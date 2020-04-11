@@ -1,0 +1,192 @@
+% Template source: ICRA6_and_Risk_LatexTemplate.tex (ICRA template 2015, received from Montserrat Guillen)
+% LaTeX documentation: https://www.latex-project.org/help/documentation/
+% of which User's Guide: https://www.latex-project.org/help/documentation/usrguide.pdf
+% Also check related links: https://www.latex-project.org/help/links/
+% Comprehensive Tex Archive Network: https://www.ctan.org/
+
+%***************************
+% List of mathematical symbols: https://oeis.org/wiki/List_of_LaTeX_mathematical_symbols
+%***************************
+
+\documentclass[11pt,A4paper]{article}
+%\documentclass[11pt,twoside,A4paper]{article}
+
+\usepackage[papersize={21cm,29.7cm},left=3.5cm,top=3cm,right=3.5cm,bottom=2.5cm]{geometry}
+\usepackage{latexsym,enumerate}
+\usepackage{amsmath,amsthm,amsopn,amstext,amscd,amsfonts,amssymb}
+\usepackage{graphics,graphicx}
+\usepackage{setspace}
+%\usepackage[spanish]{babel}
+\usepackage[english]{babel}
+\usepackage[T1]{fontenc}
+\usepackage{uarial}
+\renewcommand{\familydefault}{\sfdefault}
+\usepackage{blindtext}
+\usepackage{titlesec}
+\singlespace
+
+\author{Daniel Mastropietro}
+\title{Efficient policy learning from rare states leading to Queue Blocking}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\section{Introduction}
+
+Following the paper by Massaro et al. \cite{Massaro2019}, we propose a reinforcement learning algorithm that learns the optimal policy of an M/D/2/1 queue with the aim of minimizing the probability of blocking.
+
+The focus of the designed algorithm is to learn the optimal policy in an efficient way, where efficiency is thought of in terms of learning from the state-action pairs that are most informative of rewards.
+
+The algorithm leverages the knowledge we have in advance about rewards in the system. In fact, the reward received by the agent is always zero except at the state-action pairs that lead to blocking, in which it receives a negative reward.
+
+The problem can be formally stated as follows: one single queue of capacity $K$ receives requests to process two types of jobs, each with a Poisson-like arrival rate $\lambda_i$ and each being served in deterministic time, assumed to be equal for all job types. The agent needs to define a policy that decides whether to accept or not a new job of a given class arriving to the queue.
+
+
+
+\section{Markov Decision Process model}
+
+We model the queue and the managing agent with a Markov Decision Process (MDP) having the following characteristics:
+
+\medskip
+States: Occupancy level of the queue $s \in \{0, ..., K\}$, i.e. there are $K+1$ possible states.
+
+Note that the state only records the \emph{total} number of jobs in the queue. This limits policies to functions of the total queue occupation, disrespectful of their type.
+
+\smallskip
+Actions: $a \in \{0, 1\}$ (i.e. reject or accept a new job, respectively). Both actions are possible for all states except for the last one $s = K$ for which only $a = 0$ is possible.
+
+\smallskip
+Rewards: the goal is to define a system that gives a large penalty when the queue blocks (i.e. when $s$ becomes equal to $K$ making the queue full). For all other states, the reward could be set to 0 for all actions, thus making the agent perform uninformed actions at the outset of the process.
+
+In a more realistic setting, we could assign positive rewards to job acceptance. However, in order to avoid the trivial strategy in which the agent prefers attaining queue blocking (since that would be in principle more rewarding than rejecting jobs), we define the reward for accepting a job as a decreasing function of the occupancy level of the queue, as long as the queue is not blocked, and to be equal to a large penalty (negative reward) when the queue blocks. In addition, the reward should be \emph{positive} for all states when accepting a new job, so that the agent would always be willing to accept a new job rather than reject it. This would simulate the situation where the agent does not know the capacity of the queue (\emph{but... is this realistic?}).
+
+\smallskip
+One possible actual definition of $R(s,a)$ follows:
+
+\[ \\
+R(s,a) =
+\left \{
+  \begin{tabular}{ll}
+  $\frac{ R_{min} - R_0 }{K-2} s + R_0$ & $0 \leq s \leq K-2$ \textrm{ and } $a = 1$ \\
+  $-P$ & $s = K-1$ \textrm{ and } $a = 1$ \\
+  $0$ & \textrm{o.w.} \\
+  \end{tabular}
+\right.
+\]
+
+where:
+
+- $R_{min} > 0$ is the minimum reward for acceptance attained just before blocking,
+
+- $R_{0} > R_{min}$ is the maximum reward for acceptance when the queue is empty,
+
+- $P>0$, is the penalty when the queue blocks, ideally $>> R_0$.
+
+\bigskip
+The transition probabilities are known, since, when a new job is accepted, the state always increases by 1.
+
+
+\newpage
+
+\bibliography{RL}
+\bibliographystyle{plain}
+
+
+\iffalse
+
+
+\newpage
+\subsection{Model for the detections}
+\medskip
+Let us define the following random variables in order to model the above detector settings:
+
+$S$: "Muons' inter-arrival time"
+
+$T$: "Decay time of a muon"
+
+$N(t)$: "Number of particles arriving in a time interval t".
+
+\medskip
+It is assumed that:
+
+\[S \sim \epsilon(\lambda)\]
+\[T \sim \epsilon(1/\tau)\]
+
+where $\tau << 1/\lambda$.
+
+If the muons' inter-arrival times are independent of each other, then:
+
+\[N(t) \sim \mathcal{P}(\lambda t)\]
+
+\subsection{Detection with noise}
+The experiment is prone to several sources of errors. One of them is the following: from time to time the arrival of a new muon may be \textit{incorrectly classified} as a decay detection, thus causing an incorrect measurement of the muon's decay time.
+
+\medskip
+In order to model different sources of error, let us define the following random variable:
+
+$U$: "Decay time of a muon in the presence of \textit{noise}"
+
+where the \textit{noise} is generated by the incorrect detection of a muon decay.
+
+\medskip
+How is $U$ distributed?
+
+
+Assuming for now that the only source of error is the arrival of another muon between the arrival of the first muon and the event that triggers the measurement of its decay time, we can write $U$ as follows:
+
+\[ \\
+U =
+\left \{
+  \begin{tabular}{ll}
+  $T$ & \textrm{if it's a genuine decay detection} \\
+  $S$ & \textrm{if the decay time measurement was triggered by the arrival of another muon} \\
+  \end{tabular}
+\right.
+\]
+
+where $S$ is always less than $T$, since otherwise the arrival of the second muon would trigger a new decay time measuring period and would not correspond to a flawed measurement of the decay time.
+
+If we let $p = Pr(S < T) = \lambda \tau /(1+\lambda \tau)$ and let $Y$ be a Bernoulli random variable with parameter $p$, we may write the cumulative distribution function of $U$ as:
+
+\begin{align*}
+F_U(u) 	= P(U \leq u) 	= & P(T \leq u /Y\!=\!0) \; (1-p) + P(S \leq u /Y\!=\!1) \; p \\
+						= & (1 - e^{-u/\tau}) \; 1/(1 + \lambda \tau) I\{u \geq 0\} + 
+							(1 - e^{-\lambda u}) \; \lambda \tau /(1 + \lambda \tau) I\{u \geq 0\} \\
+						\approx & (1 - e^{-u/\tau}) \; (1 - \lambda \tau) I\{u \geq 0\} +
+							 (1 - e^{-\lambda u}) \; \lambda \tau I\{u \geq 0\}
+\end{align*}
+
+where we have used the fact that $\lambda << 1/\tau$ to replace $1/(1 + \lambda \tau)$ with its first order approximation $1 - \lambda \tau$; $I{}$ is the indicator function of the condition enclosed in braces.
+
+\medskip
+Therefore the probability density function of $U$ can be approximated by:
+
+\[
+f_U(u) = F'_U(u) \approx \left[ \frac{(1 - \lambda \tau)}{\tau} e^{-u/\tau} \; + \lambda^2 \tau e^{-\lambda u} \; \right] I\{u \geq 0\}
+\textrm{ when } \lambda \tau << 1.
+\]
+
+Note that as $\lambda \tau \to 0, f_U(u) \to \frac{e^{-u/\tau}}{\tau} \; I\{u \geq 0\} = f_T(u)$, that is $U$ tends to be distributed as $T$.
+
+\subsection{Maximum Likelihood estimation of the parameters}
+%Suppose a set of $N(t) = n$ d arrive in time interval $t$ with independent inter-arrival times.
+Suppose that $n$ independent measurements of decay time are carried out.
+
+Then the unknown parameters $\lambda$ and $\tau$ can be estimated by numerically maximizing the following log-likelihood function:
+
+\[
+l(\lambda, \tau / \underline{u}) = \sum_{i=1}^{n} \log \left[ \frac{(1 - \lambda \tau)}{\tau} e^{-u_i/\tau} \; + \lambda^2 \tau e^{-\lambda u_i} \; \right]
+\]
+
+or equivalently:
+
+\[
+l(\lambda, \tau / \underline{u}) = -\lambda \sum_{i=1}^{n} u_i + 
+											\sum_{i=1}^{n} {\log \left[ \frac{(1 - \lambda \tau)}{\tau} e^{-\frac{(1 - \lambda \tau)}{\tau} u_i} \; + \lambda^2 \tau \; \right]}
+\]
+
+
+\fi
+
+\end{document}
