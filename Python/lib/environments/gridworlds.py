@@ -14,14 +14,14 @@ Every environment should define the following methods:
 import io
 import numpy as np
 import sys
-from gym.envs.toy_text import discrete
 
 # Imports a class defined in __init__.py
 from . import Environment
 
-#__all__ = [ "EnvGridworld2D" ]
+#__all__ = [ "EnvGridworld2D",
+#            "EnvGridworld1D" ]
 
-class EnvGridworld2D(Environment, discrete.DiscreteEnv):
+class EnvGridworld2D(Environment):
     """
     2D Grid World environment from Sutton's Reinforcement Learning book chapter 4.
     You are an agent on an MxN grid and your goal is to reach the terminal
@@ -157,7 +157,7 @@ class EnvGridworld2D(Environment, discrete.DiscreteEnv):
             it.iternext()
 
 
-class EnvGridworld1D(Environment, discrete.DiscreteEnv):
+class EnvGridworld1D(Environment):
     """
     1D Grid World environment from Sutton's Reinforcement Learning book chapter 4.
     You are an agent on an M-long grid and your goal is to reach the terminal
@@ -170,7 +170,7 @@ class EnvGridworld1D(Environment, discrete.DiscreteEnv):
     x is your position and T are the two terminal states.
     """
 
-    def __init__(self, length=20):
+    def __init__(self, length=21):
         if length < 3:
             raise ValueError('the length of the grid must be at least 3')
 
@@ -184,6 +184,17 @@ class EnvGridworld1D(Environment, discrete.DiscreteEnv):
         # We substract 1 because the state are base 0 (i.e. they represent indices)
         MAX_S = nS - 1
 
+        # Rewards of the two terminal states
+        reward_terminal_left = -1.0
+        reward_terminal_right = +1.0
+
+        # True value functions (for algorithm evaluation purposes)
+        # Note that terminal states have value = 0
+        self.V = -1.0 + 2/(nS-1) * np.arange(nS)    # Note that this is the same as np.arange(-(nS-1), nS+1, 2) / (nS-1)
+                                                        # (note that stop=nS+1, because the end value is NOT included!)
+        self.V[0] = self.V[nS-1] = 0.0
+        self.Q = None 
+
         # Define the possible actions based on the geometry
         P = {}
         grid = np.arange(nS)
@@ -192,8 +203,8 @@ class EnvGridworld1D(Environment, discrete.DiscreteEnv):
         # Function that checks whether we arrived at a terminal state
         is_terminal = lambda s: s == 0 or s == nS - 1
         reward = lambda next_state: 0.0 if next_state != 0 and next_state != nS-1 \
-                                        else -1.0 if next_state == 0 \
-                                        else +1.0
+                                        else reward_terminal_left if next_state == 0 \
+                                        else reward_terminal_right
 
         while not it.finished:
             s = it.iterindex
@@ -235,3 +246,10 @@ class EnvGridworld1D(Environment, discrete.DiscreteEnv):
 
         super(EnvGridworld1D, self).__init__(nS, nA, P, isd)
 
+    def getV(self):
+        "Returns the true state value function"
+        return self.V
+    
+    def getQ(self):
+        "Returns the true state-action value function"
+        return self.Q

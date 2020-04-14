@@ -51,27 +51,40 @@ class Test_TD_Lambda(unittest.TestCase):
         cls.env = gridworlds.EnvGridworld1D(length=21)  # 19 states plus the two terminal states
         # Agents with Policy and Learner defined
         cls.rw = random_walks.PolRandomWalkDiscrete(cls.env)
-        cls.td_lambda = td.LeaTDLambda(cls.env, alpha=0.2, gamma=0.9, lmbda=0.8)
-        cls.mc_lambda = td.LeaTDLambda(cls.env, alpha=0.2, gamma=0.9, lmbda=1.0)
-        cls.agent_td_lambda = agents.PolicyLearner(cls.rw, cls.td_lambda)
-        cls.agent_mc_lambda = agents.PolicyLearner(cls.rw, cls.mc_lambda)
+        cls.tdlambda = td.LeaTDLambda(cls.env, alpha=0.2, gamma=0.9, lmbda=0.8)
+        cls.mclambda = td.LeaTDLambda(cls.env, alpha=0.2, gamma=0.9, lmbda=1.0)
+        cls.agent_rw_tdlambda = agents.GeneralAgent(cls.rw, cls.tdlambda)
+        cls.agent_rw_mclambda = agents.GeneralAgent(cls.rw, cls.mclambda)
     
     def setUp(self):
         # Make the tests repeatable
         # NOTE: This setUp() is run before EVERY test, as there is setUpClass() that is run
         # just once before ALL the tests are run.
         #self.random_generator, seed = seeding.np_random(self.seed)
+        # This is used by the MJeremy2017 implementation (since they call np.random.choice() to choose the action)
+        # (as opposed to seeding.np_random() which is the case in the DiscreteEnv environment of gym --which I use)
         np.random.seed(self.seed)
 
-    def plot_results(self, V_estimated, V_true, plotFlag):
+    def plot_results(self, V_estimated, V_true, RMSE_by_episode, plotFlag):
         if plotFlag:
+            plt.figure()
             plt.plot(np.arange(self.nS+2), V_true, 'b.-')
             plt.plot(np.arange(self.nS+2), V_estimated, 'r.-')
             plt.title(self.id())
-            plt.show()
+
+            plt.figure()
+            plt.plot(np.arange(self.nrounds)+1, RMSE_by_episode, color="black")
+            plt.xticks(np.arange(self.nrounds)+1)
+            ax = plt.gca()
+            #ax.set_ylim((0, np.max(RMSE_by_episode)))
+            ax.set_ylim((0, 0.5))
+            ax.set_xlabel("Episode")
+            ax.set_ylabel("RMSE")
+            ax.set_title(self.id())
 
     #------------------------------------------- TESTS ----------------------------------------
-    def no_test_random_walk_result_MJDM(self):
+    def test_random_walk_result_MJDM(self):
+        "Test using the off-line learning (that calls gt2tn() implemented in TD_Lambda_DM.py"
         print("\nTesting " + self.id())
         valueFunc = TDLDM.ValueFunction_DM(alpha=0.2)
         self.rw_MJDM.play(valueFunc, rounds=self.nrounds)
@@ -111,36 +124,36 @@ class Test_TD_Lambda(unittest.TestCase):
     def test_random_walk_result(self):
         "Test using my TD(Lambda) learner"
         print("\nTesting " + self.id())
-        sim = simulators.Simulator(self.env, self.agent_td_lambda, debug=False)
-        sim.play(start=9, nrounds=self.nrounds)
+        sim = simulators.Simulator(self.env, self.agent_rw_tdlambda, debug=False)
+        _, _, RMSE_by_episode = sim.play(nrounds=self.nrounds, start=9, seed=self.seed, compute_rmse=True, plot=False)
 
-        expected = np.array([ 0.,         -0.93600092, -0.62865005, -0.32600362, -0.23004461, -0.20544315,
- -0.17822048, -0.1183389,  -0.04995117, -0.01169715, -0.00284312,  0.02066435,
-  0.05085406,  0.05865383, 0.07223799,  0.15062597,  0.32170616,  0.43413232,
-  0.49881925,  0.73350279, 0.        ])
-        observed = self.td_lambda.getV().getValues()
+        expected = np.array([ 0.,       -0.74272818, -0.61096858, -0.35308404, -0.23065497, -0.20466473,
+ -0.16976291, -0.12102061, -0.08916452, -0.03742355, -0.02310061, -0.01078521,
+ -0.00815435,  0.00901039,  0.08667566,  0.16831985,  0.20887459,  0.34170913,
+  0.43002999,  0.60004664,  0.        ])
+        observed = self.tdlambda.getV().getValues()
 
         print("\nobserved: " + str(observed))
 
-        self.plot_results(observed, self.V_true, self.plotFlag)
+        self.plot_results(observed, self.V_true, RMSE_by_episode, self.plotFlag)
 
         assert np.allclose( expected, observed )
 
     def test_random_walk_as_MC_result(self):
         "Test using my TD(Lambda) with lambda = 1 to emulate a Monte Carlo learner"
         print("\nTesting " + self.id())
-        sim = simulators.Simulator(self.env, self.agent_mc_lambda, debug=False)
-        sim.play(start=9, nrounds=self.nrounds)
+        sim = simulators.Simulator(self.env, self.agent_rw_mclambda, debug=False)
+        _, _, RMSE_by_episode = sim.play(nrounds=self.nrounds, start=9, seed=self.seed, compute_rmse=True, plot=False)
 
-        expected = np.array([ 0.,         -0.92187619, -0.62423707, -0.2309414,  -0.138025,  -0.24758464,
- -0.30398583, -0.23128573, -0.08455704, -0.08961004, -0.16759842, -0.07701461,
-  0.02173501,  0.01127705,  0.05074384,  0.24794607,  0.48046892,  0.62277033,
-  0.65774705,  0.772826,    0.        ])
-        observed = self.mc_lambda.getV().getValues()
+        expected = np.array([ 0.,        -0.8598213, -0.76779645, -0.37056923, -0.18913217, -0.23620264,
+ -0.18414855, -0.12397922, -0.1037322,  -0.03250992, -0.02509062, -0.04620496,
+ -0.06607403, -0.00726447,  0.2325766,   0.35186274,  0.35691905,  0.50138679,
+  0.4908309,   0.63692378,  0.        ])
+        observed = self.mclambda.getV().getValues()
 
         print("\nobserved: " + str(observed))
 
-        self.plot_results(observed, self.V_true, self.plotFlag)
+        self.plot_results(observed, self.V_true, RMSE_by_episode, self.plotFlag)
 
         assert np.allclose( expected, observed )
     #------------------------------------------- TESTS ----------------------------------------

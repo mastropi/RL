@@ -42,38 +42,49 @@ class Test_MC_Lambda(unittest.TestCase):
         cls.V_true[0] = cls.V_true[-1] = 0
         # Agent with Policy and Learner defined
         cls.rw = random_walks.PolRandomWalkDiscrete(cls.env)
-        cls.mc_lambda = mc.LeaMCLambda(cls.env, alpha=0.2, gamma=0.9, lmbda=0.8)
-        cls.agent_mc_lambda = agents.PolicyLearner(cls.rw, cls.mc_lambda)
+        cls.mclambda = mc.LeaMCLambda(cls.env, alpha=0.2, gamma=0.9, lmbda=0.8)
+        cls.agent_rw_mclambda = agents.GeneralAgent(cls.rw, cls.mclambda)
     
     def setUp(self):
         # Make the tests repeatable
         # NOTE: This setUp() is run before EVERY test, as there is setUpClass() that is run
         # just once before ALL the tests are run.
         #self.random_generator, seed = seeding.np_random(self.seed)
-        np.random.seed(self.seed)
+        #np.random.seed(self.seed)
+        pass
 
-    def plot_results(self, V_estimated, V_true, plotFlag):
+    def plot_results(self, V_estimated, V_true, RMSE_by_episode, plotFlag):
         if plotFlag:
+            plt.figure()
             plt.plot(np.arange(self.nS+2), V_true, 'b.-')
             plt.plot(np.arange(self.nS+2), V_estimated, 'r.-')
             plt.title(self.id())
-            plt.show()
+            
+            plt.figure()
+            plt.plot(np.arange(self.nrounds)+1, RMSE_by_episode, color="black")
+            plt.xticks(np.arange(self.nrounds)+1)
+            ax = plt.gca()
+            #ax.set_ylim((0, np.max(RMSE_by_episode)))
+            ax.set_ylim((0, 0.5))
+            ax.set_xlabel("Episode")
+            ax.set_ylabel("RMSE")
+            ax.set_title(self.id())
 
     #------------------------------------------- TESTS ----------------------------------------
     def test_random_walk_result(self):
         print("\nTesting " + self.id())
-        sim = simulators.Simulator(self.env, self.agent_mc_lambda, debug=False)
-        sim.play(start=9, nrounds=self.nrounds)
+        sim = simulators.Simulator(self.env, self.agent_rw_mclambda, debug=False)
+        _, _, RMSE_by_episode = sim.play(nrounds=self.nrounds, start=9, seed=self.seed, compute_rmse=True, plot=False, pause=0.05)
 
-        expected = np.array([ 0.,         -0.92187619, -0.62423707, -0.2309414,  -0.138025,  -0.24758464,
- -0.30398583, -0.23128573, -0.08455704, -0.08961004, -0.16759842, -0.07701461,
-  0.02173501,  0.01127705,  0.05074384,  0.24794607,  0.48046892,  0.62277033,
-  0.65774705,  0.772826,    0.        ])
-        observed = self.mc_lambda.getV().getValues()
+        expected = np.array([ 0.,         -0.73375448, -0.62761282, -0.37627202, -0.25695674, -0.22698505,
+ -0.18668611, -0.13544086, -0.10660764, -0.04106711, -0.0190802,  -0.00094745,
+  0.00190329,  0.02135501,  0.09645727,  0.17523513,  0.25341255,  0.38543593,
+  0.46357219,  0.60465789,  0.        ])
+        observed = self.mclambda.getV().getValues()
 
         print("\nobserved: " + str(observed))
 
-        self.plot_results(observed, self.V_true, self.plotFlag)
+        self.plot_results(observed, self.V_true, RMSE_by_episode, self.plotFlag)
 
         assert np.allclose( expected, observed )
     #------------------------------------------- TESTS ----------------------------------------

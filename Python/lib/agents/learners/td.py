@@ -46,16 +46,21 @@ class LeaTDLambda(Learner):
         # Eligibility traces
         self.z = np.zeros(self.env.getNumStates())
 
-    def _updateZ(self, state):
-        dev = 1
-        self.z *= self.gamma * self.lmbda
-        self.z[state] += dev
+    def setParams(self, alpha=None, gamma=None, lmbda=None):
+        self.alpha = alpha if alpha else self.alpha
+        self.gamma = gamma if gamma else self.gamma
+        self.lmbda = lmbda if lmbda else self.lmbda
 
     def learn_pred_V(self, t, state, action, next_state, reward, done, info):
         self._updateZ(state)
         delta = reward + self.gamma * self.V.getValue(next_state) - self.V.getValue(state)
         delta *= self.alpha
         self.V.setWeights( self.V.getWeights() + delta * self.z )
+
+    def _updateZ(self, state):
+        dev = 1
+        self.z *= self.gamma * self.lmbda
+        self.z[state] += dev
 
     def getZ(self):
         return self.z

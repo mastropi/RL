@@ -8,10 +8,12 @@ Created on Mon Apr  6 15:35:13 2020
 
 import numpy as np
 
+from gym.envs.toy_text import discrete
 
 #__all__ = [ 'Environment' ]
 
-class Environment:
+# TODO: 2020/04/11: Rename this class EnvDiscrete
+class Environment(discrete.DiscreteEnv):
     """
     Class defining methods that are generic to ALL environments.
     """
