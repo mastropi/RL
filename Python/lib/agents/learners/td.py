@@ -3,26 +3,14 @@
 Created on Mon Mar 30 19:57:16 2020
 
 @author: Daniel Mastropetro
-@description: Definition of temporal difference algorithms.
-Each class should:
-a) Implement the following attributes:
-    - env --> the environment on which the learning takes place
-    - V --> an object containing the information on how the state value function is ESTIMATED.
-    - Q --> an object containing the information on how the state-action value function is ESTIMATED.
-    - alpha --> the learning rate
-    - gamma --> the reward discount parameter
-b) Implement the following methods:
-    - learn_pred_V() --> prediction problem: learn the state value function under the current policy (V(s))
-    - learn_pred_Q() --> prediction problem: learn the action-value function under the currenty policy (Q(s,a))
-    - learn_ctrl_policy() --> control problem: learn the optimal policy
+@description: Definition of Temporal Difference algorithms.
 """
 
 import numpy as np
 
 from . import Learner
+from .value_functions import ValueFunctionApprox
 
-
-#__all__ = [ "LeaTDLambda" ]
 
 class LeaTDLambda(Learner):
     """
@@ -33,7 +21,10 @@ class LeaTDLambda(Learner):
         env (gym.envs.toy_text.discrete.DiscreteEnv): the environment where the learning takes place.
     """
 
-    def __init__(self, env, alpha=0.1, gamma=0.9, lmbda=0.8):
+    def __init__(self, env, alpha=0.1, gamma=0.9, lmbda=0.8, debug=False):
+        super().__init__()
+        self.debug = debug
+
         # Attributes that MUST be presented for all TD methods
         self.env = env
         self.V = ValueFunctionApprox(self.env.getNumStates())
@@ -46,6 +37,9 @@ class LeaTDLambda(Learner):
         # Eligibility traces
         self.z = np.zeros(self.env.getNumStates())
 
+        # Reset the variables that store information about the episode
+        self.reset()
+
     def setParams(self, alpha=None, gamma=None, lmbda=None):
         self.alpha = alpha if alpha else self.alpha
         self.gamma = gamma if gamma else self.gamma
@@ -54,41 +48,47 @@ class LeaTDLambda(Learner):
     def learn_pred_V(self, t, state, action, next_state, reward, done, info):
         self._updateZ(state)
         delta = reward + self.gamma * self.V.getValue(next_state) - self.V.getValue(state)
-        delta *= self.alpha
-        self.V.setWeights( self.V.getWeights() + delta * self.z )
+        self.V.setWeights( self.V.getWeights() + self.alpha * delta * self.z )
 
     def _updateZ(self, state):
         dev = 1
         self.z *= self.gamma * self.lmbda
         self.z[state] += dev
 
-    def getZ(self):
-        return self.z
 
+class LeaTDLambdaAdaptive(LeaTDLambda):
+    
+    def __init__(self, env, alpha=0.1, gamma=0.9, lmbda=0.8, debug=False):
+        super().__init__(env, alpha, gamma, lmbda, debug)
 
-# TODO: (2020/04/10) This class should cover ALL value functions whose estimation is done via approximation
-# (i.e. using a parameterized expression whose parameters are materialized as a vector of weights)
-# So the constructor should receive:
-# - the dimension of the weights
-# - the features x that are affected by the weights (possibly in a linear manner
-# or perhaps in a nonlinear manner as well!)
-class ValueFunctionApprox:
-    "Class that contains information about the estimation of the state value function"
+    def learn_pred_V(self, t, state, action, next_state, reward, done, info):
+        # Adaptive lambda
+        state_value = self.V.getValue(state)
+        delta = reward + self.gamma * self.V.getValue(next_state) - state_value
+        # Define the relative state value change by dividing the change by the current state value
+        # (if the current state value is 0, then set the change to infinite unless the change is 0 as well)
+        delta_relative = delta / state_value if state_value != 0 \
+                                         else 0. if delta == 0. \
+                                         else np.Inf
+        lambda_adaptive = 1 - np.exp( -np.abs(delta_relative) )
+        # Update elegibility trace
+        self._updateZ(state, lambda_adaptive)
+        # Update the weights
+        self.V.setWeights( self.V.getWeights() + self.alpha * delta * self.z )
 
-    def __init__(self, nS):
-        "nS is the number of states"
-        self.nS = nS
-        self.weights = np.zeros(nS)
+        if self.debug:
+            print("t: {}, delta = {:.3g} --> lambda = {:.3g}".format(t, delta, lambda_adaptive))
+            print("\tV(s={}->{}) = {}".format(state, next_state, self.V.getValue(state)))
+            if done:
+                import pandas as pd
+                pd.options.display.float_format = '{:,.2f}'.format
+                print(pd.DataFrame( np.c_[self.z, self.V.getValues()].T, index=['z', 'V'] ))
+    
+            #input("Press Enter...")
 
-    def getValue(self, state):
-        v = self.weights[state]
-        return v
-
-    def getValues(self):
-        return self.weights
-
-    def getWeights(self):
-        return self.weights
-
-    def setWeights(self, weights):
-        self.weights = weights
+    def _updateZ(self, state, lambda_adaptive):
+        dev = 1
+        # Multiply the PREVIOUS z, z(t-1), by gamma*lambda
+        # IMPORTANT: lambda is computed with the information at time t!! (not at time t-1)
+        self.z *= self.gamma * lambda_adaptive
+        self.z[state] += dev

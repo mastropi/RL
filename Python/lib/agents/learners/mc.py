@@ -7,8 +7,10 @@ Created on Fri Apr 10 10:36:13 2020
 """
 
 import numpy as np
+import pandas as pd
 
 from . import Learner
+from .value_functions import ValueFunctionApprox
 
 
 class LeaMCLambda(Learner):
@@ -21,6 +23,7 @@ class LeaMCLambda(Learner):
     """
 
     def __init__(self, env, alpha=0.1, gamma=0.9, lmbda=0.8, debug=False):
+        super().__init__()
         self.debug = debug
 
         # Attributes that MUST be presented for all TD methods
@@ -32,22 +35,17 @@ class LeaMCLambda(Learner):
         
         # Attributes specific to the current TD method
         self.lmbda = lmbda
-        
-        # Reset the variables that store information about the episode 
-        self.reset()      
 
-    def reset(self):
-        "Resets the variables that store information about the episode"
-        # Store the states visited in the episode
-        self.states = []
-        # Store the rewards obtained after each action
-        # (these are needed to compute G(t:t+n) at the end of the episode)
-        # We initialize the rewards with one element equal to 0 for ease of notation
-        # when retrieving the state and the reward received at each time t
-        # because the state is defined for t = 0, ..., T-1 
-        # while the reward is defined for t = 1, ..., T
-        self.rewards = [0]
-        
+        # Reset the variables that store information about the episode
+        self.reset()
+
+    def _reset(self):
+        """
+        Resets internal structures used during learning specific to this learning algorithm
+        (all attributes reset here should start with an underscore, i.e. they should be private)
+        """
+        super()._reset()
+
         ### All the attributes that follow are used to store information about the
         ### n-step returns and the lambda returns (i.e. the lambda-weighted average
         ### n-step returns for ALL time steps in the episode, from t=0, ..., T-1,
@@ -71,20 +69,23 @@ class LeaMCLambda(Learner):
 
     def learn_pred_V_slow(self, t, state, action, next_state, reward, done, info):
         # This learner updates the estimate of the value function V ONLY at the end of the episode
-        self.states += [state]
-        self.rewards += [reward]
+        self._states += [state]
+        self._rewards += [reward]
         if done:
+            # Store the trajectory and rewards
+            self.store_trajectory()
+
             # SHOULDN'T THIS BE T = t + 1?
-            #T = len(self.states) - 1
+            #T = len(self._states) - 1
             T = t + 1
-            assert len(self.states) == T and len(self.rewards) == T + 1, \
-                    "The number of states visited ({}) is equal to T ({}) " \
-                    .format(len(self.states), T) + \
-                    "and the number of rewards ({}) is T+1 ({})" \
-                    .format(len(self.rewards), T)
+            assert len(self._states) == T and len(self._rewards) == T + 1, \
+                    "The number of _states visited ({}) is equal to T ({}) " \
+                    .format(len(self._states), T) + \
+                    "and the number of _rewards ({}) is T+1 ({})" \
+                    .format(len(self._rewards), T)
             for t in range(T):
                 # start from time t
-                state = self.states[t]
+                state = self._states[t]
                 gtlambda = 0.
                 for n in range(1, T - t):
                     # Compute G(t:t+n)
@@ -103,9 +104,10 @@ class LeaMCLambda(Learner):
 
                 delta = gtlambda - self.V.getValue(state)
                 self.updateV(state, delta)
-            
-            # Reset the episode information
-            self.reset()
+
+            # Reset the internal attributes used during learning
+            # (but NOT the value functions estimations, since we want to learn always more at each episode!)
+            self._reset()
 
     def gt2tn(self, start, end):
         """
@@ -115,52 +117,64 @@ class LeaMCLambda(Learner):
         """
         G = 0.
         for t in range(start, end):     # Recall that the last value is excluded from the range
-            reward = self.rewards[t+1]  # t+1 is fine because `reward` has one more element than `states`
+            reward = self._rewards[t+1]  # t+1 is fine because `reward` has one more element than `_states`
             G += self.gamma**(t - start) * reward
 
-        if end < len(self.states): 
+        if end < len(self._states): 
             # The end time is NOT the end of the episode
             # => Add all return coming after the final time considered here (`end`) as the current estimate of
             # the value function at the end state.
-            G += self.gamma**(end - start) * self.getV().getValue(self.states[end])
+            G += self.gamma**(end - start) * self.getV().getValue(self._states[end])
 
         return G
 
     def learn_pred_V(self, t, state, action, next_state, reward, done, info):
         "Learn the prediction problem: estimate the state value function"
-        self.states += [state]
+        self._states += [state]
         self._updateG(t, state, next_state, reward, done)
 
         if done:
+            # Store the trajectory and rewards
+            self.store_trajectory()
+
             # This means t+1 is the terminal time T
             # (recall we WERE in time t and we STEPPED INTO time t+1, so T = t+1)
             self.learn(t)
-            # Reset the variables in the object that contain information about the episode
-            self.reset()  
+
+            # Reset the internal attributes used during learning
+            # (but NOT the value functions estimations, since we want to learn always more at each episode!)
+            self._reset()
 
     def _updateG(self, t, state, next_state, reward, done):
         times_reversed = np.arange(t, -1, -1)  # This is t, t-1, ..., 0
 
+        #-- Expression for delta: what we learn at this time step
+        # Value of next state and current state needed to compute delta
+        Vns = self.V.getValue(next_state)   # Vns = V(next_state)        
+        Vs = self.V.getValue(state)         #  Vs = V(state)
+        assert not done or done and Vns == 0, "Terminal _states have value 0 ({:.2g})".format(Vns)
+        fn_delta = lambda n: reward + self.gamma*Vns - (n>0)*Vs
+            ## This fn_delta(n) is the change to add to the G value at the previous iteration
+            ## for all G's EXCEPT the new one corresponding to G(t:t+1) corresponding to
+            ## the current time t (which does NOT have a previous value).
+            ## Note that n=1 in the expression G(t:t+1) corresponds to n=0 in the code
+            ## (because of how the times_reversed array is defined.
+
         # Add the latest available return G(t:t+1), corresponding to the current time t, to the list
         # of n-step returns and initialize it to 0 (before it is updated with the currently observed reward
         # immediately below)
-        #self._G_list += [0.0]
+        self._G_list += [0.0]
         # Update all the n-step G(tt:tt+n) returns, from time tt = 0, ..., t-1, using the new observed reward.
         # The gamma discount on the observed reward is stronger (i.e. more discount) as we move from time
-        # t-1 down to time 0, that's why the exponent of gamma is the array of REVERSED times constructed above.
+        # t-1 down to time 0, that's why the exponent of gamma (n) reads its value from the array of
+        # REVERSED times constructed above.
         # Note that each G is updated using the G(tt:tt+n-1) value from the previous iteration as INPUT
         # and the meaning of the updated G is G(tt:tt+n) for each n=1, .., t-tt+1)
+        # This is true for ALL G(tt:tt+n) except for n=1 which does NOT have a previous value for G
+        # (note that in the code the theoretical "n=1" corresponds to n=0, which is why we multiply Vs
+        # with the condition (n>0) in function fn_delta(n)   
         # (see my hand-written notes for better understanding) 
-        Vns = self.V.getValue(next_state)   # Vns = V(next_state)        
-        Vs = self.V.getValue(state)         #  Vs = V(state)
-        assert not done or done and Vns == 0, "Terminal states have value 0 ({:.2g})".format(Vns)
-        delta = reward + self.gamma*Vns - Vs
-            ## This delta is the change to add to the G value at the previous iteration
-            ## for all G's EXCEPT the new one corresponding to G(t:t+1) corresponding to
-            ## the current time t (which does NOT have a previous value). 
-        self._G_list = [g + self.gamma**n * delta for (g, n) in zip(self._G_list, times_reversed[:-1])]
-        # Add the latest available return G(t:t+1), corresponding to the current time t, to the list of n-step returns
-        self._G_list += [reward + self.gamma*Vns] 
+        self._G_list = [g + self.gamma**n * fn_delta(n) for (g, n) in zip(self._G_list, times_reversed)]
         assert len(self._G_list) == len(times_reversed), \
                 "Length of _G_list ({}) coincides with length of times_reversed ({})" \
                 .format(len(self._G_list), len(times_reversed))
@@ -173,7 +187,7 @@ class LeaMCLambda(Learner):
             # We also include time = 0 because we have already added the current reward to _G_list above
             assert len(self._Glambda_list) == len(self._G_list), \
                     "Length of _Glambda_list ({}) coincides with length of _G_list ({})" \
-                        .format(len(self._G_list), len(times_reversed))
+                        .format(len(self._Glambda_list), len(self._G_list))
             self._Glambda_list = [glambda + self.lmbda**n * g
                                   for (glambda, g, n) in zip(self._Glambda_list, self._G_list, times_reversed)]
             #print("t: {} \tG(t:t+n): {} \n\tG(t,lambda): {}".format(t, self._G_list, self._Glambda_list)) 
@@ -197,7 +211,7 @@ class LeaMCLambda(Learner):
         if self.debug:
             print("DONE:")
         for tt in np.arange(T):
-            state = self.states[tt]
+            state = self._states[tt]
             # Error, where the lambda-return is used as the current value function estimate
             delta = Glambda[tt] - self.V.getValue(state)
             if self.debug:
@@ -217,36 +231,87 @@ class LeaMCLambda(Learner):
         self.V.setWeights( self.V.getWeights() + self.alpha * delta * gradient_V )
 
 
-class ValueFunctionApprox:
-    "Class that contains information about the estimation of the state value function"
+class LeaMCLambdaAdaptive(LeaMCLambda):
+    
+    def __init__(self, env, alpha=0.1, gamma=0.9, lmbda=0.8, debug=False):
+        super().__init__(env, alpha, gamma, lmbda, debug)
 
-    def __init__(self, nS):
-        "nS is the number of states"
-        self.nS = nS
-        self.V = 0
-        self.weights = np.zeros(nS)
-        # The features are dummy or indicator functions, i.e. each column of the
-        # feature matrix X represents a feature and each row represents a state. Assuming we
-        # order the states in columns in the same way we order them in rows, the X matrix
-        # is a diagonal matrix
-        self.X = np.eye(nS)
+        # Arrays that keep track of previous _rewards for each state
+        self.all_states = np.arange(self.env.getNumStates())
+        self.state_rewards = np.zeros(self.env.getNumStates())
+        self.state_counts = np.zeros(self.env.getNumStates())
+        self.state_lambdas = self.lmbda * np.ones(self.env.getNumStates())
 
-    def getValue(self, state):
-        # TODO: Apply the generalization to any set of features X (i.e. uncomment the line below)
-        #v = np.dot(self.weights[state], self.X[:,state])
-        v = self.weights[state]
-        return v
+    def learn_pred_V(self, t, state, action, next_state, reward, done, info):
+        "Learn the prediction problem: estimate the state value function"
+        self._states += [state]
+        self._rewards += [reward]
+        self._updateG(t, state, next_state, reward, done)
 
-    def getValues(self):
-        # TODO: Apply the generalization to any set of features X (i.e. uncomment the line below)
-        #return np.dot(self.weights, self.X)
-        return self.weights
+        if done:
+            # Store the trajectory and rewards
+            self.store_trajectory()
+            
+            # Compute the gamma-discounted _rewards for each state visited in the episode
+            state_rewards_prev = self.state_rewards.copy()
+            self._computeStateRewards(next_state)
+            visited_states = self.state_counts > 0
 
-    def setValues(self):
-        self.V = np.dot(self.weights, self.X) 
+            # Delta discounted _rewards (w.r.t. previous discounted _rewards)
+            delta_state_rewards = self.state_rewards[ visited_states ] - state_rewards_prev[ visited_states ]
+            abs_delta_state_rewards = np.abs( delta_state_rewards )
+            mean_abs_delta_state_rewards = np.mean( abs_delta_state_rewards )
+            self.state_lambdas[ visited_states ] = self.lmbda * np.exp( abs_delta_state_rewards - mean_abs_delta_state_rewards )
+            LambdaAdapt = pd.DataFrame.from_items([
+                                ('visited', self.all_states[ visited_states ]),
+                                ('count', self.state_counts[ visited_states ]),
+                                ('rewards_prev_epi', state_rewards_prev[ visited_states ]),
+                                ('rewards_curr_epi', self.state_rewards[ visited_states ]),
+                                ('delta_rewards', delta_state_rewards),
+                                ('delta_average_abs', np.repeat(mean_abs_delta_state_rewards, np.sum(visited_states))),
+                                ('lambda', self.state_lambdas[ visited_states ])])
+            print("\n\nSummary of lambda adaptation (Episode {}):".format(self.episode))
+            print(LambdaAdapt)
+            input("Press Enter to continue...")
 
-    def getWeights(self):
-        return self.weights
+            # This means t+1 is the terminal time T
+            # (recall we WERE in time t and we STEPPED INTO time t+1, so T = t+1)
+            self.learn(t)
 
-    def setWeights(self, weights):
-        self.weights = weights
+            # Reset the internal attributes used during learning
+            # (but NOT the value functions estimations, since we want to learn always more at each episode!)
+            self._reset()
+
+    def _computeStateRewards(self, terminal_state):
+        # Length of the episode
+        T = len(self._states)
+        
+        # Reset the state rewards and the state counts to 0
+        # so that we can compute them fresh for the current episode
+        self.state_rewards[:] = 0.
+        self.state_counts[:] = 0
+
+        # The following loop computes the gamma-discounted _rewards
+        # (iteratively from the end of the episode to its beginning) 
+        next_state = terminal_state     # Recall that the state reward for the terminal state is defined as 0
+        for t in np.arange(T, 0, -1) - 1: # this is T-1, T-2, ..., 0 (the first element is included, the last one is not)
+            state = self._states[t]
+
+            # In the computation of the discounted reward for the current state
+            # we use _rewards[t+1] and this is ok even for t = T-1 because we have constructed
+            # the _rewards array to have one more element than the _states array.
+            discounted_reward_for_state = self._rewards[t+1] + self.gamma * self.state_rewards[next_state]
+
+            # Update the stored state _rewards which is set to the average discounted _rewards
+            self._updateStateRewards(state, discounted_reward_for_state)
+
+            # Prepare for next iteration
+            # (note that this is called next_state but is actually
+            # the state visited *previously* (i.e. at time t-1) in the episode) 
+            next_state = state
+
+    def _updateStateRewards(self, state, reward):
+        # Regular average update
+        self.state_rewards[state] = ( self.state_counts[state] * self.state_rewards[state] + reward ) \
+                                    / (self.state_counts[state] + 1)   
+        self.state_counts[state] += 1

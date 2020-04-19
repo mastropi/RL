@@ -22,6 +22,11 @@ from Python.lib.agents.policies import random_walks
 from Python.lib.agents.learners import td
 import Python.lib.simulators as simulators
 
+#from importlib import reload
+#import Python.lib.agents.learners.td
+#reload(Python.lib.agents.learners.td)
+#from Python.lib.agents.learners.td import LeaTDLambda
+
 
 class Test_TD_Lambda(unittest.TestCase):
 
@@ -52,10 +57,12 @@ class Test_TD_Lambda(unittest.TestCase):
         # Agents with Policy and Learner defined
         cls.rw = random_walks.PolRandomWalkDiscrete(cls.env)
         cls.tdlambda = td.LeaTDLambda(cls.env, alpha=0.2, gamma=0.9, lmbda=0.8)
+        cls.tdlambda_adaptive = td.LeaTDLambdaAdaptive(cls.env, alpha=0.2, gamma=0.9, lmbda=0.8)
         cls.mclambda = td.LeaTDLambda(cls.env, alpha=0.2, gamma=0.9, lmbda=1.0)
         cls.agent_rw_tdlambda = agents.GeneralAgent(cls.rw, cls.tdlambda)
+        cls.agent_rw_tdlambda_adaptive = agents.GeneralAgent(cls.rw, cls.tdlambda_adaptive)
         cls.agent_rw_mclambda = agents.GeneralAgent(cls.rw, cls.mclambda)
-    
+
     def setUp(self):
         # Make the tests repeatable
         # NOTE: This setUp() is run before EVERY test, as there is setUpClass() that is run
@@ -150,6 +157,24 @@ class Test_TD_Lambda(unittest.TestCase):
  -0.06607403, -0.00726447,  0.2325766,   0.35186274,  0.35691905,  0.50138679,
   0.4908309,   0.63692378,  0.        ])
         observed = self.mclambda.getV().getValues()
+
+        print("\nobserved: " + str(observed))
+
+        self.plot_results(observed, self.V_true, RMSE_by_episode, self.plotFlag)
+
+        assert np.allclose( expected, observed )
+
+    def test_random_walk_adaptive_result(self):
+        "Test using my TD(Lambda) learner"
+        print("\nTesting " + self.id())
+        sim = simulators.Simulator(self.env, self.agent_rw_tdlambda_adaptive, debug=False)
+        _, _, RMSE_by_episode = sim.play(nrounds=self.nrounds, start=9, seed=self.seed, compute_rmse=True, plot=False)
+
+        expected = np.array([ 0.,       -0.66649787, -0.55642963, -0.35704827, -0.24394528, -0.16400875,
+ -0.10763978, -0.05887194, -0.0433007,  -0.01613763, -0.00906722,  0.00330175,
+  0.00765226,  0.01802364,  0.04323742,  0.0741316,   0.15636406, 0.2606907,
+  0.41359248,  0.6190509,   0.        ])
+        observed = self.tdlambda_adaptive.getV().getValues()
 
         print("\nobserved: " + str(observed))
 

@@ -113,13 +113,14 @@ class Simulator:
                 - number of visits at each state
                 - RMSE (when compute_rmse is not None) an array of length `nrounds` containing the
                 Root Mean Square Error after each episode, of the estimated value function averaged
-                over all states and weighted by the number of visits to each state, after each
-                episode. Otherwise, None.
+                over all states and weighted by the number of visits to each state. Otherwise, None.
         """
         if plot:
             fig_V = plt.figure()
             states_all = np.arange(self.env.getNumStates())
             colors = cm.get_cmap(colormap, lut=nrounds)
+            # Plot the true state value function (to have it as a reference already
+            plt.plot(states_all, self.env.getV(), '.-', color="blue")
 
         # Define initial state
         if start:
@@ -135,8 +136,10 @@ class Simulator:
                 isd[start] = 1.0
                 self.env.setInitialStateDistribution(isd)
 
+        # Define the policy, the learner and reset the learner (i.e. erase all learning memory to start anew!)
         policy = self.agent.getPolicy()
         learner = self.agent.getLearner()
+        learner.reset()
         if seed:
             if seed != 0:
                 self.env.seed(seed)
@@ -172,8 +175,6 @@ class Simulator:
 
                 # Learn: i.e. update the value function (stored in the learner) with the new observation
                 learner.learn_pred_V(t, state, action, next_state, reward, done, info)
-                #if self.debug:
-                #    print("time step {}: udpated Z: {}".format(t, learner.getZ()))
 
                 #if self.debug:
                 #    print("-> {}".format(self.env.getState()), end=" ")
@@ -238,6 +239,7 @@ class Simulator:
         RMSE = 0.
         RMSE2 = 0.  # Used to compute the standard error of the average RMSE
         RMSE_by_episodes = np.zeros(nepisodes)
+        RMSE_by_episodes2 = np.zeros(nepisodes) # Used to compute the standard error of the RMSE by episode
 
         # IMPORTANT: We should use the seed of the environment and NOT another seed setting mechanism
         # (such as np.random.seed()) because the Environment class used to simulate the process
@@ -250,10 +252,11 @@ class Simulator:
                       .format(exp+1, nexperiments, nepisodes), end=" ")
             V, N, RMSE_by_episodes_i = self.play(nrounds=nepisodes, start=start, seed=None,
                                                  compute_rmse=True, plot=False)
-            RMSE_i = rmse(self.env.getV(), V, weights=N)
+            RMSE_i = rmse(self.env.getV(), V) #, weights=N)
             RMSE += RMSE_i
             RMSE2 += RMSE_i**2
             RMSE_by_episodes += RMSE_by_episodes_i
+            RMSE_by_episodes2 += RMSE_by_episodes_i**2
             if verbose:
                 print("\tRMSE(experiment) = {:.3g}".format(RMSE_i))
 
@@ -261,9 +264,11 @@ class Simulator:
         RMSE_se = np.sqrt( ( RMSE2 - nexperiments*RMSE_mean**2 ) / (nexperiments - 1) ) \
                 / np.sqrt(nexperiments)
             ## The above, before taking sqrt is the estimator of the Var(RMSE) = (SS - n*mean^2) / (n-1)))
-        RMSE_by_episodes /= nexperiments
+        RMSE_by_episodes_mean = RMSE_by_episodes / nexperiments
+        RMSE_by_episodes_se = np.sqrt( ( RMSE_by_episodes2 - nexperiments*RMSE_by_episodes_mean**2 ) / (nexperiments - 1) ) \
+                            / np.sqrt(nexperiments)
 
-        return RMSE_mean, RMSE_se, RMSE_by_episodes
+        return RMSE_mean, RMSE_se, RMSE_by_episodes_mean, RMSE_by_episodes_se
 
 
 # TODO: (2020/04/11) Move this function to an util module
@@ -318,12 +323,12 @@ if __name__ == "__main__":
 
     # Policy and learner to be used in the simulation
     policy = pol_rw
-    learner = lea_mc
+    learner = lea_td
 
     # Simulation setup
     seed = 1717
-    nexperiments = 10
-    nepisodes = 20
+    nexperiments = 2
+    nepisodes = 5
     start = None
     useGrid = False
     verbose = True
@@ -338,7 +343,7 @@ if __name__ == "__main__":
         alphas = np.linspace(0.1, 0.7, n_alphas)
     else:
         lambdas = [0, 0.4, 0.8, 0.9, 0.95, 0.99, 1]
-        alphas = np.linspace(0.1, 1.2, 10)
+        alphas = np.linspace(0.1, 1.2, 5)
         #lambdas = [0.99]
         #alphas = [0.41]
         n_lambdas = len(lambdas)
@@ -355,18 +360,27 @@ if __name__ == "__main__":
     # List of dictionaries, each containing the characteristic of each parameterization considered
     results_list = []
     legend_label = []
+    # Average RMSE obtained at the LAST episode run for each parameter set and their standard error
     rmse_mean_values = np.nan*np.zeros((n_lambdas, n_alphas))
     rmse_se_values = np.nan*np.zeros((n_lambdas, n_alphas))
-    rmse_episodes_values = np.zeros(nepisodes)  # RMSE by episode averaged over all experiments and all hyperparameter values
+    # Average RMSE over the episodes run for each parameter set 
+    rmse_episodes_mean = np.nan*np.zeros((n_lambdas, n_alphas))
+    rmse_episodes_se = np.nan*np.zeros((n_lambdas, n_alphas))
+    # RMSE over the episodes averaged over ALL parameter set runs
+    rmse_episodes_values = np.zeros(nepisodes) 
     idx_simul = -1
     for idx_lmbda, lmbda in enumerate(lambdas):
         rmse_mean_lambda = []
         rmse_se_lambda = []
+        rmse_episodes_mean_lambda = []
+        rmse_episodes_se_lambda = []
         for alpha in alphas:
             idx_simul += 1
             if verbose:
                 print("\nParameter set {} of {}: lambda = {:.2g}, alpha = {:.2g}" \
                       .format(idx_simul, n_simul, lmbda, alpha))
+            
+            # Reset learner and agent (i.e. erase all memory from a previous run!)
             learner.setParams(alpha=alpha, gamma=gamma, lmbda=lmbda)
             agent = GeneralAgent(pol_rw,
                                  learner)
@@ -390,6 +404,8 @@ if __name__ == "__main__":
                              }]
             rmse_mean_lambda += [rmse_mean]
             rmse_se_lambda += [rmse_se]
+            rmse_episodes_mean_lambda += [np.mean(rmse_episodes)]
+            rmse_episodes_se_lambda += [np.std(rmse_episodes) / np.sqrt(nepisodes)]
             rmse_episodes_values += rmse_episodes
 
             if verbose:
@@ -397,6 +413,8 @@ if __name__ == "__main__":
 
         rmse_mean_values[idx_lmbda] = np.array(rmse_mean_lambda)
         rmse_se_values[idx_lmbda] = np.array(rmse_se_lambda)
+        rmse_episodes_mean[idx_lmbda] = np.array(rmse_episodes_mean_lambda)
+        rmse_episodes_se[idx_lmbda] = np.array(rmse_episodes_se_lambda)
 
         # Plot the average RMSE for the current lambda as a function of alpha
         color = colormap( idx_lmbda / np.max((1, n_lambdas-1)) )
@@ -418,10 +436,13 @@ if __name__ == "__main__":
 
     # Scaled plot (for comparison purposes)
     for idx_lmbda, lmbda in enumerate(lambdas):
-        color = colormap( idx_lmbda / np.max((1, n_lambdas-1)) )
-        ax_scaled.plot(alphas, rmse_mean_values[idx_lmbda], '.', color=color)
-        #plt.errorbar(alphas, rmse_mean_values[idx_lmbda], yerr=rmse_se_values[idx_lmbda], capsize=4, color=color)
-        ax_scaled.errorbar(alphas, rmse_mean_values[idx_lmbda], color=color)
+        #rmse2plot = rmse_mean_values[idx_lmbda]
+        #rmse2plot_error = rmse_se_values[idx_lmbda]
+        rmse2plot = rmse_episodes_mean[idx_lmbda]
+        rmse2plot_error = rmse_episodes_se[idx_lmbda]
+        color = colormap( 1 - idx_lmbda / np.max((1, n_lambdas-1)) )
+        ax_scaled.plot(alphas, rmse2plot, '.-', color=color)
+        ax_scaled.errorbar(alphas, rmse2plot, yerr=rmse2plot_error, capsize=4, color=color)
         ax_scaled.set_xlim((0, max_alpha))
         ax_scaled.set_ylim((0, max_rmse))
 
@@ -429,7 +450,7 @@ if __name__ == "__main__":
     ax_rmse_by_episode.plot(np.arange(nepisodes), rmse_episodes_values, color="black")
     ax_rmse_by_episode.set_ylim((0, max_rmse))
     ax_rmse_by_episode.set_xlabel("Episode")
-    ax_rmse_by_episode.set_ylabel("RMSE")    
+    ax_rmse_by_episode.set_ylabel("RMSE")
     ax_rmse_by_episode.set_title("Average RMSE by episode over ALL experiments")
 
     plt.figlegend(legend_label)
