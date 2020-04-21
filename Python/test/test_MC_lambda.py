@@ -47,8 +47,8 @@ class Test_MC_Lambda(unittest.TestCase):
         cls.V_true[0] = cls.V_true[-1] = 0
         # Agent with Policy and Learner defined
         cls.rw = random_walks.PolRandomWalkDiscrete(cls.env)
-        cls.mclambda = mc.LeaMCLambda(cls.env, alpha=0.2, gamma=0.9, lmbda=0.8)
-        cls.mclambda_adaptive = mc.LeaMCLambdaAdaptive(cls.env, alpha=0.2, gamma=0.9, lmbda=0.8)
+        cls.mclambda = mc.LeaMCLambda(cls.env, alpha=0.2, gamma=1.0, lmbda=0.8)
+        cls.mclambda_adaptive = mc.LeaMCLambdaAdaptive(cls.env, alpha=0.2, gamma=1.0, lmbda=0.8)
         cls.agent_rw_mclambda = agents.GeneralAgent(cls.rw, cls.mclambda)
         cls.agent_rw_mclambda_adaptive = agents.GeneralAgent(cls.rw, cls.mclambda_adaptive)
     

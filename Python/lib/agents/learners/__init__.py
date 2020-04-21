@@ -36,11 +36,22 @@ b) Have the following methods defined:
 - getValues(): reads the value function for ALL states or state-actions
 """
 
+import numpy as np
+
 
 class Learner:
     """
     Class defining methods that are generic to ALL environments.
+    
+    NOTE: Before using any learner the simulation program should call the reset() method!
+    Otherwise, the simulation process will most likely fail (because variables that are
+    defined in the reset method to track the simulation process will not be defined).
+    In addition, the *specific* Learner constructor should NOT call the reset() method
+    because the reset method would then be called twice: one when the learner is constructed
+    and one prior to the first simulation, making e.g. the episode method be equal to 2 at
+    the first simulation as opposed to the correct value 1.
     """
+
     def __init__(self):
         # Information of the observed trajectory at the END of the episode
         # (so that it can be retrieved by the user if needed as a piece of information)
@@ -50,15 +61,30 @@ class Learner:
         # Episode counter
         self.episode = 0
 
-    def reset(self):
-        "Resets the variables that store information about the episode"
+    def reset(self, reset_episode=False, reset_value_functions=False):
+        """
+        Resets the variables that store information about the episode
+        
+        Parameters:
+        reset_episode: bool, optional
+            Whether to reset the episode to the first one.
+
+        reset_value_functions: bool, optional
+            Whether to reset all the value functions to their initial estimates as well. 
+        """
+        if reset_episode:
+            self.episode = 0
+        
         # Increase episode counter
         # (note that the very first episode run is #1 because reset() is called by __init__()) 
         self.episode += 1
         # Reset the attributes that keep track of states and rewards received during learning
-        self._reset() 
-        # Reset the initial estimates of the value functions (so that we can start learning fresh)
-        self.V.reset()
+        self._reset()
+
+        # Only reset the initial estimates of the value functions at the very first episode
+        # (since each episode should leverage what the agent learned so far!)
+        if self.episode == 1 or reset_value_functions:
+            self.V.reset()
 
     def _reset(self):
         """
@@ -66,14 +92,21 @@ class Learner:
         (all attributes reset here should start with an underscore, i.e. they should be private)
         """
 
-        # Store the _states visited in the episode
+        # Store the _states visited in the episode and their count
         self._states = []
+        self._state_counts = np.zeros(self.env.getNumStates())
+
         # Store the _rewards obtained after each action
         # We initialize the _rewards with one element equal to 0 for ease of notation
         # when retrieving the state and the reward received at each time t
         # because the state is defined for t = 0, ..., T-1 
         # while the reward is defined for t = 1, ..., T
         self._rewards = [0]
+
+    def _update_trajectory(self, state, reward):
+        "Updates the trajectory based on the current state and the observed reward"
+        self._states += [state]
+        self._rewards += [reward]
 
     def store_trajectory(self):
         "Stores the trajectory observed during the episode"

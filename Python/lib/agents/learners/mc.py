@@ -36,9 +36,6 @@ class LeaMCLambda(Learner):
         # Attributes specific to the current TD method
         self.lmbda = lmbda
 
-        # Reset the variables that store information about the episode
-        self.reset()
-
     def _reset(self):
         """
         Resets internal structures used during learning specific to this learning algorithm
@@ -69,8 +66,7 @@ class LeaMCLambda(Learner):
 
     def learn_pred_V_slow(self, t, state, action, next_state, reward, done, info):
         # This learner updates the estimate of the value function V ONLY at the end of the episode
-        self._states += [state]
-        self._rewards += [reward]
+        self._update_trajectory(state, reward)
         if done:
             # Store the trajectory and rewards
             self.store_trajectory()
@@ -130,7 +126,7 @@ class LeaMCLambda(Learner):
 
     def learn_pred_V(self, t, state, action, next_state, reward, done, info):
         "Learn the prediction problem: estimate the state value function"
-        self._states += [state]
+        self._update_trajectory(state, reward)
         self._updateG(t, state, next_state, reward, done)
 
         if done:
@@ -225,7 +221,7 @@ class LeaMCLambda(Learner):
         # In the linear case the gradient is equal to the feature associated to state s,
         # which is stored at column s of the feature matrix X.
         gradient_V = self.V.X[:,state]  
-            ## The above returns a ROW vector which is good because the weights are stored as a ROW vector
+            ## Note: the above returns a ROW vector which is good because the weights are stored as a ROW vector
 
         # Update the weights based on the error observed at each time step and the gradient of the value function
         self.V.setWeights( self.V.getWeights() + self.alpha * delta * gradient_V )
@@ -244,8 +240,7 @@ class LeaMCLambdaAdaptive(LeaMCLambda):
 
     def learn_pred_V(self, t, state, action, next_state, reward, done, info):
         "Learn the prediction problem: estimate the state value function"
-        self._states += [state]
-        self._rewards += [reward]
+        self._update_trajectory(state, reward)
         self._updateG(t, state, next_state, reward, done)
 
         if done:

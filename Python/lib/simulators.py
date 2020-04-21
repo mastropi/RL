@@ -69,12 +69,15 @@ class Simulator:
         self._isd_orig = None
 
         # Reset the state counts in an episode
+        # (This is used for plotting purposes and to compute the RMSE weighted by the state counts --if requested)
         self.state_counts = np.zeros(self.env.getNumStates())
 
     def play(self, nrounds, start=None, seed=None, compute_rmse=False, plot=False, colormap="seismic", pause=0):
         # TODO: (2020/04/11) Convert the plotting parameters to a dictionary named plot_options or similar.
         # The goal is to group OPTIONAL parameters by their function/concept.  
         """Runs an episodic Reinforcement Learning experiment.
+        No reset of the learning history is done at the onset of the first episode to run.
+        It is assumed that this reset, when needed, is done by the calling function.
         
         Parameters:
         nrounds: int
@@ -139,7 +142,6 @@ class Simulator:
         # Define the policy, the learner and reset the learner (i.e. erase all learning memory to start anew!)
         policy = self.agent.getPolicy()
         learner = self.agent.getLearner()
-        learner.reset()
         if seed:
             if seed != 0:
                 self.env.seed(seed)
@@ -149,6 +151,7 @@ class Simulator:
         RMSE = np.nan*np.zeros(nrounds) if compute_rmse else None
         for episode in range(nrounds):
             self.env.reset()
+            learner.reset()
             done = False
             if self.debug:
                 print("\n\nEpisode {} starts...".format(episode+1))
@@ -250,6 +253,7 @@ class Simulator:
             if verbose:
                 print("Running experiment {} of {} (#episodes = {})..." \
                       .format(exp+1, nexperiments, nepisodes), end=" ")
+            self.agent.getLearner().reset(reset_episode=True, reset_value_functions=True)
             V, N, RMSE_by_episodes_i = self.play(nrounds=nepisodes, start=start, seed=None,
                                                  compute_rmse=True, plot=False)
             RMSE_i = rmse(self.env.getV(), V) #, weights=N)
