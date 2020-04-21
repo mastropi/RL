@@ -179,8 +179,8 @@ class Simulator:
                 # Learn: i.e. update the value function (stored in the learner) with the new observation
                 learner.learn_pred_V(t, state, action, next_state, reward, done, info)
 
-                #if self.debug:
-                #    print("-> {}".format(self.env.getState()), end=" ")
+                if self.debug:
+                    print("-> {}".format(self.env.getState()), end=" ")
 
             if compute_rmse:
                 if self.env.getV() is not None:

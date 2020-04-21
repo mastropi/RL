@@ -80,10 +80,10 @@ class Test_TD_Lambda(unittest.TestCase):
         sim = simulators.Simulator(self.env, self.agent_rw_tdlambda, debug=False)
         _, _, RMSE_by_episode = sim.play(nrounds=self.nrounds, start=9, seed=self.seed, compute_rmse=True, plot=False)
 
-        expected = np.array([ 0.,       -0.90853729, -0.87876371, -0.70629267, -0.61659491, -0.62814336,
- -0.59673825, -0.49258608, -0.40412844, -0.21597426, -0.15834096, -0.10753559,
- -0.10549221,  0.01441717,  0.28382445,  0.47064362,  0.47555858,  0.57177841,
-  0.62845292,  0.70442683,  0.        ])
+        expected = np.array([ 0.,     -0.96263354, -0.94935992, -0.79580974, -0.68319293, -0.69444404,
+ -0.66004513, -0.54932031, -0.45282584, -0.24578133, -0.18307401, -0.12925566,
+ -0.12743421,  0.00243922,  0.28248756,  0.47626462,  0.50983006,  0.63976455,
+  0.69107498,  0.74657348,  0.        ])
         observed = self.tdlambda.getV().getValues()
 
         print("\nobserved: " + str(observed))
@@ -98,10 +98,10 @@ class Test_TD_Lambda(unittest.TestCase):
         sim = simulators.Simulator(self.env, self.agent_rw_mclambda, debug=False)
         _, _, RMSE_by_episode = sim.play(nrounds=self.nrounds, start=9, seed=self.seed, compute_rmse=True, plot=False)
 
-        expected = np.array([ 0.,        -0.8598213, -0.76779645, -0.37056923, -0.18913217, -0.23620264,
- -0.18414855, -0.12397922, -0.1037322,  -0.03250992, -0.02509062, -0.04620496,
- -0.06607403, -0.00726447,  0.2325766,   0.35186274,  0.35691905,  0.50138679,
-  0.4908309,   0.63692378,  0.        ])
+        expected = np.array([ 0.,    -0.87570279, -0.77617219, -0.38677509, -0.20086812, -0.26264111,
+ -0.20460859, -0.13041183, -0.10991275, -0.03513174, -0.02629319, -0.04773745,
+ -0.06768075, -0.00798058,  0.23183274,  0.35276211,  0.37104584,  0.52515039,
+  0.50912581,  0.64218869,  0.        ])
         observed = self.mclambda.getV().getValues()
 
         print("\nobserved: " + str(observed))
@@ -116,10 +116,10 @@ class Test_TD_Lambda(unittest.TestCase):
         sim = simulators.Simulator(self.env, self.agent_rw_tdlambda_adaptive, debug=False)
         _, _, RMSE_by_episode = sim.play(nrounds=self.nrounds, start=9, seed=self.seed, compute_rmse=True, plot=False)
 
-        expected = np.array([ 0.,       -0.83763831, -0.78371244, -0.65037339, -0.55487832, -0.45724707,
- -0.36835343, -0.25302472, -0.2056898,  -0.09006464, -0.05197223,  0.01445287,
-  0.04177646,  0.09774879,  0.16473479,  0.22615434,  0.35857778,  0.44099474,
-  0.56933659,  0.71409178,  0.        ])
+        expected = np.array([ 0.,       -0.84353544, -0.78968225, -0.65385009, -0.55649136, -0.45755451,
+ -0.36783142, -0.25143119, -0.2038609,  -0.08730269, -0.05066575,  0.01550673,
+  0.04311948,  0.09924234,  0.16607023,  0.22774784,  0.36150155,  0.44464534,
+  0.56831782,  0.70843306,  0.        ])
         observed = self.tdlambda_adaptive.getV().getValues()
 
         print("\nobserved: " + str(observed))

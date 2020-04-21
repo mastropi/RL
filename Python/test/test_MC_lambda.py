@@ -51,14 +51,6 @@ class Test_MC_Lambda(unittest.TestCase):
         cls.mclambda_adaptive = mc.LeaMCLambdaAdaptive(cls.env, alpha=0.2, gamma=1.0, lmbda=0.8)
         cls.agent_rw_mclambda = agents.GeneralAgent(cls.rw, cls.mclambda)
         cls.agent_rw_mclambda_adaptive = agents.GeneralAgent(cls.rw, cls.mclambda_adaptive)
-    
-    def setUp(self):
-        # Make the tests repeatable
-        # NOTE: This setUp() is run before EVERY test, as there is setUpClass() that is run
-        # just once before ALL the tests are run.
-        #self.random_generator, seed = seeding.np_random(self.seed)
-        #np.random.seed(self.seed)
-        pass
 
     def plot_results(self, V_estimated, V_true, RMSE_by_episode, plotFlag):
         if plotFlag:
@@ -81,12 +73,12 @@ class Test_MC_Lambda(unittest.TestCase):
     def test_random_walk_result(self):
         print("\nTesting " + self.id())
         sim = simulators.Simulator(self.env, self.agent_rw_mclambda, debug=False)
-        _, _, RMSE_by_episode = sim.play(nrounds=self.nrounds, start=9, seed=self.seed, compute_rmse=True, plot=True, pause=0.1)
+        _, _, RMSE_by_episode = sim.play(nrounds=self.nrounds, start=9, seed=self.seed, compute_rmse=True, plot=False, pause=0.1)
 
-        expected = np.array([ 0.,         -0.73375448, -0.62761282, -0.37627202, -0.25695674, -0.22698505,
- -0.18668611, -0.13544086, -0.10660764, -0.04106711, -0.0190802,  -0.00094745,
-  0.00190329,  0.02135501,  0.09645727,  0.17523513,  0.25341255,  0.38543593,
-  0.46357219,  0.60465789,  0.        ])
+        expected = np.array([ 0.,     -0.94788777, -0.93485068, -0.77635209, -0.66915289, -0.67045823,
+ -0.6319687,  -0.52116762, -0.44295159, -0.20887109, -0.1027944,  -0.03800919,
+ -0.03668617,  0.06142266,  0.27410733,  0.42610526,  0.50467228,  0.63018903,
+  0.6727829,   0.72310919,  0.        ])
     
         observed = self.mclambda.getV().getValues()
 
@@ -101,10 +93,10 @@ class Test_MC_Lambda(unittest.TestCase):
         sim = simulators.Simulator(self.env, self.agent_rw_mclambda_adaptive, debug=False)
         _, _, RMSE_by_episode = sim.play(nrounds=self.nrounds, start=9, seed=self.seed, compute_rmse=True, plot=False, pause=0.05)
 
-        expected = np.array([ 0.,         -0.73375448, -0.62761282, -0.37627202, -0.25695674, -0.22698505,
- -0.18668611, -0.13544086, -0.10660764, -0.04106711, -0.0190802,  -0.00094745,
-  0.00190329,  0.02135501,  0.09645727,  0.17523513,  0.25341255,  0.38543593,
-  0.46357219,  0.60465789,  0.        ])
+        expected = np.array([ 0.,     -0.94788777, -0.93485068, -0.77635209, -0.66915289, -0.67045823,
+ -0.6319687,  -0.52116762, -0.44295159, -0.20887109, -0.1027944,  -0.03800919,
+ -0.03668617,  0.06142266,  0.27410733,  0.42610526,  0.50467228,  0.63018903,
+  0.6727829,   0.72310919,  0.        ])
         observed = self.mclambda_adaptive.getV().getValues()
 
         print("\nobserved: " + str(observed))

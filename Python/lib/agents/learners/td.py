@@ -35,7 +35,13 @@ class LeaTDLambda(Learner):
         # Attributes specific to the current TD method
         self.lmbda = lmbda
         # Eligibility traces
-        self.z = np.zeros(self.env.getNumStates())
+        self._z = np.zeros(self.env.getNumStates())
+        self._z_all = np.zeros((0,self.env.getNumStates()))
+
+    def _reset(self):
+        super()._reset()
+        self._z[:] = 0.
+        self._z_all = np.zeros((0,self.env.getNumStates()))
 
     def setParams(self, alpha=None, gamma=None, lmbda=None):
         self.alpha = alpha if alpha else self.alpha
@@ -43,14 +49,29 @@ class LeaTDLambda(Learner):
         self.lmbda = lmbda if lmbda else self.lmbda
 
     def learn_pred_V(self, t, state, action, next_state, reward, done, info):
-        self._updateZ(state)
+        self._updateZ(state, self.lmbda)
         delta = reward + self.gamma * self.V.getValue(next_state) - self.V.getValue(state)
-        self.V.setWeights( self.V.getWeights() + self.alpha * delta * self.z )
+        self.V.setWeights( self.V.getWeights() + self.alpha * delta * self._z )
 
-    def _updateZ(self, state):
-        dev = 1
-        self.z *= self.gamma * self.lmbda
-        self.z[state] += dev
+        if done and self.debug:
+            self._plotZ()
+
+    def _updateZ(self, state, lmbda):
+        # Gradient of V: it must have the same size as the weights
+        # In the linear case the gradient is equal to the feature associated to state s,
+        # which is stored at column s of the feature matrix X.
+        gradient_V = self.V.X[:,state]
+            ## Note: the above returns a ROW vector which is good because the weights are stored as a ROW vector
+        self._z = self.gamma * lmbda * self._z + gradient_V
+        self._z_all = np.r_[self._z_all, self._z.reshape(1,len(self._z))]
+
+    def _plotZ(self):
+        import matplotlib.pyplot as plt
+        plt.figure()
+        plt.plot(self._z_all[:,6:12], '.-')
+        plt.legend(np.arange(6,12,1))
+        ax = plt.gca()
+        ax.set_title("Episode {}".format(self.episode))
 
 
 class LeaTDLambdaAdaptive(LeaTDLambda):
@@ -94,10 +115,13 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
             lambda_adaptive = 1 - np.exp( -np.abs(delta_relative) ) + lambda_offset
             #print("episode: {}, t: {}, lambda (adaptive) = {}".format(self.episode, t, lambda_adaptive))
 
-        # Update elegibility trace
+        # Update the elegibility trace
         self._updateZ(state, lambda_adaptive)
         # Update the weights
-        self.V.setWeights( self.V.getWeights() + self.alpha * delta * self.z )
+        self.V.setWeights( self.V.getWeights() + self.alpha * delta * self._z )
+
+        if done and self.debug:
+            self._plotZ()
 
         if self.debug:
             print("t: {}, delta = {:.3g} --> lambda = {:.3g}".format(t, delta, lambda_adaptive))
@@ -105,16 +129,6 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
             if done:
                 import pandas as pd
                 pd.options.display.float_format = '{:,.2f}'.format
-                print(pd.DataFrame( np.c_[self.z, self.V.getValues()].T, index=['z', 'V'] ))
+                print(pd.DataFrame( np.c_[self._z, self.V.getValues()].T, index=['_z', 'V'] ))
     
             #input("Press Enter...")
-
-    def _updateZ(self, state, lambda_adaptive):
-        # Gradient of V: it must have the same size as the weights
-        # In the linear case the gradient is equal to the feature associated to state s,
-        # which is stored at column s of the feature matrix X.
-        gradient_V = self.V.X[:,state]  
-            ## Note: the above returns a ROW vector which is good because the weights are stored as a ROW vector
-        
-        # IMPORTANT: lambda_adaptive is computed with the information at time t!! (not at time t-1)
-        self.z = self.gamma * lambda_adaptive * self.z + gradient_V

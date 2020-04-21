@@ -63,12 +63,12 @@ class ValueFunctionTD_DM(ValueFunctionTD):
         delta_state_value = state_value_estimate - state_value 
         #delta_state_value_relative = delta_state_value - 
         lambda_adaptive = self.lmbda * np.exp( delta_state_value_relative )
-        self.z *= self.gamma * self.lmbda
-        self.z[state] += dev
+        self._z *= self.gamma * self.lmbda
+        self._z[state] += dev
 
     def learnAdaptive(self, state, nxtState, reward):
         delta = reward + self.gamma * self.value(nxtState) - self.value(state)
-        self.weights += self.alpha * delta * self.z
+        self.weights += self.alpha * delta * self._z
 
     def getValues(self):
         return self.weights
