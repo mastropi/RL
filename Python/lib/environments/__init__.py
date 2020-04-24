@@ -9,14 +9,26 @@ Created on Mon Apr  6 15:35:13 2020
 import numpy as np
 
 from gym.envs.toy_text import discrete
+from sympy.physics.mechanics.tests.test_system import states
 
-#__all__ = [ 'Environment' ]
+#__all__ = [ 'EnvironmentDiscrete' ]
 
-# TODO: 2020/04/11: Rename this class EnvDiscrete
-class Environment(discrete.DiscreteEnv):
+class EnvironmentDiscrete(discrete.DiscreteEnv):
     """
     Class defining methods that are generic to ALL environments.
     """
+    def __init__(self, nS, nA, P, isd):
+        """
+        Calls the constructor of the super class which requires:
+        - nS: number of possible states
+        - nA: number of possible actions
+        - P: probability of each state-action pair
+        - isd: initial state distribution
+        """
+        super().__init__(nS, nA, P, isd)
+
+        # All states
+        self.all_states = np.arange(self.getNumStates())
 
     #--- Getters
     def getInitialStateDistribution(self):

@@ -91,7 +91,7 @@ class Test_MC_Lambda(unittest.TestCase):
     def no_test_random_walk_adaptive_result(self):
         print("\nTesting " + self.id())
         sim = simulators.Simulator(self.env, self.agent_rw_mclambda_adaptive, debug=False)
-        _, _, RMSE_by_episode = sim.play(nrounds=self.nrounds, start=9, seed=self.seed, compute_rmse=True, plot=False, pause=0.05)
+        _, _, RMSE_by_episode = sim.play(nrounds=self.nrounds, start=9, seed=self.seed, compute_rmse=True, plot=False, pause=0.1)
 
         expected = np.array([ 0.,     -0.94788777, -0.93485068, -0.77635209, -0.66915289, -0.67045823,
  -0.6319687,  -0.52116762, -0.44295159, -0.20887109, -0.1027944,  -0.03800919,

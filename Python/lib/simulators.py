@@ -26,11 +26,11 @@ import numpy as np
 from matplotlib import pyplot as plt, cm    # cm is for colormaps (e.g. cm.get_cmap())
 
 if __name__ == "__main__":
-    from environments import Environment
+    from environments import EnvironmentDiscrete
     from agents import GeneralAgent
 else:
     # These relative imports are only accepted when we compile the file as a module
-    from .environments import Environment
+    from .environments import EnvironmentDiscrete
     from .agents import GeneralAgent
 
 
@@ -41,9 +41,9 @@ class Simulator:
     """
 
     def __init__(self, env, agent, seed=None, debug=False):
-        if not isinstance(env, Environment):
+        if not isinstance(env, EnvironmentDiscrete):
             raise TypeError("The environment must be of type {} from the {} module ({})" \
-                            .format(Environment.__name__, Environment.__module__, env.__class__))
+                            .format(EnvironmentDiscrete.__name__, EnvironmentDiscrete.__module__, env.__class__))
         # TODO: (2020/04/12) Fix the following check on the type of agent as it does not work...
         # even though the class of agent is Python.lib.agents.GeneralAgent
 #        if not isinstance(agent, GeneralAgent):
@@ -71,6 +71,9 @@ class Simulator:
         # Reset the state counts in an episode
         # (This is used for plotting purposes and to compute the RMSE weighted by the state counts --if requested)
         self.state_counts = np.zeros(self.env.getNumStates())
+
+        # Reset the learner to the first episode state
+        self.agent.getLearner().reset(reset_episode=True, reset_value_functions=True)
 
     def play(self, nrounds, start=None, seed=None, compute_rmse=False, plot=False, colormap="seismic", pause=0):
         # TODO: (2020/04/11) Convert the plotting parameters to a dictionary named plot_options or similar.
@@ -120,10 +123,9 @@ class Simulator:
         """
         if plot:
             fig_V = plt.figure()
-            states_all = np.arange(self.env.getNumStates())
             colors = cm.get_cmap(colormap, lut=nrounds)
             # Plot the true state value function (to have it as a reference already
-            plt.plot(states_all, self.env.getV(), '.-', color="blue")
+            plt.plot(self.env.all_states, self.env.getV(), '.-', color="blue")
 
         # Define initial state
         if start:
@@ -151,7 +153,7 @@ class Simulator:
         RMSE = np.nan*np.zeros(nrounds) if compute_rmse else None
         for episode in range(nrounds):
             self.env.reset()
-            learner.reset()
+            learner.reset(reset_episode=False, reset_value_functions=False)
             done = False
             if self.debug:
                 print("\n\nEpisode {} starts...".format(episode+1))
@@ -189,7 +191,7 @@ class Simulator:
             if plot:
                 #print("episode: {} (T={}), color: {}".format(episode, t, colors(episode/nrounds)))
                 plt.figure(fig_V.number)
-                plt.plot(states_all, learner.getV().getValues(), linewidth=0.5, color=colors(episode/nrounds))
+                plt.plot(self.env.all_states, learner.getV().getValues(), linewidth=0.5, color=colors(episode/nrounds))
                 if pause > 0:
                     plt.pause(pause)
                 plt.draw()
@@ -200,7 +202,7 @@ class Simulator:
             #plt.colorbar(cm.ScalarMappable(cmap=colormap))    # Does not work
             ax = plt.gca()
             ax2 = ax.twinx()    # Create a secondary axis sharing the same x axis
-            ax2.bar(states_all, self.state_counts, color="blue", alpha=0.3)
+            ax2.bar(self.env.all_states, self.state_counts, color="blue", alpha=0.3)
             plt.sca(ax) # Go back to the primary axis
             #plt.figure(fig_V.number)
 
@@ -245,7 +247,7 @@ class Simulator:
         RMSE_by_episodes2 = np.zeros(nepisodes) # Used to compute the standard error of the RMSE by episode
 
         # IMPORTANT: We should use the seed of the environment and NOT another seed setting mechanism
-        # (such as np.random.seed()) because the Environment class used to simulate the process
+        # (such as np.random.seed()) because the EnvironmentDiscrete class used to simulate the process
         # (defined in the gym package) sets its seed to None when constructed.  
         # This seed is then used for the environment evolution realized with the reset() and step() methods.
         [seed] = self.env.seed(self.seed)

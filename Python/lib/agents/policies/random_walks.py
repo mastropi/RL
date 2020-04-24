@@ -11,7 +11,7 @@ Each policy should have the following methods:
 
 #import numpy as np
 
-from gym.envs.toy_text.discrete import DiscreteEnv
+from Python.lib.environments import EnvironmentDiscrete
 
 
 #__all__ = [ "PolRandomWalkDiscrete" ]
@@ -28,9 +28,9 @@ class PolRandomWalkDiscrete():
 
 #    def __init__(self, env: DiscreteEnv):
     def __init__(self, env):
-        if not isinstance(env, DiscreteEnv):
+        if not isinstance(env, EnvironmentDiscrete):
             raise TypeError("The environment must be of type {} from the {} module ({})" \
-                            .format(DiscreteEnv.__name__, DiscreteEnv.__module__, env.__class__))
+                            .format(EnvironmentDiscrete.__name__, EnvironmentDiscrete.__module__, env.__class__))
         self.env = env
 
     def choose_action(self):

@@ -16,12 +16,12 @@ import numpy as np
 import sys
 
 # Imports a class defined in __init__.py
-from . import Environment
+from . import EnvironmentDiscrete
 
 #__all__ = [ "EnvGridworld2D",
 #            "EnvGridworld1D" ]
 
-class EnvGridworld2D(Environment):
+class EnvGridworld2D(EnvironmentDiscrete):
     """
     2D Grid World environment from Sutton's Reinforcement Learning book chapter 4.
     You are an agent on an MxN grid and your goal is to reach the terminal
@@ -157,7 +157,7 @@ class EnvGridworld2D(Environment):
             it.iternext()
 
 
-class EnvGridworld1D(Environment):
+class EnvGridworld1D(EnvironmentDiscrete):
     """
     1D Grid World environment from Sutton's Reinforcement Learning book chapter 4.
     You are an agent on an M-long grid and your goal is to reach the terminal

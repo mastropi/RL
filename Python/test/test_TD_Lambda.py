@@ -49,8 +49,11 @@ class Test_TD_Lambda(unittest.TestCase):
         cls.env = gridworlds.EnvGridworld1D(length=21)  # 19 states plus the two terminal states
         # Agents with Policy and Learner defined
         cls.rw = random_walks.PolRandomWalkDiscrete(cls.env)
-        cls.tdlambda = td.LeaTDLambda(cls.env, alpha=0.2, gamma=1.0, lmbda=0.8)
-        cls.tdlambda_adaptive = td.LeaTDLambdaAdaptive(cls.env, alpha=0.2, gamma=1.0, lmbda=0.8)
+        cls.tdlambda = td.LeaTDLambda(cls.env, alpha=0.8, gamma=1.0, lmbda=0.8,
+                                      adjust_alpha=True, debug=False)
+        cls.tdlambda_adaptive = td.LeaTDLambdaAdaptive(cls.env, alpha=0.8, gamma=1.0, lmbda=0.8,
+                                                       adjust_alpha=True,
+                                                       lambda_min=0., burnin=False, debug=False)
         cls.mclambda = td.LeaTDLambda(cls.env, alpha=0.2, gamma=0.9, lmbda=1.0)
         cls.agent_rw_tdlambda = agents.GeneralAgent(cls.rw, cls.tdlambda)
         cls.agent_rw_tdlambda_adaptive = agents.GeneralAgent(cls.rw, cls.tdlambda_adaptive)
@@ -78,7 +81,7 @@ class Test_TD_Lambda(unittest.TestCase):
         "Test using my TD(Lambda) learner"
         print("\nTesting " + self.id())
         sim = simulators.Simulator(self.env, self.agent_rw_tdlambda, debug=False)
-        _, _, RMSE_by_episode = sim.play(nrounds=self.nrounds, start=9, seed=self.seed, compute_rmse=True, plot=False)
+        _, _, RMSE_by_episode = sim.play(nrounds=self.nrounds, start=9, seed=self.seed, compute_rmse=True, plot=False, pause=0.1)
 
         expected = np.array([ 0.,     -0.96263354, -0.94935992, -0.79580974, -0.68319293, -0.69444404,
  -0.66004513, -0.54932031, -0.45282584, -0.24578133, -0.18307401, -0.12925566,
@@ -92,11 +95,11 @@ class Test_TD_Lambda(unittest.TestCase):
 
         assert np.allclose( expected, observed )
 
-    def test_random_walk_as_MC_result(self):
+    def no_test_random_walk_as_MC_result(self):
         "Test using my TD(Lambda) with lambda = 1 to emulate a Monte Carlo learner"
         print("\nTesting " + self.id())
         sim = simulators.Simulator(self.env, self.agent_rw_mclambda, debug=False)
-        _, _, RMSE_by_episode = sim.play(nrounds=self.nrounds, start=9, seed=self.seed, compute_rmse=True, plot=False)
+        _, _, RMSE_by_episode = sim.play(nrounds=self.nrounds, start=9, seed=self.seed, compute_rmse=True, plot=False, pause=0.1)
 
         expected = np.array([ 0.,    -0.87570279, -0.77617219, -0.38677509, -0.20086812, -0.26264111,
  -0.20460859, -0.13041183, -0.10991275, -0.03513174, -0.02629319, -0.04773745,
@@ -114,7 +117,7 @@ class Test_TD_Lambda(unittest.TestCase):
         "Test using my TD(Lambda) learner"
         print("\nTesting " + self.id())
         sim = simulators.Simulator(self.env, self.agent_rw_tdlambda_adaptive, debug=False)
-        _, _, RMSE_by_episode = sim.play(nrounds=self.nrounds, start=9, seed=self.seed, compute_rmse=True, plot=False)
+        _, _, RMSE_by_episode = sim.play(nrounds=self.nrounds, start=9, seed=self.seed, compute_rmse=True, plot=False, pause=0.1)
 
         expected = np.array([ 0.,       -0.84353544, -0.78968225, -0.65385009, -0.55649136, -0.45755451,
  -0.36783142, -0.25143119, -0.2038609,  -0.08730269, -0.05066575,  0.01550673,

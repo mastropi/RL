@@ -38,10 +38,16 @@ b) Have the following methods defined:
 
 import numpy as np
 
+from Python.lib.environments import EnvironmentDiscrete
+
+
+MIN_COUNT = 10      # Minimum state count to start shrinking alpha
+MIN_EPISODE = 10    # Minimum episode count to start shrinking alpha
+MAX_EPISODE_FOR_ALPHA_MIN = None  # Maximum episode on which the minimum alpha value above is applied
 
 class Learner:
     """
-    Class defining methods that are generic to ALL environments.
+    Class defining methods that are generic to ALL learners.
     
     NOTE: Before using any learner the simulation program should call the reset() method!
     Otherwise, the simulation process will most likely fail (because variables that are
@@ -52,7 +58,20 @@ class Learner:
     the first simulation as opposed to the correct value 1.
     """
 
-    def __init__(self):
+    def __init__(self, env, alpha, adjust_alpha=False, alpha_min=0.):
+        """
+        @param env: environment
+        @param alpha: learning rate
+        """
+        if not isinstance(env, EnvironmentDiscrete):
+            raise TypeError("The environment must be of type {} from the {} module ({})" \
+                            .format(EnvironmentDiscrete.__name__, EnvironmentDiscrete.__module__, env.__class__))
+
+        self.env = env
+        self.alpha = alpha
+        self.adjust_alpha = adjust_alpha
+        self.alpha_min = alpha_min          # Used when adjust_alpha=True
+
         # Information of the observed trajectory at the END of the episode
         # (so that it can be retrieved by the user if needed as a piece of information)
         self.states = []
@@ -60,6 +79,9 @@ class Learner:
 
         # Episode counter
         self.episode = 0
+
+        # State counts over ALL episodes run after reset
+        self._state_counts_overall = np.zeros(self.env.getNumStates())
 
     def reset(self, reset_episode=False, reset_value_functions=False):
         """
@@ -74,21 +96,32 @@ class Learner:
         """
         if reset_episode:
             self.episode = 0
-        
+            # State counts over ALL episodes run after reset
+            self._state_counts_overall = np.zeros(self.env.getNumStates())
+            # Learning rate for each state (so that we can reduce alpha with time)
+            self._alphas = self.alpha * np.ones(self.env.getNumStates())
+            # Learning rate at episode = MAX_EPISODE_FOR_ALPHA_MIN so that we can continuing applying a non-bounded alpha
+            self._alphas_at_max_episode = None
+
         # Increase episode counter
         # (note that the very first episode run is #1 because reset() is called by __init__()) 
         self.episode += 1
         # Reset the attributes that keep track of states and rewards received during learning
-        self._reset()
+        self._reset_at_start_of_episode()
 
         # Only reset the initial estimates of the value functions at the very first episode
         # (since each episode should leverage what the agent learned so far!)
         if self.episode == 1 or reset_value_functions:
             self.V.reset()
 
-    def _reset(self):
+    def setParams(self, alpha, adjust_alpha, alpha_min):
+        self.alpha = alpha if alpha else self.alpha
+        self.adjust_alpha = adjust_alpha if adjust_alpha else self.adjust_alpha
+        self.alpha_min = alpha_min if alpha_min else self.alpha_min
+
+    def _reset_at_start_of_episode(self):
         """
-        Resets internal structures used during learning
+        Resets internal structures used during learning in each episode
         (all attributes reset here should start with an underscore, i.e. they should be private)
         """
 
@@ -107,6 +140,28 @@ class Learner:
         "Updates the trajectory based on the current state and the observed reward"
         self._states += [state]
         self._rewards += [reward]
+        self._state_counts[state] += 1
+        self._state_counts_overall[state] += 1
+
+    def _update_alphas(self, state):
+        if self.adjust_alpha:
+            # Update using the state occupation counter over all past episodes 
+            if MAX_EPISODE_FOR_ALPHA_MIN is None or self.episode <= MAX_EPISODE_FOR_ALPHA_MIN:
+                # This means we should apply the alpha_min value indefinitely or up to the max episode specified by MAX_EPISODE_FOR_ALPHA_MIN
+                self._alphas[state] =  np.max([ self.alpha_min, self.alpha / np.max([1, self._state_counts_overall[state] - MIN_COUNT + 2]) ])
+                if MAX_EPISODE_FOR_ALPHA_MIN is not None and self.episode == MAX_EPISODE_FOR_ALPHA_MIN:
+                    # Store the last alpha value observed for each state
+                    # so that we can use it as starting point from now on.
+                    self._alphas_at_max_episode = self._alphas.copy()
+                    #print("episode {}, state {}: alphas at max episode: {}".format(self.episode, state, self._alphas_at_max_episode))
+            else:
+                # Start decreasing from the alpha value left at episode = MAX_EPISODE_FOR_ALPHA_MIN
+                # without any lower bound for alpha
+                self._alphas[state] = self._alphas_at_max_episode[state] / np.max([1, self._state_counts_overall[state] - MIN_COUNT + 2])
+                #print("episode {}, state {}: alphas: {}".format(self.episode, state, self._alphas))
+    
+            # Update using the episode number (equal for all states)
+            #self._alphas[state] =  np.max([ self.alpha_min, self.alpha / np.max([1, self.episode - MIN_EPISODE + 1]) ])
 
     def store_trajectory(self):
         "Stores the trajectory observed during the episode"
@@ -116,6 +171,23 @@ class Learner:
         # Assign the new trajectory observed in the current episode 
         self.states = self._states.copy()
         self.rewards = self._rewards.copy()
+
+    def final_report(self, T):
+        "Processes to be run at the end of the learning process"
+        if self.debug:
+            self.plot_alphas(T)
+
+    def plot_alphas(self, t):
+        import matplotlib.pyplot as plt
+        plt.figure()
+        plt.plot(self.env.all_states, self._alphas, 'g.-')
+        ax = plt.gca()
+        ax.set_xlabel("state")
+        ax.set_ylabel("alpha")
+        ax.set_title("Learning rate (alpha) for each state (episode {}, t={})".format(self.episode, t))
+        ax2 = ax.twinx()    # Create a secondary axis sharing the same x axis
+        ax2.bar(self.env.all_states, self._state_counts_overall, color="blue", alpha=0.3)
+        plt.sca(ax) # Go back to the primary axis
 
     def getV(self):
         "Returns the object containing information about the state value function estimation"
