@@ -115,7 +115,7 @@ class EnvGridworld2D(EnvironmentDiscrete):
         #print("P")
         #print(P)
 
-        super(EnvGridworld2D, self).__init__(nS, nA, P, isd)
+        super(EnvGridworld2D, self).__init__(nS, nA, P, isd, terminal_states=set([i for i, s in enumerate(range(nS)) if is_terminal(s)]))
 
     def _render(self, mode='human', close=False):
         """ Renders the current gridworld layout
@@ -244,7 +244,7 @@ class EnvGridworld1D(EnvironmentDiscrete):
         #print("P")
         #print(P)
 
-        super(EnvGridworld1D, self).__init__(nS, nA, P, isd)
+        super(EnvGridworld1D, self).__init__(nS, nA, P, isd, terminal_states=set([i for i, s in enumerate(range(nS)) if is_terminal(s)]))
 
     def getV(self):
         "Returns the true state value function"

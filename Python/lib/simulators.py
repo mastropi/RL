@@ -61,7 +61,7 @@ class Simulator:
     def __exit__(self, exc_type, exc_val, exc_tb):
         # Restore the initial state distribution array in case it has been possibly changed
         # (e.g. when we want to define a specific initial state)
-        if self._isd_orig:
+        if self._isd_orig is not None:
             self.setInitialStateDistribution(self._isd_orig)
 
     def reset(self):
@@ -75,7 +75,9 @@ class Simulator:
         # Reset the learner to the first episode state
         self.agent.getLearner().reset(reset_episode=True, reset_value_functions=True)
 
-    def play(self, nrounds, start=None, seed=None, compute_rmse=False, plot=False, colormap="seismic", pause=0):
+    def play(self, nrounds, start=None, seed=None, compute_rmse=False,
+             verbose=False, verbose_period=1,
+             plot=False, colormap="seismic", pause=0):
         # TODO: (2020/04/11) Convert the plotting parameters to a dictionary named plot_options or similar.
         # The goal is to group OPTIONAL parameters by their function/concept.  
         """Runs an episodic Reinforcement Learning experiment.
@@ -101,6 +103,12 @@ class Simulator:
             Whether to compute the RMSE over states (weighted by their number of visits)
             after each episode. Useful to analyze rate of convergence of the estimates.
 
+        verbose: bool, optional
+            Whether to show the experiment that is being run and the episodes for each experiment.
+            
+        verbose_period: int, optional
+            Every how many episodes per experiment should be displayed.
+
         plot: bool, optional
             Whether to generate plots showing the evolution of the value function estimates.
 
@@ -114,12 +122,15 @@ class Simulator:
             of the value function estimates.
 
         Returns: tuple
-            Tuple containing the following elements having the same size as the environment states:
-                - state value function estimates
-                - number of visits at each state
+            Tuple containing the following elements:
+                - state value function estimate for each state at the end of the episode (`nrounds`)
+                - number of visits to each state at the end of the episode
                 - RMSE (when compute_rmse is not None) an array of length `nrounds` containing the
                 Root Mean Square Error after each episode, of the estimated value function averaged
-                over all states and weighted by the number of visits to each state. Otherwise, None.
+                over all states. Otherwise, None.
+                - a dictionary containing additional relevant information, as follows:
+                    - 'alphas': the value of the learning parameter `alpha` for each state
+                    at the end of the episode.
         """
         if plot:
             fig_V = plt.figure()
@@ -128,7 +139,7 @@ class Simulator:
             plt.plot(self.env.all_states, self.env.getV(), '.-', color="blue")
 
         # Define initial state
-        if start:
+        if start is not None:
             nS = self.env.getNumStates()
             if not (isinstance(start, int) and 0 <= start and start < nS):
                 raise Warning('The `start` parameter must be an integer number between 0 and {}.' \
@@ -155,8 +166,9 @@ class Simulator:
             self.env.reset()
             learner.reset(reset_episode=False, reset_value_functions=False)
             done = False
+            if verbose and np.mod(episode, verbose_period) == 0:
+                print("Episode {} of {} running...".format(episode+1, nrounds))
             if self.debug:
-                print("\n\nEpisode {} starts...".format(episode+1))
                 print("\nStarts at state {}".format(self.env.getState()))
                 print("\tState value function at start of episode:\n\t{}".format(learner.getV().getValues()))
 
@@ -186,7 +198,7 @@ class Simulator:
 
             if compute_rmse:
                 if self.env.getV() is not None:
-                    RMSE[episode] = rmse(self.env.getV(), learner.getV().getValues(), weights=self.state_counts)
+                    RMSE[episode] = rmse(self.env.getV(), learner.getV().getValues())#, weights=self.state_counts)
 
             if plot:
                 #print("episode: {} (T={}), color: {}".format(episode, t, colors(episode/nrounds)))
@@ -206,13 +218,18 @@ class Simulator:
             plt.sca(ax) # Go back to the primary axis
             #plt.figure(fig_V.number)
 
-        # TODO: DO WE NEED THIS RESTORE OF THE INITIAL STATE DISTRIBUTION OR THE __exit__() METHOD SUFFICES??
-#        if self.isd_orig:
-#            self.env.setInitialStateDistribution(self.isd_orig)
+        # Restore the initial state distribution of the environment (for the next simulation)
+        # Note that the restore step done in the __exit__() method may NOT be enough, because the Simulator object
+        # may still exist once the simulation is over.
+        if self._isd_orig is not None:
+            self.env.setInitialStateDistribution(self._isd_orig)
+            self._isd_orig = None
 
-        return learner.getV().getValues(), self.state_counts, RMSE
+        return  learner.getV().getValues(), self.state_counts, RMSE, \
+                {'alphas_at_episode_end': learner._alphas,  # value of parameter alpha for each state at the end of the episode
+                 'alphas_by_episode': learner.alpha_mean_by_episode}   # (Average) alpha by episode run so far (averaged over visited states if relevant)  
 
-    def simulate(self, nexperiments, nepisodes, start=None, verbose=False):
+    def simulate(self, nexperiments, nepisodes, start=None, verbose=False, verbose_period=1):
         """Simulates the agent interacting with the environment for a number of experiments and number
         of episodes per experiment.
         
@@ -228,12 +245,22 @@ class Simulator:
             When None, the starting state is picked randomly following the initial state distribution
             of the environment.
 
+        verbose: bool, optional
+            Whether to show the experiment that is being run and the episodes for each experiment.
+            
+        verbose_period: int, optional
+            Every how many episodes per experiment should be displayed.
+
         Returns: tuple
             Tuple containing the following elements:
-                Avg(RMSE): Root Mean Square Error averaged over all experiments
-                SE(RMSE): Standard Error of the average RMSE
-                Episodic RMSE: array containing the Root Mean Square Error by episode averaged
+                - Avg(N): The average number of visits to each state over all experiments  
+                - Avg(RMSE): Root Mean Square Error averaged over all experiments
+                - SE(RMSE): Standard Error of the average RMSE
+                - Episodic RMSE: array containing the Root Mean Square Error by episode averaged
                 over all experiments.
+                - a dictionary containing additional relevant information, as follows:
+                    - 'alphas': the value of the learning parameter `alpha` for each state
+                    at the end of the episode in the last experiment.
         """
     
         if not (isinstance(nexperiments, int) and nexperiments > 0):
@@ -241,9 +268,10 @@ class Simulator:
         if not (isinstance(nepisodes, int) and nepisodes > 0):
             raise ValueError("The number of episodes must be a positive integer number ({})".format(nepisodes))
 
-        RMSE = 0.
-        RMSE2 = 0.  # Used to compute the standard error of the average RMSE
-        RMSE_by_episodes = np.zeros(nepisodes)
+        N = 0.      # Average number of visits to each state over all experiments
+        RMSE = 0.   # RMSE at the end of the experiment averaged over all experiments
+        RMSE2 = 0.  # Used to compute the standard error of the RMSE averaged over all experiments
+        RMSE_by_episodes = np.zeros(nepisodes)  # RMSE at each episode averaged over all experiments
         RMSE_by_episodes2 = np.zeros(nepisodes) # Used to compute the standard error of the RMSE by episode
 
         # IMPORTANT: We should use the seed of the environment and NOT another seed setting mechanism
@@ -252,20 +280,25 @@ class Simulator:
         # This seed is then used for the environment evolution realized with the reset() and step() methods.
         [seed] = self.env.seed(self.seed)
         for exp in np.arange(nexperiments):
+            self.agent.getLearner().reset(reset_episode=True, reset_value_functions=True)
             if verbose:
                 print("Running experiment {} of {} (#episodes = {})..." \
                       .format(exp+1, nexperiments, nepisodes), end=" ")
-            self.agent.getLearner().reset(reset_episode=True, reset_value_functions=True)
-            V, N, RMSE_by_episodes_i = self.play(nrounds=nepisodes, start=start, seed=None,
-                                                 compute_rmse=True, plot=False)
-            RMSE_i = rmse(self.env.getV(), V) #, weights=N)
+                print("Value function at start of experiment: {}".format(self.agent.getLearner().getV().getValues()))
+            V, N_i, RMSE_by_episodes_i, learning_info = self.play(nrounds=nepisodes, start=start, seed=None,
+                                                                  compute_rmse=True, plot=False,
+                                                                  verbose=verbose, verbose_period=verbose_period)
+            N += N_i
+            # RMSE at the end of the last episode
+            RMSE_i = RMSE_by_episodes_i[-1]
             RMSE += RMSE_i
             RMSE2 += RMSE_i**2
             RMSE_by_episodes += RMSE_by_episodes_i
             RMSE_by_episodes2 += RMSE_by_episodes_i**2
             if verbose:
-                print("\tRMSE(experiment) = {:.3g}".format(RMSE_i))
+                print("\tRMSE(at end of experiment) = {:.3g}".format(RMSE_i))
 
+        N_mean = N / nexperiments
         RMSE_mean = RMSE / nexperiments
         RMSE_se = np.sqrt( ( RMSE2 - nexperiments*RMSE_mean**2 ) / (nexperiments - 1) ) \
                 / np.sqrt(nexperiments)
@@ -274,7 +307,7 @@ class Simulator:
         RMSE_by_episodes_se = np.sqrt( ( RMSE_by_episodes2 - nexperiments*RMSE_by_episodes_mean**2 ) / (nexperiments - 1) ) \
                             / np.sqrt(nexperiments)
 
-        return RMSE_mean, RMSE_se, RMSE_by_episodes_mean, RMSE_by_episodes_se
+        return N_mean, RMSE_mean, RMSE_se, RMSE_by_episodes_mean, RMSE_by_episodes_se, learning_info
 
 
 # TODO: (2020/04/11) Move this function to an util module
@@ -317,7 +350,8 @@ if __name__ == "__main__":
     colormap = cm.get_cmap("jet")
     max_alpha = 1
     max_rmse = 0.5
-    fig, (ax_full, ax_scaled, ax_rmse_by_episode) = plt.subplots(1,3)
+    #fig, (ax_full, ax_scaled, ax_rmse_by_episode) = plt.subplots(1,3)
+    fig, (ax_full, ax_scaled) = plt.subplots(1,2)
 
     # The environment
     env = gridworlds.EnvGridworld1D(length=21)
@@ -333,8 +367,8 @@ if __name__ == "__main__":
 
     # Simulation setup
     seed = 1717
-    nexperiments = 2
-    nepisodes = 5
+    nexperiments = 1
+    nepisodes = 10
     start = None
     useGrid = False
     verbose = True
@@ -349,19 +383,12 @@ if __name__ == "__main__":
         alphas = np.linspace(0.1, 0.7, n_alphas)
     else:
         lambdas = [0, 0.4, 0.8, 0.9, 0.95, 0.99, 1]
-        alphas = np.linspace(0.1, 1.2, 5)
-        #lambdas = [0.99]
+        alphas = np.linspace(0.1, 0.9, 8)
+        lambdas = [0, 0.4, 0.7, 0.8, 0.9]
         #alphas = [0.41]
         n_lambdas = len(lambdas)
         n_alphas = len(alphas)
     n_simul = n_lambdas*n_alphas
-
-    #learner.setParams(alpha=0.41, gamma=gamma, lmbda=0.1)
-    #agent = GeneralAgent(pol_rw,
-    #                     learner)
-    #sim = Simulator(env, agent)
-    #rmse_mean, rmse_se = sim.simulate(nexperiments=nexperiments, nepisodes=nepisodes, verbose=verbose)
-    #print(rmse_mean, rmse_se)
 
     # List of dictionaries, each containing the characteristic of each parameterization considered
     results_list = []
@@ -388,6 +415,7 @@ if __name__ == "__main__":
             
             # Reset learner and agent (i.e. erase all memory from a previous run!)
             learner.setParams(alpha=alpha, gamma=gamma, lmbda=lmbda)
+            learner.reset(reset_episode=True, reset_value_functions=True)
             agent = GeneralAgent(pol_rw,
                                  learner)
             # NOTE: Setting the seed here implies that each set of experiments
@@ -399,10 +427,11 @@ if __name__ == "__main__":
             sim = Simulator(env, agent, seed=seed, debug=debug)
 
             # Run the simulation and store the results
-            rmse_mean, rmse_se, rmse_episodes = sim.simulate(nexperiments=nexperiments,
-                                                             nepisodes=nepisodes,
-                                                             start=start,
-                                                             verbose=verbose)
+            N_mean, rmse_mean, rmse_se, rmse_episodes, _, learning_info = \
+                                sim.simulate(nexperiments=nexperiments,
+                                             nepisodes=nepisodes,
+                                             start=start,
+                                             verbose=verbose)
             results_list += [{'lmbda': lmbda,
                               'alpha': alpha,
                               'rmse': rmse_mean,
@@ -423,9 +452,17 @@ if __name__ == "__main__":
         rmse_episodes_se[idx_lmbda] = np.array(rmse_episodes_se_lambda)
 
         # Plot the average RMSE for the current lambda as a function of alpha
-        color = colormap( idx_lmbda / np.max((1, n_lambdas-1)) )
-        ax_full.plot(alphas, rmse_mean_lambda, '.', color=color)
-        ax_full.errorbar(alphas, rmse_mean_lambda, yerr=rmse_se_lambda, capsize=4, color=color)
+        #rmse2plot = rmse_mean_lambda
+        #rmse2plot_error = rmse_se_lambda
+        #ylabel = "Average RMSE over all {} states, at the end of episode {}, averaged over {} experiments".format(env.getNumStates(), nepisodes, nexperiments)
+        rmse2plot = rmse_episodes_mean_lambda
+        rmse2plot_error = rmse_episodes_se_lambda
+        ylabel = "Average RMSE over all {} states, first {} episodes, and {} experiments".format(env.getNumStates(), nepisodes, nexperiments)
+
+        # Map blue to the largest lambda and red to the smallest lambda (most similar to the color scheme used in Sutton, pag. 295)
+        color = colormap( 1 - idx_lmbda / np.max((1, n_lambdas-1)) )
+        ax_full.plot(alphas, rmse2plot, '.', color=color)
+        ax_full.errorbar(alphas, rmse2plot, yerr=rmse2plot_error, capsize=4, color=color)
         legend_label += ["lam={:.2g}".format(lmbda)]
 
     # Average RMSE by episode for convergence analysis
@@ -444,8 +481,10 @@ if __name__ == "__main__":
     for idx_lmbda, lmbda in enumerate(lambdas):
         #rmse2plot = rmse_mean_values[idx_lmbda]
         #rmse2plot_error = rmse_se_values[idx_lmbda]
+        #ylabel = "Average RMSE over all {} states, at the end of episode {}, averaged over {} experiments".format(env.getNumStates(), nepisodes, nexperiments)
         rmse2plot = rmse_episodes_mean[idx_lmbda]
         rmse2plot_error = rmse_episodes_se[idx_lmbda]
+        ylabel = "Average RMSE over all {} states, first {} episodes, and {} experiments".format(env.getNumStates(), nepisodes, nexperiments)
         color = colormap( 1 - idx_lmbda / np.max((1, n_lambdas-1)) )
         ax_scaled.plot(alphas, rmse2plot, '.-', color=color)
         ax_scaled.errorbar(alphas, rmse2plot, yerr=rmse2plot_error, capsize=4, color=color)
@@ -453,11 +492,11 @@ if __name__ == "__main__":
         ax_scaled.set_ylim((0, max_rmse))
 
     # Episodic RMSE
-    ax_rmse_by_episode.plot(np.arange(nepisodes), rmse_episodes_values, color="black")
-    ax_rmse_by_episode.set_ylim((0, max_rmse))
-    ax_rmse_by_episode.set_xlabel("Episode")
-    ax_rmse_by_episode.set_ylabel("RMSE")
-    ax_rmse_by_episode.set_title("Average RMSE by episode over ALL experiments")
+    #ax_rmse_by_episode.plot(np.arange(nepisodes), rmse_episodes_values, color="black")
+    #ax_rmse_by_episode.set_ylim((0, max_rmse))
+    #ax_rmse_by_episode.set_xlabel("Episode")
+    #ax_rmse_by_episode.set_ylabel("RMSE")
+    #ax_rmse_by_episode.set_title("Average RMSE by episode over ALL experiments")
 
     plt.figlegend(legend_label)
     fig.suptitle("{}: gamma = {:.2g}, #experiments = {}, #episodes = {}"\

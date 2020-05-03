@@ -41,7 +41,7 @@ import numpy as np
 from Python.lib.environments import EnvironmentDiscrete
 
 
-MIN_COUNT = 10      # Minimum state count to start shrinking alpha
+MIN_COUNT = 30      # Minimum state count to start shrinking alpha
 MIN_EPISODE = 10    # Minimum episode count to start shrinking alpha
 MAX_EPISODE_FOR_ALPHA_MIN = None  # Maximum episode on which the minimum alpha value above is applied
 
@@ -58,18 +58,19 @@ class Learner:
     the first simulation as opposed to the correct value 1.
     """
 
-    def __init__(self, env, alpha, adjust_alpha=False, alpha_min=0.):
+    def __init__(self, env, alpha, adjust_alpha=False, adjust_alpha_by_episode=True, alpha_min=0.):
         """
         @param env: environment
         @param alpha: learning rate
         """
-        if not isinstance(env, EnvironmentDiscrete):
-            raise TypeError("The environment must be of type {} from the {} module ({})" \
-                            .format(EnvironmentDiscrete.__name__, EnvironmentDiscrete.__module__, env.__class__))
+#        if not isinstance(env, EnvironmentDiscrete):
+#            raise TypeError("The environment must be of type {} from the {} module ({})" \
+#                            .format(EnvironmentDiscrete.__name__, EnvironmentDiscrete.__module__, env.__class__))
 
         self.env = env
         self.alpha = alpha
         self.adjust_alpha = adjust_alpha
+        self.adjust_alpha_by_episode = adjust_alpha_by_episode
         self.alpha_min = alpha_min          # Used when adjust_alpha=True
 
         # Information of the observed trajectory at the END of the episode
@@ -79,6 +80,8 @@ class Learner:
 
         # Episode counter
         self.episode = 0
+        # (Average) alpha used at each episode
+        self.alpha_mean_by_episode = []
 
         # State counts over ALL episodes run after reset
         self._state_counts_overall = np.zeros(self.env.getNumStates())
@@ -96,6 +99,7 @@ class Learner:
         """
         if reset_episode:
             self.episode = 0
+            self.alpha_mean_by_episode = []
             # State counts over ALL episodes run after reset
             self._state_counts_overall = np.zeros(self.env.getNumStates())
             # Learning rate for each state (so that we can reduce alpha with time)
@@ -106,6 +110,9 @@ class Learner:
         # Increase episode counter
         # (note that the very first episode run is #1 because reset() is called by __init__()) 
         self.episode += 1
+        # List of alphas used during the episode (which may vary from state to state and from the time visited)
+        self._alphas_used_in_episode = []
+
         # Reset the attributes that keep track of states and rewards received during learning
         self._reset_at_start_of_episode()
 
@@ -114,10 +121,11 @@ class Learner:
         if self.episode == 1 or reset_value_functions:
             self.V.reset()
 
-    def setParams(self, alpha, adjust_alpha, alpha_min):
-        self.alpha = alpha if alpha else self.alpha
-        self.adjust_alpha = adjust_alpha if adjust_alpha else self.adjust_alpha
-        self.alpha_min = alpha_min if alpha_min else self.alpha_min
+    def setParams(self, alpha, adjust_alpha, adjust_alpha_by_episode, alpha_min):
+        self.alpha = alpha if alpha is not None else self.alpha
+        self.adjust_alpha = adjust_alpha if adjust_alpha is not None else self.adjust_alpha
+        self.adjust_alpha_by_episode = adjust_alpha_by_episode if adjust_alpha_by_episode is not None else self.adjust_alpha_by_episode
+        self.alpha_min = alpha_min if alpha_min is not None else self.alpha_min
 
     def _reset_at_start_of_episode(self):
         """
@@ -145,23 +153,32 @@ class Learner:
 
     def _update_alphas(self, state):
         if self.adjust_alpha:
-            # Update using the state occupation counter over all past episodes 
-            if MAX_EPISODE_FOR_ALPHA_MIN is None or self.episode <= MAX_EPISODE_FOR_ALPHA_MIN:
-                # This means we should apply the alpha_min value indefinitely or up to the max episode specified by MAX_EPISODE_FOR_ALPHA_MIN
-                self._alphas[state] =  np.max([ self.alpha_min, self.alpha / np.max([1, self._state_counts_overall[state] - MIN_COUNT + 2]) ])
-                if MAX_EPISODE_FOR_ALPHA_MIN is not None and self.episode == MAX_EPISODE_FOR_ALPHA_MIN:
-                    # Store the last alpha value observed for each state
-                    # so that we can use it as starting point from now on.
-                    self._alphas_at_max_episode = self._alphas.copy()
-                    #print("episode {}, state {}: alphas at max episode: {}".format(self.episode, state, self._alphas_at_max_episode))
+            if self.adjust_alpha_by_episode:
+                # Update using the episode number (equal for all states)
+                self._alphas[state] =  np.max([ self.alpha_min, self.alpha / np.max([1, self.episode - MIN_EPISODE + 1]) ])
             else:
-                # Start decreasing from the alpha value left at episode = MAX_EPISODE_FOR_ALPHA_MIN
-                # without any lower bound for alpha
-                self._alphas[state] = self._alphas_at_max_episode[state] / np.max([1, self._state_counts_overall[state] - MIN_COUNT + 2])
-                #print("episode {}, state {}: alphas: {}".format(self.episode, state, self._alphas))
-    
-            # Update using the episode number (equal for all states)
-            #self._alphas[state] =  np.max([ self.alpha_min, self.alpha / np.max([1, self.episode - MIN_EPISODE + 1]) ])
+                # Update using the state occupation count over all past episodes 
+                if MAX_EPISODE_FOR_ALPHA_MIN is None or self.episode <= MAX_EPISODE_FOR_ALPHA_MIN:
+                    # This means we should apply the alpha_min value indefinitely or
+                    # up to the max episode specified by MAX_EPISODE_FOR_ALPHA_MIN
+                    self._alphas[state] =  np.max([ self.alpha_min, self.alpha / np.max([1, self._state_counts_overall[state] - MIN_COUNT + 2]) ])
+                    if MAX_EPISODE_FOR_ALPHA_MIN is not None and self.episode == MAX_EPISODE_FOR_ALPHA_MIN:
+                        # Store the last alpha value observed for each state
+                        # so that we can use it as starting point from now on.
+                        self._alphas_at_max_episode = self._alphas.copy()
+                        #print("episode {}, state {}: alphas at max episode: {}".format(self.episode, state, self._alphas_at_max_episode))
+                else:
+                    # Start decreasing from the alpha value left at episode = MAX_EPISODE_FOR_ALPHA_MIN
+                    # without any lower bound for alpha
+                    self._alphas[state] = self._alphas_at_max_episode[state] / np.max([1, self._state_counts_overall[state] - MIN_COUNT + 2])
+                    #print("episode {}, state {}: alphas: {}".format(self.episode, state, self._alphas))
+
+        assert set([state]).issubset( set(self.env.terminal_states) ) == False, \
+                "The state on which the alpha is computed is NOT a terminal state"
+        self._alphas_used_in_episode += [self._alphas[state]]
+
+        #print("episode {}, state {}: count={:.0f}, alphas >= {}: {}     {}" \
+        #      .format(self.episode, state, self._state_counts_overall[state], self.alpha_min, self._alphas[state], self._alphas))
 
     def store_trajectory(self):
         "Stores the trajectory observed during the episode"
@@ -174,6 +191,12 @@ class Learner:
 
     def final_report(self, T):
         "Processes to be run at the end of the learning process"
+        # Store the (average) learning rate used during the episode for the new episode just ended
+        # Note: Using the average is only relevant when the adjustment is by state occupation count,
+        # NOT when it is by episode since in the latter case all the alphas are the same
+        # for all states visited during the episode.
+        self.alpha_mean_by_episode += [np.mean(self._alphas_used_in_episode)]
+
         if self.debug:
             self.plot_alphas(T)
 

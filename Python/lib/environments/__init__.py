@@ -17,18 +17,20 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
     """
     Class defining methods that are generic to ALL environments.
     """
-    def __init__(self, nS, nA, P, isd):
+    def __init__(self, nS, nA, P, isd, terminal_states=set()):
         """
         Calls the constructor of the super class which requires:
         - nS: number of possible states
         - nA: number of possible actions
         - P: probability of each state-action pair
         - isd: initial state distribution
+        - terminal_states: set containing the terminal states of the environment
         """
         super().__init__(nS, nA, P, isd)
 
         # All states
         self.all_states = np.arange(self.getNumStates())
+        self.terminal_states = terminal_states
 
     #--- Getters
     def getInitialStateDistribution(self):
@@ -47,6 +49,9 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
     def getNumStates(self):
         # Same comment as for getNumActions() and super()
         return self.nS
+
+    def getTerminalStates(self):
+        return self.terminal_states
 
     #--- Setters
     def setInitialStateDistribution(self, isd):

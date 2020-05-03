@@ -28,9 +28,9 @@ class PolRandomWalkDiscrete():
 
 #    def __init__(self, env: DiscreteEnv):
     def __init__(self, env):
-        if not isinstance(env, EnvironmentDiscrete):
-            raise TypeError("The environment must be of type {} from the {} module ({})" \
-                            .format(EnvironmentDiscrete.__name__, EnvironmentDiscrete.__module__, env.__class__))
+#        if not isinstance(env, EnvironmentDiscrete):
+#            raise TypeError("The environment must be of type {} from the {} module ({})" \
+#                            .format(EnvironmentDiscrete.__name__, EnvironmentDiscrete.__module__, env.__class__))
         self.env = env
 
     def choose_action(self):

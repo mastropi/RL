@@ -22,8 +22,10 @@ class LeaMCLambda(Learner):
         env (gym.envs.toy_text.discrete.DiscreteEnv): the environment where the learning takes place.
     """
 
-    def __init__(self, env, alpha=0.1, gamma=0.9, lmbda=0.8, adjust_alpha=False, alpha_min=0., debug=False):
-        super().__init__(env, alpha, adjust_alpha, alpha_min)
+    def __init__(self, env, alpha=0.1, gamma=0.9, lmbda=0.8,
+                 adjust_alpha=False, adjust_alpha_by_episode=True, alpha_min=0.,
+                 debug=False):
+        super().__init__(env, alpha, adjust_alpha, adjust_alpha_by_episode, alpha_min)
         self.debug = debug
 
         # Attributes that MUST be presented for all TD methods
@@ -58,10 +60,10 @@ class LeaMCLambda(Learner):
         # lambda-return (G(t,lambda))
         self._Glambda_list = []
 
-    def setParams(self, alpha=None, gamma=None, lmbda=None, adjust_alpha=None, alpha_min=0.):
-        super().setParams(alpha, adjust_alpha, alpha_min)
-        self.gamma = gamma if gamma else self.gamma
-        self.lmbda = lmbda if lmbda else self.lmbda
+    def setParams(self, alpha=None, gamma=None, lmbda=None, adjust_alpha=None, adjust_alpha_by_episode=None, alpha_min=0.):
+        super().setParams(alpha, adjust_alpha, adjust_alpha_by_episode, alpha_min)
+        self.gamma = gamma if gamma is not None else self.gamma
+        self.lmbda = lmbda if lmbda is not None else self.lmbda
 
     def learn_pred_V_slow(self, t, state, action, next_state, reward, done, info):
         # This learner updates the estimate of the value function V ONLY at the end of the episode
@@ -125,6 +127,25 @@ class LeaMCLambda(Learner):
             G += self.gamma**(end - start) * self.getV().getValue(self._states[end])
 
         return G
+
+    def learn_pred_V_mc(self, t, state, action, next_state, reward, done, info):
+        "Learn the prediction problem (estimate the state value function) using explicitly MC"
+        self._update_alphas(state)
+        self._update_trajectory(state, reward)
+
+        if done:
+            # Store the trajectory and rewards
+            self.store_trajectory()
+
+            # This means t+1 is the terminal time T
+            # (recall we WERE in time t and we STEPPED INTO time t+1, so T = t+1)
+            self.learn_mc(t)
+
+            # Reset the internal attributes used during learning
+            # (but NOT the value functions estimations, since we want to learn always more at each episode!)
+            self._reset_at_start_of_episode()
+
+            self.final_report(t)
 
     def learn_pred_V(self, t, state, action, next_state, reward, done, info):
         "Learn the prediction problem: estimate the state value function"
@@ -200,6 +221,23 @@ class LeaMCLambda(Learner):
             if self.debug:
                 print("[DONE] t: {} \tG(t:t+n): {} \n\tG(t,lambda): {}".format(t, self._G_list, self._Glambda_list)) 
 
+    def learn_mc(self, t):
+        "Updates the value function based on the new observed episode using first-visity Monte Carlo"
+        # Terminal time
+        T = t + 1
+
+        #-- Compute the observed return for each state in the trajectory for EVERY visit to it
+        # NOTE: we start at the LATEST state (as opposed to the first) so that we don'tt
+        # need to have a data structure that stores the already visited states in the episode;
+        # we trade data structure creation and maintenance with easier algorithmic implementation of
+        # first visit that does NOT require a special data structure storage.
+        G = 0
+        for tt in np.arange(T,0,-1) - 1:     # This is T-1, T-2, ..., 0
+            state = self._states[tt]
+            G = self.gamma*G + self._rewards[tt+1]
+            delta = G - self.V.getValue(state)
+            self.updateV(state, delta)
+
     def learn(self, t):
         "Updates the value function based on the new observed episode"
         # Terminal time
@@ -234,8 +272,10 @@ class LeaMCLambda(Learner):
 
 class LeaMCLambdaAdaptive(LeaMCLambda):
     
-    def __init__(self, env, alpha=0.1, gamma=0.9, lmbda=0.8, adjust_alpha=False, debug=False):
-        super().__init__(env, alpha, gamma, lmbda, adjust_alpha, debug)
+    def __init__(self, env, alpha=0.1, gamma=0.9, lmbda=0.8,
+                 adjust_alpha=False, adjust_alpha_by_episode=True, alpha_min=0.,
+                 debug=False):
+        super().__init__(env, alpha, gamma, lmbda, adjust_alpha, adjust_alpha_by_episode, alpha_min, debug)
 
         # Arrays that keep track of previous _rewards for each state
         self.all_states = np.arange(self.env.getNumStates())

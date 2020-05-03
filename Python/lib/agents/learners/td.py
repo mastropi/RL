@@ -21,8 +21,10 @@ class LeaTDLambda(Learner):
         env (gym.envs.toy_text.discrete.DiscreteEnv): the environment where the learning takes place.
     """
 
-    def __init__(self, env, alpha=0.1, gamma=0.9, lmbda=0.8, adjust_alpha=False, alpha_min=0., debug=False):
-        super().__init__(env, alpha, adjust_alpha, alpha_min)
+    def __init__(self, env, alpha=0.1, gamma=0.9, lmbda=0.8,
+                 adjust_alpha=False, adjust_alpha_by_episode=True, alpha_min=0.,
+                 debug=False):
+        super().__init__(env, alpha, adjust_alpha, adjust_alpha_by_episode, alpha_min)
         self.debug = debug
 
         # Attributes that MUST be presented for all TD methods
@@ -42,10 +44,10 @@ class LeaTDLambda(Learner):
         self._z[:] = 0.
         self._z_all = np.zeros((0,self.env.getNumStates()))
 
-    def setParams(self, alpha=None, gamma=None, lmbda=None, adjust_alpha=None, alpha_min=0.):
-        super().setParams(alpha, adjust_alpha, alpha_min)
-        self.gamma = gamma if gamma else self.gamma
-        self.lmbda = lmbda if lmbda else self.lmbda
+    def setParams(self, alpha=None, gamma=None, lmbda=None, adjust_alpha=None, adjust_alpha_by_episode=None, alpha_min=0.):
+        super().setParams(alpha, adjust_alpha, adjust_alpha_by_episode, alpha_min)
+        self.gamma = gamma if gamma is not None else self.gamma
+        self.lmbda = lmbda if lmbda is not None else self.lmbda
 
     def learn_pred_V(self, t, state, action, next_state, reward, done, info):
         self._update_trajectory(state, reward)
@@ -80,9 +82,10 @@ class LeaTDLambda(Learner):
 
 class LeaTDLambdaAdaptive(LeaTDLambda):
     
-    def __init__(self, env, alpha=0.1, gamma=0.9, lmbda=0.8, adjust_alpha=False, alpha_min=0.,
+    def __init__(self, env, alpha=0.1, gamma=0.9, lmbda=0.8,
+                 adjust_alpha=False, adjust_alpha_by_episode=True, alpha_min=0.,
                  lambda_min=0., burnin=False, debug=False):
-        super().__init__(env, alpha, gamma, lmbda, adjust_alpha, alpha_min, debug)
+        super().__init__(env, alpha, gamma, lmbda, adjust_alpha, adjust_alpha_by_episode, alpha_min, debug)
         # Minimum lambda for the adaptive lambda so that there is still some impact
         # in past states at the beginning when all state values are equal and equal to 0
         self.lambda_min = lambda_min
@@ -96,11 +99,11 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
         # bootstrapping information about the value function at the next state)  
         self.state_counts_noreset = np.zeros(self.env.getNumStates())
 
-    def setParams(self, alpha=None, gamma=None, lmbda=None, adjust_alpha=None, alpha_min=0.,
+    def setParams(self, alpha=None, gamma=None, lmbda=None, adjust_alpha=None, adjust_alpha_by_episode=None, alpha_min=0.,
                   lambda_min=0., burnin=False):
-        super().setParams(alpha, gamma, lmbda, adjust_alpha, alpha_min)
-        self.lambda_min = lambda_min if lambda_min else self.lambda_min
-        self.burnin = burnin if burnin else self.burnin
+        super().setParams(alpha, gamma, lmbda, adjust_alpha, adjust_alpha_by_episode, alpha_min)
+        self.lambda_min = lambda_min if lambda_min is not None else self.lambda_min
+        self.burnin = burnin if burnin is not None else self.burnin
 
     def learn_pred_V(self, t, state, action, next_state, reward, done, info):
         self._update_trajectory(state, reward)
