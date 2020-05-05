@@ -75,7 +75,7 @@ class Simulator:
         # Reset the learner to the first episode state
         self.agent.getLearner().reset(reset_episode=True, reset_value_functions=True)
 
-    def play(self, nrounds, start=None, seed=None, compute_rmse=False,
+    def play(self, nrounds, start=None, seed=None, compute_rmse=False, state_observe=None,
              verbose=False, verbose_period=1,
              plot=False, colormap="seismic", pause=0):
         # TODO: (2020/04/11) Convert the plotting parameters to a dictionary named plot_options or similar.
@@ -102,6 +102,9 @@ class Simulator:
         compute_rmse: bool, optional
             Whether to compute the RMSE over states (weighted by their number of visits)
             after each episode. Useful to analyze rate of convergence of the estimates.
+
+        state_observe: int, optional
+            A state index whose RMSE should be observed as the episode progresses.
 
         verbose: bool, optional
             Whether to show the experiment that is being run and the episodes for each experiment.
@@ -132,18 +135,23 @@ class Simulator:
                     - 'alphas': the value of the learning parameter `alpha` for each state
                     at the end of the episode.
         """
+        #--- Parse input parameters
         if plot:
             fig_V = plt.figure()
             colors = cm.get_cmap(colormap, lut=nrounds)
             # Plot the true state value function (to have it as a reference already
             plt.plot(self.env.all_states, self.env.getV(), '.-', color="blue")
+            
+            if state_observe is not None:
+                fig_RMSE_state = plt.figure()
 
         # Define initial state
+        nS = self.env.getNumStates()
         if start is not None:
-            nS = self.env.getNumStates()
             if not (isinstance(start, int) and 0 <= start and start < nS):
-                raise Warning('The `start` parameter must be an integer number between 0 and {}.' \
-                              'A start state will be selected based on the initial state distribution of the environment.'.format(nS-1))
+                raise Warning("The `start` parameter ({}) must be an integer number between 0 and {}.\n" \
+                              "A start state will be selected based on the initial state distribution of the environment." \
+                              .format(start, nS-1))
             else:
                 # Change the initial state distribution of the environment so that
                 # the environment resets to start at the given 'start' state.
@@ -152,9 +160,17 @@ class Simulator:
                 isd[start] = 1.0
                 self.env.setInitialStateDistribution(isd)
 
+        # Check initial state
+        if state_observe is not None:
+            if not (isinstance(state_observe, int) and 0 <= state_observe and state_observe < nS):
+                state_observe = np.floor(nS/2)
+                raise Warning('The `state_observe` parameter must be an integer number between 0 and {}.' \
+                              'The state whose index falls in the middle of the state space will be observed.'.format(state_observe))
+
         # Define the policy, the learner and reset the learner (i.e. erase all learning memory to start anew!)
         policy = self.agent.getPolicy()
         learner = self.agent.getLearner()
+        learner.reset(reset_episode=True, reset_value_functions=True)
         if seed:
             if seed != 0:
                 self.env.seed(seed)
@@ -164,7 +180,6 @@ class Simulator:
         RMSE = np.nan*np.zeros(nrounds) if compute_rmse else None
         for episode in range(nrounds):
             self.env.reset()
-            learner.reset(reset_episode=False, reset_value_functions=False)
             done = False
             if verbose and np.mod(episode, verbose_period) == 0:
                 print("Episode {} of {} running...".format(episode+1, nrounds))
@@ -204,14 +219,29 @@ class Simulator:
                 #print("episode: {} (T={}), color: {}".format(episode, t, colors(episode/nrounds)))
                 plt.figure(fig_V.number)
                 plt.plot(self.env.all_states, learner.getV().getValues(), linewidth=0.5, color=colors(episode/nrounds))
+                plt.title("Episode {} of {}".format(episode+1, nrounds))
                 if pause > 0:
                     plt.pause(pause)
                 plt.draw()
                 #fig.canvas.draw()
 
-        # Comment this out to NOT show the plot rightaway in case the calling function adds a new plot to the graph generated here 
+                if state_observe is not None:
+                    plt.figure(fig_RMSE_state.number)
+                    RMSE_state_observe = rmse(np.array(self.env.getV()[state_observe]), np.array(learner.getV().getValue(state_observe)))
+                    plt.plot(episode, RMSE_state_observe, 'k.-')
+                    ax = plt.gca()
+                    ax.set_ylim((0,0.8))
+                    plt.title("|Error| at state {} - episode {} of {}".format(state_observe, episode+1, nrounds))
+                    plt.draw()
+
+            # Reset the learner for the next iteration
+            # (WITHOUT resetting the value functions nor the episode counter)
+            learner.reset(reset_episode=False, reset_value_functions=False)
+
+        # Comment this out to NOT show the plot right away in case the calling function adds a new plot to the graph generated here 
         if plot:
             #plt.colorbar(cm.ScalarMappable(cmap=colormap))    # Does not work
+            plt.figure(fig_V.number)
             ax = plt.gca()
             ax2 = ax.twinx()    # Create a secondary axis sharing the same x axis
             ax2.bar(self.env.all_states, self.state_counts, color="blue", alpha=0.3)
@@ -280,7 +310,6 @@ class Simulator:
         # This seed is then used for the environment evolution realized with the reset() and step() methods.
         [seed] = self.env.seed(self.seed)
         for exp in np.arange(nexperiments):
-            self.agent.getLearner().reset(reset_episode=True, reset_value_functions=True)
             if verbose:
                 print("Running experiment {} of {} (#episodes = {})..." \
                       .format(exp+1, nexperiments, nepisodes), end=" ")
