@@ -36,6 +36,8 @@ b) Have the following methods defined:
 - getValues(): reads the value function for ALL states or state-actions
 """
 
+from enum import Enum, unique
+
 import numpy as np
 
 from Python.lib.environments import EnvironmentDiscrete
@@ -44,6 +46,12 @@ from Python.lib.environments import EnvironmentDiscrete
 MIN_COUNT = 30      # Minimum state count to start shrinking alpha
 MIN_EPISODE = 10    # Minimum episode count to start shrinking alpha
 MAX_EPISODE_FOR_ALPHA_MIN = None  # Maximum episode on which the minimum alpha value above is applied
+
+@unique # Unique enumeration values (i.e. on the RHS of the equal sign)
+class AlphaUpdateType(Enum):
+    FIRST_STATE_VISIT = 1
+    EVERY_STATE_VISIT = 2
+
 
 class Learner:
     """
@@ -58,18 +66,31 @@ class Learner:
     the first simulation as opposed to the correct value 1.
     """
 
-    def __init__(self, env, alpha, adjust_alpha=False, adjust_alpha_by_episode=True, alpha_min=0.):
+    def __init__(self, env, alpha,
+                 adjust_alpha=False, alpha_update_type=AlphaUpdateType.FIRST_STATE_VISIT, adjust_alpha_by_episode=True,
+                 alpha_min=0.):
         """
-        @param env: environment
-        @param alpha: learning rate
+        Parameters:
+        env: EnvironmentDiscrete
+            Environment where the agent learns.
+        
+        alpha: float
+            Learning rate.
+        
+        alpha_update_type: LearnerType
+            Type of learner. E.g. LearnerType.TD, LearnerType.MC.
         """
-#        if not isinstance(env, EnvironmentDiscrete):
-#            raise TypeError("The environment must be of type {} from the {} module ({})" \
-#                            .format(EnvironmentDiscrete.__name__, EnvironmentDiscrete.__module__, env.__class__))
+        if not isinstance(env, EnvironmentDiscrete):
+            raise TypeError("The environment must be of alpha_update_type {} from the {} module ({})" \
+                            .format(EnvironmentDiscrete.__name__, EnvironmentDiscrete.__module__, env.__class__))
+        if not isinstance(alpha_update_type, AlphaUpdateType):
+            raise TypeError("The alpha_update_type of learner must be of alpha_update_type {} from the {} module ({})" \
+                            .format(AlphaUpdateType.__name__, AlphaUpdateType.__module__, alpha_update_type.__class__))
 
         self.env = env
         self.alpha = alpha
         self.adjust_alpha = adjust_alpha
+        self.alpha_update_type = alpha_update_type
         self.adjust_alpha_by_episode = adjust_alpha_by_episode
         self.alpha_min = alpha_min          # Used when adjust_alpha=True
 
@@ -102,6 +123,8 @@ class Learner:
             self.alpha_mean_by_episode = []
             # State counts over ALL episodes run after reset
             self._state_counts_overall = np.zeros(self.env.getNumStates())
+            # State counts of first visits over ALL episodes run after reset 
+            self._state_counts_first_visit_overall = np.zeros(self.env.getNumStates())
             # Learning rate for each state (so that we can reduce alpha with time)
             self._alphas = self.alpha * np.ones(self.env.getNumStates())
             # Learning rate at episode = MAX_EPISODE_FOR_ALPHA_MIN so that we can continuing applying a non-bounded alpha
@@ -136,6 +159,7 @@ class Learner:
         # Store the _states visited in the episode and their count
         self._states = []
         self._state_counts = np.zeros(self.env.getNumStates())
+        self._states_first_visit_time = np.nan*np.ones(self.env.getNumStates())
 
         # Store the _rewards obtained after each action
         # We initialize the _rewards with one element equal to 0 for ease of notation
@@ -144,12 +168,23 @@ class Learner:
         # while the reward is defined for t = 1, ..., T
         self._rewards = [0]
 
-    def _update_trajectory(self, state, reward):
-        "Updates the trajectory based on the current state and the observed reward"
+    def _update_trajectory(self, t, state, reward):
+        "Updates the trajectory and related information based on the current time, current state and the observed reward"
         self._states += [state]
         self._rewards += [reward]
-        self._state_counts[state] += 1
-        self._state_counts_overall[state] += 1
+
+        # Keep track of state first visits
+        #print("t: {}, visit to state: {}".format(t, state))
+        if np.isnan(self._states_first_visit_time[state]):
+            self._state_counts_first_visit_overall[state] += 1
+            #print("\tFIRST VISIT!")
+            #print("\tcounts first visit after: {}".format(self._state_counts_first_visit_overall[state]))
+            #print("\tall counts fv: {}".format(self._state_counts_first_visit_overall))
+        self._states_first_visit_time[state] = np.nanmin([t, self._states_first_visit_time[state]])
+
+        # Keep track of state every-visit counts
+        self._state_counts[state] += 1              # Counts per-episode
+        self._state_counts_overall[state] += 1      # Counts over all episodes
 
     def _update_alphas(self, state):
         if self.adjust_alpha:
@@ -157,11 +192,17 @@ class Learner:
                 # Update using the episode number (equal for all states)
                 self._alphas[state] =  np.max([ self.alpha_min, self.alpha / np.max([1, self.episode - MIN_EPISODE + 1]) ])
             else:
-                # Update using the state occupation count over all past episodes 
+                if self.alpha_update_type == AlphaUpdateType.FIRST_STATE_VISIT:
+                    state_count = self._state_counts_first_visit_overall[state]
+                else:
+                    state_count = self._state_counts_overall[state]
+                time_divisor = np.max([1, state_count - MIN_COUNT + 2]) # +2 => when state_count = MIN_COUNT, time_divisor is > 1, o.w. alpha would not be changed
+                #print("\t\tepisode: {}, state: {}, updating alpha... time divisor = {}".format(self.episode, state, time_divisor))
+                # Update using the state occupation state_count over all past episodes 
                 if MAX_EPISODE_FOR_ALPHA_MIN is None or self.episode <= MAX_EPISODE_FOR_ALPHA_MIN:
                     # This means we should apply the alpha_min value indefinitely or
                     # up to the max episode specified by MAX_EPISODE_FOR_ALPHA_MIN
-                    self._alphas[state] =  np.max([ self.alpha_min, self.alpha / np.max([1, self._state_counts_overall[state] - MIN_COUNT + 2]) ])
+                    self._alphas[state] =  np.max([ self.alpha_min, self.alpha / time_divisor ])
                     if MAX_EPISODE_FOR_ALPHA_MIN is not None and self.episode == MAX_EPISODE_FOR_ALPHA_MIN:
                         # Store the last alpha value observed for each state
                         # so that we can use it as starting point from now on.
@@ -170,14 +211,14 @@ class Learner:
                 else:
                     # Start decreasing from the alpha value left at episode = MAX_EPISODE_FOR_ALPHA_MIN
                     # without any lower bound for alpha
-                    self._alphas[state] = self._alphas_at_max_episode[state] / np.max([1, self._state_counts_overall[state] - MIN_COUNT + 2])
+                    self._alphas[state] = self._alphas_at_max_episode[state] / time_divisor
                     #print("episode {}, state {}: alphas: {}".format(self.episode, state, self._alphas))
 
         assert set([state]).issubset( set(self.env.terminal_states) ) == False, \
                 "The state on which the alpha is computed is NOT a terminal state"
         self._alphas_used_in_episode += [self._alphas[state]]
 
-        #print("episode {}, state {}: count={:.0f}, alphas >= {}: {}     {}" \
+        #print("episode {}, state {}: state_count={:.0f}, alphas >= {}: {}     {}" \
         #      .format(self.episode, state, self._state_counts_overall[state], self.alpha_min, self._alphas[state], self._alphas))
 
     def store_trajectory(self):
@@ -190,7 +231,7 @@ class Learner:
         self.rewards = self._rewards.copy()
 
     def final_report(self, T):
-        "Processes to be run at the end of the learning process"
+        "Processes to be run at the end of the learning process (e.g. at the end of the episode)"
         # Store the (average) learning rate used during the episode for the new episode just ended
         # Note: Using the average is only relevant when the adjustment is by state occupation count,
         # NOT when it is by episode since in the latter case all the alphas are the same
