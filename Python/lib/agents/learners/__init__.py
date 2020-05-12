@@ -43,8 +43,8 @@ import numpy as np
 from Python.lib.environments import EnvironmentDiscrete
 
 
-MIN_COUNT = 30      # Minimum state count to start shrinking alpha
-MIN_EPISODE = 10    # Minimum episode count to start shrinking alpha
+MIN_COUNT = 1      # Minimum state count to start shrinking alpha
+MIN_EPISODE = 1    # Minimum episode count to start shrinking alpha
 MAX_EPISODE_FOR_ALPHA_MIN = None  # Maximum episode on which the minimum alpha value above is applied
 
 @unique # Unique enumeration values (i.e. on the RHS of the equal sign)
@@ -81,10 +81,10 @@ class Learner:
             Type of learner. E.g. LearnerType.TD, LearnerType.MC.
         """
         if not isinstance(env, EnvironmentDiscrete):
-            raise TypeError("The environment must be of alpha_update_type {} from the {} module ({})" \
+            raise TypeError("The environment must be of type {} from the {} module ({})" \
                             .format(EnvironmentDiscrete.__name__, EnvironmentDiscrete.__module__, env.__class__))
         if not isinstance(alpha_update_type, AlphaUpdateType):
-            raise TypeError("The alpha_update_type of learner must be of alpha_update_type {} from the {} module ({})" \
+            raise TypeError("The alpha_update_type of learner must be of type {} from the {} module ({})" \
                             .format(AlphaUpdateType.__name__, AlphaUpdateType.__module__, alpha_update_type.__class__))
 
         self.env = env
@@ -144,9 +144,10 @@ class Learner:
         if self.episode == 1 or reset_value_functions:
             self.V.reset()
 
-    def setParams(self, alpha, adjust_alpha, adjust_alpha_by_episode, alpha_min):
+    def setParams(self, alpha, adjust_alpha, alpha_update_type, adjust_alpha_by_episode, alpha_min):
         self.alpha = alpha if alpha is not None else self.alpha
         self.adjust_alpha = adjust_alpha if adjust_alpha is not None else self.adjust_alpha
+        self.alpha_update_type = alpha_update_type if alpha_update_type is not None else self.alpha_update_type
         self.adjust_alpha_by_episode = adjust_alpha_by_episode if adjust_alpha_by_episode is not None else self.adjust_alpha_by_episode
         self.alpha_min = alpha_min if alpha_min is not None else self.alpha_min
 
@@ -187,6 +188,7 @@ class Learner:
         self._state_counts_overall[state] += 1      # Counts over all episodes
 
     def _update_alphas(self, state):
+        self._alphas_used_in_episode += [self._alphas[state]]
         if self.adjust_alpha:
             if self.adjust_alpha_by_episode:
                 # Update using the episode number (equal for all states)
@@ -216,7 +218,6 @@ class Learner:
 
         assert set([state]).issubset( set(self.env.terminal_states) ) == False, \
                 "The state on which the alpha is computed is NOT a terminal state"
-        self._alphas_used_in_episode += [self._alphas[state]]
 
         #print("episode {}, state {}: state_count={:.0f}, alphas >= {}: {}     {}" \
         #      .format(self.episode, state, self._state_counts_overall[state], self.alpha_min, self._alphas[state], self._alphas))

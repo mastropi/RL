@@ -27,13 +27,16 @@ import Python.lib.agents.learners.mc
 #reload(Python.lib.agents.learners.mc)
 from Python.lib.agents.learners.mc import LeaMCLambda
 
+import Python.lib.agents.learners.value_functions
+from Python.lib.agents.learners.value_functions import ValueFunctionApprox
+
 
 class Test_MC_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.seed = 1717
-        self.nrounds = 1000
+        self.nrounds = 500
         self.start_state = 10
 
     @classmethod
@@ -55,7 +58,7 @@ class Test_MC_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
         cls.alpha_min = 0.0
         cls.rw = random_walks.PolRandomWalkDiscrete(cls.env)
 #        cls.mclambda = mc.LeaMCLambda(cls.env, alpha=0.2, gamma=1.0, lmbda=0.8,
-        cls.mclambda = mc.LeaMCLambda(cls.env, alpha=0.1, gamma=1.0, lmbda=1.0,
+        cls.mclambda = mc.LeaMCLambda(cls.env, alpha=1, gamma=1.0, lmbda=1.0,
                                       adjust_alpha=True, adjust_alpha_by_episode=False, alpha_min=cls.alpha_min,
                                       debug=False)
         cls.mclambda_adaptive = mc.LeaMCLambdaAdaptive(cls.env, alpha=0.2, gamma=1.0, lmbda=0.8)
@@ -71,7 +74,7 @@ class Test_MC_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
                                             sim.play(nrounds=self.nrounds, start=self.start_state, seed=self.seed,
                                                      compute_rmse=True, state_observe=10,
                                                      verbose=True, verbose_period=100,
-                                                     plot=False, pause=0.1)
+                                                     plot=True, pause=0.1)
         # Expected state values with alpha = 0.2, gamma = 0.9, lambda = 0.8
         # seed = 1717, nrounds=20, start_state = 9
         expected = np.array([ 0.,     -0.94788777, -0.93485068, -0.77635209, -0.66915289, -0.67045823,
@@ -100,7 +103,7 @@ class Test_MC_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
         observed = self.mclambda.getV().getValues() # This should be the same as state_values above
 
         print("\nobserved: " + self.array2str(observed))
-
+        
         self.plot_results(observed, self.V_true, RMSE_by_episode,
                           state_info['alphas_by_episode'], self.alpha_min,
                           max_rmse=self.max_rmse, color_rmse=self.color_rmse, plotFlag=self.plotFlag)

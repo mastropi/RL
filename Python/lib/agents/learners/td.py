@@ -112,7 +112,6 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
 
     def learn_pred_V(self, t, state, action, next_state, reward, done, info):
         self._update_trajectory(t, state, reward)
-        self._update_alphas(state)
 
         self.state_counts_noreset[state] += 1
         state_value = self.V.getValue(state)
@@ -146,6 +145,8 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
         self._updateZ(state, lambda_adaptive)
         # Update the weights
         self.V.setWeights( self.V.getWeights() + self._alphas[state] * delta * self._z )
+        # Update the alphas for the next iteration
+        self._update_alphas(state)
 
         if done:
             if self.debug:

@@ -69,7 +69,6 @@ class LeaMCLambda(Learner):
 
     def learn_pred_V_slow(self, t, state, action, next_state, reward, done, info):
         # This learner updates the estimate of the value function V ONLY at the end of the episode
-        self._update_alphas(state)
         self._update_trajectory(t, state, reward)
         if done:
             # Store the trajectory and rewards
@@ -149,7 +148,7 @@ class LeaMCLambda(Learner):
             self.final_report(t)
 
     def learn_mc(self, t):
-        "Updates the value function based on the new observed episode using first-visity Monte Carlo"
+        "Updates the value function based on the new observed episode using first-visit Monte Carlo"
         # Terminal time
         T = t + 1
 
@@ -175,7 +174,6 @@ class LeaMCLambda(Learner):
 
     def learn_pred_V(self, t, state, action, next_state, reward, done, info):
         "Learn the prediction problem: estimate the state value function"
-        self._update_alphas(state)
         self._update_trajectory(t, state, reward)
         self._updateG(t, state, next_state, reward, done)
 
@@ -260,13 +258,15 @@ class LeaMCLambda(Learner):
             print("DONE:")
         for tt in np.arange(T):
             state = self._states[tt]
-            # Error, where the lambda-return is used as the current value function estimate
-            delta = Glambda[tt] - self.V.getValue(state)
-            if self.debug:
-                print("t: {} \tG(t,lambda): {} \tV({}): {} \tdelta: {}" \
-                      .format(tt, Glambda[tt], state, self.V.getValue(state), delta))
+            # First-visit MC: We only update the value function estimation at the first visit of the state
+            if self._states_first_visit_time[state] == tt:
+                # Error, where the lambda-return is used as the current value function estimate
+                delta = Glambda[tt] - self.V.getValue(state)
+                if self.debug:
+                    print("t: {} \tG(t,lambda): {} \tV({}): {} \tdelta: {}" \
+                          .format(tt, Glambda[tt], state, self.V.getValue(state), delta))
 
-            self.updateV(state, delta)
+                self.updateV(state, delta)
 
     def updateV(self, state, delta):
         # Gradient of V: it must have the same size as the weights

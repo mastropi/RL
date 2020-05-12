@@ -178,6 +178,12 @@ class Simulator:
                 self.env.seed(self.seed)
 
         RMSE = np.nan*np.zeros(nrounds) if compute_rmse else None
+        if state_observe is not None:
+            V = [learner.getV().getValue(state_observe)]
+            # Keep track of the number of times the true value function of the state (assumed 0!)
+            # is inside its confidence interval. In practice this only works for the mid state
+            # of the 1D gridworld with the random walk policy.
+            ntimes_inside_ci95 = 0
         for episode in range(nrounds):
             self.env.reset()
             done = False
@@ -207,6 +213,9 @@ class Simulator:
 
                 # Learn: i.e. update the value function (stored in the learner) with the new observation
                 learner.learn_pred_V(t, state, action, next_state, reward, done, info)
+                if state_observe is not None:
+                    # Store the value function of the state just estimated
+                    V += [learner.getV().getValue(state_observe)]
 
                 if self.debug:
                     print("-> {}".format(self.env.getState()), end=" ")
@@ -227,11 +236,38 @@ class Simulator:
 
                 if state_observe is not None:
                     plt.figure(fig_RMSE_state.number)
+                    
+                    # Compute quantities to plot
                     RMSE_state_observe = rmse(np.array(self.env.getV()[state_observe]), np.array(learner.getV().getValue(state_observe)))
-                    plt.plot(episode, RMSE_state_observe, 'k.-')
+                    se95 = 2*np.sqrt( 0.5*(1-0.5) / (episode+1))
+                    # Only count falling inside the CI starting at episode 100 so that
+                    # the normal approximation of the SE is more correct. 
+                    if episode + 1 >= 100:
+                        ntimes_inside_ci95 += (RMSE_state_observe <= se95)
+
+                    # Plot of the estimated value of the state
+                    plt.plot(episode+1, learner.getV().getValue(state_observe), 'r*-', markersize=3)
+                    #plt.plot(episode, np.mean(np.array(V)), 'r.-')
+                    # Plot of the estimation error and the decay of the "confidence bands" for the true value function
+                    plt.plot(episode+1, RMSE_state_observe, 'k.-', markersize=3)
+                    plt.plot(episode+1,  se95, color="gray", marker=".", markersize=2)
+                    plt.plot(episode+1, -se95, color="gray", marker=".", markersize=2)
+                    # Plot of learning rate
+                    #plt.plot(episode+1, learner._alphas[state_observe], 'g.-')
+
+                    # Finalize plot
                     ax = plt.gca()
-                    ax.set_ylim((0,0.8))
-                    plt.title("|Error| at state {} - episode {} of {}".format(state_observe, episode+1, nrounds))
+                    ax.set_ylim((-1, 1))
+                    yticks = np.arange(-10,10)/10
+                    ax.set_yticks(yticks)
+                    ax.axhline(y=0, color="gray")
+                    plt.title("Value and |error| for state {} - episode {} of {}".format(state_observe, episode+1, nrounds))
+                    plt.legend(['value', '|error|', '2*SE = 2*sqrt(0.5*(1-0.5)/episode)'])
+                    if episode + 1 == nrounds:
+                        # Show the true value function coverage as x-axis label
+                        ax.set_xlabel("% Episodes error is inside 95% Confidence Interval (+/- 2*SE) (for episode>=100): {:.1f}%" \
+                                      .format(ntimes_inside_ci95/(episode+1 - 100 + 1)*100))
+                    plt.legend(['value', '|error|', '2*SE = 2*sqrt(0.5*(1-0.5)/episode)'])
                     plt.draw()
 
             # Reset the learner for the next iteration
