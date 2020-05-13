@@ -188,17 +188,26 @@ class Learner:
         self._state_counts_overall[state] += 1      # Counts over all episodes
 
     def _update_alphas(self, state):
+        assert set([state]).issubset( set(self.env.terminal_states) ) == False, \
+                "The state on which the alpha is computed is NOT a terminal state"
+        #print("Before updating alpha: episode {}, state {}: state_count={:.0f}, alpha>={}: alpha={}     {}" \
+        #      .format(self.episode, state, self._state_counts_overall[state], self.alpha_min, self._alphas[state], self._alphas))
+
         self._alphas_used_in_episode += [self._alphas[state]]
         if self.adjust_alpha:
             if self.adjust_alpha_by_episode:
                 # Update using the episode number (equal for all states)
-                self._alphas[state] =  np.max([ self.alpha_min, self.alpha / np.max([1, self.episode - MIN_EPISODE + 1]) ])
+                self._alphas[state] =  np.max([ self.alpha_min, self.alpha / np.max([1, self.episode - MIN_EPISODE + 2]) ])
+                    ## +2 => when episode = MIN_EPISODE, time_divisor is > 1,
+                    ## o.w. alpha would not be changed for the next update iteration
             else:
                 if self.alpha_update_type == AlphaUpdateType.FIRST_STATE_VISIT:
                     state_count = self._state_counts_first_visit_overall[state]
                 else:
                     state_count = self._state_counts_overall[state]
-                time_divisor = np.max([1, state_count - MIN_COUNT + 2]) # +2 => when state_count = MIN_COUNT, time_divisor is > 1, o.w. alpha would not be changed
+                time_divisor = np.max([1, state_count - MIN_COUNT + 2])
+                    ## +2 => when state_count = MIN_COUNT, time_divisor is > 1,
+                    ## o.w. alpha would not be changed for the next update iteration
                 #print("\t\tepisode: {}, state: {}, updating alpha... time divisor = {}".format(self.episode, state, time_divisor))
                 # Update using the state occupation state_count over all past episodes 
                 if MAX_EPISODE_FOR_ALPHA_MIN is None or self.episode <= MAX_EPISODE_FOR_ALPHA_MIN:
@@ -215,12 +224,6 @@ class Learner:
                     # without any lower bound for alpha
                     self._alphas[state] = self._alphas_at_max_episode[state] / time_divisor
                     #print("episode {}, state {}: alphas: {}".format(self.episode, state, self._alphas))
-
-        assert set([state]).issubset( set(self.env.terminal_states) ) == False, \
-                "The state on which the alpha is computed is NOT a terminal state"
-
-        #print("episode {}, state {}: state_count={:.0f}, alphas >= {}: {}     {}" \
-        #      .format(self.episode, state, self._state_counts_overall[state], self.alpha_min, self._alphas[state], self._alphas))
 
     def store_trajectory(self):
         "Stores the trajectory observed during the episode"
