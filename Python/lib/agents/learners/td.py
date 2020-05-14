@@ -63,6 +63,7 @@ class LeaTDLambda(Learner):
         if done:
             if self.debug:
                 self._plotZ()
+            self.store_trajectory()
             self.final_report(t)
 
     def _updateZ(self, state, lmbda):

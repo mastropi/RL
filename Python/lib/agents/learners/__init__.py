@@ -240,6 +240,8 @@ class Learner:
         # Note: Using the average is only relevant when the adjustment is by state occupation count,
         # NOT when it is by episode since in the latter case all the alphas are the same
         # for all states visited during the episode.
+        #print("Trajectory & alphas in episode {}".format(self.episode))
+        #print(np.c_[self.states, self._alphas_used_in_episode]) 
         self.alpha_mean_by_episode += [np.mean(self._alphas_used_in_episode)]
 
         if self.debug:

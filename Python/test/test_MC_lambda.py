@@ -19,6 +19,7 @@ from Python.lib.environments import gridworlds
 from Python.lib.agents.policies import random_walks
 import Python.lib.agents as agents
 from Python.lib.agents.learners import mc
+from Python.lib.agents.learners import AlphaUpdateType
 import Python.lib.simulators as simulators
 
 import test_utils
@@ -119,9 +120,14 @@ class Test_MC_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
         print("\n*** Testing " + self.id() + " ***")
 
         # Learner and agent definition
-        alpha_min = 0.0
-        learner_mclambda = mc.LeaMCLambda(self.env, alpha=1.0, gamma=1.0, lmbda=1.0,
-                                          adjust_alpha=True, adjust_alpha_by_episode=False, alpha_min=alpha_min,
+        params = dict({'alpha': 0.01,
+                       'gamma': 1.0,
+                       'lambda': 1.0,
+                       'alpha_min': 0.0,
+                       })
+        learner_mclambda = mc.LeaMCLambda(self.env, alpha=params['alpha'], gamma=params['gamma'], lmbda=params['lambda'],
+                                          alpha_update_type=AlphaUpdateType.EVERY_STATE_VISIT,
+                                          adjust_alpha=True, adjust_alpha_by_episode=False, alpha_min=params['alpha_min'],
                                           debug=False)
         agent_rw_mclambda = agents.GeneralAgent(self.policy_rw, learner_mclambda)
 
@@ -134,22 +140,26 @@ class Test_MC_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
                                                      plot=False, pause=0.1)
         observed = agent_rw_mclambda.getLearner().getV().getValues()
         print("\nobserved: " + self.array2str(observed))        
-        self.plot_results(observed, self.V_true, RMSE_by_episode,
-                          state_info['alphas_by_episode'], alpha_min,
+        self.plot_results(params,
+                          observed, self.V_true, RMSE_by_episode, state_info['alphas_by_episode'],
                           max_rmse=self.max_rmse, color_rmse=self.color_rmse, plotFlag=self.plotFlag)
 
     def no_test_random_walk_adaptive_result(self):
         print("\nTesting " + self.id())
 
         # Learner and agent definition
-        alpha_min = 0.0
-        learner_mclambda_adaptive = mc.LeaMCLambdaAdaptive(self.env, alpha=0.2, gamma=1.0, lmbda=0.8)
+        params = dict({'alpha': 1.0,
+                       'gamma': 1.0,
+                       'lambda': 1.0,
+                       'alpha_min': 0.0,
+                       })
+        learner_mclambda_adaptive = mc.LeaMCLambdaAdaptive(self.env, alpha=params['alpha'], gamma=params['gamma'], lmbda=params['lambda'])
         agent_rw_mclambda_adaptive = agents.GeneralAgent(self.policy_rw, learner_mclambda_adaptive)
 
         # Simulation
         sim = simulators.Simulator(self.env, agent_rw_mclambda_adaptive, debug=False)
         _, _, RMSE_by_episode, state_info = sim.play(nrounds=self.nrounds, start=self.start_state, seed=self.seed,
-                                                     compute_rmse=True,
+                                                     compute_rmse=True, state_observe=10,
                                                      verbose=True, verbose_period=100,
                                                      plot=False, pause=0.1)
 
@@ -161,8 +171,8 @@ class Test_MC_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
   0.6727829,   0.72310919,  0.        ])
         observed = self.mclambda_adaptive.getV().getValues()
         print("\nobserved: " + self.array2str(observed))
-        self.plot_results(observed, self.V_true, RMSE_by_episode,
-                          state_info['alphas_by_episode'], alpha_min,
+        self.plot_results(params,
+                          observed, self.V_true, RMSE_by_episode, state_info['alphas_by_episode'],
                           max_rmse=self.max_rmse, color_rmse=self.color_rmse, plotFlag=self.plotFlag)
 
         assert np.allclose(observed, expected, atol=1E-6)

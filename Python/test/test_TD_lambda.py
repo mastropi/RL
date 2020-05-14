@@ -19,6 +19,7 @@ from Python.lib.environments import gridworlds
 import Python.lib.agents as agents
 from Python.lib.agents.policies import random_walks
 from Python.lib.agents.learners import td
+from Python.lib.agents.learners import AlphaUpdateType
 import Python.lib.simulators as simulators
 
 import test_utils
@@ -42,7 +43,7 @@ class Test_TD_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
         super().__init__(*args, **kwargs)
         self.seed = 1717
         self.nrounds = 20
-        self.start_state = 9
+        self.start_state = 10
 
     @classmethod
     def setUpClass(cls):    # cls is the class, in this case, class 'Test_TD_Lambda'
@@ -70,21 +71,36 @@ class Test_TD_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
     #-------------------------------------- DATA FOR TESTS ------------------------------------
     # Case number, description, expected value, parameters
     data_test_random_walk = lambda: (
-            ( 1, 'no alpha adjustment',
-                 [],
-                (0.1, 1.0, 1.0), False, False, 0.0 ),
+            ( 1, 'TD(0), no alpha adjustment',
+                 [0.000000, -0.987504, -0.941069, -0.900173, -0.805758, -0.613337, -0.407574,
+                  -0.298142, -0.221312, -0.149854, -0.051759, 0.001865, 0.052824, 0.128984,
+                  0.217968, 0.297497, 0.478097, 0.680931, 0.810098, 0.961462, 0.000000],
+                (0.5, 1.0, 0.0), False, False, 0.0 ),
             ( 2, 'lambda<1, no alpha adjustment',
-                 [],
-                (0.2, 1.0, 0.7), False, False, 0.0 ),
-            ( 3, 'adjusted alpha by state count',
-                 [],
-                (1.0, 1.0, 1.0), True, False, 0.0 ),
-            ( 4, 'adjusted alpha by episode',
-              [],
-                (1.0, 1.0, 1.0), True,  True, 0.0 ),
-            ( 5, 'lambda<1, adjusted alpha by state count',
-              [],
-                (1.0, 1.0, 0.7), True,  False, 0.0 ),
+                 [0.000000, -0.780984, -0.650444, -0.519032, -0.289646, -0.173257, -0.109756,
+                  -0.066946, -0.017813, -0.007125, 0.000394, 0.007759, 0.027384, 0.040343,
+                  0.066892, 0.106094, 0.144276, 0.370783, 0.514059, 0.725371, 0.000000],
+                (0.2, 0.9, 0.7), False, False, 0.0 ),
+            ( 3, 'TD(1), no alpha adjustment',
+                 [0.000000, -0.191338, -0.299566, -0.338347, -0.405255, -0.542388, -0.703216,
+                  -0.683582, -0.514695, -0.389836, -0.272784, -0.102481, 0.085268, 0.144083,
+                  0.197441, 0.231908, 0.214645, 0.229342, 0.209256, 0.113961, 0.000000],
+                (0.01, 1.0, 1.0), False, False, 0.0 ),
+            ( 4, 'TD(0), alpha adjusted by state count',
+                 [0.000000, -0.784147, -0.564636, -0.339216, -0.116705, -0.035015, -0.011703,
+                  -0.004087, -0.000950, -0.000174, 0.000018, 0.000239, 0.000861, 0.002790,
+                  0.013549, 0.042693, 0.114878, 0.291660, 0.494777, 0.853046, 0.000000],
+                (2.0, 1.0, 0.0), True, False, 0.0 ),
+            ( 5, 'TD(0), alpha adjusted by episode',
+                  [0.000000, -0.886493, -0.750482, -0.612285, -0.384955, -0.205433, -0.138078,
+                   -0.106451, -0.062648, -0.028677, -0.000131, 0.034738, 0.061068, 0.089416,
+                   0.179860, 0.274118, 0.393915, 0.615136, 0.746844, 0.955497, 0.000000],
+                (2.0, 1.0, 0.0), True,  True, 0.0 ),
+            ( 6, 'lambda<1, adjusted alpha by state count',
+                  [0.000000, -0.946909, -0.907296, -0.775429, -0.507633, -0.370504, -0.280516,
+                   -0.210464, -0.131925, -0.069949, 0.005305, 0.067782, 0.116598, 0.165322,
+                   0.247306, 0.315188, 0.428172, 0.604386, 0.732484, 0.908714, 0.000000],
+                (2.0, 1.0, 0.7), True,  False, 0.0 ),
         )
 
     #------------------------------------------- TESTS ----------------------------------------
@@ -97,23 +113,17 @@ class Test_TD_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
         learner_tdlambda = td.LeaTDLambda(self.env, alpha=params_alpha_gamma_lambda[0],
                                                     gamma=params_alpha_gamma_lambda[1],
                                                     lmbda=params_alpha_gamma_lambda[2],
-                                                    adjust_alpha=False, adjust_alpha_by_episode=False, alpha_min=0.0,
+                                                    alpha_update_type=AlphaUpdateType.EVERY_STATE_VISIT,
+                                                    adjust_alpha=adjust_alpha, adjust_alpha_by_episode=adjust_alpha_by_episode, alpha_min=0.0,
                                                     debug=False)
         agent_rw_tdlambda = agents.GeneralAgent(self.policy_rw, learner_tdlambda)
-        
+
         # Simulation
         sim = simulators.Simulator(self.env, agent_rw_tdlambda, debug=False)
         _, _, RMSE_by_episode, state_info = sim.play(nrounds=self.nrounds, start=self.start_state, seed=self.seed,
                                                      compute_rmse=True, state_observe=15,
                                                      verbose=True, verbose_period=100,
                                                      plot=False, pause=0.1)
-
-        # Expected values with alpha = 0.2, gamma = 0.9, lambda = 0.8,
-        # seed = 1717, nrounds=20, start_state = 9
-        expected = np.array([ 0.,     -0.96263354, -0.94935992, -0.79580974, -0.68319293, -0.69444404,
- -0.66004513, -0.54932031, -0.45282584, -0.24578133, -0.18307401, -0.12925566,
- -0.12743421,  0.00243922,  0.28248756,  0.47626462,  0.50983006,  0.63976455,
-  0.69107498,  0.74657348,  0.        ])
         observed = agent_rw_tdlambda.getLearner().getV().getValues()
         print("\nobserved: " + self.array2str(observed))
         assert np.allclose(observed, expected, atol=1E-6)
@@ -122,39 +132,42 @@ class Test_TD_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
         print("\nTesting " + self.id())
 
         # Learner and agent
-        alpha_min = 0.0
-        learner_tdlambda = td.LeaTDLambda(self.env, alpha=0.2, gamma=0.9, lmbda=0.8,
-                                                    adjust_alpha=False, adjust_alpha_by_episode=False, alpha_min=alpha_min,
+        params = dict({'alpha': 0.01,
+                       'gamma': 1.0,
+                       'lambda': 1.0,
+                       'alpha_min': 0.0,
+                       })
+        learner_tdlambda = td.LeaTDLambda(self.env, alpha=params['alpha'], gamma=params['gamma'], lmbda=params['lambda'],
+                                                    alpha_update_type=AlphaUpdateType.EVERY_STATE_VISIT,
+                                                    adjust_alpha=True, adjust_alpha_by_episode=False, alpha_min=params['alpha_min'],
                                                     debug=False)
         agent_rw_tdlambda = agents.GeneralAgent(self.policy_rw, learner_tdlambda)
         
         # Simulation
         sim = simulators.Simulator(self.env, agent_rw_tdlambda, debug=False)
         _, _, RMSE_by_episode, state_info = sim.play(nrounds=self.nrounds, start=self.start_state, seed=self.seed,
-                                                     compute_rmse=True,
+                                                     compute_rmse=True, state_observe=15,
                                                      verbose=True, verbose_period=100,
-                                                     plot=False, pause=0.1)
+                                                     plot=False, pause=0.01)
 
-        # Expected values with alpha = 0.2, gamma = 0.9, lambda = 0.8
-        # seed = 1717, nrounds=20, start_state = 9
-        expected = np.array([0.000000, -0.749668, -0.618287, -0.360762, -0.235131, -0.208619, -0.173078,
-                             -0.123492, -0.091047, -0.038282, -0.023659, -0.011179, -0.008521, 0.008848,
-                             0.086621, 0.168348, 0.211377, 0.348970, 0.437844, 0.606336, 0.000000])
         observed = agent_rw_tdlambda.getLearner().getV().getValues()
         print("\nobserved: " + self.array2str(observed))
-        self.plot_results(observed, self.V_true, RMSE_by_episode,
-                          state_info['alphas_by_episode'], alpha_min,
+        self.plot_results(params,
+                          observed, self.V_true, RMSE_by_episode, state_info['alphas_by_episode'],
                           max_rmse=self.max_rmse, color_rmse=self.color_rmse, plotFlag=self.plotFlag)
-
-        assert np.allclose(observed, expected, atol=1E-6)
 
     def no_test_random_walk_adaptive(self):
         print("\nTesting " + self.id())
 
         # Learner and agent
-        alpha_min = 0.0
-        learner_tdlambda_adaptive = td.LeaTDLambdaAdaptive(self.env, alpha=0.8, gamma=1.0, lmbda=0.8,
-                                                           adjust_alpha=True, adjust_alpha_by_episode=True, alpha_min=alpha_min,
+        params = dict({'alpha': 0.8,
+                       'gamma': 1.0,
+                       'lambda': 0.7,
+                       'alpha_min': 0.0,
+                       })
+        learner_tdlambda_adaptive = td.LeaTDLambda(self.env, alpha=params['alpha'], gamma=params['gamma'], lmbda=params['lambda'],
+                                                           alpha_update_type=AlphaUpdateType.EVERY_STATE_VISIT,
+                                                           adjust_alpha=True, adjust_alpha_by_episode=True, alpha_min=params['alpha_min'],
                                                            lambda_min=0., burnin=False, debug=False)
         agent_rw_tdlambda_adaptive = agents.GeneralAgent(self.policy_rw, learner_tdlambda_adaptive)
 
@@ -173,8 +186,8 @@ class Test_TD_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
   0.56831782,  0.70843306,  0.        ])
         observed = agent_rw_tdlambda_adaptive.getLearner().getV().getValues()
         print("\nobserved: " + self.array2str(observed))
-        self.plot_results(observed, self.V_true, RMSE_by_episode,
-                          state_info['alphas_by_episode'], alpha_min,
+        self.plot_results(params,
+                          observed, self.V_true, RMSE_by_episode, state_info['alphas_by_episode'],
                           max_rmse=self.max_rmse, color_rmse=self.color_rmse, plotFlag=self.plotFlag)
 
         assert np.allclose(observed, expected, atol=1E-6)
