@@ -104,10 +104,6 @@ class LeaMCLambda(Learner):
                 delta = gtlambda - self.V.getValue(state)
                 self.updateV(state, delta)
 
-            # Reset the internal attributes used during learning
-            # (but NOT the value functions estimations, since we want to learn always more at each episode!)
-            self._reset_at_start_of_episode()
-
             self.final_report(t)
 
     def gt2tn(self, start, end):
@@ -140,10 +136,6 @@ class LeaMCLambda(Learner):
             # This means t+1 is the terminal time T
             # (recall we WERE in time t and we STEPPED INTO time t+1, so T = t+1)
             self.learn_mc(t)
-
-            # Reset the internal attributes used during learning
-            # (but NOT the value functions estimations, since we want to learn always more at each episode!)
-            self._reset_at_start_of_episode()
 
             self.final_report(t)
 
@@ -184,10 +176,6 @@ class LeaMCLambda(Learner):
             # This means t+1 is the terminal time T
             # (recall we WERE in time t and we STEPPED INTO time t+1, so T = t+1)
             self.learn(t)
-
-            # Reset the internal attributes used during learning
-            # (but NOT the value functions estimations, since we want to learn always more at each episode!)
-            self._reset_at_start_of_episode()
 
             self.final_report(t)
 
@@ -330,10 +318,6 @@ class LeaMCLambdaAdaptive(LeaMCLambda):
             # This means t+1 is the terminal time T
             # (recall we WERE in time t and we STEPPED INTO time t+1, so T = t+1)
             self.learn(t)
-
-            # Reset the internal attributes used during learning
-            # (but NOT the value functions estimations, since we want to learn always more at each episode!)
-            self._reset_at_start_of_episode()
 
     def _computeStateRewards(self, terminal_state):
         # Length of the episode

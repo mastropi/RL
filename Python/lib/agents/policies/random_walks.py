@@ -26,8 +26,7 @@ class PolRandomWalkDiscrete():
         place.
     """
 
-#    def __init__(self, env: DiscreteEnv):
-    def __init__(self, env):
+    def __init__(self, env: EnvironmentDiscrete):
 #        if not isinstance(env, EnvironmentDiscrete):
 #            raise TypeError("The environment must be of type {} from the {} module ({})" \
 #                            .format(EnvironmentDiscrete.__name__, EnvironmentDiscrete.__module__, env.__class__))
