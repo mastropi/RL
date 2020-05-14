@@ -11,6 +11,7 @@ runpy.run_path('../../setup.py')
 
 import numpy as np
 import unittest
+from unittest_data_provider import data_provider
 #from gym.utils import seeding
 import matplotlib.pyplot as plt
 
@@ -26,6 +27,8 @@ from importlib import reload
 import Python.lib.agents.learners.td
 #reload(Python.lib.agents.learners.td)
 from Python.lib.agents.learners.td import LeaTDLambda
+from Python.lib.agents.learners import Learner
+
 #--
 #import Python.lib.agents.policies.random_walks
 #reload(random_walks)
@@ -39,7 +42,7 @@ class Test_TD_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
         super().__init__(*args, **kwargs)
         self.seed = 1717
         self.nrounds = 20
-        self.start_state = 10
+        self.start_state = 9
 
     @classmethod
     def setUpClass(cls):    # cls is the class, in this case, class 'Test_TD_Lambda'
@@ -57,31 +60,51 @@ class Test_TD_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
         cls.V_true = np.arange(-cls.nS-1, cls.nS+2, 2) / (cls.nS+1)
         cls.V_true[0] = cls.V_true[-1] = 0
 
-        # Agents with Policy and Learner defined
+        # Random walk policy on the above environment
         print("Check subclass")
         print(cls.env.__class__)
         print(issubclass(cls.env.__class__, EnvironmentDiscrete))
 
-        cls.alpha_min = 0.008
-        cls.rw = random_walks.PolRandomWalkDiscrete(cls.env)
-        cls.tdlambda = td.LeaTDLambda(cls.env, alpha=0.8, gamma=1.0, lmbda=0.0,
-                                      adjust_alpha=True, adjust_alpha_by_episode=False, alpha_min=cls.alpha_min,
-                                      debug=False)
-        cls.tdlambda_adaptive = td.LeaTDLambdaAdaptive(cls.env, alpha=0.8, gamma=1.0, lmbda=0.8,
-                                                       adjust_alpha=True, adjust_alpha_by_episode=True, alpha_min=cls.alpha_min,
-                                                       lambda_min=0., burnin=False, debug=False)
-        cls.mclambda = td.LeaTDLambda(cls.env, alpha=0.2, gamma=0.9, lmbda=1.0)
-        cls.agent_rw_tdlambda = agents.GeneralAgent(cls.rw, cls.tdlambda)
-        cls.agent_rw_tdlambda_adaptive = agents.GeneralAgent(cls.rw, cls.tdlambda_adaptive)
-        cls.agent_rw_mclambda = agents.GeneralAgent(cls.rw, cls.mclambda)
+        cls.policy_rw = random_walks.PolRandomWalkDiscrete(cls.env)
+
+    #-------------------------------------- DATA FOR TESTS ------------------------------------
+    # Case number, description, expected value, parameters
+    data_test_random_walk = lambda: (
+            ( 1, 'no alpha adjustment',
+                 [],
+                (0.1, 1.0, 1.0), False, False, 0.0 ),
+            ( 2, 'lambda<1, no alpha adjustment',
+                 [],
+                (0.2, 1.0, 0.7), False, False, 0.0 ),
+            ( 3, 'adjusted alpha by state count',
+                 [],
+                (1.0, 1.0, 1.0), True, False, 0.0 ),
+            ( 4, 'adjusted alpha by episode',
+              [],
+                (1.0, 1.0, 1.0), True,  True, 0.0 ),
+            ( 5, 'lambda<1, adjusted alpha by state count',
+              [],
+                (1.0, 1.0, 0.7), True,  False, 0.0 ),
+        )
 
     #------------------------------------------- TESTS ----------------------------------------
-    def test_random_walk_result(self):
-        "Test using my TD(Lambda) learner"
+    @data_provider(data_test_random_walk)
+    def test_random_walk(self, casenum, desc, expected, params_alpha_gamma_lambda,
+                                                        adjust_alpha, adjust_alpha_by_episode, alpha_min):
         print("\nTesting " + self.id())
-        sim = simulators.Simulator(self.env, self.agent_rw_tdlambda, debug=False)
+
+        # Learner and agent
+        learner_tdlambda = td.LeaTDLambda(self.env, alpha=params_alpha_gamma_lambda[0],
+                                                    gamma=params_alpha_gamma_lambda[1],
+                                                    lmbda=params_alpha_gamma_lambda[2],
+                                                    adjust_alpha=False, adjust_alpha_by_episode=False, alpha_min=0.0,
+                                                    debug=False)
+        agent_rw_tdlambda = agents.GeneralAgent(self.policy_rw, learner_tdlambda)
+        
+        # Simulation
+        sim = simulators.Simulator(self.env, agent_rw_tdlambda, debug=False)
         _, _, RMSE_by_episode, state_info = sim.play(nrounds=self.nrounds, start=self.start_state, seed=self.seed,
-                                                     compute_rmse=True,
+                                                     compute_rmse=True, state_observe=15,
                                                      verbose=True, verbose_period=100,
                                                      plot=False, pause=0.1)
 
@@ -91,20 +114,22 @@ class Test_TD_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
  -0.66004513, -0.54932031, -0.45282584, -0.24578133, -0.18307401, -0.12925566,
  -0.12743421,  0.00243922,  0.28248756,  0.47626462,  0.50983006,  0.63976455,
   0.69107498,  0.74657348,  0.        ])
-        observed = self.tdlambda.getV().getValues()
-
+        observed = agent_rw_tdlambda.getLearner().getV().getValues()
         print("\nobserved: " + self.array2str(observed))
+        assert np.allclose(observed, expected, atol=1E-6)
 
-        self.plot_results(observed, self.V_true, RMSE_by_episode,
-                          state_info['alphas_by_episode'], self.alpha_min,
-                          max_rmse=self.max_rmse, color_rmse=self.color_rmse, plotFlag=self.plotFlag)
-
-        assert np.allclose( expected, observed )
-
-    def no_test_random_walk_as_MC_result(self):
-        "Test using my TD(Lambda) with lambda = 1 to emulate a Monte Carlo learner"
+    def no_test_random_walk_onecase(self):
         print("\nTesting " + self.id())
-        sim = simulators.Simulator(self.env, self.agent_rw_mclambda, debug=False)
+
+        # Learner and agent
+        alpha_min = 0.0
+        learner_tdlambda = td.LeaTDLambda(self.env, alpha=0.2, gamma=0.9, lmbda=0.8,
+                                                    adjust_alpha=False, adjust_alpha_by_episode=False, alpha_min=alpha_min,
+                                                    debug=False)
+        agent_rw_tdlambda = agents.GeneralAgent(self.policy_rw, learner_tdlambda)
+        
+        # Simulation
+        sim = simulators.Simulator(self.env, agent_rw_tdlambda, debug=False)
         _, _, RMSE_by_episode, state_info = sim.play(nrounds=self.nrounds, start=self.start_state, seed=self.seed,
                                                      compute_rmse=True,
                                                      verbose=True, verbose_period=100,
@@ -112,24 +137,29 @@ class Test_TD_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
 
         # Expected values with alpha = 0.2, gamma = 0.9, lambda = 0.8
         # seed = 1717, nrounds=20, start_state = 9
-        expected = np.array([ 0.,    -0.87570279, -0.77617219, -0.38677509, -0.20086812, -0.26264111,
- -0.20460859, -0.13041183, -0.10991275, -0.03513174, -0.02629319, -0.04773745,
- -0.06768075, -0.00798058,  0.23183274,  0.35276211,  0.37104584,  0.52515039,
-  0.50912581,  0.64218869,  0.        ])
-        observed = self.mclambda.getV().getValues()
-
+        expected = np.array([0.000000, -0.749668, -0.618287, -0.360762, -0.235131, -0.208619, -0.173078,
+                             -0.123492, -0.091047, -0.038282, -0.023659, -0.011179, -0.008521, 0.008848,
+                             0.086621, 0.168348, 0.211377, 0.348970, 0.437844, 0.606336, 0.000000])
+        observed = agent_rw_tdlambda.getLearner().getV().getValues()
         print("\nobserved: " + self.array2str(observed))
-
         self.plot_results(observed, self.V_true, RMSE_by_episode,
-                          state_info['alphas_by_episode'], self.alpha_min,
+                          state_info['alphas_by_episode'], alpha_min,
                           max_rmse=self.max_rmse, color_rmse=self.color_rmse, plotFlag=self.plotFlag)
 
-        assert np.allclose( expected, observed )
+        assert np.allclose(observed, expected, atol=1E-6)
 
-    def no_test_random_walk_adaptive_result(self):
-        "Test using my TD(Lambda) learner"
+    def no_test_random_walk_adaptive(self):
         print("\nTesting " + self.id())
-        sim = simulators.Simulator(self.env, self.agent_rw_tdlambda_adaptive, debug=False)
+
+        # Learner and agent
+        alpha_min = 0.0
+        learner_tdlambda_adaptive = td.LeaTDLambdaAdaptive(self.env, alpha=0.8, gamma=1.0, lmbda=0.8,
+                                                           adjust_alpha=True, adjust_alpha_by_episode=True, alpha_min=alpha_min,
+                                                           lambda_min=0., burnin=False, debug=False)
+        agent_rw_tdlambda_adaptive = agents.GeneralAgent(self.policy_rw, learner_tdlambda_adaptive)
+
+        # Simulation        
+        sim = simulators.Simulator(self.env, agent_rw_tdlambda_adaptive, debug=False)
         _, _, RMSE_by_episode, state_info = sim.play(nrounds=self.nrounds, start=self.start_state, seed=self.seed,
                                                      compute_rmse=True,
                                                      verbose=True, verbose_period=100,
@@ -141,17 +171,14 @@ class Test_TD_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
  -0.36783142, -0.25143119, -0.2038609,  -0.08730269, -0.05066575,  0.01550673,
   0.04311948,  0.09924234,  0.16607023,  0.22774784,  0.36150155,  0.44464534,
   0.56831782,  0.70843306,  0.        ])
-        observed = self.tdlambda_adaptive.getV().getValues()
-
+        observed = agent_rw_tdlambda_adaptive.getLearner().getV().getValues()
         print("\nobserved: " + self.array2str(observed))
-
         self.plot_results(observed, self.V_true, RMSE_by_episode,
-                          state_info['alphas_by_episode'], self.alpha_min,
+                          state_info['alphas_by_episode'], alpha_min,
                           max_rmse=self.max_rmse, color_rmse=self.color_rmse, plotFlag=self.plotFlag)
 
-        assert np.allclose( expected, observed )
+        assert np.allclose(observed, expected, atol=1E-6)
     #------------------------------------------- TESTS ----------------------------------------
-
 
 
 if __name__ == "__main__":
