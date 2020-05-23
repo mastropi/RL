@@ -41,9 +41,9 @@ class Simulator:
     """
 
     def __init__(self, env, agent, seed=None, debug=False):
-        if not isinstance(env, EnvironmentDiscrete):
-            raise TypeError("The environment must be of type {} from the {} module ({})" \
-                            .format(EnvironmentDiscrete.__name__, EnvironmentDiscrete.__module__, env.__class__))
+#        if not isinstance(env, EnvironmentDiscrete):
+#            raise TypeError("The environment must be of type {} from the {} module ({})" \
+#                            .format(EnvironmentDiscrete.__name__, EnvironmentDiscrete.__module__, env.__class__))
         # TODO: (2020/04/12) Fix the following check on the type of agent as it does not work...
         # even though the class of agent is Python.lib.agents.GeneralAgent
 #        if not isinstance(agent, GeneralAgent):
@@ -65,17 +65,14 @@ class Simulator:
             self.setInitialStateDistribution(self._isd_orig)
 
     def reset(self):
+        "Resets the simulator"
         # Copy of Initial State Distribution of environment in case we need to change it
         self._isd_orig = None
-
-        # Reset the state counts in an episode
-        # (This is used for plotting purposes and to compute the RMSE weighted by the state counts --if requested)
-        self.state_counts = np.zeros(self.env.getNumStates())
 
         # Reset the learner to the first episode state
         self.agent.getLearner().reset(reset_episode=True, reset_value_functions=True)
 
-    def play(self, nrounds, start=None, seed=None, compute_rmse=False, state_observe=None,
+    def run(self, nepisodes, start=None, seed=None, compute_rmse=False, state_observe=None,
              verbose=False, verbose_period=1,
              plot=False, colormap="seismic", pause=0):
         # TODO: (2020/04/11) Convert the plotting parameters to a dictionary named plot_options or similar.
@@ -85,7 +82,7 @@ class Simulator:
         It is assumed that this reset, when needed, is done by the calling function.
         
         Parameters:
-        nrounds: int
+        nepisodes: int
             Length of the experiment: number of episodes to run.
 
         start: None or int, optional
@@ -126,19 +123,21 @@ class Simulator:
 
         Returns: tuple
             Tuple containing the following elements:
-                - state value function estimate for each state at the end of the episode (`nrounds`)
-                - number of visits to each state at the end of the episode
-                - RMSE (when compute_rmse is not None) an array of length `nrounds` containing the
+                - state value function estimate for each state at the end of the last episode (`nepisodes`).
+                - number of visits to each state at the end of the lastt episode.
+                - RMSE (when `compute_rmse` is not None), an array of length `nepisodes` containing the
                 Root Mean Square Error after each episode, of the estimated value function averaged
                 over all states. Otherwise, None.
                 - a dictionary containing additional relevant information, as follows:
-                    - 'alphas': the value of the learning parameter `alpha` for each state
-                    at the end of the episode.
+                    - 'alphas_at_episode_end': the value of the learning parameter `alpha` for each state
+                    at the end of the last episode run.
+                    - 'alphas_by_episode': (average) learning parameter `alpha` by episode
+                    (averaged over visited states in each episode).
         """
         #--- Parse input parameters
         if plot:
             fig_V = plt.figure()
-            colors = cm.get_cmap(colormap, lut=nrounds)
+            colors = cm.get_cmap(colormap, lut=nepisodes)
             # Plot the true state value function (to have it as a reference already
             plt.plot(self.env.all_states, self.env.getV(), '.-', color="blue")
             
@@ -167,28 +166,32 @@ class Simulator:
                 raise Warning('The `state_observe` parameter must be an integer number between 0 and {}.' \
                               'The state whose index falls in the middle of the state space will be observed.'.format(state_observe))
 
-        # Define the policy, the learner and reset the learner (i.e. erase all learning memory to start anew!)
+        # Define the policy and the learner
         policy = self.agent.getPolicy()
         learner = self.agent.getLearner()
-        learner.reset(reset_episode=True, reset_value_functions=True)
+        # Reset the simulator (i.e. prepare it for a fresh new simulation with all learning memory erased)
+        self.reset()
         if seed:
             if seed != 0:
                 self.env.seed(seed)
             else:
                 self.env.seed(self.seed)
 
-        RMSE = np.nan*np.zeros(nrounds) if compute_rmse else None
+        RMSE = np.nan*np.zeros(nepisodes) if compute_rmse else None
         if state_observe is not None:
             V = [learner.getV().getValue(state_observe)]
             # Keep track of the number of times the true value function of the state (assumed 0!)
             # is inside its confidence interval. In practice this only works for the mid state
             # of the 1D gridworld with the random walk policy.
             ntimes_inside_ci95 = 0
-        for episode in range(nrounds):
+
+        if verbose:
+            print("Value function at start of experiment: {}".format(learner.getV().getValues()))
+        for episode in range(nepisodes):
             self.env.reset()
             done = False
             if verbose and np.mod(episode, verbose_period) == 0:
-                print("Episode {} of {} running...".format(episode+1, nrounds))
+                print("Episode {} of {} running...".format(episode+1, nepisodes))
             if self.debug:
                 print("\nStarts at state {}".format(self.env.getState()))
                 print("\tState value function at start of episode:\n\t{}".format(learner.getV().getValues()))
@@ -200,7 +203,6 @@ class Simulator:
                 
                 # Current state and action on that state leading to the next state
                 state = self.env.getState()
-                self.state_counts[state] += 1
                 action = policy.choose_action()
                 next_state, reward, done, info = self.env.step(action)
                 #if self.debug:
@@ -222,13 +224,13 @@ class Simulator:
 
             if compute_rmse:
                 if self.env.getV() is not None:
-                    RMSE[episode] = rmse(self.env.getV(), learner.getV().getValues())#, weights=self.state_counts)
+                    RMSE[episode] = rmse(self.env.getV(), learner.getV().getValues())#, weights=learner.getStateCounts())
 
             if plot:
-                #print("episode: {} (T={}), color: {}".format(episode, t, colors(episode/nrounds)))
+                #print("episode: {} (T={}), color: {}".format(episode, t, colors(episode/nepisodes)))
                 plt.figure(fig_V.number)
-                plt.plot(self.env.all_states, learner.getV().getValues(), linewidth=0.5, color=colors(episode/nrounds))
-                plt.title("Episode {} of {}".format(episode+1, nrounds))
+                plt.plot(self.env.all_states, learner.getV().getValues(), linewidth=0.5, color=colors(episode/nepisodes))
+                plt.title("Episode {} of {}".format(episode+1, nepisodes))
                 if pause > 0:
                     plt.pause(pause)
                 plt.draw()
@@ -261,9 +263,9 @@ class Simulator:
                     yticks = np.arange(-10,10)/10
                     ax.set_yticks(yticks)
                     ax.axhline(y=0, color="gray")
-                    plt.title("Value and |error| for state {} - episode {} of {}".format(state_observe, episode+1, nrounds))
+                    plt.title("Value and |error| for state {} - episode {} of {}".format(state_observe, episode+1, nepisodes))
                     plt.legend(['value', '|error|', '2*SE = 2*sqrt(0.5*(1-0.5)/episode)'])
-                    if episode + 1 == nrounds:
+                    if episode + 1 == nepisodes:
                         # Show the true value function coverage as x-axis label
                         ax.set_xlabel("% Episodes error is inside 95% Confidence Interval (+/- 2*SE) (for episode>=100): {:.1f}%" \
                                       .format(ntimes_inside_ci95/(episode+1 - 100 + 1)*100))
@@ -280,7 +282,7 @@ class Simulator:
             plt.figure(fig_V.number)
             ax = plt.gca()
             ax2 = ax.twinx()    # Create a secondary axis sharing the same x axis
-            ax2.bar(self.env.all_states, self.state_counts, color="blue", alpha=0.3)
+            ax2.bar(self.env.all_states, learner.getStateCounts(), color="blue", alpha=0.3)
             plt.sca(ax) # Go back to the primary axis
             #plt.figure(fig_V.number)
 
@@ -291,9 +293,12 @@ class Simulator:
             self.env.setInitialStateDistribution(self._isd_orig)
             self._isd_orig = None
 
-        return  learner.getV().getValues(), self.state_counts, RMSE, \
-                {'alphas_at_episode_end': learner._alphas,  # value of parameter alpha for each state at the end of the episode
-                 'alphas_by_episode': learner.alpha_mean_by_episode}   # (Average) alpha by episode run so far (averaged over visited states if relevant)  
+        return  learner.getV().getValues(), learner.getStateCounts(), RMSE, \
+                {# Value of alpha for each state at the end of the LAST episode run
+                 'alphas_at_episode_end': learner._alphas,
+                 # (Average) alpha by episode (averaged over visited states in the episode)
+                 'alphas_by_episode': learner.alpha_mean_by_episode
+                 }
 
     def simulate(self, nexperiments, nepisodes, start=None, verbose=False, verbose_period=1):
         """Simulates the agent interacting with the environment for a number of experiments and number
@@ -325,10 +330,12 @@ class Simulator:
                 - Episodic RMSE: array containing the Root Mean Square Error by episode averaged
                 over all experiments.
                 - a dictionary containing additional relevant information, as follows:
-                    - 'alphas': the value of the learning parameter `alpha` for each state
-                    at the end of the episode in the last experiment.
+                    - 'alphas_at_episode_end': the value of the learning parameter `alpha` for each state
+                    at the end of the last episode in the last experiment.
+                    - 'alphas_by_episode': (average) learning parameter `alpha` by episode
+                    (averaged over visited states in each episode) in the last experiment.
         """
-    
+
         if not (isinstance(nexperiments, int) and nexperiments > 0):
             raise ValueError("The number of experiments must be a positive integer number ({})".format(nexperiments))
         if not (isinstance(nepisodes, int) and nepisodes > 0):
@@ -349,8 +356,7 @@ class Simulator:
             if verbose:
                 print("Running experiment {} of {} (#episodes = {})..." \
                       .format(exp+1, nexperiments, nepisodes), end=" ")
-                print("Value function at start of experiment: {}".format(self.agent.getLearner().getV().getValues()))
-            V, N_i, RMSE_by_episodes_i, learning_info = self.play(nrounds=nepisodes, start=start, seed=None,
+            V, N_i, RMSE_by_episodes_i, learning_info = self.run(nepisodes=nepisodes, start=start, seed=None,
                                                                   compute_rmse=True, plot=False,
                                                                   verbose=verbose, verbose_period=verbose_period)
             N += N_i

@@ -22,9 +22,9 @@ class LeaMCLambda(Learner):
         env (gym.envs.toy_text.discrete.DiscreteEnv): the environment where the learning takes place.
     """
 
-    def __init__(self, env, alpha=0.1, gamma=0.9, lmbda=0.8,
+    def __init__(self, env, alpha=0.1, gamma=1.0, lmbda=0.8,
                  adjust_alpha=False, alpha_update_type=AlphaUpdateType.FIRST_STATE_VISIT,
-                 adjust_alpha_by_episode=True, alpha_min=0.,
+                 adjust_alpha_by_episode=False, alpha_min=0.,
                  debug=False):
         super().__init__(env, alpha, adjust_alpha, alpha_update_type, adjust_alpha_by_episode, alpha_min)
         self.debug = debug
@@ -72,10 +72,10 @@ class LeaMCLambda(Learner):
         self._update_trajectory(t, state, reward)
         if done:
             # Store the trajectory and rewards
-            self.store_trajectory()
+            self.store_trajectory(next_state)
+            self._update_state_counts(t+1, next_state)            
 
-            # SHOULDN'T THIS BE T = t + 1?
-            #T = len(self._states) - 1
+            # Terminal time
             T = t + 1
             assert len(self._states) == T and len(self._rewards) == T + 1, \
                     "The number of _states visited ({}) is equal to T ({}) " \
@@ -131,7 +131,8 @@ class LeaMCLambda(Learner):
 
         if done:
             # Store the trajectory and rewards
-            self.store_trajectory()
+            self.store_trajectory(next_state)
+            self._update_state_counts(t+1, next_state)            
 
             # This means t+1 is the terminal time T
             # (recall we WERE in time t and we STEPPED INTO time t+1, so T = t+1)
@@ -171,7 +172,8 @@ class LeaMCLambda(Learner):
 
         if done:
             # Store the trajectory and rewards
-            self.store_trajectory()
+            self.store_trajectory(next_state)
+            self._update_state_counts(t+1, next_state)            
 
             # This means t+1 is the terminal time T
             # (recall we WERE in time t and we STEPPED INTO time t+1, so T = t+1)
@@ -272,7 +274,7 @@ class LeaMCLambda(Learner):
 
 class LeaMCLambdaAdaptive(LeaMCLambda):
     
-    def __init__(self, env, alpha=0.1, gamma=0.9, lmbda=0.8,
+    def __init__(self, env, alpha=0.1, gamma=1.0, lmbda=0.8,
                  adjust_alpha=False, alpha_update_type=AlphaUpdateType.FIRST_STATE_VISIT,
                  adjust_alpha_by_episode=True, alpha_min=0.,
                  debug=False):
@@ -291,7 +293,8 @@ class LeaMCLambdaAdaptive(LeaMCLambda):
 
         if done:
             # Store the trajectory and rewards
-            self.store_trajectory()
+            self.store_trajectory(next_state)
+            self._update_state_counts(t+1, next_state)            
             
             # Compute the gamma-discounted _rewards for each state visited in the episode
             state_rewards_prev = self.state_rewards.copy()

@@ -53,6 +53,9 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
     def getTerminalStates(self):
         return self.terminal_states
 
+    def isTerminalState(self, state):
+        return set([state]).issubset( set(self.terminal_states) )
+
     #--- Setters
     def setInitialStateDistribution(self, isd):
         self.isd = isd

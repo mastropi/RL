@@ -21,9 +21,9 @@ class LeaTDLambda(Learner):
         env (gym.envs.toy_text.discrete.DiscreteEnv): the environment where the learning takes place.
     """
 
-    def __init__(self, env, alpha=0.1, gamma=0.9, lmbda=0.8,
-                 adjust_alpha=False, alpha_update_type=AlphaUpdateType.FIRST_STATE_VISIT,
-                 adjust_alpha_by_episode=True, alpha_min=0.,
+    def __init__(self, env, alpha=0.1, gamma=1.0, lmbda=0.8,
+                 adjust_alpha=False, alpha_update_type=AlphaUpdateType.EVERY_STATE_VISIT,
+                 adjust_alpha_by_episode=False, alpha_min=0.,
                  debug=False):
         super().__init__(env, alpha, adjust_alpha, alpha_update_type, adjust_alpha_by_episode, alpha_min)
         self.debug = debug
@@ -57,13 +57,23 @@ class LeaTDLambda(Learner):
         delta = reward + self.gamma * self.V.getValue(next_state) - self.V.getValue(state)
         #print("episode {}, state {}: count = {}, alpha = {}".format(self.episode, state, self._state_counts_overall[state], self._alphas[state]))
         self.V.setWeights( self.V.getWeights() + self._alphas[state] * delta * self._z )
-        # Update alpha for the next iteration
-        self._update_alphas(state)
+        
+        # Update alpha for the next iteration for "by state counts" update
+        if not self.adjust_alpha_by_episode:
+            self._update_alphas(state)
 
         if done:
             if self.debug:
                 self._plotZ()
-            self.store_trajectory()
+            self.store_trajectory(next_state)
+            self._update_state_counts(t+1, next_state)            
+
+            # Update alpha for the next iteration for "by episode" updates
+            if self.adjust_alpha_by_episode:
+                for state in range(self.env.getNumStates()):
+                    if not self.env.isTerminalState(state):
+                        self._update_alphas(state)
+
             self.final_report(t)
 
     def _updateZ(self, state, lmbda):
@@ -86,8 +96,8 @@ class LeaTDLambda(Learner):
 
 class LeaTDLambdaAdaptive(LeaTDLambda):
     
-    def __init__(self, env, alpha=0.1, gamma=0.9, lmbda=0.8,
-                 adjust_alpha=False, alpha_update_type=AlphaUpdateType.FIRST_STATE_VISIT,
+    def __init__(self, env, alpha=0.1, gamma=1.0, lmbda=0.8,
+                 adjust_alpha=False, alpha_update_type=AlphaUpdateType.EVERY_STATE_VISIT,
                  adjust_alpha_by_episode=True, alpha_min=0.,
                  lambda_min=0., burnin=False, debug=False):
         super().__init__(env, alpha, gamma, lmbda, adjust_alpha, alpha_update_type, adjust_alpha_by_episode, alpha_min, debug)
@@ -146,12 +156,23 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
         self._updateZ(state, lambda_adaptive)
         # Update the weights
         self.V.setWeights( self.V.getWeights() + self._alphas[state] * delta * self._z )
-        # Update the alphas for the next iteration
-        self._update_alphas(state)
+
+        # Update alpha for the next iteration for "by state counts" update
+        if not self.adjust_alpha_by_episode:
+            self._update_alphas(state)
 
         if done:
             if self.debug:
                 self._plotZ()
+            self.store_trajectory(next_state)
+            self._update_state_counts(t+1, next_state)            
+
+            # Update alpha for the next iteration for "by episode" updates
+            if self.adjust_alpha_by_episode:
+                for state in range(self.env.getNumStates()):
+                    if not self.env.isTerminalState(state):
+                        self._update_alphas(state)
+                
             self.final_report(t)
 
         if self.debug:

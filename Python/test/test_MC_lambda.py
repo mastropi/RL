@@ -40,7 +40,7 @@ class Test_MC_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.seed = 1717
-        self.nrounds = 20
+        self.nepisodes = 20
         self.start_state = 10
 
     @classmethod
@@ -96,7 +96,7 @@ class Test_MC_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
     @data_provider(data_test_random_walk)
     def test_random_walk(self, casenum, desc, expected, params_alpha_gamma_lambda,
                                                         adjust_alpha, adjust_alpha_by_episode, alpha_min):
-        # All tests are run using seed = 1717, nrounds = 20, start_state = 10
+        # All tests are run using seed = 1717, nepisodes = 20, start_state = 10
         print("\n*** Testing {0}, case number {1} ***".format(self.id(), casenum))
         learner_mclambda = mc.LeaMCLambda(self.env, alpha=params_alpha_gamma_lambda[0],
                                                     gamma=params_alpha_gamma_lambda[1],
@@ -107,7 +107,7 @@ class Test_MC_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
         agent_rw_mc = agents.GeneralAgent(self.policy_rw, learner_mclambda)
         sim = simulators.Simulator(self.env, agent_rw_mc, debug=False)
         _, _, RMSE_by_episode, state_info = \
-                                            sim.play(nrounds=self.nrounds, start=self.start_state, seed=self.seed,
+                                            sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
                                                      compute_rmse=True, state_observe=10,
                                                      verbose=True, verbose_period=100,
                                                      plot=False, pause=0.1)
@@ -116,25 +116,25 @@ class Test_MC_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
         assert np.allclose(observed, expected, atol=1E-6)
                                             
     def no_test_random_walk_onecase(self):
-        #-- All tests are run using seed = 1717, nrounds = 20, start_state = 10
+        #-- All tests are run using seed = 1717, nepisodes = 20, start_state = 10
         print("\n*** Testing " + self.id() + " ***")
 
         # Learner and agent definition
-        params = dict({'alpha': 0.01,
-                       'gamma': 1.0,
+        params = dict({'alpha': 1.0,
+                       'gamma': 0.8,
                        'lambda': 1.0,
                        'alpha_min': 0.0,
                        })
         learner_mclambda = mc.LeaMCLambda(self.env, alpha=params['alpha'], gamma=params['gamma'], lmbda=params['lambda'],
-                                          alpha_update_type=AlphaUpdateType.EVERY_STATE_VISIT,
-                                          adjust_alpha=True, adjust_alpha_by_episode=False, alpha_min=params['alpha_min'],
+                                          alpha_update_type=AlphaUpdateType.FIRST_STATE_VISIT,  # First-visit is the default
+                                          adjust_alpha=True, adjust_alpha_by_episode=True, alpha_min=params['alpha_min'],
                                           debug=False)
         agent_rw_mclambda = agents.GeneralAgent(self.policy_rw, learner_mclambda)
 
         # Simulation
         sim = simulators.Simulator(self.env, agent_rw_mclambda, debug=False)
         _, _, RMSE_by_episode, state_info = \
-                                            sim.play(nrounds=self.nrounds, start=self.start_state, seed=self.seed,
+                                            sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
                                                      compute_rmse=True, state_observe=10,
                                                      verbose=True, verbose_period=100,
                                                      plot=False, pause=0.1)
@@ -158,13 +158,13 @@ class Test_MC_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
 
         # Simulation
         sim = simulators.Simulator(self.env, agent_rw_mclambda_adaptive, debug=False)
-        _, _, RMSE_by_episode, state_info = sim.play(nrounds=self.nrounds, start=self.start_state, seed=self.seed,
+        _, _, RMSE_by_episode, state_info = sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
                                                      compute_rmse=True, state_observe=10,
                                                      verbose=True, verbose_period=100,
                                                      plot=False, pause=0.1)
 
         # Expected state values with alpha = 0.2, gamma = 0.9, lambda = 0.8
-        # seed = 1717, nrounds=20, start_state = 9
+        # seed = 1717, nepisodes=20, start_state = 9
         expected = np.array([ 0.,     -0.94788777, -0.93485068, -0.77635209, -0.66915289, -0.67045823,
  -0.6319687,  -0.52116762, -0.44295159, -0.20887109, -0.1027944,  -0.03800919,
  -0.03668617,  0.06142266,  0.27410733,  0.42610526,  0.50467228,  0.63018903,

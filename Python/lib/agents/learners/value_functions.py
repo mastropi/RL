@@ -4,6 +4,19 @@ Created on Mon Mar 30 19:57:16 2020
 
 @author: Daniel Mastropetro
 @description: Definition of value function estimators.
+
+The value functions used by the learner classes are assumed to:
+a) Be defined in terms of weights, e.g. the state value function for state s is V(s,w),
+where w is the vector of weights applied to a set of features X.
+Note that this assumption does NOT offer any limitation, since a tabular value function
+can be defined using binary/dummy features. 
+
+b) Have the following methods defined:
+- reset(): resets the vector w of weigths to their initial estimates 
+- getWeights(): reads the vector w of weights
+- setWeights(): updates the vector w of weights
+- getValue(): reads the value function for a particular state or state-action
+- getValues(): reads the value function for ALL states or state-actions
 """
 
 import numpy as np

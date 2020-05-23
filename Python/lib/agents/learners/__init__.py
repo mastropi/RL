@@ -20,20 +20,9 @@ All learners are assumed to have the following methods defined:
     - learn_pred_V() --> prediction problem: learns the state value function under the current policy (V(s))
     - learn_pred_Q() --> prediction problem: learns the action-value function under the currenty policy (Q(s,a))
     - learn_ctrl_policy() --> control problem: learns the optimal policy
-
-VALUE FUNCTIONS:
-The value functions used by the learner classes are assumed to:
-a) Be defined in terms of weights, e.g. the state value function for state s is V(s,w),
-where w is the vector of weights applied to a set of features X.
-Note that this assumption does NOT offer any limitation, since a tabular value function
-can be defined using binary/dummy features. 
-
-b) Have the following methods defined:
-- reset(): resets the vector w of weigths to their initial estimates 
-- getWeights(): reads the vector w of weights
-- setWeights(): updates the vector w of weights
-- getValue(): reads the value function for a particular state or state-action
-- getValues(): reads the value function for ALL states or state-actions
+    - getStateCounts(first_visit) --> returns the state counts over all run episodes, optionally the first visit counts.
+    - getV() --> returns the state value function
+    - getQ() --> returns the state-action value function
 """
 
 from enum import Enum, unique
@@ -67,7 +56,7 @@ class Learner:
     """
 
     def __init__(self, env, alpha,
-                 adjust_alpha=False, alpha_update_type=AlphaUpdateType.FIRST_STATE_VISIT, adjust_alpha_by_episode=True,
+                 adjust_alpha=False, alpha_update_type=AlphaUpdateType.FIRST_STATE_VISIT, adjust_alpha_by_episode=False,
                  alpha_min=0.):
         """
         Parameters:
@@ -77,15 +66,21 @@ class Learner:
         alpha: float
             Learning rate.
         
-        alpha_update_type: LearnerType
+        learner_type: LearnerType *** NOT YET IMPLEMENTED BUT COULD BE A GOOD IDEA TO AVOID DEFINING THE AlphaUpdateType...? ***
             Type of learner. E.g. LearnerType.TD, LearnerType.MC.
+
+        alpha_update_type: AlphaUpdateType
+            How alpha is updated, e.g. AlphaUpdateType.FIRST_STATE_VISIT, AlphaUpdateType.EVERY_STATE_VISIT
+            This value defines the denominator when updating alpha for each state as alpha/n, where alpha
+            is the initial learning rate (passed as parameter alpha) and n is the number of FIRST or EVERY visit
+            to the state, depending on the value of the alpha_update_type parameter.
         """
-        if not isinstance(env, EnvironmentDiscrete):
-            raise TypeError("The environment must be of type {} from the {} module ({})" \
-                            .format(EnvironmentDiscrete.__name__, EnvironmentDiscrete.__module__, env.__class__))
-        if not isinstance(alpha_update_type, AlphaUpdateType):
-            raise TypeError("The alpha_update_type of learner must be of type {} from the {} module ({})" \
-                            .format(AlphaUpdateType.__name__, AlphaUpdateType.__module__, alpha_update_type.__class__))
+#        if not isinstance(env, EnvironmentDiscrete):
+#            raise TypeError("The environment must be of type {} from the {} module ({})" \
+#                            .format(EnvironmentDiscrete.__name__, EnvironmentDiscrete.__module__, env.__class__))
+#        if not isinstance(alpha_update_type, AlphaUpdateType):
+#            raise TypeError("The alpha_update_type of learner must be of type {} from the {} module ({})" \
+#                            .format(AlphaUpdateType.__name__, AlphaUpdateType.__module__, alpha_update_type.__class__))
 
         self.env = env
         self.alpha = alpha
@@ -173,7 +168,9 @@ class Learner:
         "Updates the trajectory and related information based on the current time, current state and the observed reward"
         self._states += [state]
         self._rewards += [reward]
+        self._update_state_counts(t, state)
 
+    def _update_state_counts(self, t, state):
         # Keep track of state first visits
         #print("t: {}, visit to state: {}".format(t, state))
         if np.isnan(self._states_first_visit_time[state]):
@@ -188,7 +185,7 @@ class Learner:
         self._state_counts_overall[state] += 1      # Counts over all episodes
 
     def _update_alphas(self, state):
-        assert set([state]).issubset( set(self.env.terminal_states) ) == False, \
+        assert self.env.isTerminalState(state) == False, \
                 "The state on which the alpha is computed is NOT a terminal state"
         #print("Before updating alpha: episode {}, state {}: state_count={:.0f}, alpha>={}: alpha={}     {}" \
         #      .format(self.episode, state, self._state_counts_overall[state], self.alpha_min, self._alphas[state], self._alphas))
@@ -225,13 +222,19 @@ class Learner:
                     self._alphas[state] = self._alphas_at_max_episode[state] / time_divisor
                     #print("episode {}, state {}: alphas: {}".format(self.episode, state, self._alphas))
 
-    def store_trajectory(self):
-        "Stores the trajectory observed during the episode"
+    def store_trajectory(self, state):
+        """
+        Stores the trajectory observed during the episode and updates the state counts with the given final state.
+        
+        Arguments:
+        state: int
+            Final state of the trajectory that is added to the trajectory information.
+        """
         # Remove any trajectory stored from a previous run from memory
         del self.states
         del self.rewards
         # Assign the new trajectory observed in the current episode 
-        self.states = self._states.copy()
+        self.states = self._states.copy() + [state]
         self.rewards = self._rewards.copy()
 
     def final_report(self, T):
@@ -258,6 +261,12 @@ class Learner:
         ax2 = ax.twinx()    # Create a secondary axis sharing the same x axis
         ax2.bar(self.env.all_states, self._state_counts_overall, color="blue", alpha=0.3)
         plt.sca(ax) # Go back to the primary axis
+
+    def getStateCounts(self, first_visit=False):
+        if first_visit: 
+            return self._state_counts_first_visit_overall
+        else:
+            return self._state_counts_overall            
 
     def getV(self):
         "Returns the object containing information about the state value function estimation"
