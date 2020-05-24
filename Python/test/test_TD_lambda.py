@@ -49,7 +49,7 @@ class Test_TD_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
     def setUpClass(cls):    # cls is the class, in this case, class 'Test_TD_Lambda'
                             # IMPORTANT: All attributes defined here can be then be referenced using self!
                             # (i.e. they belong to the "object" instantiated by this class)
-        cls.plotFlag = False
+        cls.plotFlag = True
         cls.max_rmse = 0.8
         cls.color_rmse = "red"
 
@@ -57,7 +57,7 @@ class Test_TD_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
         cls.nS = 19             # Number of non-terminal states in the 1D gridworld
         cls.env = gridworlds.EnvGridworld1D(length=cls.nS+2)  # nS states plus the two terminal states
 
-        # True state value functions
+        # True state value function when gamma = 1.0
         cls.V_true = np.arange(-cls.nS-1, cls.nS+2, 2) / (cls.nS+1)
         cls.V_true[0] = cls.V_true[-1] = 0
 
@@ -81,7 +81,7 @@ class Test_TD_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
                   -0.066946, -0.017813, -0.007125, 0.000394, 0.007759, 0.027384, 0.040343,
                   0.066892, 0.106094, 0.144276, 0.370783, 0.514059, 0.725371, 0.000000],
                 (0.2, 0.9, 0.7), False, False, 0.0 ),
-            ( 3, 'TD(1), no alpha adjustment',
+            ( 3, 'TD(1), no alpha adjustment (should be similar to MC every-visit, because lambda = 1)',
                  [0.000000, -0.191338, -0.299566, -0.338347, -0.405255, -0.542388, -0.703216,
                   -0.683582, -0.514695, -0.389836, -0.272784, -0.102481, 0.085268, 0.144083,
                   0.197441, 0.231908, 0.214645, 0.229342, 0.209256, 0.113961, 0.000000],
@@ -129,23 +129,23 @@ class Test_TD_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
 
     def no_test_random_walk_onecase(self):
         print("\nTesting " + self.id())
-
+ 
         # Learner and agent
         params = dict({'alpha': 1.0,
                        'gamma': 1.0,
-                       'lambda': 1.0,
+                       'lambda': 0.7,
                        'alpha_min': 0.0,
                        })
         learner_tdlambda = td.LeaTDLambda(self.env, alpha=params['alpha'], gamma=params['gamma'], lmbda=params['lambda'],
-                                                    alpha_update_type=AlphaUpdateType.EVERY_STATE_VISIT,  # Every-visit is the default
-                                                    adjust_alpha=True, adjust_alpha_by_episode=True, alpha_min=params['alpha_min'],
+                                                    alpha_update_type=AlphaUpdateType.FIRST_STATE_VISIT,  # Every-visit is the default
+                                                    adjust_alpha=True, adjust_alpha_by_episode=False, alpha_min=params['alpha_min'],
                                                     debug=False)
         agent_rw_tdlambda = agents.GeneralAgent(self.policy_rw, learner_tdlambda)
 
         # Simulation
         sim = simulators.Simulator(self.env, agent_rw_tdlambda, debug=False)
         _, _, RMSE_by_episode, state_info = sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
-                                                     compute_rmse=True, state_observe=15,
+                                                     compute_rmse=True, state_observe=19,
                                                      verbose=True, verbose_period=100,
                                                      plot=False, pause=0.01)
 

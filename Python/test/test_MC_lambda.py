@@ -55,7 +55,7 @@ class Test_MC_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
         # Environment definition
         cls.nS = 19             # Number of non-terminal states in the 1D gridworld
         cls.env = gridworlds.EnvGridworld1D(length=cls.nS+2)  # nS states plus the two terminal states
-        # True state value functions
+        # True state value function when gamma = 1.0
         cls.V_true = np.arange(-cls.nS-1, cls.nS+2, 2) / (cls.nS+1)
         cls.V_true[0] = cls.V_true[-1] = 0
         
@@ -121,13 +121,13 @@ class Test_MC_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
 
         # Learner and agent definition
         params = dict({'alpha': 1.0,
-                       'gamma': 0.8,
+                       'gamma': 1.0,
                        'lambda': 1.0,
                        'alpha_min': 0.0,
                        })
         learner_mclambda = mc.LeaMCLambda(self.env, alpha=params['alpha'], gamma=params['gamma'], lmbda=params['lambda'],
                                           alpha_update_type=AlphaUpdateType.FIRST_STATE_VISIT,  # First-visit is the default
-                                          adjust_alpha=True, adjust_alpha_by_episode=True, alpha_min=params['alpha_min'],
+                                          adjust_alpha=True, adjust_alpha_by_episode=False, alpha_min=params['alpha_min'],
                                           debug=False)
         agent_rw_mclambda = agents.GeneralAgent(self.policy_rw, learner_mclambda)
 

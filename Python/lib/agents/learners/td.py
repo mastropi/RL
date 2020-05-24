@@ -57,7 +57,7 @@ class LeaTDLambda(Learner):
         delta = reward + self.gamma * self.V.getValue(next_state) - self.V.getValue(state)
         #print("episode {}, state {}: count = {}, alpha = {}".format(self.episode, state, self._state_counts_overall[state], self._alphas[state]))
         self.V.setWeights( self.V.getWeights() + self._alphas[state] * delta * self._z )
-        
+
         # Update alpha for the next iteration for "by state counts" update
         if not self.adjust_alpha_by_episode:
             self._update_alphas(state)

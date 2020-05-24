@@ -162,9 +162,9 @@ class Simulator:
         # Check initial state
         if state_observe is not None:
             if not (isinstance(state_observe, int) and 0 <= state_observe and state_observe < nS):
-                state_observe = np.floor(nS/2)
-                raise Warning('The `state_observe` parameter must be an integer number between 0 and {}.' \
-                              'The state whose index falls in the middle of the state space will be observed.'.format(state_observe))
+                state_observe = int(nS/2)
+                raise Warning("The `state_observe` parameter must be an integer number between 0 and {}.\n" \
+                              "The state whose index falls in the middle of the state space will be observed.".format(nS-1))
 
         # Define the policy and the learner
         policy = self.agent.getPolicy()

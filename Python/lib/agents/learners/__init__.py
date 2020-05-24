@@ -187,9 +187,10 @@ class Learner:
     def _update_alphas(self, state):
         assert self.env.isTerminalState(state) == False, \
                 "The state on which the alpha is computed is NOT a terminal state"
-        #print("Before updating alpha: episode {}, state {}: state_count={:.0f}, alpha>={}: alpha={}     {}" \
-        #      .format(self.episode, state, self._state_counts_overall[state], self.alpha_min, self._alphas[state], self._alphas))
-
+        #with np.printoptions(precision=4):
+        #    print("Before updating alpha: episode {}, state {}: state_count={:.0f}, alpha>={}: alpha={}\n{}" \
+        #          .format(self.episode, state, self._state_counts_overall[state], self.alpha_min, self._alphas[state], np.array(self._alphas)))
+        
         self._alphas_used_in_episode += [self._alphas[state]]
         if self.adjust_alpha:
             if self.adjust_alpha_by_episode:
@@ -248,6 +249,7 @@ class Learner:
         self.alpha_mean_by_episode += [np.mean(self._alphas_used_in_episode)]
 
         if self.debug:
+            print("Episode {}: Terminal state = {}".format(self.episode, self.states[-1]))
             self.plot_alphas(T)
 
     def plot_alphas(self, t):
