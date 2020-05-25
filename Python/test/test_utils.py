@@ -102,7 +102,7 @@ def plot_rmse_by_episode(rmse_mean_values, rmse_se_values=None, max_rmse=None, c
 class EpisodeSimulation:
     
     def plot_results(self, params,
-                     V_estimated, V_true, RMSE_by_episode, alphas_by_episode,
+                     V_estimated, V_true, RMSE_by_episode, alphas_by_episode, y2label="(Average) alpha",
                      max_rmse=0.8, color_rmse="black", plotFlag=True):
         """
         Plots the estimated and true state value function.
@@ -148,8 +148,15 @@ class EpisodeSimulation:
             
             ax2 = ax.twinx()
             ax2.plot(np.arange(self.nepisodes)+1, alphas_by_episode, "k:")
-            ax2.set_ylabel("(Average) alpha")
+            ax2.set_ylabel(y2label)
             ax2.axhline(y=params['alpha_min'], color="gray")
+            
+            # Go back to the primary axis
+            plt.sca(ax)
+            
+            return (ax, ax2)
+    
+        return (None, None)
 
     def array2str(self, x, sep=", ", fmt=":.6f"):
         "Converts an array (possibly numeric) to string separated by `sep`"

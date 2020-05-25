@@ -101,6 +101,7 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
                  adjust_alpha_by_episode=True, alpha_min=0.,
                  lambda_min=0., burnin=False, debug=False):
         super().__init__(env, alpha, gamma, lmbda, adjust_alpha, alpha_update_type, adjust_alpha_by_episode, alpha_min, debug)
+        self._lambdas = []
         # Minimum lambda for the adaptive lambda so that there is still some impact
         # in past states at the beginning when all state values are equal and equal to 0
         self.lambda_min = lambda_min
@@ -113,6 +114,27 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
         # based on whether the delta information from which the agent learns already contains
         # bootstrapping information about the value function at the next state)  
         self.state_counts_noreset = np.zeros(self.env.getNumStates())
+
+        # Keep track of lambdas sums by state in order to compute statistics of lambda by state
+        self._all_lambdas_n = np.zeros(self.env.getNumStates(), dtype=int)
+        self._all_lambdas_sum = np.zeros(self.env.getNumStates(), dtype=float)
+        self._all_lambdas_sum2 = np.zeros(self.env.getNumStates(), dtype=float)
+
+        # Keep track of the average lambda by episode
+        self.lambda_mean_by_episode = []
+
+    def _reset_at_start_of_episode(self):
+        super()._reset_at_start_of_episode()
+        self._lambdas = []
+
+    def reset(self, reset_episode=False, reset_value_functions=False):
+        super().reset(reset_episode=reset_episode, reset_value_functions=reset_value_functions)
+        if reset_episode:
+            self.lambda_mean_by_episode = []
+            del self._all_lambdas_n, self._all_lambdas_sum, self._all_lambdas_sum2
+            self._all_lambdas_n = np.zeros(self.env.getNumStates(), dtype=int)
+            self._all_lambdas_sum = np.zeros(self.env.getNumStates(), dtype=float)
+            self._all_lambdas_sum2 = np.zeros(self.env.getNumStates(), dtype=float)
 
     def setParams(self, alpha=None, gamma=None, lmbda=None, adjust_alpha=None, alpha_update_type=None,
                   adjust_alpha_by_episode=None, alpha_min=0.,
@@ -149,10 +171,17 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
             delta_relative = delta / state_value if state_value != 0 \
                                                  else 0. if delta == 0. \
                                                  else np.Inf
+            #delta_relative = np.exp( np.abs(delta) - np.abs(state_value) )
             lambda_adaptive = 1 - (1 - self.lambda_min) * np.exp( -np.abs(delta_relative) )
+            #lambda_adaptive = 1 - (1 - self.lambda_min) * np.exp( -np.abs(delta) )
             #print("episode: {}, t: {}, lambda (adaptive) = {}".format(self.episode, t, lambda_adaptive))
+        self._lambdas += [lambda_adaptive]
+        # Update the sum of lambdas for the final lambda statistics by state
+        self._all_lambdas_n[state] += 1 
+        self._all_lambdas_sum[state] += lambda_adaptive 
+        self._all_lambdas_sum2[state] += lambda_adaptive**2 
 
-        # Update the elegibility trace
+        # Update the eligibility trace
         self._updateZ(state, lambda_adaptive)
         # Update the weights
         self.V.setWeights( self.V.getWeights() + self._alphas[state] * delta * self._z )
@@ -184,3 +213,19 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
                 print(pd.DataFrame( np.c_[self._z, self.V.getValues()].T, index=['_z', 'V'] ))
     
             #input("Press Enter...")
+
+    def final_report(self, T):
+        super().final_report(T)
+        # Store the (average) _lambdas by episode
+        #print("lambdas in episode {}".format(self.episode))
+        #with np.printoptions(precision=3, suppress=True):
+        #    print(np.c_[self.states[:-1], self._lambdas]) 
+        self.lambda_mean_by_episode += [np.mean(self._lambdas)]
+
+    def compute_lambda_statistics_by_state(self):
+        "Computes the number, mean, and standard deviation of historical values of lambda by state"
+        lambdas_n = self._all_lambdas_n
+        lambdas_mean = [S/n for n, S in zip(self._all_lambdas_n, self._all_lambdas_sum)]
+        lambdas_std = [np.sqrt( (S2 - S**2/n) / (n - 1) )
+                                for n, S, S2 in zip(self._all_lambdas_n, self._all_lambdas_sum, self._all_lambdas_sum2)]
+        return lambdas_n, lambdas_mean, lambdas_std

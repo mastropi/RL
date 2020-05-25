@@ -147,7 +147,7 @@ class Test_TD_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
         _, _, RMSE_by_episode, state_info = sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
                                                      compute_rmse=True, state_observe=19,
                                                      verbose=True, verbose_period=100,
-                                                     plot=False, pause=0.01)
+                                                     plot=False, pause=0.001)
 
         observed = agent_rw_tdlambda.getLearner().getV().getValues()
         print("\nobserved: " + self.array2str(observed))
@@ -155,18 +155,20 @@ class Test_TD_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
                           observed, self.V_true, RMSE_by_episode, state_info['alphas_by_episode'],
                           max_rmse=self.max_rmse, color_rmse=self.color_rmse, plotFlag=self.plotFlag)
 
-    def no_test_random_walk_adaptive(self):
+    def no_test_random_walk_adaptive_onecase(self):
         print("\nTesting " + self.id())
 
         # Learner and agent
-        params = dict({'alpha': 0.8,
+        params = dict({'alpha': 1.0,
                        'gamma': 1.0,
-                       'lambda': 0.7,
+                       'lambda': np.nan,
                        'alpha_min': 0.0,
+                       'lambda_min': 0.0,
                        })
-        learner_tdlambda_adaptive = td.LeaTDLambda(self.env, alpha=params['alpha'], gamma=params['gamma'], lmbda=params['lambda'],
-                                                             adjust_alpha=True, adjust_alpha_by_episode=True, alpha_min=params['alpha_min'],
-                                                             lambda_min=0., burnin=False, debug=False)
+        learner_tdlambda_adaptive = td.LeaTDLambdaAdaptive(self.env, alpha=params['alpha'], gamma=params['gamma'],
+                                                             alpha_update_type=AlphaUpdateType.FIRST_STATE_VISIT,  # Every-visit is the default
+                                                             adjust_alpha=True, adjust_alpha_by_episode=False, alpha_min=params['alpha_min'],
+                                                             lambda_min=params['lambda_min'], burnin=False, debug=False)
         agent_rw_tdlambda_adaptive = agents.GeneralAgent(self.policy_rw, learner_tdlambda_adaptive)
 
         # Simulation        
@@ -174,7 +176,7 @@ class Test_TD_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
         _, _, RMSE_by_episode, state_info = sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
                                                      compute_rmse=True,
                                                      verbose=True, verbose_period=100,
-                                                     plot=False, pause=0.1)
+                                                     plot=False, pause=0.001)
 
         # Expected values with alpha = 0.2, gamma = 0.9, lambda = 0.8
         # seed = 1717, nepisodes=20, start_state = 9
@@ -184,11 +186,14 @@ class Test_TD_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
   0.56831782,  0.70843306,  0.        ])
         observed = agent_rw_tdlambda_adaptive.getLearner().getV().getValues()
         print("\nobserved: " + self.array2str(observed))
-        self.plot_results(params,
+        (ax, ax2) = self.plot_results(params,
                           observed, self.V_true, RMSE_by_episode, state_info['alphas_by_episode'],
+                          y2label="(Average) alpha & lambda",
                           max_rmse=self.max_rmse, color_rmse=self.color_rmse, plotFlag=self.plotFlag)
 
-        assert np.allclose(observed, expected, atol=1E-6)
+        ax2.plot(np.arange(self.nepisodes)+1, agent_rw_tdlambda_adaptive.getLearner().lambda_mean_by_episode, color="orange")
+        
+        #assert np.allclose(observed, expected, atol=1E-6)
     #------------------------------------------- TESTS ----------------------------------------
 
 

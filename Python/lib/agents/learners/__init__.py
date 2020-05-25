@@ -96,11 +96,17 @@ class Learner:
 
         # Episode counter
         self.episode = 0
+        
+        # Learning rates info
+        self._alphas = self.alpha * np.ones(self.env.getNumStates())
+        # Learning rate at episode = MAX_EPISODE_FOR_ALPHA_MIN so that we can continue applying a non-bounded alpha
+        self._alphas_at_max_episode = None
         # (Average) alpha used at each episode
         self.alpha_mean_by_episode = []
 
-        # State counts over ALL episodes run after reset
+        # State counts over ALL episodes run after reset, and state counts of just their first visits
         self._state_counts_overall = np.zeros(self.env.getNumStates())
+        self._state_counts_first_visit_overall = np.zeros(self.env.getNumStates())
 
     def reset(self, reset_episode=False, reset_value_functions=False):
         """
@@ -116,13 +122,10 @@ class Learner:
         if reset_episode:
             self.episode = 0
             self.alpha_mean_by_episode = []
-            # State counts over ALL episodes run after reset
+            del self._state_counts_overall, self._state_counts_first_visit_overall, self._alphas
             self._state_counts_overall = np.zeros(self.env.getNumStates())
-            # State counts of first visits over ALL episodes run after reset 
             self._state_counts_first_visit_overall = np.zeros(self.env.getNumStates())
-            # Learning rate for each state (so that we can reduce alpha with time)
             self._alphas = self.alpha * np.ones(self.env.getNumStates())
-            # Learning rate at episode = MAX_EPISODE_FOR_ALPHA_MIN so that we can continuing applying a non-bounded alpha
             self._alphas_at_max_episode = None
 
         # Increase episode counter
@@ -245,7 +248,7 @@ class Learner:
         # NOT when it is by episode since in the latter case all the alphas are the same
         # for all states visited during the episode.
         #print("Trajectory & alphas in episode {}".format(self.episode))
-        #print(np.c_[self.states, self._alphas_used_in_episode]) 
+        #print(np.c_[self.states[:-1], self._alphas_used_in_episode])
         self.alpha_mean_by_episode += [np.mean(self._alphas_used_in_episode)]
 
         if self.debug:

@@ -28,10 +28,12 @@ from matplotlib import pyplot as plt, cm    # cm is for colormaps (e.g. cm.get_c
 if __name__ == "__main__":
     from environments import EnvironmentDiscrete
     from agents import GeneralAgent
+    from agents.learners.td import LeaTDLambdaAdaptive
 else:
     # These relative imports are only accepted when we compile the file as a module
     from .environments import EnvironmentDiscrete
     from .agents import GeneralAgent
+    from .agents.learners.td import LeaTDLambdaAdaptive
 
 
 class Simulator:
@@ -271,6 +273,58 @@ class Simulator:
                                       .format(ntimes_inside_ci95/(episode+1 - 100 + 1)*100))
                     plt.legend(['value', '|error|', '2*SE = 2*sqrt(0.5*(1-0.5)/episode)'])
                     plt.draw()
+
+            if isinstance(learner, LeaTDLambdaAdaptive) and episode == nepisodes - 1:
+                fig_lambdas = plt.figure()
+                #(ax1, ax2) = fig_lambdas.subplots(1,2)
+                ax1 = plt.gca()
+
+                # Plot of state-dependent lambdas
+                # 1) mean(lambda) and std(lambda) by state
+                #nstates = self.env.getNumStates()
+                #states = np.arange(nstates)
+                #lambda_sum = np.zeros_like(states, dtype=float)
+                #lambda2_sum = np.zeros_like(states, dtype=float)
+                #n = np.zeros_like(states)
+                #for i, lmbda in enumerate(learner._lambdas):
+                #    s = learner.states[i]
+                #    lambda_sum[s] += lmbda
+                #    lambda2_sum[s] += lmbda**2
+                #    n[s] += 1
+                #    print("i: {}, state: {}, lambda: {}, lambda_sum: {}, n: {}".format(i, s, lmbda, lambda_sum[s], n[s]))
+                #lambda_mean = np.nan * np.ones_like(states, dtype=float)
+                #lambda_std = np.nan * np.ones_like(states, dtype=float)
+                #for s in range(self.env.getNumStates()):
+                #    if n[s] > 0:
+                #        lambda_mean[s] = lambda_sum[s] / n[s]
+                #        if n[s] > 1:
+                #            lambda_std[s] = np.sqrt( ( lambda2_sum[s] - n[s] * lambda_mean[s]**2 ) / (n[s] - 1) )
+                #ax1.plot(states, lambda_mean, '.-', color="orange")
+                #ax1.errorbar(states, lambda_mean, yerr=lambda_std, capsize=4, color="orange")
+                #ax1.set_title("Mean and StdDev of state-dependent lambdas at the last episode")
+                (lambdas_n, lambdas_mean, lambdas_std) = learner.compute_lambda_statistics_by_state()
+                print("lambda statistics by state:")
+                with np.printoptions(precision=3, suppress=True):
+                    print(np.c_[self.env.all_states, lambdas_n, lambdas_mean, lambdas_std])
+                ax1.plot(self.env.all_states, lambdas_mean, '.-', color="orange")
+                ax1.errorbar(self.env.all_states, lambdas_mean, yerr=lambdas_std, capsize=4, color="orange")
+                ax1.set_ylim((0,1))
+                ax1.set_ylabel("Lambdas mean +/- Std. Dev.")
+                ax1.tick_params(axis='y', colors="orange")
+                ax1.yaxis.label.set_color("orange")
+                ax1.set_title("Lambda statistics over all episodes / State count distribution")
+                # State count distribution
+                ax1sec = ax1.twinx()
+                ax1sec.bar(self.env.all_states, lambdas_n, color="blue", alpha=0.3)
+                ax1sec.tick_params(axis='y', colors="blue")
+                ax1sec.yaxis.label.set_color("blue")
+                ax1sec.set_ylabel("State count")
+                plt.sca(ax1) # Go back to the primary axis
+
+                # 2) Histogram of lambdas for last episode
+                #ax2.hist(learner._lambdas, color="orange")
+                #ax2.set_title("Distribution of state-dependent lambdas at the last episode")
+                #ax2.set_xlim((0, 1))
 
             # Reset the learner for the next iteration
             # (WITHOUT resetting the value functions nor the episode counter)
