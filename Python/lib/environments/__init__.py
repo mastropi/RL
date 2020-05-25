@@ -29,7 +29,7 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
         super().__init__(nS, nA, P, isd)
 
         # All states
-        self.all_states = np.arange(self.getNumStates())
+        self.all_states = list( range(self.getNumStates()) )
         self.terminal_states = terminal_states
 
     #--- Getters
@@ -52,6 +52,9 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
 
     def getTerminalStates(self):
         return self.terminal_states
+
+    def getNonTerminalStates(self):
+        return set(self.all_states).difference( set( self.terminal_states ) )
 
     def isTerminalState(self, state):
         return set([state]).issubset( set(self.terminal_states) )

@@ -10,6 +10,7 @@ import numpy as np
 
 from . import Learner, AlphaUpdateType
 from .value_functions import ValueFunctionApprox
+import Python.lib.utils.plotting as plotting
 
 
 class LeaTDLambda(Learner):
@@ -115,7 +116,12 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
         # bootstrapping information about the value function at the next state)  
         self.state_counts_noreset = np.zeros(self.env.getNumStates())
 
-        # Keep track of lambdas sums by state in order to compute statistics of lambda by state
+        #-- Variables for lambda statistics over all episodes
+        # List of lists to store the lambdas used for each state in each episode
+        self._lambdas_in_episode = [[] for _ in self.env.all_states]
+        # Store all the lambdas over all episodes
+        self._all_lambdas_by_episode = []
+        # For count, mean and std
         self._all_lambdas_n = np.zeros(self.env.getNumStates(), dtype=int)
         self._all_lambdas_sum = np.zeros(self.env.getNumStates(), dtype=float)
         self._all_lambdas_sum2 = np.zeros(self.env.getNumStates(), dtype=float)
@@ -123,18 +129,20 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
         # Keep track of the average lambda by episode
         self.lambda_mean_by_episode = []
 
-    def _reset_at_start_of_episode(self):
-        super()._reset_at_start_of_episode()
-        self._lambdas = []
-
     def reset(self, reset_episode=False, reset_value_functions=False):
         super().reset(reset_episode=reset_episode, reset_value_functions=reset_value_functions)
         if reset_episode:
             self.lambda_mean_by_episode = []
+            self._all_lambdas_by_episode = []
             del self._all_lambdas_n, self._all_lambdas_sum, self._all_lambdas_sum2
             self._all_lambdas_n = np.zeros(self.env.getNumStates(), dtype=int)
             self._all_lambdas_sum = np.zeros(self.env.getNumStates(), dtype=float)
             self._all_lambdas_sum2 = np.zeros(self.env.getNumStates(), dtype=float)
+
+    def _reset_at_start_of_episode(self):
+        super()._reset_at_start_of_episode()
+        self._lambdas = []
+        self._lambdas_in_episode = [[] for _ in self.env.all_states]
 
     def setParams(self, alpha=None, gamma=None, lmbda=None, adjust_alpha=None, alpha_update_type=None,
                   adjust_alpha_by_episode=None, alpha_min=0.,
@@ -176,7 +184,8 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
             #lambda_adaptive = 1 - (1 - self.lambda_min) * np.exp( -np.abs(delta) )
             #print("episode: {}, t: {}, lambda (adaptive) = {}".format(self.episode, t, lambda_adaptive))
         self._lambdas += [lambda_adaptive]
-        # Update the sum of lambdas for the final lambda statistics by state
+        # Update the history of lambdas used
+        self._lambdas_in_episode[state] += [lambda_adaptive]
         self._all_lambdas_n[state] += 1 
         self._all_lambdas_sum[state] += lambda_adaptive 
         self._all_lambdas_sum2[state] += lambda_adaptive**2 
@@ -194,9 +203,10 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
             if self.debug:
                 self._plotZ()
             self.store_trajectory(next_state)
-            self._update_state_counts(t+1, next_state)            
+            self._update_state_counts(t+1, next_state)
+            self._store_lambdas_in_episode()            
 
-            # Update alpha for the next iteration for "by episode" updates
+            # Update alpha for the next episode for "by episode" updates
             if self.adjust_alpha_by_episode:
                 for state in range(self.env.getNumStates()):
                     if not self.env.isTerminalState(state):
@@ -214,6 +224,11 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
     
             #input("Press Enter...")
 
+    def _store_lambdas_in_episode(self):
+        #print("lambdas in episode {}".format(self.episode))
+        #print(self._lambdas_in_episode)
+        self._all_lambdas_by_episode += [[self._lambdas_in_episode[s] for s in self.env.all_states]]
+
     def final_report(self, T):
         super().final_report(T)
         # Store the (average) _lambdas by episode
@@ -229,3 +244,96 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
         lambdas_std = [np.sqrt( (S2 - S**2/n) / (n - 1) )
                                 for n, S, S2 in zip(self._all_lambdas_n, self._all_lambdas_sum, self._all_lambdas_sum2)]
         return lambdas_n, lambdas_mean, lambdas_std
+
+    # GETTERS
+    def getLambdasByEpisodeAndState(self):
+        return self._all_lambdas_by_episode
+
+    # PLOTTING FUNCTIONS
+    def plot_info(self, episode, nepisodes):
+        """
+        Plots selected information about the experiment run.
+
+        Arguments:
+        episode: int
+            Number of episode of interest for the plot.
+        nepisodes: int
+            Number of total episodes to run or already run
+        """
+
+        import matplotlib.pyplot as plt
+
+        fig_lambdas = plt.figure()
+        #(ax1, ax2) = fig_lambdas.subplots(1,2)
+        ax1 = plt.gca()
+
+        #---- Plot of state-dependent lambdas
+        #-- 1) mean(lambda) and std(lambda) by state
+
+        # Option 1: Compute the mean and standard deviation of lambdas by state for last episode 
+        #nstates = self.env.getNumStates()
+        #states = np.arange(nstates)
+        #lambda_sum = np.zeros_like(states, dtype=float)
+        #lambda2_sum = np.zeros_like(states, dtype=float)
+        #n = np.zeros_like(states)
+        #for i, lmbda in enumerate(self._lambdas):
+        #    s = self.states[i]
+        #    lambda_sum[s] += lmbda
+        #    lambda2_sum[s] += lmbda**2
+        #    n[s] += 1
+        #    print("i: {}, state: {}, lambda: {}, lambda_sum: {}, n: {}".format(i, s, lmbda, lambda_sum[s], n[s]))
+        #lambda_mean = np.nan * np.ones_like(states, dtype=float)
+        #lambda_std = np.nan * np.ones_like(states, dtype=float)
+        #for s in range(self.env.getNumStates()):
+        #    if n[s] > 0:
+        #        lambda_mean[s] = lambda_sum[s] / n[s]
+        #        if n[s] > 1:
+        #            lambda_std[s] = np.sqrt( ( lambda2_sum[s] - n[s] * lambda_mean[s]**2 ) / (n[s] - 1) )
+        #ax1.plot(states, lambda_mean, '.-', color="orange")
+        #ax1.errorbar(states, lambda_mean, yerr=lambda_std, capsize=4, color="orange")
+        #ax1.set_title("Mean and StdDev of state-dependent lambdas at the last episode")
+
+        # Option 2: Use the statistics tracked during experiment to plot lambda statistics by state 
+        #(lambdas_n, lambdas_mean, lambdas_std) = self.compute_lambda_statistics_by_state()
+        #print("lambda statistics by state:")
+        #with np.printoptions(precision=3, suppress=True):
+        #    print(np.c_[self.env.all_states, lambdas_n, lambdas_mean, lambdas_std])
+        #ax1.plot(self.env.all_states, lambdas_mean, '.-', color="orange")
+        #ax1.errorbar(self.env.all_states, lambdas_mean, yerr=lambdas_std, capsize=4, color="orange")
+
+        # Option 3: Boxplots by state based on whole history of lambdas
+        nplots = 5
+        episodes_to_show = lambda nepisodes, nplots: set( list( range(0, nepisodes, max(1, int( (nepisodes-1)/(nplots-1) ))) ) + [nepisodes-1] )
+        episodes_to_consider = lambda start, stop: range(start, stop)
+        #for e in episodes_to_show(nepisodes, nplots):
+        #    print("Plotting lambdas for episode {}:".format(e))
+        #    print(self._all_lambdas_by_episode[e])
+        #    ax1.violinplot(self._all_lambdas_by_episode[e], showmeans=True)
+        lambdas_by_state = [[] for _ in self.env.all_states]
+        for e in episodes_to_consider(0, nepisodes):
+            for s in self.env.all_states:
+                lambdas_by_state[s] += self._all_lambdas_by_episode[e][s]
+        states2plot = [s for s in self.env.getNonTerminalStates() if self._state_counts_overall[s] > 0] 
+        #print("lambdas_by_state for plotting:")
+        #print([lambdas_by_state[s] for s in states2plot])
+        plotting.violinplots(ax1, [lambdas_by_state[s] for s in states2plot], positions=states2plot,
+                                  color_body="orange", color_lines="orange", color_mean="red")
+
+        # Finalize the setup of the graphs
+        ax1.set_ylim((0,1.02))
+        ax1.set_ylabel("Lambdas distribution by state")
+        ax1.tick_params(axis='y', colors="orange")
+        ax1.yaxis.label.set_color("orange")
+        ax1.set_title("Lambda distribution for selected episodes / State count distribution")
+        ## State count distribution
+        ax1sec = ax1.twinx()
+        ax1sec.bar(self.env.all_states, self.getStateCounts(), color="blue", alpha=0.2)
+        ax1sec.tick_params(axis='y', colors="blue")
+        ax1sec.yaxis.label.set_color("blue")
+        ax1sec.set_ylabel("State count")
+        plt.sca(ax1) # Go back to the primary axis
+
+        #-- 2) Histogram of lambdas for last episode
+        #ax2.hist(self._lambdas, color="orange")
+        #ax2.set_title("Distribution of state-dependent lambdas at the last episode")
+        #ax2.set_xlim((0, 1))
