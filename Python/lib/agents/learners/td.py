@@ -57,7 +57,8 @@ class LeaTDLambda(Learner):
         self._updateZ(state, self.lmbda)
         delta = reward + self.gamma * self.V.getValue(next_state) - self.V.getValue(state)
         #print("episode {}, state {}: count = {}, alpha = {}".format(self.episode, state, self._state_counts_overall[state], self._alphas[state]))
-        self.V.setWeights( self.V.getWeights() + self._alphas[state] * delta * self._z )
+        if delta != 0.0:
+            self.V.setWeights( self.V.getWeights() + self._alphas[state] * delta * self._z )
 
         # Update alpha for the next iteration for "by state counts" update
         if not self.adjust_alpha_by_episode:
@@ -173,16 +174,22 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
             #print("episode: {}, t: {}, next_state: {}, state_counts[{}] = {} \n\tstate counts: {}\n\tlambda(adap)={}" \
             #      .format(self.episode, t, next_state, next_state, self.state_counts_noreset[next_state], self.state_counts_noreset, lambda_adaptive))
         else:
-            # Adaptive lambda
-            # Define the relative state value change by dividing the change by the current state value
-            # (if the current state value is 0, then set the change to infinite unless the change is 0 as well)
-            delta_relative = delta / state_value if state_value != 0 \
-                                                 else 0. if delta == 0. \
-                                                 else np.Inf
+            #-- Adaptive lambda
+            # Define the relative target error delta by dividing delta to a reference value defined below
+            #ref_value = state_value        # reference value is the value of the current state
+            ref_value = np.mean( np.abs(self.V.getValues()) )   # reference value is the average value over all states
+            delta_relative = delta / ref_value if ref_value != 0 \
+                                               else 0. if delta == 0. \
+                                               else np.Inf
+            # Relative delta that prevents division by 0 (i.e. delta_relative = exp(|delta|) / exp(|value|))
             #delta_relative = np.exp( np.abs(delta) - np.abs(state_value) )
+
+            # Compute lambda as a function of delta or relative delta
             lambda_adaptive = 1 - (1 - self.lambda_min) * np.exp( -np.abs(delta_relative) )
             #lambda_adaptive = 1 - (1 - self.lambda_min) * np.exp( -np.abs(delta) )
             #print("episode: {}, t: {}, lambda (adaptive) = {}".format(self.episode, t, lambda_adaptive))
+
+        # Keep history of used lambdas
         self._lambdas += [lambda_adaptive]
         # Update the history of lambdas used
         self._lambdas_in_episode[state] += [lambda_adaptive]
@@ -193,7 +200,8 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
         # Update the eligibility trace
         self._updateZ(state, lambda_adaptive)
         # Update the weights
-        self.V.setWeights( self.V.getWeights() + self._alphas[state] * delta * self._z )
+        if delta != 0.0:
+            self.V.setWeights( self.V.getWeights() + self._alphas[state] * delta * self._z )
 
         # Update alpha for the next iteration for "by state counts" update
         if not self.adjust_alpha_by_episode:
@@ -260,12 +268,26 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
         nepisodes: int
             Number of total episodes to run or already run
         """
-
         import matplotlib.pyplot as plt
 
-        fig_lambdas = plt.figure()
-        #(ax1, ax2) = fig_lambdas.subplots(1,2)
-        ax1 = plt.gca()
+        # Finalize setup of all possible graphs created here
+        def finalize_plot(ax, state_counts, title="Lambda distribution for selected episodes / State count distribution"):
+            ax.set_title(title)
+
+            ax.set_xticks(self.env.all_states)
+            ax.set_xlim((0, self.env.getNumStates()-1))
+            ax.set_ylim((0,1.02))
+            ax.set_ylabel("Lambdas distribution by state")
+            ax.tick_params(axis='y', colors="orange")
+            ax.yaxis.label.set_color("orange")
+
+            # State count distribution
+            ax1sec = ax.twinx()
+            ax1sec.bar(self.env.all_states, state_counts, color="blue", alpha=0.2)
+            ax1sec.tick_params(axis='y', colors="blue")
+            ax1sec.yaxis.label.set_color("blue")
+            ax1sec.set_ylabel("State count")
+            plt.sca(ax) # Go back to the primary axis
 
         #---- Plot of state-dependent lambdas
         #-- 1) mean(lambda) and std(lambda) by state
@@ -302,36 +324,55 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
         #ax1.errorbar(self.env.all_states, lambdas_mean, yerr=lambdas_std, capsize=4, color="orange")
 
         # Option 3: Boxplots by state based on whole history of lambdas
-        nplots = 5
         episodes_to_show = lambda nepisodes, nplots: set( list( range(0, nepisodes, max(1, int( (nepisodes-1)/(nplots-1) ))) ) + [nepisodes-1] )
-        episodes_to_consider = lambda start, stop: range(start, stop)
+        episodes_to_consider = lambda start, stop: range(start, stop+1)
+
         #for e in episodes_to_show(nepisodes, nplots):
         #    print("Plotting lambdas for episode {}:".format(e))
         #    print(self._all_lambdas_by_episode[e])
         #    ax1.violinplot(self._all_lambdas_by_episode[e], showmeans=True)
         lambdas_by_state = [[] for _ in self.env.all_states]
-        for e in episodes_to_consider(0, nepisodes):
+        for e in episodes_to_consider(0, nepisodes-1):
             for s in self.env.all_states:
                 lambdas_by_state[s] += self._all_lambdas_by_episode[e][s]
         states2plot = [s for s in self.env.getNonTerminalStates() if self._state_counts_overall[s] > 0] 
         #print("lambdas_by_state for plotting:")
         #print([lambdas_by_state[s] for s in states2plot])
-        plotting.violinplots(ax1, [lambdas_by_state[s] for s in states2plot], positions=states2plot,
-                                  color_body="orange", color_lines="orange", color_mean="red")
 
-        # Finalize the setup of the graphs
-        ax1.set_ylim((0,1.02))
-        ax1.set_ylabel("Lambdas distribution by state")
-        ax1.tick_params(axis='y', colors="orange")
-        ax1.yaxis.label.set_color("orange")
-        ax1.set_title("Lambda distribution for selected episodes / State count distribution")
-        ## State count distribution
-        ax1sec = ax1.twinx()
-        ax1sec.bar(self.env.all_states, self.getStateCounts(), color="blue", alpha=0.2)
-        ax1sec.tick_params(axis='y', colors="blue")
-        ax1sec.yaxis.label.set_color("blue")
-        ax1sec.set_ylabel("State count")
-        plt.sca(ax1) # Go back to the primary axis
+        #plt.figure()
+        #ax1 = plt.gca()
+        # Note: the violinpot() function does NOT accept an empty list for plotting nor NaN values
+        # (when at least a NaN value is present, nothing is shown for the corresponding group!)   
+        #plotting.violinplot(ax1, [lambdas_by_state[s] for s in states2plot], positions=states2plot,
+                            #color_body="orange", color_lines="orange", color_means="red")
+        #finalize_plot(ax1, self.env.getStateCounts())
+
+        #-- Plots by group of episodes in the experiment (to see how lambdas by state distribution evolve with time)   
+        fig = plt.figure()
+        nplots = 4
+        axes = fig.subplots(2, int(nplots/2))
+
+        episode_step = max(1, int(nepisodes / nplots))      # Ex: int(50/4) = 48/4 = 12 
+        for idx_ax, ax in enumerate(axes.reshape(nplots)):
+            episode_begin = idx_ax*episode_step             # Ex: 0, 12, 24, 36
+            episode_end = episode_begin + episode_step - 1 if idx_ax < nplots - 1 else nepisodes - 1
+                ## Ex: 11, 23, 35, 49 (for the last block of episodes, include ALL remaining episodes)
+            #print("Plotting lambdas for episodes from {} to {}...".format(episode_begin+1, episode_end+1))
+            lambdas_by_state = [[] for _ in self.env.all_states]
+            nvisits_by_state = np.zeros(self.env.getNumStates())
+            for e in episodes_to_consider(episode_begin, episode_end):
+                for s in self.env.all_states:
+                    lambdas_by_state[s] += self._all_lambdas_by_episode[e][s]
+                    nvisits_by_state[s] += len(self._all_lambdas_by_episode[e][s])
+            states2plot = [s for s in self.env.getNonTerminalStates() if nvisits_by_state[s] > 0]
+            #print("lambdas_by_state for plotting:")
+            #print([lambdas_by_state[s] for s in states2plot])
+            # Note: the violinpot() function does NOT accept an empty list for plotting nor NaN values
+            # (when at least a NaN value is present, nothing is shown for the corresponding group!)
+            plotting.violinplot(ax, [lambdas_by_state[s] for s in states2plot], positions=states2plot,
+                                color_body="orange", color_lines="orange", color_means="red")
+            finalize_plot(ax, nvisits_by_state, title="Episodes {} thru {}".format(episode_begin+1, episode_end+1))
+        fig.suptitle("Lambdas distribution by state for different periods of the experiment")
 
         #-- 2) Histogram of lambdas for last episode
         #ax2.hist(self._lambdas, color="orange")

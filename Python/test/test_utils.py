@@ -131,13 +131,18 @@ class EpisodeSimulation:
             title = "alpha={:.2f}, gamma={:.2f}, lambda={:.2f}, {} episodes" \
                          .format(params['alpha'], params['gamma'], params['lambda'], self.nepisodes)
 
+            all_states = np.arange(self.nS+2)
+            all_episodes = np.arange(self.nepisodes)+1
+
             plt.figure()
-            plt.plot(np.arange(self.nS+2), V_true, 'b.-')
-            plt.plot(np.arange(self.nS+2), V_estimated, 'r.-')
+            plt.plot(all_states, V_true, 'b.-')
+            plt.plot(all_states, V_estimated, 'r.-')
+            ax = plt.gca()
+            ax.set_xticks(all_states)
             plt.title(title)
-    
+
             plt.figure()
-            plt.plot(np.arange(self.nepisodes)+1, RMSE_by_episode, color=color_rmse)
+            plt.plot(all_episodes, RMSE_by_episode, color=color_rmse)
             #plt.xticks(np.arange(self.nepisodes)+1)
             ax = plt.gca()
             #ax.set_ylim((0, np.max(RMSE_by_episode)))
@@ -147,7 +152,7 @@ class EpisodeSimulation:
             ax.set_title(title)
             
             ax2 = ax.twinx()
-            ax2.plot(np.arange(self.nepisodes)+1, alphas_by_episode, "k:")
+            ax2.plot(all_episodes, alphas_by_episode, "k:")
             ax2.set_ylabel(y2label)
             ax2.axhline(y=params['alpha_min'], color="gray")
             

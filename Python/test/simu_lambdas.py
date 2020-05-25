@@ -29,15 +29,17 @@ from test_utils import plot_rmse_by_episode
 # Directories
 resultsdir = "../../RL-001-MemoryManagement/results/SimulateTDLambda-DifferenLambdas&Adaptive"
 
+
+############################ EXPERIMENT SETUP #################################
 # The environment
-nstates = 9 # Number of states including terminal states
-env = gridworlds.EnvGridworld1D(length=nstates)
+nstates = 19 # Number of states excluding terminal states
+env = gridworlds.EnvGridworld1D(length=nstates+2)
 
 # Simulation setup
 gamma = 1.0
 seed = 1717
 nexperiments = 10
-nepisodes = 1000
+nepisodes = 200
 start = int((nstates - 1) / 2)
 verbose = True
 verbose_period = 100
@@ -90,7 +92,7 @@ ax.spines['left'].set_color("red")
 ax.tick_params(axis='y', colors="red")
 ax.yaxis.label.set_color("red")
 ax2 = ax.twinx()
-ax2.bar(env.all_states[[0,nstates-1]], N_mean[[0,nstates-1]], color="blue")
+ax2.bar(np.array(env.all_states)[[0,nstates+1]], N_mean[[0,nstates+1]], color="blue")
 ax2.set_ylabel("Distribution over terminal states")
 ax2.spines['right'].set_color("blue")
 ax2.tick_params(axis='y', colors="blue")
@@ -130,7 +132,7 @@ ax.set_title("Distribution of state visits in all {} episodes (seed={})".format(
 #
 
 results_td = []
-lambdas = [0, 0.2, 0.4, 0.8, 0.9, 0.95]
+lambdas = [0, 0.4, 0.8, 0.9]
 
 #alphas_td = [8, 7.5, 7, 3, 2, 1]        # 10 times larger than the optimum in constant-alpha case
 alphas_td = np.repeat(1, len(lambdas))
@@ -203,7 +205,7 @@ lambda_min = 0.0
 #alphas_td_adap.reverse()
 #adjust_alpha_by_episode = False
 
-alphas_td_adap = [1, 2, 3, 5]
+alphas_td_adap = [1, 3, 5]
 adjust_alpha_by_episode = False
 
 #alphas_td_adap = [1, 2, 3, 5]
@@ -263,7 +265,7 @@ pickle.load(file)
 file.close()
 
 colormap = cm.get_cmap("jet")
-max_alpha = max(alphas_td)
+max_alpha = 1       # max(alpha_td)
 max_rmse = 0.8
 fontsize = 14
 

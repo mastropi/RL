@@ -54,7 +54,7 @@ class Test_TD_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
         cls.color_rmse = "red"
 
         # Environment
-        cls.nS = 19             # Number of non-terminal states in the 1D gridworld
+        cls.nS = 19         # Number of non-terminal states in the 1D gridworld
         cls.env = gridworlds.EnvGridworld1D(length=cls.nS+2)  # nS states plus the two terminal states
 
         # True state value function when gamma = 1.0
