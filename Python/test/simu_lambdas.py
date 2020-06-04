@@ -15,7 +15,7 @@ import pickle
 
 #from Python.lib import environments, agents
 from Python.lib.environments import gridworlds
-from Python.lib.agents import GeneralAgent
+from Python.lib.agents import GenericAgent
 from Python.lib.agents.policies import random_walks
 from Python.lib.agents.learners import mc
 from Python.lib.agents.learners import td
@@ -58,7 +58,7 @@ learner_td_adap = td.LeaTDLambdaAdaptive(env, gamma=gamma, adjust_alpha=True,
 # MC (lambda-return)
 adjust_alpha_by_episode = False
 learner_mc.setParams(adjust_alpha_by_episode=adjust_alpha_by_episode)
-agent = GeneralAgent(pol_rw, learner_mc)
+agent = GenericAgent(pol_rw, learner_mc)
 
 # Run the simulation and store the results
 sim = simulators.Simulator(env, agent, seed=seed, debug=debug)
@@ -146,7 +146,7 @@ for idx_lambda, lmbda in enumerate(lambdas):
     # Reset learner and agent (i.e. erase all memory from a previous run!)
     learner_td.setParams(alpha=alphas_td[idx_lambda], lmbda=lmbda, adjust_alpha_by_episode=adjust_alpha_by_episode)
     learner_td.reset(reset_episode=True, reset_value_functions=True)
-    agent = GeneralAgent(pol_rw, learner_td)
+    agent = GenericAgent(pol_rw, learner_td)
 
     # NOTE: Setting the seed here implies that each set of experiments
     # (i.e. for each combination of alpha and lambda) yields the same outcome in terms
@@ -216,7 +216,7 @@ for idx_alpha, alpha in enumerate(alphas_td_adap):
     # Reset learner and agent (i.e. erase all memory from a previous run!)
     learner_td_adap.setParams(alpha=alpha, lambda_min=lambda_min, adjust_alpha_by_episode=adjust_alpha_by_episode)
     learner_td_adap.reset(reset_episode=True, reset_value_functions=True)
-    agent = GeneralAgent(pol_rw, learner_td_adap)
+    agent = GenericAgent(pol_rw, learner_td_adap)
 
     # NOTE: Setting the seed here implies that each set of experiments
     # (i.e. for each combination of alpha and lambda) yields the same outcome in terms

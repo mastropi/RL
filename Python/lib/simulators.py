@@ -27,13 +27,13 @@ from matplotlib import pyplot as plt, cm    # cm is for colormaps (e.g. cm.get_c
 
 if __name__ == "__main__":
     from environments import EnvironmentDiscrete
-    from agents import GeneralAgent
+    from agents import GenericAgent
     from agents.learners.td import LeaTDLambdaAdaptive
     from utils.computing import rmse
 else:
     # These relative imports are only accepted when we compile the file as a module
     from .environments import EnvironmentDiscrete
-    from .agents import GeneralAgent
+    from .agents import GenericAgent
     from .agents.learners.td import LeaTDLambdaAdaptive
     from .utils.computing import rmse
 
@@ -49,10 +49,10 @@ class Simulator:
 #            raise TypeError("The environment must be of type {} from the {} module ({})" \
 #                            .format(EnvironmentDiscrete.__name__, EnvironmentDiscrete.__module__, env.__class__))
         # TODO: (2020/04/12) Fix the following check on the type of agent as it does not work...
-        # even though the class of agent is Python.lib.agents.GeneralAgent
-#        if not isinstance(agent, GeneralAgent):
+        # even though the class of agent is Python.lib.agents.GenericAgent
+#        if not isinstance(agent, GenericAgent):
 #            raise TypeError("The agent must be of type {} from the {} module ({})" \
-#                            .format(GeneralAgent.__name__, GeneralAgent.__module__, agent.__class__))
+#                            .format(GenericAgent.__name__, GenericAgent.__module__, agent.__class__))
 
         self.debug = debug
 
@@ -468,7 +468,7 @@ if __name__ == "__main__":
             # Reset learner and agent (i.e. erase all memory from a previous run!)
             learner.setParams(alpha=alpha, gamma=gamma, lmbda=lmbda)
             learner.reset(reset_episode=True, reset_value_functions=True)
-            agent = GeneralAgent(pol_rw,
+            agent = GenericAgent(pol_rw,
                                  learner)
             # NOTE: Setting the seed here implies that each set of experiments
             # (i.e. for each combination of alpha and lambda) yields the same outcome in terms
@@ -522,7 +522,7 @@ if __name__ == "__main__":
 
     # JUST ONE FINAL RUN
     #learner.setParams(alpha=0.3, gamma=gamma, lmbda=1)
-    #agent = GeneralAgent(pol_rw,
+    #agent = GenericAgent(pol_rw,
     #                     learner)
     #sim = Simulator(env, agent)
     #rmse_mean, rmse_se = sim.simulate(nexperiments=nexperiments, nepisodes=nepisodes, verbose=verbose)

@@ -104,7 +104,7 @@ class Test_MC_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
                                                     adjust_alpha=adjust_alpha, adjust_alpha_by_episode=adjust_alpha_by_episode,
                                                     alpha_min=alpha_min,
                                                     debug=False)
-        agent_rw_mc = agents.GeneralAgent(self.policy_rw, learner_mclambda)
+        agent_rw_mc = agents.GenericAgent(self.policy_rw, learner_mclambda)
         sim = simulators.Simulator(self.env, agent_rw_mc, debug=False)
         _, _, RMSE_by_episode, state_info = \
                                             sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
@@ -129,7 +129,7 @@ class Test_MC_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
                                           alpha_update_type=AlphaUpdateType.FIRST_STATE_VISIT,  # First-visit is the default
                                           adjust_alpha=True, adjust_alpha_by_episode=False, alpha_min=params['alpha_min'],
                                           debug=False)
-        agent_rw_mclambda = agents.GeneralAgent(self.policy_rw, learner_mclambda)
+        agent_rw_mclambda = agents.GenericAgent(self.policy_rw, learner_mclambda)
 
         # Simulation
         sim = simulators.Simulator(self.env, agent_rw_mclambda, debug=False)
@@ -154,7 +154,7 @@ class Test_MC_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
                        'alpha_min': 0.0,
                        })
         learner_mclambda_adaptive = mc.LeaMCLambdaAdaptive(self.env, alpha=params['alpha'], gamma=params['gamma'], lmbda=params['lambda'])
-        agent_rw_mclambda_adaptive = agents.GeneralAgent(self.policy_rw, learner_mclambda_adaptive)
+        agent_rw_mclambda_adaptive = agents.GenericAgent(self.policy_rw, learner_mclambda_adaptive)
 
         # Simulation
         sim = simulators.Simulator(self.env, agent_rw_mclambda_adaptive, debug=False)

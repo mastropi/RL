@@ -17,8 +17,7 @@ Each agent is created with a policy and a learner class and implements the follo
 #from .policies.random_walks import PolRandomWalkDiscrete
 #from .learners.td_lambda import LeaTDLambda
 
-
-class GeneralAgent:
+class GenericAgent:
     "Class that holds the information of the policy and the learner associated to the agent"
 
     def __init__(self, policy, learner):

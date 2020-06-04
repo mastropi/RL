@@ -115,7 +115,7 @@ class Test_TD_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
                                                     lmbda=params_alpha_gamma_lambda[2],
                                                     adjust_alpha=adjust_alpha, adjust_alpha_by_episode=adjust_alpha_by_episode, alpha_min=0.0,
                                                     debug=False)
-        agent_rw_tdlambda = agents.GeneralAgent(self.policy_rw, learner_tdlambda)
+        agent_rw_tdlambda = agents.GenericAgent(self.policy_rw, learner_tdlambda)
 
         # Simulation
         sim = simulators.Simulator(self.env, agent_rw_tdlambda, debug=False)
@@ -140,7 +140,7 @@ class Test_TD_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
                                                     alpha_update_type=AlphaUpdateType.FIRST_STATE_VISIT,  # Every-visit is the default
                                                     adjust_alpha=True, adjust_alpha_by_episode=False, alpha_min=params['alpha_min'],
                                                     debug=False)
-        agent_rw_tdlambda = agents.GeneralAgent(self.policy_rw, learner_tdlambda)
+        agent_rw_tdlambda = agents.GenericAgent(self.policy_rw, learner_tdlambda)
 
         # Simulation
         sim = simulators.Simulator(self.env, agent_rw_tdlambda, debug=False)
@@ -169,7 +169,7 @@ class Test_TD_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
                                                              alpha_update_type=AlphaUpdateType.FIRST_STATE_VISIT,  # Every-visit is the default
                                                              adjust_alpha=True, adjust_alpha_by_episode=False, alpha_min=params['alpha_min'],
                                                              lambda_min=params['lambda_min'], burnin=False, debug=False)
-        agent_rw_tdlambda_adaptive = agents.GeneralAgent(self.policy_rw, learner_tdlambda_adaptive)
+        agent_rw_tdlambda_adaptive = agents.GenericAgent(self.policy_rw, learner_tdlambda_adaptive)
 
         # Simulation        
         sim = simulators.Simulator(self.env, agent_rw_tdlambda_adaptive, debug=False)
