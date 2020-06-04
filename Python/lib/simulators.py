@@ -29,13 +29,15 @@ if __name__ == "__main__":
     from environments import EnvironmentDiscrete
     from agents import GeneralAgent
     from agents.learners.td import LeaTDLambdaAdaptive
+    from utils.computing import rmse
 else:
     # These relative imports are only accepted when we compile the file as a module
     from .environments import EnvironmentDiscrete
     from .agents import GeneralAgent
     from .agents.learners.td import LeaTDLambdaAdaptive
+    from .utils.computing import rmse
 
-
+# TODO: (2020/05) Rename this class to SimulatorDiscrete as it simulates on a discrete environment
 class Simulator:
     """
     Simulator class that runs a Reinforcement Learning simulation on a given environment `env`
@@ -384,32 +386,6 @@ class Simulator:
                             / np.sqrt(nexperiments)
 
         return N_mean, RMSE_mean, RMSE_se, RMSE_by_episodes_mean, RMSE_by_episodes_se, learning_info
-
-
-# TODO: (2020/04/11) Move this function to an util module
-def rmse(Vtrue, Vest, weights=None):
-    """Root Mean Square Error (RMSE) between Vtrue and Vest, weighted or not weighted by weights.
-    @param Vtrue: True Value function.
-    @param Vest: Estimated value function.
-    @param weights: Number of visits for each value.
-    """
-
-    assert type(Vtrue) == np.ndarray and type(Vest) == np.ndarray and (weights is None or type(weights) == np.ndarray), \
-            "The first three input parameters are numpy arrays"
-    assert Vtrue.shape == Vest.shape and (weights is None or Vest.shape == weights.shape), \
-            "The first three input parameters have the same shape({}, {}, {})" \
-            .format(Vtrue.shape, Vest.shape, weights and weights.shape or "")
-
-    if np.sum(weights) == 0:
-        raise Warning("The weights sum up to zero. They will not be used to compute the RMSE.")
-        weights = None
-
-    if weights is not None:
-        mse = np.sum( weights * (Vtrue - Vest)**2 ) / np.sum(weights)
-    else:
-        mse = np.mean( (Vtrue - Vest)**2 )
-
-    return np.sqrt(mse)
 
 
 if __name__ == "__main__":
