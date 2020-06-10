@@ -27,7 +27,7 @@ class Test_QB_Particles(unittest.TestCase):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.capacity = 10
+        self.log = False
         self.rate_birth = 1.2
         self.rate_death = 1.4
         self.nservers = 1
@@ -93,7 +93,7 @@ class Test_QB_Particles(unittest.TestCase):
         print("\nRunning test " + self.id())
         nparticles = 5
         seed = 1717
-        est = estimators.EstimatorQueueBlockingFlemingViot(nparticles, queue=self.queue, seed=seed)
+        est = estimators.EstimatorQueueBlockingFlemingViot(nparticles, queue=self.queue, seed=seed, log=False)
 
         # Changes on the last time the system changed when a new event occurs
         # OLD
@@ -106,71 +106,92 @@ class Test_QB_Particles(unittest.TestCase):
         for it in range(niter):
             # The list storing the times when particles became active is sorted increasingly
             est.update_state(it+1)
-            
-            print("------ END OF ITER {} of {} ------".format(it+1, niter))
+
+            if self.log:
+                print("------ END OF ITER {} of {} ------".format(it+1, niter))
             N1 = n_active_particles = est.get_number_active_particles()
             particles, activation_times = est.get_all_activation_times()
-            with np.printoptions(precision=3):
-                print("activation times: {}".format(np.array(activation_times)))
-                assert sorted(activation_times) == activation_times, \
-                        "The absolute times of activation are sorted: {}".format(np.array(activation_times))
+            if self.log:
+                with np.printoptions(precision=3):
+                    print("activation times: {}".format(np.array(activation_times)))
+            assert sorted(activation_times) == activation_times, \
+                    "The absolute times of activation are sorted: {}".format(np.array(activation_times))
             assert len(activation_times) >= N1, \
                     "The number of activation times ({}) is at least equal to the number of active particles (N1 = {})" \
                     .format(len(activation_times), N1)
 
             particles, absorption_times = est.get_all_absorption_times()
-            with np.printoptions(precision=3):
-                print("absorption times: {}".format(np.array(absorption_times)))
-                assert sorted(absorption_times) == absorption_times, \
-                        "The (relative) absorption times are sorted: {}".format(np.array(absorption_times))            
+            if self.log:
+                with np.printoptions(precision=3):
+                    print("absorption times: {}".format(np.array(absorption_times)))
+            assert sorted(absorption_times) == absorption_times, \
+                    "The (relative) absorption times are sorted: {}".format(np.array(absorption_times))            
 
             # The list storing the time segments where statistics are computed is sorted
-            time_segments = est.get_time_segments()
-            with np.printoptions(precision=3):
-                print("time segments: {}".format(np.array(time_segments)))
-                assert sorted(time_segments) == time_segments, \
-                        "The time segments are sorted: {}".format(np.array(time_segments))
-            assert time_segments[0] == 0.0, \
+            survival_time_segments = est.get_survival_time_segments()
+            if self.log:
+                with np.printoptions(precision=3):
+                    print("time segments: {}".format(np.array(survival_time_segments)))
+            assert sorted(survival_time_segments) == survival_time_segments, \
+                    "The time segments are sorted: {}".format(np.array(survival_time_segments))
+            assert survival_time_segments[0] == 0.0, \
                     "The first element of the time segments array ({}) is equal to 0" \
-                    .format(time_segments[0])
-            #assert time_segments[1:] == absorption_times, \
+                    .format(survival_time_segments[0])
+            #assert survival_time_segments[1:] == absorption_times, \
             #        "The ending time segments ({}) are equal to the absorption times ({})" \
-            #        .format(time_segments, absorption_times)
+            #        .format(survival_time_segments, absorption_times)
 
             counts_particles_alive_by_elapsed_time = est.get_counts_particles_alive_by_elapsed_time()
-            print("Counts by segment: {}".format(counts_particles_alive_by_elapsed_time))
-            assert np.all( counts_particles_alive_by_elapsed_time == np.arange(len(time_segments)-1, -1, -1) ), \
+            if self.log:
+                print("Counts by segment: {}".format(counts_particles_alive_by_elapsed_time))
+            assert np.all( counts_particles_alive_by_elapsed_time == np.arange(len(survival_time_segments)-1, -1, -1) ), \
                     "Since the time segments are defined by jumps in the count of active particles" \
                     " they should decrease linearly to 0 starting at {} ({})" \
-                    .format(len(time_segments)-1, counts_particles_alive_by_elapsed_time)
-            print("------ END OF ITER {} of {} ------".format(it+1, niter))
+                    .format(len(survival_time_segments)-1, counts_particles_alive_by_elapsed_time)
+            if self.log:
+                print("------ END OF ITER {} of {} ------".format(it+1, niter))
 
         # At the last iteration we should finalize the counts of active praticles
         # by counting all the particles that are still active 
         est.finalize()
 
-        time_segments = est.get_time_segments()
-        with np.printoptions(precision=3):
-            print("time segments: {}".format(np.array(time_segments)))
-            assert sorted(time_segments) == time_segments, \
-                    "The time segments are sorted: {}".format(np.array(time_segments))
-        assert time_segments[0] == 0.0, \
-                "The first element of the time segments array ({}) is equal to 0" \
-                .format(time_segments[0])
+        survival_time_segments = est.get_survival_time_segments()
+        with np.printoptions(precision=3, suppress=True):
+            print("Survival time segments: {}".format(np.array(survival_time_segments)))
+            assert sorted(survival_time_segments) == survival_time_segments, \
+                    "The survival time segments are sorted: {}".format(np.array(survival_time_segments))
+        assert survival_time_segments[0] == 0.0, \
+                "The first element of the survival time segments array ({}) is equal to 0" \
+                .format(survival_time_segments[0])
 
         counts_particles_alive_by_elapsed_time = est.get_counts_particles_alive_by_elapsed_time()
-        print("Counts by segment: {}".format(counts_particles_alive_by_elapsed_time))
-        assert np.all( counts_particles_alive_by_elapsed_time == np.arange(len(time_segments)-1, -1, -1) ), \
+        print("Counts by survival segment: {}".format(counts_particles_alive_by_elapsed_time))
+        assert np.all( counts_particles_alive_by_elapsed_time == np.arange(len(survival_time_segments)-1, -1, -1) ), \
                 "Since the time segments are defined by jumps in the count of active particles" \
                 " they should decrease linearly to 0 starting at {} ({})" \
-                .format(len(time_segments)-1, counts_particles_alive_by_elapsed_time)
+                .format(len(survival_time_segments)-1, counts_particles_alive_by_elapsed_time)
+
+        blocking_time_segments = est.get_blocking_time_segments()
+        with np.printoptions(precision=3, suppress=True):
+            print("Blocking time segments: {}".format(np.array(blocking_time_segments)))
+            assert sorted(blocking_time_segments) == blocking_time_segments, \
+                    "The blocking time segments are sorted: {}".format(np.array(blocking_time_segments))
+        assert blocking_time_segments[0] == 0.0, \
+                "The first element of the blocking time segments array ({}) is equal to 0" \
+                .format(blocking_time_segments[0])
+
+        counts_particles_blocked_by_elapsed_time = est.get_counts_particles_blocked_by_elapsed_time()
+        print("Counts by blocking segment: {}".format(counts_particles_blocked_by_elapsed_time))
+        assert counts_particles_blocked_by_elapsed_time[0] == 0, \
+                "The first element of the counts of blocked particles array ({}) is equal to 0" \
+                .format(counts_particles_blocked_by_elapsed_time[0])
 
         print("\nLatest time the system changed: {:.3f}".format(est.get_time_last_change_of_system()))
         times_last_event_by_particle = est.get_all_times_last_event()
         print("Range of latest event times in all {} particles in the system: [{:.3f}, {:.3f}]" \
               .format(est.N, np.min(times_last_event_by_particle), np.max(times_last_event_by_particle)))
         print("Latest particle positions: {}".format(est.positions))
-        with np.printoptions(precision=3):
+        with np.printoptions(precision=3, suppress=True):
             print("Latest event times: {}".format(np.array(times_last_event_by_particle)))
             particles, elapsed_times_since_activation = est.get_all_elapsed_times()
             print("Latest elapsed times since activation: {}".format(np.array(elapsed_times_since_activation)))
