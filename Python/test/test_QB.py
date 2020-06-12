@@ -93,7 +93,7 @@ class Test_QB_Particles(unittest.TestCase):
         print("\nRunning test " + self.id())
         nparticles = 5
         seed = 1717
-        est = estimators.EstimatorQueueBlockingFlemingViot(nparticles, queue=self.queue, seed=seed, log=False)
+        est = estimators.EstimatorQueueBlockingFlemingViot(nparticles, queue=self.queue, reactivate=True, seed=seed, log=False)
 
         # Changes on the last time the system changed when a new event occurs
         # OLD
@@ -185,6 +185,9 @@ class Test_QB_Particles(unittest.TestCase):
         assert counts_particles_blocked_by_elapsed_time[0] == 0, \
                 "The first element of the counts of blocked particles array ({}) is equal to 0" \
                 .format(counts_particles_blocked_by_elapsed_time[0])
+        assert len([c for c in counts_particles_blocked_by_elapsed_time if c < 0]) == 0, \
+                "All counts in the counts of blocked particles array are non-negative ({})" \
+                .format(counts_particles_blocked_by_elapsed_time)
 
         print("\nLatest time the system changed: {:.3f}".format(est.get_time_last_change_of_system()))
         times_last_event_by_particle = est.get_all_times_last_event()
@@ -198,6 +201,21 @@ class Test_QB_Particles(unittest.TestCase):
             print("Particles associated to these times  : {}".format(particles))
         print("\nSIMULATION RENDER:")
         print(est.render())
+        
+        print("\nESTIMATIONS:")
+        df_proba_survival = est.estimate_proba_survival_given_position_one()
+        df_proba_blocking_given_alive = est.estimate_proba_blocking_given_alive()
+        with np.printoptions(precision=3, suppress=True):
+            print("Prob(T > t)")
+            print(df_proba_survival)
+            print("Phi(t, K) = P(X(t)=K / T>t)")
+            print(df_proba_blocking_given_alive)
+
+        est.estimate_proba_blocking()
+        print("Blocking probability estimate: {:.3f}".format(est.proba_blocking))
+        print("Rough estimate (rho^K) (rho={:.3f}, K={}): {:.3f}" \
+              .format(self.rate_birth / self.rate_death, self.capacity, (self.rate_birth / self.rate_death)**self.capacity))
+
         print("\nSeed used: {}".format(est.seed))
 
 if __name__ == "__main__":
