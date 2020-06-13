@@ -21,9 +21,11 @@ from .utils.basic import find
 
 @unique # Unique enumeration values (i.e. on the RHS of the equal sign)
 class EventType(Enum):
+    ACTIVATION = +1
+    REACTIVATION = +2
     ABSORPTION = 0
-    BLOCK = +1
-    UNBLOCK = -1
+    BLOCK = +9
+    UNBLOCK = -9
 
 class EstimatorQueueBlockingFlemingViot:
     
@@ -66,8 +68,8 @@ class EstimatorQueueBlockingFlemingViot:
 
         # Arrays that are used to estimate the expected survival time (time to killing from position 0)
         self.times0 = np.zeros(self.N, dtype=float)        # Latest times the particles changed to position 0
-        self.ktimes0_sum = np.zeros(self.N, dtype=float)    # Times to absorption from latest time it changed to position 0
-        self.ktimes0_n = np.zeros(self.N, dtype=int)        # Number of times the particles were absorbed
+        self.ktimes0_sum = np.zeros(self.N, dtype=float)   # Times to absorption from latest time it changed to position 0
+        self.ktimes0_n = np.zeros(self.N, dtype=int)       # Number of times the particles were absorbed
 
         # 3) Attributes used directly in the computation of the estimated measures that contribute to the probability of blocking.
         self.active = []# Whether the particle in the corresponding index of the activation times array is active,
@@ -265,18 +267,18 @@ class EstimatorQueueBlockingFlemingViot:
             is_unblocked = lambda p: positions_change[p] < 0 and self.positions[p] == self.particles[p].getCapacity() + positions_change[p] 
 
             if is_activated(o):
-                self._add_new_activation_time(o, t)
+                self._add_new_activation_time(o, t, EventType.ACTIVATION)
 
             elif is_absorbed(o):
-                self._add_new_survival_time_segment(o, t)
+                self._add_new_time_segment(o, t, EventType.ABSORPTION)
                 self._update_survival_time_from_zero(o, t)
                 if self.reactivate:
                     self._reactivate(o, t)
 
             elif is_blocked(o):
-                self._add_new_blocking_time_segment(o, t, EventType.BLOCK)
+                self._add_new_time_segment(o, t, EventType.BLOCK)
             elif is_unblocked(o):
-                self._add_new_blocking_time_segment(o, t, EventType.UNBLOCK)
+                self._add_new_time_segment(o, t, EventType.UNBLOCK)
 
             particles, times_from_activation = self.get_all_elapsed_times()
             assert len(self.active) ==  len(self.atimes) == len(self.pat) == len(self.iat) \
@@ -313,7 +315,7 @@ class EstimatorQueueBlockingFlemingViot:
                     "Iter {}: All times are non-negative" \
                     .format(self.iter)
 
-    def _add_new_activation_time(self, p, time_of_event):
+    def _add_new_activation_time(self, p, time_of_event, type_of_event):
         "Adds a new time to the array of activation times"
         # Add this time to the list of activation times and to the list of active flags
         # NOTE: we need to EXPLICITLY insert the new time IN ORDER in the array,
@@ -324,15 +326,8 @@ class EstimatorQueueBlockingFlemingViot:
         self.active.insert(idx_insort, True)
         if self.LOG:
             with np.printoptions(precision=3, suppress=True):
-                print("\n>>>>> ACTIVATION: p={}: time_of_event={:.3f}, activation_times={}".format(p, time_of_event, np.array(self.atimes)))
-
-    def _add_new_survival_time_segment(self, p, time_of_event):
-        "Adds a new segment-start time to the array of survival time segments"
-        # Insert the current time in the array of absorption times
-        self._insert_new_time_in_order(p, time_of_event, self.pkt, self.ktimes, self.ikt)
-
-        # Insert the current time in the array of time-segment starts and update counts of each segment accordingly
-        self._insert_new_time(p, time_of_event, EventType.ABSORPTION)
+                print("\n>>>>> {}: iter={}, p={}: time_of_event={:.3f}, activation_times={}" \
+                      .format(type_of_event.name.upper(), self.iter, p, time_of_event, np.array(self.atimes)))
 
     def _update_survival_time_from_zero(self, p, time_of_event):
         # Refer the survival time to the latest time the particle was at position 0
@@ -343,13 +338,18 @@ class EstimatorQueueBlockingFlemingViot:
         # Update the latest time the particle was at position 0
         self.times0[p] = time_of_event
 
-    def _add_new_blocking_time_segment(self, p, time_of_event, type_of_event):
+    def _add_new_time_segment(self, p, time_of_event, type_of_event):
         """
-        Adds a new block/unblock time in the respective absolute time array
-        and a segment-start time to the array of block/unblock time segments.
+        Adds a new time in the absolute time array of the given event type
+        and a segment-start time of the given event type
+        to the array of corresponding time segments.
+        
+        Valid event types are absorption/block/unblock.
         """
         #-- Insert the current time in the array of blocking times
-        if type_of_event == EventType.BLOCK:
+        if type_of_event == EventType.ABSORPTION:
+            self._insert_new_time_in_order(p, time_of_event, self.pkt, self.ktimes, self.ikt)
+        elif type_of_event == EventType.BLOCK:
             self._insert_new_time_in_order(p, time_of_event, self.pbt, self.btimes, self.ibt)
         elif type_of_event == EventType.UNBLOCK:
             self._insert_new_time_in_order(p, time_of_event, self.put, self.utimes, self.iut)
@@ -359,12 +359,15 @@ class EstimatorQueueBlockingFlemingViot:
 
     def _insert_new_time(self, p, time_of_event, type_of_event):
         idx_activation_times, activation_times = self.get_activation_times(p)
-        times_since_activation = [time_of_event - t for t in activation_times]
-        if self.LOG:
+        times_since_activation = [time_of_event - u for u in activation_times]
+        if True: #self.LOG:
             with np.printoptions(precision=3, suppress=True):
-                print("\nXXXXXXXXXXXXXXX {}: p={}: time_of_event={:.3f}, a: {}, s: {}" \
-                      .format(type_of_event.name.upper(), p, time_of_event, np.array(activation_times), np.array(times_since_activation)))
+                print("\nXXXXXXXXXXXXXXX {}: iter={}, p={}: time_of_event={:.3f}, a: {}, s: {}" \
+                      .format(type_of_event.name.upper(), self.iter, p, time_of_event, np.array(activation_times), np.array(times_since_activation)))
 
+        self._insert_new_relative_times(idx_activation_times, times_since_activation, type_of_event)
+
+    def _insert_new_relative_times(self, idx_activation_times, times_since_activation, type_of_event):
         for idx_activation_time, s in zip(idx_activation_times, times_since_activation):
             if type_of_event == EventType.ABSORPTION:
                 idx_insort = self.insort(self.sk, s)
@@ -491,11 +494,103 @@ class EstimatorQueueBlockingFlemingViot:
                           .format(p_assigned, np.array([atime for atime in activation_times_for_assigned_particle if atime < t])))
             for atime in activation_times_for_assigned_particle:
                 if atime < t:
-                    self._add_new_activation_time(p, atime)
+                    self._add_new_activation_time(p, (1+1E-6)*atime, EventType.REACTIVATION)
+                        # We insert a time that is a little larger than the existing time,
+                        # so that the value is inserted AFTER the pre-existing time
+                        # making "repeated" times be sorted according to the iteration number
+                        # when they were inserted.
+                    # Set the latest time the particle was at position 0 to the time
+                    # the assigned particle was at position 0 
+                    self.times0[p] = self.times0[p_assigned] 
         else:
             p_assigned = None
 
         return p_assigned
+
+    def compute_counts(self):
+        """
+        Computes the survival time segments and blocking time segments needed to
+        compute the survival probability from position 1 and the probability of blocking
+        for active particles. 
+        """
+       
+        all_event_types =   [EventType.ABSORPTION]*len(self.ktimes) + \
+                            [EventType.BLOCK]*len(self.btimes) + \
+                            [EventType.UNBLOCK]*len(self.utimes)
+        all_event_particles = self.pkt + self.pbt + self.put
+        all_event_times = self.ktimes + self.btimes + self.utimes
+        all_event_iters = self.ikt + self.ibt + self.iut
+
+        #with np.printoptions(precision=3, suppress=True):
+        #    print("activation_times: {}".format(np.array(self.atimes)))
+        #    print("particles: {}".format(self.pat))
+        #    print("iters: {}".format(self.iat))
+
+        #with np.printoptions(precision=3, suppress=True):
+        #    print("BEFORE SORTING:")
+        #    print("all_event_times: {}".format(np.array(all_event_times)))
+        #    print("all_event_particles: {}".format(all_event_particles))
+        #    print("all_event_types: {}".format(all_event_types))
+        #    print("all_event_iters: {}".format(np.array(all_event_iters)))
+
+        # Sort by iteration number, as this is the order in which the events were added
+        all_events_order = np.argsort(all_event_iters)
+
+        all_event_types = [all_event_types[o] for o in all_events_order]
+        all_event_particles = [all_event_particles[o] for o in all_events_order]
+        all_event_times = [all_event_times[o] for o in all_events_order]
+        all_event_iters = [all_event_iters[o] for o in all_events_order] 
+        last_iter = max(all_event_iters)
+
+        #with np.printoptions(precision=3, suppress=True):
+        #    print("AFTER SORTING:")
+        #    print("all_event_times: {}".format(np.array(all_event_times)))
+        #    print("all_event_particles: {}".format(all_event_particles))
+        #    print("all_event_types: {}".format(all_event_types))
+        #    print("all_event_iters: {}".format(np.array(all_event_iters)))
+
+        # Reset the time segments array in case they were already calculated
+        # and make all particles active (i.e. not yet observed)        
+        self.sk = [0.0]
+        self.sbu = [0.0]
+        self.counts_alive = [0]
+        self.counts_blocked = [0]
+        self.active = [True]*len(self.atimes)
+        for idx, t in enumerate(all_event_times):
+            type_of_event = all_event_types[idx]
+            p = all_event_particles[idx]
+            iter = all_event_iters[idx]
+
+            # Get the activation times that are needed to compute the relative times to the event
+            idx_activation_times, _ = self.get_activation_times(p)
+                # NOTE: These indices are indices in the array of ALL activation times
+                # not only in those retrieved by the get_activation_times() method.
+
+            # Choose only the activation times that happened BEFORE the current time
+            # AND at an iteration number that is EARLIER than the current iteration number
+            # These two conditions guarantee that:
+            # - the activation time is SMALLER than the current event time
+            # - the activation time is NOT actually the activation time of a particle after RE-ACTIVATION
+            # (which happened LATER than the currently analyzed time)
+            idx_eligible_activation_times = []
+            eligible_activation_times = []
+            times_since_activation = []
+            for i in idx_activation_times:
+                if self.iat[i] < iter and self.atimes[i] < t:
+                    idx_eligible_activation_times += [i]
+                    eligible_activation_times += [self.atimes[i]]
+                    times_since_activation += [t - self.atimes[i]]
+
+            if True: #self.LOG:
+                with np.printoptions(precision=3, suppress=True):
+                    print("\nXXXXXXXXXXXXXXX {}: iter={}, p={}: time_of_event={:.3f}, a: {}, s: {}" \
+                          .format(type_of_event.name.upper(), iter, p, t, np.array(eligible_activation_times), np.array(times_since_activation)))
+
+            self._insert_new_relative_times(idx_eligible_activation_times, times_since_activation, type_of_event)
+
+        #with np.printoptions(precision=3, suppress=True):
+        #    print("Relative absorption times: sk={}".format(np.array(self.sk)))
+        #    print("Relative blocking times: sbu={}".format(np.array(self.sbu)))
 
     def finalize(self):
         "Finalize the statistics based on the particles still active"
@@ -509,7 +604,7 @@ class EstimatorQueueBlockingFlemingViot:
                 p = self.pat[i]
                 earliest_event = self._order_times_next_events[p][0]
                 time_of_next_event = self.particles[p].getTimeLastEvent() + self.times_next_events[p][earliest_event]
-                self._add_new_survival_time_segment(p, time_of_next_event)
+                self._add_new_time_segment(p, time_of_next_event, EventType.ABSORPTION)
 
     def estimate_proba_survival_given_position_one(self):
         assert len(self.sk) > 1, "The length of the survival times array is at least 2 ({})".format(self.sk)
@@ -566,6 +661,8 @@ class EstimatorQueueBlockingFlemingViot:
         else:
             # All particles are alive (censored), so we estimate the expected survival time
             # as the average time each particle survived so far.
+            # This should be a VERY RARE SITUATION, because it means that absolutely NO particle
+            # has been absorbed in the whole simulation process!
             expected_survival_time = np.mean([self.particles[p].getTimeLastEvent() for p in range(self.N)])
 
         return expected_survival_time
@@ -665,20 +762,18 @@ class EstimatorQueueBlockingFlemingViot:
 
         return idx_activation_times_p, activation_times_p
 
-    def get_absorption_times(self, p):
+    def get_times_for_particle(self, p, lparticles, ltimes):
         """
-        Returns the absorption times (relative to the trajectory activation) for all trajectories
-        historically observed for particle pat, that is for all sub-trajectories of all trajectories
-        observed for particle p that start at position 1.
+        Returns the absolute times stored in the given list of times `ltimes` for particle p
         
         Return: list
         Two-element list containing:
-        - a list with the particle numbers corresponding to each element in the absorption times array
-        - a list with the absorption times of each sub-trajectory measured w.r.t. the sub-trajectory activation
+        - a list with the particle numbers corresponding to each element in the given list of times
+        - a list with the times correspoding to the specified particle
         """
-        idx_absorption_times_p = [idx for idx in find(self.pkt, p)]
-        absorption_times_p = [self.ktimes[i] for i in idx_absorption_times_p]
-        return idx_absorption_times_p, absorption_times_p
+        idx_times_p = [idx for idx in find(lparticles, p)]
+        times_p = [ltimes[i] for i in idx_times_p]
+        return idx_times_p, times_p
 
     def get_survival_time_segments(self):
         return self.sk
@@ -740,7 +835,7 @@ class EstimatorQueueBlockingFlemingViot:
             return idx_activation_times_for_event
 
         #--------------------------------------------------------------------------------------
-        all_types = [1]*len(self.atimes) + [0]*len(self.ktimes) + [9]*len(self.btimes) + [-9]*len(self.utimes)
+        all_types = [EventType.ACTIVATION.value]*len(self.atimes) + [EventType.ABSORPTION.value]*len(self.ktimes) + [EventType.BLOCK.value]*len(self.btimes) + [EventType.UNBLOCK.value]*len(self.utimes)
         all_particles = self.pat + self.pkt + self.pbt + self.put
         all_times = self.atimes + self.ktimes + self.btimes + self.utimes
         all_iters = self.iat + self.ikt + self.ibt + self.iut

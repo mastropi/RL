@@ -202,7 +202,7 @@ class Test_QB_Particles(unittest.TestCase):
         print("\nSIMULATION RENDER:")
         print(est.render())
         
-        print("\nESTIMATIONS:")
+        print("\nESTIMATIONS *** METHOD 1 ***:")
         df_proba_survival = est.estimate_proba_survival_given_position_one()
         df_proba_blocking_given_alive = est.estimate_proba_blocking_given_alive()
         with np.printoptions(precision=3, suppress=True):
@@ -211,8 +211,27 @@ class Test_QB_Particles(unittest.TestCase):
             print("Phi(t, K) = P(X(t)=K / T>t)")
             print(df_proba_blocking_given_alive)
 
+        print("\nESTIMATIONS *** METHOD 2: FROM OBSERVED TIMES ***:")
+        est.compute_counts()
+        df_proba_survival_2 = est.estimate_proba_survival_given_position_one()
+        df_proba_blocking_given_alive_2 = est.estimate_proba_blocking_given_alive()
+        with np.printoptions(precision=3, suppress=True):
+            print("Prob(T > t)")
+            print(df_proba_survival_2)
+            print("Phi(t, K) = P(X(t)=K / T>t)")
+            print(df_proba_blocking_given_alive_2)
+        
+        print("\nEqual survivals?")
+        df_comparison = (df_proba_survival == df_proba_survival_2)
+        print(np.min(np.min(df_comparison)))
+        print(df_comparison)
+        print("\nEqual blocking probs?")
+        df_comparison = (df_proba_blocking_given_alive == df_proba_blocking_given_alive_2)
+        print(np.min(np.min(df_comparison)))
+        print(df_comparison)
+
         est.estimate_proba_blocking()
-        print("Blocking probability estimate: {:.3f}".format(est.proba_blocking))
+        print("\nBlocking probability estimate: {:.3f}".format(est.proba_blocking))
         print("Rough estimate (rho^K) (rho={:.3f}, K={}): {:.3f}" \
               .format(self.rate_birth / self.rate_death, self.capacity, (self.rate_birth / self.rate_death)**self.capacity))
 
