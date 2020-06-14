@@ -99,6 +99,10 @@ class EstimatorQueueBlockingFlemingViot:
         # (which starts at 1 when simulation runs,
         # and its value is set by the simulation process when calling update_state()) 
         self.iter = 0
+        
+        # Variable the keeps track whether the finalize process (at the end of the simulation)
+        # has been carried out or not
+        self.finalize_status = False
 
         # 1) Initialize the particles in the system
         # (after deleting the variable in case it exists, so that we do not use more memory)
@@ -353,6 +357,7 @@ class EstimatorQueueBlockingFlemingViot:
                           "\n\tb: {}" \
                           "\n\tcounts_alive: {}" \
                           "\n\tcounts_blocked: {}" \
+                          "\n\tsurvival_time_from_zero: {}" \
                           .format(t, self.particles[o].getTypeLastEvent().name, o, self.positions[o], sum(self.active),
                                  self.active,
                                  np.array(self.atimes),
@@ -361,7 +366,8 @@ class EstimatorQueueBlockingFlemingViot:
                                  np.array(self.sk),
                                  np.array(self.sbu),
                                  self.counts_alive,
-                                 self.counts_blocked))
+                                 self.counts_blocked,
+                                 self.ktimes0_sum))
 
             assert sum(np.array(times_from_activation) < 0) == 0 \
                     and sum(np.array(self.atimes) < 0) == 0 and sum(np.array(self.ktimes) < 0) == 0 \
@@ -393,8 +399,17 @@ class EstimatorQueueBlockingFlemingViot:
         self.ktimes0_sum[p] += time_of_event - self.times0[p]
         self.ktimes0_n[p] += 1
 
+        if False:
+            with np.printoptions(precision=3, suppress=True):
+                print(">>>> Last time at 0: p={}, {:.3f}".format(p, self.times0[p]))
+                print(">>>> Total Survival times: p={}, {}".format(p, np.array(self.ktimes0_sum)))
+                print(">>>> Total Survival measures: p={}, {}".format(p, np.array(self.ktimes0_n)))
+
         # Update the latest time the particle was at position 0
         self.times0[p] = time_of_event
+
+        if False:
+            print(">>>> UPDATED Last time at 0: p={}, {:.3f}".format(p, self.times0[p]))
 
     def _add_new_time_segment(self, p, time_of_event, type_of_event):
         """
@@ -562,8 +577,12 @@ class EstimatorQueueBlockingFlemingViot:
                         # making "repeated" times be sorted according to the iteration number
                         # when they were inserted.
                     # Set the latest time the particle was at position 0 to the time
-                    # the assigned particle was at position 0 
-                    self.times0[p] = self.times0[p_assigned] 
+                    # the assigned particle was at position 0
+                    # DM-2020/06/14: NOO!! We should NOT do this because we are NOT counting the
+                    # blocking periods of the reactivated particles BEFORE reactivation.
+                    # If we do so, the estimate of the survival time (from position 0)
+                    # would be too large...
+                    #self.times0[p] = self.times0[p_assigned] 
         else:
             p_assigned = None
 
@@ -690,6 +709,7 @@ class EstimatorQueueBlockingFlemingViot:
                 self.finalize_mark_for_removal(p)
             self.finalize_remove()
 
+        self.finalize_status = True
 
     def finalize_absorb_particle(self, p):
         """
@@ -697,8 +717,14 @@ class EstimatorQueueBlockingFlemingViot:
         and the absorption time is recorded as a valid absorption time to be used in the calculation
         of the expected survival time
         """
-        # Add the absorption
+        # Time to the next event that would have come
         time_next_event, _, _ = self.get_time_next_event(p)
+      
+        # Unblock particle if it is blocked
+        if self.positions[p] == self.queue.getCapacity():
+            self._add_new_time_segment(p, time_next_event, EventType.UNBLOCK)
+
+        # Add the absorption
         self._add_new_time_segment(p, time_next_event, EventType.ABSORPTION)
 
         # Add the survival time information
@@ -830,7 +856,7 @@ class EstimatorQueueBlockingFlemingViot:
                 .format(len(self.counts_alive), len(self.sk))
 
         self.proba_surv = [c / (len(self.sk)-1) for c in self.counts_alive]
-        return pd.DataFrame.from_items([('t', self.sk), ('P(T>t/s=1)', self.proba_surv)])
+        return pd.DataFrame.from_items([('t', self.sk), ('P(T>t / s=1)', self.proba_surv)])
 
     def estimate_proba_blocking_given_alive(self):
         assert len(self.counts_blocked) == len(self.sbu), \
@@ -843,7 +869,7 @@ class EstimatorQueueBlockingFlemingViot:
         else:
             self.proba_block = [0.0]
 
-        return pd.DataFrame.from_items([('t', self.sbu), ('P(BLOCK / T>t, s=1)', self.proba_block)])
+        return pd.DataFrame.from_items([('t', self.sbu), ('P(BLOCK / T>t,s=1)', self.proba_block)])
 
     def estimate_expected_survival_time_given_position_zero(self):
         # The following disregards the particles that were still alive when the simulation stopped
@@ -905,6 +931,7 @@ class EstimatorQueueBlockingFlemingViot:
 
     def estimate_proba_blocking(self):
         # Insert times in the survival times array and the P(T>t/s=1) array
+        # so that we can merge the two arrays consistently on time
         sk = self.sk.copy()
         proba_surv = self.proba_surv.copy()
         sbu = self.sbu.copy()
@@ -927,19 +954,17 @@ class EstimatorQueueBlockingFlemingViot:
                 "The length of the survival probabilities array and the block probabilities array to multiply are the same ({}, {})" \
                 .format(len(proba_surv), len(proba_block))
 
-        if True: #self.LOG:
-            print("Probabilities arrays:")
-            print(pd.DataFrame.from_items([('t', sk), ('P(T>t/s=1)', proba_surv), ('P(BLOCK / T>t, s=1)', proba_block)]))
-
         # Integrate => Multiply the two quantities and sum
         integral = 0
         for i in range(len(proba_surv)):
             integral += proba_surv[i] * proba_block[i]
-        if True: #self.LOG:
+        if self.LOG:
             print("integral = {:.3f}".format(integral))
 
         # Estimate the blocking probability!
         self.proba_blocking = integral / self.estimate_expected_survival_time_given_position_zero()
+
+        return pd.DataFrame.from_items([('t', sk), ('P(T>t / s=1)', proba_surv), ('P(BLOCK / T>t,s=1)', proba_block)])
 
 
     #-------------- Getters
@@ -1028,6 +1053,105 @@ class EstimatorQueueBlockingFlemingViot:
 
     def get_blocking_time_segments(self):
         return self.sbu
+
+    def get_all_total_blocking_time(self):
+        "Returns the total blocking time for all particles"
+        blocking_time = 0.0
+        for p in range(self.N):
+            blocking_time += self.get_total_blocking_time(p)
+        return blocking_time
+
+    def get_total_blocking_time(self, p):
+        "Returns the total blocking time for a particle"
+        df_blocking_periods = self.get_blocking_periods(p)
+        return np.sum(df_blocking_periods['Unblock Time'] - df_blocking_periods['Block Time'])
+
+    def get_blocking_periods(self, p):
+        """
+        Returns the blocking periods (block / unblock) for a particle
+        
+        Return: pandas DataFrame
+        DataFrame with two columns:
+        - 'Block Time': start time of blocking
+        - 'Unblock Time': end time of blocking
+        """
+        if not self.finalize_status:
+            raise Warning("The simulation has not been finalized..." \
+                          "\nThe result of the total blocking time may be incorrect or give an error." \
+                          "\nRun first the finalize() method and rerun")
+
+        # Blocking periods
+        _, block_times = self.get_times_for_particle(p, EventType.BLOCK)
+        _, unblock_times = self.get_times_for_particle(p, EventType.UNBLOCK)
+
+        assert len(block_times) == len(unblock_times), \
+                "Particle {}: The number of blocking times ({}) is the same as the number of unblocking times ({})" \
+                .format(p, block_times, unblock_times)
+
+        df_blocking_times = pd.DataFrame.from_items([('Block Time', block_times), ('Unblock Time', unblock_times)])
+
+        for r in df_blocking_times.index:
+            assert df_blocking_times.loc[r]['Block Time'] < df_blocking_times.loc[r]['Unblock Time'], \
+                    "The block time ({:.3f}) is always smaller than the unblock time ({:.3f})" \
+                    .format(df_blocking_times.loc[r]['Block Time'], df_blocking_times.loc[r]['Unblock Time'])
+
+        return df_blocking_times
+
+    def get_all_total_survival_time(self):
+        "Returns the total blocking time for all particles"
+        survival_time = 0.0
+        for p in range(self.N):
+            df_survival_periods_p = self.get_survival_periods(p)
+            survival_time += np.sum(df_survival_periods_p['Survival Period Span'])
+
+        assert np.allclose(survival_time, np.sum(self.ktimes0_sum)), \
+                "The sum of the survival period spans ({:.3f}) equals" \
+                " the sum of the total survival times per particle computed during the simulation ({:.3f})" \
+                .format(survival_time, np.sum(self.ktimes0_sum))
+
+        return survival_time
+
+    def get_total_survival_time(self, p):
+        "Returns the total survival time for a particle (from position 0 back to position 0)"
+        df_survival_periods = self.get_survival_periods(p)
+        return np.sum(df_survival_periods['Survival Period Span'])
+
+    def get_survival_periods(self, p):
+        """
+        Returns all the survival periods (period in which the particle goes from position 0
+        back to position 0) for particle p.
+        
+        Return: tuple
+        - list with the end time of each survival period
+        - list with the time span of each survival period
+        """
+        _, absorption_times = self.get_times_for_particle(p, EventType.ABSORPTION)
+
+        survival_times = []
+        if len(absorption_times) > 0:
+            survival_times = [absorption_times[0]]
+            for idx, t in enumerate(absorption_times[1:]):
+                survival_times += [t - absorption_times[idx]]
+
+        assert len(survival_times) == len(absorption_times)
+        assert np.all(np.array(survival_times) > 0), \
+                "The survival period span is always positive ({})" \
+                .format(survival_times)
+
+        # Survival periods
+        return pd.DataFrame.from_items([('Survival Period End', absorption_times), ('Survival Period Span', survival_times)])
+
+    def get_survival_times(self):
+        """
+        Returns the survival times from position 0 for all particles
+        
+        Return: tuple
+        The tuple contains information about the survival periods (i.e. the contiguous time
+        during which a particle goes from position 0 back to position 0 for the first time)
+        - a list with the number of survival periods for all particles
+        - a list with the time span of the survival periods
+        """
+        return self.ktimes_n, self.ktimes_sum
 
     def get_type_last_event(self, p):
         try:
@@ -1183,6 +1307,24 @@ class EstimatorQueueBlockingFlemingViot:
         return render_str
 
     #-------------- Helper functions
+    def setup(self):
+        params_str = "***********************" \
+                    "\nK = {}" \
+                    "\nlambda = {:.3f}" \
+                    "\nmu = {:.3f}" \
+                    "\nrho = {:.3f}" \
+                    "\nnparticles = {}" \
+                    "\nreactivate = {}" \
+                    "\nfinalize_type = {}" \
+                    "\nniter = {}" \
+                    "\nseed = {}" \
+                    "\n***********************" \
+                    .format(self.queue.getCapacity(),
+                            self.queue.rates[Event.BIRTH.value], self.queue.rates[Event.DEATH.value],
+                            self.queue.rates[Event.BIRTH.value] / self.queue.rates[Event.DEATH.value],
+                            self.N, self.reactivate, self.finalize_type.name, self.niter, self.seed)
+        return params_str
+
     def isLastIteration(self):
         return self.iter == self.niter
 
