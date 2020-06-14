@@ -106,10 +106,10 @@ class QueueMM(GenericQueue):
             # Return an array
             return np.random.exponential(rate, size=size)
 
-    def generate_next_birth_time(self):
+    def generate_birth_time(self):
         return self.generate_event_times(self.rates[Event.BIRTH.value], size=1)
 
-    def generate_next_death_time(self):
+    def generate_death_time(self):
         return self.generate_event_times(self.rates[Event.DEATH.value], size=1)
 
     def getTypeLastEvent(self):

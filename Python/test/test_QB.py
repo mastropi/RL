@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 
 import Python.lib.queues as queues
 import Python.lib.estimators as estimators
+from Python.lib.estimators import FinalizeType
 
 #from importlib import reload
 #reload(estimators)
@@ -31,7 +32,7 @@ class Test_QB_Particles(unittest.TestCase):
         self.rate_birth = 1.2
         self.rate_death = 1.4
         self.nservers = 1
-        self.capacity = 5
+        self.capacity = 3
         self.queue = queues.QueueMM(self.rate_birth, self.rate_death, self.nservers, self.capacity)
 
     def no_tests_on_one_queue(self):
@@ -56,13 +57,15 @@ class Test_QB_Particles(unittest.TestCase):
 
     def no_test_simulation_on_one_particle(self):
         print("\nRunning test " + self.id())
-        est = estimators.EstimatorQueueBlockingFlemingViot(1, queue=self.queue)
+        niter = 100
+        est = estimators.EstimatorQueueBlockingFlemingViot(1, niter, self.queue,
+                                                           reactivate=True)
         
         # The state udpate process is correctly done. Let aNET = "array with Next Event Times",
         # then the following assertions hold.
         est.reset()
-        niter = 100
-        print("The test is run on {} different simulations (no pre-specified seed)".format(niter))
+        print("The test runs on a simulation with {} iterations" \
+              "\n(no pre-specified seed, so that different test runs produce even more tests!)".format(niter))
         for it in range(niter):
             aNET = est.get_times_next_events(0)
             aNET_prev = aNET.copy()
@@ -89,11 +92,14 @@ class Test_QB_Particles(unittest.TestCase):
                 or est._order_times_next_events[0] == [queues.DEATH, queues.BIRTH] and time_next_birth > time_next_death, \
                     "The array that stores the order of next event times reflects the true order"
 
-    def tests_on_n_particles(self):
+    def tests_on_n_particles(self): 
         print("\nRunning test " + self.id())
         nparticles = 5
-        seed = 1717
-        est = estimators.EstimatorQueueBlockingFlemingViot(nparticles, queue=self.queue, reactivate=True, seed=seed, log=False)
+        niter = 1000
+        seed = None
+        est = estimators.EstimatorQueueBlockingFlemingViot(nparticles, niter, self.queue,
+                                                           reactivate=True, finalize_type=FinalizeType.REMOVE_CENSORED,
+                                                           seed=seed, log=False)
 
         # Changes on the last time the system changed when a new event occurs
         # OLD
@@ -101,15 +107,17 @@ class Test_QB_Particles(unittest.TestCase):
         #est.time_last_change_of_system = est.time_last_change_of_system + t
         
         est.reset()
-        niter = 10
-        print("The test is run on {} different simulations (no pre-specified seed)".format(niter))
+        print("The simulation is run on {} iterations".format(niter))
         for it in range(niter):
-            # The list storing the times when particles became active is sorted increasingly
             est.update_state(it+1)
+            N1 = n_active_particles = est.get_number_active_particles()
+            if np.mod(it, int(niter/10)) == 0:
+                print("Iteration {} of {}... ({} active particles)".format(it+1, niter, N1))
 
             if self.log:
                 print("------ END OF ITER {} of {} ------".format(it+1, niter))
-            N1 = n_active_particles = est.get_number_active_particles()
+
+            # The list storing the times when particles became active is sorted increasingly
             particles, activation_times = est.get_all_activation_times()
             if self.log:
                 with np.printoptions(precision=3):
@@ -151,9 +159,7 @@ class Test_QB_Particles(unittest.TestCase):
             if self.log:
                 print("------ END OF ITER {} of {} ------".format(it+1, niter))
 
-        # At the last iteration we should finalize the counts of active praticles
-        # by counting all the particles that are still active 
-        est.finalize()
+        print("\n\n****** SIMULATION SUMMARY ({} iterations) ******".format(niter))
 
         survival_time_segments = est.get_survival_time_segments()
         with np.printoptions(precision=3, suppress=True):
@@ -199,36 +205,59 @@ class Test_QB_Particles(unittest.TestCase):
             particles, elapsed_times_since_activation = est.get_all_elapsed_times()
             print("Latest elapsed times since activation: {}".format(np.array(elapsed_times_since_activation)))
             print("Particles associated to these times  : {}".format(particles))
-        print("\nSIMULATION RENDER:")
+
+
+        #************************************************************************
+        # GRAPHICAL RENDER
+        print("\nSIMULATION RENDER (before treatment of censored values):")
         print(est.render())
-        
+        #************************************************************************
+
+
+        #************************************************************************
+        # FINALIZE THE SIMULATION PROCESS BY DEALING WITH ACTIVE PARTICLES (censoring)
+        est.finalize()
+        print("\n\n****** ESTIMATION PROCESS ({} iterations) ******".format(niter))
+        #************************************************************************
+
+
+        #************************************************************************
+        # GRAPHICAL RENDER
+        print("\nSIMULATION RENDER (after treatment of censored values):")
+        print(est.render())
+        #************************************************************************
+
+
         print("\nESTIMATIONS *** METHOD 1 ***:")
         df_proba_survival = est.estimate_proba_survival_given_position_one()
         df_proba_blocking_given_alive = est.estimate_proba_blocking_given_alive()
         with np.printoptions(precision=3, suppress=True):
-            print("Prob(T > t)")
+            print("Prob(T > t / start=1)")
             print(df_proba_survival)
-            print("Phi(t, K) = P(X(t)=K / T>t)")
+            print("Phi(t, K, 1) = P(X(t)=K / T>t, start=1)")
             print(df_proba_blocking_given_alive)
 
+        # TODO: (2020/06/14) Move the call to compute_counts() inside estimate_proba_blocking()
         print("\nESTIMATIONS *** METHOD 2: FROM OBSERVED TIMES ***:")
         est.compute_counts()
         df_proba_survival_2 = est.estimate_proba_survival_given_position_one()
         df_proba_blocking_given_alive_2 = est.estimate_proba_blocking_given_alive()
         with np.printoptions(precision=3, suppress=True):
-            print("Prob(T > t)")
+            print("Prob(T > t / start=1)")
             print(df_proba_survival_2)
-            print("Phi(t, K) = P(X(t)=K / T>t)")
+            print("Phi(t, K, 1) = P(X(t)=K / T>t, start=1)")
             print(df_proba_blocking_given_alive_2)
-        
-        print("\nEqual survivals?")
-        df_comparison = (df_proba_survival == df_proba_survival_2)
-        print(np.min(np.min(df_comparison)))
-        print(df_comparison)
-        print("\nEqual blocking probs?")
-        df_comparison = (df_proba_blocking_given_alive == df_proba_blocking_given_alive_2)
-        print(np.min(np.min(df_comparison)))
-        print(df_comparison)
+
+        if est.finalize_type != FinalizeType.REMOVE_CENSORED:
+            # Only compare probabilities when censored times are NOT removed
+            print("\nEqual survivals?")
+            df_comparison = (df_proba_survival == df_proba_survival_2)
+            print(np.min(np.min(df_comparison)))
+            print(df_comparison)
+            print("\nEqual blocking probs?")
+            df_comparison = (df_proba_blocking_given_alive == df_proba_blocking_given_alive_2)
+            print(np.min(np.min(df_comparison)))
+            print(df_comparison)
 
         est.estimate_proba_blocking()
         print("\nBlocking probability estimate: {:.3f}".format(est.proba_blocking))
