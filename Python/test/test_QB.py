@@ -34,7 +34,7 @@ class Test_QB_Particles(unittest.TestCase):
         self.rate_birth = 1.2
         self.rate_death = 1.4
         self.nservers = 1
-        self.capacity = 3
+        self.capacity = 5
         self.queue = queues.QueueMM(self.rate_birth, self.rate_death, self.nservers, self.capacity)
 
         self.plotFlag = True
@@ -99,7 +99,7 @@ class Test_QB_Particles(unittest.TestCase):
     def tests_on_n_particles(self,  reactivate=True,
                                     finalize_type=FinalizeType.REMOVE_CENSORED,
                                     nparticles=5,
-                                    niter=25,
+                                    niter=100,
                                     seed=1713): 
         print("\nRunning test " + self.id())
         #nparticles = 30
@@ -194,9 +194,69 @@ class Test_QB_Particles(unittest.TestCase):
 
 
 
+        survival_time_segments = est.get_survival_time_segments()
+        if False:
+            with np.printoptions(precision=3, suppress=True):
+                print("Survival time segments: {}".format(np.array(survival_time_segments)))
+        assert sorted(survival_time_segments) == survival_time_segments, \
+                "The survival time segments are sorted: {}".format(np.array(survival_time_segments))
+        assert survival_time_segments[0] == 0.0, \
+                "The first element of the survival time segments list ({}) is equal to 0" \
+                .format(survival_time_segments[0])
+
+        counts_particles_alive_by_elapsed_time = est.get_counts_particles_alive_by_elapsed_time()
+        if False:
+            print("Counts by survival segment: {}".format(counts_particles_alive_by_elapsed_time))
+        assert np.all( counts_particles_alive_by_elapsed_time == np.arange(len(survival_time_segments)-1, -1, -1) ), \
+                "Since the time segments are defined by jumps in the count of active particles" \
+                " they should decrease linearly to 0 starting at {} ({})" \
+                .format(len(survival_time_segments)-1, counts_particles_alive_by_elapsed_time)
+
+        blocking_time_segments = est.get_blocking_time_segments()
+        if False:
+            with np.printoptions(precision=3, suppress=True):
+                print("Blocking time segments: {}".format(np.array(blocking_time_segments)))
+        assert sorted(blocking_time_segments) == blocking_time_segments, \
+                "The blocking time segments are sorted: {}".format(np.array(blocking_time_segments))
+        assert blocking_time_segments[0] == 0.0, \
+                "The first element of the blocking time segments list ({}) is equal to 0" \
+                .format(blocking_time_segments[0])
+
+        counts_particles_blocked_by_elapsed_time = est.get_counts_particles_blocked_by_elapsed_time()
+        if False:
+            print("Counts by blocking segment: {}".format(counts_particles_blocked_by_elapsed_time))
+        assert counts_particles_blocked_by_elapsed_time[0] == 0, \
+                "The first element of the counts of blocked particles list ({}) is equal to 0" \
+                .format(counts_particles_blocked_by_elapsed_time[0])
+        assert len([c for c in counts_particles_blocked_by_elapsed_time if c < 0]) == 0, \
+                "All counts in the counts of blocked particles list are non-negative ({})" \
+                .format(counts_particles_blocked_by_elapsed_time)
+
+        print("\nLatest time the system changed: {:.3f}".format(est.get_time_last_change_of_system()))
+        times_last_event_by_particle = est.get_all_times_last_event()
+        print("Range of latest event times in all {} particles in the system: [{:.3f}, {:.3f}]" \
+              .format(est.N, np.min(times_last_event_by_particle), np.max(times_last_event_by_particle)))
+        print("Latest particle positions: {}".format(est.positions))
+        with np.printoptions(precision=3, suppress=True):
+            print("Latest event times: {}".format(np.array(times_last_event_by_particle)))
+            particles, elapsed_times_since_activation = est.get_all_elapsed_times()
+            print("Latest elapsed times since activation: {}".format(np.array(elapsed_times_since_activation)))
+            print("Particles associated to these times  : {}".format(particles))
+
+
+        #print("\nESTIMATIONS *** METHOD 1 ***:")
+        #df_proba_survival_and_blocking_conditional_BF = est.estimate_proba_survival_and_blocking_conditional()
+        #with np.printoptions(precision=3, suppress=True):
+        #    print(df_proba_survival_and_blocking_conditional_BF)
+
         # TODO: (2020/06/14) Move the call to compute_counts() inside estimate_proba_blocking()
         print("\nESTIMATIONS *** METHOD 2: FROM observed TIMES ***:")
+
+        ##### IMPORTANT: THE FOLLOWING RECOMPUTATION OF COUNTS SHOULD ALWAYS BE DONE WHEN finalize_type = REMOVE!!
+        ##### In fact, the finalize() process by REMOVE changes the counts since it removes time segments!!   
         est.compute_counts()
+        ##### IMPORTANT
+
         df_proba_survival_and_blocking_conditional = est.estimate_proba_survival_and_blocking_conditional()
         with np.printoptions(precision=3, suppress=True):
             print("Estimated probabilities by time:")
@@ -204,6 +264,8 @@ class Test_QB_Particles(unittest.TestCase):
 
         if False and est.finalize_type != FinalizeType.REMOVE_CENSORED:
             # Only compare probabilities when censored times are NOT removed
+            # (because when censored times are removed, the information stored in
+            # the counts_alive and counts_blocked lists is quite different between the two different methods) 
             print("\nEqual survivals and blocking probs?")
             df_comparison = (df_proba_survival_and_blocking_conditional_BF == df_proba_survival_and_blocking_conditional)
             equal = np.min(np.min(df_comparison))
@@ -243,7 +305,7 @@ class Test_QB_Particles(unittest.TestCase):
 
         proba_blocking = est.estimate_proba_blocking()
         print("\nBlocking probability estimate: {:.1f}%".format(proba_blocking*100))
-        print("Rough estimate (rho^K) (rho={:.1f}, K={}): {:.1f}%" \
+        print("Rough estimate (rho^K) (rho={:.3f}, K={}): {:.1f}%" \
               .format(self.rate_birth / self.rate_death, self.capacity, (self.rate_birth / self.rate_death)**self.capacity*100))
 
         print("Simulation setup:")
@@ -272,10 +334,12 @@ class Test_QB_Particles(unittest.TestCase):
         color1 = 'blue'
         color2 = 'red'
         #y2max = 0.05
-        y2max = 1.1*np.max(df_proba_survival_and_blocking_conditional['P(BLOCK / T>t,s=1)'])
+        y2max = 1.0
+        #y2max = 1.1*np.max(df_proba_survival_and_blocking_conditional['P(BLOCK / T>t,s=1)'])
         plt.step(df_proba_survival_and_blocking_conditional['t'], df_proba_survival_and_blocking_conditional['P(T>t / s=1)'],
                  'b-', where='post')
         ax = plt.gca()
+        ax.set_xlabel('t')
         ax.spines['left'].set_color(color1)
         ax.tick_params(axis='y', color=color1)
         ax.yaxis.label.set_color(color1)
@@ -289,7 +353,7 @@ class Test_QB_Particles(unittest.TestCase):
         plt.sca(ax)
         ax.legend(['P(T>t / s=1)'], loc='upper left')
         ax2.legend(['P(BLOCK / T>t,s=1)'], loc='upper right')
-        plt.title("K={}, rate(B)={:.1f}, rate(D)={:.1f}, rho={:.1f}, reactivate={}, final={}, N={}, #iter={}" \
+        plt.title("K={}, rate(B)={:.1f}, rate(D)={:.1f}, rho={:.3f}, reactivate={}, finalize={}, N={}, #iter={}" \
                   .format(self.capacity,
                           self.queue.rates[Event.BIRTH.value],
                           self.queue.rates[Event.DEATH.value],
