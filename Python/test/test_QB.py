@@ -97,10 +97,11 @@ class Test_QB_Particles(unittest.TestCase):
                     "The list that stores the order of next event times reflects the true order"
 
     def tests_on_n_particles(self,  reactivate=True,
-                                    finalize_type=FinalizeType.REMOVE_CENSORED,
-                                    nparticles=5,
+                                    finalize_type=FinalizeType.ABSORB_CENSORED,
+                                    nparticles=30,
                                     niter=100,
-                                    seed=1713): 
+                                    seed=1713,
+                                    log=False): 
         print("\nRunning test " + self.id())
         #nparticles = 30
         #niter = 200
@@ -112,7 +113,7 @@ class Test_QB_Particles(unittest.TestCase):
                                                            reactivate=reactivate,
                                                            finalize_type=finalize_type,
                                                            render_type=RenderType.GRAPH,
-                                                           seed=seed, log=False)
+                                                           seed=seed, log=log)
         print("Simulation setup:")
         print(est.setup())
         
@@ -254,7 +255,7 @@ class Test_QB_Particles(unittest.TestCase):
 
         ##### IMPORTANT: THE FOLLOWING RECOMPUTATION OF COUNTS SHOULD ALWAYS BE DONE WHEN finalize_type = REMOVE!!
         ##### In fact, the finalize() process by REMOVE changes the counts since it removes time segments!!   
-        est.compute_counts()
+        #est.compute_counts()
         ##### IMPORTANT
 
         df_proba_survival_and_blocking_conditional = est.estimate_proba_survival_and_blocking_conditional()

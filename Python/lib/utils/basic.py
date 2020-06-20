@@ -33,6 +33,44 @@ def find(alist, value):
 
     return [i for i, v in enumerate(alist) if v == value]
 
+def find_first(alist, value):
+    """
+    Returns the smallest index in `alist` that is equal to `value`
+
+    Arguments:
+    alist: list
+        List where `value` is searched for.
+    value: any object
+        A value/object to search in `alist`.
+
+    Return: list
+        A list containing the smallest index where the list element is equal to `value`
+        or -1 if `value` is not present.
+    """
+    for i, v in enumerate(alist):
+        if v == value:
+            return i
+    return -1
+
+def find_last(alist, value):
+    """
+    Returns the smallest index in `alist` that is equal to `value`
+
+    Arguments:
+    alist: list
+        List where `value` is searched for.
+    value: any object
+        A value/object to search in `alist`.
+
+    Return: list
+        A list containing the largest index where the list element is equal to `value`
+        or -1 if `value` is not present.
+    """
+    for i in range(len(alist)-1, -1, -1):
+        if alist[i] == value:
+            return i
+    return -1
+
 def merge_values_in_time(t1, y1, t2, y2):
     """
     Merges two list of values measured at different times into two separate lists
