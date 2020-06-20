@@ -1112,7 +1112,7 @@ class EstimatorQueueBlockingFlemingViot:
         self.t, counts_alive, counts_blocked = merge_values_in_time(self.sk, self.counts_alive, self.sbu, self.counts_blocked)
 
         if  len(self.t) > 1:
-            self.proba_surv_by_t = [n_survived / (len(self.t)-1) for n_survived in counts_alive]
+            self.proba_surv_by_t = [n_survived / counts_alive[0] for n_survived in counts_alive]
             self.proba_block_by_t = [n_blocked / n_survived if n_survived > 0
                                                             else 0.0 if n_blocked == 0
                                                             else np.inf 
@@ -1130,7 +1130,7 @@ class EstimatorQueueBlockingFlemingViot:
         assert np.all( 0 <= np.array(self.proba_block_by_t) ) and np.all( np.array(self.proba_block_by_t) <= 1 ), \
                 "The conditional blocking probabilities take values between 0 and 1 ([{:.3f}, {:.3f}])" \
                 .format(np.min(self.proba_block_by_t), np.max(self.proba_block_by_t))
-#        assert self.proba_surv_by_t[0] == 1.0, "The survival function at t = 0 is 1.0 ({:.3f})".format(self.proba_surv_by_t[0])
+        assert self.proba_surv_by_t[0] == 1.0, "The survival function at t = 0 is 1.0 ({:.3f})".format(self.proba_surv_by_t[0])
         assert self.proba_surv_by_t[-1] == 0.0, "The survival function at the last measured time is 0 ({})".format(self.proba_surv_by_t[-1])
         assert self.proba_block_by_t[0] == 0.0, "The conditional blocking probability at the last measured time is 0 ({})".format(self.proba_block_by_t[0])
 
