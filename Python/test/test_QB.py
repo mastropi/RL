@@ -181,7 +181,7 @@ class Test_QB_Particles(unittest.TestCase):
                                             seed=seed,
                                             log=log)
 
-    def tests_on_n_particles(self,   reactivate=False,
+    def no_tests_on_n_particles(self,   reactivate=False,
                                      finalize_type=FinalizeType.ABSORB_CENSORED,
                                      nparticles=5,
                                      niter=20,
@@ -405,6 +405,46 @@ class Test_QB_Particles(unittest.TestCase):
 
         return  df_proba_survival_and_blocking_conditional, \
                 (reactivate, finalize_type, nparticles, niter)
+
+    def test_simpler_algorithm(self, reactivate=True,
+                                     finalize_type=FinalizeType.ABSORB_CENSORED,
+                                     nparticles=5,
+                                     niter=20,
+                                     seed=1713,
+                                     log=False): 
+        print("\nRunning test " + self.id())
+        #nparticles = 30
+        #niter = 200
+        #reactivate = True
+        #finalize_type = FinalizeType.ABSORB_CENSORED
+        #finalize_type = FinalizeType.REMOVE_CENSORED
+        #seed = 1713
+        est = estimators.EstimatorQueueBlockingFlemingViot(nparticles, niter, self.queue,
+                                                           reactivate=reactivate,
+                                                           finalize_type=finalize_type,
+                                                           render_type=RenderType.GRAPH,
+                                                           seed=seed, log=log)
+        print("Simulation setup:")
+        print(est.setup())
+        
+        est.simulate()
+        est.render()
+
+        print("\n\nRelevant events for each particle ID:")
+        for p in range(len(est.info_particles)):
+            print("Particle ID p={} (P={} --> Q={} (q={})" \
+                  .format(p,
+                          est.info_particles[p]['source number'],
+                          est.info_particles[p]['reactivated number'], 
+                          est.info_particles[p]['reactivated ID']),
+                  end="")
+            if est.info_particles[p]['t0'] is not None:
+                print(" -> x={} @t={:.3f} @iter={})" \
+                      .format(est.info_particles[p]['x'], est.info_particles[p]['t0'], est.info_particles[p]['iter']))
+            else:
+                print(")")
+            print(np.c_[est.info_particles[p]['t'], est.info_particles[p]['E']])
+            print("\n")
 
     def plot_results(self, df_proba_survival_and_blocking_conditional, *args):
         reactivate = args[0]

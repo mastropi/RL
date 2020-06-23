@@ -11,12 +11,16 @@ from enum import Enum, unique
 import sys
 import warnings
 import numpy as np
+from bokeh.core.properties import Size
 
 @unique
 class Event(Enum):
-    # The values of each element should be a valid INDEX for a list storing event types, starting at 0
+    # The values of each element representing normal events (e.g. birth, death)
+    # should be a valid INDEX for a list storing event types, starting at 0
     BIRTH = 0
     DEATH = 1
+    RESIZE = 9
+    RESET = 99
 
 class GenericQueue:
     "Class that holds information that is present in all queues"
@@ -74,12 +78,11 @@ class QueueMM(GenericQueue):
         self.rates[Event.BIRTH.value] = rate_birth
         self.rates[Event.DEATH.value] = rate_death
         
-        self.time_last_event = 0.0
-        self.type_last_event = None
+        self.reset()
 
     def reset(self):
         self.time_last_event = 0.0
-        self.type_last_event = None
+        self.type_last_event = Event.RESET
 
     def apply_event(self, event, event_time):
         """
@@ -122,6 +125,20 @@ class QueueMM(GenericQueue):
 
     def generate_death_time(self):
         return self.generate_event_times(self.rates[Event.DEATH.value], size=1)
+
+    def resize(self, size, t):
+        """"
+        Sets the size of the queue to the given value and assigns the given time 't' as the time of the last event.
+        The type of the last event is set to Event.RESIZE
+        """
+        if not (0 <= size <= self.getCapacity() and t >= 0):
+            warnings.warn("Invalid size or time given (0 <= size <= {}; t >= 0) (size={}, t={})." \
+                          "\nNo resize done." \
+                          .format(self.getCapacity(), size, t))
+        else:
+            self.size = size
+            self.time_last_event = t
+            self.type_last_event = Event.RESIZE
 
     def getTypeLastEvent(self):
         return self.type_last_event
