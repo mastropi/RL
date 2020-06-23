@@ -251,7 +251,7 @@ class EstimatorQueueBlockingFlemingViot:
         For example, the two-element array may be updated to [0.5, 1.2],  where 0.5 is a deterministic value
         (= 3.2 - 2.7) while 1.2 is a randomly generated value --e.g. following an exponential distribution with
         parameter equal to the death rate.
-        
+
         The new array stores the information of *when* the next event will take place on this particle and
         of what *type* it will be. In this case, the next event will take place 0.5 time units later than
         the (death) event just selected, and it will be a birth event --since the said time value (0.5) is
@@ -325,12 +325,12 @@ class EstimatorQueueBlockingFlemingViot:
             print("\tpositions change: {}".format(positions_change))
             print("\tactivation times by particle:")
             for p in range(self.N):
-                _, activation_times_p = self.get_activation_times(p)
+                _, activation_times_p = self.get_activation_times_for_active_subtrajectories(p)
                 with printoptions(precision=3):
                     print("\t\tp={}: {}".format(p, np.array(activation_times_p)))
             print("\ttime elapsed since activation times:")
             for p in range(self.N):
-                _, activation_times_p = self.get_activation_times(p)
+                _, activation_times_p = self.get_activation_times_for_active_subtrajectories(p)
                 with printoptions(precision=3):
                     print("\t\tp={}: {}".format(p, np.array([times_of_events[p] - u for u in activation_times_p])))
         order_times_to_event = self._compute_order(times_of_events)
@@ -485,7 +485,7 @@ class EstimatorQueueBlockingFlemingViot:
 
     def _insert_new_time(self, p, time_of_event, type_of_event):
         # Get the activation times so that we can compute the RELATIVE time to the event
-        idx_activation_times, activation_times = self.get_activation_times(p)
+        idx_activation_times, activation_times = self.get_activation_times_for_active_subtrajectories(p)
         times_since_activation = [time_of_event - u for u in activation_times if u < time_of_event]
             ## Need to ask whether the activation time u < time_of_event because
             ## when we reactivate a particle (in method _reactivate()),
@@ -583,7 +583,7 @@ class EstimatorQueueBlockingFlemingViot:
         # If no particles satisfy this condition, then the particle to re-activate is NOT re-activated.
         eligible_active_particles = []
         for q in active_particles:
-            _, activation_times_q = self.get_activation_times(q)
+            _, activation_times_q = self.get_activation_times_for_active_subtrajectories(q)
             # Compare the minimum activation time
             # (which is at position 0 since the activation times returned by the method are sorted)
             if activation_times_q[0] < t:
@@ -652,7 +652,7 @@ class EstimatorQueueBlockingFlemingViot:
         # I.e. we assume that the particle has the same sub-trajectories of the
         # selected particle starting at position 1, as long as they were activated before
         # the particle's time t.
-        _, activation_times_for_assigned_particle = self.get_activation_times(p_assigned)
+        _, activation_times_for_assigned_particle = self.get_activation_times_for_active_subtrajectories(p_assigned)
         if self.LOG:
             with printoptions(precision=3, suppress=True):
                 print("Valid activation times for selected particle (p_assigned={}): {}" \
@@ -761,7 +761,7 @@ class EstimatorQueueBlockingFlemingViot:
         # where k is the jump size to the new position from the particle's current position
         # i.e. k = dict_position_by_particle[p_assigned] - self.positions[p].
 
-        if True and p == 22:
+        if self.LOG and p == 22:
             print("********************* UPDATING position of particle 1 to {} at absorption time {:.3f}...".format(p_assigned, t))
             print("\t\tBEFORE: positions: {}".format(self.all_positions[p]))
             print("\t\tTO BE UPDATED TO: positions p_assigned: {}".format(dict_position_by_particle[p_assigned]))
@@ -792,7 +792,7 @@ class EstimatorQueueBlockingFlemingViot:
             # and to the list of blocking time segments
             self._add_new_time_segment(p, time_at_new_position, EventType.BLOCK)
 
-        if True and p == 22:
+        if self.LOG and p == 22:
             print("\t\tAFTER: positions: {}".format(self.all_positions[p]))
             print("\t\tAFTER: times: {}".format(self.all_times[p]))
 
@@ -844,7 +844,12 @@ class EstimatorQueueBlockingFlemingViot:
         #    print("all_event_iters: {}".format(np.array(all_event_iters)))
 
         # Reset the time segments array in case they were already calculated
-        # and make all particles active (i.e. not yet observed)        
+        # and make all particles ACTIVE (i.e. not yet observed)
+        # Using the information of ACTIVE is important because once a particle is absorbed
+        # its activation times should NO longer be considered for the calculation of future
+        # (relative) absorbtion times that contribute to the counts_alive list.
+        # In fact, when a new absorption time is inserted in the loop below, the ACTIVE
+        # status of the absorbed particle is marked as False (see e.g. self._insert_new_relative_times()).   
         self.sk = [0.0]
         self.sbu = [0.0]
         self.counts_alive = [0]
@@ -856,9 +861,12 @@ class EstimatorQueueBlockingFlemingViot:
             iter = all_event_iters[idx]
 
             # Get the activation times that are needed to compute the relative times to the event
-            idx_activation_times, _ = self.get_activation_times(p)
-                # NOTE: These indices are indices in the array of ALL activation times
-                # not only in those retrieved by the get_activation_times() method.
+            # These are given by the ACTIVE particles at the current analyzed time t
+            # (particles are active as long as their trajectories have not been absorbed) 
+            idx_activation_times, _ = self.get_activation_times_for_active_subtrajectories(p)
+                # NOTE: These indices allow us to access the correct elements in the list
+                # that contains ALL activation times not only those retrieved by the
+                # get_activation_times_for_active_subtrajectories() method just called.
 
             # Choose only the activation times that happened BEFORE the current time
             # AND at an iteration number that is EARLIER than the current iteration number
@@ -957,7 +965,7 @@ class EstimatorQueueBlockingFlemingViot:
         #time_next_event, _, _ = self.get_time_next_event(p)
 
         time_latest_absorption = self.times0[p]
-        _, activation_times = self.get_activation_times(p)
+        _, activation_times = self.get_activation_times_for_active_subtrajectories(p)
         first_activation_time = np.min(activation_times)
         time_last_event = self.particles[p].getTimeLastEvent()
       
@@ -1325,7 +1333,7 @@ class EstimatorQueueBlockingFlemingViot:
         particles = []
         times_from_activation = []
         for p in range(self.N):
-            idx_activation_times_p, activation_times_p = self.get_activation_times(p)
+            idx_activation_times_p, activation_times_p = self.get_activation_times_for_active_subtrajectories(p)
             t = self.get_time_last_event(p)
             particles += [self.pat[idx] for idx in idx_activation_times_p]
             times_from_activation += [t - u for u in activation_times_p]
@@ -1337,7 +1345,7 @@ class EstimatorQueueBlockingFlemingViot:
         order = self._compute_order(times_from_activation)
         return [particles[o] for o in order], [times_from_activation[o] for o in order]
 
-    def get_activation_times(self, p):
+    def get_activation_times_for_active_subtrajectories(self, p):
         """
         Returns the activation times for all ACTIVE trajectories of particle p,
         that is for all sub-trajectories of the trajectory of particle p that start at position 1.
@@ -1646,16 +1654,19 @@ class EstimatorQueueBlockingFlemingViot:
             K = self.queue.getCapacity()
             colormap = cm.get_cmap("jet")
             reflines = range(0, (K+1)*self.N, K+1)
+            reflines_block = range(K, (K+(K+1))*self.N, K+1)
             max_time = 0.0
             particle_numbers = list(range(self.N))
             for p in particle_numbers:
                 max_time = np.max([max_time, np.nanmax(self.all_times[p])])
             plt.figure()
             ax = plt.gca()
+            ax.set_xlabel("t")
             ax.set_yticks(reflines)
             ax.yaxis.set_ticklabels(particle_numbers)
             ax.xaxis.set_ticks(np.arange(0, round(max_time)+1) )
             ax.set_ylim((0, (K+1)*self.N))
+            ax.hlines(reflines_block, 0, max_time, color='gray', linestyles='dashed')
             ax.hlines(reflines, 0, max_time, color='gray')
             for p in particle_numbers:
                 color = colormap( (p+1) / self.N )
