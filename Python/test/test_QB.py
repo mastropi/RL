@@ -34,7 +34,7 @@ class Test_QB_Particles(unittest.TestCase):
         self.rate_birth = 1.2
         self.rate_death = 1.4
         self.nservers = 1
-        self.capacity = 5
+        self.capacity = 10
         self.queue = queues.QueueMM(self.rate_birth, self.rate_death, self.nservers, self.capacity)
 
         self.plotFlag = True
@@ -96,12 +96,97 @@ class Test_QB_Particles(unittest.TestCase):
                 or est._order_times_next_events[0] == [queues.DEATH, queues.BIRTH] and time_next_birth > time_next_death, \
                     "The list that stores the order of next event times reflects the true order"
 
-    def tests_on_n_particles(self,  reactivate=True,
-                                    finalize_type=FinalizeType.ABSORB_CENSORED,
-                                    nparticles=30,
-                                    niter=100,
-                                    seed=1713,
-                                    log=False): 
+    def run_test_compute_counts(self,   reactivate,
+                                        finalize_type=FinalizeType.ABSORB_CENSORED,
+                                        nparticles=5,
+                                        niter=20,
+                                        seed=1713,
+                                        log=False): 
+        est = estimators.EstimatorQueueBlockingFlemingViot(nparticles, niter, self.queue,
+                                                           reactivate=reactivate,
+                                                           finalize_type=finalize_type,
+                                                           render_type=RenderType.GRAPH,
+                                                           seed=seed, log=log)        
+        est.reset()
+        for it in range(niter):
+            est.update_state(it+1)
+            N1 = n_active_particles = est.get_number_active_particles()
+            if np.mod(it, int(niter/10)) == 0:
+                print("Iteration {} of {}... ({} active particles)".format(it+1, niter, N1))
+                
+        # Recompute the counts and check they are the same as the online calculation
+        counts_alive_orig = est.counts_alive.copy()
+        counts_blocked_orig = est.counts_blocked.copy()
+        est.compute_counts()
+
+        print("\tAsserting counts...")
+        if  True or len(est.counts_alive) != len(counts_alive_orig) or \
+            len(est.counts_blocked) != len(counts_blocked_orig) or \
+            est.counts_alive != counts_alive_orig or \
+            est.counts_blocked != counts_blocked_orig:
+            print("ALIVE:")
+            print("orig: \n{}".format(counts_alive_orig))
+            print("new: \n{}".format(est.counts_alive))
+            print("BLOCKED:")
+            print("orig: \n{}".format(counts_blocked_orig))
+            print("new: \n{}".format(est.counts_blocked))
+            est.render()
+
+        assert len(est.counts_alive) == len(counts_alive_orig), \
+                "The length of the two counts of ALIVE particles list are the same (orig={}, new={})" \
+                .format(len(counts_alive_orig), len(est.counts_alive))
+        assert len(est.counts_blocked) == len(counts_blocked_orig), \
+                "The length of the two counts of blocked particles list are the same (orig={}, new={})" \
+                .format(len(counts_blocked_orig), len(est.counts_blocked))
+
+        assert est.counts_alive == counts_alive_orig, \
+                "The counts of ALIVE particles coincides with the online calculation" \
+                "\n{}".format(np.c_[counts_alive_orig, est.counts_alive])
+        assert est.counts_blocked == counts_blocked_orig, \
+                "The counts of BLOCKED particles coincides with the online calculation" \
+                "\n{}".format(np.c_[counts_blocked_orig, est.counts_blocked])
+
+    def no_test_compute_counts(self, log=False):
+        print("\nRunning test " + self.id())
+        seed = 1713
+        all_nparticles = [5, 10, 20, 30]
+        all_niters = [20, 50]
+
+
+        reactivate = True
+        finalize_type = FinalizeType.ABSORB_CENSORED
+        print("\n***** START OF reactivate={}, finalize_type={}...".format(reactivate, finalize_type))
+        for nparticles in all_nparticles:
+            for niter in all_niters:
+                print("\nRunning with reactivate={}, finalize_type={}...".format(reactivate, finalize_type))
+                print("\tnparticles={}, niter={}...".format(nparticles, niter))
+                self.run_test_compute_counts(reactivate=reactivate,
+                                            finalize_type=finalize_type,
+                                            nparticles=nparticles,
+                                            niter=niter,
+                                            seed=seed,
+                                            log=log)
+
+        reactivate = True
+        finalize_type = FinalizeType.REMOVE_CENSORED
+        print("\n***** START OF reactivate={}, finalize_type={}...".format(reactivate, finalize_type))
+        for nparticles in all_nparticles:
+            for niter in all_niters:
+                print("\nRunning with reactivate={}, finalize_type={}...".format(reactivate, finalize_type))
+                print("\tnparticles={}, niter={}...".format(nparticles, niter))
+                self.run_test_compute_counts(reactivate=reactivate,
+                                            finalize_type=finalize_type,
+                                            nparticles=nparticles,
+                                            niter=niter,
+                                            seed=seed,
+                                            log=log)
+
+    def tests_on_n_particles(self,   reactivate=False,
+                                     finalize_type=FinalizeType.ABSORB_CENSORED,
+                                     nparticles=5,
+                                     niter=20,
+                                     seed=1713,
+                                     log=False): 
         print("\nRunning test " + self.id())
         #nparticles = 30
         #niter = 200
