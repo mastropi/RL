@@ -8,6 +8,8 @@ Created on Thu Jun  6 19:39:44 2020
 
 from enum import Enum, unique
 
+import sys
+import warnings
 import numpy as np
 
 @unique
@@ -63,6 +65,11 @@ class QueueMM(GenericQueue):
 
     def __init__(self, rate_birth, rate_death, nservers, capacity):
         super().__init__(capacity, nservers=nservers, size=0)
+        if rate_birth < 0 or rate_death < 0:
+            raise ValueError("Both birth and death rates must be non-negative ({}, {})." \
+                             "\nThe process stops." \
+                             .format(rate_birth, rate_death))
+            sys.exit(-1)
         self.rates = [0]* 2
         self.rates[Event.BIRTH.value] = rate_birth
         self.rates[Event.DEATH.value] = rate_death
@@ -99,12 +106,16 @@ class QueueMM(GenericQueue):
         return self.size - size_prev
 
     def generate_event_times(self, rate, size):
+        # Note: the parameter of the exponential (`scale`) is 1/lambda, i.e. the inverse of the event rate
+        if rate < 0:
+            warnings.warn("The event rate must be non-negative ({}). np.nan is returned.".format(rate))
+            return np.nan
         if size == 1:
             # Return a scalar (it would be an array if we use parameter `size=1`!!)
-            return np.random.exponential(rate)
+            return np.random.exponential(1/rate)
         else:
             # Return an array
-            return np.random.exponential(rate, size=size)
+            return np.random.exponential(1/rate, size=size)
 
     def generate_birth_time(self):
         return self.generate_event_times(self.rates[Event.BIRTH.value], size=1)
