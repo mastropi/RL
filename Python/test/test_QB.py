@@ -34,7 +34,7 @@ class Test_QB_Particles(unittest.TestCase):
         self.rate_birth = 1.2
         self.rate_death = 1.4
         self.nservers = 1
-        self.capacity = 10
+        self.capacity = 5
         self.queue = queues.QueueMM(self.rate_birth, self.rate_death, self.nservers, self.capacity)
 
         self.plotFlag = True
@@ -390,9 +390,12 @@ class Test_QB_Particles(unittest.TestCase):
         print("\n")
 
         proba_blocking = est.estimate_proba_blocking()
+        rho = self.rate_birth / self.rate_death
+        K = self.capacity
         print("\nBlocking probability estimate: {:.1f}%".format(proba_blocking*100))
-        print("Rough estimate (rho^K) (rho={:.3f}, K={}): {:.1f}%" \
-              .format(self.rate_birth / self.rate_death, self.capacity, (self.rate_birth / self.rate_death)**self.capacity*100))
+        print("Theoretical value (rho^K / sum(rho^i)) (rho={:.3f}, K={}): {:.1f}%" \
+              .format(rho, K,
+                      rho**K / np.sum([ rho**i for i in range(K+1) ]) *100))
 
         print("Simulation setup:")
         print(est.setup())
@@ -407,10 +410,10 @@ class Test_QB_Particles(unittest.TestCase):
                 (reactivate, finalize_type, nparticles, niter)
 
     def test_simpler_algorithm(self, reactivate=True,
-                                     finalize_type=FinalizeType.ABSORB_CENSORED,
+                                     finalize_type=FinalizeType.REMOVE_CENSORED,
                                      nparticles=5,
-                                     niter=20,
-                                     seed=1713,
+                                     niter=500,
+                                     seed=1717,
                                      log=False): 
         print("\nRunning test " + self.id())
         #nparticles = 30
@@ -431,30 +434,98 @@ class Test_QB_Particles(unittest.TestCase):
         est.render()
 
         print("\n\nRelevant events for each particle ID:")
-        for p in range(len(est.info_particles)):
-            print("Particle ID p={} (P={} --> Q={} (q={})" \
-                  .format(p,
-                          est.info_particles[p]['source number'],
-                          est.info_particles[p]['reactivated number'], 
-                          est.info_particles[p]['reactivated ID']),
-                  end="")
-            if est.info_particles[p]['t0'] is not None:
-                print(" -> x={} @t={:.3f} @iter={})" \
-                      .format(est.info_particles[p]['x'], est.info_particles[p]['t0'], est.info_particles[p]['iter']))
-            else:
-                print(")")
-            print(np.c_[est.info_particles[p]['t'], est.info_particles[p]['E']])
-            print("\n")
+        if False:
+            for P in range(len(est.info_particles)):
+                print("Particle ID P={} (P={} --> Q={} (q={})" \
+                      .format(P,
+                              est.info_particles[P]['particle number'],
+                              est.info_particles[P]['reactivated number'], 
+                              est.info_particles[P]['reactivated ID']),
+                      end="")
+                if est.info_particles[P]['t0'] is not None:
+                    print(" -> x={} @t={:.3f} @iter={})" \
+                          .format(est.info_particles[P]['x'], est.info_particles[P]['t0'], est.info_particles[P]['iter']))
+                else:
+                    print(")")
+                print(np.c_[est.info_particles[P]['t'], est.info_particles[P]['E']])
+                print("\n")
+
+        est.finalize()
+        est.compute_counts()
+
+        if False and not reactivate:
+            print("Total blocking time by particle:")
+            blocking_periods = est.get_all_blocking_periods()
+            survival_periods = est.get_all_survival_periods()
+            for P in range(est.N):
+                print("\n\nParticle {}".format(P))
+                print("Block periods:")
+                print(blocking_periods[P])
+
+                print("\nSurvival periods:")
+                print(survival_periods[P])
+
+                total_blocking_time = est.get_total_blocking_time(P)
+                total_survival_time = est.get_total_survival_time(P)
+                print("")
+                print("Total blocking time = {:.3f}".format(total_blocking_time))
+                print("Total survival time = {:.3f}".format(total_survival_time))
+                print("% blocking time = {:.1f}%".format(total_blocking_time / total_survival_time * 100))
+                print("\n")
+
+        proba_blocking, integral, expected_survival_time = est.estimate_proba_blocking()
+        
+        print("Total blocking time for ALL particles:")
+        all_total_blocking_time = est.get_all_total_blocking_time()
+        all_total_survival_time = est.get_all_total_survival_time()
+        print("")
+        print("Total blocking time = {:.3f}".format(all_total_blocking_time))
+        if reactivate:
+            survival_times_for_particles = [ dict_info['t'][-1] for dict_info in est.info_particles ]
+            total_survival_time = np.sum( survival_times_for_particles )
+            print("Total survival time = {:.3f}".format(total_survival_time))
+            print("% blocking time = {:.1f}%".format(all_total_blocking_time / total_survival_time * 100))
+        else:
+            print("Total survival time = {:.3f}".format(all_total_survival_time))
+            print("% blocking time = {:.1f}%".format(all_total_blocking_time / all_total_survival_time * 100))
+        print("\n")
+
+
+        rho = self.rate_birth / self.rate_death
+        K = self.capacity
+        print("\nEstimation of blocking probability via Approximation 1:")
+        print("Integral = {:.3f}".format(integral))
+        print("Expected Survival Time = {:.3f}".format(expected_survival_time))
+        print("Blocking probability estimate: {:.1f}%".format(proba_blocking*100))
+        print("Theoretical value (rho^K / sum(rho^i)) (rho={:.3f}, K={}): {:.1f}%" \
+              .format(rho, K,
+                      rho**K / np.sum([ rho**i for i in range(K+1) ]) *100))
+
+        print("Simulation setup:")
+        print(est.setup())
+
+        df_proba_survival_and_blocking_conditional = est.estimate_proba_survival_and_blocking_conditional()
+        self.plot_results(df_proba_survival_and_blocking_conditional, 
+                          reactivate,
+                          finalize_type,
+                          nparticles,
+                          niter,
+                          seed)
+
+        return  df_proba_survival_and_blocking_conditional, \
+                (reactivate, finalize_type, nparticles, niter)
 
     def plot_results(self, df_proba_survival_and_blocking_conditional, *args):
         reactivate = args[0]
         finalize_type = args[1]
         nparticles = args[2]
         niter = args[3]
+        seed = args[4]
         print(reactivate)
         print(finalize_type.name)
         print(nparticles)
         print(niter)
+        print(seed)
 
         plt.figure()
         color1 = 'blue'
@@ -479,13 +550,13 @@ class Test_QB_Particles(unittest.TestCase):
         plt.sca(ax)
         ax.legend(['P(T>t / s=1)'], loc='upper left')
         ax2.legend(['P(BLOCK / T>t,s=1)'], loc='upper right')
-        plt.title("K={}, rate(B)={:.1f}, rate(D)={:.1f}, rho={:.3f}, reactivate={}, finalize={}, N={}, #iter={}" \
+        plt.title("K={}, rate(B)={:.1f}, rate(D)={:.1f}, rho={:.3f}, reactivate={}, finalize={}, N={}, #iter={}, seed={}" \
                   .format(self.capacity,
                           self.queue.rates[Event.BIRTH.value],
                           self.queue.rates[Event.DEATH.value],
                           self.queue.rates[Event.BIRTH.value] / self.queue.rates[Event.DEATH.value],
                           reactivate, finalize_type.name[0:3],
-                          nparticles, niter
+                          nparticles, niter, seed
                           ))
         ax.title.set_fontsize(9)
 
