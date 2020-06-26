@@ -177,7 +177,7 @@ class EstimatorQueueBlockingFlemingViot:
                                            't0': None,                  # Absorption /reactivation time
                                            'x': None,                   # Position after reactivation
                                            'iter': None,                # Iteration number of absorption / reactivation
-                                           'particle number': None,       # Source particle (queue) from which reactivation happened (only used when reactivate=True)
+                                           'particle number': P,        # Source particle (queue) from which reactivation happened (only used when reactivate=True)
                                            'reactivated number': None,  # Reactivated particle (queue) to which the source particle was reactivated (only used when reactivate=True)
                                            'reactivated ID': None       # Reactivated particle ID (index of this info_particle list) 
                                            }) ]
@@ -1075,7 +1075,7 @@ class EstimatorQueueBlockingFlemingViot:
         nremoved = 0
         for p in active_particle_ids:
             dict_info = self.info_particles[p - nremoved]
-            P = p if dict_info['particle number'] is None else dict_info['particle number'] 
+            P = dict_info['particle number'] 
             print("Processing particle ID p={}, P={} out of {} particles".format(p, P, len(active_particle_ids)))
             assert len(dict_info['E']) > 0, \
                     "There is at least one event in the info_particles dictionary for particle ID p={}" \
@@ -1588,7 +1588,7 @@ class EstimatorQueueBlockingFlemingViot:
         for P in range(self.N):
             blocking_times += [ pd.DataFrame.from_items([('Block Time', []), ('Unblock Time', [])]) ]
         for p, dict_info in enumerate(self.info_particles):
-            P = p if dict_info['particle number'] is None else dict_info['particle number']
+            P = dict_info['particle number']
             block_times_p = [t    for idx, t in enumerate(dict_info['t'])
                                 if dict_info['E'][idx] == EventType.BLOCK]
             unblock_times_p = [t  for idx, t in enumerate(dict_info['t'])
@@ -1648,7 +1648,7 @@ class EstimatorQueueBlockingFlemingViot:
             absorption_and_censoring_times += [ [0.0] ]
             survival_times += [ pd.DataFrame.from_items([('Survival Period End', []), ('Survival Period Span', [])]) ]
         for p, dict_info in enumerate(self.info_particles):
-            P = p if dict_info['particle number'] is None else dict_info['particle number']
+            P = dict_info['particle number']
             #with printoptions(precision=3):
             #    print("\np={}, P={}:\n{}".format(p, P, np.c_[ np.array(dict_info['t']), np.array(dict_info['E']) ]))
             absorption_and_censoring_times_p = [t   for idx, t in enumerate(dict_info['t'])
