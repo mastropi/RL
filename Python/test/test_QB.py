@@ -9,6 +9,7 @@ Created on Thu Jun  4 19:16:02 2020
 import runpy
 runpy.run_path('../../setup.py')
 
+import copy
 import numpy as np
 import unittest
 from unittest_data_provider import data_provider
@@ -409,12 +410,14 @@ class Test_QB_Particles(unittest.TestCase):
         return  df_proba_survival_and_blocking_conditional, \
                 (reactivate, finalize_type, nparticles, niter)
 
-    def test_simpler_algorithm(self, reactivate=True,
+    def test_simpler_algorithm(self, start=1,
+                                     mean_lifetime=None,
+                                     reactivate=True,
                                      finalize_type=FinalizeType.REMOVE_CENSORED,
                                      nparticles=5,
-                                     niter=500,
+                                     niter=40,
                                      seed=1717,
-                                     log=False): 
+                                     log=False):
         print("\nRunning test " + self.id())
         #nparticles = 30
         #niter = 200
@@ -422,14 +425,17 @@ class Test_QB_Particles(unittest.TestCase):
         #finalize_type = FinalizeType.ABSORB_CENSORED
         #finalize_type = FinalizeType.REMOVE_CENSORED
         #seed = 1713
-        est = estimators.EstimatorQueueBlockingFlemingViot(nparticles, niter, self.queue,
+        queue = copy.deepcopy(self.queue) 
+        queue.size = start
+        est = estimators.EstimatorQueueBlockingFlemingViot(nparticles, niter, queue,
+                                                           mean_lifetime=mean_lifetime,
                                                            reactivate=reactivate,
                                                            finalize_type=finalize_type,
                                                            render_type=RenderType.GRAPH,
                                                            seed=seed, log=log)
         print("Simulation setup:")
         print(est.setup())
-        
+
         est.simulate()
         est.render()
 
@@ -513,6 +519,7 @@ class Test_QB_Particles(unittest.TestCase):
                           seed)
 
         return  df_proba_survival_and_blocking_conditional, \
+                expected_survival_time, \
                 (reactivate, finalize_type, nparticles, niter)
 
     def plot_results(self, df_proba_survival_and_blocking_conditional, *args):
@@ -568,46 +575,74 @@ else:
     # Lines to execute "by hand" (i.e. at the Python prompt)
     test = Test_QB_Particles()
 
-    nparticles = 30
-    niter = 50
+    nparticles = 5
+    niter = 100
     seed = 1717
 
-    #####
-    reactivate = False
-    finalize_type = FinalizeType.ABSORB_CENSORED
-    df_resultsFA, paramsFA = test.tests_on_n_particles(reactivate,
-                                                    finalize_type,
-                                                    nparticles,
-                                                    niter,
-                                                    seed)
-    test.plot_results(df_resultsFA, *paramsFA)
-
-    #####
-    reactivate = True
-    finalize_type = FinalizeType.ABSORB_CENSORED
-    df_resultsTA, paramsTA = test.tests_on_n_particles(reactivate,
-                                                    finalize_type,
-                                                    nparticles,
-                                                    niter,
-                                                    seed)
-    test.plot_results(df_resultsTA, *paramsTA)
-
-    #####
+    # Estimate the expected survival time using simulation without reactivation
+    test_mc = Test_QB_Particles()
     reactivate = False
     finalize_type = FinalizeType.REMOVE_CENSORED
-    df_resultsFR, paramsFR = test.tests_on_n_particles(reactivate,
-                                                    finalize_type,
-                                                    nparticles,
-                                                    niter,
-                                                    seed)
-    test.plot_results(df_resultsFR, *paramsFR)
+    start = 0
+    mean_lifetime = None
+    df_resultsFR0, EST_FR0, paramsFR0 = test_mc.test_simpler_algorithm(start,
+                                                                       mean_lifetime,
+                                                                 reactivate,
+                                                                 finalize_type,
+                                                                 nparticles,
+                                                                 niter,
+                                                                 seed)
 
-    #####
+    test_fv = Test_QB_Particles()
     reactivate = True
     finalize_type = FinalizeType.REMOVE_CENSORED
-    df_resultsTR, paramsTR = test.tests_on_n_particles(reactivate,
-                                                    finalize_type,
-                                                    nparticles,
-                                                    niter,
-                                                    seed)
-    test.plot_results(df_resultsTR, *paramsTR)
+    start = 1
+    mean_lifetime = EST_FR0
+    df_resultsTR1, EST_TR1, paramsTR1 = test_fv.test_simpler_algorithm(start,
+                                                                 mean_lifetime,
+                                                                 reactivate,
+                                                                 finalize_type,
+                                                                 nparticles,
+                                                                 niter,
+                                                                 seed)
+
+    if False:
+        #####
+        reactivate = False
+        finalize_type = FinalizeType.ABSORB_CENSORED
+        df_resultsFA, paramsFA = test.tests_on_n_particles(reactivate,
+                                                        finalize_type,
+                                                        nparticles,
+                                                        niter,
+                                                        seed)
+        test.plot_results(df_resultsFA, *paramsFA)
+    
+        #####
+        reactivate = True
+        finalize_type = FinalizeType.ABSORB_CENSORED
+        df_resultsTA, paramsTA = test.tests_on_n_particles(reactivate,
+                                                        finalize_type,
+                                                        nparticles,
+                                                        niter,
+                                                        seed)
+        test.plot_results(df_resultsTA, *paramsTA)
+    
+        #####
+        reactivate = False
+        finalize_type = FinalizeType.REMOVE_CENSORED
+        df_resultsFR, paramsFR = test.tests_on_n_particles(reactivate,
+                                                        finalize_type,
+                                                        nparticles,
+                                                        niter,
+                                                        seed)
+        test.plot_results(df_resultsFR, *paramsFR)
+    
+        #####
+        reactivate = True
+        finalize_type = FinalizeType.REMOVE_CENSORED
+        df_resultsTR, paramsTR = test.tests_on_n_particles(reactivate,
+                                                        finalize_type,
+                                                        nparticles,
+                                                        niter,
+                                                        seed)
+        test.plot_results(df_resultsTR, *paramsTR)

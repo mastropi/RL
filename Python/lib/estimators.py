@@ -98,6 +98,22 @@ class EstimatorQueueBlockingFlemingViot:
         self.N = nparticles
         self.niter = niter
         self.queue = queue                  # This variable is used to create the particles as replications of the given queue
+
+        if queue.size not in [0, 1]:
+            raise ValueError("The start position of the particles must be either 0 or 1 ({})".format(queue.size))
+        if queue.getCapacity() <= 1:
+            # This condition must be satisfied because ONLY ONE EVENT is accepted for each event time
+            # i.e. ACTIVATION, BLOCK, UNBLOCK or ABSORPTION.
+            # If we allowed a queue capacity of 1, when the position of the particle goes to 1, the particle
+            # is both ACTIVATED and BLOCKED, a situation that cannot be handled with the code as is written now.
+            # In any case, a capacity of 1 is NOT of interest.   
+            raise ValueError("The maximum position of the particles must be larger than 1 ({})".format(queue.getCapacity()))
+        self.START = queue.size             # Initial start position for each particle
+
+        if mean_lifetime is not None and (np.isnan(mean_lifetime) or mean_lifetime <= 0):
+            raise ValueError("The mean life time must be positive ({})".format(mean_lifetime))
+        self.mean_lifetime = mean_lifetime  # A possibly separate estimation of the expected survival time
+
         self.reactivate = reactivate        # Whether the particle is reactivated to a positive position after absorption
         self.finalize_type = finalize_type  # How to finalize the simulation
         self.render_type = render_type
@@ -162,18 +178,23 @@ class EstimatorQueueBlockingFlemingViot:
         self.trajectories = []
         # Information about the particles used to compute the statistics needed to estimate the blocking probability
         self.info_particles = []
+        assert self.START in [0, 1], "The start position for the particle is 0 or 1 ({})".format(self.START)
+        if self.START == 0:
+            start_event_type = EventType.ABSORPTION
+        elif self.START == 1:
+            start_event_type = EventType.ACTIVATION
         for P in range(self.N):
             self.trajectories += [ dict({
                                            't': [0.0],          # event times at which the particle changes position
-                                           'x': [0],            # positions taken by the particle after each event
+                                           'x': [self.START],   # positions taken by the particle after each event
                                            'e': [Event.RESET]   # events (birth, death) associated to the event times
                                            }) ]
             self.info_particles += [ dict({
-                                           't': [], # times at which the events of interest take place
-                                           'E': [], # events of interest associated to the times 't'
-                                                    # (the events of interest are those affecting the
-                                                    # estimation of the blocking probability:
-                                                    # activation, absorption, block, unblock)
+                                           't': [0.0],                  # times at which the events of interest take place
+                                           'E': [start_event_type],     # events of interest associated to the times 't'
+                                                                        # (the events of interest are those affecting the
+                                                                        # estimation of the blocking probability:
+                                                                        # activation, absorption, block, unblock)
                                            't0': None,                  # Absorption /reactivation time
                                            'x': None,                   # Position after reactivation
                                            'iter': None,                # Iteration number of absorption / reactivation
@@ -181,6 +202,12 @@ class EstimatorQueueBlockingFlemingViot:
                                            'reactivated number': None,  # Reactivated particle (queue) to which the source particle was reactivated (only used when reactivate=True)
                                            'reactivated ID': None       # Reactivated particle ID (index of this info_particle list) 
                                            }) ]
+            if self.START == 0:
+                # Remove the first event added above when particles start at 0
+                # in order to avoid failing the assertions stating that the first
+                # event in the info_particles dictionaries is an ACTIVATION. 
+                self.info_particles[P]['t'].pop(0)
+                self.info_particles[P]['E'].pop(0)
         # List stating whether the corresponding particle number has been absorbed already at least once
         # This is used when updating the dict_info_absorption_times dictionary, as this should contain
         # only one absorption time per particle.
@@ -207,7 +234,7 @@ class EstimatorQueueBlockingFlemingViot:
         self.all_positions = []
         self.all_times = []
         for P in range(self.N):
-            self.all_positions += [ [0] ]
+            self.all_positions += [ [self.START] ]
             self.all_times += [ [0.0] ]
 
         # 2) Compute the times of the next birth and death for each queue/particle, and their order
@@ -217,7 +244,12 @@ class EstimatorQueueBlockingFlemingViot:
                                             for p in np.arange(self.N) ]
 
         # Arrays that are used to estimate the expected survival time (time to killing from position 0)
-        self.times0 = np.zeros(self.N, dtype=float)        # Latest times the particles changed to position 0
+        if self.START == 0:
+            # Latest times the particles changed to position 0 is 0.0 as they start at position 0
+            self.times0 = np.zeros(self.N, dtype=float)
+        else:
+            # Latest times the particles changed to position 0 is unknown as they don't start at position 0
+            self.times0 = np.nan * np.ones(self.N, dtype=float)
         self.ktimes0_sum = np.zeros(self.N, dtype=float)   # Times to absorption from latest time it changed to position 0
         self.ktimes0_n = np.zeros(self.N, dtype=int)       # Number of times the particles were absorbed
 
@@ -270,23 +302,24 @@ class EstimatorQueueBlockingFlemingViot:
                         # Size: As many elements as trajectories beginning at position 1 that come from particles
                         # becoming either blocked or unblocked.
 
-        # Particle counts used in the computation of the estimated measures 
-        self.counts_alive = [0]     # Number of particles that are alive in each time segment defined by sk
-                                    # => have not been absorbed by position 0.
-                                    # The time segment associated to the count has the time value in the sk array
-                                    # as its lower bound.
-                                    # Size: same as the times of ABSORPTION array
-        self.counts_blocked = [0]   # Number of particles that are blocked in each time segment defined by sb
-                                    # => have reached position K, the maximum capacity of the queue represented by the particle. 
-                                    # Size: same as the times of BLOCK/UNBLOCK array
+        # Particle counts used in the computation of the estimated measures
+        # Note that these initial values are ALWAYS 0, regardless of the initial position of the particles
+        # (whether 0 or 1). For more details see the comments in the compute_counts() method.
+        self.counts_alive = [0] # Number of particles that are alive in each time segment defined by sk
+                                # => have not been absorbed by position 0.
+                                # The time segment associated to the count has the time value in the sk array
+                                # as its lower bound.
+                                # Size: same as the times of ABSORPTION array
+        self.counts_blocked = [0]# Number of particles that are blocked in each time segment defined by sb
+                                # => have reached position K, the maximum capacity of the queue represented by the particle. 
+                                # Size: same as the times of BLOCK/UNBLOCK array
 
         # Times of last change
         self.time_last_change_of_system = 0.0
 
-        #print("Particle system with {} particles has been reset:".format(self.N))
-        #print("times_next_events = {}".format(self.times_next_events))
-        #print("_order_times_next_events = {}".format(self._order_times_next_events))
-        #print("")
+        if self.LOG:
+            print("Particle system with {} particles has been reset:".format(self.N))
+            print("")
 
     def simulate(self):
         self.reset()
@@ -294,7 +327,7 @@ class EstimatorQueueBlockingFlemingViot:
         #self.estimate_proba_blocking()
 
     def generate_trajectories(self):
-        # IMPORTANT: We start at iteration 1 because at iteration 0 the time and position for all particles is 0
+        # IMPORTANT: We start at iteration 1 because we consider 0 the iteration for the starting positions
         for it in range(1, self.niter+1):
             self.iter = it
             for P in range(self.N):
@@ -844,14 +877,15 @@ class EstimatorQueueBlockingFlemingViot:
                               np.array(self.atimes), self.pat, self.active))
 
     def _update_survival_time_from_zero(self, P, time_of_absorption):
+        ref_time = 0.0 if np.isnan(self.times0[P]) else self.times0[P]
+
         # Refer the survival time to the latest time the particle was at position 0
         # and add it to the previously measured survival time
-        assert time_of_absorption > self.times0[P], \
+        assert time_of_absorption > ref_time, \
                 "The time of absorption ({}) contributing to the mean survival time calculation" \
                 " is larger than the latest time of absorption of the particle ({})" \
-                .format(time_of_absorption, self.times0[P])
-
-        self.ktimes0_sum[P] += time_of_absorption - self.times0[P]
+                .format(time_of_absorption, ref_time)
+        self.ktimes0_sum[P] += time_of_absorption - ref_time
         self.ktimes0_n[P] += 1
 
         if False:
@@ -1166,12 +1200,25 @@ class EstimatorQueueBlockingFlemingViot:
                           "\nThe computation of the counts by time segment cannot proceed." \
                           "\nRun first the finalize() method and rerun.")
 
+        # Initialize the lists that will store information about the counts by time
         self.sk = [0.0]
         self.sbu = [0.0]
+        # The following counts are initialized to 0 because:
+        # - they correspond to the number of particles counted in the time segment 
+        # defined by the value in sk or sbu and Infinity, and they are updated ONLY when
+        # a new time is observed, in which case the non-zero count goes to the segment
+        # just inserted (if it's the first one, the segment is [0, t) where t is the
+        # event time triggering the update of the counts).
+        # - the capacity of the queue is assumed larger than 1, as the status of a particle
+        # CANNOT be both ACTIVE and BLOCKED, because if we allowed this we would need to
+        # change the way events are stored in the info_particles list of dictionaries,
+        # as now only one event type is accepted at each event time. 
         self.counts_alive = [0]
         self.counts_blocked = [0]
+        # Go over each particle
         for p, dict_info in enumerate(self.info_particles):
-            print("Processing particle ID p={}, P={} out of {} particles".format(p, dict_info['particle number'], len(self.info_particles)))
+            P = dict_info['particle number']
+            print("Processing particle ID p={}, P={} out of {} particles".format(p, P, len(self.info_particles)))
             assert dict_info['E'][0] == EventType.ACTIVATION, \
                     "The first event for particle ID p={} is an ACTIVATION ({})" \
                     .format(p, dict_info['E'][0].value)
@@ -1196,7 +1243,7 @@ class EstimatorQueueBlockingFlemingViot:
                     #if self.reactivate:
                     #    assert event_type_prev != EventType.ABSORPTION, \
                     #            "There must be NO event after an absorption (p={}, P={}, {})" \
-                    #            .format(p, dict_info['particle number'], event_type)
+                    #            .format(p, P, event_type)
                     assert len(activation_times) == 0 and event_type_prev in [None, EventType.ABSORPTION] or \
                            len(activation_times)  > 0, \
                             "The activation_times list is empty only when it's the first event" \
@@ -1231,9 +1278,10 @@ class EstimatorQueueBlockingFlemingViot:
         assert len(self.counts_blocked) == len(self.sbu), \
                 "The length of counts_alive ({}) is the same as the length of self.sk ({})" \
                 .format(len(self.counts_blocked), len(self.sbu))
-        if self.finalize_type in [FinalizeType.ABSORB_CENSORED, FinalizeType.REMOVE_CENSORED]:
+        if self.START == 0 and self.finalize_type in [FinalizeType.ABSORB_CENSORED, FinalizeType.REMOVE_CENSORED]:
             assert self.counts_alive[-1] == 0, "The last element of the counts_alive list is 0 ({})".format(self.counts_alive[-1])
-        assert self.counts_blocked[0] == 0, "The first element of the counts_blocked list is 0 ({})".format(self.counts_blocked[0])
+        if self.START < self.queue.getCapacity():
+            assert self.counts_blocked[0] == 0, "The first element of the counts_blocked list is 0 ({})".format(self.counts_blocked[0])
 
         if self.LOG:
             with printoptions(precision=3, suppress=True):
@@ -1282,11 +1330,12 @@ class EstimatorQueueBlockingFlemingViot:
                 " is the same as the number of elements in the blocking time segments array ({})" \
                 .format(len(self.counts_blocked), len(self.sbu))
 
-        if  self.finalize_type in [FinalizeType.ABSORB_CENSORED, FinalizeType.REMOVE_CENSORED]:
+        if self.START == 0 and self.finalize_type in [FinalizeType.ABSORB_CENSORED, FinalizeType.REMOVE_CENSORED]:
             assert self.counts_alive[-1] == 0, \
                     "The number of particles alive at the last measured time is 0" \
                     " since particles are assumed to have been all absorbed or removed ({})" \
                     .format(self.counts_alive)
+        if self.START < self.queue.getCapacity() and self.finalize_type in [FinalizeType.ABSORB_CENSORED, FinalizeType.REMOVE_CENSORED]:
             assert self.counts_blocked[-1] == 0, \
                     "The number of particles blocked at the last measured time is 0" \
                     " since particles are assumed to have been all absorbed or removed ({})" \
@@ -1314,8 +1363,9 @@ class EstimatorQueueBlockingFlemingViot:
                 "The conditional blocking probabilities take values between 0 and 1 ([{:.3f}, {:.3f}])" \
                 .format(np.min(self.proba_block_by_t), np.max(self.proba_block_by_t))
         assert self.proba_surv_by_t[0] == 1.0, "The survival function at t = 0 is 1.0 ({:.3f})".format(self.proba_surv_by_t[0])
-        if self.finalize_type in [FinalizeType.ABSORB_CENSORED, FinalizeType.REMOVE_CENSORED]:
+        if self.START == 0 and self.finalize_type in [FinalizeType.ABSORB_CENSORED, FinalizeType.REMOVE_CENSORED]:
             assert self.proba_surv_by_t[-1] == 0.0, "The survival function at the last measured time is 0 ({})".format(self.proba_surv_by_t[-1])
+        if self.START < self.queue.getCapacity() and self.finalize_type in [FinalizeType.ABSORB_CENSORED, FinalizeType.REMOVE_CENSORED]:
             assert self.proba_block_by_t[-1] == 0.0, "The conditional blocking probability at the last measured time is 0 ({})".format(self.proba_block_by_t[-1])
 
         return pd.DataFrame.from_items([('t', self.t),
@@ -1677,12 +1727,10 @@ class EstimatorQueueBlockingFlemingViot:
 
         for P in range(self.N):
             survival_times_P = np.diff(absorption_and_censoring_times[P])
-            assert len(survival_times_P) > 0, \
-                    "There is at least one survival period for particle number P={}" \
-                    .format(P)
-            assert np.all(survival_times_P > 0), \
-                    "The survival period spans for particle P={} are all positive ({})" \
-                    .format(P, survival_times_P)
+            if len(survival_times_P) > 0:
+                assert np.all(survival_times_P > 0), \
+                        "The survival period spans for particle P={} are all positive ({})" \
+                        .format(P, survival_times_P)
 
             survival_times[P] = pd.concat( [ survival_times[P],
                                              pd.DataFrame({'Survival Period End': absorption_and_censoring_times[P][1:],
@@ -1897,6 +1945,7 @@ class EstimatorQueueBlockingFlemingViot:
                     "\nmu = {:.3f}" \
                     "\nrho = {:.3f}" \
                     "\nnparticles = {}" \
+                    "\nstart = {}" \
                     "\nreactivate = {}" \
                     "\nfinalize_type = {}" \
                     "\nniter = {}" \
@@ -1906,6 +1955,7 @@ class EstimatorQueueBlockingFlemingViot:
                             self.queue.rates[Event.BIRTH.value], self.queue.rates[Event.DEATH.value],
                             self.queue.rates[Event.BIRTH.value] / self.queue.rates[Event.DEATH.value],
                             self.N, self.reactivate, self.finalize_type.name, self.niter, self.seed)
+                            self.reactivate, self.finalize_type.name, self.niter, self.seed)
         return params_str
 
     def isLastIteration(self):
