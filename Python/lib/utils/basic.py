@@ -8,14 +8,44 @@ Created on Thu Jun 07 21:43:52 2020
 
 import bisect   # To insert elements in order in a list (bisect.insort(list, element)
 
-def insort(alist, value):
+def insort(alist, value, unique=False):
     """
     Inserts a value in a list in order and returns the index of insertion
-    (something that the bisect.insort() function does not do)
-     """
-    idx = bisect.bisect(alist, value)  # Index where to insert the value respecting the list order
-    alist.insert(idx, value)           # Insert the new value respecting the list order
-    return idx
+    together with a flag stating whether the value was already present in the list. 
+    
+    The value is not inserted if unique=True and the value already existed in the list.
+
+    Return: tuple
+    The tuple contains two elements:
+    - the index of the sorted insertion if unique=False or the value does not already
+    exist in the list, or the index of the last occurrence of `value` in the input list
+    otherwise.
+    - a flag stating whether the value already existed in the list 
+    """
+    # Index where to insert the value respecting the list order
+    # NOTE that, when the value is already in the list, bisect()
+    # returns an index number that would insert the value AFTER
+    # all the indices where the value is found in the list.
+    idx = bisect.bisect(alist, value)
+    if idx > 0 and alist[idx-1] == value:
+        found = True
+    else:
+        found = False
+
+    if not unique or \
+       unique and not found:
+        # Insert the value respecting the list order
+        alist.insert(idx, value)
+
+    if unique and found:
+        # The returned index is the index of the last occurrence of
+        # the element already existing in the list, so that this
+        # index can be used directly as an index "to update" in case
+        # we need to update another list that is related to the list
+        # given as input to this function.
+        idx = idx - 1
+
+    return idx, found
 
 def find(alist, value):
     """
@@ -116,14 +146,14 @@ def merge_values_in_time(t1, y1, t2, y2):
     # Insert values in the first pair of lists
     for t in t2:
         if (t > 0):
-            idx_insort = insort(t1_merged, t)
+            idx_insort, found = insort(t1_merged, t)
             assert idx_insort > 0, "The index to insert the new time is larger than 0 ({})".format(idx_insort)
             y1_merged.insert(idx_insort, y1_merged[idx_insort-1])
 
     # Insert values in the second pair of lists
     for t in t1:
         if (t > 0):
-            idx_insort = insort(t2_merged, t)
+            idx_insort, found = insort(t2_merged, t)
             assert idx_insort > 0, "The index to insert the new time is larger than 0 ({})".format(idx_insort)
             y2_merged.insert(idx_insort, y2_merged[idx_insort-1])
 

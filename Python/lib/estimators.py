@@ -184,7 +184,7 @@ class EstimatorQueueBlockingFlemingViot:
         # List stating whether the corresponding particle number has been absorbed already at least once
         # This is used when updating the dict_info_absorption_times dictionary, as this should contain
         # only one absorption time per particle.
-        self.particle_was_absorbed_already = [False]*self.N
+        self.particle_already_absorbed = [False]*self.N
         # List of reactivation IDs which are the indices in the info_particles list
         # where we should look for the latest information (relevant events and their times)
         # about each particle.
@@ -305,12 +305,12 @@ class EstimatorQueueBlockingFlemingViot:
                 self._update_trajectories(P)
                 self._update_info_particles(P, position_change)
                 if not self.reactivate and self._is_particle_absorbed(P, position_change) or \
-                   self.reactivate and self._is_particle_absorbed(P, position_change) and not self.particle_was_absorbed_already[P]:
-                    self.particle_was_absorbed_already[P] = True
+                   self.reactivate and self._is_particle_absorbed(P, position_change) and not self.particle_already_absorbed[P]:
+                    self.particle_already_absorbed[P] = True
                     self._update_info_absorption_times(P, time_of_event, it)
                     self._update_survival_time_from_zero(P, time_of_event)
 
-                # TODO: Add assertions about the information stored in the above objects
+                # TODO: (2020/06/22) Add assertions about the information stored in the above objects
                 # (see notes on loose sheets of paper)
                 assert sorted(self.dict_info_absorption_times['t']) == self.dict_info_absorption_times['t'], \
                         "The absorption times in the dict_info_absorption_times dictionary are sorted" \
@@ -366,7 +366,7 @@ class EstimatorQueueBlockingFlemingViot:
                     position_Q_at_t0 = self._copy_info_from_particle_at_given_time(P, Q, t0, iter)
 
                     # Since the particle was reactivated state that it is no longer absorbed
-                    self.particle_was_absorbed_already[P] = False
+                    self.particle_already_absorbed[P] = False
 
                     # Update the trajectory of the reactivated particle to new positions
                     # using the already generated event times and starting at the position
@@ -379,10 +379,10 @@ class EstimatorQueueBlockingFlemingViot:
                         if iter_final < self.niter:
                             # The particle was absorbed and we have not yet reached the last iteration
                             # => Add the absorption time to the dictionary of absorption times
-                            assert not self.particle_was_absorbed_already[P], \
+                            assert not self.particle_already_absorbed[P], \
                                     "The flag indicating that particle {} has been absorbed is set to False" \
                                     .format(P)
-                            self.particle_was_absorbed_already[P] = True
+                            self.particle_already_absorbed[P] = True
                             self._update_info_absorption_times(P, self.trajectories[P]['t'][iter_final], iter_final)
     
                             assert len(self.info_particles[ self.particle_reactivation_ids[P] ]) >= 2, \
@@ -455,7 +455,7 @@ class EstimatorQueueBlockingFlemingViot:
         self.assertTimeInsertedInTrajectories(P)
         self.trajectories[P]['t'] += [self.particles[P].getTimeLastEvent()]
         if not self.reactivate or \
-           self.reactivate and not self.particle_was_absorbed_already[P]:
+           self.reactivate and not self.particle_already_absorbed[P]:
             self.trajectories[P]['x'] += [self.particles[P].size]
         self.trajectories[P]['e'] += [self.particles[P].getTypeLastEvent()]
         
@@ -465,7 +465,7 @@ class EstimatorQueueBlockingFlemingViot:
     def _update_info_absorption_times(self, P, time_of_absorption, it):
         "Inserts a new absorption time in order, together with its particle number and iteration number"
         assert self.isValidParticle(P), "The particle number is valid (0<=P<{}) ({})".format(self.N, P)
-        idx_insort = insort(self.dict_info_absorption_times['t'], time_of_absorption)
+        idx_insort, found = insort(self.dict_info_absorption_times['t'], time_of_absorption)
         self.dict_info_absorption_times['P'].insert(idx_insort, P)
         self.dict_info_absorption_times['iter'].insert(idx_insort, it)
 
@@ -489,7 +489,7 @@ class EstimatorQueueBlockingFlemingViot:
 
         if type_of_event(P) is not None and \
            (not self.reactivate or
-            self.reactivate and not self.particle_was_absorbed_already[P]):
+            self.reactivate and not self.particle_already_absorbed[P]):
             # When reactivate=True, only add the information about the event types
             # as long as the particle has not yet been absorbed. If the latter is the case
             # we should not add this information because it belongs to a new particle ID
@@ -899,7 +899,7 @@ class EstimatorQueueBlockingFlemingViot:
         """
         ltimes, lparticles, liter, _ = self.get_lists_with_event_type_info(type_of_event)
 
-        idx_insort = insort(ltimes, time_of_event)
+        idx_insort, found = insort(ltimes, time_of_event)
         lparticles.insert(idx_insort, p)
         liter.insert(idx_insort, self.iter)
 
@@ -927,12 +927,12 @@ class EstimatorQueueBlockingFlemingViot:
     def _insert_new_relative_times(self, idx_activation_times, times_since_activation, type_of_event):
         for idx_activation_time, s in zip(idx_activation_times, times_since_activation):
             if type_of_event == EventType.ABSORPTION:
-                idx_insort = insort(self.sk, s)
+                idx_insort, found = insort(self.sk, s)
                 self._update_counts_alive(idx_insort)
                 # De-activate the trajectory associated to the absorption
                 self.active[idx_activation_time] = False
             elif type_of_event == EventType.BLOCK or type_of_event == EventType.UNBLOCK:
-                idx_insort = insort(self.sbu, s)
+                idx_insort, found = insort(self.sbu, s)
                 self._update_counts_blocked(idx_insort, type_of_event)
             else:
                 raise ValueError("The type of event is invalid: {}".format(type_of_event))
@@ -971,8 +971,9 @@ class EstimatorQueueBlockingFlemingViot:
                 "The event type is either ABSORPTION or CENSORING ({})" \
                 .format(event_type.name)
 
-        # Insert a new element in the array whose value is equal to the count of the segment
-        # before split (in fact, the particle just absorbed had not yet been counted in the segment
+        # Insert a new element in the list and assign it a count value
+        # equal to the count of the segment before split
+        # (in fact, the particle just absorbed had not yet been counted in the segment
         # and thus we should not count it on the right part of the split, since the particle no longer
         # exists at that time)
         self.counts_alive.insert(idx_to_insert, self.counts_alive[idx_to_insert - 1])
@@ -992,21 +993,28 @@ class EstimatorQueueBlockingFlemingViot:
             # we are assuming that the particle is still alive up to Infinity.)  
             self.counts_alive[idx_to_insert] += 1
 
-    def _update_counts_blocked(self, idx_to_insert, event_type):
+    def _update_counts_blocked(self, idx_to_insert_or_update, event_type, new=True):
         """
         Updates the counts of blocked particles in each time segment where the count can change
         following the blocking or unblocking of a new particle.
+
+        Arguments:
+        new: bool
+            Whether the index to insert corresponds to a new split of an existing time segment
+            or whether the time segment already exists and it should be updated. 
         """
-        assert 1 <= idx_to_insert <= len(self.counts_blocked), \
+        assert 1 <= idx_to_insert_or_update <= len(self.counts_blocked), \
                 "The index where a new counter needs to be inserted ({}) is at least 1" \
                 " and at most the current number of elements in the counts_blocked array ({})" \
-                .format(idx_to_insert, len(self.counts_blocked))
+                .format(idx_to_insert_or_update, len(self.counts_blocked))
         assert event_type in [EventType.BLOCK, EventType.UNBLOCK], \
                 "The event type is either BLOCK or UNBLOCK ({})" \
                 .format(event_type.name)
 
-        # Insert a new element in the array whose value is equal to the count of the segment before split
-        self.counts_blocked.insert(idx_to_insert, self.counts_blocked[idx_to_insert - 1])
+        if new:
+            # Insert a new element in the list and assign it a count value
+            # equal to the count of the segment before split.
+            self.counts_blocked.insert(idx_to_insert_or_update, self.counts_blocked[idx_to_insert_or_update - 1])
 
         # INCREASE/DECREASE by 1 ALL counts to the RIGHT of the insert index
         # (because the block/unblock indicates that all time segments that are larger
@@ -1015,7 +1023,7 @@ class EstimatorQueueBlockingFlemingViot:
             delta_count = +1
         elif event_type == EventType.UNBLOCK:
             delta_count = -1
-        for idx in range(idx_to_insert, len(self.counts_blocked)):
+        for idx in range(idx_to_insert_or_update, len(self.counts_blocked)):
             self.counts_blocked[idx] += delta_count
 
     def _update_particle_position_info(self, P, new_position, time_at_new_position):
@@ -1204,6 +1212,17 @@ class EstimatorQueueBlockingFlemingViot:
                     self.insert_relative_time(t, activation_times, event_type)
                     if event_type == EventType.ABSORPTION:
                         activation_times = []
+
+                    if False:
+                        # These assertions are disabled because they take time
+                        assert sorted(self.sk) == list(np.unique(self.sk)), \
+                                "The list of survival time segments contains unique values" \
+                                " after insertion of event {} for particle p={}, P={}" \
+                                .format(event_type.name, p, P)
+                        assert sorted(self.sbu) == list(np.unique(self.sbu)), \
+                                "The list of block/unblock time segments contains unique values" \
+                                " after insertion of event {} for particle p={}, P={}" \
+                                .format(event_type.name, p, P)
                 event_type_prev = event_type
 
         assert len(self.counts_alive) == len(self.sk), \
@@ -1233,11 +1252,12 @@ class EstimatorQueueBlockingFlemingViot:
             if s < 0:
                 break
             if event_type in [EventType.ABSORPTION, EventType.CENSORING]:
-                idx_insort = insort(self.sk, s)
+                idx_insort, found = insort(self.sk, s)
+                assert not found, "The time value is NOT found in the list of survival time segments ({})".format(s)
                 self._update_counts_alive(idx_insort, event_type)
             elif event_type in [EventType.BLOCK, EventType.UNBLOCK]:
-                idx_insort = insort(self.sbu, s)
-                self._update_counts_blocked(idx_insort, event_type)
+                idx_insort, found = insort(self.sbu, s, unique=True)
+                self._update_counts_blocked(idx_insort, event_type, new=not found)
             else:
                 raise ValueError("The event type is invalid: {}".format(event_type))
 
@@ -1903,7 +1923,7 @@ class EstimatorQueueBlockingFlemingViot:
         assert  len(self.trajectories[P]['t']) == 0 and self.particles[P].getTimeLastEvent() > 0 or \
                 len(self.trajectories[P]['t'])  > 0 and self.particles[P].getTimeLastEvent() > self.trajectories[P]['t'][-1], \
                 "The time to insert in the trajectories dictionary ({}) for particle {}" \
-                " is larger than the latest time inserted ({})" \
+                " is larger than the latest inserted time ({})" \
                 .format(self.particles[P].getTimeLastEvent(),
                         len(self.trajectories[P]['t']) == 0 and 0.0 or self.trajectories[P]['t'][-1])
 
