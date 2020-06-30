@@ -39,12 +39,6 @@ class FinalizeType(Enum):
     REMOVE_CENSORED = 2
     ABSORB_CENSORED = 3
 
-@unique
-class RenderType(Enum):
-    "Types of rendering the evolution of particles in the simulated process"
-    GRAPH = 1
-    TEXT = 0
-
 class EstimatorQueueBlockingFlemingViot:
     """Estimator of the blocking probability of queues using the Fleming Viot particle system
     
@@ -72,6 +66,11 @@ class EstimatorQueueBlockingFlemingViot:
         - getTypeLastEvent()
         - apply_event()
 
+    mean_lifetime: (opt) positive float
+        Mean particle lifetime to be used as the expected survival time.
+        This is useful when reactivate=True and start=1, as in that case
+        the particles never touch position 0.
+
     reactivate: (opt) bool
         Whether to reactivate a particle after absorption to a positive position.
 
@@ -85,12 +84,15 @@ class EstimatorQueueBlockingFlemingViot:
     seed: (opt) int
         Random seed to use for the random number generation by numpy.random.
 
+    plotFlag: (opt) bool
+        Whether to plot the trajectories of the particles.
+
     log: (opt) bool
         Whether to show messages of what is happening with the particles.
     """
     def __init__(self, nparticles: int, niter: int, queue: GenericQueue,
-                 reactivate=True, finalize_type=FinalizeType.REMOVE_CENSORED, render_type=RenderType.GRAPH,
-                 seed=None, log=False):
+                 mean_lifetime=None, reactivate=True, finalize_type=FinalizeType.REMOVE_CENSORED,
+                 seed=None, plotFlag=False, log=False):
         if reactivate and nparticles < 2:
             raise ValueError("The number of particles must be at least 2 when reactivate=True ({})".format(nparticles))
             import sys
@@ -116,7 +118,7 @@ class EstimatorQueueBlockingFlemingViot:
 
         self.reactivate = reactivate        # Whether the particle is reactivated to a positive position after absorption
         self.finalize_type = finalize_type  # How to finalize the simulation
-        self.render_type = render_type
+        self.plotFlag = plotFlag
         self.seed = seed
         self.LOG = log
 
@@ -254,46 +256,6 @@ class EstimatorQueueBlockingFlemingViot:
         self.ktimes0_n = np.zeros(self.N, dtype=int)       # Number of times the particles were absorbed
 
         # 3) Attributes used directly in the computation of the estimated measures that contribute to the probability of blocking.
-        # TODO: (2020/06/16) Store the information on each particle in separate lists (FOR SPEED UP!)
-        self.active = []# Whether the particle in the corresponding index of the activation times array is active,
-                        # i.e. if it has not yet been absorbed.
-                        # GOAL: find all the activation times for an absorption event. 
-                        # SIZE: same as the activation times array
-
-        self.atimes = []# Absolute times when a particle becomes active, i.e. touches position 1.
-                        # If this happens for an active particle, a fictitious particle is created
-                        # and their position followed as well.
-                        # These times are called activation times and they are sorted increasingly in the array.
-                        # GOAL: use as reference time to compute the relative absorption and blocking times.
-                        # SIZE AT THE END OF SIMULATION: N1 = number of particles considered for the estimation
-                        # of the probability of blocking.
-        self.pat = []   # Particle number associated to the corresponding index in the activation times array.
-                        # GOAL: find the activation time of a particle when the particle is absorbed/blocked/unblocked.
-                        # SIZE: same as the activation times array
-        self.iat = []   # Array that keeps track of the iteration at which each activation takes place.
-                        # SIZE: same as the activation times array
-
-        self.ktimes = []# List of sorted absolute absorption times (for checking purposes). k = kill
-                        # Size: As many as number of absorptions occurred
-        self.pkt = []   # Particle number associated to each absorption time (pkt = Particle Kill Time).
-                        # Size: Same as the absorption times array
-        self.ikt = []   # Array that keeps track of the iteration at which each absorption took place.
-                        # Size: same as the absorption times array
-
-        self.btimes = []# List of sorted absolute BLOCK times (for checking purposes).
-                        # Size: As many as number of blocks occurred
-        self.pbt = []   # Particle number associated to each BLOCK time (pbt = Particle Block Time).
-                        # Size: Same as the blocking times array
-        self.ibt = []   # Array that keeps track of the iteration at which each BLOCK takes place.
-                        # Size: same as the block times array
-
-        self.utimes = []# List of sorted absolute UNBLOCK times (for checking purposes).
-                        # Size: As many as number of unblocks occurred
-        self.put = []   # Particle number associated to each UNBLOCK time (put = Particle Unblock Time).
-                        # Size: Same as the unblock times array
-        self.iut = []   # Array that keeps track of the iteration at which each UNBLOCK takes place.
-                        # Size: same as the unblock times array
-
         self.sk = [0]   # Times of an ABSORPTION (Killing) relative to ALL the activation times of the absorbed particle.
                         # The list is updated whenever an active particle is absorbed (i.e. touches position 0)
                         # GOAL: define the disjoint time segments on which the estimated survival probability is constant.
@@ -315,6 +277,7 @@ class EstimatorQueueBlockingFlemingViot:
                                 # Size: same as the times of BLOCK/UNBLOCK array
 
         # Times of last change
+        # TODO: Update this value as the simulation goes forward
         self.time_last_change_of_system = 0.0
 
         if self.LOG:
@@ -322,37 +285,36 @@ class EstimatorQueueBlockingFlemingViot:
             print("")
 
     def simulate(self):
+        """
+        Simulates the system of particles and estimates the blocking probability
+
+        Return: tuple
+        The tuple contains the following elements:
+        - the estimated blocking probability
+        - the estimated expected blocking time given the particle starts at position 1 and is not absorbed
+          (this is the numerator of the expression giving the blocking probability estimate)
+        - the estimated expected survival time (time to first absorption) given the particle starts at position 0.
+          (this is the denominator of the expression giving the blocking probability estimate)
+        """
         self.reset()
+
         self.generate_trajectories()
-        #self.estimate_proba_blocking()
+
+        self.finalize()
+        self.compute_counts()
+
+        proba_blocking, integral, expected_survival_time = self.estimate_proba_blocking()
+        self.proba_blocking = proba_blocking
+
+        if self.plotFlag:
+            self.plot_trajectories()
+
+        return self.proba_blocking, integral, expected_survival_time
 
     def generate_trajectories(self):
-        # IMPORTANT: We start at iteration 1 because we consider 0 the iteration for the starting positions
+        # NOTE: We start at iteration 1 because we consider 0 to be the iteration for the starting particle positions
         for it in range(1, self.niter+1):
-            self.iter = it
-            for P in range(self.N):
-                time_of_event, position_change = self._update_one_particle(P)
-                assert -1 <= position_change <= 1, \
-                        "The change of position of particle P={} is -1, 0, or +1 ({})" \
-                        .format(P, position_change)
-                self._update_trajectories(P)
-                self._update_info_particles(P, position_change)
-                if not self.reactivate and self._is_particle_absorbed(P, position_change) or \
-                   self.reactivate and self._is_particle_absorbed(P, position_change) and not self.particle_already_absorbed[P]:
-                    self.particle_already_absorbed[P] = True
-                    self._update_info_absorption_times(P, time_of_event, it)
-                    self._update_survival_time_from_zero(P, time_of_event)
-
-                # TODO: (2020/06/22) Add assertions about the information stored in the above objects
-                # (see notes on loose sheets of paper)
-                assert sorted(self.dict_info_absorption_times['t']) == self.dict_info_absorption_times['t'], \
-                        "The absorption times in the dict_info_absorption_times dictionary are sorted" \
-                        "\n{}".format(self.dict_info_absorption_times[P]['t'])
-                if self.reactivate:
-                    assert  len(self.dict_info_absorption_times['P']) == 0 or \
-                            list(np.unique(self.dict_info_absorption_times['P'])) == sorted(self.dict_info_absorption_times['P']), \
-                            "The particles associated to the absorption times in the dict_info_absorption_times dictionary are unique" \
-                            "\n{}".format(self.dict_info_absorption_times['P'])
+            self.generate_one_iteration(it)
 
         if self.LOG: #True:
             print("\n******** Info PARTICLES before REACTIVATION:")
@@ -362,110 +324,230 @@ class EstimatorQueueBlockingFlemingViot:
                     print(np.c_[np.array(self.info_particles[P]['t']), np.array(self.info_particles[P]['E'])])
 
         if self.reactivate:
-            # Helper function for an assertion below
-            has_been_absorbed_at_time_t = lambda P, t: len(self.trajectories[P]['x']) == self.niter + 1 and self.trajectories[P]['t'][-1] < t and self.trajectories[P]['x'][-1] == 0
-                ## NOTE: For this function to return what the name says, the 'x' attribute of the dictionary
-                ## stored for each particle in self.trajectories must increase its size as the simulation progresses
-                ## (in fact, the function checks whether the length of this attribute is equal to the number of iterations)
-                ## (as opposed to fill it up up front when generating all the events for each particle
-                ## at the beginning of this method generate_trajectories())    
+            self.regenerate_trajectories_iteratively_until_all_absorption_times_are_exhausted()
 
-            # Re-generate the trajectories based on reactivation of particles after absorption
-            initial_number_absorption_times = len(self.dict_info_absorption_times['t'])
-            while len(self.dict_info_absorption_times['t']) > 0:
-                if self.LOG:
-                    with printoptions(precision=3, suppress=True):
-                        print("\n******** Trajectories:")
-                        for P in range(self.N):
-                            print("Particle {}".format(P))
-                            print(np.r_[self.trajectories[P]['t'], self.trajectories[P]['x']])
-                            pass
-                        print("Absorption times:")
-                        print(self.dict_info_absorption_times['t'])
-                        print(self.dict_info_absorption_times['P'])
-                        print(self.dict_info_absorption_times['iter'])
-                t0 = self.dict_info_absorption_times['t'].pop(0)
-                P = self.dict_info_absorption_times['P'].pop(0)
-                iter = self.dict_info_absorption_times['iter'].pop(0)
-                
-                if iter < self.niter:
-                    # Only reactivate the particle if the absorption didn't happen at the last iteration
-                    # If this is the case, we should take the last position of the particle as absorbed
-                    # which would avoid us further work when finalizing the simulation
-                    # (which needs to deal with all non-absorbed --i.e. still alive-- particles).  
+    def generate_one_iteration(self, it):
+        self.iter = it
+        for P in range(self.N):
+            time_of_event, position_change = self._update_one_particle(P)
+            assert -1 <= position_change <= 1, \
+                    "The change of position of particle P={} is -1, 0, or +1 ({})" \
+                    .format(P, position_change)
+            self._update_trajectories(P)
+            self._update_info_particles(P, position_change)
+            if not self.reactivate and self._is_particle_absorbed(P, position_change) or \
+               self.reactivate and self._is_particle_absorbed(P, position_change) and not self.particle_already_absorbed[P]:
+                self.particle_already_absorbed[P] = True
+                self._update_info_absorption_times(P, time_of_event, it)
+                self._update_survival_time_from_zero(P, time_of_event)
 
-                    # Choose a particle and copy the relevant info from it to the reactivated particle
-                    Q = self._choose_assigned_particle(P)
-                    position_Q_at_t0 = self._copy_info_from_particle_at_given_time(P, Q, t0, iter)
+            self.time_last_change_of_system = time_of_event;
+            self.assertSystemConsistency(P, time_of_event)
 
-                    # Since the particle was reactivated state that it is no longer absorbed
-                    self.particle_already_absorbed[P] = False
+            # TODO: (2020/06/22) Add assertions about the information stored in the above objects
+            # (see notes on loose sheets of paper)
+            assert sorted(self.dict_info_absorption_times['t']) == self.dict_info_absorption_times['t'], \
+                    "The absorption times in the dict_info_absorption_times dictionary are sorted" \
+                    "\n{}".format(self.dict_info_absorption_times[P]['t'])
+            if self.reactivate:
+                assert  len(self.dict_info_absorption_times['P']) == 0 or \
+                        list(np.unique(self.dict_info_absorption_times['P'])) == sorted(self.dict_info_absorption_times['P']), \
+                        "The particles associated to the absorption times in the dict_info_absorption_times dictionary are unique" \
+                        "\n{}".format(self.dict_info_absorption_times['P'])
 
-                    # Update the trajectory of the reactivated particle to new positions
-                    # using the already generated event times and starting at the position
-                    # of the assigned particle Q.
-                    iter_final, position_change = self._regenerate_trajectory(P, position_Q_at_t0, iter)
+    def regenerate_trajectories_iteratively_until_all_absorption_times_are_exhausted(self):
+        # Helper function for an assertion below
+        has_been_absorbed_at_time_t = lambda P, t: len(self.trajectories[P]['x']) == self.niter + 1 and self.trajectories[P]['t'][-1] < t and self.trajectories[P]['x'][-1] == 0
+            ## NOTE: For this function to return what the name says, the 'x' attribute of the dictionary
+            ## stored for each particle in self.trajectories must increase its size as the simulation progresses
+            ## (in fact, the function checks whether the length of this attribute is equal to the number of iterations)
+            ## (as opposed to fill it up up front when generating all the events for each particle
+            ## at the beginning of this method generate_trajectories())    
 
-                    if self._is_particle_absorbed(P, position_change):
-                        # Update the lists used to compute the expected survival time
-                        self._update_survival_time_from_zero(P, self.trajectories[P]['t'][iter_final])
-                        if iter_final < self.niter:
-                            # The particle was absorbed and we have not yet reached the last iteration
-                            # => Add the absorption time to the dictionary of absorption times
-                            assert not self.particle_already_absorbed[P], \
-                                    "The flag indicating that particle {} has been absorbed is set to False" \
-                                    .format(P)
-                            self.particle_already_absorbed[P] = True
-                            self._update_info_absorption_times(P, self.trajectories[P]['t'][iter_final], iter_final)
-    
-                            assert len(self.info_particles[ self.particle_reactivation_ids[P] ]) >= 2, \
-                                    "The number of relevant events of the reactivated particle P={}" \
-                                    " to particle ID {} is at least two (an activation and an absorption at the end)." \
-                                    .format(P, self.particle_reactivation_ids[P])
-                            assert self.info_particles[ self.particle_reactivation_ids[P] ]['E'][-2] == EventType.ACTIVATION and \
-                                   self.info_particles[ self.particle_reactivation_ids[P] ]['E'][-1] == EventType.ABSORPTION, \
-                                    "The last two relevant events of the reactivated particle (p={}) for particle P={}" \
-                                    " are ACTIVATION and ABSORPTION ({}, {})" \
-                                    .format(self.particle_reactivation_ids[P], P,
-                                            self.particle_reactivation_ids[P]['E'][-2].value,
-                                            self.particle_reactivation_ids[P]['E'][-1].value)
-                            if not has_been_absorbed_at_time_t(Q, t0):
-                                # The following assertion only makes sense when the particle Q to which
-                                # particle P has been assigned to is still active.
-                                # It is NOT necessarily true ONLY when particle Q has become inactive, and
-                                # this is only the case when ALL of the following conditions take place:
-                                # - the particle Q has reached the last iteration of simulation
-                                # - the particle Q has been absorbed at the last iteration of simulation
-                                # - the absorption time of particle Q is SMALLER than the reactivation time of particle P.
-                                assert np.sum( [1   if E == EventType.ABSORPTION
-                                                    else 0
-                                                    for E in self.info_particles[ self.particle_reactivation_ids[P] ]['E'] ] ) == 1, \
-                                        "There is exactly one ABSORPTION event for the reactivated particle (P={}, p={}):" \
-                                        "\n(events={})\n(times={})" \
-                                        .format(P, self.particle_reactivation_ids[P],
-                                                [E.value for E in self.info_particles[ self.particle_reactivation_ids[P] ]['E']],
-                                                self.info_particles[ self.particle_reactivation_ids[P] ]['t'])
+        # Re-generate the trajectories based on reactivation of particles after absorption
+        initial_number_absorption_times = len(self.dict_info_absorption_times['t'])
+        while len(self.dict_info_absorption_times['t']) > 0:
+            if self.LOG:
+                with printoptions(precision=3, suppress=True):
+                    print("\n******** Trajectories:")
+                    for P in range(self.N):
+                        print("Particle {}".format(P))
+                        print(np.r_[self.trajectories[P]['t'], self.trajectories[P]['x']])
+                        pass
+                    print("Absorption times:")
+                    print(self.dict_info_absorption_times['t'])
+                    print(self.dict_info_absorption_times['P'])
+                    print(self.dict_info_absorption_times['iter'])
+            t0 = self.dict_info_absorption_times['t'].pop(0)
+            P = self.dict_info_absorption_times['P'].pop(0)
+            iter = self.dict_info_absorption_times['iter'].pop(0)
+            
+            if iter < self.niter:
+                # Only reactivate the particle if the absorption didn't happen at the last iteration
+                # If this is the case, we should take the last position of the particle as absorbed
+                # which would avoid us further work when finalizing the simulation
+                # (which needs to deal with all non-absorbed --i.e. still alive-- particles).  
 
-                    # Assertions for ALL cases, i.e. not only for the case when the particle is absorbed
-                    # at the end of the trajectory regeneration process 
-                    assert self.particle_reactivation_ids[P] == len(self.info_particles) - 1, \
-                            "The reactivated particle ID (p={}) for particle P={}" \
-                            " is the last one in the info_particles list (len={})" \
-                            .format(self.particle_reactivation_ids[P], P, len(self.info_particles))
-                    assert len(self.info_particles[ self.particle_reactivation_ids[P] ]) >= 2, \
-                            "The number of relevant events of the reactivated particle P={}" \
-                            " to particle ID {} is at least two (an activation and an absorption at the end)." \
-                            .format(P, self.particle_reactivation_ids[P])
-                    assert self.info_particles[ self.particle_reactivation_ids[P] ]['E'][0] == EventType.ACTIVATION, \
-                            "The first relevant event of the reactivated particle (p={}) for particle P={}" \
-                            " is an ACTIVATION ({})" \
-                            .format(self.particle_reactivation_ids[P], P,
-                                    self.particle_reactivation_ids[P]['E'][0].value)
+                # Choose a particle and copy the relevant info from it to the reactivated particle
+                Q = self._choose_assigned_particle(P)
+                position_Q_at_t0 = self._copy_info_from_particle_at_given_time(P, Q, t0, iter)
 
-                assert len(self.dict_info_absorption_times['t']) <= initial_number_absorption_times, \
-                        "The length of the list containing the absorption times ({}) is" \
-                        " <= the initial number of absorption times ({})" \
-                        .format(len(self.dict_info_absorption_times['t']), initial_number_absorption_times)
+                # Since the particle was reactivated state that it is no longer absorbed
+                self.particle_already_absorbed[P] = False
+
+                # Update the trajectory of the reactivated particle to new positions
+                # using the already generated event times and starting at the position
+                # of the assigned particle Q.
+                iter_final, position_change = self._regenerate_trajectory(P, position_Q_at_t0, iter)
+
+                if self._is_particle_absorbed(P, position_change):
+                    # Update the lists used to compute the expected survival time
+                    self._update_survival_time_from_zero(P, self.trajectories[P]['t'][iter_final])
+                    if iter_final < self.niter:
+                        # The particle was absorbed and we have not yet reached the last iteration
+                        # => Add the absorption time to the dictionary of absorption times
+                        assert not self.particle_already_absorbed[P], \
+                                "The flag indicating that particle {} has been absorbed is set to False" \
+                                .format(P)
+                        self.particle_already_absorbed[P] = True
+                        self._update_info_absorption_times(P, self.trajectories[P]['t'][iter_final], iter_final)
+
+                        assert len(self.info_particles[ self.particle_reactivation_ids[P] ]) >= 2, \
+                                "The number of relevant events of the reactivated particle P={}" \
+                                " to particle ID {} is at least two (an activation and an absorption at the end)." \
+                                .format(P, self.particle_reactivation_ids[P])
+                        assert self.info_particles[ self.particle_reactivation_ids[P] ]['E'][-2] == EventType.ACTIVATION and \
+                               self.info_particles[ self.particle_reactivation_ids[P] ]['E'][-1] == EventType.ABSORPTION, \
+                                "The last two relevant events of the reactivated particle (p={}) for particle P={}" \
+                                " are ACTIVATION and ABSORPTION ({}, {})" \
+                                .format(self.particle_reactivation_ids[P], P,
+                                        self.particle_reactivation_ids[P]['E'][-2].value,
+                                        self.particle_reactivation_ids[P]['E'][-1].value)
+                        if not has_been_absorbed_at_time_t(Q, t0):
+                            # The following assertion only makes sense when the particle Q to which
+                            # particle P has been assigned to is still active.
+                            # It is NOT necessarily true ONLY when particle Q has become inactive, and
+                            # this is only the case when ALL of the following conditions take place:
+                            # - the particle Q has reached the last iteration of simulation
+                            # - the particle Q has been absorbed at the last iteration of simulation
+                            # - the absorption time of particle Q is SMALLER than the reactivation time of particle P.
+                            assert np.sum( [1   if E == EventType.ABSORPTION
+                                                else 0
+                                                for E in self.info_particles[ self.particle_reactivation_ids[P] ]['E'] ] ) == 1, \
+                                    "There is exactly one ABSORPTION event for the reactivated particle (P={}, p={}):" \
+                                    "\n(events={})\n(times={})" \
+                                    .format(P, self.particle_reactivation_ids[P],
+                                            [E.value for E in self.info_particles[ self.particle_reactivation_ids[P] ]['E']],
+                                            self.info_particles[ self.particle_reactivation_ids[P] ]['t'])
+
+                # Assertions for ALL cases, i.e. not only for the case when the particle is absorbed
+                # at the end of the trajectory regeneration process 
+                assert self.particle_reactivation_ids[P] == len(self.info_particles) - 1, \
+                        "The reactivated particle ID (p={}) for particle P={}" \
+                        " is the last one in the info_particles list (len={})" \
+                        .format(self.particle_reactivation_ids[P], P, len(self.info_particles))
+                assert len(self.info_particles[ self.particle_reactivation_ids[P] ]) >= 2, \
+                        "The number of relevant events of the reactivated particle P={}" \
+                        " to particle ID {} is at least two (an activation and an absorption at the end)." \
+                        .format(P, self.particle_reactivation_ids[P])
+                #assert self.info_particles[ self.particle_reactivation_ids[P] ]['E'][0] == EventType.ACTIVATION, \
+                #        "The first relevant event of the reactivated particle (p={}) for particle P={}" \
+                #        " is an ACTIVATION ({})" \
+                #        .format(self.particle_reactivation_ids[P], P,
+                #                self.info_particles[ self.particle_reactivation_ids[P] ]['E'][0].value)
+
+            assert len(self.dict_info_absorption_times['t']) <= initial_number_absorption_times, \
+                    "The length of the list containing the absorption times ({}) is" \
+                    " <= the initial number of absorption times ({})" \
+                    .format(len(self.dict_info_absorption_times['t']), initial_number_absorption_times)
+
+    def _update_one_particle(self, P):
+        """
+        Updates the position/state of the particle based on the current "next times-to-event array"
+        for the particle, and updates this array with new times-to-event.
+       
+        The times-to-event array is a two-element array that represents the times of occurrence of the
+        two possible events on a particle, namely birth and death in this order. The times are measured
+        from the occurrence of the latest event taking place on the particle.
+      
+        In practice, this method does the following: it takes the current value of the said two-element array
+        --e.g. [3.2, 2.7]-- and selects the smallest time between the two (2.7 in this case, which corresponds
+        to a death event). The goal is to apply to the particle the event that is happening *next*, and update
+        its state accordingly (i.e. increase its position if it's a birth event or decrease its position
+        if it's a death event, as long as the position restrictions are satisfied). 
+        
+        The two-element array is then updated as follows:
+        - a new random value is generated to fill the time-to-event for the (death) event just chosen;
+        - the time corresponding to the non-chosen event (birth) is decreased so that the new value represents
+        the time-to-event for the (birth) event *as measured from the time in which the chosen (death) event
+        just took place*.
+        
+        For example, the two-element array may be updated to [0.5, 1.2],  where 0.5 is a deterministic value
+        (= 3.2 - 2.7) while 1.2 is a randomly generated value --e.g. following an exponential distribution with
+        parameter equal to the death rate.
+
+        The new array stores the information of *when* the next event will take place on this particle and
+        of what *type* it will be. In this case, the next event will take place 0.5 time units later than
+        the (death) event just selected, and it will be a birth event --since the said time value (0.5) is
+        stored at the first position of the array, which represents a birth event. 
+
+        Arguments:
+        P: non-negative int
+            Index of the particle to update, from 0 to N-1, where N is the number of particles in the system.
+        
+        Return: tuple
+        The tuple contains:
+        - the time of the selected event, measured in absolute terms, i.e. from the common origin of all particles.
+        - the change in position after applying the event, which can be -1, 0 or +1.
+        """
+        assert self.isValidParticle(P), \
+                "The selected particle ({}) is valid (its index is an integer between 0 and {})".format(P, len(self.N)-1)
+        
+        # Find the event type to apply (whichever occurs first)
+        time_of_event, time_since_previous_event, earliest_event = self.get_time_next_event(P)
+
+        # Update the particle's state by applying the event type just selected and record the position change
+        position_change = self._apply_event(P, Event(earliest_event), time_of_event)
+        latest_event = self._order_times_next_events[P][1]
+
+        # Generate the next time for the event type just applied from the list of event times for this particle
+        event_rate = self.particles[P].rates[earliest_event]
+        self.times_next_events[P][earliest_event] = self.particles[P].generate_event_times(event_rate, size=1)
+
+        # Update the time-to-event for the event type not applied so that it is now relative to the event just applied
+        self.times_next_events[P][latest_event] -= time_since_previous_event
+
+        # Update the order of the next event times
+        self._order_times_next_events[P] = self._compute_order( self.times_next_events[P] )
+
+        #print("UPDATED times_next_events[{}]: {}".format(P, self.times_next_events[P]))
+
+        return time_of_event, position_change
+
+    def _compute_order(self, arr):
+        return list( np.argsort(arr) )
+
+    def _apply_event(self, P, event_to_apply, time_of_event):
+        position_change = self.particles[P].apply_event(event_to_apply, time_of_event)
+        self._update_particle_position_info(P, self.particles[P].size, time_of_event)
+        return position_change
+
+    def _update_particle_position_info(self, P, new_position, time_at_new_position):
+        self.positions[P] = new_position
+        self.all_positions[P] += [self.positions[P]]
+        self.all_times[P] += [time_at_new_position]
+
+    def _update_trajectories(self, P):
+        assert self.isValidParticle(P), "The particle number is valid (0<=P<{}) ({})".format(self.N, P)
+        self.assertTimeInsertedInTrajectories(P)
+        self.trajectories[P]['t'] += [self.particles[P].getTimeLastEvent()]
+        if not self.reactivate or \
+           self.reactivate and not self.particle_already_absorbed[P]:
+            self.trajectories[P]['x'] += [self.particles[P].size]
+        self.trajectories[P]['e'] += [self.particles[P].getTypeLastEvent()]
+        
+        # Update the list stating whether each particle is active
+        self._update_active_particles(P)
 
     def _update_active_particles(self, P):
         """
@@ -482,29 +564,6 @@ class EstimatorQueueBlockingFlemingViot:
         # i.e. at the last iteration, which is in effect retrieved by the -1 element of the list stored 
         # in the 'x' attribute, as done here.
         self.is_particle_active[P] = self.trajectories[P]['x'][-1] > 0
-
-    def _update_trajectories(self, P):
-        assert self.isValidParticle(P), "The particle number is valid (0<=P<{}) ({})".format(self.N, P)
-        self.assertTimeInsertedInTrajectories(P)
-        self.trajectories[P]['t'] += [self.particles[P].getTimeLastEvent()]
-        if not self.reactivate or \
-           self.reactivate and not self.particle_already_absorbed[P]:
-            self.trajectories[P]['x'] += [self.particles[P].size]
-        self.trajectories[P]['e'] += [self.particles[P].getTypeLastEvent()]
-        
-        # Update the list stating whether each particle is active
-        self._update_active_particles(P)
-
-    def _update_info_absorption_times(self, P, time_of_absorption, it):
-        "Inserts a new absorption time in order, together with its particle number and iteration number"
-        assert self.isValidParticle(P), "The particle number is valid (0<=P<{}) ({})".format(self.N, P)
-        idx_insort, found = insort(self.dict_info_absorption_times['t'], time_of_absorption)
-        self.dict_info_absorption_times['P'].insert(idx_insort, P)
-        self.dict_info_absorption_times['iter'].insert(idx_insort, it)
-
-    def _is_particle_absorbed(self, P, last_position_change):
-        assert self.isValidParticle(P), "The particle number is valid (0<=P<{}) ({})".format(self.N, P)
-        return last_position_change < 0 and self.particles[P].size == 0
 
     def _update_info_particles(self, P, last_position_change):
         assert self.isValidParticle(P), "The particle to update is valid (0<=P<{}) ({})".format(self.N, P)
@@ -533,6 +592,42 @@ class EstimatorQueueBlockingFlemingViot:
                     .format(p, len(self.info_particles))
             self.info_particles[p]['t'] += [self.particles[P].getTimeLastEvent()]
             self.info_particles[p]['E'] += [type_of_event(P)]
+
+    def _is_particle_absorbed(self, P, last_position_change):
+        assert self.isValidParticle(P), "The particle number is valid (0<=P<{}) ({})".format(self.N, P)
+        return last_position_change < 0 and self.particles[P].size == 0
+
+    def _update_info_absorption_times(self, P, time_of_absorption, it):
+        "Inserts a new absorption time in order, together with its particle number and iteration number"
+        assert self.isValidParticle(P), "The particle number is valid (0<=P<{}) ({})".format(self.N, P)
+        idx_insort, found = insort(self.dict_info_absorption_times['t'], time_of_absorption)
+        self.dict_info_absorption_times['P'].insert(idx_insort, P)
+        self.dict_info_absorption_times['iter'].insert(idx_insort, it)
+
+    def _update_survival_time_from_zero(self, P, time_of_absorption):
+        ref_time = 0.0 if np.isnan(self.times0[P]) else self.times0[P]
+
+        # Refer the survival time to the latest time the particle was at position 0
+        # and add it to the previously measured survival time
+        assert time_of_absorption > ref_time, \
+                "The time of absorption ({}) contributing to the mean survival time calculation" \
+                " is larger than the latest time of absorption of the particle ({})" \
+                .format(time_of_absorption, ref_time)
+        self.ktimes0_sum[P] += time_of_absorption - ref_time
+        self.ktimes0_n[P] += 1
+
+        if False:
+            with printoptions(precision=3, suppress=True):
+                print("\n>>>> Particle P={}: absorption @t={:.3f}".format(P, time_of_absorption))
+                print(">>>> Previous times at position 0: {:.3f}".format(self.times0[P]))
+                print(">>>> Total Survival times for ALL particles: {}".format(np.array(self.ktimes0_sum)))
+                print(">>>> Total Survival units for ALL particles: {}".format(np.array(self.ktimes0_n)))
+
+        # Update the latest time the particle was at position 0
+        self.times0[P] = time_of_absorption
+
+        if False:
+            print(">>>> UPDATED Last time at 0: P={}, {:.3f}".format(P, self.times0[P]))
 
     def _choose_assigned_particle(self, P):
         list_of_particles_to_choose_from = list(range(P)) + list(range(P+1, self.N))
@@ -581,9 +676,21 @@ class EstimatorQueueBlockingFlemingViot:
             Iteration number at which the absorption happens.
         """
 
+        # NOTE: These helper functions are NOT used as we don't need to copy
+        # the past history of the assigned particle to the reactivated particle
+        # as I initially tought. But I leave them here, just in case I want to use them
+        # in the future for some experiments.
         def copy_event_times_and_types_up_to_time_t(q, t):
             for idx, s in enumerate(self.info_particles[q]['t']):
                 if s <= t:
+                    self.info_particles[-1]['t'] += [s]
+                    self.info_particles[-1]['E'] += [ self.info_particles[q]['E'][idx] ]
+                else:
+                    break
+
+        def copy_activation_times_up_to_time_t(q, t):
+            for idx, s in enumerate(self.info_particles[q]['t']):
+                if self.info_particles[q]['E'][idx] == EventType.ACTIVATION and s <= t:
                     self.info_particles[-1]['t'] += [s]
                     self.info_particles[-1]['E'] += [ self.info_particles[q]['E'][idx] ]
                 else:
@@ -608,7 +715,6 @@ class EstimatorQueueBlockingFlemingViot:
                                        'particle number': P,
                                        'reactivated number': Q,
                                        'reactivated ID': q}) ]
-        copy_event_times_and_types_up_to_time_t(q, t)
 
         if self.LOG: #True:
             with printoptions(precision=3, suppress=True):
@@ -652,6 +758,7 @@ class EstimatorQueueBlockingFlemingViot:
 
         self.trajectories[P]['x'][iter] = position_start
         self.all_positions[P][iter] = position_start
+        self._update_info_particles(P, position_start)
         for it in range(iter+1, self.niter+1):
             position_change = self._update_particle_trajectory(P, it)
             self._update_info_particles(P, position_change)
@@ -673,303 +780,272 @@ class EstimatorQueueBlockingFlemingViot:
 
         return it, position_change
 
-    def _compute_order(self, arr):
-        return list( np.argsort(arr) )
-
-    def _update_one_particle(self, p):
+    def _update_particle_trajectory(self, P, it):
         """
-        Updates the position/state of the particle based on the current "next times-to-event array"
-        for the particle, and updates this array with new times-to-event.
-       
-        The times-to-event array is a two-element array that represents the times of occurrence of the
-        two possible events on a particle, namely birth and death in this order. The times are measured
-        from the occurrence of the latest event taking place on the particle.
-      
-        In practice, this method does the following: it takes the current value of the said two-element array
-        --e.g. [3.2, 2.7]-- and selects the smallest time between the two (2.7 in this case, which corresponds
-        to a death event). The goal is to apply to the particle the event that is happening *next*, and update
-        its state accordingly (i.e. increase its position if it's a birth event or decrease its position
-        if it's a death event, as long as the position restrictions are satisfied). 
-        
-        The two-element array is then updated as follows:
-        - a new random value is generated to fill the time-to-event for the (death) event just chosen;
-        - the time corresponding to the non-chosen event (birth) is decreased so that the new value represents
-        the time-to-event for the (birth) event *as measured from the time in which the chosen (death) event
-        just took place*.
-        
-        For example, the two-element array may be updated to [0.5, 1.2],  where 0.5 is a deterministic value
-        (= 3.2 - 2.7) while 1.2 is a randomly generated value --e.g. following an exponential distribution with
-        parameter equal to the death rate.
-
-        The new array stores the information of *when* the next event will take place on this particle and
-        of what *type* it will be. In this case, the next event will take place 0.5 time units later than
-        the (death) event just selected, and it will be a birth event --since the said time value (0.5) is
-        stored at the first position of the array, which represents a birth event. 
-
-        Arguments:
-        pat: int
-            Index of the particle to update, from 0 to N-1, where N is the number of particles in the system.
-        
-        Return: tuple
-        The tuple contains:
-        - the time of the selected event, measured in absolute terms, i.e. from the common origin of all particles.
-        - the change in position after applying the event, which can be -1, 0 or +1.
+        Updates the trajectory of the given particle number at the given iteration
+        and returns the change in position.
         """
-        assert self.isValidParticle(p), \
-                "The selected particle ({}) is valid (its index is an integer between 0 and {})".format(p, len(self.N)-1)
-        
-        # Find the event type to apply (whichever occurs first)
-        time_of_event, time_since_previous_event, earliest_event = self.get_time_next_event(p)
+        # Retrieve the event type and time as this information has been already generated
+        # at the very beginning of the simulation by the call to the generate_trajectories() method.
+        next_event = self.trajectories[P]['e'][it]
+        next_event_time = self.trajectories[P]['t'][it]
 
-        # Update the particle's state by applying the event type just selected and record the position change
-        position_change = self._apply_event(p, Event(earliest_event), time_of_event)
-        latest_event = self._order_times_next_events[p][1]
+        # Apply the event to the particle (queue)
+        position_change = self.particles[P].apply_event(next_event, next_event_time)
 
-        # Generate the next time for the event type just applied from the list of event times for this particle
-        event_rate = self.particles[p].rates[earliest_event]
-        self.times_next_events[p][earliest_event] = self.particles[p].generate_event_times(event_rate, size=1)
+        # Update the trajectory position at the retrieved event time
+        self.trajectories[P]['x'] += [self.particles[P].size]
 
-        # Update the time-to-event for the event type not applied so that it is now relative to the event just applied
-        self.times_next_events[p][latest_event] -= time_since_previous_event
+        # Update the `positions` lists
+        self.positions[P] = self.particles[P].size
+        self.all_positions[P][it] = self.particles[P].size
 
-        # Update the order of the next event times
-        self._order_times_next_events[p] = self._compute_order( self.times_next_events[p] )
-
-        #print("UPDATED times_next_events[{}]: {}".format(pat, self.times_next_events[pat]))
-
-        return time_of_event, position_change
-
-    def _apply_event(self, P, event_to_apply, time_of_event):
-        position_change = self.particles[P].apply_event(event_to_apply, time_of_event)
-        self._update_particle_position_info(P, self.particles[P].size, time_of_event)
         return position_change
 
-    def update_state(self, iter):
+    def finalize(self):
         """
-        The state of the particle system is updated based on the time of occurrence of the
-        next event on each particle.
+        Finalize the simulation process by treating particles that are active,
+        i.e. those particles providing CENSORED survival time values.
         
-        Goal: extract the information of when the next event happens on each particle, update
-        the position of each particle and the times of the upcoming next events,
-        which will be used the next time the system state is updated.  
-        
-        Return: float numpy array
-        The times of occurrence of the events on each particle leading to the update of the system state.
-        The times of occurrence are measured w.r.atimes. the common origin for all particles.
+        The type of finalize process is defined by the object's attribute `finalize_type`.
         """
-        self.iter = iter
 
-        times_of_events = np.nan*np.ones(self.N)
-        positions_change = np.zeros(self.N, dtype=int)
-        for p in range(self.N):
-            # Update the particle's position based on the time and type of the next event
-            times_of_events[p], positions_change[p] = self._update_one_particle(p)
-            assert -1 <= positions_change[p] <= 1, \
-                    "The change of position of particle p={} is -1, 0, or +1 ({})" \
-                    .format(p, positions_change[p])
+        active_particle_numbers = self.get_active_particle_numbers()
+        active_particle_ids = list( np.sort([ self.particle_reactivation_ids[P] for P in active_particle_numbers ]) )
+
+        if self.LOG:
+            if self.finalize_type == FinalizeType.ABSORB_CENSORED:
+                finalize_process = "absorbing"
+            elif self.finalize_type == FinalizeType.REMOVE_CENSORED:
+                finalize_process = "removing"
+            elif self.finalize_type == FinalizeType.ESTIMATE_CENSORED:
+                finalize_process = "censoring"
+            print("\n****** FINALIZING the simulation by {} the currently active particles: ******".format(finalize_process))
+            print("Active particles: {}" \
+                  .format(", ".join(["(p={}, P={})".format(p, self.info_particles[p]['particle number']) for p in active_particle_ids])))
+
+        # Make a copy of the list because this may be updated by removing elements
+        if self.finalize_type == FinalizeType.REMOVE_CENSORED:
+            assert sorted(active_particle_ids) == active_particle_ids, \
+                    "The list of active particle IDs is sorted," \
+                    " which is crucial for the correct removal of censored particles ({})" \
+                    .format(active_particle_ids)
+        nremoved = 0
+        for p in active_particle_ids:
+            dict_info = self.info_particles[p - nremoved]
+            P = dict_info['particle number'] 
+            #print("Processing particle ID p={}, P={} out of {} particles".format(p, P, len(active_particle_ids)))
+            if self.finalize_type == FinalizeType.REMOVE_CENSORED:
+                if self.reactivate:
+                    if self.LOG:
+                        print("...{} particle p={} (P={})".format(finalize_process, p, P))
+                    # Simply remove the particle from the analysis
+                    self.info_particles.pop(p - nremoved)
+                    nremoved += 1
+                        # NOTE that no update needs to be done to the quantities
+                        # used to estimate E(T) (e.g. ktimes0_sum) because these quantities are updated
+                        # ONLY when there is an absorption, and this never happened
+                        # for this particle (recall that, when reactivate=True,
+                        # there is at most ONE absorption per particle,
+                        # and when it occurs, it's the last event to occur. 
+                else:
+                    if self.LOG:
+                        print("...{} the active tail of particle P={}".format(finalize_process, P))
+                    # Find the latest absorption time and remove all the events since then
+                    idx_last_absorption = find_last(dict_info['E'], EventType.ABSORPTION)
+                    # Remove all the elements AFTER the index of the last absorption to the end
+                    # Note that if no absorption event is found, ALL the trajectory is removed
+                    # and this works fine because find_last() returns -1 when the searched value
+                    # is not found in the list.
+                    while len(dict_info['E']) > idx_last_absorption + 1:
+                        dict_info['t'].pop(idx_last_absorption+1)
+                        dict_info['E'].pop(idx_last_absorption+1)
+                    # NOTE that no update needs to be done to the quantities
+                    # used to estimate E(T) (e.g. ktimes0_sum) because these quantities are updated
+                    # ONLY when there is an absorption, and this already happened
+                    # at the latest absorption time. Since we are removing everything
+                    # that happened after that, we do not need to update neither
+                    # ktimes0_sum, nor ktimes0_n, nor times0.   
+                # Flag the particle as inactive (as the latest censored trajector was removed)
+                self.is_particle_active[P] = False
+
+            elif self.finalize_type in [FinalizeType.ABSORB_CENSORED, FinalizeType.ESTIMATE_CENSORED]:
+                if self.LOG:
+                    print("...{} particle p={}".format(finalize_process, p))
+                # Increase slightly and randomly the time to insert the new "fictitious" event
+                # in order to avoid repeated times in the list of time segments
+                # (the random component is especially important here as it would affect
+                # the insertion of a survival time segment which is done RELATIVE to
+                # valid earlier activation events)
+                # Note that having repeate time values messes up the process that merges the
+                # two list of times needed to compute the blocking probability:
+                # - the list of alive time segments
+                # - the list of block/unblock time segments
+                time_to_insert = self.trajectories[P]['t'][-1] + self.EPSILON_TIME*np.random.random()
+
+                # Final event which can be either an absorption or a censoring time
+                if self.finalize_type == FinalizeType.ABSORB_CENSORED:
+                    # To avoid assertion failures... make sure that, at the end of the simulation:
+                    # - the particle is unblocked if it was blocked
+                    #   (adding this preserves the assertion that the number of
+                    #   blocked particles at the very last time is 0 --since the particles are all absorbed!)
+                    # - the particle is activated if it was not in position 1
+                    #   (this makes things logical --i.e. before absorption the particle passes by position 1)
+                    if self.trajectories[P]['x'][-1] == self.queue.getCapacity():
+                        dict_info['t'] += [time_to_insert]
+                        dict_info['E'] += [EventType.UNBLOCK]
+                        # Increase the time to insert for the insertion of the next event
+                        time_to_insert += self.EPSILON_TIME*np.random.random()
+                    if self.trajectories[P]['x'][-1] != 1:
+                        dict_info['t'] += [time_to_insert]
+                        dict_info['E'] += [EventType.ACTIVATION]
+                        # Increase the time to insert for the insertion of the
+                        # fictitious absorption event coming next (to avoid time value repetitions)
+                        time_to_insert += self.EPSILON_TIME*np.random.random()
+                    dict_info['t'] += [time_to_insert]
+                    dict_info['E'] += [EventType.ABSORPTION]
+                    # Flag the particle as inactive (as it was just absorbed)
+                    self.is_particle_active[P] = False
+                elif self.finalize_type == FinalizeType.ESTIMATE_CENSORED:
+                    dict_info['t'] += [time_to_insert]
+                    dict_info['E'] += [EventType.CENSORING]  
+
+                # Survival time from s=0
+                self._update_survival_time_from_zero(P, time_to_insert)
+
+        self.is_simulation_finalized = True
+
+    def compute_counts(self):
+        """
+        Computes the survival time segments and blocking time segments needed for
+        the calculation of P(T>t / s=1) and P(BLOCK / T>t, s=1). 
+        """
+        if self.LOG:
+            print("Computing counts for the calculation of the survival function and conditional blocking probability...")
+
+        if not self.is_simulation_finalized:
+            raise ValueError("The simulation has not been finalized..." \
+                          "\nThe computation of the counts by time segment cannot proceed." \
+                          "\nRun first the finalize() method and rerun.")
+
+        # Initialize the lists that will store information about the counts by time
+        self.sk = [0.0]
+        self.sbu = [0.0]
+        # The following counts are initialized to 0 because:
+        # - they correspond to the number of particles counted in the time segment 
+        # defined by the value in sk or sbu and Infinity, and they are updated ONLY when
+        # a new time is observed, in which case the non-zero count goes to the segment
+        # just inserted (if it's the first one, the segment is [0, t) where t is the
+        # event time triggering the update of the counts).
+        # - the capacity of the queue is assumed larger than 1, as the status of a particle
+        # CANNOT be both ACTIVE and BLOCKED, because if we allowed this we would need to
+        # change the way events are stored in the info_particles list of dictionaries,
+        # as now only one event type is accepted at each event time. 
+        self.counts_alive = [0]
+        self.counts_blocked = [0]
+        # Go over each particle
+        for p, dict_info in enumerate(self.info_particles):
+            P = dict_info['particle number']
+            #print("Processing particle ID p={}, P={} out of {} particles".format(p, P, len(self.info_particles)))
+            assert len(dict_info['E']) == 0 or dict_info['E'][-1] in [EventType.ABSORPTION, EventType.CENSORING], \
+                    "Either particle p={} has NO events" \
+                    " or the last event is an ABSORPTION or a CENSORING ({})" \
+                    .format(p, dict_info['E'][-1])
+
+            activation_times = []
+            event_type_prev = None
+            for t, event_type in zip(dict_info['t'], dict_info['E']):
+                if event_type == EventType.ACTIVATION:
+                    assert event_type_prev != EventType.CENSORING, \
+                            "There must be NO event after a CENSORING observation ({})".format(event_type)
+                    # 2020/06/25: This assertion is not true under very rare BORDERLINE circumstances
+                    # happening towards the end of the simulation, but they are valid. In any case
+                    # the situation happens all the time when reactivate=False, so the situation is dealt with
+                    # appropriately below by reinitializing the activation_times list to empty after
+                    # the occurrence of an absorption.
+                    # For more details about the conditions under which this can happen, see the
+                    # generate_trajectories() method where it is explained when calling the lambda function
+                    # has_been_absorbed_at_time_t().    
+                    #if self.reactivate:
+                    #    assert event_type_prev != EventType.ABSORPTION, \
+                    #            "There must be NO event after an absorption (p={}, P={}, {})" \
+                    #            .format(p, P, event_type)
+                    #assert len(activation_times) == 0 and event_type_prev in [None, EventType.ABSORPTION] or \
+                    #       len(activation_times)  > 0, \
+                    #        "The activation_times list is empty only when it's the first event" \
+                    #        " or when the previous event was an ABSORPTION (prev={}, atimes={})" \
+                    #        .format(event_type_prev, activation_times)  
+                    activation_times += [t]
+                elif event_type == EventType.ABSORPTION:
+                    assert event_type_prev == EventType.ACTIVATION and len(activation_times) > 0, \
+                            "The previous event of an ABSORPTION is always an ACTIVATION ({}, p={}, P={}, t={}))" \
+                            .format(event_type.name, p, P, t) 
+                    self.insert_relative_time(t, activation_times, event_type)
+                    activation_times = []                    
+                    if True:
+                        # We may want to disable this assertion if they take too long
+                        assert sorted(self.sk) == list(np.unique(self.sk)), \
+                                "The list of survival time segments contains unique values" \
+                                " after insertion of event {} for particle p={}, P={}" \
+                                .format(event_type.name, p, P)
+                elif event_type in [EventType.BLOCK, EventType.UNBLOCK]:
+                    # We insert the ABSOLUTE time for BLOCK and UNBLOCK events
+                    # since this is used to compute the empirical distribution at the absolute time t
+                    self.insert_absolute_time(t, event_type)
+                    if event_type == EventType.UNBLOCK:
+                        assert event_type_prev == EventType.BLOCK, \
+                                "The event coming before an UNBLOCK event is a BLOCK event ({})" \
+                                .format(event_type_prev.value)
+                    if True:
+                        # We may want to disable this assertion if they take too long
+                        assert sorted(self.sbu) == list(np.unique(self.sbu)), \
+                                "The list of block/unblock time segments contains unique values" \
+                                " after insertion of event {} for particle p={}, P={}" \
+                                .format(event_type.name, p, P)
+                event_type_prev = event_type
+
+        assert len(self.counts_alive) == len(self.sk), \
+                "The length of counts_alive ({}) is the same as the length of self.sk ({})" \
+                .format(len(self.counts_alive), len(self.sk))
+        assert len(self.counts_blocked) == len(self.sbu), \
+                "The length of counts_alive ({}) is the same as the length of self.sk ({})" \
+                .format(len(self.counts_blocked), len(self.sbu))
+        if self.finalize_type in [FinalizeType.ABSORB_CENSORED, FinalizeType.REMOVE_CENSORED]:
+            assert self.counts_alive[-1] == 0, "The last element of the counts_alive list is 0 ({})".format(self.counts_alive[-1])
+            assert self.counts_blocked[0] == 0, "The first element of the counts_blocked list is 0 ({})".format(self.counts_blocked[0])
+
         if self.LOG:
             with printoptions(precision=3, suppress=True):
-                print("\ntimes to event: {}".format(times_of_events))
-            print("\tparticle positions: {}".format(self.positions))
-            print("\tpositions change: {}".format(positions_change))
-            print("\tactivation times by particle:")
-            for p in range(self.N):
-                _, activation_times_p = self.get_activation_times_for_active_subtrajectories(p)
-                with printoptions(precision=3):
-                    print("\t\tp={}: {}".format(p, np.array(activation_times_p)))
-            print("\ttime elapsed since activation times:")
-            for p in range(self.N):
-                _, activation_times_p = self.get_activation_times_for_active_subtrajectories(p)
-                with printoptions(precision=3):
-                    print("\t\tp={}: {}".format(p, np.array([times_of_events[p] - u for u in activation_times_p])))
-        order_times_to_event = self._compute_order(times_of_events)
+                print("Relative absorption times and counts:\n{}".format(np.c_[np.array(self.sk), np.array(self.counts_alive)]))
+                print("Relative blocking times:\n{}".format(np.c_[np.array(self.sbu), np.array(self.counts_blocked)]))
 
-        self.update_times_record(times_of_events, order_times_to_event, positions_change)
+    def insert_absolute_time(self, t: float, event_type: EventType):
+        assert event_type in [EventType.BLOCK, EventType.UNBLOCK], \
+                "The event type when inserting the relative time for time t={}" \
+                " is either BLOCK or UNBLOCK ({})" \
+                .format(t, event_type.name)
+        idx_insort, found = insort(self.sbu, t, unique=True)
+        self._update_counts_blocked(idx_insort, event_type, new=not found)
+        assert not found, "The absolute time value is NOT found in the list of block/unblock time  ({})".format(t)
 
-        particle_with_latest_event = order_times_to_event[-1]
-        self.time_last_change_of_system = times_of_events[ particle_with_latest_event ]
-
-        return times_of_events
-
-    def update_times_record(self, times_of_events, order_times_to_event, positions_change):
-        for o in order_times_to_event:  # o represents a particle
-            # Absolute time to event on the current particle
-            t = times_of_events[o]
-
-            # Possible status change of a particle 
-            is_activated = lambda p: self.positions[p] == 1 # Note that a particle can be activated even if it was ALREADY at position 1 => a new sub-trajectory becomes active
-            is_absorbed = lambda p: positions_change[p] < 0 and self.positions[p] == 0
-            is_blocked = lambda p: positions_change[p] > 0 and self.positions[p] == self.particles[p].getCapacity()
-            is_unblocked = lambda p: positions_change[p] < 0 and self.positions[p] == self.particles[p].getCapacity() + positions_change[p] 
-
-            if is_activated(o):
-                self._add_new_activation_time(o, t, EventType.ACTIVATION)
-
-            elif is_absorbed(o):
-                self._add_new_time_segment(o, t, EventType.ABSORPTION)
-                self._update_survival_time_from_zero(o, t)
-                if self.reactivate and not self.isLastIteration():
-                    # Note: for the last iteration, we should NOT reactivate the particle
-                    # so that we can consider the particle as absorbed (i.e. not censored time)
-                    # for the calculation of the statistics (basically the expected survival time)
-                    self._reactivate(o, t)
-
-            elif is_blocked(o):
-                self._add_new_time_segment(o, t, EventType.BLOCK)
-            elif is_unblocked(o):
-                self._add_new_time_segment(o, t, EventType.UNBLOCK)
-
-            particles, times_from_activation = self.get_all_elapsed_times()
-            assert len(self.active) ==  len(self.atimes) == len(self.pat) == len(self.iat) \
-                    and                 len(self.ktimes) == len(self.pkt) == len(self.ikt) \
-                    and                 len(self.btimes) == len(self.pbt) == len(self.ibt) \
-                    and                 len(self.utimes) == len(self.put) == len(self.iut),\
-                    "Iter {}: The length of arrays keeping track of the same type of information is the same" \
-                    .format(self.iter)
-
-            if self.LOG:
-                with printoptions(precision=3, suppress=True):
-                    print("event time: {:.3f} ({}), p={}, pos={}, active in the system (at different times): {}" \
-                          "\n\ta: {}" \
-                          "\n\tt: {}" \
-                          "\n\te: {}" \
-                          "\n\tp: {}" \
-                          "\n\ts: {}" \
-                          "\n\tb: {}" \
-                          "\n\tcounts_alive: {}" \
-                          "\n\tcounts_blocked: {}" \
-                          "\n\tsurvival_time_from_zero: {}" \
-                          .format(t, self.particles[o].getTypeLastEvent().name, o, self.positions[o], sum(self.active),
-                                 self.active,
-                                 np.array(self.atimes),
-                                 np.array(times_from_activation),
-                                 np.array(self.pat),
-                                 np.array(self.sk),
-                                 np.array(self.sbu),
-                                 self.counts_alive,
-                                 self.counts_blocked,
-                                 self.ktimes0_sum))
-
-            assert sum(np.array(times_from_activation) < 0) == 0 \
-                    and sum(np.array(self.atimes) < 0) == 0 and sum(np.array(self.ktimes) < 0) == 0 \
-                    and sum(np.array(self.btimes) < 0) == 0 and sum(np.array(self.utimes) < 0) == 0, \
-                    "Iter {}: All times are non-negative" \
-                    .format(self.iter)
-
-            self.assertSystemConsistency()
-
-    def _add_new_activation_time(self, p, time_of_event, type_of_event):
-        "Adds a new time to the array of activation times"
-        # Add this time to the list of activation times and to the list of active flags
-        # NOTE: we need to EXPLICITLY insert the new time IN ORDER in the array,
-        # despite the fact the time_of_event values are SORTED in the CURRENT call to this method,
-        # because we do not know anything about the order of these time_of_event values in relation to
-        # the time values ALREADY PRESENT in the array.
-        idx_insort = self._insert_new_time_in_order(p, time_of_event, EventType.ACTIVATION)
-        self.active.insert(idx_insort, True)
-        if type_of_event == EventType.REACTIVATION: # self.LOG:
-            with printoptions(precision=3, suppress=True):
-                print("\n>>>>> {}: p={}, iter={}: time_of_activation={:.3f}:" \
-                        "\n\tall_activation_times={}" \
-                        "\n\tall_particles={}" \
-                        "\n\tall_active={}" \
-                      .format(type_of_event.name.upper(), p, self.iter, time_of_event,
-                              np.array(self.atimes), self.pat, self.active))
-
-    def _update_survival_time_from_zero(self, P, time_of_absorption):
-        ref_time = 0.0 if np.isnan(self.times0[P]) else self.times0[P]
-
-        # Refer the survival time to the latest time the particle was at position 0
-        # and add it to the previously measured survival time
-        assert time_of_absorption > ref_time, \
-                "The time of absorption ({}) contributing to the mean survival time calculation" \
-                " is larger than the latest time of absorption of the particle ({})" \
-                .format(time_of_absorption, ref_time)
-        self.ktimes0_sum[P] += time_of_absorption - ref_time
-        self.ktimes0_n[P] += 1
-
-        if False:
-            with printoptions(precision=3, suppress=True):
-                print("\n>>>> Particle P={}: absorption @t={:.3f}".format(P, time_of_absorption))
-                print(">>>> Previous times at position 0: {:.3f}".format(self.times0[P]))
-                print(">>>> Total Survival times for ALL particles: {}".format(np.array(self.ktimes0_sum)))
-                print(">>>> Total Survival units for ALL particles: {}".format(np.array(self.ktimes0_n)))
-
-        # Update the latest time the particle was at position 0
-        self.times0[P] = time_of_absorption
-
-        if False:
-            print(">>>> UPDATED Last time at 0: P={}, {:.3f}".format(P, self.times0[P]))
-
-    def _add_new_time_segment(self, p, time_of_event, type_of_event):
+    def insert_relative_time(self, t: float, activation_times: list, event_type: EventType):
         """
-        Adds a new time in the absolute time array of the given event type
-        and a segment-start time of the given event type
-        to the array of corresponding time segments.
+        Inserts a new time segment in the list containing the times where a change in counts
+        associated to the given event type happens.
         
-        Valid event types are absorption/block/unblock.
+        Only the activation times that are smaller than the given time t are considered.
         """
-        #-- Insert the current time in the array of blocking times
-        self._insert_new_time_in_order(p, time_of_event, type_of_event)
-
-        # Insert the current time in the array of time-segment starts and update counts of each segment accordingly
-        self._insert_new_time(p, time_of_event, type_of_event)
-
-    def _insert_new_time_in_order(self, p, time_of_event, type_of_event):
-        """
-        Inserts new elements in the lists related to absolute time_of_event storage.
-        
-        Arguments:
-        p: int
-            Index of the particle affected by the insert.
-        time_of_event: positive float
-            Time to insert.
-        type_of_event: EventType
-            Type of the event associated to the time_of_event to insert.
-            
-        Return:
-        The index of the insertion in the lists that contain information about the events
-        of the given type for the given particle.
-        """
-        ltimes, lparticles, liter, _ = self.get_lists_with_event_type_info(type_of_event)
-
-        idx_insort, found = insort(ltimes, time_of_event)
-        lparticles.insert(idx_insort, p)
-        liter.insert(idx_insort, self.iter)
-
-        return idx_insort
-
-    def _insert_new_time(self, p, time_of_event, type_of_event):
-        # Get the activation times so that we can compute the RELATIVE time to the event
-        idx_activation_times, activation_times = self.get_activation_times_for_active_subtrajectories(p)
-        times_since_activation = [time_of_event - u for u in activation_times if u < time_of_event]
-            ## Need to ask whether the activation time u < time_of_event because
-            ## when we reactivate a particle (in method _reactivate()),
-            ## we do the insertion of times ASYNCHRONOUSLY, i.e. we FIRST insert all activation times
-            ## and THEN insert all block and unblock times. This would lead to the situation where
-            ## some block times, AT THE TIME OF THEIR INSERTION IN THE RELATIVE TIMES OF BLOCK TIMES LIST,
-            ## would happen EARLIER than some of the activation times of the particle... which does not make sense.
-            ## So we should NOT insert that relative time to the list of relative block times list.
-            ## This is precisely what we accomplish by asking u < time_of_event.  
-        if self.LOG:
-            with printoptions(precision=3, suppress=True):
-                print("\nXXXXXXXXXXXXXXX {}: p={}, iter={}: time_of_event={:.3f}, a: {}, s: {}" \
-                      .format(type_of_event.name.upper(), p, self.iter, time_of_event, np.array(activation_times), np.array(times_since_activation)))
-
-        self._insert_new_relative_times(idx_activation_times, times_since_activation, type_of_event)
-
-    def _insert_new_relative_times(self, idx_activation_times, times_since_activation, type_of_event):
-        for idx_activation_time, s in zip(idx_activation_times, times_since_activation):
-            if type_of_event == EventType.ABSORPTION:
-                idx_insort, found = insort(self.sk, s)
-                self._update_counts_alive(idx_insort)
-                # De-activate the trajectory associated to the absorption
-                self.active[idx_activation_time] = False
-            elif type_of_event == EventType.BLOCK or type_of_event == EventType.UNBLOCK:
-                idx_insort, found = insort(self.sbu, s)
-                self._update_counts_blocked(idx_insort, type_of_event)
-            else:
-                raise ValueError("The type of event is invalid: {}".format(type_of_event))
+        for a in activation_times:
+            s = t - a
+            if s < 0:
+                break
+            assert event_type in [EventType.ABSORPTION, EventType.CENSORING], \
+                    "The event type when inserting the relative time for time t={}" \
+                    " is either ABSORPTION or CENSORING ({})" \
+                    .format(t, event_type.name)
+            idx_insort, found = insort(self.sk, s)
+            assert not found, "The relative time value is NOT found in the list of survival time segments ({})".format(s)
+            self._update_counts_alive(idx_insort, event_type)
 
     def _update_counts_alive(self, idx_to_insert: int, event_type: EventType):
         """
@@ -1059,255 +1135,9 @@ class EstimatorQueueBlockingFlemingViot:
             delta_count = -1
         for idx in range(idx_to_insert_or_update, len(self.counts_blocked)):
             self.counts_blocked[idx] += delta_count
-
-    def _update_particle_position_info(self, P, new_position, time_at_new_position):
-        self.positions[P] = new_position
-        self.all_positions[P] += [self.positions[P]]
-        self.all_times[P] += [time_at_new_position]
-
-    def _update_particle_trajectory(self, P, it):
-        """
-        Updates the trajectory of the given particle number at the given iteration
-        and returns the change in position.
-        """
-        # Retrieve the event type and time as this information has been already generated
-        # at the very beginning of the simulation by the call to the generate_trajectories() method.
-        next_event = self.trajectories[P]['e'][it]
-        next_event_time = self.trajectories[P]['t'][it]
-
-        # Apply the event to the particle (queue)
-        position_change = self.particles[P].apply_event(next_event, next_event_time)
-
-        # Update the trajectory position at the retrieved event time
-        self.trajectories[P]['x'] += [self.particles[P].size]
-
-        # Update the `positions` lists
-        self.positions[P] = self.particles[P].size
-        self.all_positions[P][it] = self.particles[P].size
-
-        return position_change
-
-    def finalize(self):
-        """
-        Finalize the simulation process by treating particles that are active,
-        i.e. those particles providing CENSORED survival time values.
-        
-        The type of finalize process is defined by the object's attribute `finalize_type`.
-        """
-        active_particle_numbers = self.get_active_particle_numbers()
-        active_particle_ids = list( np.sort([ self.particle_reactivation_ids[P] for P in active_particle_numbers ]) )
-
-        if True: #self.LOG:
-            if self.finalize_type == FinalizeType.ABSORB_CENSORED:
-                finalize_process = "absorbing"
-            elif self.finalize_type == FinalizeType.REMOVE_CENSORED:
-                finalize_process = "removing"
-            elif self.finalize_type == FinalizeType.ESTIMATE_CENSORED:
-                finalize_process = "using"
-            print("\n****** FINALIZING the simulation by {} the currently active particles: ******".format(finalize_process))
-            print("Active particles: {}" \
-                  .format(", ".join(["(p={}, P={})".format(p, self.info_particles[p]['particle number']) for p in active_particle_ids])))
-
-        # Make a copy of the list because this may be updated by removing elements
-        if self.finalize_type == FinalizeType.REMOVE_CENSORED:
-            assert sorted(active_particle_ids) == active_particle_ids, \
-                    "The list of active particle IDs is sorted," \
-                    " which is crucial for the correct removal of censored particles ({})" \
-                    .format(active_particle_ids)
-        nremoved = 0
-        for p in active_particle_ids:
-            dict_info = self.info_particles[p - nremoved]
-            P = dict_info['particle number'] 
-            print("Processing particle ID p={}, P={} out of {} particles".format(p, P, len(active_particle_ids)))
-            assert len(dict_info['E']) > 0, \
-                    "There is at least one event in the info_particles dictionary for particle ID p={}" \
-                    .format(p)
-            assert dict_info['E'][0] == EventType.ACTIVATION, \
-                    "The first event for particle ID p={} is an ACTIVATION ({})" \
-                    .format(p, dict_info['E'][0].value)
-
-            if dict_info['E'][-1] != EventType.ABSORPTION:
-                if self.finalize_type == FinalizeType.REMOVE_CENSORED:
-                    if self.reactivate:
-                        # Simply remove the particle from the analysis
-                        self.info_particles.pop(p - nremoved)
-                        nremoved += 1
-                            # NOTE that no update needs to be done to the quantities
-                            # used to estimate E(T) (e.g. ktimes0_sum) because these quantities are updated
-                            # ONLY when there is an absorption, and this never happened
-                            # for this particle (recall that, when reactivate=True,
-                            # there is at most ONE absorption per particle,
-                            # and when it occurs, it's the last event to occur. 
-                    else:
-                        # Find the latest absorption time and remove all the events since then
-                        idx_last_absorption = find_last(dict_info['E'], EventType.ABSORPTION)
-                        if idx_last_absorption >= 0:
-                            # Remove all the elements AFTER the index of the last absorption to the end 
-                            while len(dict_info['E']) > idx_last_absorption + 1:
-                                dict_info['t'].pop(idx_last_absorption+1)
-                                dict_info['E'].pop(idx_last_absorption+1)
-                            # NOTE that no update needs to be done to the quantities
-                            # used to estimate E(T) (e.g. ktimes0_sum) because these quantities are updated
-                            # ONLY when there is an absorption, and this already happened
-                            # at the latest absorption time. Since we are removing everything
-                            # that happened after that, we do not need to update neither
-                            # ktimes0_sum, nor ktimes0_n, nor times0.   
-                    # Flag the particle as inactive (as the latest censored trajector was removed)
-                    self.is_particle_active[P] = False
-
-                elif self.finalize_type in [FinalizeType.ABSORB_CENSORED, FinalizeType.ESTIMATE_CENSORED]:
-                    # Increase slightly the time to insert the new "fictitious" event
-                    # in order to avoid repeated times in the list of time segments
-                    # (which messes up the process that merges the two list of times:
-                    # the one defining the alive time segments, and the one defining
-                    # the block/unblock time segments)
-                    time_to_insert = dict_info['t'][-1] + self.EPSILON_TIME
-                    if dict_info['E'][-1] == EventType.BLOCK:
-                        # If the last event was a BLOCK, unblock it in order to avoid a potential
-                        # value for P(BLOCK / T>t, s=1) > 1, which would happen in the case 
-                        # the end of the block/unblock time segment starting at such BLOCK event
-                        # ends LATER than the end of the alive time segment *AND* the alive time segment
-                        # is NOT the last one among the alive time segments (which would imply that
-                        # the alive count associated to that time is valid until Infinity
-                        # --so its count will never decrease)  
-                        dict_info['t'] += [time_to_insert]
-                        dict_info['E'] += [EventType.UNBLOCK]
-                        # Increase the time to insert for the next insertion of the censoring "event" next
-                        time_to_insert += self.EPSILON_TIME
-
-                    # Final event which can be either an absorption or a censoring time
-                    dict_info['t'] += [time_to_insert]
-                    if self.finalize_type == FinalizeType.ABSORB_CENSORED:
-                        dict_info['E'] += [EventType.ABSORPTION]
-                        # Flag the particle as inactive (as it was just absorbed)
-                        self.is_particle_active[P] = False
-                    elif self.finalize_type == FinalizeType.ESTIMATE_CENSORED:
-                        dict_info['E'] += [EventType.CENSORING]  
-
-                    # Survival time from s=0
-                    self._update_survival_time_from_zero(P, time_to_insert)
-
-        self.is_simulation_finalized = True
-
-    def compute_counts(self):
-        """
-        Computes the survival time segments and blocking time segments needed for
-        the calculation of P(T>t / s=1) and P(BLOCK / T>t, s=1). 
-        """
-        print("Computing counts for the calculation of the survival function and conditional blocking probability...")
-        if not self.is_simulation_finalized:
-            raise ValueError("The simulation has not been finalized..." \
-                          "\nThe computation of the counts by time segment cannot proceed." \
-                          "\nRun first the finalize() method and rerun.")
-
-        # Initialize the lists that will store information about the counts by time
-        self.sk = [0.0]
-        self.sbu = [0.0]
-        # The following counts are initialized to 0 because:
-        # - they correspond to the number of particles counted in the time segment 
-        # defined by the value in sk or sbu and Infinity, and they are updated ONLY when
-        # a new time is observed, in which case the non-zero count goes to the segment
-        # just inserted (if it's the first one, the segment is [0, t) where t is the
-        # event time triggering the update of the counts).
-        # - the capacity of the queue is assumed larger than 1, as the status of a particle
-        # CANNOT be both ACTIVE and BLOCKED, because if we allowed this we would need to
-        # change the way events are stored in the info_particles list of dictionaries,
-        # as now only one event type is accepted at each event time. 
-        self.counts_alive = [0]
-        self.counts_blocked = [0]
-        # Go over each particle
-        for p, dict_info in enumerate(self.info_particles):
-            P = dict_info['particle number']
-            print("Processing particle ID p={}, P={} out of {} particles".format(p, P, len(self.info_particles)))
-            assert dict_info['E'][0] == EventType.ACTIVATION, \
-                    "The first event for particle ID p={} is an ACTIVATION ({})" \
-                    .format(p, dict_info['E'][0].value)
-            assert dict_info['E'][-1] in [EventType.ABSORPTION, EventType.CENSORING], \
-                    "The last event for particle ID p={} is an ABSORPTION or a CENSORING observation ({})" \
-                    .format(p, dict_info['E'][-1].value)
-
-            activation_times = []
-            event_type_prev = None
-            for t, event_type in zip(dict_info['t'], dict_info['E']):
-                if event_type == EventType.ACTIVATION:
-                    assert event_type_prev != EventType.CENSORING, \
-                            "There must be NO event after a CENSORING observation ({})".format(event_type)
-                    # 2020/06/25: This assertion is not true under very rare BORDERLINE circumstances
-                    # happening towards the end of the simulation, but they are valid. In any case
-                    # the situation happens all the time when reactivate=False, so the situation is dealt with
-                    # appropriately below by reinitializing the activation_times list to empty after
-                    # the occurrence of an absorption.
-                    # For more details about the conditions under which this can happen, see the
-                    # generate_trajectories() method where it is explained when calling the lambda function
-                    # has_been_absorbed_at_time_t().    
-                    #if self.reactivate:
-                    #    assert event_type_prev != EventType.ABSORPTION, \
-                    #            "There must be NO event after an absorption (p={}, P={}, {})" \
-                    #            .format(p, P, event_type)
-                    assert len(activation_times) == 0 and event_type_prev in [None, EventType.ABSORPTION] or \
-                           len(activation_times)  > 0, \
-                            "The activation_times list is empty only when it's the first event" \
-                            " or when the previous event was an ABSORPTION (prev={}, atimes={})" \
-                            .format(event_type_prev, activation_times)  
-                    activation_times += [t]
-                elif event_type in [EventType.ABSORPTION, EventType.BLOCK, EventType.UNBLOCK]:
-                    if event_type == EventType.UNBLOCK:
-                        assert event_type_prev == EventType.BLOCK, \
-                                "The event coming before an UNBLOCK event is a BLOCK event ({})" \
-                                .format(event_type_prev.value)
-
-                    self.insert_relative_time(t, activation_times, event_type)
-                    if event_type == EventType.ABSORPTION:
-                        activation_times = []
-
-                    if False:
-                        # These assertions are disabled because they take time
-                        assert sorted(self.sk) == list(np.unique(self.sk)), \
-                                "The list of survival time segments contains unique values" \
-                                " after insertion of event {} for particle p={}, P={}" \
-                                .format(event_type.name, p, P)
-                        assert sorted(self.sbu) == list(np.unique(self.sbu)), \
-                                "The list of block/unblock time segments contains unique values" \
-                                " after insertion of event {} for particle p={}, P={}" \
-                                .format(event_type.name, p, P)
-                event_type_prev = event_type
-
-        assert len(self.counts_alive) == len(self.sk), \
-                "The length of counts_alive ({}) is the same as the length of self.sk ({})" \
-                .format(len(self.counts_alive), len(self.sk))
-        assert len(self.counts_blocked) == len(self.sbu), \
-                "The length of counts_alive ({}) is the same as the length of self.sk ({})" \
-                .format(len(self.counts_blocked), len(self.sbu))
-        if self.START == 0 and self.finalize_type in [FinalizeType.ABSORB_CENSORED, FinalizeType.REMOVE_CENSORED]:
-            assert self.counts_alive[-1] == 0, "The last element of the counts_alive list is 0 ({})".format(self.counts_alive[-1])
-        if self.START < self.queue.getCapacity():
-            assert self.counts_blocked[0] == 0, "The first element of the counts_blocked list is 0 ({})".format(self.counts_blocked[0])
-
-        if self.LOG:
-            with printoptions(precision=3, suppress=True):
-                print("Relative absorption times and counts:\n{}".format(np.c_[np.array(self.sk), np.array(self.counts_alive)]))
-                print("Relative blocking times:\n{}".format(np.c_[np.array(self.sbu), np.array(self.counts_blocked)]))
-
-    def insert_relative_time(self, t: float, activation_times: list, event_type: EventType):
-        """
-        Inserts a new time segment in the list containing the times where a change in counts
-        associated to the given event type happens.
-        
-        Only the activation times that are smaller than the given time t are considered.
-        """
-        for a in activation_times:
-            s = t - a
-            if s < 0:
-                break
-            if event_type in [EventType.ABSORPTION, EventType.CENSORING]:
-                idx_insort, found = insort(self.sk, s)
-                assert not found, "The time value is NOT found in the list of survival time segments ({})".format(s)
-                self._update_counts_alive(idx_insort, event_type)
-            elif event_type in [EventType.BLOCK, EventType.UNBLOCK]:
-                idx_insort, found = insort(self.sbu, s, unique=True)
-                self._update_counts_blocked(idx_insort, event_type, new=not found)
-            else:
-                raise ValueError("The event type is invalid: {}".format(event_type))
+            assert 0 <= self.counts_blocked[idx] <= self.N, \
+                    "The number of blocked particles in time segment with index idx={} is between 0 and {} ({}) \n({})" \
+                    .format(idx, self.N, self.counts_blocked[idx], self.counts_blocked) 
 
     def estimate_proba_survival_given_position_one(self):
         assert len(self.sk) > 1, "The length of the survival times array is at least 2 ({})".format(self.sk)
@@ -1330,12 +1160,11 @@ class EstimatorQueueBlockingFlemingViot:
                 " is the same as the number of elements in the blocking time segments array ({})" \
                 .format(len(self.counts_blocked), len(self.sbu))
 
-        if self.START == 0 and self.finalize_type in [FinalizeType.ABSORB_CENSORED, FinalizeType.REMOVE_CENSORED]:
+        if self.finalize_type in [FinalizeType.ABSORB_CENSORED, FinalizeType.REMOVE_CENSORED]:
             assert self.counts_alive[-1] == 0, \
                     "The number of particles alive at the last measured time is 0" \
                     " since particles are assumed to have been all absorbed or removed ({})" \
                     .format(self.counts_alive)
-        if self.START < self.queue.getCapacity() and self.finalize_type in [FinalizeType.ABSORB_CENSORED, FinalizeType.REMOVE_CENSORED]:
             assert self.counts_blocked[-1] == 0, \
                     "The number of particles blocked at the last measured time is 0" \
                     " since particles are assumed to have been all absorbed or removed ({})" \
@@ -1345,10 +1174,7 @@ class EstimatorQueueBlockingFlemingViot:
 
         if  len(self.t) > 1:
             self.proba_surv_by_t = [n_survived / counts_alive[0] for n_survived in counts_alive]
-            self.proba_block_by_t = [n_blocked / n_survived if n_survived > 0
-                                                            else 0.0 if n_blocked == 0
-                                                            else np.inf 
-                                                            for n_blocked, n_survived in zip(counts_blocked, counts_alive)]
+            self.proba_block_by_t = [n_blocked / self.N          for n_blocked  in counts_blocked]
         else:
             self.proba_surv_by_t = [1.0]
             self.proba_block_by_t = [0.0]
@@ -1363,9 +1189,8 @@ class EstimatorQueueBlockingFlemingViot:
                 "The conditional blocking probabilities take values between 0 and 1 ([{:.3f}, {:.3f}])" \
                 .format(np.min(self.proba_block_by_t), np.max(self.proba_block_by_t))
         assert self.proba_surv_by_t[0] == 1.0, "The survival function at t = 0 is 1.0 ({:.3f})".format(self.proba_surv_by_t[0])
-        if self.START == 0 and self.finalize_type in [FinalizeType.ABSORB_CENSORED, FinalizeType.REMOVE_CENSORED]:
+        if self.finalize_type in [FinalizeType.ABSORB_CENSORED, FinalizeType.REMOVE_CENSORED]:
             assert self.proba_surv_by_t[-1] == 0.0, "The survival function at the last measured time is 0 ({})".format(self.proba_surv_by_t[-1])
-        if self.START < self.queue.getCapacity() and self.finalize_type in [FinalizeType.ABSORB_CENSORED, FinalizeType.REMOVE_CENSORED]:
             assert self.proba_block_by_t[-1] == 0.0, "The conditional blocking probability at the last measured time is 0 ({})".format(self.proba_block_by_t[-1])
 
         return pd.DataFrame.from_items([('t', self.t),
@@ -1427,6 +1252,17 @@ class EstimatorQueueBlockingFlemingViot:
         return self.expected_survival_time
 
     def estimate_proba_blocking(self):
+        """
+        Estimates the blocking probability
+
+        Return: tuple
+        The tuple contains the following elements:
+        - the estimated blocking probability
+        - the estimated expected blocking time given the particle starts at position 1 and is not absorbed
+          (this is the numerator of the expression giving the blocking probability estimate)
+        - the estimated expected survival time (time to first absorption) given the particle starts at position 0.
+          (this is the denominator of the expression giving the blocking probability estimate)
+        """
         # Compute self.t, self.proba_surv_by_t, self.proba_block_by_t
         if not self.is_simulation_finalized:
             raise ValueError("The simulation has not been finalized..." \
@@ -1443,12 +1279,15 @@ class EstimatorQueueBlockingFlemingViot:
             print("integral = {:.3f}".format(integral))
 
         # Expected survival time
-        expected_survival_time = self.estimate_expected_survival_time_given_position_zero()
+        if self.mean_lifetime is None:
+            expected_survival_time = self.estimate_expected_survival_time_given_position_zero()
+        else:
+            expected_survival_time = self.mean_lifetime
 
         # Estimate the blocking probability!
-        self.proba_blocking = integral / expected_survival_time
+        proba_blocking = integral / expected_survival_time
 
-        return self.proba_blocking, integral, expected_survival_time
+        return proba_blocking, integral, expected_survival_time
 
     #-------------------------------------- Getters -------------------------------------------
     def get_position(self, P, t):
@@ -1464,52 +1303,8 @@ class EstimatorQueueBlockingFlemingViot:
         "Returns the list of particle particle numbers P whose current position is > 0"
         return [P for P in range(len(self.is_particle_active)) if self.is_particle_active[P]]
 
-    def get_active_particles_at_time(self, t):
-        """
-        Returns the list of particle numbers that are active at time t
-        and a dictionary with their activation times after their latest absorption time
-        """
-        activation_times_smaller_than_t, particles_with_activation_times_smaller_than_t = \
-            self.get_times_and_particles_smaller_than_t(t, EventType.ACTIVATION)
-        absorption_times_smaller_than_t, particles_with_absorption_times_smaller_than_t = \
-            self.get_times_and_particles_smaller_than_t(t, EventType.ABSORPTION)
-
-        # Construct the list of active particles at time t
-        # and the dictionary containing the activation times for each active particle
-        # (which might be necessary during reactivation to copy the activation times
-        # of the assigned particle to the reactivated particle)
-        active_particles_at_time_t = []
-        dict_position_by_particle = dict()
-        dict_activation_times_by_particle = dict()
-        for p in range(self.N):
-            assert sorted(absorption_times_smaller_than_t) == absorption_times_smaller_than_t, \
-                    "The absorption times list is sorted increasingly ({})" \
-                    .format(absorption_times_smaller_than_t)
-            idx_last_absorption_time_for_p = find_last(particles_with_absorption_times_smaller_than_t, p)
-            if idx_last_absorption_time_for_p < 0:
-                # The particle was never absorbed
-                # => t = 0 is the last time the particle was at position 0
-                last_absorption_time = 0.0
-            else:
-                last_absorption_time = absorption_times_smaller_than_t[ idx_last_absorption_time_for_p ]
-            # Find the activation times between the last absorption time and the current time t 
-            activation_times_later_than_last_absorption_and_smaller_than_t_for_p = \
-                    [activation_times_smaller_than_t[idx]   for idx in range(len(activation_times_smaller_than_t))
-                                                            if  particles_with_activation_times_smaller_than_t[idx] == p and
-                                                                last_absorption_time < activation_times_smaller_than_t[idx]]
-            if len(activation_times_later_than_last_absorption_and_smaller_than_t_for_p) > 0:
-                active_particles_at_time_t += [p]
-                # Get the latest position of the particle before time t
-                for idx in range(len(self.all_times[p])-1, -1, -1):
-                    if self.all_times[p][idx] < t:
-                        dict_position_by_particle[p] = self.all_positions[p][idx]
-                        break
-                dict_activation_times_by_particle[p] = activation_times_later_than_last_absorption_and_smaller_than_t_for_p
-
-        return active_particles_at_time_t, dict_position_by_particle, dict_activation_times_by_particle
-
     def get_number_active_particles(self):
-        return sum(self.active)
+        return sum(self.is_particle_active)
 
     def get_all_activation_times(self):
         return self.pat, self.atimes
@@ -1564,61 +1359,6 @@ class EstimatorQueueBlockingFlemingViot:
             self.raiseWarningInvalidParticle(p)
             return [], []
 
-    def get_times_for_particle(self, p, type_of_event):
-        """
-        Returns the absolute times for particle p associated to the given event type
-        
-        Return: tuple
-        The tuple contains:
-        - a list with the indices in the indexed attributes of the class (normally lists)
-        that store information about the given event type that contain the times of the events
-        for particle p.
-        - a list with the event times for particle p.
-        """
-        if self.isValidParticle(p):
-            ltimes, lparticles, _, _ = self.get_lists_with_event_type_info(type_of_event)
-            idx_times_p = [idx for idx in find(lparticles, p)]
-            times_p = [ltimes[i] for i in idx_times_p]
-            return idx_times_p, times_p
-        else:
-            self.raiseWarningInvalidParticle(p)
-            return [], []
-
-    def get_times_and_particles_smaller_than_t(self, t, type_of_event):
-        """
-        Returns the times smaller than t and their respective particle numbers
-        for the given event type.
-
-        This function is useful to return at once both the times AND the particles
-        associated to those times.
-
-        Argument:
-        t: positive float
-            Time of interest.
-
-        type_of_event: EventType
-            Type of event associated to the times to search in relation to t.
-
-        Return: tuple
-        The tuple contains:
-        - a list with the times that are smaller than t for the given event type
-        - a list with the particles associated to those times. 
-        """
-        ltimes, lparticles, _, _ = self.get_lists_with_event_type_info(type_of_event)
-        zipped_values = list( zip( *[(ltimes[idx], lparticles[idx]) for idx in range(len(ltimes)) if ltimes[idx] < t] ) )
-        
-        if len(zipped_values) > 0:
-            # Extract the tuples from the zipped values list
-            # and convert each to a list.
-            # The conversion to a list is IMPORTANT because that allows us to
-            # e.g. check whether the list is sorted (done for instance via assertions)
-            # because sorted( tuple ) returns a list!
-            times = list( zipped_values[0] )
-            particles = list( zipped_values[1] ) 
-            return times, particles
-        else:
-            return [], []
-
     def get_survival_time_segments(self):
         return self.sk
 
@@ -1664,11 +1404,16 @@ class EstimatorQueueBlockingFlemingViot:
             unblock_times_p = [t  for idx, t in enumerate(dict_info['t'])
                                 if dict_info['E'][idx] == EventType.UNBLOCK]
 
-            assert len(block_times_p) == len(unblock_times_p), \
-                    "Particle {}: The number of blocking times ({}) is the same as the number of unblocking times ({})" \
-                    .format(p, len(block_times_p), len(unblock_times_p))
+            if self.finalize_type in [FinalizeType.ABSORB_CENSORED, FinalizeType.REMOVE_CENSORED]:
+                assert len(block_times_p) == len(unblock_times_p), \
+                        "Particle {}: The number of blocking times ({}) is the same as the number of unblocking times ({})" \
+                        .format(p, len(block_times_p), len(unblock_times_p))
+            elif self.finalize_type == FinalizeType.ESTIMATE_CENSORED and len(block_times_p) > len(unblock_times_p):
+                # This happens when the particle is censored at the block position 
+                unblock_times_p += [np.nan]
+
             for b, u in zip(block_times_p, unblock_times_p):
-                assert b < u, \
+                assert np.isnan(u) or b < u, \
                         "The block time ({:.3f}) is always smaller than the unblock time ({:.3f})" \
                         .format(b, u)
 
@@ -1745,32 +1490,32 @@ class EstimatorQueueBlockingFlemingViot:
         Return: tuple
         The tuple contains information about the survival periods (i.e. the contiguous time
         during which a particle goes from position 0 back to position 0 for the first time)
-        - a list with the number of survival periods for all particles
-        - a list with the time span of the survival periods
+        - a list with the number of survival periods observed for each particles
+        - a list with the total time span of the survival periods for each particle
         """
-        return self.ktimes_n, self.ktimes_sum
+        return self.ktimes0_n, self.ktimes0_sum
 
-    def get_type_last_event(self, p):
+    def get_type_last_event(self, P):
         try:
-            return self.particles[p].getTypeLastEvent()
+            return self.particles[P].getTypeLastEvent()
         except:
-            self.raiseErrorInvalidParticle(p)
+            self.raiseErrorInvalidParticle(P)
             return None
 
     def get_all_times_last_event(self):
-        return [self.get_time_last_event(p) for p in range(self.N)]
+        return [self.get_time_last_event(P) for P in range(self.N)]
 
-    def get_time_last_event(self, p):
+    def get_time_last_event(self, P):
         try:
-            return self.particles[p].getTimeLastEvent()
+            return self.particles[P].getTimeLastEvent()
         except:
-            self.raiseErrorInvalidParticle(p)
+            self.raiseErrorInvalidParticle(P)
             return None
 
     def get_all_times_next_events(self):
         return self.times_next_events
 
-    def get_time_next_event(self, p):
+    def get_time_next_event(self, P):
         """
         Returns the absolute time of the next event for the given particle, which is chosen
         as the earliest time of all possible next events the particle can undergo.
@@ -1782,20 +1527,20 @@ class EstimatorQueueBlockingFlemingViot:
         - the index associated to the time of the next event from the list of all possible events for the particle
         """
         try:
-            earliest_event = self._order_times_next_events[p][0]
-            time_since_last_event = self.times_next_events[p][earliest_event]
-            time_next_event = self.particles[p].getTimeLastEvent() + time_since_last_event
+            earliest_event = self._order_times_next_events[P][0]
+            time_since_last_event = self.times_next_events[P][earliest_event]
+            time_next_event = self.particles[P].getTimeLastEvent() + time_since_last_event
             return time_next_event, time_since_last_event, earliest_event
         except:
-            self.raiseErrorInvalidParticle(p)
+            self.raiseErrorInvalidParticle(P)
             return None, None, None
 
-    def get_times_next_events(self, p):
+    def get_times_next_events(self, P):
         "Returns the times for all possible next events the particle can undergo" 
         try:
-            return self.times_next_events[p]
+            return self.times_next_events[P]
         except:
-            self.raiseErrorInvalidParticle(p)
+            self.raiseErrorInvalidParticle(P)
             return None
 
     def get_time_last_change_of_system(self):
@@ -1807,135 +1552,38 @@ class EstimatorQueueBlockingFlemingViot:
     def get_counts_particles_blocked_by_elapsed_time(self):
         return self.counts_blocked
 
-    def get_lists_with_event_type_info(self, type_of_event):
-        "Returns the object's lists that contain information about the given event type"
-        if type_of_event == EventType.ACTIVATION:
-            ltimes = self.atimes
-            lparticles = self.pat
-            liters = self.iat
-            lactive = self.active
-        elif type_of_event == EventType.ABSORPTION:
-            ltimes = self.ktimes
-            lparticles = self.pkt
-            liters = self.ikt
-            lactive = None 
-        elif type_of_event == EventType.BLOCK:
-            ltimes = self.btimes
-            lparticles = self.pbt
-            liters = self.ibt
-            lactive = None 
-        elif type_of_event == EventType.UNBLOCK:
-            ltimes = self.utimes
-            lparticles = self.put
-            liters = self.iut
-            lactive = None 
-
-        return ltimes, lparticles, liters, lactive
-
-    def render(self):
-        "Renders the simulation process in a semi-graphical way"
-
-        def update_render_string_with_event(t, iter, p, char):
-            global render_str;
-            global activation_times_shown;
-            global iter_width;
-            idx_activation_times_for_event = [idx for idx in find(self.pat, p)
-                                              if self.atimes[idx] < t and not activation_times_shown[idx]]
-            activation_times_for_event = [self.atimes[idx] for idx in idx_activation_times_for_event]
-            #with printoptions(precision=3):
-            #    print("iter: {}".format(iter))
-            #    print("\tp: {} ({})".format(p, char))
-            #    print("\tt: {:.3f}".format(t))
-            #    print("\tatimes: {}".format(np.array(self.atimes)))
-            #    print("\tpat: {}".format(self.pat))
-            #    print("\tatimes_shown: {}".format(activation_times_shown))
-            #    print("\tidx_activation_times: {}".format(idx_activation_times_for_event))
-            #    print("\tactivation_times: {}".format(np.array(activation_times_for_event)))
-            str_relative_event_times = ",".join(["{:.3f}".format(t - u) for u in activation_times_for_event])
-
-            render_str += "it={:{width}}: [{}] ".format(iter, char, width=iter_width) + "{:.3f}".format(t) \
-                            + " ({};{})\n".format(p, str_relative_event_times)
-            
-            return idx_activation_times_for_event
-
-        #--------------------------------------------------------------------------------------
-        if self.render_type == RenderType.GRAPH:
-            K = self.queue.getCapacity()
-            colormap = cm.get_cmap("jet")
-            reflines = range(0, (K+1)*self.N, K+1)
-            reflines_block = range(K, (K+(K+1))*self.N, K+1)
-            max_time = 0.0
-            particle_numbers = list(range(self.N))
-            for p in particle_numbers:
-                max_time = np.max([max_time, np.nanmax(self.all_times[p])])
-            plt.figure()
-            ax = plt.gca()
-            ax.set_xlabel("t")
-            ax.set_yticks(reflines)
-            ax.yaxis.set_ticklabels(particle_numbers)
-            ax.xaxis.set_ticks(np.arange(0, round(max_time)+1) )
-            ax.set_ylim((0, (K+1)*self.N))
-            ax.hlines(reflines_block, 0, max_time, color='gray', linestyles='dashed')
-            ax.hlines(reflines, 0, max_time, color='gray')
-            for p in particle_numbers:
-                color = colormap( (p+1) / self.N )
-                # Non-overlapping step plots at vertical positions (K+1)*p
-                plt.step(self.all_times[p], [(K+1)*p + pos for pos in self.all_positions[p]], 'x-',
-                         where='post', color=color, markersize=3)
-            plt.title("K={}, rate(B)={:.1f}, rate(D)={:.1f}, reactivate={}, finalize={}, N={}, #iter={}, seed={}" \
-                      .format(self.queue.getCapacity(),
-                          self.queue.rates[Event.BIRTH.value],
-                          self.queue.rates[Event.DEATH.value],
-                          self.reactivate, self.finalize_type.name[0:3], self.N, self.niter, self.seed
-                          ))
-            ax.title.set_fontsize(9)
-            plt.show()
-        else:
-            all_types = [EventType.ACTIVATION.value]*len(self.atimes) + [EventType.ABSORPTION.value]*len(self.ktimes) + [EventType.BLOCK.value]*len(self.btimes) + [EventType.UNBLOCK.value]*len(self.utimes)
-            all_particles = self.pat + self.pkt + self.pbt + self.put
-            all_times = self.atimes + self.ktimes + self.btimes + self.utimes
-            all_iters = self.iat + self.ikt + self.ibt + self.iut
-    
-            all_order = np.argsort( np.abs(all_times) )
-    
-            all_types = [all_types[o] for o in all_order]
-            all_particles = [all_particles[o] for o in all_order]
-            all_times = [all_times[o] for o in all_order]
-            all_iters = [all_iters[o] for o in all_order] 
-            last_iter = self.niter
-    
-            # Default rendering is TEXTUAL
-            global render_str;
-            global activation_times_shown;
-            global iter_width;
-            render_str = ""
-            activation_times_shown = [False]*len(self.atimes)
-            iter_width = len(str(self.iter))    # Display width for the iteration number so that all lines are aligned in the output string 
-            for i, t in enumerate(all_times):
-                if all_types[i] == 1:
-                    # ACTIVATION TIME
-                    render_str += "it={:{width}}: [A] ".format(all_iters[i], width=iter_width) + "{:.3f}".format(t) \
-                                    + " ({})\n".format(all_particles[i])
-                elif all_types[i] == 0:
-                    # ABSORPTION TIME OR FINAL ITERATION
-                    if all_iters[i] == last_iter:
-                        char = "F"  # Final iteration where we count also the non-absorbed particles by applying an absorption
-                    else:
-                        char = "X"  # Actual absorption
-                    idx_activation_times_for_absorption = update_render_string_with_event(t, all_iters[i], all_particles[i], char)
-                    # Update the list of activation times already shown
-                    # (so that they are not shown again in future events!)
-                    for idx in idx_activation_times_for_absorption:
-                        activation_times_shown[idx] = True
-                elif all_types[i] == +9:
-                    # BLOCK TIME
-                    update_render_string_with_event(t, all_iters[i], all_particles[i], "B")
-                elif all_types[i] == -9:
-                    # UNBLOCK TIME
-                    update_render_string_with_event(t, all_iters[i], all_particles[i], "U")
-    
-            return render_str
-
+    def plot_trajectories(self):
+        "Plots the trajectories of the particles"
+        K = self.queue.getCapacity()
+        colormap = cm.get_cmap("jet")
+        reflines = range(0, (K+1)*self.N, K+1)
+        reflines_block = range(K, (K+(K+1))*self.N, K+1)
+        max_time = 0.0
+        particle_numbers = list(range(self.N))
+        for p in particle_numbers:
+            max_time = np.max([max_time, np.nanmax(self.all_times[p])])
+        plt.figure()
+        ax = plt.gca()
+        ax.set_xlabel("t")
+        ax.set_yticks(reflines)
+        ax.yaxis.set_ticklabels(particle_numbers)
+        ax.xaxis.set_ticks(np.arange(0, round(max_time)+1) )
+        ax.set_ylim((0, (K+1)*self.N))
+        ax.hlines(reflines_block, 0, max_time, color='gray', linestyles='dashed')
+        ax.hlines(reflines, 0, max_time, color='gray')
+        for p in particle_numbers:
+            color = colormap( (p+1) / self.N )
+            # Non-overlapping step plots at vertical positions (K+1)*p
+            plt.step(self.all_times[p], [(K+1)*p + pos for pos in self.all_positions[p]], 'x-',
+                     where='post', color=color, markersize=3)
+        plt.title("K={}, rate(B)={:.1f}, rate(D)={:.1f}, reactivate={}, finalize={}, N={}, #iter={}, seed={}" \
+                  .format(self.queue.getCapacity(),
+                      self.queue.rates[Event.BIRTH.value],
+                      self.queue.rates[Event.DEATH.value],
+                      self.reactivate, self.finalize_type.name[0:3], self.N, self.niter, self.seed
+                      ))
+        ax.title.set_fontsize(9)
+        plt.show()
 
     #-------------- Helper functions
     def setup(self):
@@ -1946,6 +1594,7 @@ class EstimatorQueueBlockingFlemingViot:
                     "\nrho = {:.3f}" \
                     "\nnparticles = {}" \
                     "\nstart = {}" \
+                    "\nmean_lifetime = {}" \
                     "\nreactivate = {}" \
                     "\nfinalize_type = {}" \
                     "\nniter = {}" \
@@ -1954,7 +1603,7 @@ class EstimatorQueueBlockingFlemingViot:
                     .format(self.queue.getCapacity(),
                             self.queue.rates[Event.BIRTH.value], self.queue.rates[Event.DEATH.value],
                             self.queue.rates[Event.BIRTH.value] / self.queue.rates[Event.DEATH.value],
-                            self.N, self.reactivate, self.finalize_type.name, self.niter, self.seed)
+                            self.N, self.START, self.mean_lifetime,
                             self.reactivate, self.finalize_type.name, self.niter, self.seed)
         return params_str
 
@@ -1978,8 +1627,8 @@ class EstimatorQueueBlockingFlemingViot:
                         len(self.trajectories[P]['t']) == 0 and 0.0 or self.trajectories[P]['t'][-1])
 
     def assertSystemConsistency(self, particle_number=None, time=None):
-        is_state_consistent_particle = \
-            lambda p: self.positions[p] == self.particles[p].size and self.positions[p] == self.all_positions[p][-1] and self.particles[p].getTimeLastEvent() == self.all_times[p][-1]
+        is_state_consistent_for_particle = \
+            lambda P: self.positions[P] == self.particles[P].size and self.positions[P] == self.all_positions[P][-1] and self.particles[P].getTimeLastEvent() == self.all_times[P][-1]
 
         if time is None:
             time_str = "time last change={:.3f}".format(self.time_last_change_of_system)
@@ -1988,20 +1637,20 @@ class EstimatorQueueBlockingFlemingViot:
 
         consistent_state = True
         if particle_number is None:
-            for p in range(self.N):
-                consistent_state = is_state_consistent_particle(p)              
+            for P in range(self.N):
+                consistent_state = is_state_consistent_for_particle(P)              
                 if not consistent_state:
-                    particle_number = p
+                    particle_number = P
                     break
             if not consistent_state:
-                self.render()
+                self.plot_trajectories()
             assert consistent_state, \
                     "Iter {}, {}: The system is NOT in a consistent state at least for particle {}" \
                     .format(self.iter, time_str, particle_number)           
         else:
-            consistent_state = is_state_consistent_particle(particle_number)
+            consistent_state = is_state_consistent_for_particle(particle_number)
             if not consistent_state:
-                self.render()
+                self.plot_trajectories()
             assert consistent_state, \
                     "Iter {}, {}: The system is NOT in a consistent state for particle {}" \
                     "\n\tpositions[{}]={} vs. particles[{}].size={}" \
@@ -2012,8 +1661,8 @@ class EstimatorQueueBlockingFlemingViot:
                             particle_number, self.positions[particle_number], particle_number, self.all_positions[particle_number][-1],
                             particle_number, self.particles[particle_number].getTimeLastEvent(), particle_number, self.all_times[particle_number][-1])         
 
-    def raiseErrorInvalidParticle(self, p):
-        raise ValueError("Wrong particle number: {}. Valid values are integers between 0 and {}.\n".format(p, self.N-1))
+    def raiseErrorInvalidParticle(self, P):
+        raise ValueError("Wrong particle number: {}. Valid values are integers between 0 and {}.\n".format(P, self.N-1))
 
-    def raiseWarningInvalidParticle(self, p):
-        raise Warning("Wrong particle number: {}. Valid values are integers between 0 and {}.\n".format(p, self.N-1))
+    def raiseWarningInvalidParticle(self, P):
+        raise Warning("Wrong particle number: {}. Valid values are integers between 0 and {}.\n".format(P, self.N-1))
