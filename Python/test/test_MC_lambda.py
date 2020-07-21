@@ -94,7 +94,7 @@ class Test_MC_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
 
     #------------------------------------------- TESTS ----------------------------------------
     @data_provider(data_test_random_walk)
-    def test_random_walk(self, casenum, desc, expected, params_alpha_gamma_lambda,
+    def no_test_random_walk(self, casenum, desc, expected, params_alpha_gamma_lambda,
                                                         adjust_alpha, adjust_alpha_by_episode, alpha_min):
         # All tests are run using seed = 1717, nepisodes = 20, start_state = 10
         print("\n*** Testing {0}, case number {1} ***".format(self.id(), casenum))
@@ -115,14 +115,14 @@ class Test_MC_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
         print("\nobserved: " + test_utils.array2str(observed))
         assert np.allclose(observed, expected, atol=1E-6)
                                             
-    def no_test_random_walk_onecase(self):
+    def test_random_walk_onecase(self):
         #-- All tests are run using seed = 1717, nepisodes = 20, start_state = 10
         print("\n*** Testing " + self.id() + " ***")
 
         # Learner and agent definition
         params = dict({'alpha': 1.0,
-                       'gamma': 1.0,
-                       'lambda': 1.0,
+                       'gamma': 0.7,
+                       'lambda': 0.8,
                        'alpha_min': 0.0,
                        })
         learner_mclambda = mc.LeaMCLambda(self.env, alpha=params['alpha'], gamma=params['gamma'], lmbda=params['lambda'],

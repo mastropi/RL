@@ -15,9 +15,12 @@ b) Have the following methods defined:
 - reset(): resets the vector w of weigths to their initial estimates 
 - getWeights(): reads the vector w of weights
 - setWeights(): updates the vector w of weights
+- setWeight(): updates the value of the weight for a particular state
 - getValue(): reads the value function for a particular state or state-action
 - getValues(): reads the value function for ALL states or state-actions
 """
+
+import warnings
 
 import numpy as np
 
@@ -50,10 +53,19 @@ class ValueFunctionApprox:
     def getWeights(self):
         return self.weights
 
+    def setWeight(self, state, weight):
+        if not (0 <= state < self.nS):
+            warnings.warn("Invalid state ({}). It should be between 0 and {}. Nothing to do.".format(state, self.nS-1))
+            return -1
+        self.weights[state] = weight
+
     def setWeights(self, weights):
         self.weights = weights
 
     def getValue(self, state):
+        if not (0 <= state < self.nS):
+            warnings.warn("Invalid state ({}). It should be between 0 and {}. None is returned.".format(state, self.nS-1))
+            return None
         return np.dot(self.weights, self.X[:,state])
 
     def getValues(self):

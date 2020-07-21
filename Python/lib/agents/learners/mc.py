@@ -188,6 +188,10 @@ class LeaMCLambda(Learner):
         # Value of next state and current state needed to compute delta
         Vns = self.V.getValue(next_state)   # Vns = V(next_state)        
         Vs = self.V.getValue(state)         #  Vs = V(state)
+        
+        self._values_next_state += [Vns]
+
+        
         assert not done or done and Vns == 0, "Terminal _states have value 0 ({:.2g})".format(Vns)
         fn_delta = lambda n: reward + self.gamma*Vns - (n>0)*Vs
             ## This fn_delta(n) is the change to add to the G value at the previous iteration
@@ -233,7 +237,20 @@ class LeaMCLambda(Learner):
             self._Glambda_list = [(1 - self.lmbda) * glambda + self.lmbda**n * g
                                   for (glambda, g, n) in zip(self._Glambda_list, self._G_list, times_reversed)]
             if self.debug:
-                print("[DONE] t: {} \tG(t:t+n): {} \n\tG(t,lambda): {}".format(t, self._G_list, self._Glambda_list)) 
+                print("[DONE] t: {} \tG(t:t+n): {} \n\tG(t,lambda): {}".format(t, self._G_list, self._Glambda_list))
+            if True:
+                # DM-2020/07/20: Check whether the statement in paper "META-Learning state-based eligibility traces
+                # by Zhao et al. (2020) is true, namely that G(t,lambda) can be computed recursively as:
+                #     G(t,lambda) = R(t+1) + gamma * ( (1 - lambda) * V(S(t+1)) + lambda * G(t,lambda) )
+                # AND IT IS VERIFIED!!!
+                # The problem: I don't know how to prove it... I tried it on my A4 sheets when travelling to Valais
+                # on 19-Jul-2020 but did not succeed...
+                print("[DONE] t={}, Check G(t,lambda): [t, R(t+1), V(t+1), G(t,lambda), check_G(t,lambda), diff]".format(t))
+                check = [R + self.gamma * ( (1 - self.lmbda)*Vns + self.lmbda*G )
+                         for (R, Vns, G) in zip(self._rewards[1:-1], self._values_next_state[1:-1], self._Glambda_list[1:])] + [np.nan]
+                diff = [c - G for (c, G) in zip(check, self._Glambda_list)]
+                with np.printoptions(precision=3, suppress=True):
+                    print(np.c_[np.arange(t+1), self._rewards[1:], self._values_next_state[1:], self._Glambda_list, check, diff])  
 
     def learn(self, t):
         "Updates the value function based on the new observed episode"
@@ -250,7 +267,9 @@ class LeaMCLambda(Learner):
             state = self._states[tt]
             # First-visit MC: We only update the value function estimation at the first visit of the state
             if self._states_first_visit_time[state] == tt:
-                # Error, where the lambda-return is used as the current value function estimate
+                # Error, where the lambda-return is used as the current value function estimate,
+                # i.e. as the TARGET value --to which we want to take V(S(t))-- 
+                # which we consider estimated by G(t,lambda)
                 delta = Glambda[tt] - self.V.getValue(state)
                 if self.debug:
                     print("t: {} \tG(t,lambda): {} \tV({}): {} \tdelta: {}" \

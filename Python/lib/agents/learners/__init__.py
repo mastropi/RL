@@ -167,6 +167,12 @@ class Learner:
         # while the reward is defined for t = 1, ..., T
         self._rewards = [0]
 
+        # Store the values of the next states at each time iteration
+        # This is used for instance to check in mc.py the recursive calculation of G(t,lambda), i.e.:
+        #     G(t,lambda) = R(t+1) + gamma * ( (1 - lambda) * V(S(t+1)) + lambda * G(t,lambda) )
+        # stated in the paper "META-Learning state-based eligibility traces..." by Zhao et al. (2020)
+        self._values_next_state = [np.nan]
+
     def _update_trajectory(self, t, state, reward):
         "Updates the trajectory and related information based on the current time, current state and the observed reward"
         self._states += [state]
