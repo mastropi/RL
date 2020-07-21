@@ -112,7 +112,7 @@ class Test_MC_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
                                                      verbose=True, verbose_period=100,
                                                      plot=False, pause=0.1)
         observed = agent_rw_mc.getLearner().getV().getValues()
-        print("\nobserved: " + self.array2str(observed))
+        print("\nobserved: " + test_utils.array2str(observed))
         assert np.allclose(observed, expected, atol=1E-6)
                                             
     def no_test_random_walk_onecase(self):
@@ -139,7 +139,7 @@ class Test_MC_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
                                                      verbose=True, verbose_period=100,
                                                      plot=False, pause=0.1)
         observed = agent_rw_mclambda.getLearner().getV().getValues()
-        print("\nobserved: " + self.array2str(observed))        
+        print("\nobserved: " + test_utils.array2str(observed))        
         self.plot_results(params,
                           observed, self.V_true, RMSE_by_episode, state_info['alphas_by_episode'],
                           max_rmse=self.max_rmse, color_rmse=self.color_rmse, plotFlag=self.plotFlag)
@@ -170,7 +170,7 @@ class Test_MC_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
  -0.03668617,  0.06142266,  0.27410733,  0.42610526,  0.50467228,  0.63018903,
   0.6727829,   0.72310919,  0.        ])
         observed = self.mclambda_adaptive.getV().getValues()
-        print("\nobserved: " + self.array2str(observed))
+        print("\nobserved: " + test_utils.array2str(observed))
         self.plot_results(params,
                           observed, self.V_true, RMSE_by_episode, state_info['alphas_by_episode'],
                           max_rmse=self.max_rmse, color_rmse=self.color_rmse, plotFlag=self.plotFlag)

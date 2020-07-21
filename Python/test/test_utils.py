@@ -9,6 +9,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
+def array2str(x, sep=", ", fmt=":.6f"):
+    "Converts an array (possibly numeric) to string separated by `sep`"
+    return "[" + sep.join( map(lambda s: ("{" + fmt + "}").format(s), x) ) + "]"
+
 def plot_rmse_by_episode(rmse_mean_values, rmse_se_values=None, max_rmse=None, color="black",
                          alphas=None, alpha_min=0.0, color_alphas='black', max_alpha=None, fig=None, subtitle="", fontsize=12, legend=True):
     """
@@ -99,10 +103,41 @@ def plot_rmse_by_episode(rmse_mean_values, rmse_se_values=None, max_rmse=None, c
     return fig
 
 
+def plot_results_2D(V, params, colormap, fontsize=7):
+    """
+    Plots a 2D state value function as an image
+    
+    Arguments:
+    V: 2D numpy.array
+        State value function for each 2D state.
+
+    params: dict
+        Dictionary with simulation parameters:
+        - 'alpha': learning rate
+        - 'gamma': discount factor of the environment
+        - 'lambda': lambda parameter in TD(lambda)
+        - 'alpha_min': lower bound for the learning rate used when running the simulation       
+        - 'nepisodes': number of episodes run to estimate V_estimate     
+
+    colormap: matplotlib.cm
+        Colormap to use in the plot associated to the state values shown in the image.
+
+    fontsize: int
+        Font size to use for the labels showing the state value function at each 2D state.
+    """
+
+    title = "alpha={:.2f}>={:.2f}, gamma={:.2f}, lambda={:.2f}, {} episodes" \
+                 .format(params['alpha'], params['alpha_min'], params['gamma'], params['lambda'], params['nepisodes'])
+    plt.imshow(V, cmap=colormap)
+    (nx, ny) = V.shape
+    for y in range(ny):
+        for x in range(nx):
+            plt.text(y, x, "{:.3f}".format(V[x,y]), fontsize=fontsize, horizontalalignment='center', verticalalignment='center')
+
 class EpisodeSimulation:
     
     def plot_results(self, params,
-                     V_estimated, V_true, RMSE_by_episode, alphas_by_episode, y2label="(Average) alpha",
+                     V_estimate, V_true, RMSE_by_episode, alphas_by_episode, y2label="(Average) alpha",
                      max_rmse=0.8, color_rmse="black", plotFlag=True):
         """
         Plots the estimated and true state value function.
@@ -115,7 +150,7 @@ class EpisodeSimulation:
             - 'lambda': lambda parameter in TD(lambda)
             - 'alpha_min': lower bound for the learning rate used when running the simulation       
 
-        V_estimated: numpy.array of length number of states in the environment
+        V_estimate: numpy.array of length number of states in the environment
             Estimated state value function.
             
         V_true: numpy.array of length number of states in the environment
@@ -136,7 +171,7 @@ class EpisodeSimulation:
 
             plt.figure()
             plt.plot(all_states, V_true, 'b.-')
-            plt.plot(all_states, V_estimated, 'r.-')
+            plt.plot(all_states, V_estimate, 'r.-')
             ax = plt.gca()
             ax.set_xticks(all_states)
             plt.title(title)
@@ -162,7 +197,3 @@ class EpisodeSimulation:
             return (ax, ax2)
     
         return (None, None)
-
-    def array2str(self, x, sep=", ", fmt=":.6f"):
-        "Converts an array (possibly numeric) to string separated by `sep`"
-        return "[" + sep.join( map(lambda s: ("{" + fmt + "}").format(s), x) ) + "]"
