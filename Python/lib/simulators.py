@@ -21,6 +21,7 @@ and setters:
 The environments of class gym.toy_text.Env satisfy the above conditions.
 """
 
+import warnings
 
 import numpy as np
 from matplotlib import pyplot as plt, cm    # cm is for colormaps (e.g. cm.get_cmap())
@@ -152,9 +153,9 @@ class Simulator:
         nS = self.env.getNumStates()
         if start is not None:
             if not (isinstance(start, int) and 0 <= start and start < nS):
-                raise Warning("The `start` parameter ({}) must be an integer number between 0 and {}.\n" \
+                warnings.warn("The `start` parameter ({}, type={}) must be an integer number between 0 and {}.\n" \
                               "A start state will be selected based on the initial state distribution of the environment." \
-                              .format(start, nS-1))
+                              .format(start, type(start), nS-1))
             else:
                 # Change the initial state distribution of the environment so that
                 # the environment resets to start at the given 'start' state.
@@ -166,9 +167,10 @@ class Simulator:
         # Check initial state
         if state_observe is not None:
             if not (isinstance(state_observe, int) and 0 <= state_observe and state_observe < nS):
+                warnings.warn("The `state_observe` parameter ({}, type={}) must be an integer number between 0 and {}.\n" \
+                              "The state whose index falls in the middle of the state space will be observed." \
+                              .format(state_observe, type(state_observe), nS-1))
                 state_observe = int(nS/2)
-                raise Warning("The `state_observe` parameter must be an integer number between 0 and {}.\n" \
-                              "The state whose index falls in the middle of the state space will be observed.".format(nS-1))
 
         # Define the policy and the learner
         policy = self.agent.getPolicy()
@@ -293,12 +295,7 @@ class Simulator:
             plt.sca(ax) # Go back to the primary axis
             #plt.figure(fig_V.number)
 
-        # Restore the initial state distribution of the environment (for the next simulation)
-        # Note that the restore step done in the __exit__() method may NOT be enough, because the Simulator object
-        # may still exist once the simulation is over.
-        if self._isd_orig is not None:
-            self.env.setInitialStateDistribution(self._isd_orig)
-            self._isd_orig = None
+        self.finalize_run()
 
         return  learner.getV().getValues(), learner.getStateCounts(), RMSE, \
                 {# Value of alpha for each state at the end of the LAST episode run
@@ -306,6 +303,21 @@ class Simulator:
                  # (Average) alpha by episode (averaged over visited states in the episode)
                  'alphas_by_episode': learner.alpha_mean_by_episode
                  }
+
+    def finalize_run(self):
+        # Restore the initial state distribution of the environment (for the next simulation)
+        # Note that the restore step done in the __exit__() method may NOT be enough, because the Simulator object
+        # may still exist once the simulation is over.
+        if self._isd_orig is not None:
+            self.env.setInitialStateDistribution(self._isd_orig)
+            self._isd_orig = None
+
+        # Set the value of terminal states to their reward, both the True values and estimated values
+        # (just to make plots of the state value function more understandable, specially in environments > 1D)
+        for s, r in self.env.getTerminalStatesAndRewards():
+            self.agent.getLearner().getV().setWeight(s, r)
+            if self.env.getV() is not None:
+                self.env.getV()[s] = r
 
     def simulate(self, nexperiments, nepisodes, start=None, verbose=False, verbose_period=1):
         """Simulates the agent interacting with the environment for a number of experiments and number

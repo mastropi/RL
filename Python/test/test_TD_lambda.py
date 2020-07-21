@@ -53,13 +53,9 @@ class Test_TD_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
         cls.max_rmse = 0.8
         cls.color_rmse = "red"
 
-        # Environment
+        # Environment: 1D gridworld
         cls.nS = 19         # Number of non-terminal states in the 1D gridworld
         cls.env = gridworlds.EnvGridworld1D(length=cls.nS+2)  # nS states plus the two terminal states
-
-        # True state value function when gamma = 1.0
-        cls.V_true = np.arange(-cls.nS-1, cls.nS+2, 2) / (cls.nS+1)
-        cls.V_true[0] = cls.V_true[-1] = 0
 
         # Random walk policy on the above environment
         print("Check subclass")
@@ -72,34 +68,34 @@ class Test_TD_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
     # Case number, description, expected value, parameters
     data_test_random_walk = lambda: (
             ( 1, 'TD(0), no alpha adjustment',
-                 [0.000000, -0.987504, -0.941069, -0.900173, -0.805758, -0.613337, -0.407574,
+                 [-1.000000, -0.987504, -0.941069, -0.900173, -0.805758, -0.613337, -0.407574,
                   -0.298142, -0.221312, -0.149854, -0.051759, 0.001865, 0.052824, 0.128984,
-                  0.217968, 0.297497, 0.478097, 0.680931, 0.810098, 0.961462, 0.000000],
+                  0.217968, 0.297497, 0.478097, 0.680931, 0.810098, 0.961462, 1.000000],
                 (0.5, 1.0, 0.0), False, False, 0.0 ),
             ( 2, 'lambda<1, no alpha adjustment',
-                 [0.000000, -0.780984, -0.650444, -0.519032, -0.289646, -0.173257, -0.109756,
+                 [-1.000000, -0.780984, -0.650444, -0.519032, -0.289646, -0.173257, -0.109756,
                   -0.066946, -0.017813, -0.007125, 0.000394, 0.007759, 0.027384, 0.040343,
-                  0.066892, 0.106094, 0.144276, 0.370783, 0.514059, 0.725371, 0.000000],
+                  0.066892, 0.106094, 0.144276, 0.370783, 0.514059, 0.725371, 1.000000],
                 (0.2, 0.9, 0.7), False, False, 0.0 ),
             ( 3, 'TD(1), no alpha adjustment (should be similar to MC every-visit, because lambda = 1)',
-                 [0.000000, -0.191338, -0.299566, -0.338347, -0.405255, -0.542388, -0.703216,
+                 [-1.000000, -0.191338, -0.299566, -0.338347, -0.405255, -0.542388, -0.703216,
                   -0.683582, -0.514695, -0.389836, -0.272784, -0.102481, 0.085268, 0.144083,
-                  0.197441, 0.231908, 0.214645, 0.229342, 0.209256, 0.113961, 0.000000],
+                  0.197441, 0.231908, 0.214645, 0.229342, 0.209256, 0.113961, 1.000000],
                 (0.01, 1.0, 1.0), False, False, 0.0 ),
             ( 4, 'TD(0), alpha adjusted by state count',
-                 [0.000000, -0.784147, -0.564636, -0.339216, -0.116705, -0.035015, -0.011703,
+                 [-1.000000, -0.784147, -0.564636, -0.339216, -0.116705, -0.035015, -0.011703,
                   -0.004087, -0.000950, -0.000174, 0.000018, 0.000239, 0.000861, 0.002790,
-                  0.013549, 0.042693, 0.114878, 0.291660, 0.494777, 0.853046, 0.000000],
+                  0.013549, 0.042693, 0.114878, 0.291660, 0.494777, 0.853046, 1.000000],
                 (2.0, 1.0, 0.0), True, False, 0.0 ),
             ( 5, 'TD(0), alpha adjusted by episode',
-                  [0.000000, -0.972581, -0.884367, -0.763372, -0.511674, -0.286549, -0.197769,
+                  [-1.000000, -0.972581, -0.884367, -0.763372, -0.511674, -0.286549, -0.197769,
                    -0.155286, -0.095648, -0.050941, -0.015981, 0.023179, 0.049375, 0.075978,
-                   0.156952, 0.238841, 0.342924, 0.544935, 0.673823, 0.907726, 0.000000],
+                   0.156952, 0.238841, 0.342924, 0.544935, 0.673823, 0.907726, 1.000000],
                 (2.0, 1.0, 0.0), True,  True, 0.0 ),
             ( 6, 'lambda<1, adjusted alpha by state count',
-                  [0.000000, -0.946909, -0.907296, -0.775429, -0.507633, -0.370504, -0.280516,
+                  [-1.000000, -0.946909, -0.907296, -0.775429, -0.507633, -0.370504, -0.280516,
                    -0.210464, -0.131925, -0.069949, 0.005305, 0.067782, 0.116598, 0.165322,
-                   0.247306, 0.315188, 0.428172, 0.604386, 0.732484, 0.908714, 0.000000],
+                   0.247306, 0.315188, 0.428172, 0.604386, 0.732484, 0.908714, 1.000000],
                 (2.0, 1.0, 0.7), True,  False, 0.0 ),
         )
 
@@ -152,7 +148,7 @@ class Test_TD_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
         observed = agent_rw_tdlambda.getLearner().getV().getValues()
         print("\nobserved: " + self.array2str(observed))
         self.plot_results(params,
-                          observed, self.V_true, RMSE_by_episode, state_info['alphas_by_episode'],
+                          observed, self.env.getV(), RMSE_by_episode, state_info['alphas_by_episode'],
                           max_rmse=self.max_rmse, color_rmse=self.color_rmse, plotFlag=self.plotFlag)
 
     def no_test_random_walk_adaptive_onecase(self):
@@ -187,7 +183,7 @@ class Test_TD_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
         observed = agent_rw_tdlambda_adaptive.getLearner().getV().getValues()
         print("\nobserved: " + self.array2str(observed))
         (ax, ax2) = self.plot_results(params,
-                          observed, self.V_true, RMSE_by_episode, state_info['alphas_by_episode'],
+                          observed, self.env.getV(), RMSE_by_episode, state_info['alphas_by_episode'],
                           y2label="(Average) alpha & lambda",
                           max_rmse=self.max_rmse, color_rmse=self.color_rmse, plotFlag=self.plotFlag)
 

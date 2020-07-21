@@ -6,6 +6,8 @@ Created on Mon Apr  6 15:35:13 2020
 @description: Definition of classes that are common to all environments.
 """
 
+import warnings
+
 import numpy as np
 
 from gym.envs.toy_text import discrete
@@ -17,7 +19,7 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
     """
     Class defining methods that are generic to ALL environments.
     """
-    def __init__(self, nS, nA, P, isd, terminal_states=set()):
+    def __init__(self, nS, nA, P, isd, terminal_states=set(), terminal_rewards=[]):
         """
         Calls the constructor of the super class which requires:
         - nS: number of possible states
@@ -25,12 +27,20 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
         - P: probability of each state-action pair
         - isd: initial state distribution
         - terminal_states: set containing the terminal states of the environment
+        - terminal_rewards: list containing the values of the rewards at the terminal states
         """
         super().__init__(nS, nA, P, isd)
 
         # All states
         self.all_states = list( range(self.getNumStates()) )
         self.terminal_states = terminal_states
+        if len(terminal_rewards) != len(terminal_states):
+            warnings.warn("The number of rewards given for the terminal states ({}) is" \
+                          " different than the number of terminal states ({}). The rewards are left undefined." \
+                          .format(len(terminal_rewards), len(terminal_states)))
+            self.terminal_rewards = []
+        else:
+            self.terminal_rewards = terminal_rewards
 
     #--- Getters
     def getInitialStateDistribution(self):
@@ -52,6 +62,9 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
 
     def getTerminalStates(self):
         return self.terminal_states
+
+    def getTerminalStatesAndRewards(self):
+        return zip( self.terminal_states, self.terminal_rewards )
 
     def getNonTerminalStates(self):
         return set(self.all_states).difference( set( self.terminal_states ) )

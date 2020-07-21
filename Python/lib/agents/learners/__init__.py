@@ -189,11 +189,11 @@ class Learner:
 
     def _update_alphas(self, state):
         assert self.env.isTerminalState(state) == False, \
-                "The state on which the alpha is computed is NOT a terminal state"
+                "The state on which alpha is computed is NOT a terminal state ({})".format(state)
         #with np.printoptions(precision=4):
         #    print("Before updating alpha: episode {}, state {}: state_count={:.0f}, alpha>={}: alpha={}\n{}" \
         #          .format(self.episode, state, self._state_counts_overall[state], self.alpha_min, self._alphas[state], np.array(self._alphas)))
-        
+
         self._alphas_used_in_episode += [self._alphas[state]]
         if self.adjust_alpha:
             if self.adjust_alpha_by_episode:
