@@ -284,9 +284,11 @@ class EstimatorQueueBlockingFlemingViot:
             print("Particle system with {} particles has been reset:".format(self.N))
             print("")
 
+    #--------------------------------- Functions to simulate ----------------------------------
     def simulate(self):
         """
         Simulates the system of particles and estimates the blocking probability
+        via Approximation 1 and Approximation 2 of Matt's draft on queue blocking dated Apr-2020.
 
         Return: tuple
         The tuple contains the following elements:
@@ -303,13 +305,15 @@ class EstimatorQueueBlockingFlemingViot:
         self.finalize()
         self.compute_counts()
 
-        proba_blocking, integral, expected_survival_time = self.estimate_proba_blocking()
-        self.proba_blocking = proba_blocking
+        proba_blocking_integral, proba_blocking_laplacian, integral, gamma, expected_survival_time = \
+            self.estimate_proba_blocking()
+        self.proba_blocking_integral = proba_blocking_integral
+        self.proba_blocking_laplacian = proba_blocking_laplacian
 
         if self.plotFlag:
             self.plot_trajectories()
 
-        return self.proba_blocking, integral, expected_survival_time
+        return self.proba_blocking_integral, self.proba_blocking_laplacian, integral, gamma, expected_survival_time
 
     def generate_trajectories(self):
         # NOTE: We start at iteration 1 because we consider 0 to be the iteration for the starting particle positions
@@ -866,7 +870,7 @@ class EstimatorQueueBlockingFlemingViot:
                     # at the latest absorption time. Since we are removing everything
                     # that happened after that, we do not need to update neither
                     # ktimes0_sum, nor ktimes0_n, nor times0.   
-                # Flag the particle as inactive (as the latest censored trajector was removed)
+                # Flag the particle as inactive (as the latest censored trajectory was removed)
                 self.is_particle_active[P] = False
 
             elif self.finalize_type in [FinalizeType.ABSORB_CENSORED, FinalizeType.ESTIMATE_CENSORED]:
@@ -1138,19 +1142,127 @@ class EstimatorQueueBlockingFlemingViot:
             assert 0 <= self.counts_blocked[idx] <= self.N, \
                     "The number of blocked particles in time segment with index idx={} is between 0 and {} ({}) \n({})" \
                     .format(idx, self.N, self.counts_blocked[idx], self.counts_blocked) 
+    #--------------------------------- Functions to simulate ----------------------------------
+
+
+    #----------------------------- Functions to analyze the simulation ------------------------
+    def compute_survival_probability_from_counts(self, counts_alive: list):
+        """
+        Computes the survival probability (Pr(T>t)) at each time step where counts change.
+        The input data is the array containing the counts of alive particle by time step.
+        """
+        if len(self.t) <= 1:
+            return [1.0]
+        
+        assert counts_alive is not None and len(counts_alive) > 0, \
+                    "The input list is not None and has at least 1 element".format(counts_alive)
+        # I comment out the following assertion because sorting takes time...
+        #assert sorted(counts_alive, reverse=True) == counts_alive, \
+        #            "The input array with the number of particles alive measured at every death time is sorted non-increasingly"
+        assert counts_alive[0] > 0, "The number of particles alive at t=0 is positive ({})".format(counts_alive[0])
+
+        return [n_survived / counts_alive[0] for n_survived in counts_alive]        
+
+    def compute_probability_from_counts(self, counts):
+        """
+        Computes an empirical probability of an event by time using an array of event counts
+        at each time step the count changes.
+        """
+        if len(self.t) <= 1:
+            return [0.0]
+        return [n / self.N for n in counts]        
+
+    def compute_killing_rate(self):
+        """
+        Computes the killing rate of the survival process stored in the object
+        at each time step where the number of particles alive change.
+        """
+        if len(self.t) <= 1:
+            return np.nan
+        return [-np.log(p)/t    if t > 0 and p > 0
+                                else np.nan
+                                for t, p in zip(self.t, self.proba_surv_by_t)]        
+
+    def estimate_QSD_at_block(self):
+        """
+        Smoothes the estimate of the Quasi-Stationary distribution (QSD), nu(K), given by phi(t,K)
+        --the estimated probability of blocking given survival-- according to Matt's draft describing
+        Approximation 2 for the estimation of the blocking probability,
+        by averaging a set of values of phi(t,K) over a specified time interval for large times 
+        (i.e. over times towards the end of the simulation). 
+        The goal is to make that value phi(t,K) more stable, which, if we didn't average, would be
+        measure at one single time t, which may oscillate quite a lot for different simulations or
+        slightly different t values.
+        For details, see graphs produced by the algorithm and shown at the meeting minutes document.
+        
+        The average is computed over a range of times defined by hard-coded parameters which define
+        two the start and end time of the range as a proportion of the number of time steps where
+        a change happens during the simulation, as e.g.:
+        proportion of start = 0.25 
+        proportion of stop = 0.75 
+        """ 
+        proportion_of_length_to_start_integrating = 0.25
+        proportion_of_length_to_stop_integrating = 0.75
+        idx_tfirst = int( proportion_of_length_to_start_integrating * len(self.proba_surv_by_t) )
+        idx_tlast = int( proportion_of_length_to_stop_integrating * len(self.proba_surv_by_t) )
+        pblock_integral = 0.0
+        for i in range(idx_tfirst, idx_tlast-1):
+            pblock_integral += self.proba_block_by_t[i] * (self.t[i+1] - self.t[i])
+        timespan = self.t[idx_tlast] - self.t[idx_tfirst]
+        pblock_mean = pblock_integral / timespan
+
+        return pblock_mean
+
+    def compute_blocking_time_estimate(self):
+        """
+        Computes Pr(K) * (Expected Survival time given start at position 0) where
+        Pr(K) is the calculation of the blocking probability using Approximation 2 in Matt's draft.
+        
+        A modification is done on this estimate to increase robustness or stability of the estimation,
+        namely the phi(t,K) probability of blocking given survival is averaged over a time interval
+        picked over large times (i.e. the times towards the end of the simulation). 
+        """
+        if  len(self.t) <= 1:
+            return np.nan
+
+        pblock_mean = self.estimate_QSD_at_block()
+
+        return [1/gamma * np.exp(gamma*t) * psurv * pblock_mean
+                for t, gamma, psurv in zip(self.t, self.gamma, self.proba_surv_by_t)]        
 
     def estimate_proba_survival_given_position_one(self):
+        """
+        Computes the survival probability given the particle started at position 1
+        
+        A data frame is returned containing the times at which the probability is estimated
+        and the probability estimate itself.
+        """
         assert len(self.sk) > 1, "The length of the survival times array is at least 2 ({})".format(self.sk)
+        assert self.sk[-1], "The last value of the survival time segments array is 0.0 ({:.2f})".format(self.sk[-1])
         assert len(self.counts_alive) == len(self.sk), \
                 "The number of elements in the survival counts array ({})" \
                 " is the same as the number of elements in the survival time segments array ({})" \
                 .format(len(self.counts_alive), len(self.sk))
+        assert self.counts_alive[0] == len(self.sk) - 1, \
+                "The number of particles alive at t=0 (counts_alive[0]={})" \
+                " is equal to S-1, where S is the number of elements in the survival time segments array (len(sk)-1={})" \
+                .format(self.counts_alive[0], len(self.sk)-1)
 
-        self.proba_surv_by_t = [c / (len(self.sk)-1) for c in self.counts_alive]
-        return pd.DataFrame.from_items([('t', self.sk), ('P(T>t / s=1)', self.proba_surv_by_t)])
+        # NOTE: The list containing the survival probability is NOT stored in the object
+        # because the one we store in the object is the list that is aligned with the times
+        # at which the conditional blocking probability is measured.
+        proba_surv_by_t = self.compute_survival_probability_from_counts(self.counts_alive)
+        return pd.DataFrame.from_items([('t', self.sk), ('P(T>t / s=1)', proba_surv_by_t)])
 
     def estimate_proba_survival_and_blocking_conditional(self):
-        "Computes P(BLOCK / T>t,s=1)"
+        """
+        Computes the following quantities which are returned in a data frame:
+        - time at which a change in any quantity happens
+        - P(T>t / s=1): survival probability given start position = 1
+        - P(BLOCK / T>t,s=1): blocking probability given survived and start position = 1
+        - gamma: killing rate
+        - blocking time estimate = Pr(BLOCK) * (Expected Survival Time starting at position = 0)
+        """
 
         # Since we must compute this probability CONDITIONED to the event T > t,
         # we first need to merge the measurements of the block times and of the survival times
@@ -1172,12 +1284,14 @@ class EstimatorQueueBlockingFlemingViot:
 
         self.t, counts_alive, counts_blocked = merge_values_in_time(self.sk, self.counts_alive, self.sbu, self.counts_blocked)
 
-        if  len(self.t) > 1:
-            self.proba_surv_by_t = [n_survived / counts_alive[0] for n_survived in counts_alive]
-            self.proba_block_by_t = [n_blocked / self.N          for n_blocked  in counts_blocked]
-        else:
-            self.proba_surv_by_t = [1.0]
-            self.proba_block_by_t = [0.0]
+        self.proba_surv_by_t = self.compute_survival_probability_from_counts(counts_alive)
+        self.proba_block_by_t = self.compute_probability_from_counts(counts_blocked)
+        self.gamma = self.compute_killing_rate()
+        self.blocking_time_estimate = self.compute_blocking_time_estimate()
+            ## Note: blocking time estimate = Pr(K) * Expected survival time
+            ## This is the Approximation 2 proposed by Matt where we use an estimate
+            ## of phi(t,K), the probability of blocking given survival to time t, at
+            ## just ONE (large) time.
 
         # Assertions
         idx_inf = find(self.proba_block_by_t, np.inf)
@@ -1195,7 +1309,9 @@ class EstimatorQueueBlockingFlemingViot:
 
         return pd.DataFrame.from_items([('t', self.t),
                                         ('P(T>t / s=1)', self.proba_surv_by_t),
-                                        ('P(BLOCK / T>t,s=1)', self.proba_block_by_t)])
+                                        ('P(BLOCK / T>t,s=1)', self.proba_block_by_t),
+                                        ('Killing Rate', self.gamma),
+                                        ('Blocking Time Estimate', self.blocking_time_estimate)])
 
     def estimate_expected_survival_time_given_position_zero(self):
         # The following disregards the particles that were still alive when the simulation stopped
@@ -1251,6 +1367,48 @@ class EstimatorQueueBlockingFlemingViot:
 
         return self.expected_survival_time
 
+    def estimate_proba_blocking_via_integral(self, expected_survival_time):
+        "Computes the blocking probability via Approximation 1 in Matt's draft"
+        # Integrate => Multiply the survival, the conditional blocking probabilities, and delta(t) and sum
+        integral = 0.0
+        for i in range(0, len(self.proba_surv_by_t)-1):
+            integral += (self.proba_surv_by_t[i] * self.proba_block_by_t[i]) * (self.t[i+1] - self.t[i])
+        if self.LOG:
+            print("integral = {:.3f}".format(integral))
+
+        assert expected_survival_time > 0, "The expected survival time is positive ({})".format(expected_survival_time)
+        proba_blocking_integral = integral / expected_survival_time
+
+        return proba_blocking_integral, integral
+
+    def estimate_proba_blocking_via_laplacian(self, expected_survival_time):
+        "Computes the blocking probability via Approximation 2 in Matt's draft"
+        try:
+            # Find the index with the last informed (non-NaN) gamma
+            # (we exclude the first element as gamma = NaN, since t = 0 at the first element)
+            # (note that we don't need to substract one to the result of index() because
+            # the exclusion of the first element does this "automatically") 
+            idx_tmax = self.gamma[1:].index(np.nan)
+        except:
+            # The index with the last informed gamma is the last index
+            idx_tmax = -1
+
+        proba_blocking_laplacian = self.blocking_time_estimate[idx_tmax] / expected_survival_time
+        gamma = self.gamma[idx_tmax]
+        proba_block_mean = self.estimate_QSD_at_block()
+
+        if False:
+            if self.mean_lifetime is not None:
+                print("Building blocks of estimation:")
+                print("idx_tmax = {}".format(idx_tmax))
+                print("tmax = {:.3f}".format(self.t[idx_tmax]))
+                print("gamma = {:.3f}".format(gamma))
+                print("Pr(T>t / s=1) = {:.3f}".format(self.proba_surv_by_t[idx_tmax]))
+                print("Pr(K / T>t,s=1) = {:.3f}".format(self.proba_block_by_t[idx_tmax]))
+                print("Average blocking probability = {:.3f}".format(proba_block_mean))
+
+        return proba_blocking_laplacian, gamma
+
     def estimate_proba_blocking(self):
         """
         Estimates the blocking probability
@@ -1263,31 +1421,44 @@ class EstimatorQueueBlockingFlemingViot:
         - the estimated expected survival time (time to first absorption) given the particle starts at position 0.
           (this is the denominator of the expression giving the blocking probability estimate)
         """
-        # Compute self.t, self.proba_surv_by_t, self.proba_block_by_t
         if not self.is_simulation_finalized:
             raise ValueError("The simulation has not been finalized..." \
                           "\nThe estimation of the blocking probability cannot proceed." \
                           "\nRun first the finalize() method and rerun.")
             
-        self.estimate_proba_survival_and_blocking_conditional()
+        #-- Compute the building blocks of the blocking probability estimate which are stored in the object
+        # This includes:
+        # - self.t: time at which an event occurs
+        # - self.proba_surv_by_t: survival probability given start position = 1
+        # - self.proba_block_by_t: blocking probability given alive and start position = 1
+        # - self.gamma: killing rate, eigenvalue of the laplacian
+        # - self.blocking_time_estimate: estimated blocking time = Pr(block) * (Expected Survival Time)
+        df = self.estimate_proba_survival_and_blocking_conditional()
+        if False:
+            if self.mean_lifetime is not None:
+                plt.plot(df['t'], df['Killing Rate'], 'b.-')
+                ax = plt.gca()
+                ax.set_ylim((0,2))
+                ax.set_xlabel("t")
+                ax.set_ylabel("Killing Rate (gamma)")
+                plt.title("K={}, particles={}, iterations={}".format(self.queue.getCapacity(), self.N, self.niter))
+                plt.show()
 
-        # Integrate => Multiply the survival, the conditional blocking probabilities, and delta(t) and sum 
-        integral = 0.0
-        for i in range(0, len(self.proba_surv_by_t)-1):
-            integral += (self.proba_surv_by_t[i] * self.proba_block_by_t[i]) * (self.t[i+1] - self.t[i])
-        if self.LOG:
-            print("integral = {:.3f}".format(integral))
-
-        # Expected survival time
+        #-- Expected survival time
         if self.mean_lifetime is None:
             expected_survival_time = self.estimate_expected_survival_time_given_position_zero()
         else:
             expected_survival_time = self.mean_lifetime
 
-        # Estimate the blocking probability!
-        proba_blocking = integral / expected_survival_time
+        #-- Blocking probability estimate via Approximation 1: estimate the integral
+        proba_blocking_integral, integral = self.estimate_proba_blocking_via_integral(expected_survival_time)
 
-        return proba_blocking, integral, expected_survival_time
+        #-- Blocking probability estimate via Approximation 2: estimate the Laplacian eigenvalue (gamma) and eigenvector (h(1))
+        proba_blocking_laplacian, gamma = self.estimate_proba_blocking_via_laplacian(expected_survival_time)
+
+        return proba_blocking_integral, proba_blocking_laplacian, integral, gamma, expected_survival_time
+    #----------------------------- Functions to analyze the simulation ------------------------
+
 
     #-------------------------------------- Getters -------------------------------------------
     def get_position(self, P, t):

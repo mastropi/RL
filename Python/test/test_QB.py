@@ -437,7 +437,7 @@ class Test_QB_Particles(unittest.TestCase):
             niter=niter,
             seed=seed,
             plotFlag=True,
-            log=True)
+            log=False)
 
     def run(self,   start=1,
                     mean_lifetime=None,
@@ -460,7 +460,7 @@ class Test_QB_Particles(unittest.TestCase):
             print("Simulation setup:")
             print(est.setup())
 
-        proba_blocking, integral, expected_survival_time = est.simulate()
+        proba_blocking_integral, proba_blocking_laplacian, integral, gamma, expected_survival_time = est.simulate()
 
         # Estimate the probability of blocking in the Monte Carlo case for benchmarking
         # as the proportion of time blocked over all elapsed time (= total survival time).
@@ -524,10 +524,12 @@ class Test_QB_Particles(unittest.TestCase):
         if log:
             rho = self.rate_birth / self.rate_death
             K = self.capacity
-            print("\nEstimation of blocking probability via Approximation 1:")
+            print("\nEstimation of blocking probability via Approximation 1 & 2:")
             print("Integral = {:.6f}".format(integral))
+            print("Gamma = {:.6f}".format(gamma))
             print("Expected Survival Time = {:.3f}".format(expected_survival_time))
-            print("Blocking probability estimate: {:.1f}%".format(proba_blocking*100))
+            print("Blocking probability estimate (Approx. 1): {:.1f}%".format(proba_blocking_integral*100))
+            print("Blocking probability estimate (Approx. 2): {:.1f}%".format(proba_blocking_laplacian*100))
             print("Theoretical value (rho^K / sum(rho^i)) (rho={:.3f}, K={}): {:.3f}%" \
                   .format(rho, K,
                           rho**K / np.sum([ rho**i for i in range(K+1) ]) *100))
@@ -546,8 +548,10 @@ class Test_QB_Particles(unittest.TestCase):
                               niter,
                               seed)
 
-        return  proba_blocking, \
+        return  proba_blocking_integral, \
+                proba_blocking_laplacian, \
                 integral, \
+                gamma, \
                 expected_survival_time, \
                 prop_blocking_time, \
                 (mean_lifetime, reactivate, finalize_type, nparticles, niter)
@@ -578,7 +582,8 @@ class Test_QB_Particles(unittest.TestCase):
                                                                ('integral', []),
                                                                ('E(T)', []),
                                                                ('PMC(K)', []),
-                                                               ('PFV(K)', []),
+                                                               ('PFV1(K)', []),
+                                                               ('PFV2(K)', []),
                                                                ('P(K)', [])
                                                                ])
         rho = self.queue.rates[Event.BIRTH.value] / self.queue.rates[Event.DEATH.value]
@@ -604,7 +609,7 @@ class Test_QB_Particles(unittest.TestCase):
                         reactivate = False
                         start = 0
                         mean_lifetime = None
-                        _, _, mean_lifetime_mc, proba_blocking_mc, params_mc = self.run(start,
+                        _, _, _, _, mean_lifetime_mc, proba_blocking_mc, params_mc = self.run(start,
                                                                         mean_lifetime,
                                                                         reactivate,
                                                                         finalize_type,
@@ -618,7 +623,7 @@ class Test_QB_Particles(unittest.TestCase):
                               .format(mean_lifetime_mc))
                         reactivate = True
                         start = 1
-                        proba_blocking, integral, expected_survival_time, _, params_fv = \
+                        proba_blocking_integral, proba_blocking_laplacian, integral, gamma, expected_survival_time, _, params_fv = \
                                                                 self.run(   start,
                                                                             mean_lifetime_mc,
                                                                             reactivate,
@@ -639,12 +644,20 @@ class Test_QB_Particles(unittest.TestCase):
                                                                             ('integral', [integral]),
                                                                             ('E(T)', [expected_survival_time]),
                                                                             ('PMC(K)', [proba_blocking_mc]),
-                                                                            ('PFV(K)', [proba_blocking]),
+                                                                            ('PFV1(K)', [proba_blocking_integral]),
+                                                                            ('PFV2(K)', [proba_blocking_laplacian]),
                                                                             ('P(K)', [proba_blocking_K])]
                                                                                          )],
                                                                  axis=0)
                                                                 
-                        print("\t--> PMC(K)={:.6f}% vs. PFV(K)={:.6f}% vs. P(K)={:.6f}%".format(proba_blocking_mc*100, proba_blocking*100, proba_blocking_K*100))
+                        print("\t--> PMC(K)={:.6f}% vs. PFV1(K)={:.6f}% vs. PFV2(K)={:.6f}% vs. P(K)={:.6f}%" \
+                              .format(proba_blocking_mc*100, proba_blocking_integral*100, proba_blocking_laplacian*100, proba_blocking_K*100))
+
+                    if False:
+                        # DM-2020/08/23: Stop at a simulation showing large values of PFV2(K) (e.g. 72% when the actual P(K) = 10%!)
+                        if K == 5 and nparticles == 10 and niter == 400:
+                            import sys
+                            sys.exit()
 
                     if niter < niter_max:
                         # Give the opportunity to reach niter_max (in case niter*niter_mult goes beyond niter_max)
@@ -711,7 +724,7 @@ class Test_QB_Particles(unittest.TestCase):
                           self.queue.rates[Event.DEATH.value],
                           self.queue.rates[Event.BIRTH.value] / self.queue.rates[Event.DEATH.value],
 
-                          mean_lifetime, reactivate, finalize_type.name[0:3],
+                          mean_lifetime or np.nan, reactivate, finalize_type.name[0:3],
                           nparticles, niter, seed
                           ))
         ax.title.set_fontsize(9)
@@ -808,7 +821,7 @@ class Test_QB_Particles(unittest.TestCase):
         grp_iter = 'niter'
         grp_K = 'K'
         y_mc = 'PMC(K)'
-        y_fv = 'PFV(K)'
+        y_fv = 'PFV1(K)'   # Approximation 1
         replications = int(np.max(df['rep']))
 
         # Analysis by group (mean, std, min, max)
@@ -881,7 +894,7 @@ class Test_QB_Particles(unittest.TestCase):
         grp_iter = 'niter'
         grp_K = 'K'
         y_mc = 'PMC(K)'
-        y_fv = 'PFV(K)'
+        y_fv = 'PFV1(K)'  # Approximation 1
         replications = int(np.max(df['rep']))
         
         # Filter each analysis by group by the largest value of the other group variable
@@ -900,20 +913,28 @@ class Test_QB_Particles(unittest.TestCase):
         plot(df_byiter, grp_K, grp_iter, legend, se_mult=2)
 
 
-if __name__ == "__main__":
+if __name__ != "__main__":
     #unittest.main()
 
-#else:
+    # DM-2020/08/24: Instead of using unittest.main(), use the following to test the FV system
+    # because there is a very weird error generated by the fact that queue.size inside
+    # the EstimatorQueueBlockingFlemingViot class is interpreted of being of class
+    # unittest.runner.TextTestResult (or similar)!! instead of simply returning the size
+    # attribute of the `queue` object!!!
+    test = Test_QB_Particles()
+    test.test_simpler_algorithm()
+
+else:
     # Lines to execute "by hand" (i.e. at the Python prompt)
     test = Test_QB_Particles()
-
+    
     time_start = timer()
     results_convergence, rho = test.analyze_convergence(
                                     finalize_type=FinalizeType.REMOVE_CENSORED,
                                     replications=5,
                                     K_range=(5, 40, 2),
-                                    nparticles_range=(10, 80, 2),
-                                    niter_range=(50, 800, 2), 
+                                    nparticles_range=(10, 40, 2),
+                                    niter_range=(50, 400, 2), 
                                     seed=1717,
                                     log=False)
     time_end = timer()
@@ -924,9 +945,9 @@ if __name__ == "__main__":
 
     print("Execution time: {:.1f} min".format(timedelta(time_end - time_start).seconds / 60))
 
-    filename = "../../RL-002-QueueBlocking/results/fv_approx1_convergence_rho={:.3f}.csv"
-    results_convergence.to_csv(filename.format(rho))
-    print("Results of simulation saved to {}".format(filename))    
+    #filename = "../../RL-002-QueueBlocking/results/fv_approx1_convergence_rho={:.3f}.csv"
+    #results_convergence.to_csv(filename.format(rho))
+    #print("Results of simulation saved to {}".format(filename))    
 
     # Plots
     test.plot_convergence_analysis_allvalues(results_convergence)
