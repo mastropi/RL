@@ -11,6 +11,7 @@ import numpy as np
 from . import Learner, AlphaUpdateType
 from .value_functions import ValueFunctionApprox
 import Python.lib.utils.plotting as plotting
+from matplotlib import pyplot as plt, cm 
 
 
 class LeaTDLambda(Learner):
@@ -101,8 +102,12 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
     def __init__(self, env, alpha=0.1, gamma=1.0, lmbda=0.8,
                  adjust_alpha=False, alpha_update_type=AlphaUpdateType.EVERY_STATE_VISIT,
                  adjust_alpha_by_episode=True, alpha_min=0.,
-                 lambda_min=0., burnin=False, debug=False):
+                 lambda_min=0., burnin=False, plotwhat="boxplot", fontsize=15, debug=False):
         super().__init__(env, alpha, gamma, lmbda, adjust_alpha, alpha_update_type, adjust_alpha_by_episode, alpha_min, debug)
+        
+        # List that keeps the history of ALL lambdas used at EVERY TIME STEP
+        # (i.e. all states are mixed up here and if we want to identify which state the lambda corresponds to
+        # we need to look at the history of states provided by the learner)
         self._lambdas = []
         # Minimum lambda for the adaptive lambda so that there is still some impact
         # in past states at the beginning when all state values are equal and equal to 0
@@ -110,6 +115,11 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
         # Whether to perform a burn-in learning using a constant lambda
         # at the beginning to accelerate learning
         self.burnin = burnin
+        # Type of plot to generate to analyze the adaptive lambdas by state
+        self.plotwhat = plotwhat
+        # Reference font size to use in 2D image plot of the lambdas by state
+        # to show the number of cases and/or the lambda value
+        self.fontsize = fontsize
 
         # Counter of state visits WITHOUT resetting the count after each episode
         # (This is used to decide whether we should use the adaptive or non-adaptive lambda
@@ -121,13 +131,19 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
         # List of lists to store the lambdas used for each state in each episode
         self._lambdas_in_episode = [[] for _ in self.env.all_states]
         # Store all the lambdas over all episodes
+        # This is a 3D list indexed by:
+        # - episode number
+        # - state
+        # - visit to the state in the episode
         self._all_lambdas_by_episode = []
-        # For count, mean and std
+        # For count, mean and std by state
         self._all_lambdas_n = np.zeros(self.env.getNumStates(), dtype=int)
         self._all_lambdas_sum = np.zeros(self.env.getNumStates(), dtype=float)
         self._all_lambdas_sum2 = np.zeros(self.env.getNumStates(), dtype=float)
 
         # Keep track of the average lambda by episode
+        # computed over the lambdas observed during the TRAJECTORY
+        # (i.e. it's not an average over the lambdas by state!)
         self.lambda_mean_by_episode = []
 
     def reset(self, reset_episode=False, reset_value_functions=False):
@@ -265,19 +281,25 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
         Arguments:
         episode: int
             Number of episode of interest for the plot.
+
         nepisodes: int
             Number of total episodes to run or already run
+
+        what: str
+            What to plot. Possible values are:
+            - "boxplots": for a boxplot of lambdas by state for different ranges of episode number
+                (e.g. early learning episodes vs. late learning episodes) divided into 4 groups).
+            - "average": for a plot of average lambda by state over all the episodes run.
         """
-        import matplotlib.pyplot as plt
 
         # Finalize setup of all possible graphs created here
-        def finalize_plot(ax, state_counts, title="Lambda distribution for selected episodes / State count distribution"):
+        def finalize_plot_1D(ax, state_counts, title="Lambda by state for selected episodes / State count distribution"):
             ax.set_title(title)
 
             ax.set_xticks(self.env.all_states)
             ax.set_xlim((0, self.env.getNumStates()-1))
             ax.set_ylim((0,1.02))
-            ax.set_ylabel("Lambdas distribution by state")
+            ax.set_ylabel("Lambda")
             ax.tick_params(axis='y', colors="orange")
             ax.yaxis.label.set_color("orange")
 
@@ -289,9 +311,26 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
             ax1sec.set_ylabel("State count")
             plt.sca(ax) # Go back to the primary axis
 
-        #---- Plot of state-dependent lambdas
-        #-- 1) mean(lambda) and std(lambda) by state
+        def finalize_plot_2D(ax, state_lambdas_2D, state_counts_2D, fontsize=12, title="Lambda by state for selected episodes / State count distribution"):
+            ax.set_title(title)
 
+            (nx, ny) = state_counts_2D.shape
+            # Adjust the font size according to the image shape
+            # It is assumed that the unmodified fontsize works fine for a 5x5 grid
+            fontsize = int( np.min((5/nx, 5/ny)) * fontsize )
+            for y in range(ny):
+                for x in range(nx):
+                    if state_lambdas_2D is None:
+                        ax.text(y, x, "N={}".format(int(state_counts_2D[x,y])),
+                                fontsize=fontsize, horizontalalignment='center', verticalalignment='center')
+                    elif state_counts_2D is None:
+                        ax.text(y, x, "{:.3f}".format(state_lambdas_2D[x,y]),
+                                fontsize=fontsize, horizontalalignment='center', verticalalignment='center')
+                    else:
+                        ax.text(y, x, "{:.3f}\n (N={})".format(state_lambdas_2D[x,y], int(state_counts_2D[x,y])),
+                                fontsize=fontsize, horizontalalignment='center', verticalalignment='center')
+
+        #---- Plot of state-dependent lambdas
         # Option 1: Compute the mean and standard deviation of lambdas by state for last episode 
         #nstates = self.env.getNumStates()
         #states = np.arange(nstates)
@@ -323,7 +362,13 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
         #ax1.plot(self.env.all_states, lambdas_mean, '.-', color="orange")
         #ax1.errorbar(self.env.all_states, lambdas_mean, yerr=lambdas_std, capsize=4, color="orange")
 
-        # Option 3: Boxplots by state based on whole history of lambdas
+        if nepisodes < 4:
+            print("NOTE: No plots by episode number group are generated: at least 4 episodes are needed.")
+            return
+
+        # Option 3: Plot distribution of lambdas by range of episode numbers
+        # (to see how lambdas by state evolve with time)
+        # Define 4 groups of episode numbers range 
         episodes_to_show = lambda nepisodes, nplots: set( list( range(0, nepisodes, max(1, int( (nepisodes-1)/(nplots-1) ))) ) + [nepisodes-1] )
         episodes_to_consider = lambda start, stop: range(start, stop+1)
 
@@ -346,11 +391,22 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
         #plotting.violinplot(ax1, [lambdas_by_state[s] for s in states2plot], positions=states2plot,
                             #color_body="orange", color_lines="orange", color_means="red")
         #finalize_plot(ax1, self.env.getStateCounts())
-
-        #-- Plots by group of episodes in the experiment (to see how lambdas by state distribution evolve with time)   
+ 
         fig = plt.figure()
         nplots = 4
         axes = fig.subplots(2, int(nplots/2))
+        if self.plotwhat == "average":
+            # Create a new figure to show the distribution of state counts
+            # as we cannot plot them in the same figure as the lambda values
+            fig_counts = plt.figure()
+            axes_counts = fig_counts.subplots(2, int(nplots/2))
+
+        lambda_mean = np.sum( [S for S in self._all_lambdas_sum] ) / np.sum( [n for n in self._all_lambdas_n] )
+        nvisits_min = np.min( [n for n in self._all_lambdas_n] )
+        nvisits_mean = np.mean( [n for n in self._all_lambdas_n] )
+        nvisits_max = np.max( [n for n in self._all_lambdas_n] )
+        print("Average lambda over all steps and episodes: {:.2f}".format(lambda_mean))
+        print("# visits: (min, mean, max) = ({:.0f}, {:.1f}, {:.0f})".format(nvisits_min, nvisits_mean, nvisits_max))
 
         episode_step = max(1, int(nepisodes / nplots))      # Ex: int(50/4) = 48/4 = 12 
         for idx_ax, ax in enumerate(axes.reshape(nplots)):
@@ -367,14 +423,60 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
             states2plot = [s for s in self.env.getNonTerminalStates() if nvisits_by_state[s] > 0]
             #print("lambdas_by_state for plotting:")
             #print([lambdas_by_state[s] for s in states2plot])
-            # Note: the violinpot() function does NOT accept an empty list for plotting nor NaN values
-            # (when at least a NaN value is present, nothing is shown for the corresponding group!)
-            plotting.violinplot(ax, [lambdas_by_state[s] for s in states2plot], positions=states2plot,
-                                color_body="orange", color_lines="orange", color_means="red")
-            finalize_plot(ax, nvisits_by_state, title="Episodes {} thru {}".format(episode_begin+1, episode_end+1))
-        fig.suptitle("Lambdas distribution by state for different periods of the experiment")
+            lambda_min_episodes = np.min( [np.min(lambdas_by_state[s]) for s in states2plot] )
+            lambda_mean_episodes = np.sum( [np.sum(lambdas) for lambdas in lambdas_by_state] ) / np.sum( [n for n in nvisits_by_state] )
+            lambda_max_episodes = np.max( [np.max(lambdas_by_state[s]) for s in states2plot] )
+            nvisits_min_episodes = np.min( [n for n in nvisits_by_state] )
+            nvisits_mean_episodes = np.mean( [n for n in nvisits_by_state] )
+            nvisits_max_episodes = np.max( [n for n in nvisits_by_state] )
+            print("\nLambdas over episodes {} thru {}: (min, mean, max) = ({:.2f}, {:.2f}, {:.2f})" \
+                  .format(episode_begin+1, episode_end+1, lambda_min_episodes, lambda_mean_episodes, lambda_max_episodes))
+            print("# visits over episodes {} thru {}: (min, mean, max) = ({:.0f}, {:.1f}, {:.0f})" \
+                   .format(episode_begin+1, episode_end+1, nvisits_min_episodes, nvisits_mean_episodes, nvisits_max_episodes))
 
-        #-- 2) Histogram of lambdas for last episode
-        #ax2.hist(self._lambdas, color="orange")
-        #ax2.set_title("Distribution of state-dependent lambdas at the last episode")
-        #ax2.set_xlim((0, 1))
+            if self.plotwhat == "boxplots":
+                # Note: the violinpot() function does NOT accept an empty list for plotting nor NaN values
+                # (when at least a NaN value is present, nothing is shown for the corresponding group!)
+                plotting.violinplot(ax, [lambdas_by_state[s] for s in states2plot], positions=states2plot,
+                                    color_body="orange", color_lines="orange", color_means="red")
+                finalize_plot_1D(ax, nvisits_by_state, title="Episodes {} thru {}\nlambdas: (min, mean, max) = ({:.2f}, {:.2f}, {:.2f})" \
+                                 .format(episode_begin+1, episode_end+1, lambda_min_episodes, lambda_mean_episodes, lambda_max_episodes))
+                fig.suptitle("Lambdas distribution by state for different time periods of the experiment")
+            elif self.plotwhat == "average":
+                # Average lambda values by state
+                lambda_mean_by_state = [np.mean(lambdas_by_state[s]) if s in states2plot
+                                                                     else np.nan
+                                                                     for s in self.env.all_states]
+                lambda_se_by_state = [np.std(lambdas_by_state[s]) / np.sqrt(nvisits_by_state[s]) if s in states2plot
+                                                                                                 else np.nan
+                                                                                                 for s in self.env.all_states]
+                if self.env.getDimension() == 2:
+                    # Prepare data to plot 
+                    shape = self.env.getShape()
+                    lambda_mean_by_state_2D = np.asarray(lambda_mean_by_state).reshape(shape)
+                    nvisits_by_state_2D = np.asarray(nvisits_by_state).reshape(shape)
+
+                    # Display the 2D images
+                    # --lambdas distribution
+                    colormap = cm.get_cmap("Oranges")
+                    colornorm = plt.Normalize(vmin=0.0, vmax=1.0)
+                    ax.imshow(lambda_mean_by_state_2D, cmap=colormap, norm=colornorm)
+                    finalize_plot_2D(ax, lambda_mean_by_state_2D, nvisits_by_state_2D, fontsize=self.fontsize, title="Episodes {} thru {}\nlambdas: (min, mean, max) = ({:.2f}, {:.2f}, {:.2f})" \
+                                 .format(episode_begin+1, episode_end+1, lambda_min_episodes, lambda_mean_episodes, lambda_max_episodes))
+
+                    # --state count distribution
+                    colormap = cm.get_cmap("Blues")
+                    colornorm = plt.Normalize(vmin=np.min(nvisits_by_state), vmax=np.max(nvisits_by_state))
+                    axc = axes_counts[int(idx_ax/2), idx_ax%2]
+                    axc.imshow(nvisits_by_state_2D, cmap=colormap, norm=colornorm)
+                    finalize_plot_2D(axc, None, nvisits_by_state_2D, fontsize=self.fontsize*1.5, title="Episodes {} thru {}\nstate count: (min, mean, max) = ({:.0f}, {:.1f}, {:.0f})" \
+                                 .format(episode_begin+1, episode_end+1, nvisits_min_episodes, nvisits_mean_episodes, nvisits_max_episodes))
+                else:
+                    # For 1D or dimensions higher than 2, just plot lambdas in terms of the 1D state numbers
+                    ax.errorbar(states2plot, lambda_mean_by_state, yerr=lambda_se_by_state, capsize=4, color="orange")
+                    finalize_plot_1D(ax, nvisits_by_state, title="Episodes {} thru {}\nlambdas: (min, mean, max) = ({:.2f}, {:.2f}, {:.2f})" \
+                                     .format(episode_begin+1, episode_end+1, lambda_min_episodes, lambda_mean_episodes, lambda_max_episodes))
+
+                fig.suptitle("Lambda by state averaged over episodes in different time periods of the experiment" \
+                             "\n(overall lambda average = {:.2f})".format(lambda_mean))
+                fig_counts.suptitle("State count distribution over episodes in different time periods of the experiment")

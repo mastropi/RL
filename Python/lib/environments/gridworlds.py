@@ -48,9 +48,9 @@ class EnvGridworld1D(EnvironmentDiscrete):
         # We substract 1 because the state are base 0 (i.e. they represent indices)
         MAX_S = nS - 1
 
-        # Rewards of the two terminal states
-        reward_terminal_left = -1.0
-        reward_terminal_right = +1.0
+        # Terminal states
+        terminal_states = set([0, nS-1])
+        rewards_dict = dict({0: -1.0, nS-1: +1.0})
 
         # True value functions (for algorithm evaluation purposes)
         # Note that terminal states have value = 0
@@ -65,10 +65,9 @@ class EnvGridworld1D(EnvironmentDiscrete):
         it = np.nditer(grid)
 
         # Function that checks whether we arrived at a terminal state
-        is_terminal = lambda s: s == 0 or s == nS - 1
-        reward = lambda s: 0.0  if s != 0 and s != nS-1 \
-                                else reward_terminal_left if s == 0 \
-                                else reward_terminal_right
+        num_nonterminal_states = nS - len(terminal_states)
+        is_terminal = lambda s: s in terminal_states
+        reward = lambda s: rewards_dict[s] if s in rewards_dict.keys() else 0.0
 
         while not it.finished:
             s = it.iterindex
@@ -96,7 +95,7 @@ class EnvGridworld1D(EnvironmentDiscrete):
             it.iternext()
 
         # Initial state distribution is uniform, excluding terminal state which have zero probability
-        isd = np.ones(nS) / (nS - 2)
+        isd = np.ones(nS) / num_nonterminal_states
         isd[0] = 0.0
         isd[nS-1] = 0.0
         assert np.isclose(np.sum(isd), 1.0), \
@@ -107,8 +106,9 @@ class EnvGridworld1D(EnvironmentDiscrete):
         #print(P)
 
         super(EnvGridworld1D, self).__init__(nS, nA, P, isd,
+                                             dim=1,
                                              terminal_states=set([i for i, s in enumerate(range(nS)) if is_terminal(s)]),
-                                             rewards_dict=[reward(s) for s in range(nS) if is_terminal(s)])
+                                             terminal_rewards=[reward(s) for s in terminal_states])
 
     def getV(self):
         "Returns the true state value function"
@@ -156,20 +156,20 @@ class EnvGridworld2D(EnvironmentDiscrete):
     
     shape: list/tuple
         Size of the 2D gridworld given as #rows x #cols.
-        default: [4, 4]
+        default: [5, 5]
 
     terminal_states: set
         Set with the 1D state numbers considered as terminal states.
-        default: set([0, 4*4-1])
+        default: set([0, 5*5-1])
 
-    terminal_rewards: dict
-        Values of the rewards for each state in the set of terminal states used as key to the dictionary.
-        default: {0: -1.0, 4*4-1: +1.0}
+    rewards_dict: dict
+        Reward values for a subset of states in the grid. The 1D state number is used as dictionary key.
+        default: {0: -1.0, 5*5-1: +1.0}
     """
 
     metadata = {'render.modes': ['human', 'ansi']}
 
-    def __init__(self, shape=[4,4], terminal_states=None, rewards_dict=None):
+    def __init__(self, shape=[5,5], terminal_states=None, rewards_dict=None):
         if not isinstance(shape, (list, tuple)) or len(shape) != 2:
             raise ValueError("Shape argument must be a list/tuple of length 2")
         if terminal_states is not None and len(terminal_states) == 0:
@@ -179,8 +179,8 @@ class EnvGridworld2D(EnvironmentDiscrete):
 
         # Environment geometry
         self.shape = shape
-        nS = np.prod(shape)
-        nA = 4
+        nS = np.prod(shape)         # Number of states
+        nA = 4                      # Number of actions (one in each cardinal point)
 
         # Terminal states
         if terminal_states is None:
@@ -257,8 +257,9 @@ class EnvGridworld2D(EnvironmentDiscrete):
         #print(P)
 
         super(EnvGridworld2D, self).__init__(nS, nA, P, isd,
-                                            terminal_states=terminal_states,
-                                            rewards_dict=[reward(s) for s in terminal_states])
+                                             dim=2,
+                                             terminal_states=terminal_states,
+                                             terminal_rewards=[reward(s) for s in terminal_states])
 
     def _render(self, mode='human', close=False):
         """ Renders the current gridworld layout
@@ -298,6 +299,10 @@ class EnvGridworld2D(EnvironmentDiscrete):
                 outfile.write("\n")
 
             it.iternext()
+    
+    #--- Getters
+    def getShape(self):
+        return self.shape
 
     def getV(self):
         "Returns the true state value function"

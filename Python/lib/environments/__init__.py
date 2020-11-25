@@ -19,7 +19,7 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
     """
     Class defining methods that are generic to ALL environments.
     """
-    def __init__(self, nS, nA, P, isd, terminal_states=set(), terminal_rewards=[]):
+    def __init__(self, nS, nA, P, isd, dim=1, terminal_states=set(), terminal_rewards=[]):
         """
         Calls the constructor of the super class which requires:
         - nS: number of possible states
@@ -30,6 +30,9 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
         - terminal_rewards: list containing the values of the rewards at the terminal states
         """
         super().__init__(nS, nA, P, isd)
+
+        # Dimension of the environment (e.g. 1D (gridworld), 2D (gridworld), etc.)
+        self.dim = dim
 
         # All states
         self.all_states = list( range(self.getNumStates()) )
@@ -43,6 +46,9 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
             self.terminal_rewards = terminal_rewards
 
     #--- Getters
+    def getDimension(self):
+        return self.dim
+
     def getInitialStateDistribution(self):
         return np.copy(self.isd)
 

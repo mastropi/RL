@@ -143,11 +143,11 @@ class Simulator:
         if plot:
             fig_V = plt.figure()
             colors = cm.get_cmap(colormap, lut=nepisodes)
-            # Plot the true state value function (to have it as a reference already
-            plt.plot(self.env.all_states, self.env.getV(), '.-', color="blue")
-            
-            if state_observe is not None:
-                fig_RMSE_state = plt.figure()
+            if self.env.getDimension() == 1:
+                # Plot the true state value function (to have it as a reference already
+                plt.plot(self.env.all_states, self.env.getV(), '.-', color="blue")
+                if state_observe is not None:
+                    fig_RMSE_state = plt.figure()
 
         # Define initial state
         nS = self.env.getNumStates()
@@ -197,7 +197,8 @@ class Simulator:
             self.env.reset()
             done = False
             if verbose and np.mod(episode, verbose_period) == 0:
-                print("Episode {} of {} running...".format(episode+1, nepisodes))
+                print("Episode {} of {} running...".format(episode+1, nepisodes), end=" ")
+                print("(agent starts at state: {}".format(self.env.getState()), end=" ")
             if self.debug:
                 print("\nStarts at state {}".format(self.env.getState()))
                 print("\tState value function at start of episode:\n\t{}".format(learner.getV().getValues()))
@@ -228,55 +229,79 @@ class Simulator:
                 if self.debug:
                     print("-> {}".format(self.env.getState()), end=" ")
 
+            if verbose and np.mod(episode, verbose_period) == 0:
+                print(", agent ENDS at state: {})".format(self.env.getState()))
+
             if compute_rmse:
                 if self.env.getV() is not None:
                     RMSE[episode] = rmse(self.env.getV(), learner.getV().getValues())#, weights=learner.getStateCounts())
 
-            if plot:
-                #print("episode: {} (T={}), color: {}".format(episode, t, colors(episode/nepisodes)))
-                plt.figure(fig_V.number)
-                plt.plot(self.env.all_states, learner.getV().getValues(), linewidth=0.5, color=colors(episode/nepisodes))
-                plt.title("Episode {} of {}".format(episode+1, nepisodes))
-                if pause > 0:
-                    plt.pause(pause)
-                plt.draw()
-                #fig.canvas.draw()
+            if plot and np.mod(episode, verbose_period) == 0:
+                # Plot the estimated value function at the end of the episode
+                if self.env.getDimension() == 2:
+                    plt.figure(fig_V.number)
+                    (ax_V, ax_C) = fig_V.subplots(1, 2)
+                    shape = self.env.getShape()
+                    terminal_rewards = [r for (_, r) in self.env.getTerminalStatesAndRewards()]
 
-                if state_observe is not None:
-                    plt.figure(fig_RMSE_state.number)
-                    
-                    # Compute quantities to plot
-                    RMSE_state_observe = rmse(np.array(self.env.getV()[state_observe]), np.array(learner.getV().getValue(state_observe)))
-                    se95 = 2*np.sqrt( 0.5*(1-0.5) / (episode+1))
-                    # Only count falling inside the CI starting at episode 100 so that
-                    # the normal approximation of the SE is more correct. 
-                    if episode + 1 >= 100:
-                        ntimes_inside_ci95 += (RMSE_state_observe <= se95)
+                    state_values = np.asarray(learner.getV().getValues()).reshape(shape)
+                    colornorm = plt.Normalize(vmin=np.min(terminal_rewards), vmax=np.max(terminal_rewards))
+                    ax_V.imshow(state_values, cmap=colors, norm=colornorm)
 
-                    # Plot of the estimated value of the state
-                    plt.plot(episode+1, learner.getV().getValue(state_observe), 'r*-', markersize=3)
-                    #plt.plot(episode, np.mean(np.array(V)), 'r.-')
-                    # Plot of the estimation error and the decay of the "confidence bands" for the true value function
-                    plt.plot(episode+1, RMSE_state_observe, 'k.-', markersize=3)
-                    plt.plot(episode+1,  se95, color="gray", marker=".", markersize=2)
-                    plt.plot(episode+1, -se95, color="gray", marker=".", markersize=2)
-                    # Plot of learning rate
-                    #plt.plot(episode+1, learner._alphas[state_observe], 'g.-')
+                    state_counts = np.asarray(learner.getStateCounts()).reshape(shape)
+                    colors_count = cm.get_cmap("Blues")
+                    colornorm = plt.Normalize(vmin=0, vmax=np.max(state_counts))
+                    ax_C.imshow(state_counts, cmap=colors_count, norm=colornorm)
 
-                    # Finalize plot
-                    ax = plt.gca()
-                    ax.set_ylim((-1, 1))
-                    yticks = np.arange(-10,10)/10
-                    ax.set_yticks(yticks)
-                    ax.axhline(y=0, color="gray")
-                    plt.title("Value and |error| for state {} - episode {} of {}".format(state_observe, episode+1, nepisodes))
-                    plt.legend(['value', '|error|', '2*SE = 2*sqrt(0.5*(1-0.5)/episode)'])
-                    if episode + 1 == nepisodes:
-                        # Show the true value function coverage as x-axis label
-                        ax.set_xlabel("% Episodes error is inside 95% Confidence Interval (+/- 2*SE) (for episode>=100): {:.1f}%" \
-                                      .format(ntimes_inside_ci95/(episode+1 - 100 + 1)*100))
-                    plt.legend(['value', '|error|', '2*SE = 2*sqrt(0.5*(1-0.5)/episode)'])
+                    fig_V.suptitle("Episode {} of {}".format(episode, nepisodes))
+                    if pause > 0:
+                        plt.pause(pause)
                     plt.draw()
+                else:
+                    #print("episode: {} (T={}), color: {}".format(episode, t, colors(episode/nepisodes)))
+                    plt.figure(fig_V.number)
+                    plt.plot(self.env.all_states, learner.getV().getValues(), linewidth=0.5, color=colors(episode/nepisodes))
+                    plt.title("Episode {} of {}".format(episode+1, nepisodes))
+                    if pause > 0:
+                        plt.pause(pause)
+                    plt.draw()
+                    #fig.canvas.draw()
+
+                    if state_observe is not None:
+                        plt.figure(fig_RMSE_state.number)
+                        
+                        # Compute quantities to plot
+                        RMSE_state_observe = rmse(np.array(self.env.getV()[state_observe]), np.array(learner.getV().getValue(state_observe)))
+                        se95 = 2*np.sqrt( 0.5*(1-0.5) / (episode+1))
+                        # Only count falling inside the CI starting at episode 100 so that
+                        # the normal approximation of the SE is more correct. 
+                        if episode + 1 >= 100:
+                            ntimes_inside_ci95 += (RMSE_state_observe <= se95)
+    
+                        # Plot of the estimated value of the state
+                        plt.plot(episode+1, learner.getV().getValue(state_observe), 'r*-', markersize=3)
+                        #plt.plot(episode, np.mean(np.array(V)), 'r.-')
+                        # Plot of the estimation error and the decay of the "confidence bands" for the true value function
+                        plt.plot(episode+1, RMSE_state_observe, 'k.-', markersize=3)
+                        plt.plot(episode+1,  se95, color="gray", marker=".", markersize=2)
+                        plt.plot(episode+1, -se95, color="gray", marker=".", markersize=2)
+                        # Plot of learning rate
+                        #plt.plot(episode+1, learner._alphas[state_observe], 'g.-')
+    
+                        # Finalize plot
+                        ax = plt.gca()
+                        ax.set_ylim((-1, 1))
+                        yticks = np.arange(-10,10)/10
+                        ax.set_yticks(yticks)
+                        ax.axhline(y=0, color="gray")
+                        plt.title("Value and |error| for state {} - episode {} of {}".format(state_observe, episode+1, nepisodes))
+                        plt.legend(['value', '|error|', '2*SE = 2*sqrt(0.5*(1-0.5)/episode)'])
+                        if episode + 1 == nepisodes:
+                            # Show the true value function coverage as x-axis label
+                            ax.set_xlabel("% Episodes error is inside 95% Confidence Interval (+/- 2*SE) (for episode>=100): {:.1f}%" \
+                                          .format(ntimes_inside_ci95/(episode+1 - 100 + 1)*100))
+                        plt.legend(['value', '|error|', '2*SE = 2*sqrt(0.5*(1-0.5)/episode)'])
+                        plt.draw()
 
             if isinstance(learner, LeaTDLambdaAdaptive) and episode == nepisodes - 1:
                 learner.plot_info(episode, nepisodes)
@@ -285,15 +310,44 @@ class Simulator:
             # (WITHOUT resetting the value functions nor the episode counter)
             learner.reset(reset_episode=False, reset_value_functions=False)
 
-        # Comment this out to NOT show the plot right away in case the calling function adds a new plot to the graph generated here 
+        # Comment this out to NOT show the plot right away
+        # in case the calling function adds a new plot to the graph generated here 
         if plot:
-            #plt.colorbar(cm.ScalarMappable(cmap=colormap))    # Does not work
-            plt.figure(fig_V.number)
-            ax = plt.gca()
-            ax2 = ax.twinx()    # Create a secondary axis sharing the same x axis
-            ax2.bar(self.env.all_states, learner.getStateCounts(), color="blue", alpha=0.3)
-            plt.sca(ax) # Go back to the primary axis
-            #plt.figure(fig_V.number)
+            if self.env.getDimension() == 2:
+                # Plot the state counts in a separate image
+                fig_C = plt.figure()
+                plt.figure(fig_C.number)
+                
+                state_counts_min = np.min( learner.getStateCounts() )
+                state_counts_mean = np.mean( learner.getStateCounts() )
+                state_counts_max = np.max( learner.getStateCounts() )
+
+                shape = self.env.getShape()
+                state_counts = np.asarray(learner.getStateCounts()).reshape(shape)
+                colors_count = cm.get_cmap("Blues")
+                colornorm = plt.Normalize(vmin=0, vmax=np.max(state_counts))
+                plt.imshow(state_counts, cmap=colors_count, norm=colornorm)
+                # Font size factor
+                fontsize = 14
+                factor_fs = np.min((5/shape[0], 5/shape[1])) 
+                for x in range(shape[0]):
+                    for y in range(shape[1]):
+                        # Recall the x axis corresponds to the columns of the matrix shown in the image
+                        # and the y axis corresponds to the rows
+                        plt.text(x, y, "{:.0f}".format(state_counts[y,x]),
+                                 fontsize=fontsize*factor_fs, horizontalalignment='center', verticalalignment='center')
+
+                plt.title("State counts by state\n# visits: (min, mean, max) = ({:.0f}, {:.1f}, {:.0f})" \
+                          .format(state_counts_min, state_counts_mean, state_counts_max))
+            else:
+                # Add the state counts to the plot of the state value function
+                #plt.colorbar(cm.ScalarMappable(cmap=colormap))    # Does not work
+                plt.figure(fig_V.number)
+                ax = plt.gca()
+                ax2 = ax.twinx()    # Create a secondary axis sharing the same x axis
+                ax2.bar(self.env.all_states, learner.getStateCounts(), color="blue", alpha=0.3)
+                plt.sca(ax) # Go back to the primary axis
+                #plt.figure(fig_V.number)
 
         self.finalize_run()
 

@@ -126,13 +126,25 @@ def plot_results_2D(V, params, colormap, fontsize=7):
         Font size to use for the labels showing the state value function at each 2D state.
     """
 
+    plt.figure()
     title = "alpha={:.2f}>={:.2f}, gamma={:.2f}, lambda={:.2f}, {} episodes" \
                  .format(params['alpha'], params['alpha_min'], params['gamma'], params['lambda'], params['nepisodes'])
     plt.imshow(V, cmap=colormap)
     (nx, ny) = V.shape
-    for y in range(ny):
-        for x in range(nx):
-            plt.text(y, x, "{:.3f}".format(V[x,y]), fontsize=fontsize, horizontalalignment='center', verticalalignment='center')
+    for x in range(nx):
+        for y in range(ny):
+            # NOTE that the position coordinates are indicated as (x,y)
+            # (x = horizontal axis, y = vertical axis with origin at the top)
+            # while the matrix indices with the values from V to retrieve are indicated as (i,j)
+            # (i = row index, j = column index)
+            # with the mapping i <-> y, j <-> x
+            # since the image coordinate x corresponds to the COLUMNS of V (j index)
+            # and the image coordinate y corresponds to the ROWS of V (i index)
+            j = x
+            i = y
+            plt.text(x, y, "{:.3f}".format(V[i,j]), fontsize=fontsize, horizontalalignment='center', verticalalignment='center')
+    plt.title(title)
+
 
 class EpisodeSimulation:
     

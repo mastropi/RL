@@ -89,7 +89,7 @@ class Learner:
         self.adjust_alpha_by_episode = adjust_alpha_by_episode
         self.alpha_min = alpha_min          # Used when adjust_alpha=True
 
-        # Information of the observed trajectory at the END of the episode
+        # Information of the observed trajectory available at the END of the episode
         # (so that it can be retrieved by the user if needed as a piece of information)
         self.states = []
         self.rewards = []
