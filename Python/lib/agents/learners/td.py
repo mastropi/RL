@@ -41,11 +41,19 @@ class LeaTDLambda(Learner):
         # Eligibility traces
         self._z = np.zeros(self.env.getNumStates())
         self._z_all = np.zeros((0,self.env.getNumStates()))
+        
+        # (Nov-2020) Product of alpha and z (the eligibility trace)
+        # which gives the EFFECTIVE alpha value of the Stochastic Approximation algorithm
+        # Goal: Compare the rate of convergence of the non-adaptive vs. the adaptive TD(lambda)
+        # by keeping track of the effective alpha as a FUNCTION of the episode number for EACH STATE
+        self._times_nonzero_update = [[] for _ in self.env.all_states]
+        self._alphas_effective = np.zeros((0,self.env.getNumStates()))
 
     def _reset_at_start_of_episode(self):
         super()._reset_at_start_of_episode()
         self._z[:] = 0.
         self._z_all = np.zeros((0,self.env.getNumStates()))
+        self._alphas_effective = np.zeros((0,self.env.getNumStates()))
 
     def setParams(self, alpha=None, gamma=None, lmbda=None, adjust_alpha=None, alpha_update_type=None,
                   adjust_alpha_by_episode=None, alpha_min=0.):
@@ -58,7 +66,17 @@ class LeaTDLambda(Learner):
         self._updateZ(state, self.lmbda)
         delta = reward + self.gamma * self.V.getValue(next_state) - self.V.getValue(state)
         #print("episode {}, state {}: count = {}, alpha = {}".format(self.episode, state, self._state_counts_overall[state], self._alphas[state]))
+        self._alphas_effective = np.r_[self._alphas_effective, self._alphas[state] * self._z.reshape(1,len(self._z))]
         if delta != 0.0:
+            # IMPORTANT: (2020/11/11) if we use _alphas[state] as the learning rate alpha in the following update,
+            # we are using the SAME learning rate alpha for the update of ALL states, namely the
+            # learning rate value associated to the state that is being visited now.
+            # This is NOT how the alpha value should be updated for each state
+            # (as we should apply the alpha associated to the state that decreases with the number of visits
+            # to EACH state --which happens differently). However, this seems to give slightly faster convergence
+            # than the theoretical alpha strategy just mentioned.
+            # If we wanted to use the strategy that should be applied in theory, we should simply
+            # replace `self._alphas[state]` with `self._alphas` in the below expression. 
             self.V.setWeights( self.V.getWeights() + self._alphas[state] * delta * self._z )
 
         # Update alpha for the next iteration for "by state counts" update
@@ -66,8 +84,9 @@ class LeaTDLambda(Learner):
             self._update_alphas(state)
 
         if done:
-            if self.debug:
+            if self.debug: #and self.episode > 45: # Use the condition on `episode` in order to plot just the last episodes 
                 self._plotZ()
+                self._plotAlphasEffective()
             self.store_trajectory(next_state)
             self._update_state_counts(t+1, next_state)            
 
@@ -85,16 +104,34 @@ class LeaTDLambda(Learner):
         # which is stored at column s of the feature matrix X.
         gradient_V = self.V.X[:,state]
             ## Note: the above returns a ROW vector which is good because the weights are stored as a ROW vector
-        self._z = self.gamma * lmbda * self._z + gradient_V
+        self._z = self.gamma * lmbda * self._z + \
+                    gradient_V                                    # For every-visit TD(lambda)
+                    #gradient_V * (self._state_counts[state] == 1)  # For first-visit TD(lambda)
         self._z_all = np.r_[self._z_all, self._z.reshape(1,len(self._z))]
 
     def _plotZ(self):
-        import matplotlib.pyplot as plt
         plt.figure()
-        plt.plot(self._z_all[:,6:12], '.-')
-        plt.legend(np.arange(6,12,1))
+        plt.plot(self._z_all[:,9:12], '.-')
+        plt.legend(np.arange(9,12,1))
         ax = plt.gca()
-        ax.set_title("Episode {}".format(self.episode))
+        ax.set_xlabel("time step")
+        ax.set_ylabel("z")
+        ax.set_title("Eligibility trace by time step (Episode {})".format(self.episode))
+
+    def _plotAlphasEffective(self):
+        plt.figure()
+        #plt.plot(self._times_nonzero_update[9], self._alphas_effective[9], '.-')
+        #plt.plot(self._times_nonzero_update[10], self._alphas_effective[10], '.-')
+        #plt.plot(self._times_nonzero_update[11], self._alphas_effective[11], '.-')
+        #plt.plot(self._times_nonzero_update[self.env.getNumStates()-1], self._alphas_effective[self.env.getNumStates()-1], '.-')
+        plt.plot(self._alphas_effective[:,9:12], '.-')
+        plt.legend(np.arange(9,12,1))
+        ax = plt.gca()
+        #ax.set_xlim([0,len(self._states)-1])
+        ax.set_ylim([0,1])
+        ax.set_xlabel("time step")
+        ax.set_ylabel("alpha*z")
+        ax.set_title("Effective learning rate (alpha*z) by time step (Episode {})".format(self.episode))
 
 
 class LeaTDLambdaAdaptive(LeaTDLambda):
@@ -216,6 +253,7 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
         # Update the eligibility trace
         self._updateZ(state, lambda_adaptive)
         # Update the weights
+        self._alphas_effective = np.r_[self._alphas_effective, self._alphas[state] * self._z.reshape(1,len(self._z))]
         if delta != 0.0:
             self.V.setWeights( self.V.getWeights() + self._alphas[state] * delta * self._z )
 
@@ -224,8 +262,9 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
             self._update_alphas(state)
 
         if done:
-            if self.debug:
+            if self.debug: # and self.episode > 45:
                 self._plotZ()
+                self._plotAlphasEffective()
             self.store_trajectory(next_state)
             self._update_state_counts(t+1, next_state)
             self._store_lambdas_in_episode()            
@@ -249,7 +288,7 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
             #input("Press Enter...")
 
     def _store_lambdas_in_episode(self):
-        #print("lambdas in episode {}".format(self.episode))
+        #print("lambdas in episode {}:".format(self.episode))
         #print(self._lambdas_in_episode)
         self._all_lambdas_by_episode += [[self._lambdas_in_episode[s] for s in self.env.all_states]]
 
