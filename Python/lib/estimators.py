@@ -126,7 +126,7 @@ class EstimatorQueueBlockingFlemingViot:
         # This epsilon time takes into account the scale of the problem by making it 1E6 times smaller
         # than the minimum of the event rates.
         # I.e. we cannot simply set it to 1E-6... what if the event rate IS 1E-6??
-        self.EPSILON_TIME = 1E-6 * np.min([ self.queue.rates[Event.BIRTH.value], self.queue.rates[Event.DEATH.value] ])
+        self.EPSILON_TIME = 1E-6 * np.min([ self.queue.getBirthRate(), self.queue.getDeathRate() ])
 
         self.reset()
         
@@ -515,7 +515,7 @@ class EstimatorQueueBlockingFlemingViot:
         latest_event = self._order_times_next_events[P][1]
 
         # Generate the next time for the event type just applied from the list of event times for this particle
-        event_rate = self.particles[P].rates[earliest_event]
+        event_rate = self.particles[P].getRates()[earliest_event]
         self.times_next_events[P][earliest_event] = self.particles[P].generate_event_times(event_rate, size=1)
 
         # Update the time-to-event for the event type not applied so that it is now relative to the event just applied
@@ -1749,8 +1749,8 @@ class EstimatorQueueBlockingFlemingViot:
                      where='post', color=color, markersize=3)
         plt.title("K={}, rate(B)={:.1f}, rate(D)={:.1f}, reactivate={}, finalize={}, N={}, #iter={}, seed={}" \
                   .format(self.queue.getCapacity(),
-                      self.queue.rates[Event.BIRTH.value],
-                      self.queue.rates[Event.DEATH.value],
+                      self.queue.getBirthRate(),
+                      self.queue.getDeathRate(),
                       self.reactivate, self.finalize_type.name[0:3], self.N, self.niter, self.seed
                       ))
         ax.title.set_fontsize(9)
@@ -1772,8 +1772,8 @@ class EstimatorQueueBlockingFlemingViot:
                     "\nseed = {}" \
                     "\n***********************" \
                     .format(self.queue.getCapacity(),
-                            self.queue.rates[Event.BIRTH.value], self.queue.rates[Event.DEATH.value],
-                            self.queue.rates[Event.BIRTH.value] / self.queue.rates[Event.DEATH.value],
+                            self.queue.getBirthRate(), self.queue.getDeathRate(),
+                            self.queue.getBirthRate() / self.queue.getDeathRate(),
                             self.N, self.START, self.mean_lifetime,
                             self.reactivate, self.finalize_type.name, self.niter, self.seed)
         return params_str

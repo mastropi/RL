@@ -586,7 +586,7 @@ class Test_QB_Particles(unittest.TestCase):
                                                                ('PFV2(K)', []),
                                                                ('P(K)', [])
                                                                ])
-        rho = self.queue.rates[Event.BIRTH.value] / self.queue.rates[Event.DEATH.value]
+        rho = self.queue.getBirthRate() / self.queue.getDeathRate()
         np.random.seed(seed)
         i = 0
         K = K_min
@@ -720,9 +720,9 @@ class Test_QB_Particles(unittest.TestCase):
         plt.title("K={}, rate(B)={:.1f}, rate(D)={:.1f}, rho={:.3f}, mean_lifetime={:.1f}" \
                   ", reactivate={}, finalize={}, N={}, #iter={}, seed={}" \
                   .format(self.capacity,
-                          self.queue.rates[Event.BIRTH.value],
-                          self.queue.rates[Event.DEATH.value],
-                          self.queue.rates[Event.BIRTH.value] / self.queue.rates[Event.DEATH.value],
+                          self.queue.getBirthRate(),
+                          self.queue.getDeathRate(),
+                          self.queue.getBirthRate() / self.queue.getDeathRate(),
 
                           mean_lifetime or np.nan, reactivate, finalize_type.name[0:3],
                           nparticles, niter, seed

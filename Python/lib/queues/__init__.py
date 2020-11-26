@@ -67,16 +67,33 @@ class GenericQueue:
 
 class QueueMM(GenericQueue):
 
-    def __init__(self, rate_birth, rate_death, nservers, capacity):
+    def __init__(self, rates_birth, rates_death, nservers :int, capacity :int):
         super().__init__(capacity, nservers=nservers, size=0)
-        if rate_birth < 0 or rate_death < 0:
-            raise ValueError("Both birth and death rates must be non-negative ({}, {})." \
+        is_rates_birth_scalar = not isinstance(rates_birth, (list, tuple, np.ndarray))
+        is_rates_death_scalar = not isinstance(rates_death, (list, tuple, np.ndarray))
+        if  not is_rates_birth_scalar and len(rates_birth) != nservers or \
+            not is_rates_death_scalar and len(rates_death) != nservers:
+            raise ValueError("Both birth and death rates must be either just one value " \
+                             "({} birth rates given, {} death rates given) or be as many as the number of servers ({})." \
                              "\nThe process stops." \
-                             .format(rate_birth, rate_death))
+                             .format(len(rates_birth), len(rates_death), nservers))
             sys.exit(-1)
-        self.rates = [0]* 2
-        self.rates[Event.BIRTH.value] = rate_birth
-        self.rates[Event.DEATH.value] = rate_death
+        if  is_rates_birth_scalar and rates_birth < 0 or \
+            is_rates_death_scalar and rates_death < 0 or \
+            not is_rates_birth_scalar and any(np.array(rates_birth) < 0) or \
+            not is_rates_death_scalar and any(np.array(rates_death) < 0):
+            raise ValueError("Both birth and death rates must be non-negative (birth rates: {}, death rates: {})." \
+                             "\nThe process stops." \
+                             .format(rates_birth, rates_death))
+            sys.exit(-1)
+        self.rates = np.repeat([[0]* 2], nservers, axis=0)  # 2 is the number of rates: birth and death
+        if is_rates_birth_scalar:
+            rates_birth = np.repeat(rates_birth, nservers)
+        if is_rates_death_scalar:
+            rates_death = np.repeat(rates_death, nservers)
+        for s in range(nservers):
+            self.rates[s][Event.BIRTH.value] = rates_birth[s]
+            self.rates[s][Event.DEATH.value] = rates_death[s]
         
         self.reset()
 
@@ -120,11 +137,11 @@ class QueueMM(GenericQueue):
             # Return an array
             return np.random.exponential(1/rate, size=size)
 
-    def generate_birth_time(self):
-        return self.generate_event_times(self.rates[Event.BIRTH.value], size=1)
+    def generate_birth_time(self, server=0):
+        return self.generate_event_times(self.rates[server][Event.BIRTH.value], size=1)
 
-    def generate_death_time(self):
-        return self.generate_event_times(self.rates[Event.DEATH.value], size=1)
+    def generate_death_time(self, server=0):
+        return self.generate_event_times(self.rates[server][Event.DEATH.value], size=1)
 
     def resize(self, size, t):
         """"
@@ -146,8 +163,11 @@ class QueueMM(GenericQueue):
     def getTimeLastEvent(self):
         return self.time_last_event
 
-    def getBirthRate(self):
-        return self.rates[Event.BIRTH.value]
+    def getBirthRate(self, server=0):
+        return self.rates[server][Event.BIRTH.value]
 
-    def getDeathRate(self):
-        return self.rates[Event.DEATH.value]
+    def getDeathRate(self, server=0):
+        return self.rates[server][Event.DEATH.value]
+
+    def getRates(self, server=0):
+        return self.rates[server];
