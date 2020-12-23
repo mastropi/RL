@@ -48,9 +48,9 @@ class GenericQueue:
         self.c = nservers
 
         # Sizes of the queue in EACH server
-        if isinstance(size, int):
-            # Convert the size to an array
-            size = np.array([size])
+        if isinstance(size, (int, np.int32, np.int64, float, np.float32, np.float64)):
+            # Convert the size to an array (and to int if given as float)
+            size = np.repeat(int(size), nservers)
 
         self.size_initial = size
         self.size = size

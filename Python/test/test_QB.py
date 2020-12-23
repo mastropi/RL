@@ -448,9 +448,10 @@ class Test_QB_Particles(unittest.TestCase):
                     seed=1717,
                     plotFlag=True,
                     log=False):
-        queue = copy.deepcopy(self.queue)
-        queue.size = start
-        est = estimators.EstimatorQueueBlockingFlemingViot(nparticles, niter, queue,
+        # DM-2020/12/01: Is this copy of the queue object really necessary now?
+        #queue = copy.deepcopy(self.queue)
+        #queue.size = np.repeat(start, self.nservers)
+        est = estimators.EstimatorQueueBlockingFlemingViot(nparticles, niter, self.queue,
                                                            mean_lifetime=mean_lifetime,
                                                            reactivate=reactivate,
                                                            finalize_type=finalize_type,
@@ -913,7 +914,9 @@ class Test_QB_Particles(unittest.TestCase):
         plot(df_byiter, grp_K, grp_iter, legend, se_mult=2)
 
 
-if __name__ != "__main__":
+# DM-2020/12/23: To change which portion of the below code to run, change the IF condition
+# to `== "__main__"` or to `!= "__main__"` accordingly
+if __name__ == "__main__":
     #unittest.main()
 
     # DM-2020/08/24: Instead of using unittest.main(), use the following to test the FV system

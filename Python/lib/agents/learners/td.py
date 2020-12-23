@@ -19,8 +19,9 @@ class LeaTDLambda(Learner):
     TD(Lambda) learning algorithm using step size `alpha`, discount `gamma`, and decay parameter `lmbda`
     applied to a discrete environment defined with the DiscreteEnv class of openAI's gym module.
 
-    Args:
-        env (gym.envs.toy_text.discrete.DiscreteEnv): the environment where the learning takes place.
+    Arguments:
+    env: gym.envs.toy_text.discrete.DiscreteEnv
+        The environment where the learning takes place.
     """
 
     def __init__(self, env, alpha=0.1, gamma=1.0, lmbda=0.8,
