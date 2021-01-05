@@ -7,6 +7,53 @@ Created on Thu Jun 07 21:43:52 2020
 """
 
 import bisect   # To insert elements in order in a list (bisect.insort(list, element)
+import copy
+import numpy as np
+
+def array_of_objects(size, value=None, dtype=list):
+    """
+    Creates an array of objects of the specified type.
+    Each element of the array is optionally filled to a given value, the same for all elements.
+    
+    Arguments:
+    size: int, tuple
+        Size of the array, which is used when calling numpy.empty().
+
+    value: (optional)
+        Value to assign to each element of the array when it is created.
+        Note that a COPY of it is assigned so that they don't share the same memory address. 
+        default: None
+
+    dtype: (optional)
+        Type of object to be stored in each element of the array.
+        Its value is used as the `dtype` parameter of the numpy.empty() call that is used to create the array.
+        default: list
+
+    Return: numpy array
+    Numpy array of size `size` containing `value` as each element's value if different from `None`.
+    """
+    arr = np.empty(size, dtype=dtype)
+
+    # Fill in the values of the array if `value` is not None 
+    if value is not None:
+        if len(size) == 1:
+            # 1D array
+            for idx in range(len(arr)):
+                # We store a COPY of `value` so that in case the value is immutable (e.g. a list)
+                # they don't share the same memory address and they can be changed without affecting the other entries of the array!
+                arr[idx] = copy.deepcopy(value)
+        else:
+            # Multi-dimensional array
+            # Fill the values using a stacked version of the array
+            # (so that the array can be filled regardless of its shape)
+            arr_stacked = arr.reshape( np.prod(size) )
+            for idx in range(len(arr_stacked)):
+                # We store a COPY of `value` so that in case the value is immutable (e.g. a list)
+                # they don't share the same memory address and they can be changed without affecting the other entries of the array!
+                arr_stacked[idx] = copy.deepcopy(value)
+            arr = arr_stacked.reshape(size)
+
+    return arr
 
 def insort(alist, value, unique=False):
     """

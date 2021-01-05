@@ -47,39 +47,40 @@ class GenericQueue:
         self.K = capacity           # Capacity of the buffer that receives the jobs before assigning them to a server
         self.c = nservers
 
-        # Sizes of the queue in EACH server
-        if isinstance(size, (int, np.int32, np.int64, float, np.float32, np.float64)):
-            # Convert the size to an array (and to int if given as float)
-            size = np.repeat(int(size), nservers)
-
-        self.size_initial = size
-        self.size = size
+        self.setServerSizes(size)
+        self.size_initial = copy.deepcopy(self.size)
         self.LOG = log
 
         self.reset()
 
     def reset(self):
         self.size = self.size_initial
+        self.last_change = np.zeros(self.c, dtype=int)
 
     def add(self, server=0):
         if not self.isFull():
             self.size[server] += 1
+            self.last_change[server] = +1
         else:
+            self.last_change[server] = 0
             if self.LOG:
                 print("Queue is full (size={}): no job added".format(self.size))
  
     def remove(self, server=0):
-        if not self.isEmpty():
+        if not self.isEmpty(server):
             self.size[server] -= 1
+            self.last_change[server] = -1
         else:
+            self.last_change[server] = 0
             if self.LOG:
                 print("Queue is empty (size={}): no job removed".format(self.size))
 
     def isEmpty(self, server=0):
+        "Whether the server has no jobs to be served or being served"
         return self.size[server] == 0
 
     def isFull(self):
-        "Whether the buffer capacity (one buffer for all servers) has been reached"
+        "Whether the buffer capacity (one buffer for ALL servers) has been reached"
         return np.sum(self.size) == self.K
 
     # GETTERS
@@ -89,6 +90,10 @@ class GenericQueue:
     def getCapacity(self):
         return self.K
 
+    def getServerSize(self, server=0):
+        "Returns the size of the given server"
+        return self.size[server]
+
     def getServerSizes(self):
         """
         Returns a COPY of the `size` attribute which is an array.
@@ -97,8 +102,20 @@ class GenericQueue:
         """
         return copy.deepcopy(self.size)
 
+    def getLastChange(self):
+        "Returns the last change in the queue size of each server"
+        return self.last_change
+
     def getBufferSize(self):
         return np.sum(self.size)
+
+    # SETTERS
+    def setServerSizes(self, size):
+        "Sets the size of the queue in EACH server"
+        # Convert the size to an array (and to int if given as float)
+        if isinstance(size, (int, np.int32, np.int64, float, np.float32, np.float64)):
+            size = np.repeat(int(size), self.c)
+        self.size = size
 
 
 class QueueMM(GenericQueue):
@@ -135,6 +152,9 @@ class QueueMM(GenericQueue):
         self.reset()
 
     def reset(self):
+        # We need to call the SUPER reset() method because the `self.reset()` call in the super class
+        # calls THIS reset() method, NOT the SUPER method!!
+        super().reset()
         # Time and type of the last event in EACH server
         # They are stored as ARRAYS instead of lists in order to facilitate operations on them during simulations.
         self.time_last_event = np.zeros(self.getNServers(), dtype=float)
@@ -214,13 +234,27 @@ class QueueMM(GenericQueue):
             # Return an array
             return np.random.exponential(1/rate, size=size)
 
+    def generate_event_time(self, event, server=0):
+        """
+        Generates an event time of the given event type for the given server
+        
+        Arguments:
+        events: Event
+            Event type to generate for the given server.
+        
+        Return: non-negative float
+            Generated event time.
+        """ 
+        return self._generate_event_times_at_rate( self.rates[server][event.value] )
+
     def generate_event_times(self, events):
         """
-        Generates event times for the given event types for every server in the queue
+        Generates event times for the given event types defined for every server in the queue
         
         Arguments:
         events: Event or list of Event
-            Event type to generate or list of event types to generate for each server.
+            Event type to generate or list of event types to generate for each server,
+            i.e. a list with the same length as the number of servers in the queue.
         
         Return: array
             Array with the generated event times
@@ -267,11 +301,25 @@ class QueueMM(GenericQueue):
         self.time_last_event = np.repeat(t, self.getNServers())
         self.type_last_event = np.repeat(Event.RESIZE, self.getNServers())
 
-    def getTypeLastEvent(self):
+    def getTypesLastEvents(self):
         return copy.deepcopy(self.type_last_event)
 
-    def getTimeLastEvent(self):
+    def getTimesLastEvents(self):
         return copy.deepcopy(self.time_last_event)
+
+    def getTypeLastEvent(self, server=0):
+        return self.type_last_event[server]
+
+    def getTimeLastEvent(self, server=0):
+        return self.time_last_event[server]
+
+    def getMostRecentEventInfo(self):
+        "Returns the server, its last change, the event type, and the event time of the event with largest event time"
+        server_with_largest_time = np.argmax( self.time_last_event )
+        return  server_with_largest_time, \
+                self.last_change[server_with_largest_time], \
+                self.type_last_event[server_with_largest_time], \
+                self.time_last_event[server_with_largest_time]
 
     def getBirthRate(self, server=0):
         return self.rates[server][Event.BIRTH.value]

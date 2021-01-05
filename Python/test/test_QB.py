@@ -39,8 +39,18 @@ class Test_QB_Particles(unittest.TestCase):
         self.log = False
         self.rate_birth = 1.2
         self.rate_death = 1.4
-        self.nservers = 1
         self.capacity = 5
+        
+        # One server
+        #self.nservers = 1
+        #self.job_rates = [1.2]
+        #self.policy = [[1]]
+        
+        # Multiple servers
+        self.nservers = 3
+        self.job_rates = [2, 5]
+        self.policy = [[0.5, 0.5, 0.0], [0.0, 0.5, 0.5]]
+
         self.queue = queues.QueueMM(self.rate_birth, self.rate_death, self.nservers, self.capacity)
 
         self.plotFlag = True
@@ -426,32 +436,40 @@ class Test_QB_Particles(unittest.TestCase):
         start = 1
         reactivate = True
         finalize_type = FinalizeType.REMOVE_CENSORED
-        nparticles = 40
-        niter = 400
+        nparticles = 3
+        nmeantimes = 3
         seed = 1717
         self.run(start=start,
             mean_lifetime=None,
             reactivate=reactivate,
             finalize_type=finalize_type,
             nparticles=nparticles,
-            niter=niter,
+            nmeantimes=nmeantimes,
             seed=seed,
             plotFlag=True,
-            log=False)
+            log=True)
 
     def run(self,   start=1,
                     mean_lifetime=None,
                     reactivate=True,
                     finalize_type=FinalizeType.REMOVE_CENSORED,
                     nparticles=100,
-                    niter=1000,
+                    nmeantimes=1000,
                     seed=1717,
                     plotFlag=True,
                     log=False):
-        # DM-2020/12/01: Is this copy of the queue object really necessary now?
-        #queue = copy.deepcopy(self.queue)
-        #queue.size = np.repeat(start, self.nservers)
-        est = estimators.EstimatorQueueBlockingFlemingViot(nparticles, niter, self.queue,
+        # DM-2020/12/23: We make a copy of the queue so that we do NOT change the queue defined in the constructor of this object
+        # For the reactivation case, we start the buffer size of the queue at 1,
+        # a situation that is obtained by setting the first server to 1 and the rest to 0.
+        initial_server_sizes = np.repeat(0, self.queue.getNServers())
+        initial_server_sizes[0] = start
+        queue = copy.deepcopy(self.queue)
+        queue.setServerSizes(initial_server_sizes)
+        job_rates = self.job_rates
+        policy = self.policy
+        est = estimators.EstimatorQueueBlockingFlemingViot(nparticles, queue,
+                                                           nmeantimes=nmeantimes,
+                                                           job_rates=job_rates, policy=policy,
                                                            mean_lifetime=mean_lifetime,
                                                            reactivate=reactivate,
                                                            finalize_type=finalize_type,
