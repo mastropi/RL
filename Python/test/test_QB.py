@@ -447,7 +447,7 @@ class Test_QB_Particles(unittest.TestCase):
             nmeantimes=nmeantimes,
             seed=seed,
             plotFlag=True,
-            log=True)
+            log=False)
 
     def run(self,   start=1,
                     mean_lifetime=None,

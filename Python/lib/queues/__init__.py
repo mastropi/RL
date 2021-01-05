@@ -102,9 +102,12 @@ class GenericQueue:
         """
         return copy.deepcopy(self.size)
 
-    def getLastChange(self):
+    def getLastChange(self, server=None):
         "Returns the last change in the queue size of each server"
-        return self.last_change
+        if server is None:
+            return self.last_change
+        else:
+            return self.last_change[server]
 
     def getBufferSize(self):
         return np.sum(self.size)
