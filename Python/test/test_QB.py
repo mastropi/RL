@@ -38,7 +38,7 @@ class Test_QB_Particles(unittest.TestCase):
         super().__init__(*args, **kwargs)
         self.log = False
         self.rate_birth = 1.2
-        self.rate_death = 1.4
+        self.rate_death = 7 #1.4
         self.capacity = 5
         
         # One server
@@ -58,7 +58,7 @@ class Test_QB_Particles(unittest.TestCase):
     def tests_on_one_queue(self):
         print("\nRunning test " + self.id())
         # Cannot remove non-existing job
-        self.queue.reset()
+        self.queue.reset()  
         self.queue.remove()
         assert self.queue.size == 0
 
@@ -77,17 +77,18 @@ class Test_QB_Particles(unittest.TestCase):
 
     def test_simulation_of_events_on_a_system_with_one_particle(self):
         print("\nRunning test " + self.id())
-        niter = 100
-        est = estimators.EstimatorQueueBlockingFlemingViot(1, niter, self.queue,
+        nmeantimes = 100
+        est = estimators.EstimatorQueueBlockingFlemingViot(1, self.queue,
+                                                           nmeantimes=nmeantimes,
                                                            reactivate=False)
         
         # The state udpate process is correctly done. Let aNET = "array with Next Event Times",
         # then the following assertions hold.
         est.reset()
         print("The test runs on a simulation with {} iterations" \
-              "\n(no pre-specified seed, so that different test runs produce even more tests!)".format(niter))
+              "\n(no pre-specified seed, so that different test runs produce even more tests!)".format(nmeantimes))
         time_event_prev = 0.0
-        for it in range(niter):
+        for it in range(nmeantimes):
             # aNET = Array of Next Event Times
             aNET = est.get_times_next_events(0)
             aNET_prev = aNET.copy()
@@ -122,20 +123,21 @@ class Test_QB_Particles(unittest.TestCase):
     def run_test_compute_counts(self,   reactivate,
                                         finalize_type=FinalizeType.ABSORB_CENSORED,
                                         nparticles=5,
-                                        niter=20,
+                                        nmeantimes=20,
                                         seed=1713,
                                         log=False): 
-        est = estimators.EstimatorQueueBlockingFlemingViot(nparticles, niter, self.queue,
+        est = estimators.EstimatorQueueBlockingFlemingViot(nparticles, self.queue,
+                                                           nmeantimes=nmeantimes,
                                                            reactivate=reactivate,
                                                            finalize_type=finalize_type,
                                                            plotFlag=True,
                                                            seed=seed, log=log)        
         est.reset()
-        for it in range(niter):
+        for it in range(nmeantimes):
             est.generate_one_iteration(it+1)
             N1 = n_active_particles = est.get_number_active_particles()
-            if np.mod(it, int(niter/10)) == 0:
-                print("Iteration {} of {}... ({} active particles)".format(it+1, niter, N1))
+            if np.mod(it, int(nmeantimes/10)) == 0:
+                print("Iteration {} of {}... ({} active particles)".format(it+1, nmeantimes, N1))
                 
         # Recompute the counts and check they are the same as the online calculation
         counts_alive_orig = est.counts_alive.copy()
@@ -172,20 +174,20 @@ class Test_QB_Particles(unittest.TestCase):
         print("\nRunning test " + self.id())
         seed = 1713
         all_nparticles = [5, 10, 20, 30]
-        all_niters = [20, 50]
+        all_nmeantimes = [20, 50]
 
 
         reactivate = True
         finalize_type = FinalizeType.ABSORB_CENSORED
         print("\n***** START OF reactivate={}, finalize_type={}...".format(reactivate, finalize_type))
         for nparticles in all_nparticles:
-            for niter in all_niters:
+            for nmeantimes in all_nmeantimes:
                 print("\nRunning with reactivate={}, finalize_type={}...".format(reactivate, finalize_type))
-                print("\tnparticles={}, niter={}...".format(nparticles, niter))
+                print("\tnparticles={}, nmeantimes={}...".format(nparticles, nmeantimes))
                 self.run_test_compute_counts(reactivate=reactivate,
                                             finalize_type=finalize_type,
                                             nparticles=nparticles,
-                                            niter=niter,
+                                            nmeantimes=nmeantimes,
                                             seed=seed,
                                             log=log)
 
@@ -193,30 +195,31 @@ class Test_QB_Particles(unittest.TestCase):
         finalize_type = FinalizeType.REMOVE_CENSORED
         print("\n***** START OF reactivate={}, finalize_type={}...".format(reactivate, finalize_type))
         for nparticles in all_nparticles:
-            for niter in all_niters:
+            for nmeantimes in all_nmeantimes:
                 print("\nRunning with reactivate={}, finalize_type={}...".format(reactivate, finalize_type))
-                print("\tnparticles={}, niter={}...".format(nparticles, niter))
+                print("\tnparticles={}, nmeantimes={}...".format(nparticles, nmeantimes))
                 self.run_test_compute_counts(reactivate=reactivate,
                                             finalize_type=finalize_type,
                                             nparticles=nparticles,
-                                            niter=niter,
+                                            nmeantimes=nmeantimes,
                                             seed=seed,
                                             log=log)
 
     def no_tests_on_n_particles(self,   reactivate=False,
                                      finalize_type=FinalizeType.ABSORB_CENSORED,
                                      nparticles=5,
-                                     niter=20,
+                                     nmeantimes=20,
                                      seed=1713,
                                      log=False): 
         print("\nRunning test " + self.id())
         #nparticles = 30
-        #niter = 200
+        #nmeantimes = 200
         #reactivate = True
         #finalize_type = FinalizeType.ABSORB_CENSORED
         #finalize_type = FinalizeType.REMOVE_CENSORED
         #seed = 1713
-        est = estimators.EstimatorQueueBlockingFlemingViot(nparticles, niter, self.queue,
+        est = estimators.EstimatorQueueBlockingFlemingViot(nparticles, self.queue,
+                                                           nmeantimes=nmeantimes,
                                                            reactivate=reactivate,
                                                            finalize_type=finalize_type,
                                                            plotFlag=True,
@@ -225,14 +228,14 @@ class Test_QB_Particles(unittest.TestCase):
         print(est.setup())
         
         est.reset()
-        for it in range(niter):
+        for it in range(nmeantimes):
             est.update_state(it+1)
             N1 = n_active_particles = est.get_number_active_particles()
-            if np.mod(it, int(niter/10)) == 0:
-                print("Iteration {} of {}... ({} active particles)".format(it+1, niter, N1))
+            if np.mod(it, int(nmeantimes/10)) == 0:
+                print("Iteration {} of {}... ({} active particles)".format(it+1, nmeantimes, N1))
 
             if self.log:
-                print("------ END OF ITER {} of {} ------".format(it+1, niter))
+                print("------ END OF ITER {} of {} ------".format(it+1, nmeantimes))
 
             # The list storing the times when particles became active is sorted increasingly
             particles, activation_times = est.get_all_activation_times()
@@ -274,9 +277,9 @@ class Test_QB_Particles(unittest.TestCase):
                     " they should decrease linearly to 0 starting at {} ({})" \
                     .format(len(survival_time_segments)-1, counts_particles_alive_by_elapsed_time)
             if self.log:
-                print("------ END OF ITER {} of {} ------".format(it+1, niter))
+                print("------ END OF ITER {} of {} ------".format(it+1, nmeantimes))
 
-        print("\n\n****** SIMULATION SUMMARY ({} iterations) ******".format(niter))
+        print("\n\n****** SIMULATION SUMMARY ({} iterations) ******".format(nmeantimes))
 
         #************************************************************************
         # GRAPHICAL RENDER
@@ -289,7 +292,7 @@ class Test_QB_Particles(unittest.TestCase):
         #************************************************************************
         # FINALIZE THE SIMULATION PROCESS BY DEALING WITH ACTIVE PARTICLES (censoring)
         est.finalize()
-        print("\n\n****** ESTIMATION PROCESS ({} iterations) ******".format(niter))
+        print("\n\n****** ESTIMATION PROCESS ({} iterations) ******".format(nmeantimes))
         #************************************************************************
 
 
@@ -353,7 +356,7 @@ class Test_QB_Particles(unittest.TestCase):
 
 
         #print("\nESTIMATIONS *** METHOD 1 ***:")
-        #df_proba_survival_and_blocking_conditional_BF = est.estimate_proba_survival_and_blocking_conditional()
+        df_proba_survival_and_blocking_conditional_BF = est.estimate_proba_survival_and_blocking_conditional()
         #with np.printoptions(precision=3, suppress=True):
         #    print(df_proba_survival_and_blocking_conditional_BF)
 
@@ -402,12 +405,11 @@ class Test_QB_Particles(unittest.TestCase):
                 print("% blocking time = {:.1f}%".format(total_blocking_time / total_survival_time * 100))
                 print("\n")
 
-        print("Total blocking time for ALL particles:")
+        print("\nTotal blocking time for ALL particles:")
         all_total_blocking_time = est.get_all_total_blocking_time()
         all_total_survival_time = est.get_all_total_survival_time()
-        print("")
-        print("Total blocking time = {:.3f}".format(all_total_blocking_time))
-        print("Total survival time = {:.3f}".format(all_total_survival_time))
+        print("Total blocking time (all particles) = {:.3f}".format(all_total_blocking_time))
+        print("Total survival time (all particles) = {:.3f}".format(all_total_survival_time))
         print("% blocking time = {:.1f}%".format(all_total_blocking_time / all_total_survival_time * 100))
         print("\n")
 
@@ -415,29 +417,30 @@ class Test_QB_Particles(unittest.TestCase):
         rho = self.rate_birth / self.rate_death
         K = self.capacity
         print("\nBlocking probability estimate: {:.1f}%".format(proba_blocking*100))
-        print("Theoretical value (rho^K / sum(rho^i)) (rho={:.3f}, K={}): {:.1f}%" \
-              .format(rho, K,
-                      rho**K / np.sum([ rho**i for i in range(K+1) ]) *100))
+        #print("Theoretical value (rho^K / sum(rho^i)) (rho={:.3f}, K={}): {:.1f}%" \
+        #      .format(rho, K,
+        #              rho**K / np.sum([ rho**i for i in range(K+1) ]) *100))
 
         print("Simulation setup:")
         print(est.setup())
 
-        self.plot_results(df_proba_survival_and_blocking_conditional, 
+        self.plot_results(df_proba_survival_and_blocking_conditional,
+                          K,
                           reactivate,
                           finalize_type,
                           nparticles,
-                          niter)
+                          nmeantimes)
 
         return  df_proba_survival_and_blocking_conditional, \
-                (reactivate, finalize_type, nparticles, niter)
+                (reactivate, finalize_type, nparticles, nmeantimes)
 
     def test_simpler_algorithm(self):
         print("\nRunning test " + self.id())
         start = 1
-        reactivate = True
-        finalize_type = FinalizeType.REMOVE_CENSORED
-        nparticles = 3
-        nmeantimes = 3
+        reactivate = False
+        finalize_type = FinalizeType.ABSORB_CENSORED
+        nparticles = 50
+        nmeantimes = 5
         seed = 1717
         self.run(start=start,
             mean_lifetime=None,
@@ -475,19 +478,21 @@ class Test_QB_Particles(unittest.TestCase):
                                                            finalize_type=finalize_type,
                                                            plotFlag=plotFlag,
                                                            seed=seed, log=log)
-        if log:
-            print("Simulation setup:")
-            print(est.setup())
+        print("Simulation setup:")
+        print(est.setup())
 
+        print("Simulating...")
         proba_blocking_integral, proba_blocking_laplacian, integral, gamma, expected_survival_time = est.simulate()
 
         # Estimate the probability of blocking in the Monte Carlo case for benchmarking
         # as the proportion of time blocked over all elapsed time (= total survival time).
+        print("Estimating blocking time rate over all {} particles...".format(nparticles))
+        all_total_blocking_time = est.get_all_total_blocking_time()
         if not reactivate:
-            all_total_blocking_time = est.get_all_total_blocking_time()
             all_total_survival_time = est.get_all_total_survival_time()
             prop_blocking_time = all_total_blocking_time / all_total_survival_time
         else:
+            all_total_survival_time = est.maxtime * nparticles
             prop_blocking_time = None
 
         if False:
@@ -507,7 +512,7 @@ class Test_QB_Particles(unittest.TestCase):
                 print(np.c_[est.info_particles[P]['t'], est.info_particles[P]['E']])
                 print("\n")
 
-        if log and not reactivate:
+        if True: #log and not reactivate:
             if False:
                 print("Total blocking time by particle:")
                 blocking_periods = est.get_all_blocking_periods()
@@ -519,7 +524,7 @@ class Test_QB_Particles(unittest.TestCase):
     
                     print("\nSurvival periods:")
                     print(survival_periods[P])
-    
+
                     total_blocking_time = est.get_total_blocking_time(P)
                     total_survival_time = est.get_total_survival_time(P)
                     print("")
@@ -527,53 +532,48 @@ class Test_QB_Particles(unittest.TestCase):
                     print("Total survival time = {:.3f}".format(total_survival_time))
                     print("% blocking time = {:.1f}%".format(total_blocking_time / total_survival_time * 100))
                     print("\n")
-            print("Total blocking time for ALL particles:")
-            print("")
-            print("Total blocking time = {:.3f}".format(all_total_blocking_time))
-            if reactivate:
-                survival_times_for_particles = [ dict_info['t'][-1] for dict_info in est.info_particles ]
-                total_survival_time = np.sum( survival_times_for_particles )
-                print("Total survival time = {:.3f}".format(total_survival_time))
-                print("% blocking time = {:.1f}%".format(all_total_blocking_time / total_survival_time * 100))
-            else:
-                print("Total survival time = {:.3f}".format(all_total_survival_time))
-                print("% blocking time = {:.1f}%".format(all_total_blocking_time / all_total_survival_time * 100))
+            print("\nTotal blocking time for ALL particles:")
+            print("Total blocking time (all particles) = {:.3f}".format(all_total_blocking_time))
+            print("Total survival time (all particles) = {:.3f}".format(all_total_survival_time))
+            print("% blocking time = {:.1f}%".format(all_total_blocking_time / all_total_survival_time * 100))
             print("\n")
 
-        if log:
-            rho = self.rate_birth / self.rate_death
-            K = self.capacity
-            print("\nEstimation of blocking probability via Approximation 1 & 2:")
-            print("Integral = {:.6f}".format(integral))
-            print("Gamma = {:.6f}".format(gamma))
-            print("Expected Survival Time = {:.3f}".format(expected_survival_time))
-            print("Blocking probability estimate (Approx. 1): {:.1f}%".format(proba_blocking_integral*100))
-            print("Blocking probability estimate (Approx. 2): {:.1f}%".format(proba_blocking_laplacian*100))
-            print("Theoretical value (rho^K / sum(rho^i)) (rho={:.3f}, K={}): {:.3f}%" \
-                  .format(rho, K,
-                          rho**K / np.sum([ rho**i for i in range(K+1) ]) *100))
-            print("Last time the system of particle was updated: {:.1f}".format(est.get_time_last_change_of_system()))
-    
-            print("\nSimulation setup:")
-            print(est.setup())
+        rho = self.rate_birth / self.rate_death
+        K = self.capacity
+        print("\nEstimation of blocking probability via Approximation 1 & 2:")
+        print("Integral = {:.6f}".format(integral))
+        print("Gamma = {:.6f}".format(gamma))
+        print("Expected Survival Time = {:.3f}".format(expected_survival_time))
+        print("Blocking probability estimate (Approx. 1): {:.1f}%".format(proba_blocking_integral*100))
+        print("Blocking probability estimate (Approx. 2): {:.1f}%".format(proba_blocking_laplacian*100))
+        #print("Theoretical value (rho^K / sum(rho^i)) (rho={:.3f}, K={}): {:.3f}%" \
+        #      .format(rho, K,
+        #              rho**K / np.sum([ rho**i for i in range(K+1) ]) *100))
+        print("Last time the system of particle was updated: {:.1f}".format(est.get_time_last_change_of_system()))
+
+        print("\nSimulation setup:")
+        print(est.setup())
 
         if plotFlag:
             df_proba_survival_and_blocking_conditional = est.estimate_proba_survival_and_blocking_conditional()
             self.plot_results(df_proba_survival_and_blocking_conditional,
+                              K,
                               mean_lifetime,
                               reactivate,
                               finalize_type,
                               nparticles,
-                              niter,
+                              nmeantimes,
                               seed)
 
-        return  proba_blocking_integral, \
+        # Note: `est` is the object used for the estimation process (so that we can do further calculations outside if needed)
+        return  est, \
+                proba_blocking_integral, \
                 proba_blocking_laplacian, \
                 integral, \
                 gamma, \
                 expected_survival_time, \
                 prop_blocking_time, \
-                (mean_lifetime, reactivate, finalize_type, nparticles, niter)
+                (mean_lifetime, reactivate, finalize_type, nparticles, nmeantimes)
 
     def analyze_convergence(self,   finalize_type=FinalizeType.REMOVE_CENSORED,
                                     replications=5,
@@ -582,20 +582,21 @@ class Test_QB_Particles(unittest.TestCase):
                                     # Both min and max are included in the values considered for the simulation
                                     K_range=(5, 40, 2),
                                     nparticles_range=(10, 80, 2),
-                                    niter_range=(50, 800, 2), 
+                                    nmeantimes_range=(50, 800, 2), 
                                     seed=1717,
                                     log=False):
         K_min, K_max, K_mult = K_range 
         nparticles_min, nparticles_max, nparticles_mult = nparticles_range 
-        niter_min, niter_max, niter_mult = niter_range
+        nmeantimes_min, nmeantimes_max, nmeantimes_mult = nmeantimes_range
+        # Number of simulations to run based on the input parameters defining simulation characteristics
         nsimul = int(   (np.ceil( np.log10(K_max / K_min) / np.log10(K_mult)) + 1) * \
                         (np.ceil( np.log10(nparticles_max / nparticles_min) / np.log10(nparticles_mult)) + 1) * \
-                        (np.ceil( np.log10(niter_max / niter_min) / np.log10(niter_mult)) + 1) ) 
+                        (np.ceil( np.log10(nmeantimes_max / nmeantimes_min) / np.log10(nmeantimes_mult)) + 1) ) 
 
         df_proba_blocking_estimates = pd.DataFrame.from_items([
                                                                ('K', []),
                                                                ('nparticles', []),
-                                                               ('niter', []),
+                                                               ('nmeantimes', []),
                                                                ('rep', []),
                                                                ('seed', []),
                                                                ('integral', []),
@@ -603,61 +604,72 @@ class Test_QB_Particles(unittest.TestCase):
                                                                ('PMC(K)', []),
                                                                ('PFV1(K)', []),
                                                                ('PFV2(K)', []),
-                                                               ('P(K)', [])
+                                                               ('EstPMC(K)', []),
+                                                               ('EstPFV(K)', []),
                                                                ])
-        rho = self.queue.getBirthRate() / self.queue.getDeathRate()
+        #rho = self.queue.getBirthRate() / self.queue.getDeathRate()
         np.random.seed(seed)
         i = 0
         K = K_min
         while K <= K_max:
             self.queue.K = K
             print("\n---> NEW K (Queue's capacity = {})".format(self.queue.getCapacity()))
-            proba_blocking_K = rho**K / np.sum([ rho**i for i in range(K+1) ])
+            # True blocking probability for the one server case
+            #proba_blocking_K = rho**K / np.sum([ rho**i for i in range(K+1) ])
             nparticles = nparticles_min
             while nparticles <= nparticles_max:
                 print("\n\t---> NEW NPARTICLES ({})".format(nparticles))
-                niter = niter_min
-                while niter <= niter_max:
+                nmeantimes = nmeantimes_min
+                while nmeantimes <= nmeantimes_max:
                     i += 1
-                    print("Simulation {} of {}: \n\tK={}, particles={}, iterations={}" \
-                          .format(i, nsimul, K, nparticles, niter))
+                    print("Simulation {} of {}: \n\tK={}, particles={}, nmeantimes={}" \
+                          .format(i, nsimul, K, nparticles, nmeantimes))
                     for rep in range(replications):
                         print("\tReplication {} of {}".format(rep+1, replications))
-                        print("\t1) Estimating the expected survival time...")
+                        print("\t1) Estimating the expected survival time using NO reactivation...")
                         seed_rep = seed + rep * int(np.round(100*np.random.random()))
                         reactivate = False
                         start = 0
                         mean_lifetime = None
-                        _, _, _, _, mean_lifetime_mc, proba_blocking_mc, params_mc = self.run(start,
-                                                                        mean_lifetime,
-                                                                        reactivate,
-                                                                        finalize_type,
-                                                                        nparticles,
-                                                                        niter,
-                                                                        seed_rep,
-                                                                        plotFlag=False,
-                                                                        log=log)
+                        est_mc, _, _, _, _, mean_lifetime_mc, proba_blocking_mc, params_mc = \
+                            self.run(start,
+                                    mean_lifetime,
+                                    reactivate,
+                                    finalize_type,
+                                    nparticles,
+                                    nmeantimes,
+                                    seed_rep,
+                                    plotFlag=False,
+                                    log=log)
 
                         print("\t2) Estimating blocking probability using Fleming-Viot (E(T) = {:.1f})..." \
                               .format(mean_lifetime_mc))
                         reactivate = True
                         start = 1
-                        proba_blocking_integral, proba_blocking_laplacian, integral, gamma, expected_survival_time, _, params_fv = \
-                                                                self.run(   start,
-                                                                            mean_lifetime_mc,
-                                                                            reactivate,
-                                                                            finalize_type,
-                                                                            nparticles,
-                                                                            niter,
-                                                                            seed_rep,
-                                                                            plotFlag=False,
-                                                                            log=log)
-        
+                        est_fv, proba_blocking_integral, proba_blocking_laplacian, integral, gamma, expected_survival_time, _, params_fv = \
+                            self.run(start,
+                                    mean_lifetime_mc,
+                                    reactivate,
+                                    finalize_type,
+                                    nparticles,
+                                    nmeantimes,
+                                    seed_rep,
+                                    plotFlag=False,
+                                    log=log)
+
+                        # Compute the rate of blocking time w.r.t. total simulation time
+                        # in order to have a rough estimation of the blocking probability
+                        assert est_mc.maxtime == est_fv.maxtime, "The maximum simulation time of the MC and of the FV process coincide"
+                        rate_blocking_time_mc = est_mc.get_all_total_blocking_time() / (est_mc.maxtime * nparticles)
+                        rate_blocking_time_fv = est_fv.get_all_total_blocking_time() / (est_fv.maxtime * nparticles)
+                        print("rate blocking time MC: {:.3f}%".format(rate_blocking_time_mc*100))
+                        print("rate blocking time FV: {:.3f}%".format(rate_blocking_time_fv*100))
+
                         df_proba_blocking_estimates = pd.concat([df_proba_blocking_estimates,
                                                                  pd.DataFrame.from_items([
                                                                             ('K', [K]),
                                                                             ('nparticles', [nparticles]),
-                                                                            ('niter', [niter]),
+                                                                            ('nmeantimes', [nmeantimes]),
                                                                             ('rep', [rep+1]),
                                                                             ('seed', [seed_rep]),
                                                                             ('integral', [integral]),
@@ -665,25 +677,35 @@ class Test_QB_Particles(unittest.TestCase):
                                                                             ('PMC(K)', [proba_blocking_mc]),
                                                                             ('PFV1(K)', [proba_blocking_integral]),
                                                                             ('PFV2(K)', [proba_blocking_laplacian]),
-                                                                            ('P(K)', [proba_blocking_K])]
-                                                                                         )],
+                                                                            ('EstPMC(K)', [rate_blocking_time_mc]),
+                                                                            ('EstPFV(K)', [rate_blocking_time_fv]),
+                                                                            ])],
                                                                  axis=0)
                                                                 
-                        print("\t--> PMC(K)={:.6f}% vs. PFV1(K)={:.6f}% vs. PFV2(K)={:.6f}% vs. P(K)={:.6f}%" \
-                              .format(proba_blocking_mc*100, proba_blocking_integral*100, proba_blocking_laplacian*100, proba_blocking_K*100))
+                        print("\t--> PMC(K)={:.6f}% vs. Est PMC(K)={:.6f}% vs. PFV1(K)={:.6f}% vs. PFV2(K)={:.6f}% vs. Est PFV(K)={:.6f}%" \
+                              .format(proba_blocking_mc*100, rate_blocking_time_mc*100, proba_blocking_integral*100, proba_blocking_laplacian*100, rate_blocking_time_fv*100))
+                        df_proba_survival_and_blocking_conditional = est_fv.estimate_proba_survival_and_blocking_conditional()
+                        self.plot_results(df_proba_survival_and_blocking_conditional,
+                                          K,
+                                          mean_lifetime_mc,
+                                          reactivate,
+                                          finalize_type,
+                                          nparticles,
+                                          nmeantimes,
+                                          seed)
 
                     if False:
-                        # DM-2020/08/23: Stop at a simulation showing large values of PFV2(K) (e.g. 72% when the actual P(K) = 10%!)
-                        if K == 5 and nparticles == 10 and niter == 400:
+                        # DM-2020/08/23: Stop at a simulation showing large values of PFV2(K) (e.g. 72% when the true P(K) = 10%!)
+                        if K == 5 and nparticles == 10 and True: # niter == 400:
                             import sys
                             sys.exit()
 
-                    if niter < niter_max:
-                        # Give the opportunity to reach niter_max (in case niter*niter_mult goes beyond niter_max)
-                        niter = np.min([niter*niter_mult, niter_max])
+                    if nmeantimes < nmeantimes_max:
+                        # Give the opportunity to reach nmeantimes_max (in case nmeantimes*nmeantimes_mult goes beyond nmeantimes_max)
+                        nmeantimes = np.min([nmeantimes*nmeantimes_mult, nmeantimes_max])
                     else:
-                        # We should stop iterating on niter at the next iteration
-                        niter = niter * niter_mult
+                        # We should stop iterating on nmeantimes at the next iteration
+                        nmeantimes = nmeantimes * nmeantimes_mult
                 if nparticles < nparticles_max:
                     # Give the opportunity to reach nparticles_max (in case nparticles*nparticles_mult goes beyond nparticles_max)
                     nparticles = np.min([nparticles*nparticles_mult, nparticles_max])
@@ -697,20 +719,22 @@ class Test_QB_Particles(unittest.TestCase):
                 # We should stop iterating on K at the next iteration
                 K = K * K_mult
 
-        return df_proba_blocking_estimates, rho
+        return df_proba_blocking_estimates
 
     def plot_results(self, df_proba_survival_and_blocking_conditional, *args):
-        mean_lifetime = args[0]
-        reactivate = args[1]
-        finalize_type = args[2]
-        nparticles = args[3]
-        niter = args[4]
-        seed = args[5]
+        K = args[0]
+        mean_lifetime = args[1]
+        reactivate = args[2]
+        finalize_type = args[3]
+        nparticles = args[4]
+        nmeantimes = args[5]
+        seed = args[6]
+        print(K)
         print(mean_lifetime)
         print(reactivate)
         print(finalize_type.name)
         print(nparticles)
-        print(niter)
+        print(nmeantimes)
         print(seed)
 
         plt.figure()
@@ -736,29 +760,28 @@ class Test_QB_Particles(unittest.TestCase):
         plt.sca(ax)
         ax.legend(['P(T>t / s=1)'], loc='upper left')
         ax2.legend(['P(BLOCK / T>t,s=1)'], loc='upper right')
-        plt.title("K={}, rate(B)={:.1f}, rate(D)={:.1f}, rho={:.3f}, mean_lifetime={:.1f}" \
-                  ", reactivate={}, finalize={}, N={}, #iter={}, seed={}" \
-                  .format(self.capacity,
-                          self.queue.getBirthRate(),
-                          self.queue.getDeathRate(),
-                          self.queue.getBirthRate() / self.queue.getDeathRate(),
-
+        plt.title("K={}, job rates={}, service rates={}, mean_lifetime={:.1f}" \
+                  ", reactivate={}, finalize={}, N={}, nmeantimes={}, seed={}" \
+                  .format(K,
+                          self.job_rates,
+                          self.rate_death,
+                          #self.queue.getBirthRate() / self.queue.getDeathRate(),
                           mean_lifetime or np.nan, reactivate, finalize_type.name[0:3],
-                          nparticles, niter, seed
+                          nparticles, nmeantimes, seed
                           ))
         ax.title.set_fontsize(9)
 
     def plot_convergence_analysis_allvalues(self, results_convergence):
 
-        def plot(convergence_results_agg_by_K_nparticles_niter,
+        def plot(convergence_results_agg_by_K_nparticles_nmeantimes,
                  grp_K, grp_axis, grp_legend,
                  replications):
             """
-            The input data frame should be aggregated by K, nparticles, niter IN THIS ORDER and
+            The input data frame should be aggregated by K, nparticles, nmeantimes IN THIS ORDER and
             be created via the pd.groupby() method using as_index=True.
             """
-            df_agg = convergence_results_agg_by_K_nparticles_niter
-            all_K, all_nparticles, all_niters = df_agg.index.levels
+            df_agg = convergence_results_agg_by_K_nparticles_nmeantimes
+            all_K, all_nparticles, all_nmeantimes = df_agg.index.levels
             
             grp_legend_idx = df_agg.index.names.index(grp_legend)
             grp_axis_idx = df_agg.index.names.index(grp_axis)
@@ -771,7 +794,8 @@ class Test_QB_Particles(unittest.TestCase):
             color_norm = matplotlib.colors.Normalize(vmin=0.8*grp_legend_values[0], vmax=grp_legend_values[-1])
             for idx, K in enumerate(all_K):
                 ind_K = df[grp_K] == K
-                P_true = df[ind_K].iloc[0]['P(K)']
+                P_est_mc = df[ind_K].iloc[0]['EstPMC(K)']
+                P_est_fv = df[ind_K].iloc[0]['EstPFV(K)']
                 (ax_mc, ax_fv) = axes[idx]
                 legend_lines_mc  = []
                 legend_lines_fv  = []
@@ -812,21 +836,22 @@ class Test_QB_Particles(unittest.TestCase):
                                                     positions=grp_axis_values, showmedians=False, linewidth=4,
                                                     color_body="green", color_lines="green", color_means="green")            
         
+                    refline_mc = ax_mc.axhline(y=P_est_mc*100, color='black', linestyle='dashed')
+                    refline_fv = ax_fv.axhline(y=P_est_fv*100, color='black', linestyle='dashed')
                     for ax in (ax_mc, ax_fv):
-                        refline = ax.axhline(y=P_true*100, color='black', linestyle='dashed')
                         ax.set_xlabel(grp_axis)
                         ax.yaxis.set_major_formatter(mtick.PercentFormatter())
                     ax_mc.set_ylabel('K = {:.0f}'.format(K), fontsize=12)
         
-                ymax = np.max(np.r_[P_true, df[ind_K][y_mc], df[ind_K][y_fv]])*100
+                ymax = np.max(np.r_[P_est_mc, P_est_fv, df[ind_K][y_mc], df[ind_K][y_fv]])*100
                 for ax in (ax_mc, ax_fv):
                     ax.set_ylim((0, ymax*1.1))
-                ax_mc.legend((refline, *legend_lines_mc),
-                             ("True value (P={:.3f}%)".format(P_true*100), *legend_labels_mc),
+                ax_mc.legend((refline_mc, *legend_lines_mc),
+                             ("Estimated blocking rate (P={:.3f}%)".format(P_est_mc*100), *legend_labels_mc),
                              ncol=2,
                              fontsize='x-small')
-                ax_fv.legend((refline, *legend_lines_fv),
-                             ("True value (P={:.3f}%)".format(P_true*100), *legend_labels_fv),
+                ax_fv.legend((refline_fv, *legend_lines_fv),
+                             ("Estimated blocking rate (P={:.3f}%)".format(P_est_fv*100), *legend_labels_fv),
                              ncol=2,
                              fontsize='x-small')
                 plt.suptitle("Estimated blocking probability P(K) using a particle system" \
@@ -837,7 +862,7 @@ class Test_QB_Particles(unittest.TestCase):
         # Define the analysis data frame and the name of the variables involved in the plots
         df = results_convergence
         grp_part = 'nparticles'
-        grp_iter = 'niter'
+        grp_iter = 'nmeantimes'
         grp_K = 'K'
         y_mc = 'PMC(K)'
         y_fv = 'PFV1(K)'   # Approximation 1
@@ -870,7 +895,7 @@ class Test_QB_Particles(unittest.TestCase):
         def df_agg_param(df4param, grp_K, grp_param):
             """
             Computes summary statistics in the input data frame by K and by the values
-            of the parameter given in grp_param (e.g. 'nparticles', 'niter').
+            of the parameter given in grp_param (e.g. 'nparticles', 'nmeantimes').
             """
             grouped_param = df4param.groupby([grp_K, grp_param], as_index=True, group_keys=False)
             agg_functions = {'n': 'count', 'mean': np.mean, 'std': np.std}
@@ -888,20 +913,21 @@ class Test_QB_Particles(unittest.TestCase):
             legend_label_fv = "FV: {}".format(legend)
             axes = plt.figure(figsize=(9,16)).subplots(len(all_K),1)
             for idx, K in enumerate(all_K):
-                P_true = df[df[grp_K] == K].iloc[0]['P(K)']
+                P_est_mc = df[df[grp_K] == K].iloc[0]['EstPMC(K)']
+                P_est_fv = df[df[grp_K] == K].iloc[0]['EstPFV(K)']
                 ax = axes[idx]
                 ax.errorbar(df2plot.loc[K].index, df2plot.loc[K]['mean'][y_mc], yerr=se_mult*df2plot.loc[K]['SE'][y_mc],
                             capsize=4, color='red', marker='.')
                 ax.errorbar(df2plot.loc[K].index, df2plot.loc[K]['mean'][y_fv], yerr=se_mult*df2plot.loc[K]['SE'][y_fv],
                             capsize=4, color='green', marker='.')
-                ax.axhline(y=P_true, color='black', linestyle='dashed')
+                #ax.axhline(y=P_true, color='black', linestyle='dashed')
                 ax.set_xlabel(grp_axis)
                 ax.set_ylabel('K = {:.0f}'.format(K))
-                ymax = np.max(np.r_[P_true,
+                ymax = np.max(np.r_[P_est_mc, P_est_fv,
                                     df2plot.loc[K]['mean'][y_mc] + se_mult*df2plot.loc[K]['SE'][y_mc],
                                     df2plot.loc[K]['mean'][y_fv] + se_mult*df2plot.loc[K]['SE'][y_fv]])
                 ax.set_ylim((0, ymax*1.1))
-                ax.legend(["True value (K={}, P={:.2g}%)".format(K, P_true*100),
+                ax.legend(["Blokcing rate values (K={}, P(MC)={:.2g}%, P(FV)={:.2g}%)".format(K, P_est_mc*100, P_est_fv*100),
                            legend_label_mc,
                            legend_label_fv])
                 plt.suptitle("P(K) vs. {} in the Fleming Viot system (+/-{}SE, replications={})" \
@@ -910,17 +936,17 @@ class Test_QB_Particles(unittest.TestCase):
         # Define the analysis data frame and the name of the variables involved in the plots
         df = results_convergence
         grp_part = 'nparticles'
-        grp_iter = 'niter'
+        grp_iter = 'nmeantimes'
         grp_K = 'K'
         y_mc = 'PMC(K)'
         y_fv = 'PFV1(K)'  # Approximation 1
         replications = int(np.max(df['rep']))
         
         # Filter each analysis by group by the largest value of the other group variable
-        all_niters = np.unique(df[grp_iter])
-        niters_max = int(all_niters[-1])
-        legend = "{} = {}".format(grp_iter, niters_max)
-        df4part = df[ df[grp_iter] == niters_max ]
+        all_nmeantimes = np.unique(df[grp_iter])
+        nmeantimes_max = int(all_nmeantimes[-1])
+        legend = "{} = {}".format(grp_iter, nmeantimes_max)
+        df4part = df[ df[grp_iter] == nmeantimes_max ]
         df_agg_byparam = df_agg_param(df4part, grp_K, grp_part)
         plot(df_agg_byparam, grp_K, grp_part, legend, se_mult=2)
 
@@ -934,7 +960,7 @@ class Test_QB_Particles(unittest.TestCase):
 
 # DM-2020/12/23: To change which portion of the below code to run, change the IF condition
 # to `== "__main__"` or to `!= "__main__"` accordingly
-if __name__ == "__main__":
+if __name__ != "__main__":
     #unittest.main()
 
     # DM-2020/08/24: Instead of using unittest.main(), use the following to test the FV system
@@ -950,12 +976,12 @@ else:
     test = Test_QB_Particles()
     
     time_start = timer()
-    results_convergence, rho = test.analyze_convergence(
-                                    finalize_type=FinalizeType.REMOVE_CENSORED,
+    results_convergence = test.analyze_convergence(
+                                    finalize_type=FinalizeType.ABSORB_CENSORED,
                                     replications=5,
-                                    K_range=(5, 40, 2),
-                                    nparticles_range=(10, 40, 2),
-                                    niter_range=(50, 400, 2), 
+                                    K_range=(5, 20, 2),
+                                    nparticles_range=(40, 160, 2),
+                                    nmeantimes_range=(10, 10, 2), 
                                     seed=1717,
                                     log=False)
     time_end = timer()
@@ -972,4 +998,4 @@ else:
 
     # Plots
     test.plot_convergence_analysis_allvalues(results_convergence)
-    test.plot_convergence_analysis_maxvalues(results_convergence)
+    #test.plot_convergence_analysis_maxvalues(results_convergence)

@@ -20,7 +20,8 @@ class Event(Enum):
     BIRTH = 0
     DEATH = 1
     RESIZE = 9
-    RESET = 99
+    RESET = -1
+    END = 99
 
 class GenericQueue:
     """
