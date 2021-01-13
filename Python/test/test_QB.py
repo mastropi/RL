@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 
 from timeit import default_timer as timer
-from datetime import timedelta 
+#from datetime import timedelta 
 import unittest
 from unittest_data_provider import data_provider
 import matplotlib
@@ -38,7 +38,7 @@ class Test_QB_Particles(unittest.TestCase):
         super().__init__(*args, **kwargs)
         self.log = False
         self.rate_birth = 1.2
-        self.rate_death = 7 #1.4
+        self.rate_death = [5, 4, 3] #1.4
         self.capacity = 5
         
         # One server
@@ -343,7 +343,7 @@ class Test_QB_Particles(unittest.TestCase):
                 "All counts in the counts of blocked particles list are non-negative ({})" \
                 .format(counts_particles_blocked_by_elapsed_time)
 
-        print("\nLatest time the system changed: {:.3f}".format(est.get_time_last_change_of_system()))
+        print("\nLatest time the system was updated to a known state: {:.3f}".format( np.min(est.get_times_latest_known_state()) ))
         times_last_event_by_particle = est.get_all_times_last_event()
         print("Range of latest event times in all {} particles in the system: [{:.3f}, {:.3f}]" \
               .format(est.N, np.min(times_last_event_by_particle), np.max(times_last_event_by_particle)))
@@ -414,7 +414,7 @@ class Test_QB_Particles(unittest.TestCase):
         print("\n")
 
         proba_blocking = est.estimate_proba_blocking()
-        rho = self.rate_birth / self.rate_death
+        #rho = self.rate_birth / self.rate_death
         K = self.capacity
         print("\nBlocking probability estimate: {:.1f}%".format(proba_blocking*100))
         #print("Theoretical value (rho^K / sum(rho^i)) (rho={:.3f}, K={}): {:.1f}%" \
@@ -434,28 +434,28 @@ class Test_QB_Particles(unittest.TestCase):
         return  df_proba_survival_and_blocking_conditional, \
                 (reactivate, finalize_type, nparticles, nmeantimes)
 
-    def test_simpler_algorithm(self):
+    def test_algorithm(self):
         print("\nRunning test " + self.id())
         start = 1
-        reactivate = False
+        reactivate = True
         finalize_type = FinalizeType.ABSORB_CENSORED
         nparticles = 50
-        nmeantimes = 5
+        nmeantimes = 10
         seed = 1717
         self.run(start=start,
-            mean_lifetime=None,
-            reactivate=reactivate,
-            finalize_type=finalize_type,
-            nparticles=nparticles,
-            nmeantimes=nmeantimes,
-            seed=seed,
-            plotFlag=True,
-            log=False)
+                mean_lifetime=None,
+                reactivate=reactivate,
+                finalize_type=finalize_type,
+                nparticles=nparticles,
+                nmeantimes=nmeantimes,
+                seed=seed,
+                plotFlag=True,
+                log=False)
 
     def run(self,   start=1,
                     mean_lifetime=None,
                     reactivate=True,
-                    finalize_type=FinalizeType.REMOVE_CENSORED,
+                    finalize_type=FinalizeType.ABSORB_CENSORED,
                     nparticles=100,
                     nmeantimes=1000,
                     seed=1717,
@@ -478,7 +478,7 @@ class Test_QB_Particles(unittest.TestCase):
                                                            finalize_type=finalize_type,
                                                            plotFlag=plotFlag,
                                                            seed=seed, log=log)
-        print("Simulation setup:")
+        print("\n(START) Simulation setup: (REACTIVATE={})".format(reactivate))
         print(est.setup())
 
         print("Simulating...")
@@ -487,12 +487,11 @@ class Test_QB_Particles(unittest.TestCase):
         # Estimate the probability of blocking in the Monte Carlo case for benchmarking
         # as the proportion of time blocked over all elapsed time (= total survival time).
         print("Estimating blocking time rate over all {} particles...".format(nparticles))
+        all_total_survival_time = est.get_all_total_survival_time()
         all_total_blocking_time = est.get_all_total_blocking_time()
         if not reactivate:
-            all_total_survival_time = est.get_all_total_survival_time()
             prop_blocking_time = all_total_blocking_time / all_total_survival_time
         else:
-            all_total_survival_time = est.maxtime * nparticles
             prop_blocking_time = None
 
         if False:
@@ -538,7 +537,7 @@ class Test_QB_Particles(unittest.TestCase):
             print("% blocking time = {:.1f}%".format(all_total_blocking_time / all_total_survival_time * 100))
             print("\n")
 
-        rho = self.rate_birth / self.rate_death
+        #rho = self.rate_birth / self.rate_death
         K = self.capacity
         print("\nEstimation of blocking probability via Approximation 1 & 2:")
         print("Integral = {:.6f}".format(integral))
@@ -549,12 +548,13 @@ class Test_QB_Particles(unittest.TestCase):
         #print("Theoretical value (rho^K / sum(rho^i)) (rho={:.3f}, K={}): {:.3f}%" \
         #      .format(rho, K,
         #              rho**K / np.sum([ rho**i for i in range(K+1) ]) *100))
-        print("Last time the system of particle was updated: {:.1f}".format(est.get_time_last_change_of_system()))
+        print("Last time the system has a known state: {:.3f}".format( np.min(est.get_times_latest_known_state()) ))
 
-        print("\nSimulation setup:")
+        print("\n(END) Simulation setup: (REACTIVATE={})".format(reactivate))
         print(est.setup())
 
         if plotFlag:
+            print("Plotting...")
             df_proba_survival_and_blocking_conditional = est.estimate_proba_survival_and_blocking_conditional()
             self.plot_results(df_proba_survival_and_blocking_conditional,
                               K,
@@ -662,8 +662,8 @@ class Test_QB_Particles(unittest.TestCase):
                         assert est_mc.maxtime == est_fv.maxtime, "The maximum simulation time of the MC and of the FV process coincide"
                         rate_blocking_time_mc = est_mc.get_all_total_blocking_time() / (est_mc.maxtime * nparticles)
                         rate_blocking_time_fv = est_fv.get_all_total_blocking_time() / (est_fv.maxtime * nparticles)
-                        print("rate blocking time MC: {:.3f}%".format(rate_blocking_time_mc*100))
-                        print("rate blocking time FV: {:.3f}%".format(rate_blocking_time_fv*100))
+                        print("Blocking time rate MC: {:.3f}%".format(rate_blocking_time_mc*100))
+                        print("Blocking time rate FV: {:.3f}%".format(rate_blocking_time_fv*100))
 
                         df_proba_blocking_estimates = pd.concat([df_proba_blocking_estimates,
                                                                  pd.DataFrame.from_items([
@@ -729,13 +729,13 @@ class Test_QB_Particles(unittest.TestCase):
         nparticles = args[4]
         nmeantimes = args[5]
         seed = args[6]
-        print(K)
-        print(mean_lifetime)
-        print(reactivate)
-        print(finalize_type.name)
-        print(nparticles)
-        print(nmeantimes)
-        print(seed)
+        print("K={}".format(K))
+        print("mean_lifetime={}".format(mean_lifetime))
+        print("reactivate={}".format(reactivate))
+        print("finalize_type={}".format(finalize_type.name))
+        print("nparticles={}".format(nparticles))
+        print("nmeantimes={}".format(nmeantimes))
+        print("seed={}".format(seed))
 
         plt.figure()
         color1 = 'blue'
@@ -771,6 +771,39 @@ class Test_QB_Particles(unittest.TestCase):
                           ))
         ax.title.set_fontsize(9)
 
+    def aggregation_bygroups(self, df, groupvars, analvars,
+                             dict_stats={'n': 'count', 'mean': np.mean, 'std': np.std, 'min': np.min, 'max': np.max}):
+        """
+        Computes the given summary statistics in the input data frame on the analysis variables
+        by the given group variables.
+        
+        Arguments:
+        groupvars: list
+            List of grouping variables.
+
+        analvars: list
+            List of analysis variables whose statistics is of interest.
+    
+        dict_stats: dict
+            Dictionary with the summary statistics names and functions to compute them.
+            default: {'n': 'count', 'mean': np.mean, 'std': np.std, 'min': 'min', 'max': 'max'}
+    
+        Return: data frame
+        Data frame containing the summary statistics results.
+        If the 'std' and 'n' (count) summary statistics is part of the `dict_stats` dictionary,
+        the Standard Error (SE) is also computed as 'std' / sqrt('n')
+        """
+        df_grouped = df.groupby(groupvars, as_index=True, group_keys=False)
+        df_agg = df_grouped[analvars].agg(dict_stats)
+        stat_names = dict_stats.keys() 
+        if 'std' in stat_names and 'n' in stat_names:
+            df_agg_se = df_agg['std'][analvars] / np.sqrt(df_agg['n'][analvars])
+            # Rename the column names to reflect the column represents the Standard Error (as opposed to the Standard Deviation)
+            df_agg_se.set_axis([['SE']*len(analvars), analvars], axis=1, inplace=True)
+            df_agg = pd.concat([df_agg, df_agg_se], axis=1)
+    
+        return df_agg
+
     def plot_convergence_analysis_allvalues(self, results_convergence):
 
         def plot(convergence_results_agg_by_K_nparticles_nmeantimes,
@@ -788,25 +821,33 @@ class Test_QB_Particles(unittest.TestCase):
             grp_legend_values = df_agg.index.levels[grp_legend_idx]
             grp_axis_values = df_agg.index.levels[grp_axis_idx]
             se_mult = 2
-            axes = plt.figure(figsize=(9,16)).subplots(len(all_K),2)
+            axes = plt.figure(figsize=(9,4*len(all_K))).subplots(len(all_K),2)
             cmap_red = cm.get_cmap('Reds')
             cmap_green = cm.get_cmap('Greens')
             color_norm = matplotlib.colors.Normalize(vmin=0.8*grp_legend_values[0], vmax=grp_legend_values[-1])
             for idx, K in enumerate(all_K):
                 ind_K = df[grp_K] == K
-                P_est_mc = df[ind_K].iloc[0]['EstPMC(K)']
-                P_est_fv = df[ind_K].iloc[0]['EstPFV(K)']
-                (ax_mc, ax_fv) = axes[idx]
+                if len(all_K) == 1:
+                    (ax_mc, ax_fv) = axes
+                else:
+                    (ax_mc, ax_fv) = axes[idx]
                 legend_lines_mc  = []
                 legend_lines_fv  = []
                 legend_labels_mc = []
                 legend_labels_fv = []
                 for idx_legend, legend_value in enumerate(grp_legend_values):
                     if grp_legend_idx == 1:
-                        # This tells us how 
+                        # The set of legend values to plot contains only one value
                         df2plot = df_agg.loc[(K, legend_value)]
                     else:
+                        # The set of legend values to plot contains more than one value
                         df2plot = df_agg.loc[(K, list(grp_axis_values), legend_value)]
+
+                    # Color for the lines for each legend
+                    # (the line for the last legend --which corresponds to the largest parameter value
+                    # expected to be the best setting, because it has more particles/longer simulation time
+                    # is plotted with the HIGHEST COLOR INTENSITY, while the rest are plotted with lighter colors
+                    # selected from the respective color map)
                     if idx_legend == len(grp_legend_values) - 1:
                         color_red = "red"
                         color_green = "green"
@@ -814,18 +855,26 @@ class Test_QB_Particles(unittest.TestCase):
                         color_strength = color_norm(legend_value)
                         color_red = cmap_red(color_strength)
                         color_green = cmap_green(color_strength)
-                    yerr_mc = se_mult*df2plot['SE'][y_mc]*100
-                    yerr_fv = se_mult*df2plot['SE'][y_fv]*100
-                    line_mc = ax_mc.errorbar(grp_axis_values, df2plot['mean'][y_mc]*100, yerr=yerr_mc,
+
+                    # Lines in each plot (shown with error bars)
+                    yerr_mc = se_mult*df2plot['SE'][y_mc]
+                    yerr_fv = se_mult*df2plot['SE'][y_fv]
+                    yerr_ref_mc = se_mult*df2plot['SE'][block_mc]       # Referece value are the blocking rates
+                    line_mc = ax_mc.errorbar(grp_axis_values, df2plot['mean'][y_mc]*100, yerr=yerr_mc*100,
                                 capsize=4, color=color_red, marker='.')
-                    line_fv = ax_fv.errorbar(grp_axis_values, df2plot['mean'][y_fv]*100, yerr=yerr_fv,
+                    line_fv = ax_fv.errorbar(grp_axis_values, df2plot['mean'][y_fv]*100, yerr=yerr_fv*100,
                                 capsize=4, color=color_green, marker='.')
-                    legend_lines_mc  += [line_mc]
-                    legend_lines_fv  += [line_fv]
-                    legend_labels_mc += ["MC: {}={}".format(grp_legend, int(legend_value))]
-                    legend_labels_fv += ["FV: {}={}".format(grp_legend, int(legend_value))]
+                    line_ref_mc = ax_mc.errorbar(grp_axis_values, df2plot['mean'][block_mc]*100, yerr=yerr_ref_mc*100,
+                                capsize=4, color="black", marker='.', linestyle='dashed')
+
+                    # Legend lines and labels in each plot (MC and FV)
+                    legend_lines_mc  += [line_mc, line_ref_mc]
+                    legend_lines_fv  += [line_fv, line_ref_mc]
+                    legend_labels_mc += ["MC: {}={}".format(grp_legend, int(legend_value)), "Reference (blocking rate values (MC))"]
+                    legend_labels_fv += ["FV: {}={}".format(grp_legend, int(legend_value)), "Reference (blocking rate values (MC))"]
         
-                    # Add violinplots for the largest parameter
+                    # Add violinplots for the LARGEST parameter
+                    # (which is expected to give the best results, as mentioned above)
                     if idx_legend == len(grp_legend_values) - 1:
                         import Python.lib.utils.plotting  as plotting
                         ind = (df[grp_K] == K) & (df[grp_legend] == legend_value)
@@ -835,101 +884,100 @@ class Test_QB_Particles(unittest.TestCase):
                         plotting.violinplot(ax_fv,  [df[ind & (df[grp_axis]==x)][y_fv]*100 for x in grp_axis_values],
                                                     positions=grp_axis_values, showmedians=False, linewidth=4,
                                                     color_body="green", color_lines="green", color_means="green")            
-        
-                    refline_mc = ax_mc.axhline(y=P_est_mc*100, color='black', linestyle='dashed')
-                    refline_fv = ax_fv.axhline(y=P_est_fv*100, color='black', linestyle='dashed')
+                        for ax in (ax_mc, ax_fv):
+                            plotting.violinplot(ax,  [df[ind & (df[grp_axis]==x)][block_mc]*100 for x in grp_axis_values],
+                                                        positions=grp_axis_values, showmedians=False, linewidth=4,
+                                                        color_body="black", color_lines="black", color_means="black")
+   
+                    # Add labels     
                     for ax in (ax_mc, ax_fv):
                         ax.set_xlabel(grp_axis)
                         ax.yaxis.set_major_formatter(mtick.PercentFormatter())
                     ax_mc.set_ylabel('K = {:.0f}'.format(K), fontsize=12)
         
-                ymax = np.max(np.r_[P_est_mc, P_est_fv, df[ind_K][y_mc], df[ind_K][y_fv]])*100
+                # Define Y-axis limits: the Y-axis upper limit is set to the maximum observed in the original containing the results (non-aggregated for plotting)
+                ymax = np.max(np.r_[df[ind_K][y_mc], df[ind_K][y_fv]])*100
                 for ax in (ax_mc, ax_fv):
                     ax.set_ylim((0, ymax*1.1))
-                ax_mc.legend((refline_mc, *legend_lines_mc),
-                             ("Estimated blocking rate (P={:.3f}%)".format(P_est_mc*100), *legend_labels_mc),
+
+                # Add the legend
+                ax_mc.legend(legend_lines_mc,
+                             legend_labels_mc,
                              ncol=2,
                              fontsize='x-small')
-                ax_fv.legend((refline_fv, *legend_lines_fv),
-                             ("Estimated blocking rate (P={:.3f}%)".format(P_est_fv*100), *legend_labels_fv),
+                ax_fv.legend(legend_lines_fv,
+                             legend_labels_fv,
                              ncol=2,
                              fontsize='x-small')
+
+                # Add the title
                 plt.suptitle("Estimated blocking probability P(K) using a particle system" \
                              " (Mean +/-{}SE + Boxplots of largest legend value, replications={})" \
                              "\nMonte Carlo (red) vs. Fleming Viot (green)" \
-                             "\n\nDependency with {}" \
-                             .format(se_mult, replications, grp_axis.upper()))
+                             .format(se_mult, replications))
+
         # Define the analysis data frame and the name of the variables involved in the plots
         df = results_convergence
+        # Grouping variables
         grp_part = 'nparticles'
         grp_iter = 'nmeantimes'
         grp_K = 'K'
+        groupvars = [grp_K, grp_part, grp_iter]
+        # Analysis variables
         y_mc = 'PMC(K)'
-        y_fv = 'PFV1(K)'   # Approximation 1
+        y_fv = 'PFV1(K)'        # Approximation 1
+        block_mc = 'EstPMC(K)'  # Reference values for comparing estimated values against: observed blocking time rate (calculated from the MC simulation)
+        analvars = [y_mc, y_fv, block_mc]
         replications = int(np.max(df['rep']))
 
         # Analysis by group (mean, std, min, max)
-        grouped = df.groupby([grp_K, grp_part, grp_iter], as_index=True, group_keys=False)
-        agg_functions = {'n': 'count', 'mean': np.mean, 'std': np.std, 'min': 'min', 'max': 'max'}
-        df_agg = grouped[y_mc, y_fv].agg(agg_functions)
-        df_agg_se = df_agg['std'][[y_mc, y_fv]] / np.sqrt(df_agg['n'][[y_mc, y_fv]])
-        df_agg_se.set_axis([['SE','SE'],[y_mc, y_fv]], axis=1, inplace=True)
-        df_agg = pd.concat([df_agg, df_agg_se], axis=1)
+        df_agg = self.aggregation_bygroups(df, groupvars, analvars)
 
         # Plot convergence analysis for ALL parameter values
         # first for grp_part, then for grp_iter
         grp_axis = grp_part
         grp_legend = grp_iter
+        print("1:\n{}".format(df_agg))
         plot(df_agg,
              grp_K, grp_axis, grp_legend,
              replications)
 
         grp_axis = grp_iter
         grp_legend = grp_part
+        print("2:\n{}".format(df_agg))
         plot(df_agg,
              grp_K, grp_axis, grp_legend,
              replications)
 
-    def plot_convergence_analysis_maxvalues(self, convergence_results):
-
-        def df_agg_param(df4param, grp_K, grp_param):
-            """
-            Computes summary statistics in the input data frame by K and by the values
-            of the parameter given in grp_param (e.g. 'nparticles', 'nmeantimes').
-            """
-            grouped_param = df4param.groupby([grp_K, grp_param], as_index=True, group_keys=False)
-            agg_functions = {'n': 'count', 'mean': np.mean, 'std': np.std}
-            df_agg_byparam = grouped_param[y_mc, y_fv].agg(agg_functions)
-            df_agg_byparam_se = df_agg_byparam['std'][[y_mc,y_fv]] / np.sqrt(df_agg_byparam['n'][[y_mc, y_fv]])
-            df_agg_byparam_se.set_axis([['SE','SE'],[y_mc,y_fv]], axis=1, inplace=True)
-            df_agg_byparam = pd.concat([df_agg_byparam, df_agg_byparam_se], axis=1)
-
-            return df_agg_byparam
+    def plot_convergence_analysis_maxvalues(self, results_convergence):
 
         def plot(df2plot, grp_K, grp_axis, legend, se_mult=2):
             all_K = df2plot.index.levels[0]
 
             legend_label_mc = "MC: {}".format(legend)
             legend_label_fv = "FV: {}".format(legend)
-            axes = plt.figure(figsize=(9,16)).subplots(len(all_K),1)
+            axes = plt.figure(figsize=(9,4*len(all_K))).subplots(len(all_K),1)
             for idx, K in enumerate(all_K):
-                P_est_mc = df[df[grp_K] == K].iloc[0]['EstPMC(K)']
-                P_est_fv = df[df[grp_K] == K].iloc[0]['EstPFV(K)']
-                ax = axes[idx]
+                if len(all_K) == 1:
+                    ax = axes
+                else:
+                    ax = axes[idx]
                 ax.errorbar(df2plot.loc[K].index, df2plot.loc[K]['mean'][y_mc], yerr=se_mult*df2plot.loc[K]['SE'][y_mc],
                             capsize=4, color='red', marker='.')
                 ax.errorbar(df2plot.loc[K].index, df2plot.loc[K]['mean'][y_fv], yerr=se_mult*df2plot.loc[K]['SE'][y_fv],
                             capsize=4, color='green', marker='.')
+                ax.errorbar(df2plot.loc[K].index, df2plot.loc[K]['mean'][block_mc], yerr=se_mult*df2plot.loc[K]['SE'][block_mc],
+                            capsize=4, color='black', marker='.', linestyle='dashed')
                 #ax.axhline(y=P_true, color='black', linestyle='dashed')
                 ax.set_xlabel(grp_axis)
                 ax.set_ylabel('K = {:.0f}'.format(K))
-                ymax = np.max(np.r_[P_est_mc, P_est_fv,
-                                    df2plot.loc[K]['mean'][y_mc] + se_mult*df2plot.loc[K]['SE'][y_mc],
-                                    df2plot.loc[K]['mean'][y_fv] + se_mult*df2plot.loc[K]['SE'][y_fv]])
+                ymax = np.max(np.r_[df2plot.loc[K]['mean'][y_mc] + se_mult*df2plot.loc[K]['SE'][y_mc],
+                                    df2plot.loc[K]['mean'][y_fv] + se_mult*df2plot.loc[K]['SE'][y_fv],
+                                    df2plot.loc[K]['mean'][block_mc] + se_mult*df2plot.loc[K]['SE'][block_mc]])
                 ax.set_ylim((0, ymax*1.1))
-                ax.legend(["Blokcing rate values (K={}, P(MC)={:.2g}%, P(FV)={:.2g}%)".format(K, P_est_mc*100, P_est_fv*100),
-                           legend_label_mc,
-                           legend_label_fv])
+                ax.legend([legend_label_mc,
+                           legend_label_fv,
+                           "Blocking rate values"])
                 plt.suptitle("P(K) vs. {} in the Fleming Viot system (+/-{}SE, replications={})" \
                              .format(grp_axis.upper(), se_mult, replications))
 
@@ -940,27 +988,31 @@ class Test_QB_Particles(unittest.TestCase):
         grp_K = 'K'
         y_mc = 'PMC(K)'
         y_fv = 'PFV1(K)'  # Approximation 1
+        block_mc = 'EstPMC(K)'  # Reference values for comparing estimated values against: observed blocking time rate (calculated from the MC simulation)
+        analvars = [y_mc, y_fv, block_mc]
         replications = int(np.max(df['rep']))
         
         # Filter each analysis by group by the largest value of the other group variable
+        # (because the largest value of the parameter is supposed to be best in the sense that
+        # more particles are used in the simulation or the simulation is run for longer)
         all_nmeantimes = np.unique(df[grp_iter])
         nmeantimes_max = int(all_nmeantimes[-1])
         legend = "{} = {}".format(grp_iter, nmeantimes_max)
         df4part = df[ df[grp_iter] == nmeantimes_max ]
-        df_agg_byparam = df_agg_param(df4part, grp_K, grp_part)
+        df_agg_byparam = self.aggregation_bygroups(df4part, [grp_K, grp_part], analvars)
         plot(df_agg_byparam, grp_K, grp_part, legend, se_mult=2)
 
         all_nparticles = np.unique(df[grp_part])
         nparticles_max = int(all_nparticles[-1])
         legend = "{} = {}".format(grp_part, nparticles_max)
         df4iter = df[ df[grp_part] == nparticles_max ]
-        df_byiter = df_agg_param(df4iter, grp_K, grp_iter)
+        df_byiter = self.aggregation_bygroups(df4iter, [grp_K, grp_iter], analvars)
         plot(df_byiter, grp_K, grp_iter, legend, se_mult=2)
 
 
 # DM-2020/12/23: To change which portion of the below code to run, change the IF condition
 # to `== "__main__"` or to `!= "__main__"` accordingly
-if __name__ != "__main__":
+if __name__ == "__main__":
     #unittest.main()
 
     # DM-2020/08/24: Instead of using unittest.main(), use the following to test the FV system
@@ -969,19 +1021,64 @@ if __name__ != "__main__":
     # unittest.runner.TextTestResult (or similar)!! instead of simply returning the size
     # attribute of the `queue` object!!!
     test = Test_QB_Particles()
-    test.test_simpler_algorithm()
+    #test.test_algorithm()
 
+    finalize_type = FinalizeType.ABSORB_CENSORED
+    nparticles = 100
+    nmeantimes = 30
+    seed = 1717
+    plotFlag = True
+    log = False
+    est_mc,     proba_blocking_integral_mc, \
+                proba_blocking_laplacian_mc, \
+                integral_mc, \
+                gamma_mc, \
+                expected_survival_time_mc, \
+                prop_blocking_mc, \
+                params_mc = test.run(   start=0,
+                                        mean_lifetime=None,
+                                        reactivate=False,
+                                        finalize_type=finalize_type,
+                                        nparticles=nparticles,
+                                        nmeantimes=nmeantimes,
+                                        seed=seed,
+                                        plotFlag=plotFlag,
+                                        log=log)
+    est_fv,     proba_blocking_integral_fv, \
+                proba_blocking_laplacian_fv, \
+                integral_fv, \
+                gamma_fv, \
+                expected_survival_time_fv, \
+                prop_blocking_fv, \
+                params_fv = test.run(   start=1,
+                                        mean_lifetime=expected_survival_time_mc,
+                                        reactivate=True,
+                                        finalize_type=finalize_type,
+                                        nparticles=nparticles,
+                                        nmeantimes=nmeantimes,
+                                        seed=seed,
+                                        plotFlag=plotFlag,
+                                        log=log)
+
+    print("\n**** Summary of estimation ****")
+    assert est_mc.maxtime == est_fv.maxtime, "The maximum simulation time of the MC and of the FV process coincide"
+    #blocking_time = est_mc.get_all_total_blocking_time()
+    #survival_time = est_mc.get_all_total_survival_time()
+    #rate_blocking_time_mc = blocking_time / survival_time
+    #print("Blocking time (MC): {:.3f}%".format(rate_blocking_time_mc*100))
+    print("Blocking time (MC): {:.3f}%".format(prop_blocking_mc*100))
+    print("P(K) estimated by FV: {:.6f}%".format(proba_blocking_integral_fv*100))
 else:
     # Lines to execute "by hand" (i.e. at the Python prompt)
     test = Test_QB_Particles()
-    
+
     time_start = timer()
     results_convergence = test.analyze_convergence(
                                     finalize_type=FinalizeType.ABSORB_CENSORED,
                                     replications=5,
-                                    K_range=(5, 20, 2),
+                                    K_range=(5, 20, 2), 
                                     nparticles_range=(40, 160, 2),
-                                    nmeantimes_range=(10, 10, 2), 
+                                    nmeantimes_range=(10, 20, 2), 
                                     seed=1717,
                                     log=False)
     time_end = timer()
@@ -990,7 +1087,7 @@ else:
     print(results_convergence.head())
     print(results_convergence.tail())
 
-    print("Execution time: {:.1f} min".format(timedelta(time_end - time_start).seconds / 60))
+    print("Execution time: {:.1f} min".format((time_end - time_start) / 60))
 
     #filename = "../../RL-002-QueueBlocking/results/fv_approx1_convergence_rho={:.3f}.csv"
     #results_convergence.to_csv(filename.format(rho))
@@ -998,4 +1095,4 @@ else:
 
     # Plots
     test.plot_convergence_analysis_allvalues(results_convergence)
-    #test.plot_convergence_analysis_maxvalues(results_convergence)
+    test.plot_convergence_analysis_maxvalues(results_convergence)

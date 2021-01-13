@@ -136,6 +136,7 @@ class EstimatorQueueBlockingFlemingViot:
                                         # As a simple example to begin with, here it is defined as a vector of probabilities for each job class
                                         # where the probability is the assignment of the job class to each server, where the number of servers is assumed to be 3. 
         self.job_rates = job_rates      # This should be a list of arrival rates for each job class
+        self.nmeantimes = nmeantimes
         self.maxtime = nmeantimes * np.max( 1/np.array(self.job_rates) ) # The max simulation time is computed as a multiple (given by the user) of the mean arrival time of the lowest frequency job
         self.nservers = self.queue.getNServers()
 
@@ -261,6 +262,7 @@ class EstimatorQueueBlockingFlemingViot:
                                            't0': None,                  # Absorption /reactivation time
                                            'x': None,                   # Position after reactivation
                                            'particle number': P,        # Source particle (queue) from which reactivation happened (only used when reactivate=True)
+                                           'particle ID': P,            # Particle ID associated to the particle BEFORE reactivation (this may not be needed but still we store it in case we need it --at first I thought it would have been needed during the finalize() process but then I overcome this need with the value t0 already stored
                                            'reactivated number': None,  # Reactivated particle (queue) to which the source particle was reactivated (only used when reactivate=True)
                                            'reactivated ID': None       # Reactivated particle ID (index of this info_particle list) 
                                            }) ]
@@ -355,12 +357,16 @@ class EstimatorQueueBlockingFlemingViot:
 
 
         #--------------------------- Last jobs and services information -----------------------
-        # Times of the last jobs arrived for each class and of the last jobs served by each server
+        # Times (ABSOLUTE) of the last jobs arrived for each class and of the last jobs served by each server
         # These are needed in order to compute the ABSOLUTE time of the next arriving job of each class
         # and of the next served job for each server, since the arrival and service times are generated
-        # RELATIVE to the time of the latest respective event. 
-        self.times_last_jobs = np.zeros((self.N, len(self.job_rates)))
-        self.times_last_services = np.zeros((self.N, self.nservers))
+        # RELATIVE to the time of the latest respective event.
+        # The times of the last jobs arrived per class is also used to decide WHEN new arriving job times
+        # should be generated and thus make the process more efficient (as opposed to generating new arriving job times
+        # at every iteration (i.e. at every call to generate_one_iteration()) which may quickly fill
+        # up the server queues with times that will never be used, significantly slowing down the simulation process)        
+        self.times_last_jobs = np.zeros((self.N, len(self.job_rates)), dtype=float)
+        self.times_last_services = np.zeros((self.N, self.nservers), dtype=float)
         #--------------------------- Last jobs and services information -----------------------
 
 
@@ -422,9 +428,9 @@ class EstimatorQueueBlockingFlemingViot:
         #----------------------- Information about blocking and unblocking --------------------
 
 
-        # Time of last change of the whole system of particles
-        # TODO: Update this value as the simulation goes forward
-        self.time_last_change_of_system = 0.0
+        # Latest time at which we know the state of the system for each particle.
+        # This means, that for all times <= this time we now precisely the size of ALL servers in the system.
+        self.times_latest_known_state = np.zeros((self.N,), dtype=float)
 
         if self.LOG:
             print("Particle system with {} particles has been reset:".format(self.N))
@@ -543,6 +549,7 @@ class EstimatorQueueBlockingFlemingViot:
                 if self.LOG:
                     print("\n++++++ P={}: APPLY an event ++++++".format(P))
                 self._apply_next_event(P, server_next_event, type_next_event, time_next_event)
+                self.assertSystemConsistency(P)
 
         return False
 
@@ -581,37 +588,62 @@ class EstimatorQueueBlockingFlemingViot:
         - The times of the next birth events by server is updated when the generated birth event is the first job
         assigned to the server's queue. Otherwise, the time of the next birth event in the sever is kept.
         """
-        # Generate a birth time for each job CLASS and store them as ABSOLUTE values
-        birth_times_relative_for_jobs = np.random.exponential( 1/np.array(self.job_rates) )
-        time_last_job = copy.deepcopy(self.times_last_jobs[P])
-        self.times_last_jobs[P] += birth_times_relative_for_jobs 
+        def are_all_next_birth_times_smaller_than_all_latest_generated_jobclass_times(P):
+            resp = True
+            smallest_time_last_jobclass = np.min(self.times_last_jobs[P])
+            for server in range(self.nservers):
+                if len(self.times_next_events_in_queue[P][server]) == 0 or \
+                   self.times_next_events_in_queue[P][server][0] > smallest_time_last_jobclass:
+                    resp = False
+                    break
+            return resp
 
-        # Assign the job class associated to each birth time to one of the servers based on the policy
-        job_classes = range( len(self.job_rates) )
-        servers = range(self.nservers)
-        for job_class in job_classes:
-            # IMPORTANT: The assigned server can be repeated for different job classes
-            # => we might have a queue of jobs for a particular server (which is handled here)
-            assigned_server = np.random.choice(servers, p=self.policy[job_class])
-            assert assigned_server < self.nservers, \
-                    "The assigned server ({}) is one of the possible servers [0, {}]".format(assigned_server, self.nservers-1)
+        if False:
+            print("P={}".format(P))
+            print("times last jobs[P]: {}".format(self.times_last_jobs[P]))
+            print("times next events in queue: {}".format(self.times_next_events_in_queue[P]))
+        if not are_all_next_birth_times_smaller_than_all_latest_generated_jobclass_times(P):
+            # The time of the first event in at least one of the server queues is LARGER than the
+            # SMALLEST time already generated for the arriving job classes for this particle
+            # This means that at least one of the times generated for the NEXT arriving job class
+            # could be SMALLER than the time of the next event to be born in a server queue, making
+            # that event to be positioned SECOND in the queue of the server assigned to the job class
+            # (i.e. behind the newly generated time for the next arriving job class, assuming it is assigned
+            # to that server, of course). And this implies that the next event to be born would be
+            # born earlier than the event that is first in the queue. 
+            # => Generate a birth time for ALL the job CLASSES and assign them to a server
 
-            # Insert the new job time in order into the server's queue containing job birth times
-            # Note that the order of the jobs is NOT guaranteed because the server's queue may contain
-            # jobs of different classes, whose arrival times are generated independently from each other.
-            idx_insort, _ = insort(self.times_next_events_in_queue[P][assigned_server], self.times_last_jobs[P][job_class])
-            self.jobclasses_next_events_in_queue[P][assigned_server].insert(idx_insort, job_class)
+            # Generate the next arriving job class times
+            birth_times_relative_for_jobs = np.random.exponential( 1/np.array(self.job_rates) )
+            time_last_job = copy.deepcopy(self.times_last_jobs[P])
+            self.times_last_jobs[P] += birth_times_relative_for_jobs 
+
+            # Assign the job class associated to each birth time to one of the servers based on the policy
+            job_classes = range( len(self.job_rates) )
+            servers = range(self.nservers)
+            for job_class in job_classes:
+                # IMPORTANT: The assigned server can be repeated for different job classes
+                # => we might have a queue of jobs for a particular server (which is handled here)
+                assigned_server = np.random.choice(servers, p=self.policy[job_class])
+                assert assigned_server < self.nservers, \
+                        "The assigned server ({}) is one of the possible servers [0, {}]".format(assigned_server, self.nservers-1)
+    
+                # Insert the new job time in order into the server's queue containing job birth times
+                # Note that the order of the jobs is NOT guaranteed because the server's queue may contain
+                # jobs of different classes, whose arrival times are generated independently from each other.
+                idx_insort, _ = insort(self.times_next_events_in_queue[P][assigned_server], self.times_last_jobs[P][job_class])
+                self.jobclasses_next_events_in_queue[P][assigned_server].insert(idx_insort, job_class)
+                if self.LOG:
+                    print("job class: {}".format(job_class))
+                    print("job time (PREVIOUS): {}".format(time_last_job[job_class]))
+                    print("job time (RELATIVE): {}".format(birth_times_relative_for_jobs[job_class]))
+                    print("job time (ABSOLUTE): {}".format(self.times_last_jobs[P][job_class]))
+                    print("assigned server: {}".format(assigned_server))
+                    print("queue of assigned server: {}".format(self.times_next_events_in_queue[P][assigned_server]))
+    
             if self.LOG:
-                print("job class: {}".format(job_class))
-                print("job time (PREVIOUS): {}".format(time_last_job[job_class]))
-                print("job time (RELATIVE): {}".format(birth_times_relative_for_jobs[job_class]))
-                print("job time (ABSOLUTE): {}".format(self.times_last_jobs[P][job_class]))
-                print("assigned server: {}".format(assigned_server))
-                print("queue of assigned server: {}".format(self.times_next_events_in_queue[P][assigned_server]))
-
-        if self.LOG:
-            print("currently assigned job classes by server: {}".format(self.jobclasses_next_events_in_queue[P]))        
-            print("currently assigned job times by server: {}".format(self.times_next_events_in_queue[P]))        
+                print("currently assigned job classes by server: {}".format(self.jobclasses_next_events_in_queue[P]))        
+                print("currently assigned job times by server: {}".format(self.times_next_events_in_queue[P]))        
 
         # Assign the birth times for each server by picking the first job in each server's queue 
         for server in range(self.nservers):
@@ -631,20 +663,22 @@ class EstimatorQueueBlockingFlemingViot:
         - The times of the next service event (death event) by server is updated when the generated death event
         is the first service time assigned to the server. Otherwise, the time of the next death event in the sever is kept. 
         """
-        # Generate a death time for each server and store them as ABSOLUTE values
-        death_times_relative = self.particles[P].generate_event_times(Event.DEATH)
-        self.times_last_services[P] += death_times_relative 
-
+        # Generate a death time for each server whose queue is empty and store them as ABSOLUTE values
         for server in range(self.nservers):
-            # Add the death time to the list of service times already generated for each server
-            # (which by construction are sorted increasingly)
-            self.times_next_services[P][server] += [ self.times_last_services[P][server] ]
+            if len(self.times_next_services[P][server]) == 0:
+                # Generate the next death time for the server
+                death_time_relative = self.particles[P].generate_event_time(Event.DEATH, server)
+                self.times_last_services[P][server] += death_time_relative
 
-            # Update the time of the next DEATH event
-            # (which DOESN'T change from the value already stored there
-            # if the list of death times was not empty before including
-            # the death time just generated for the server)
-            self.times_next_death_events[P][server] = self.times_next_services[P][server][0]
+                # Add the death time to the list of service times already generated for each server
+                # (which by construction are sorted increasingly)
+                self.times_next_services[P][server] += [ self.times_last_services[P][server] ]
+    
+                # Update the time of the next DEATH event
+                # (which DOESN'T change from the value already stored there
+                # if the list of death times was not empty before including
+                # the death time just generated for the server)
+                self.times_next_death_events[P][server] = self.times_next_services[P][server][0]
 
     def _find_next_event_times(self, P):
         "Finds the next event times for the given particle"
@@ -713,6 +747,9 @@ class EstimatorQueueBlockingFlemingViot:
             if self.LOG:
                 print("Job service times list {} (the first job will be removed as server finished processing it): {}".format(server, self.times_next_services[P][server]))
             self.times_next_services[P][server].pop(0)
+
+        # Update the latest time we know the state of the system
+        self.times_latest_known_state[P] = time_of_event
 
         # Increase the iteration because the iteration is associated to the application of a new event in ONE server
         self.iterations[P] += 1
@@ -874,8 +911,9 @@ class EstimatorQueueBlockingFlemingViot:
                 "\n(0<=P<{}, 0<=Q<{}) (P={}, Q={})" \
                 .format(self.N, self.N, P, Q)
 
-        # Particle ID in the info_particles list associated to particle number Q
+        # Particle IDs in the info_particles list associated to particle numbers P and Q
         # to which the absorbed particle P is reactivated.
+        p = self.particle_reactivation_ids[P]
         q = self.particle_reactivation_ids[Q]
         assert self.isValidParticleId(q), "The particle ID is valid (0<=q<{}) ({})" \
                 .format(len(self.info_particles), q)
@@ -890,6 +928,7 @@ class EstimatorQueueBlockingFlemingViot:
                                        't0': t,
                                        'x': position_Q,
                                        'particle number': P,
+                                       'particle ID': p, 
                                        'reactivated number': Q,
                                        'reactivated ID': q}) ]
 
@@ -1034,7 +1073,7 @@ class EstimatorQueueBlockingFlemingViot:
             # => Store the information about the absorption
             if self.LOG: #True:
                 print("P={}: STOPPED BY ABSORPTION (latest buffer change time: {:.3f} < {:.3f}, buffer size={})".format(P, self.times_buffer[P], self.maxtime, self.particles[P].getBufferSize()))
-            _, _, _, time_of_event = self.particles[P].getMostRecentEventInfo()
+            time_of_event = self.particles[P].getMostRecentEventTime()
             absorption_time = time_of_event
             self._update_info_absorption_times(P, absorption_time, self.iterations[P])
             self._update_survival_time_from_zero(P, absorption_time)
@@ -1202,6 +1241,9 @@ class EstimatorQueueBlockingFlemingViot:
                     if self.LOG: #True:
                         print("...{} particle p={} (P={})".format(finalize_process, p, P))
                     # Simply remove the particle from the analysis
+                    # But first get the time of absorption leading to the reactivation of the
+                    # particle ID to remove so that we set the latest time with info about P below
+                    time_latest_absorption_P = self.info_particles[p - nremoved]['t0']
                     self.info_particles.pop(p - nremoved)
                     nremoved += 1
                         # NOTE that no update needs to be done to the quantities
@@ -1210,6 +1252,15 @@ class EstimatorQueueBlockingFlemingViot:
                         # for this particle ID (recall that, when reactivate=True,
                         # there is at most ONE absorption per particle ID,
                         # and when it occurs, it's the last event to occur).
+
+                    # Update the latest time of known state for particle P to the absorption time
+                    # leading to the particle ID p just removed
+                    if time_latest_absorption_P is not None:
+                        self.times_latest_known_state[P] = time_latest_absorption_P
+                    else:
+                        self.times_latest_known_state[P] = 0.0
+                    if self.LOG:
+                        print("REMOVAL: Latest absorption time set for particle P={}: {:.3f}".format(P, self.times_latest_known_state[P]))
                 else:
                     if self.LOG:
                         print("...{} the active tail of particle P={}".format(finalize_process, P))
@@ -1227,7 +1278,20 @@ class EstimatorQueueBlockingFlemingViot:
                     # ONLY when there is an absorption, and this already happened
                     # at the latest absorption time. Since we are removing everything
                     # that happened after that, we do not need to update neither
-                    # ktimes0_sum, nor ktimes0_n, nor times0.   
+                    # ktimes0_sum, nor ktimes0_n, nor times0.
+
+                    # Update the latest time of known state for particle P to the absorption time
+                    # leading to the particle ID p just removed
+                    if len(dict_info['E']) > 0:
+                        assert dict_info['E'][-1] == EventType.ABSORPTION, \
+                                "The last special event stored for particle P={} in info_particles after removal of the part of the trajectory still active is an ABSORPTION ({})" \
+                                .format(P, dict_info['E'][-1])                             
+                        self.times_latest_known_state[P] = dict_info['t'][-1]
+                    else:
+                        self.times_latest_known_state[P] = 0.0
+                    if self.LOG:
+                        print("REMOVAL: Latest absorption time set for particle P={}: {:.3f}".format(P, self.times_latest_known_state[P]))
+
                 # Flag the particle as inactive (as the latest censored trajectory was removed)
                 self.is_particle_active[P] = False
 
@@ -1735,9 +1799,10 @@ class EstimatorQueueBlockingFlemingViot:
         # Note: When reactivation is used, the following estimate is not really accurate because the particles never start at position 0.
         # For that case, I used to use the following calculation, which doesn't really make sense:
         # self.expected_survival_time = np.mean([self.particles[P].getTimesLastEvents() for P in range(self.N)])
-        print("Estimating expected survival time...")
-        print("ktimes0_sum: {}".format(self.ktimes0_sum))
-        print("ktimes0_n: {}".format(self.ktimes0_n))
+        if False:
+            print("Estimating expected survival time...")
+            print("ktimes0_sum: {}".format(self.ktimes0_sum))
+            print("ktimes0_n: {}".format(self.ktimes0_n))
         self.expected_survival_time = np.sum(self.ktimes0_sum) / np.sum(self.ktimes0_n)
 
         return self.expected_survival_time
@@ -2109,8 +2174,12 @@ class EstimatorQueueBlockingFlemingViot:
             self.raiseErrorInvalidParticle(P)
             return None
 
-    def get_time_last_change_of_system(self):
-        return self.time_last_change_of_system
+    def get_times_latest_known_state(self):
+        "Returns the time of the latest known state of the system (i.e. over all particles)"
+        return np.min(self.times_latest_known_state)
+
+    def get_time_latest_known_state_for_particle(self, P):
+        return self.times_latest_known_state[P]
 
     def get_counts_particles_alive_by_elapsed_time(self):
         return self.counts_alive
@@ -2202,24 +2271,24 @@ class EstimatorQueueBlockingFlemingViot:
 
     #-------------- Helper functions
     def setup(self):
+        # Note: Cannot use {:.3f} as format for the mean life time below because its value may be None and we get an error of unsupported format
         params_str = "***********************" \
                     "\nK = {}" \
-                    "\nlambda = {:.3f}" \
-                    "\nmu = {:.3f}" \
-                    "\nrho = {:.3f}" \
-                    "\nnparticles = {}" \
+                    "\njob arriving rates = {}" \
+                    "\njob service rates = {}" \
+                    "\n# particles = {}" \
+                    "\n# servers = {}" \
                     "\nstart = {}" \
                     "\nmean_lifetime = {}" \
                     "\nreactivate = {}" \
                     "\nfinalize_type = {}" \
-                    "\nmaxtime = {:.3f}" \
+                    "\nnmeantimes = {:.1f} (maxtime = {:.1f})" \
                     "\nseed = {}" \
                     "\n***********************" \
                     .format(self.queue.getCapacity(),
-                            self.queue.getBirthRate(), self.queue.getDeathRate(),
-                            self.queue.getBirthRate() / self.queue.getDeathRate(),
-                            self.N, self.START, self.mean_lifetime,
-                            self.reactivate, self.finalize_type.name, self.maxtime, self.seed)
+                            self.job_rates, self.queue.getDeathRates(),
+                            self.N, self.nservers, self.START, self.mean_lifetime,
+                            self.reactivate, self.finalize_type.name, self.nmeantimes, self.maxtime, self.seed)
         return params_str
 
     def isLastIteration(self):
@@ -2276,40 +2345,55 @@ class EstimatorQueueBlockingFlemingViot:
                 return False
         return True
 
-    def assertSystemConsistency(self, particle_number=None, time=None):
-        is_state_consistent_for_particle = \
-            lambda P: self.positions_buffer[P] == self.particles[P].getBufferSize() and self.positions_buffer[P] == self.all_positions_buffer[P][-1] and all(self.particles[P].getTimesLastEvents() == [self.all_times_by_server[P][server][-1] for server in range(self.nservers)])
+    def assertSystemConsistency(self, P):
+        """
+        Checks whether the information stored in the particles coincides with the information
+        stored in the attributes containing the current and historical positions and times
+        as of the latest time at which we known state of the system.
+        
+        The information checked is:
+        - at buffer level:
+            - particle's buffer size coincides with current buffer size stored in the attribute.
+            - time of particle's most recent change coincides with time of current buffer size.
+            - current buffer size coincides with latest historical buffer size.
+            - time of current buffer size coincides with latest historical time at which the buffer changes.
+        - at server level:
+            - particle's server sizes coincide with current server sizes stored in the attribute.
+            - times of particle's most recent changes in servers coincide with the times of current change by server stored in the attribute.
+            - current particle's server sizes coincide with latest historical server sizes.
+            - time of current particle's server sizes coincide with latest historical times at which server sizes change.
+        """
+        def is_state_consistent_for_particle(P):
+            return  self.particles[P].getBufferSize()           == self.positions_buffer[P] and \
+                    self.particles[P].getMostRecentEventTime()  == self.times_buffer[P] and \
+                    self.positions_buffer[P]                    == self.all_positions_buffer[P][-1] and \
+                    self.times_buffer[P]                        == self.all_times_buffer[P][-1] and \
+                    True and \
+                    all(self.particles[P].getServerSizes()      == self.positions_by_server[P]) and \
+                    all([np.isnan(self.times_by_server[P][server]) or self.particles[P].getTimeLastEvent(server) == self.times_by_server[P][server] for server in range(self.nservers)]) and \
+                    all([self.positions_by_server[P][server]    == self.all_positions_by_server[P][server][-1] for server in range(self.nservers)]) and \
+                    all([np.isnan(self.times_by_server[P][server]) or self.times_by_server[P][server] == self.all_times_by_server[P][server][-1] for server in range(self.nservers)])
 
-        if time is None:
-            time_str = "time last change={:.3f}".format(self.time_last_change_of_system)
-        else:
-            time_str = "time={:.3f}".format(time)
-
-        consistent_state = True
-        if particle_number is None:
-            for P in range(self.N):
-                consistent_state = is_state_consistent_for_particle(P)              
-                if not consistent_state:
-                    particle_number = P
-                    break
-            if not consistent_state:
-                self.plot_trajectories_by_server(particle_number)
-            assert consistent_state, \
-                    "Iter {}, {}: The system is NOT in a consistent state at least for particle {}" \
-                    .format(self.iter, time_str, particle_number)           
-        else:
-            consistent_state = is_state_consistent_for_particle(particle_number)
-            if not consistent_state:
-                self.plot_trajectories_by_server(particle_number)
-            assert consistent_state, \
-                    "Iter {}, {}: The system is NOT in a consistent state for particle {}" \
-                    "\n\tpositions[{}]={} vs. particles[{}].size={}" \
-                    "\n\tpositions[{}]={} vs. all_positions[{}][-1]={}" \
-                    "\n\tparticles[{}].TimeLastEvent={} vs. all_times[{}][-1]={}" \
-                    .format(self.iter, time_str, particle_number,
-                            particle_number, self.positions_buffer[particle_number], particle_number, self.particles[particle_number].size,
-                            particle_number, self.positions_buffer[particle_number], particle_number, self.all_positions[particle_number][-1],
-                            particle_number, self.particles[particle_number].getTimesLastEvents(), particle_number, self.all_times[particle_number][-1])         
+        consistent_state = is_state_consistent_for_particle(P)
+        assert consistent_state, \
+                "t={:.3f}: The system is NOT in a consistent state for particle {}" \
+                "\n\tparticles[{}].size={}      vs. positions_buffer[{}]={}" \
+                "\n\tparticles[{}].time={:.3f}  vs. times_buffer[{}]={:.3f}" \
+                "\n\tpositions_buffer[{}]={}    vs. all_positions_buffer[{}][-1]={}" \
+                "\n\ttimes_buffer[{}]={:.3f}    vs. all_times_buffer[{}][-1]={:.3f}" \
+                "\n\tparticles[{}].positions={} vs. positions_by_server[{}]={}" \
+                "\n\tparticles[{}].times={}     vs. times_by_server[{}]={}" \
+                "\n\tpositions_by_server[{}]={} vs. all_positions_by_server[{}][-1]={}" \
+                "\n\ttimes_by_server[{}]={} vs. all_times_by_server[{}][-1]={}" \
+                .format(self.times_latest_known_state[P], P,
+                        P, self.particles[P].getBufferSize(), P, self.positions_buffer[P],
+                        P, self.particles[P].getMostRecentEventTime(), P, self.times_buffer[P],
+                        P, self.positions_buffer[P], P, self.all_positions_buffer[P][-1],
+                        P, self.times_buffer[P], P, self.all_times_buffer[P][-1],
+                        P, self.particles[P].getServerSizes(), P, self.positions_by_server[P],
+                        P, self.particles[P].getTimesLastEvents(), P, self.times_by_server[P],
+                        P, self.positions_by_server[P], P, [self.all_positions_by_server[P][server][-1] for server in range(self.nservers)],
+                        P, self.times_by_server[P], P, [self.all_times_by_server[P][server][-1] for server in range(self.nservers)])
 
     def raiseErrorInvalidParticle(self, P):
         raise ValueError("Wrong particle number: {}. Valid values are integers between 0 and {}.\n".format(P, self.N-1))
