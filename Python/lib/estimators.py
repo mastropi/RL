@@ -15,6 +15,7 @@ import numpy as np
 from numpy import printoptions
 import pandas as pd
 from matplotlib import pyplot as plt, cm    # cm is for colormaps (e.g. cm.get_cmap())
+from timeit import default_timer as timer
 
 from . import queues
 from .queues import Event, GenericQueue
@@ -454,14 +455,19 @@ class EstimatorQueueBlockingFlemingViot:
         """
         self.reset()
 
+        time_start = timer()
+        print("Generating trajectories for each particle until first absorption...")
         self.generate_trajectories_at_startup()
+        time1 = timer()
         # Check trajectories
         if False:
             for P in range(self.N):
                 self.plot_trajectories_by_server(P)
             self.plot_trajectories_by_particle()
 
+        print("Generating trajectories for each particle until END OF SIMULATION TIME (T={})...".format(self.maxtime))
         self.generate_trajectories_until_end_of_simulation()
+        time2 = timer()
         # Check trajectories
         if False:
             if False:
@@ -477,16 +483,27 @@ class EstimatorQueueBlockingFlemingViot:
                     print(self.info_particles[p])
                 input("Press ENTER...")
 
+        print("Finalizing and counting...")
         self.finalize()
         self.compute_counts()
+        time3 = timer()
 
+        print("Estimating blocking probabilty via Approx. 1 & 2...")
         proba_blocking_integral, proba_blocking_laplacian, integral, gamma, expected_survival_time = \
             self.estimate_proba_blocking()
         self.proba_blocking_integral = proba_blocking_integral
         self.proba_blocking_laplacian = proba_blocking_laplacian
+        time_end = timer()
 
         if self.plotFlag:
             self.plot_trajectories_by_particle()
+
+        print("Total simulation time: {:.1f} min".format((time_end - time_start) / 60))
+        print("Split as:")
+        print("\tSimulation of initial trajectories until first absorption: {:.1f} min".format((time1 - time_start) / 60))
+        print("\tSimulation of trajectories until end of simulation: {:.1f} min".format((time2 - time1) / 60))
+        print("\tCompute counts: {:.1f} min".format((time3 - time2) / 60))
+        print("\tEstimate probability (Approx. 1 and 2): {:.1f} min".format((time_end - time3) / 60))
 
         return self.proba_blocking_integral, self.proba_blocking_laplacian, integral, gamma, expected_survival_time
 
@@ -823,9 +840,17 @@ class EstimatorQueueBlockingFlemingViot:
 
     def generate_trajectories_until_end_of_simulation(self):
         "Generates the trajectories until the end of the simulation time is reached"
+        step_fraction_process_to_report = 0.1
+        next_fraction_process_to_report = step_fraction_process_to_report
+        print("...completed {:.1f}%".format(self.get_time_latest_known_state() / self.maxtime * 100))
         while len(self.dict_info_absorption_times['t']) > 0:
-            assert self.dict_info_absorption_times['t'] == sorted(self.dict_info_absorption_times['t']), \
-                "The absorption times are sorted: {}".format(self.dict_info_absorption_times['t'])
+            fraction_maxtime_completed = self.get_time_latest_known_state() / self.maxtime
+            if fraction_maxtime_completed > next_fraction_process_to_report:
+                print("...completed {:.0f}%".format(next_fraction_process_to_report*100))
+                next_fraction_process_to_report += step_fraction_process_to_report
+            if False:
+                assert self.dict_info_absorption_times['t'] == sorted(self.dict_info_absorption_times['t']), \
+                    "The absorption times are sorted: {}".format(self.dict_info_absorption_times['t'])
             if self.LOG:
                 with printoptions(precision=3, suppress=True):
                     print("\n******** REST OF SIMULATION STARTS (#absorption times left: {} **********".format(len(self.dict_info_absorption_times['t'])))
@@ -1416,7 +1441,7 @@ class EstimatorQueueBlockingFlemingViot:
                             .format(event_type_prev.name, p, P, t)
                     self.insert_relative_time(t, activation_times, event_type)
                     activation_times = []                    
-                    if True:
+                    if False:
                         # We may want to disable this assertion if they take too long
                         assert sorted(self.sk) == list(np.unique(self.sk)), \
                                 "The list of survival time segments contains unique values" \
@@ -1430,7 +1455,7 @@ class EstimatorQueueBlockingFlemingViot:
                         assert event_type_prev == EventType.BLOCK, \
                                 "The event coming before an UNBLOCK event is a BLOCK event ({})" \
                                 .format(event_type_prev.name)
-                    if True:
+                    if False:
                         # We may want to disable this assertion if they take too long
                         assert sorted(self.sbu) == list(np.unique(self.sbu)), \
                                 "The list of block/unblock time segments contains unique values" \
@@ -1596,9 +1621,10 @@ class EstimatorQueueBlockingFlemingViot:
         
         assert counts_alive is not None and len(counts_alive) > 0, \
                     "The input list is not None and has at least 1 element".format(counts_alive)
-        # I comment out the following assertion because sorting takes time...
-        #assert sorted(counts_alive, reverse=True) == counts_alive, \
-        #            "The input array with the number of particles alive measured at every death time is sorted non-increasingly"
+        if False:
+            # Disable this assertion if it takes too much time...
+            assert sorted(counts_alive, reverse=True) == counts_alive, \
+                        "The input array with the number of particles alive measured at every death time is sorted non-increasingly"
         assert counts_alive[0] > 0, "The number of particles alive at t=0 is positive ({})".format(counts_alive[0])
 
         return [n_survived / counts_alive[0] for n_survived in counts_alive]        
@@ -1866,7 +1892,7 @@ class EstimatorQueueBlockingFlemingViot:
             raise ValueError("The simulation has not been finalized..." \
                           "\nThe estimation of the blocking probability cannot proceed." \
                           "\nRun first the finalize() method and rerun.")
-            
+
         #-- Compute the building blocks of the blocking probability estimate which are stored in the object
         # This includes:
         # - self.t: time at which an event occurs
@@ -2174,7 +2200,7 @@ class EstimatorQueueBlockingFlemingViot:
             self.raiseErrorInvalidParticle(P)
             return None
 
-    def get_times_latest_known_state(self):
+    def get_time_latest_known_state(self):
         "Returns the time of the latest known state of the system (i.e. over all particles)"
         return np.min(self.times_latest_known_state)
 

@@ -39,7 +39,7 @@ class Test_QB_Particles(unittest.TestCase):
         self.log = False
         self.rate_birth = 1.2
         self.rate_death = [5, 4, 3] #1.4
-        self.capacity = 5
+        self.capacity = 40
         
         # One server
         #self.nservers = 1
@@ -343,7 +343,7 @@ class Test_QB_Particles(unittest.TestCase):
                 "All counts in the counts of blocked particles list are non-negative ({})" \
                 .format(counts_particles_blocked_by_elapsed_time)
 
-        print("\nLatest time the system was updated to a known state: {:.3f}".format( np.min(est.get_times_latest_known_state()) ))
+        print("\nLatest time the system was updated to a known state: {:.3f}".format( est.get_time_latest_known_state() ))
         times_last_event_by_particle = est.get_all_times_last_event()
         print("Range of latest event times in all {} particles in the system: [{:.3f}, {:.3f}]" \
               .format(est.N, np.min(times_last_event_by_particle), np.max(times_last_event_by_particle)))
@@ -484,58 +484,72 @@ class Test_QB_Particles(unittest.TestCase):
         print("Simulating...")
         proba_blocking_integral, proba_blocking_laplacian, integral, gamma, expected_survival_time = est.simulate()
 
-        # Estimate the probability of blocking in the Monte Carlo case for benchmarking
-        # as the proportion of time blocked over all elapsed time (= total survival time).
-        print("Estimating blocking time rate over all {} particles...".format(nparticles))
-        all_total_survival_time = est.get_all_total_survival_time()
-        all_total_blocking_time = est.get_all_total_blocking_time()
-        if not reactivate:
-            prop_blocking_time = all_total_blocking_time / all_total_survival_time
+        if True:
+            # Estimate the probability of blocking in the Monte Carlo case for benchmarking
+            # as the proportion of time blocked over all elapsed time (= total survival time).
+            print("Estimating blocking time rate over all {} particles (K={})...".format(nparticles, self.capacity))
+
+            print("\tComputing survival time over all {} particles...".format(nparticles))
+            ts1 = timer()
+            all_total_survival_time = est.get_all_total_survival_time()
+            ts2 = timer()
+            print("\t\ttook {:.1f} sec".format((ts2 - ts1)))
+
+            print("\tComputing blocking time over all {} particles...".format(nparticles))
+            tb1 = timer()
+            all_total_blocking_time = est.get_all_total_blocking_time()
+            tb2 = timer()
+            print("\t\ttook {:.1f} sec".format((tb2 - tb1)))
+
+            if not reactivate:
+                prop_blocking_time = all_total_blocking_time / all_total_survival_time
+            else:
+                prop_blocking_time = None
+    
+            if False:
+                print("\n\nRelevant events for each particle ID:")
+                for P in range(len(est.info_particles)):
+                    print("Particle ID P={} (P={} --> Q={} (q={})" \
+                          .format(P,
+                                  est.info_particles[P]['particle number'],
+                                  est.info_particles[P]['reactivated number'], 
+                                  est.info_particles[P]['reactivated ID']),
+                          end="")
+                    if est.info_particles[P]['t0'] is not None:
+                        print(" -> x={} @t={:.3f} @iter={})" \
+                              .format(est.info_particles[P]['x'], est.info_particles[P]['t0'], est.info_particles[P]['iter']))
+                    else:
+                        print(")")
+                    print(np.c_[est.info_particles[P]['t'], est.info_particles[P]['E']])
+                    print("\n")
+    
+            if True: #log and not reactivate:
+                if False:
+                    print("Total blocking time by particle:")
+                    blocking_periods = est.get_all_blocking_periods()
+                    survival_periods = est.get_all_survival_periods()
+                    for P in range(est.N):
+                        print("\n\nParticle {}".format(P))
+                        print("Block periods:")
+                        print(blocking_periods[P])
+        
+                        print("\nSurvival periods:")
+                        print(survival_periods[P])
+    
+                        total_blocking_time = est.get_total_blocking_time(P)
+                        total_survival_time = est.get_total_survival_time(P)
+                        print("")
+                        print("Total blocking time = {:.3f}".format(total_blocking_time))
+                        print("Total survival time = {:.3f}".format(total_survival_time))
+                        print("% blocking time = {:.1f}%".format(total_blocking_time / total_survival_time * 100))
+                        print("\n")
+                print("\nTotal blocking time for ALL particles:")
+                print("Total blocking time (all particles) = {:.3f}".format(all_total_blocking_time))
+                print("Total survival time (all particles) = {:.3f}".format(all_total_survival_time))
+                print("% blocking time = {:.1f}%".format(all_total_blocking_time / all_total_survival_time * 100))
+                print("\n")
         else:
             prop_blocking_time = None
-
-        if False:
-            print("\n\nRelevant events for each particle ID:")
-            for P in range(len(est.info_particles)):
-                print("Particle ID P={} (P={} --> Q={} (q={})" \
-                      .format(P,
-                              est.info_particles[P]['particle number'],
-                              est.info_particles[P]['reactivated number'], 
-                              est.info_particles[P]['reactivated ID']),
-                      end="")
-                if est.info_particles[P]['t0'] is not None:
-                    print(" -> x={} @t={:.3f} @iter={})" \
-                          .format(est.info_particles[P]['x'], est.info_particles[P]['t0'], est.info_particles[P]['iter']))
-                else:
-                    print(")")
-                print(np.c_[est.info_particles[P]['t'], est.info_particles[P]['E']])
-                print("\n")
-
-        if True: #log and not reactivate:
-            if False:
-                print("Total blocking time by particle:")
-                blocking_periods = est.get_all_blocking_periods()
-                survival_periods = est.get_all_survival_periods()
-                for P in range(est.N):
-                    print("\n\nParticle {}".format(P))
-                    print("Block periods:")
-                    print(blocking_periods[P])
-    
-                    print("\nSurvival periods:")
-                    print(survival_periods[P])
-
-                    total_blocking_time = est.get_total_blocking_time(P)
-                    total_survival_time = est.get_total_survival_time(P)
-                    print("")
-                    print("Total blocking time = {:.3f}".format(total_blocking_time))
-                    print("Total survival time = {:.3f}".format(total_survival_time))
-                    print("% blocking time = {:.1f}%".format(total_blocking_time / total_survival_time * 100))
-                    print("\n")
-            print("\nTotal blocking time for ALL particles:")
-            print("Total blocking time (all particles) = {:.3f}".format(all_total_blocking_time))
-            print("Total survival time (all particles) = {:.3f}".format(all_total_survival_time))
-            print("% blocking time = {:.1f}%".format(all_total_blocking_time / all_total_survival_time * 100))
-            print("\n")
 
         #rho = self.rate_birth / self.rate_death
         K = self.capacity
@@ -548,7 +562,7 @@ class Test_QB_Particles(unittest.TestCase):
         #print("Theoretical value (rho^K / sum(rho^i)) (rho={:.3f}, K={}): {:.3f}%" \
         #      .format(rho, K,
         #              rho**K / np.sum([ rho**i for i in range(K+1) ]) *100))
-        print("Last time the system has a known state: {:.3f}".format( np.min(est.get_times_latest_known_state()) ))
+        print("Last time the system has a known state: {:.3f}".format( est.get_time_latest_known_state() ))
 
         print("\n(END) Simulation setup: (REACTIVATE={})".format(reactivate))
         print(est.setup())
@@ -1024,7 +1038,7 @@ if __name__ == "__main__":
     #test.test_algorithm()
 
     finalize_type = FinalizeType.ABSORB_CENSORED
-    nparticles = 100
+    nparticles = 500
     nmeantimes = 30
     seed = 1717
     plotFlag = True
@@ -1066,7 +1080,8 @@ if __name__ == "__main__":
     #survival_time = est_mc.get_all_total_survival_time()
     #rate_blocking_time_mc = blocking_time / survival_time
     #print("Blocking time (MC): {:.3f}%".format(rate_blocking_time_mc*100))
-    print("Blocking time (MC): {:.3f}%".format(prop_blocking_mc*100))
+    if prop_blocking_mc is not None:
+        print("Blocking time (MC): {:.3f}%".format(prop_blocking_mc*100))
     print("P(K) estimated by FV: {:.6f}%".format(proba_blocking_integral_fv*100))
 else:
     # Lines to execute "by hand" (i.e. at the Python prompt)
