@@ -392,20 +392,25 @@ class EstimatorQueueBlockingFlemingViot:
         #------------------------- Absorption times and active particles ----------------------
 
 
-        #----------------------- Information for survival time calculation --------------------
+        #----------------- Attributes for survival and blocking time calculation --------------
         # Arrays that are used to estimate the expected survival time (time to killing from position 0)
         if start_event_type == EventType.ABSORPTION:
             # Latest times the particles changed to position 0 is 0.0 as they start at position 0
             self.times0 = np.zeros(self.N, dtype=float)
         else:
             # Latest times the particles changed to position 0 is unknown as they don't start at position 0
-            self.times0 = np.nan * np.ones(self.N, dtype=float)
-        self.ktimes0_sum = np.zeros(self.N, dtype=float)   # Times to absorption from latest time it changed to position 0
-        self.ktimes0_n = np.zeros(self.N, dtype=int)       # Number of times the particles were absorbed
-        #----------------------- Information for survival time calculation --------------------
+            self.times0 = np.nan*np.ones(self.N, dtype=float)
+        self.ktimes0_sum = np.zeros(self.N, dtype=float)    # Times to absorption from latest time it changed to position 0
+        self.ktimes0_n = np.zeros(self.N, dtype=int)        # Number of times the particles were absorbed
+
+        # Arrays that are used to estimate the blocking proportion as a rough estimate of the blocking probability
+        self.timesb = np.nan*np.ones(self.N, dtype=float)   # Latest blocking time (used to update btimes_sum)
+        self.btimes_sum = np.zeros(self.N, dtype=float)     # Total blocking time
+        self.btimes_n = np.zeros(self.N, dtype=int)         # Number of times each particle goes to blocking state
+        #----------------- Attributes for survival and blocking time calculation --------------
 
 
-        #----------------------- Information about blocking and unblocking --------------------
+        #-------------------- Attributes for blocking probability estimation ------------------
         # Attributes used directly in the computation of the estimated measures that contribute to the probability of blocking.
         self.sk = [0]   # Times of an ABSORPTION (Killing) relative to ALL the activation times of the absorbed particle.
                         # The list is updated whenever an active particle is absorbed (i.e. touches position 0)
@@ -426,7 +431,7 @@ class EstimatorQueueBlockingFlemingViot:
         self.counts_blocked = [0]# Number of particles that are blocked in each time segment defined by sb
                                 # => have reached position K, the maximum capacity of the queue represented by the particle. 
                                 # Size: same as the times of BLOCK/UNBLOCK array
-        #----------------------- Information about blocking and unblocking --------------------
+        #-------------------- Attributes for blocking probability estimation ------------------
 
 
         # Latest time at which we know the state of the system for each particle.
@@ -444,14 +449,21 @@ class EstimatorQueueBlockingFlemingViot:
         via Approximation 1 and Approximation 2 of Matthieu Jonckheere's draft on queue blocking dated Apr-2020.
 
         Return: tuple
-        The tuple contains the following elements:
+        The content of the tuple depends on parameter 'reactivate'.
+        When reactivate=True, the Fleming-Viot estimator is used to compute the blocking probability,
+        therefore the tuple contains the following elements:
         - the estimated blocking probability
         - the estimated expected blocking time given the particle starts at position 1 and is not absorbed
           (this is the numerator of the expression giving the blocking probability estimate)
         - the integral appearing at the numerator of Approximation 1
         - the estimated gamma parameter: the absorption rate
-        - the estimated expected survival time (time to first absorption) given the particle starts at position 0.
-          (this is the denominator of the expression giving the blocking probability estimate)
+
+        When reactivate=False, Monte-Carlo is used to compute the blocking probability,
+        therefore the tuple contains the following elements:
+        - the estimated blocking probability
+        - the total blocking time over all particles
+        - the total survival time over all particles
+        - the estimated expected survival time (which is normally used as the denominator of the Fleming-Viot estimator)
         """
         self.reset()
 
@@ -483,16 +495,18 @@ class EstimatorQueueBlockingFlemingViot:
                     print(self.info_particles[p])
                 input("Press ENTER...")
 
-        print("Finalizing and counting...")
+        print("Finalizing and identifying unchanged time segments...")
         self.finalize()
         self.compute_counts()
         time3 = timer()
 
-        print("Estimating blocking probabilty via Approx. 1 & 2...")
-        proba_blocking_integral, proba_blocking_laplacian, integral, gamma, expected_survival_time = \
-            self.estimate_proba_blocking()
-        self.proba_blocking_integral = proba_blocking_integral
-        self.proba_blocking_laplacian = proba_blocking_laplacian
+        if self.reactivate:
+            print("Estimating blocking probabilty via Approx. 1 & 2...")
+            proba_blocking_integral, proba_blocking_laplacian, integral, gamma = self.estimate_proba_blocking_fv()
+            self.proba_blocking_integral = proba_blocking_integral
+            self.proba_blocking_laplacian = proba_blocking_laplacian
+        else:
+            proba_blocking, total_blocking_time, total_survival_time, expected_survival_time = self.estimate_proba_blocking_mc()
         time_end = timer()
 
         if self.plotFlag:
@@ -505,7 +519,10 @@ class EstimatorQueueBlockingFlemingViot:
         print("\tCompute counts: {:.1f} min".format((time3 - time2) / 60))
         print("\tEstimate probability (Approx. 1 and 2): {:.1f} min".format((time_end - time3) / 60))
 
-        return self.proba_blocking_integral, self.proba_blocking_laplacian, integral, gamma, expected_survival_time
+        if self.reactivate:
+            return self.proba_blocking_integral, self.proba_blocking_laplacian, integral, gamma
+        else:
+            return proba_blocking, total_blocking_time, total_survival_time, expected_survival_time 
 
     def generate_trajectories_at_startup(self):
         for P in range(self.N):
@@ -822,7 +839,8 @@ class EstimatorQueueBlockingFlemingViot:
         self._update_trajectories(P, server)
 
         #-- Update the historical info of special events so that we can compute the statistics needed for the estimations
-        self._update_info_particles(P, buffer_size_change) # The second parameter is the change in BUFFER size for the particle, NOT the array of changes in server queue sizes
+        # The second parameter is the change in BUFFER size for the particle, NOT the array of changes in server queue sizes
+        self._update_info_particles_and_blocking_statistics(P, buffer_size_change)
 
     def _update_trajectories(self, P, server=0):
         """
@@ -837,6 +855,17 @@ class EstimatorQueueBlockingFlemingViot:
         self.trajectories[P][server]['t'] += [ self.particles[P].getTimeLastEvent(server) ]
         self.trajectories[P][server]['e'] += [ self.particles[P].getTypeLastEvent(server) ]
         self.trajectories[P][server]['x'] += [ self.particles[P].getServerSize(server)    ]
+
+    def _update_blocking_statistics(self, P, type_of_event):
+        "Updates the blocking time statistics whenever the particle is blocked or unblocked"
+        if type_of_event == EventType.BLOCK:
+            blocking_time = self.particles[P].getMostRecentEventTime()
+            #print("P={}: (B) info_particles: {}".format(P, self.info_particles[P]))
+            self._update_latest_blocking_time(P, blocking_time)
+        elif type_of_event == EventType.UNBLOCK:
+            unblocking_time = self.particles[P].getMostRecentEventTime()
+            #print("P={}: (U) info_particles: {}".format(P, self.info_particles[P]))
+            self._update_blocking_time(P, unblocking_time)
 
     def generate_trajectories_until_end_of_simulation(self):
         "Generates the trajectories until the end of the simulation time is reached"
@@ -880,7 +909,7 @@ class EstimatorQueueBlockingFlemingViot:
                 # and these special events are checked based on the information stored in the self.particles[P] attribute
                 # which is updated by the _set_new_particle_position() call. 
                 self._set_new_particle_position(P, t0, position_Q_at_t0)
-                self._update_info_particles(P, np.sum(position_change)) # The second parameter is the change in BUFFER size for the particle, NOT the array of changes in server queue sizes
+                self._update_info_particles_and_blocking_statistics(P, np.sum(position_change)) # The second parameter is the change in BUFFER size for the particle, NOT the array of changes in server queue sizes
             else:
                 # In NO reactivation mode, we need to generate ONE iteration before CONTINUING with the simulation below,
                 # otherwise the assertion that the next absorption time is different from the previous one
@@ -1030,7 +1059,7 @@ class EstimatorQueueBlockingFlemingViot:
         # Update the list stating whether each particle is active
         self._update_active_particles(P)
 
-    def _update_info_particles(self, P, last_position_change):
+    def _update_info_particles_and_blocking_statistics(self, P, last_position_change):
         """
         Updates the info_particles attribute with the new particle's position
         and any special state that the particle goes into as a result of the last position change,
@@ -1049,9 +1078,10 @@ class EstimatorQueueBlockingFlemingViot:
         type_of_event = lambda P: is_activated(P) and EventType.ACTIVATION or is_absorbed(P) and EventType.ABSORPTION or is_blocked(P) and EventType.BLOCK or is_unblocked(P) and EventType.UNBLOCK or None
         #--------------- Helper functions -------------------
 
-        if type_of_event(P) is not None:
+        event_type = type_of_event(P)
+        if event_type is not None:
             if self.LOG:
-                print("P={}: SPECIAL EVENT OBSERVED: {}".format(P, type_of_event(P)))
+                print("P={}: SPECIAL EVENT OBSERVED: {}".format(P, event_type))
                 print("\tposition of P (buffer size): {}".format(self.particles[P].getBufferSize()))
                 print("\tlast change in buffer size: {}".format(last_position_change))
             p = self.particle_reactivation_ids[P]
@@ -1059,7 +1089,10 @@ class EstimatorQueueBlockingFlemingViot:
                     "The particle ID (p={}) exists in the info_particles list (0 <= p < {})" \
                     .format(p, len(self.info_particles))
             self.info_particles[p]['t'] += [ self.times_buffer[P] ]
-            self.info_particles[p]['E'] += [ type_of_event(P) ]
+            self.info_particles[p]['E'] += [ event_type ]
+
+            # Update the blocking times if any blocking/unblocking event took place 
+            self._update_blocking_statistics(P, event_type)
 
     def _generate_trajectory_until_absorption_or_end_of_simulation(self, P, end_of_simulation):
         """
@@ -1072,7 +1105,7 @@ class EstimatorQueueBlockingFlemingViot:
         end_of_simulation: int
             Whether the end of the simulation has been reached.
         """
-        absorbed = lambda P: self._check_particle_absorbed_based_on_most_recent_change(P)
+        absorbed = lambda P: self._check_particle_state_based_on_most_recent_change(P, EventType.ABSORPTION)
 
         while not end_of_simulation and not absorbed(P):
             end_of_simulation = self.generate_one_iteration(P)
@@ -1098,8 +1131,7 @@ class EstimatorQueueBlockingFlemingViot:
             # => Store the information about the absorption
             if self.LOG: #True:
                 print("P={}: STOPPED BY ABSORPTION (latest buffer change time: {:.3f} < {:.3f}, buffer size={})".format(P, self.times_buffer[P], self.maxtime, self.particles[P].getBufferSize()))
-            time_of_event = self.particles[P].getMostRecentEventTime()
-            absorption_time = time_of_event
+            absorption_time = self.particles[P].getMostRecentEventTime()
             self._update_info_absorption_times(P, absorption_time, self.iterations[P])
             self._update_survival_time_from_zero(P, absorption_time)
 
@@ -1181,9 +1213,10 @@ class EstimatorQueueBlockingFlemingViot:
         """
         return last_position_change < 0 and self.particles[P].getBufferSize() == self.particles[P].getCapacity() + last_position_change
 
-    def _check_particle_absorbed_based_on_most_recent_change(self, P):
+    def _check_particle_state_based_on_most_recent_change(self, P, type_of_event):
         """
-        Whether a particle has been absorbed based on the most recent change in the particle's servers.
+        Whether a particle has achieved a NEW state defined by the type_of_event
+        based on the most recent change in the particle's servers.
         
         This function CANNOT be used when the latest event times for all servers is the same,
         notably at the very beginning of the simulation or when a reactivation has occurred
@@ -1192,7 +1225,12 @@ class EstimatorQueueBlockingFlemingViot:
         """
         assert self.isValidParticle(P), "The particle number is valid (0<=P<{}) ({})".format(self.N, P)
         _, last_change, _, _ = self.particles[P].getMostRecentEventInfo()
-        return self._has_particle_become_absorbed(P, last_change)
+        if type_of_event == EventType.ABSORPTION:
+            return self._has_particle_become_absorbed(P, last_change)
+        elif type_of_event == EventType.BLOCK:
+            return self._has_particle_become_blocked(P, last_change)
+        elif type_of_event == EventType.UNBLOCK:
+            return self._has_particle_become_unblocked(P, last_change)
 
     def _update_info_absorption_times(self, P, time_of_absorption, it):
         "Inserts a new absorption time in order, together with its particle number"
@@ -1226,6 +1264,33 @@ class EstimatorQueueBlockingFlemingViot:
         if False:
             print(">>>> P={}: UPDATED Last time at 0: {:.3f}".format(P, self.times0[P]))
             print(">>>> \tNew total killing times (ktimes0_sum): {:.3f}".format(self.ktimes0_sum[P]))
+
+    def _update_latest_blocking_time(self, P, time_of_blocking):
+        "Updates the latest time the particle was blocked"
+        self.timesb[P] = time_of_blocking
+
+        if False:
+            print(">>>> P={}: UPDATED Last time particle was blocked: {:.3f}".format(P, self.timesb[P]))
+
+    def _update_blocking_time(self, P, time_of_unblocking):
+        "Updates the total blocking time and the number of blocking times measured based on an unblocking event time"
+        assert self.timesb[P] != np.nan, "The last blocking time is not NaN ({:.3f})".format(self.timesb[P])
+        last_blocking_time = self.timesb[P]
+
+        # Refer the survival time to the latest time the particle was at position 0
+        # and add it to the previously measured survival time
+        assert time_of_unblocking > last_blocking_time, \
+                "The time of unblocking ({}) contributing to the total blocking time calculation" \
+                " is larger than the latest blocking time for particle {} ({})" \
+                .format(time_of_unblocking, P, last_blocking_time)
+        self.btimes_sum[P] += time_of_unblocking - last_blocking_time
+        self.btimes_n[P] += 1
+
+        if False:
+            with printoptions(precision=3, suppress=True):
+                print("\n>>>> Particle P={}: unblocking @t={:.3f}".format(P, time_of_unblocking))
+                print(">>>> Previous blocking times: {:.3f}".format(self.timesb[P]))
+                print(">>>> \tNew total blocking time (btimes_sum): {:.3f}".format(self.btimes_sum[P]))
 
     def finalize(self):
         """
@@ -1346,11 +1411,13 @@ class EstimatorQueueBlockingFlemingViot:
                     # - the particle is activated if it was not in position 1
                     #   (this makes things logical --i.e. before absorption the particle passes by position 1)
                     if self._is_particle_blocked(P):
-                        # Add an BLOCK time if the buffer size was not already BLOCKED
+                        # Add an UNBLOCK time if the particle was BLOCKED
                         dict_info['t'] += [time_to_insert]
                         dict_info['E'] += [EventType.UNBLOCK]
                         # Increase each of the times to insert for the insertion of the next event
                         time_to_insert += self.EPSILON_TIME*np.random.random()
+                        # Update the total blocking time
+                        self._update_blocking_time(P, time_to_insert)
                     if not self._is_particle_activated(P):
                         # Add an ACTIVATION time if the buffer size was not already in the ACTIVATION set
                         dict_info['t'] += [time_to_insert]
@@ -1875,9 +1942,9 @@ class EstimatorQueueBlockingFlemingViot:
 
         return proba_blocking_laplacian, gamma
 
-    def estimate_proba_blocking(self):
+    def estimate_proba_blocking_fv(self):
         """
-        Estimates the blocking probability
+        Estimates the blocking probability using the Fleming-Viot estimator
 
         Return: tuple
         The tuple contains the following elements:
@@ -1885,8 +1952,6 @@ class EstimatorQueueBlockingFlemingViot:
         - the estimated blocking probability via Approximation 2 (Laplacian approach)
         - the value of the integral in Approximation 1 
         - the killing rate gamma in Approximation 2
-        - the estimated expected survival time (time to first absorption) given the particle starts at position 0.
-          (this is the denominator of the expression giving the blocking probability estimate)
         """
         if not self.is_simulation_finalized:
             raise ValueError("The simulation has not been finalized..." \
@@ -1899,7 +1964,7 @@ class EstimatorQueueBlockingFlemingViot:
         # - self.proba_surv_by_t: survival probability given start position = 1
         # - self.proba_block_by_t: blocking probability given alive and start position = 1
         # - self.gamma: killing rate, eigenvalue of the laplacian
-        # - self.blocking_time_estimate: estimated blocking time = Pr(block) * (Expected Survival Time)
+        # - self.blocking_time_estimate: estimated blocking time = Pr(block) * (Expected Survival Time starting at 0)
         df = self.estimate_proba_survival_and_blocking_conditional()
         if False:
             if self.mean_lifetime is not None:
@@ -1911,19 +1976,41 @@ class EstimatorQueueBlockingFlemingViot:
                 plt.title("K={}, particles={}, iterations={}".format(self.queue.getCapacity(), self.N, self.niter))
                 plt.show()
 
-        #-- Expected survival time
-        if self.mean_lifetime is None:
-            expected_survival_time = self.estimate_expected_survival_time_given_position_zero()
-        else:
-            expected_survival_time = self.mean_lifetime
+        #-- Expected survival time was given by the user as a positive value
+        assert self.mean_lifetime is not None and self.mean_lifetime > 0, \
+            "The expected survival time used in the F-V estimator is positive ({:.3f})".format(self.mean_lifetime)
 
         #-- Blocking probability estimate via Approximation 1: estimate the integral
-        proba_blocking_integral, integral = self.estimate_proba_blocking_via_integral(expected_survival_time)
+        proba_blocking_integral, integral = self.estimate_proba_blocking_via_integral(self.mean_lifetime)
 
         #-- Blocking probability estimate via Approximation 2: estimate the Laplacian eigenvalue (gamma) and eigenvector (h(1))
-        proba_blocking_laplacian, gamma = self.estimate_proba_blocking_via_laplacian(expected_survival_time)
+        proba_blocking_laplacian, gamma = self.estimate_proba_blocking_via_laplacian(self.mean_lifetime)
 
-        return proba_blocking_integral, proba_blocking_laplacian, integral, gamma, expected_survival_time
+        return proba_blocking_integral, proba_blocking_laplacian, integral, gamma
+
+    def estimate_proba_blocking_mc(self):
+        """
+        Estimates the blocking probability using Monte Carlo and computes the expected survival time
+        
+        The blocking probability is estimated as the ratio between the total blocking time and
+        the total survival time over all particles.
+        
+        Note that this methodology of summing ALL times over ALL particles, avoids having to weight
+        the estimation of each particle, as we don't need to weight proportionally the amount of
+        samples available for each particle to give more weight to particles with longer observed time.
+
+        Return: tuple
+        The tuple contains the following elements:
+        - the estimated blocking probability as the proportion of blocking time over survival time
+        - the total blocking time over all particles
+        - the total survival time over all particles
+        - the estimated expected survival time (starting from position 0)
+        """
+        total_blocking_time = np.sum(self.btimes_sum)
+        total_survival_time = np.sum(self.ktimes0_sum)
+        blocking_time_rate = total_blocking_time / total_survival_time
+        expected_survival_time = self.estimate_expected_survival_time_given_position_zero()
+        return blocking_time_rate, total_blocking_time, total_survival_time, expected_survival_time
     #----------------------------- Functions to analyze the simulation ------------------------
 
 
