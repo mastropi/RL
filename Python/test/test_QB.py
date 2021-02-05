@@ -24,6 +24,7 @@ import Python.lib.queues as queues
 import Python.lib.estimators as estimators
 from Python.lib.queues import Event
 from Python.lib.estimators import FinalizeType
+from Python.lib.utils.computing import all_combos_with_sum, comb
 
 #from importlib import reload
 #reload(estimators)
@@ -40,19 +41,22 @@ class Test_QB_Particles(unittest.TestCase):
         self.rate_birth = 0.5
         self.capacity = 20
         
-        self.nservers = 1
-        #self.nservers = 3
+        #self.nservers = 1
+        self.nservers = 3
 
         if self.nservers == 1:
             # One server
             self.job_rates = [self.rate_birth]
-            self.rate_death = 1
+            self.rate_death = [1]
             self.policy = [[1]]
         elif self.nservers == 3:
             # Multiple servers
             self.job_rates = [0.8, 0.7]
             self.rate_death = [1, 1, 1]
             self.policy = [[0.5, 0.5, 0.0], [0.0, 0.5, 0.5]]
+
+        # rho rates for each server based on arrival rates and assignment probabilities
+        self.rhos = self.compute_rhos()
 
         self.queue = queues.QueueMM(self.rate_birth, self.rate_death, self.nservers, self.capacity)
 
@@ -419,7 +423,7 @@ class Test_QB_Particles(unittest.TestCase):
         proba_blocking = est.estimate_proba_blocking()
         K = self.capacity
         print("\nBlocking probability estimate: {:.1f}%".format(proba_blocking*100))
-        proba_blocking_K = self.compute_proba_blocking()
+        proba_blocking_K = self.compute_true_blocking_probability(K, self.rhos)
         if proba_blocking_K is not None:
             print("Theoretical value: {:.1f}%".format(proba_blocking_K*100))
 
@@ -436,13 +440,47 @@ class Test_QB_Particles(unittest.TestCase):
         return  df_proba_survival_and_blocking_conditional, \
                 (reactivate, finalize_type, nparticles, nmeantimes)
 
-    def compute_true_blocking_probability(self, K):
+    def compute_rhos(self):
+        "Computes the rho rates for each server based on arrival rates, service rates, and assignment probabilities"
+        R = self.nservers
+        J = len(self.job_rates) # Number of job classes
+        rhos = [0]*self.nservers
+        for r in range(R):
+            for c in range(J):
+                rhos[r] += self.policy[c][r] * self.job_rates[c] / self.rate_death[r]
+        
+        return rhos
+
+    def compute_true_blocking_probability(self, K, rhos):
         "Computes the true blocking probability of the system (if possible)"
         if self.nservers == 1:
-            rho = self.job_rates[0] / self.rate_death
-            proba_blocking_K = rho**K / np.sum([ rho**i for i in range(K+1) ])
+            proba_blocking_K = rhos[0]**K / np.sum([ rhos[0]**i for i in range(K+1) ])
         else:
-            proba_blocking_K = None            
+            R = self.nservers
+            const = 0
+            ncases_total = 0
+            prod = [0]*(K+1)   # Array to store the contributions to the normalizing for each 1 <= k <= K
+            for k in range(K+1):
+                ncases = comb(k+R-1,k)
+                combos = all_combos_with_sum(R,k)
+                count = 0
+                while True:
+                    try:
+                        v = next(combos)
+                        assert len(v) == len(rhos), "The length of v and rho rates coincide ({}, {})".format(len(v), len(rhos))
+                        prod[k] += np.prod( [(1- r)*r**nr for r, nr in zip(rhos, v)] )
+                        count += 1
+                    except StopIteration as e:
+                        break
+                combos.close()
+                const += prod[k]
+                assert count == ncases
+                ncases_total += ncases
+            assert const <= 1, "The normalizing constant is <= 1"
+            assert abs(sum(prod)/const - 1.0) < 1E-6
+            
+            # Blocking probability
+            proba_blocking_K = prod[K] / const
 
         return proba_blocking_K        
 
@@ -490,10 +528,11 @@ class Test_QB_Particles(unittest.TestCase):
                                                            finalize_type=finalize_type,
                                                            plotFlag=plotFlag,
                                                            seed=seed, log=log)
-        print("\n(START) Simulation setup: (REACTIVATE={})".format(reactivate))
-        print(est.setup())
+        if log:
+            print("\n(START) Simulation setup: (REACTIVATE={})".format(reactivate))
+            print(est.setup())
+            print("Simulating...")
 
-        print("Simulating...")
         if reactivate:
             proba_blocking_integral, proba_blocking_laplacian, integral, gamma = est.simulate()
         else:
@@ -567,20 +606,21 @@ class Test_QB_Particles(unittest.TestCase):
             prop_blocking_time = None
 
         K = self.capacity
-        if reactivate:
-            print("\nEstimation of blocking probability via Fleming-Viot (Approximation 1 & 2):")
-            print("Integral = {:.6f}".format(integral))
-            print("Gamma = {:.6f}".format(gamma))
-            print("Blocking probability estimate (Approx. 1): {:.6f}%".format(proba_blocking_integral*100))
-            print("Blocking probability estimate (Approx. 2): {:.6f}%".format(proba_blocking_laplacian*100))
-        else:
-            print("\nEstimation of blocking probability via Monte-Carlo:")
-            print("Expected Survival Time = {:.3f}".format(expected_survival_time))
-            print("Blocking probability estimate (proportion of blocking time / survival time): {:.3f}%".format(proba_blocking_mc*100))
-        print("Last time the system has a known state: {:.3f}".format( est.get_time_latest_known_state() ))
-
-        print("\n(END) Simulation setup: (REACTIVATE={})".format(reactivate))
-        print(est.setup())
+        if log:
+            if reactivate:
+                print("\nEstimation of blocking probability via Fleming-Viot (Approximation 1 & 2):")
+                print("Integral = {:.6f}".format(integral))
+                print("Gamma = {:.6f}".format(gamma))
+                print("Blocking probability estimate (Approx. 1): {:.6f}%".format(proba_blocking_integral*100))
+                print("Blocking probability estimate (Approx. 2): {:.6f}%".format(proba_blocking_laplacian*100))
+            else:
+                print("\nEstimation of blocking probability via Monte-Carlo:")
+                print("Expected Survival Time = {:.3f}".format(expected_survival_time))
+                print("Blocking probability estimate (proportion of blocking time / survival time): {:.3f}%".format(proba_blocking_mc*100))
+            print("Last time the system has a known state: {:.3f}".format( est.get_time_latest_known_state() ))
+    
+            print("\n(END) Simulation setup: (REACTIVATE={})".format(reactivate))
+            print(est.setup())
 
         if plotFlag:
             print("Plotting...")
@@ -648,7 +688,12 @@ class Test_QB_Particles(unittest.TestCase):
             self.queue.K = K
             print("\n---> NEW K (Queue's capacity = {})".format(self.queue.getCapacity()))
 
-            proba_blocking_K = self.compute_true_blocking_probability(K)
+            print("Computing TRUE blocking probability...", end=" --> ")
+            time_pr_start = timer()
+            proba_blocking_K = self.compute_true_blocking_probability(K, self.rhos)
+            time_pr_end = timer()
+            print("{:.1f} sec".format(time_pr_end - time_pr_start))
+            print("Pr(K)={:.6f}%".format(proba_blocking_K*100))
 
             nparticles = nparticles_min
             while nparticles <= nparticles_max:
@@ -656,15 +701,16 @@ class Test_QB_Particles(unittest.TestCase):
                 nmeantimes = nmeantimes_min
                 while nmeantimes <= nmeantimes_max:
                     i += 1
-                    print("Simulation {} of {}: \n\tK={}, particles={}, nmeantimes={}" \
+                    print("******************!!!!!!! Simulation {} of {} !!!!!!*****************\n\tK={}, particles={}, nmeantimes={}" \
                           .format(i, nsimul, K, nparticles, nmeantimes))
                     for rep in range(replications):
-                        print("\tReplication {} of {}".format(rep+1, replications))
-                        print("\t1) Estimating the expected survival time using NO reactivation...")
+                        print("\n\tReplication {} of {}".format(rep+1, replications))
+                        print("\t1) Estimating the expected survival time using NO reactivation...", end=" --> ")
                         seed_rep = seed + rep * int(np.round(100*np.random.random()))
                         reactivate = False
                         start = 0
                         mean_lifetime = None
+                        time_mc_start = timer()
                         est_mc, proba_blocking_mc, total_blocking_time_mc, total_survival_time_mc, mean_lifetime_mc, params_mc = \
                             self.run(start,
                                     mean_lifetime,
@@ -675,11 +721,14 @@ class Test_QB_Particles(unittest.TestCase):
                                     seed_rep,
                                     plotFlag=False,
                                     log=log)
+                        time_mc_end = timer()
+                        print("{:.1f} sec".format(time_mc_end - time_mc_start))
 
                         print("\t2) Estimating blocking probability using Fleming-Viot (E(T) = {:.1f})..." \
-                              .format(mean_lifetime_mc))
+                              .format(mean_lifetime_mc), end=" --> ")
                         reactivate = True
                         start = 1
+                        time_fv_start = timer()
                         est_fv, proba_blocking_integral, proba_blocking_laplacian, integral, gamma, params_fv = \
                             self.run(start,
                                     mean_lifetime_mc,
@@ -690,6 +739,8 @@ class Test_QB_Particles(unittest.TestCase):
                                     seed_rep,
                                     plotFlag=False,
                                     log=log)
+                        time_fv_end = timer()
+                        print("{:.1f} sec".format(time_fv_end - time_fv_start))
 
                         # Compute the rate of blocking time w.r.t. total simulation time
                         # in order to have a rough estimation of the blocking probability
@@ -758,7 +809,7 @@ class Test_QB_Particles(unittest.TestCase):
 
         return df_proba_blocking_estimates
 
-    def plot_results(self, df_proba_survival_and_blocking_conditional, *args):
+    def plot_results(self, df_proba_survival_and_blocking_conditional, *args, log=False):
         K = args[0]
         mean_lifetime = args[1]
         reactivate = args[2]
@@ -766,13 +817,14 @@ class Test_QB_Particles(unittest.TestCase):
         nparticles = args[4]
         nmeantimes = args[5]
         seed = args[6]
-        print("K={}".format(K))
-        print("mean_lifetime={}".format(mean_lifetime))
-        print("reactivate={}".format(reactivate))
-        print("finalize_type={}".format(finalize_type.name))
-        print("nparticles={}".format(nparticles))
-        print("nmeantimes={}".format(nmeantimes))
-        print("seed={}".format(seed))
+        if log:
+            print("K={}".format(K))
+            print("mean_lifetime={}".format(mean_lifetime))
+            print("reactivate={}".format(reactivate))
+            print("finalize_type={}".format(finalize_type.name))
+            print("nparticles={}".format(nparticles))
+            print("nmeantimes={}".format(nmeantimes))
+            print("seed={}".format(seed))
 
         plt.figure()
         color1 = 'blue'
@@ -1067,7 +1119,7 @@ if __name__ != "__main__":
     #test.test_algorithm()
 
     finalize_type = FinalizeType.ABSORB_CENSORED
-    nparticles = 400
+    nparticles = 100
     nmeantimes = 50
     seed = 1717
     plotFlag = True
@@ -1108,7 +1160,7 @@ if __name__ != "__main__":
     print("P(K) by MC: {:.3f}%".format(proba_blocking_mc*100))
     print("P(K) estimated by FV1: {:.6f}%".format(proba_blocking_integral_fv*100))
     print("P(K) estimated by FV2: {:.6f}%".format(proba_blocking_laplacian_fv*100))
-    proba_blocking_true = test.compute_true_blocking_probability(self.capacity)
+    proba_blocking_true = test.compute_true_blocking_probability(test.capacity, test.rhos)
     if proba_blocking_true is not None:
         print("True P(K): {:.6f}%".format(proba_blocking_true*100))
 else:
@@ -1119,9 +1171,9 @@ else:
     results_convergence = test.analyze_convergence(
                                     finalize_type=FinalizeType.ABSORB_CENSORED,
                                     replications=10,
-                                    K_range=(5, 80, 2), 
-                                    nparticles_range=(100, 400, 2),
-                                    nmeantimes_range=(20, 80, 2), 
+                                    K_range=(5, 20, 2), 
+                                    nparticles_range=(100, 800, 2),
+                                    nmeantimes_range=(20, 40, 2), 
                                     seed=1717,
                                     log=False)
     time_end = timer()
@@ -1132,9 +1184,18 @@ else:
 
     print("Execution time: {:.1f} min".format((time_end - time_start) / 60))
 
+    # OLD filename save
     #filename = "../../RL-002-QueueBlocking/results/fv_approx1_convergence_rho={:.3f}.csv"
     #results_convergence.to_csv(filename.format(rho))
-    #print("Results of simulation saved to {}".format(filename))    
+    #print("Results of simulation saved to {}".format(filename))  
+    
+    #filename = "../../RL-002-QueueBlocking/results/RL-QB-20210205-SimulationMultiServer3-JobClass2-K=5&10&20,N=100&200&400&800,T=20&40 (RAW).csv"
+    #results_convergence.to_csv(filename)
+    #print("Results of simulation saved to {}".format(os.path.abspath(filename)))
+
+    #filename = "../../RL-002-QueueBlocking/results/RL-QB-20210205-SimulationMultiServer3-JobClass2-K=5&10&20,N=100&200&400&800,T=20&40.csv"
+    #results_convergence_agg.to_csv(filename)
+    #print("Results of simulation saved to {}".format(os.path.abspath(filename)))
 
     # Plots
     results_convergence_agg = test.plot_convergence_analysis_allvalues(results_convergence)

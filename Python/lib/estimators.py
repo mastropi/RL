@@ -468,7 +468,8 @@ class EstimatorQueueBlockingFlemingViot:
         self.reset()
 
         time_start = timer()
-        print("Generating trajectories for each particle until first absorption...")
+        if self.LOG:
+            print("Generating trajectories for each particle until first absorption...")
         self.generate_trajectories_at_startup()
         time1 = timer()
         # Check trajectories
@@ -477,7 +478,8 @@ class EstimatorQueueBlockingFlemingViot:
                 self.plot_trajectories_by_server(P)
             self.plot_trajectories_by_particle()
 
-        print("Generating trajectories for each particle until END OF SIMULATION TIME (T={})...".format(self.maxtime))
+        if self.LOG:
+            print("Generating trajectories for each particle until END OF SIMULATION TIME (T={})...".format(self.maxtime))
         self.generate_trajectories_until_end_of_simulation()
         time2 = timer()
         # Check trajectories
@@ -495,13 +497,15 @@ class EstimatorQueueBlockingFlemingViot:
                     print(self.info_particles[p])
                 input("Press ENTER...")
 
-        print("Finalizing and identifying unchanged time segments...")
+        if self.LOG:
+            print("Finalizing and identifying unchanged time segments...")
         self.finalize()
         self.compute_counts()
         time3 = timer()
 
         if self.reactivate:
-            print("Estimating blocking probabilty via Approx. 1 & 2...")
+            if self.LOG:
+                print("Estimating blocking probabilty via Approx. 1 & 2...")
             proba_blocking_integral, proba_blocking_laplacian, integral, gamma = self.estimate_proba_blocking_fv()
             self.proba_blocking_integral = proba_blocking_integral
             self.proba_blocking_laplacian = proba_blocking_laplacian
@@ -512,12 +516,13 @@ class EstimatorQueueBlockingFlemingViot:
         if self.plotFlag:
             self.plot_trajectories_by_particle()
 
-        print("Total simulation time: {:.1f} min".format((time_end - time_start) / 60))
-        print("Split as:")
-        print("\tSimulation of initial trajectories until first absorption: {:.1f} min".format((time1 - time_start) / 60))
-        print("\tSimulation of trajectories until end of simulation: {:.1f} min".format((time2 - time1) / 60))
-        print("\tCompute counts: {:.1f} min".format((time3 - time2) / 60))
-        print("\tEstimate probability (Approx. 1 and 2): {:.1f} min".format((time_end - time3) / 60))
+        if self.LOG:
+            print("Total simulation time: {:.1f} min".format((time_end - time_start) / 60))
+            print("Split as:")
+            print("\tSimulation of initial trajectories until first absorption: {:.1f} min".format((time1 - time_start) / 60))
+            print("\tSimulation of trajectories until end of simulation: {:.1f} min".format((time2 - time1) / 60))
+            print("\tCompute counts: {:.1f} min".format((time3 - time2) / 60))
+            print("\tEstimate probability (Approx. 1 and 2): {:.1f} min".format((time_end - time3) / 60))
 
         if self.reactivate:
             return self.proba_blocking_integral, self.proba_blocking_laplacian, integral, gamma
@@ -871,11 +876,13 @@ class EstimatorQueueBlockingFlemingViot:
         "Generates the trajectories until the end of the simulation time is reached"
         step_fraction_process_to_report = 0.1
         next_fraction_process_to_report = step_fraction_process_to_report
-        print("...completed {:.1f}%".format(self.get_time_latest_known_state() / self.maxtime * 100))
+        if self.LOG:
+            print("...completed {:.1f}%".format(self.get_time_latest_known_state() / self.maxtime * 100))
         while len(self.dict_info_absorption_times['t']) > 0:
             fraction_maxtime_completed = self.get_time_latest_known_state() / self.maxtime
             if fraction_maxtime_completed > next_fraction_process_to_report:
-                print("...completed {:.0f}%".format(next_fraction_process_to_report*100))
+                if self.LOG:
+                    print("...completed {:.0f}%".format(next_fraction_process_to_report*100))
                 next_fraction_process_to_report += step_fraction_process_to_report
             if False:
                 assert self.dict_info_absorption_times['t'] == sorted(self.dict_info_absorption_times['t']), \
@@ -1575,7 +1582,9 @@ class EstimatorQueueBlockingFlemingViot:
                     " is either ABSORPTION or CENSORING ({})" \
                     .format(t, event_type.name)
             idx_insort, found = insort(self.sk, s)
-            assert not found, "The relative time value is NOT found in the list of survival time segments ({})".format(s)
+            assert not found, "The relative time value is NOT found in the list of survival time segments ({}):\n{}".format(s, self.sk)
+            #DM-2021/02/04: "AssertionError: The relative time value is NOT found in the list of survival time segments (2.5563288374996773e-07)"
+            #N=800, nmeantimes=80, seed=1717
             self._update_counts_alive(idx_insort, event_type)
 
     def _update_counts_alive(self, idx_to_insert: int, event_type: EventType):
