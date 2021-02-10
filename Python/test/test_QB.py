@@ -522,7 +522,9 @@ class Test_QB_Particles(unittest.TestCase):
         policy = self.policy
         est = estimators.EstimatorQueueBlockingFlemingViot(nparticles, queue,
                                                            nmeantimes=nmeantimes,
-                                                           job_rates=job_rates, policy=policy,
+                                                           job_rates=job_rates,
+                                                           service_rates=None,
+                                                           policy=policy,
                                                            mean_lifetime=mean_lifetime,
                                                            reactivate=reactivate,
                                                            finalize_type=finalize_type,
@@ -1107,7 +1109,7 @@ class Test_QB_Particles(unittest.TestCase):
 
 # DM-2020/12/23: To change which portion of the below code to run, change the IF condition
 # to `== "__main__"` or to `!= "__main__"` accordingly
-if __name__ != "__main__":
+if __name__ == "__main__":
     #unittest.main()
 
     # DM-2020/08/24: Instead of using unittest.main(), use the following to test the FV system

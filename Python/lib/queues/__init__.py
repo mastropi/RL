@@ -354,3 +354,15 @@ class QueueMM(GenericQueue):
         for server in range(self.getNServers()):
             rates += [self.rates[server][Event.DEATH.value]]
         return rates
+
+    def setBirthRates(self, rates):
+        if len(rates) != self.getNServers():
+            raise ValueError("The number of rates given ({}) must coincide with the number of servers ({})".format(len(rates), self.nservers))
+        for server in range(self.getNServers()):
+            self.rates[server][Event.BIRTH.value] = rates[server]
+
+    def setDeathRates(self, rates):
+        if len(rates) != self.getNServers():
+            raise ValueError("The number of rates given ({}) must coincide with the number of servers ({})".format(len(rates), self.nservers))
+        for server in range(self.getNServers()):
+            self.rates[server][Event.DEATH.value] = rates[server]

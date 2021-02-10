@@ -49,14 +49,34 @@ class EstimatorQueueBlockingFlemingViot:
     nparticles: int
         Number of particles to consider in the Fleming Viot system.
 
-    niter: int
-        Number of iterations on which the estimation is based.
-        This is important for the finalization process carried out at the end of the simulation,
-        so that absorbed particles at the last iteration are NOT re-activated but considered as
-        absorbed, and thus included in the estimation of the expected survival time, regardless
-        of the `finalize_type` parameter value.
+    queue: subclass of GenericQueue
+        The object should have the following attributes:
+        - rates: a list with two elements corresponding to the birth and death events
+        at the positions specified by the Event.BIRTH and Event.DEATH values of the Event Enum.
 
-    nmeantimes: int
+        The object should have the following methods implemented:
+        - apply_event()
+        - generate_event_time()
+        - getCapacity()
+        - getBufferSize()
+        - getLastChange()
+        - getMostRecentEventTime()
+        - getMostRecentEventInfo()
+        - getNServers()
+        - getTimeLastEvent()
+        - getTimesLastEvents()
+        - getTypesLastEvents()
+        - getTimeLastEvent()
+        - getTypeLastEvent()
+        - getServerSize()
+        - getServerSizes()
+        - getBirthRates()
+        - getDeathRates()
+        - setBirthRates()
+        - setDeathRates()
+        - resize()
+
+    nmeantimes: (opt) int
         Multiple of the mean time of the job class with LOWEST arrival rate defining the maximum simulation time.
         Ex: If there are two job classes with arrival rates respectively 2 jobs/sec and 3 jobs/sec,
         the maximum simulation time is computed as `nmeantimes * 1/2` sec, which is expected to include
@@ -64,40 +84,32 @@ class EstimatorQueueBlockingFlemingViot:
         For instance, if nmeantimes = 10, the simulation time is 5 sec and is expected to include 10 jobs
         of the lowest arrival rate class, and `(nmeantimes * 1/2) / (1/3) = 5*3` = 15 jobs of the
         highest arrival rate class.
-        default: 10
+        default: 3
 
-    queue: subclass of GenericQueue
-        The object should have the following attributes:
-        - rates: a list with two elements corresponding to the birth and death events
-        at the positions specified by the Event.BIRTH and Event.DEATH values of the Event Enum.
-
-        The object should have the following methods implemented:
-        - generate_birth_time()
-        - generate_death_time()
-        - generate_event_times()
-        - getTimesLastEvents()
-        - getTypesLastEvents()
-        - getTimeLastEvent()
-        - getTypeLastEvent()
-        - apply_event()
-        - apply_events()
-
-    job_rates: list
+    job_rates: (opt) list
         List of arrival rate for every possible job class. The job class values are the indices of the given list. 
-        Ex: [2, 5]
+        default: [0.8, 0.7]
 
-    policy: list of lists
+    service_rates: (opt) list
+        Service rates of each server.
+        When given, it overrides the death rates given in the `queue` parameter.
+        Otherwise, the death rates of the `queue` parameter are used as service rates.
+        default: None
+
+    policy: (opt) list of lists
         List of probabilities of assigning each job class associated to each job rate given in `job_rates`
         to a server in the queue.
         Ex: In a scenario with 2 job classes and 3 servers, the following policy assigns job class 0
         to server 0 or 1 with equal probability and job class 1 to server 1 or 2 with equal probability:
         [[0.5, 0.5, 0.0], [0.0, 0.5, 0.5]]
+        default: [[0.5, 0.5, 0.0], [0.0, 0.5, 0.5]]
 
     mean_lifetime: (opt) positive float
         Mean particle lifetime to be used as the expected survival time.
         This is useful when reactivate=True and start=1, as in that case
         the particles never touch position 0, which means that the mean lifetime
         cannot be computed.
+        default: None
 
     reactivate: (opt) bool
         Whether to reactivate a particle after absorption to a positive position.
@@ -105,6 +117,7 @@ class EstimatorQueueBlockingFlemingViot:
         where the array of zeros has length equal to the number of servers.
         That is, the particle is an ARRAY of server sizes, which should ALL be idle
         in order for the particle to be considered absorbed.
+        default: True
 
     finalize_type: (opt) FinalizeType
         Indicates what type of finalization of the simulation should be done on the active particles, either:
@@ -112,31 +125,43 @@ class EstimatorQueueBlockingFlemingViot:
         - FinalizeType.REMOVE_CENSORED
         - FinalizeType.ABSORB_CENSORED
         of which only "remove" and "absorb" are currently implemented.
+        default: FinalizeType.ABSORB_CENSORED
 
     seed: (opt) int
         Random seed to use for the random number generation by numpy.random.
+        default: None
 
     plotFlag: (opt) bool
         Whether to plot the trajectories of the particles.
+        default: False
 
     log: (opt) bool
         Whether to show messages of what is happening with the particles.
+        default: False
     """
-    def __init__(self, nparticles: int, queue: GenericQueue, niter=10,
-                 nmeantimes=3, job_rates=[2,5], policy=[[0.5, 0.5, 0.0], [0.0, 0.5, 0.5]],
-                 mean_lifetime=None, reactivate=True, finalize_type=FinalizeType.REMOVE_CENSORED,
+    def __init__(self, nparticles: int, queue: GenericQueue,
+                 nmeantimes=3, job_rates=[0.8, 0.7], service_rates=None,
+                 policy=[[0.5, 0.5, 0.0], [0.0, 0.5, 0.5]],
+                 mean_lifetime=None, reactivate=True, finalize_type=FinalizeType.ABSORB_CENSORED,
                  seed=None, plotFlag=False, log=False):
         if reactivate and nparticles < 2:
             raise ValueError("The number of particles must be at least 2 when reactivate=True ({})".format(nparticles))
             import sys
             sys.exit(-1)
         self.N = nparticles
-        self.niter = niter
         self.queue = queue              # This variable is used to create the particles as replications of the given queue
         self.policy = policy            # This should be a mapping from job class to server.
                                         # As a simple example to begin with, here it is defined as a vector of probabilities for each job class
                                         # where the probability is the assignment of the job class to each server, where the number of servers is assumed to be 3. 
         self.job_rates = job_rates      # This should be a list of arrival rates for each job class
+
+        # Update the birth and death rates of the given queue
+        # NOTE: (2021/02/10) Currently the birth rates   
+        equivalent_birth_rates = self.compute_equivalent_birth_rates()
+        self.queue.setBirthRates(equivalent_birth_rates)
+        if service_rates is not None:
+            self.queue.setDeathRates(service_rates)
+
         self.nmeantimes = nmeantimes
         self.maxtime = nmeantimes * np.max( 1/np.array(self.job_rates) ) # The max simulation time is computed as a multiple (given by the user) of the mean arrival time of the lowest frequency job
         self.nservers = self.queue.getNServers()
@@ -171,7 +196,7 @@ class EstimatorQueueBlockingFlemingViot:
         # This epsilon time takes into account the scale of the problem by making it 1E6 times smaller
         # than the minimum of the event rates.
         # I.e. we cannot simply set it to 1E-6... what if the event rate IS 1E-6??
-        self.EPSILON_TIME = 1E-6 * np.min([ self.queue.getBirthRate(), self.queue.getDeathRate() ])
+        self.EPSILON_TIME = 1E-6 * np.min([ self.queue.getBirthRates(), self.queue.getDeathRates() ])
 
         #self.reset()    # Reset is called whenever a new simulation starts (see method simulate() below)
         
@@ -441,6 +466,20 @@ class EstimatorQueueBlockingFlemingViot:
         if self.LOG:
             print("Particle system with {} particles has been reset:".format(self.N))
             print("")
+
+    def compute_equivalent_birth_rates(self):
+        """
+        Computes the birth rates for each server for the situation of pre-assigned jobs
+        as is the case here, based on arrival rates and assignment probabilities
+        """
+        R = self.queue.getNServers()
+        J = len(self.job_rates) # Number of job classes
+        equivalent_birth_rates = [0]*R
+        for r in range(R):
+            for c in range(J):
+                equivalent_birth_rates[r] += self.policy[c][r] * self.job_rates[c]
+        
+        return equivalent_birth_rates
 
     #--------------------------------- Functions to simulate ----------------------------------
     def simulate(self):
@@ -1982,7 +2021,7 @@ class EstimatorQueueBlockingFlemingViot:
                 ax.set_ylim((0,2))
                 ax.set_xlabel("t")
                 ax.set_ylabel("Killing Rate (gamma)")
-                plt.title("K={}, particles={}, iterations={}".format(self.queue.getCapacity(), self.N, self.niter))
+                plt.title("K={}, particles={}, maxtime={:.1f}".format(self.queue.getCapacity(), self.N, self.maxtime))
                 plt.show()
 
         #-- Expected survival time was given by the user as a positive value
@@ -2338,10 +2377,10 @@ class EstimatorQueueBlockingFlemingViot:
             # Non-overlapping step plots at vertical positions (K+1)*p
             plt.step(self.all_times_buffer[p], [(K+1)*p + pos for pos in self.all_positions_buffer[p]], 'x-',
                      where='post', color=color, markersize=3)
-        plt.title("K={}, rate(B)={:.1f}, rate(D)={:.1f}, reactivate={}, finalize={}, N={}, maxtime={:.1f}, seed={}" \
+        plt.title("K={}, rates(B)={}, rates(D)={}, reactivate={}, finalize={}, N={}, maxtime={:.1f}, seed={}" \
                   .format(self.queue.getCapacity(),
-                      self.queue.getBirthRate(),
-                      self.queue.getDeathRate(),
+                      self.queue.getBirthRates(),
+                      self.queue.getDeathRates(),
                       self.reactivate, self.finalize_type.name[0:3], self.N, self.maxtime, self.seed
                       ))
         ax.title.set_fontsize(9)
@@ -2381,11 +2420,11 @@ class EstimatorQueueBlockingFlemingViot:
         plt.step(self.all_times_buffer[P], [(K+1)*self.nservers + pos for pos in self.all_positions_buffer[P]], 'x-',
                      where='post', color="black", markersize=3)
         
-        plt.title("Particle {}: K={}, rate(B)={:.1f}, rate(D)={:.1f}, reactivate={}, finalize={}, #servers={}, maxtime={:.1f}, seed={}" \
+        plt.title("Particle {}: K={}, rates(B)={}, rates(D)={}, reactivate={}, finalize={}, #servers={}, maxtime={:.1f}, seed={}" \
                   .format(P,
                     self.queue.getCapacity(),
-                    self.queue.getBirthRate(),
-                    self.queue.getDeathRate(),
+                    self.queue.getBirthRates(),
+                    self.queue.getDeathRates(),
                     self.reactivate, self.finalize_type.name[0:3], self.nservers, self.maxtime, self.seed
                     ))
         ax.title.set_fontsize(9)
@@ -2412,9 +2451,6 @@ class EstimatorQueueBlockingFlemingViot:
                             self.N, self.nservers, self.START, self.mean_lifetime,
                             self.reactivate, self.finalize_type.name, self.nmeantimes, self.maxtime, self.seed)
         return params_str
-
-    def isLastIteration(self):
-        return self.iter == self.niter
 
     def isValidParticle(self, P):
         "Returns whether the given particle is a valid particle number indexing the list of particle queues"
