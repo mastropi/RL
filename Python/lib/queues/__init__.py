@@ -119,7 +119,7 @@ class GenericQueue:
         # Convert the size to an array (and to int if given as float)
         if isinstance(size, (int, np.int32, np.int64, float, np.float32, np.float64)):
             size = np.repeat(int(size), self.c)
-        self.size = size
+        self.size = np.array(size)
 
 
 class QueueMM(GenericQueue):

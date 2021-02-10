@@ -117,6 +117,13 @@ class EstimatorQueueBlockingFlemingViot:
         where the array of zeros has length equal to the number of servers.
         That is, the particle is an ARRAY of server sizes, which should ALL be idle
         in order for the particle to be considered absorbed.
+        
+        When reactivate=True, the initial position of the system is (1, 0, ..., 0),
+        i.e. the initial buffer size is 1 (as the system can never be absorbed)
+        When reactivate=False, the initial position of the system is (0, 0, ..., 0).
+        This setting is used when we are interested in estimating the expected survival time
+        (which is used as input to the system run under reactivate=True to estimate
+        the blocking probability under the Fleming-Viot algorithm). 
         default: True
 
     finalize_type: (opt) FinalizeType
@@ -149,7 +156,7 @@ class EstimatorQueueBlockingFlemingViot:
             import sys
             sys.exit(-1)
         self.N = nparticles
-        self.queue = queue              # This variable is used to create the particles as replications of the given queue
+        self.queue = copy.deepcopy(queue) # We copy the queue so that we do NOT change the `queue` object calling this function
         self.policy = policy            # This should be a mapping from job class to server.
                                         # As a simple example to begin with, here it is defined as a vector of probabilities for each job class
                                         # where the probability is the assignment of the job class to each server, where the number of servers is assumed to be 3. 
@@ -167,30 +174,36 @@ class EstimatorQueueBlockingFlemingViot:
         self.nservers = self.queue.getNServers()
 
         #-- Parameter checks
-        if queue.getCapacity() <= 1:
+        if self.queue.getCapacity() <= 1:
             # This condition must be satisfied because ONLY ONE EVENT is accepted for each event time
             # i.e. ACTIVATION, BLOCK, UNBLOCK or ABSORPTION.
             # If we allowed a queue capacity of 1, when the position of the particle goes to 1, the particle
             # is both ACTIVATED and BLOCKED, a situation that cannot be handled with the code as is written now.
             # In any case, a capacity of 1 is NOT of interest.   
-            raise ValueError("The maximum position of the particles must be larger than 1 ({})".format(queue.getCapacity()))
-
-        self.START = queue.getServerSizes() # Initial server size for each simulated particle (should be a numpy array)
-        if np.sum(self.START) not in [0, 1]:
-            raise ValueError("The start position for the particle (buffer size) should be either 0 or 1. These are the initial server sizes: {}" \
-                             "\nProcess aborts." \
-                             .format(self.START))
-        #-- Parameter checks
+            raise ValueError("The maximum position of the particles must be larger than 1 ({})".format(self.queue.getCapacity()))
 
         if mean_lifetime is not None and (np.isnan(mean_lifetime) or mean_lifetime <= 0):
             raise ValueError("The mean life time must be positive ({})".format(mean_lifetime))
-        self.mean_lifetime = mean_lifetime  # A possibly separate estimation of the expected survival time
+        #-- Parameter checks
 
+        self.mean_lifetime = mean_lifetime  # A possibly separate estimation of the expected survival time
         self.reactivate = reactivate        # Whether the particle is reactivated to a positive position after absorption
         self.finalize_type = finalize_type  # How to finalize the simulation
         self.plotFlag = plotFlag
         self.seed = seed
         self.LOG = log
+
+        # Set the initial size of the FIRST server to the `start` value and the rest to 0
+        # so that the buffer size is equal to `start`
+        # Note: self.START can be either a list or a numpy array, it is stored as a numpy array inside `queue` by setServerSizes()
+        self.START = [0]*self.nservers
+        if self.reactivate:
+            self.START[0] = 1
+        self.queue.setServerSizes(self.START)
+        if np.sum(self.START) not in [0, 1]:
+            raise ValueError("The start position for the particle (buffer size) should be either 0 or 1. These are the initial server sizes: {}" \
+                             "\nProcess aborts." \
+                             .format(self.START))
 
         # Epsilon time --> used to avoid repetition of times when reactivating a particle
         # This epsilon time takes into account the scale of the problem by making it 1E6 times smaller

@@ -486,13 +486,12 @@ class Test_QB_Particles(unittest.TestCase):
 
     def test_algorithm(self):
         print("\nRunning test " + self.id())
-        start = 1
         reactivate = True
         finalize_type = FinalizeType.ABSORB_CENSORED
         nparticles = 50
         nmeantimes = 10
         seed = 1717
-        self.run(start=start,
+        self.run(
                 mean_lifetime=None,
                 reactivate=reactivate,
                 finalize_type=finalize_type,
@@ -502,8 +501,7 @@ class Test_QB_Particles(unittest.TestCase):
                 plotFlag=True,
                 log=False)
 
-    def run(self,   start=1,
-                    mean_lifetime=None,
+    def run(self,   mean_lifetime=None,
                     reactivate=True,
                     finalize_type=FinalizeType.ABSORB_CENSORED,
                     nparticles=100,
@@ -511,13 +509,7 @@ class Test_QB_Particles(unittest.TestCase):
                     seed=1717,
                     plotFlag=True,
                     log=False):
-        # DM-2020/12/23: We make a copy of the queue so that we do NOT change the queue defined in the constructor of this object
-        # For the reactivation case, we start the buffer size of the queue at 1,
-        # a situation that is obtained by setting the first server to 1 and the rest to 0.
-        initial_server_sizes = np.repeat(0, self.queue.getNServers())
-        initial_server_sizes[0] = start
-        queue = copy.deepcopy(self.queue)
-        queue.setServerSizes(initial_server_sizes)
+        queue = self.queue
         job_rates = self.job_rates
         policy = self.policy
         est = estimators.EstimatorQueueBlockingFlemingViot(nparticles, queue,
@@ -710,11 +702,10 @@ class Test_QB_Particles(unittest.TestCase):
                         print("\t1) Estimating the expected survival time using NO reactivation...", end=" --> ")
                         seed_rep = seed + rep * int(np.round(100*np.random.random()))
                         reactivate = False
-                        start = 0
                         mean_lifetime = None
                         time_mc_start = timer()
                         est_mc, proba_blocking_mc, total_blocking_time_mc, total_survival_time_mc, mean_lifetime_mc, params_mc = \
-                            self.run(start,
+                            self.run(
                                     mean_lifetime,
                                     reactivate,
                                     finalize_type,
@@ -729,10 +720,9 @@ class Test_QB_Particles(unittest.TestCase):
                         print("\t2) Estimating blocking probability using Fleming-Viot (E(T) = {:.1f})..." \
                               .format(mean_lifetime_mc), end=" --> ")
                         reactivate = True
-                        start = 1
                         time_fv_start = timer()
                         est_fv, proba_blocking_integral, proba_blocking_laplacian, integral, gamma, params_fv = \
-                            self.run(start,
+                            self.run(
                                     mean_lifetime_mc,
                                     reactivate,
                                     finalize_type,
@@ -1120,6 +1110,8 @@ if __name__ == "__main__":
     test = Test_QB_Particles()
     #test.test_algorithm()
 
+    time_start = timer()
+
     finalize_type = FinalizeType.ABSORB_CENSORED
     nparticles = 100
     nmeantimes = 50
@@ -1130,8 +1122,7 @@ if __name__ == "__main__":
                 total_blocking_time, \
                 total_survival_time, \
                 expected_survival_time, \
-                params_mc = test.run(   start=0,
-                                        mean_lifetime=None,
+                params_mc = test.run(   mean_lifetime=None,
                                         reactivate=False,
                                         finalize_type=finalize_type,
                                         nparticles=nparticles,
@@ -1143,8 +1134,7 @@ if __name__ == "__main__":
                 proba_blocking_laplacian_fv, \
                 integral_fv, \
                 gamma_fv, \
-                params_fv = test.run(   start=1,
-                                        mean_lifetime=expected_survival_time,
+                params_fv = test.run(   mean_lifetime=expected_survival_time,
                                         reactivate=True,
                                         finalize_type=finalize_type,
                                         nparticles=nparticles,
@@ -1165,6 +1155,9 @@ if __name__ == "__main__":
     proba_blocking_true = test.compute_true_blocking_probability(test.capacity, test.rhos)
     if proba_blocking_true is not None:
         print("True P(K): {:.6f}%".format(proba_blocking_true*100))
+
+    time_end = timer()
+    print("Execution time: {:.1f} min".format((time_end - time_start) / 60))
 else:
     # Lines to execute "by hand" (i.e. at the Python prompt)
     test = Test_QB_Particles()
