@@ -3,6 +3,7 @@
 Created on Thu Apr 30 13:16:50 2020
 
 @author: Daniel Mastropietro
+@description: Util functions used in running unit tests
 """
 
 import numpy as np

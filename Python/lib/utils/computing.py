@@ -7,6 +7,7 @@ Created on Thu Jun 04 22:15:48 2020
 """
 
 import numpy as np
+import copy
 
 def comb(n,k):
     """
@@ -29,6 +30,56 @@ def comb(n,k):
         den *= i + 1
         
     return int( num / den )
+
+def stationary_distribution_birth_death_process(nservers :int, capacity :int, rhos :list):
+    if len(rhos) != nservers:
+        raise ValueError("The length of the process density ({}) must be equal to the number of servers in the system ({})".format(len(rhos), nservers))
+    if capacity < 0:
+        raise ValueError("The capacity must be non-negative: {}".format(capacity)) 
+
+    # Create short-name variable for number of servers
+    R = nservers
+
+    # Total expected number of cases (needed to initialize the output arrays and check the results)
+    ncases_total_expected = 0
+    for c in range(capacity+1):
+        ncases_total_expected += comb(c+R-1,c)
+
+    # Initialize the output arrays with all possible x = (n1, n2, ..., nR) combinations, where R=nservers,
+    # and the probability distribution for each x. They are all initialized to a dummy value.
+    # They are indexed by the order in which all the combinations are generated below:
+    # - by increasing capacity 0 <= c <= capacity
+    # - by the order defined by the all_combos_with_sum(R,c) function
+    x = [[-1]*nservers]*ncases_total_expected
+    #x = array_of_objects((ncases_total_expected,), value=[-1]*nservers)
+    dist = [0]*ncases_total_expected
+    k = -1
+    ncases_total = 0
+    const = 0   # Normalizing constant (because the system's capacity is finite)
+    for c in range(capacity+1):
+        ncases_expected = comb(c+R-1,c)
+        combos_generator = all_combos_with_sum(nservers, c)
+        ncases = 0
+        while True:
+            try:
+                next_combo = next(combos_generator)
+                k += 1  # Index of the distribution array
+                x[k] = copy.deepcopy(next_combo)    # IMPORTANT: Need to make a copy o.w. x[k] will share the same memory address as next_combo and its value will change at the next iteration!!
+                #print("next_combo (k={}): {}".format(k, next_combo))
+                dist[k] = np.prod( [(1- r)*r**nr for r, nr in zip(rhos, next_combo)] )
+                const += dist[k]
+                ncases += 1
+                ncases_total += 1
+            except StopIteration:
+                break
+        combos_generator.close()
+        assert ncases == ncases_expected, "The number of generated combinations for R={}, C={} ({}) is equal to the expected number of combinations ({})".format(R, c, ncases, ncases_expected)
+    dist /= const
+    assert ncases_total == ncases_total_expected, "The number of TOTAL generated combinations for R={}, C<={} ({}) is equal to the expected number of combinations ({})".format(R, C, ncases_total, ncases_total_expected)
+    assert const <= 1, "The normalizing constant is <= 1"
+    assert abs(sum(dist) - 1.0) < 1E-6, "The sum of the distribution function is 1 ({.6f})".format(sum(dist))
+
+    return x, dist
 
 def rmse(Vtrue, Vest, weights=None):
     """Root Mean Square Error (RMSE) between Vtrue and Vest, weighted or not weighted by weights.
@@ -159,3 +210,133 @@ if __name__ == "__main__":
     assert count == expected_count, "The number of combinations generated is {} ({})".format(expected_count, count)
     print("OK! {} combinations generated for R={}, C={}.".format(count, R, C))
     #------------ all_combos_with_sum(R,C) -----------------#
+
+
+    #------------ stationary_distribution_birth_death_process --------------#
+    import matplotlib.pyplot as plt
+    print("\nTesting stationary_distribution_birth_death_process(nservers, capacity, rhos):")
+    R = 3
+    C = 3
+    n_expected = [
+                [0, 0, 0],
+                [1, 0, 0],
+                [0, 1, 0],
+                [0, 0, 1],
+                [2, 0, 0],
+                [1, 1, 0],
+                [1, 0, 1],
+                [0, 2, 0],
+                [0, 1, 1],
+                [0, 0, 2],
+                [3, 0, 0],
+                [2, 1, 0],
+                [2, 0, 1],
+                [1, 2, 0],
+                [1, 1, 1],
+                [1, 0, 2],
+                [0, 3, 0],
+                [0, 2, 1],
+                [0, 1, 2],
+                [0, 0, 3]
+                ]
+
+    print("Test #1: all process intensities rhos are equal (to 0.5)")
+    rhos_equal = [0.5, 0.5, 0.5]
+    dist_expected = [
+                    0.190476,
+                    0.095238,
+                    0.095238,
+                    0.095238,
+                    0.047619,
+                    0.047619,
+                    0.047619,
+                    0.047619,
+                    0.047619,
+                    0.047619,
+                    0.023810,
+                    0.023810,
+                    0.023810,
+                    0.023810,
+                    0.023810,
+                    0.023810,
+                    0.023810,
+                    0.023810,
+                    0.023810,
+                    0.023810
+                    ]           
+    n, dist = stationary_distribution_birth_death_process(R, C, rhos_equal)
+    print("State space for R={}, C={}: {}".format(R, C, len(dist)))
+    print("Distribution for rhos={}:".format(rhos_equal))
+    [print("index={}: x={}, p={:.6f}".format(idx, x, p)) for idx, (x, p) in enumerate(zip(n, dist))]
+    print("---------------")
+    print("Sum: p={:.6f}".format(sum(dist)))
+    assert abs(sum(dist) - 1.0) < 1E-6, "The sum of the distribution function is 1 ({.6f})".format(sum(dist))
+    assert all([x == x_expected for x, x_expected in zip(n, n_expected)]), "The expected event space is verified"
+    assert all(abs(dist - dist_expected) < 1E-6), "The expected distribution is verified"
+
+    # Multinomial distribution on these events
+    # Notes:
+    # - sample_size is the number of experiments to run for the multinomial distribution
+    # in our case, it's our sample size.
+    # - the resulting array gives the number of times we get the index value out of all possible indices
+    # from 0 ... length(dist)-1, so we can use it as the number of times to use the n array associated
+    # to each index as starting point of the simulation
+    sample_size = 1000
+    print("Generating {} samples with the given distribution".format(sample_size))
+    sample = np.random.multinomial(sample_size, dist, size=1)
+    print("No. of times each array combination n appears in the sample:\n{}".format(sample[0]))
+    plt.figure()
+    plt.plot(dist, 'r.-')
+    plt.plot(sample[0]/sample_size, 'b.')
+    plt.title("R={}, C={}, rhos={} (ALL EQUAL) (sample size = {})".format(R, C, rhos_equal, sample_size))
+
+    print("Test #2: process intensities rhos are different (smaller than 1)")
+    rhos_diff = [0.8, 0.7, 0.4]
+    dist_expected = [
+                    0.124611,
+                    0.099688,
+                    0.087227,
+                    0.049844,
+                    0.079751,
+                    0.069782,
+                    0.039875,
+                    0.061059,
+                    0.034891,
+                    0.019938,
+                    0.063801,
+                    0.055826,
+                    0.031900,
+                    0.048847,
+                    0.027913,
+                    0.015950,
+                    0.042741,
+                    0.024424,
+                    0.013956,
+                    0.007975
+                    ]
+    n, dist = stationary_distribution_birth_death_process(R, C, rhos_diff)
+    print("State space for R={}, C={}: {}".format(R, C, len(dist)))
+    print("Distribution for rhos={}:".format(rhos_diff))
+    [print("index={}: x={}, p={:.6f}".format(idx, x, p)) for idx, (x, p) in enumerate(zip(n, dist))]
+    print("---------------")
+    print("Sum: p={:.6f}".format(sum(dist)))
+    assert abs(sum(dist) - 1.0) < 1E-6, "The sum of the distribution function is 1 ({.6f})".format(sum(dist))
+    assert all([x == x_expected for x, x_expected in zip(n, n_expected)]), "The expected event space is verified"
+    assert all(abs(dist - dist_expected) < 1E-6), "The expected distribution is verified"
+
+    # Multinomial distribution on these events
+    # Notes:
+    # - sample_size is the number of experiments to run for the multinomial distribution
+    # in our case, it's our sample size.
+    # - the resulting array gives the number of times we get the index value out of all possible indices
+    # from 0 ... length(dist)-1, so we can use it as the number of times to use the n array associated
+    # to each index as starting point of the simulation
+    sample_size = 1000
+    print("Generating {} samples with the given distribution".format(sample_size))
+    sample = np.random.multinomial(sample_size, dist, size=1)
+    print("No. of times each array combination n appears in the sample:\n{}".format(sample[0]))
+    plt.figure()
+    plt.plot(dist, 'r.-')
+    plt.plot(sample[0]/sample_size, 'b.')
+    plt.title("R={}, C={}, rhos={} (ALL DIFFERENT) (sample size = {})".format(R, C, rhos_diff, sample_size))
+    #------------ stationary_distribution_birth_death_process --------------#
