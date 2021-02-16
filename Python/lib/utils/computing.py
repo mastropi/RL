@@ -45,39 +45,58 @@ def stationary_distribution_birth_death_process(nservers :int, capacity :int, rh
     for c in range(capacity+1):
         ncases_total_expected += comb(c+R-1,c)
 
-    # Initialize the output arrays with all possible x = (n1, n2, ..., nR) combinations, where R=nservers,
+    # Initialize the output arrays with all possible x = (n1, n2, ..., nR) combinations,
     # and the probability distribution for each x. They are all initialized to a dummy value.
     # They are indexed by the order in which all the combinations are generated below:
     # - by increasing capacity 0 <= c <= capacity
     # - by the order defined by the all_combos_with_sum(R,c) function
-    x = [[-1]*nservers]*ncases_total_expected
-    #x = array_of_objects((ncases_total_expected,), value=[-1]*nservers)
+    x = [[-1]*R]*ncases_total_expected
     dist = [0]*ncases_total_expected
-    k = -1
     ncases_total = 0
     const = 0   # Normalizing constant (because the system's capacity is finite)
+    last_case = -1
     for c in range(capacity+1):
         ncases_expected = comb(c+R-1,c)
-        combos_generator = all_combos_with_sum(nservers, c)
-        ncases = 0
-        while True:
-            try:
-                next_combo = next(combos_generator)
-                k += 1  # Index of the distribution array
-                x[k] = copy.deepcopy(next_combo)    # IMPORTANT: Need to make a copy o.w. x[k] will share the same memory address as next_combo and its value will change at the next iteration!!
-                #print("next_combo (k={}): {}".format(k, next_combo))
-                dist[k] = np.prod( [(1- r)*r**nr for r, nr in zip(rhos, next_combo)] )
-                const += dist[k]
-                ncases += 1
-                ncases_total += 1
-            except StopIteration:
-                break
-        combos_generator.close()
-        assert ncases == ncases_expected, "The number of generated combinations for R={}, C={} ({}) is equal to the expected number of combinations ({})".format(R, c, ncases, ncases_expected)
+        ind = slice(last_case+1, last_case+1+ncases_expected)
+        
+        x[ind], dist[ind] = stationary_distribution_birth_death_process_at_capacity(R, c, rhos, ncases_expected)
+
+        const += sum(dist[ind])
+        ncases_total += ncases_expected
+        # Prepare for next iteration
+        last_case += ncases_expected
     dist /= const
     assert ncases_total == ncases_total_expected, "The number of TOTAL generated combinations for R={}, C<={} ({}) is equal to the expected number of combinations ({})".format(R, C, ncases_total, ncases_total_expected)
     assert const <= 1, "The normalizing constant is <= 1"
-    assert abs(sum(dist) - 1.0) < 1E-6, "The sum of the distribution function is 1 ({.6f})".format(sum(dist))
+    assert abs(sum(dist) - 1.0) < 1E-6, "The sum of the distribution function is 1 ({:.6f})".format(sum(dist))
+
+    return x, dist
+
+def stationary_distribution_birth_death_process_at_capacity(nservers :int, capacity :int, rhos :list, ncases_expected=None):
+    """
+    Returns the UNNORMALIZED stationary distribution of a birth-death process for the state subspace
+    associated to a fixed capacity, i.e. for all the n = (n1, n2, ..., nR)
+    such that their sum is equal to the given capacity.
+    """
+    R = nservers
+    C = capacity
+    if ncases_expected is None:
+        ncases_expected = comb(C+R-1,C)
+    combos_generator = all_combos_with_sum(R, C)
+    ncases = 0
+    x = [[-1]*R]*ncases_expected
+    dist = [0]*ncases_expected
+    while True:
+        try:
+            next_combo = next(combos_generator)
+            #print("next_combo (k={}): {}".format(ncases, next_combo))
+            x[ncases] = copy.deepcopy(next_combo)    # IMPORTANT: Need to make a copy o.w. x[k] will share the same memory address as next_combo and its value will change at the next iteration!!
+            dist[ncases] = np.prod( [(1- r)*r**nr for r, nr in zip(rhos, next_combo)] )
+            ncases += 1
+        except StopIteration:
+            break
+    combos_generator.close()
+    assert ncases == ncases_expected, "The number of generated combinations for R={}, C={} ({}) is equal to the expected number of combinations ({})".format(R, C, ncases, ncases_expected)
 
     return x, dist
 

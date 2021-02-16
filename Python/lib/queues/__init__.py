@@ -58,6 +58,24 @@ class GenericQueue:
         self.size = self.size_initial
         self.last_change = np.zeros(self.c, dtype=int)
 
+    def resize(self, size):
+        if len(size) != self.getNServers():
+            warnings.warn("The number of sizes to set ({}) and the number of servers ({}) differ." \
+                          "\nNo resize done." \
+                          .format(len(size), self.getNServers()))
+            return
+        if not (0 <= np.sum(size) <= self.getCapacity()):
+            warnings.warn("Invalid size values given (0 <= sum(size) <= {}) (size={})." \
+                          "\nNo resize done." \
+                          .format(self.getCapacity(), size))
+            return
+
+        previous_size = self.size
+        self.size = np.array(size)
+
+        # Store how the size changed from the size prior to the resize just performed
+        self.last_change = self.size - previous_size
+
     def add(self, server=0):
         if not self.isFull():
             self.size[server] += 1
@@ -290,18 +308,13 @@ class QueueMM(GenericQueue):
         t: non-negative float
             Time at which the resize takes place.
         """
-        if len(size) != self.getNServers():
-            warnings.warn("The number of sizes to set ({}) and the number of servers ({}) differ." \
+        if t < 0:
+            warnings.warn("Invalid time given (t >= 0) (size={}, t={})." \
                           "\nNo resize done." \
-                          .format(len(size), self.getNServers()))
-            return
-        if not (0 <= np.sum(size) <= self.getCapacity() and t >= 0):
-            warnings.warn("Invalid size values or time given (0 <= sum(size) <= {}; t >= 0) (size={}, t={})." \
-                          "\nNo resize done." \
-                          .format(self.getCapacity(), size, t))
+                          .format(size, t))
             return
 
-        self.size = np.array(size)
+        super().resize(size)
         self.time_last_event = np.repeat(t, self.getNServers())
         self.type_last_event = np.repeat(Event.RESIZE, self.getNServers())
 
@@ -318,17 +331,26 @@ class QueueMM(GenericQueue):
         return self.time_last_event[server]
 
     def getMostRecentEventInfo(self):
-        "Returns the server, its last change, the event type, and the event time of the event with largest time"
+        """
+        Returns the array of last change in size experienced by the system,
+        together with the server, event type, and event time associated to the latest event
+        taking place in the system (i.e. the event --among all the latest events taking place
+        in the servers-- with the largest time).
+        
+        Note that we return the last change for ALL servers, because this is needed
+        for processing purposes (in e.g. estimators.py) when the last change was due to
+        a RESIZE, because in such case, the size in the server selected here as the server
+        having the event with largest time (which is any of them because a RESIZE happens
+        for all servers at once, i.e. at the same time), may NOT have changed at all,
+        although all the other servers may have changed their sizes...;
+        and this situation will not be caught if we only returned the last change in size
+        of the server with the largest time identified by this function.
+        """
         server_with_largest_time = np.argmax( self.time_last_event )
-        return  server_with_largest_time, \
-                self.last_change[server_with_largest_time], \
+        return  self.last_change, \
+                server_with_largest_time, \
                 self.type_last_event[server_with_largest_time], \
                 self.time_last_event[server_with_largest_time]
-
-    def getMostRecentSize(self):
-        "Returns the time of the latest change"
-        server_with_largest_time = np.argmax( self.time_last_event )
-        return self.time_last_event[server_with_largest_time]
 
     def getMostRecentEventTime(self):
         "Returns the time of the latest event"

@@ -9,7 +9,7 @@ Created on Thu Jun  4 19:16:02 2020
 import runpy
 runpy.run_path('../../setup.py')
 
-import copy
+import os
 import numpy as np
 import pandas as pd
 
@@ -432,10 +432,13 @@ class Test_QB_Particles(unittest.TestCase):
 
         self.plot_results(df_proba_survival_and_blocking_conditional,
                           K,
+                          nparticles,
+                          nmeantimes,
+                          buffer_size_activation,
+                          None,
                           reactivate,
                           finalize_type,
-                          nparticles,
-                          nmeantimes)
+                          seed)
 
         return  df_proba_survival_and_blocking_conditional, \
                 (reactivate, finalize_type, nparticles, nmeantimes)
@@ -501,7 +504,8 @@ class Test_QB_Particles(unittest.TestCase):
                 plotFlag=True,
                 log=False)
 
-    def run(self,   mean_lifetime=None,
+    def run(self,   buffer_size_activation=1,
+                    mean_lifetime=None,
                     reactivate=True,
                     finalize_type=FinalizeType.ABSORB_CENSORED,
                     nparticles=100,
@@ -513,6 +517,7 @@ class Test_QB_Particles(unittest.TestCase):
         job_rates = self.job_rates
         policy = self.policy
         est = estimators.EstimatorQueueBlockingFlemingViot(nparticles, queue,
+                                                           buffer_size_activation=buffer_size_activation,
                                                            nmeantimes=nmeantimes,
                                                            job_rates=job_rates,
                                                            service_rates=None,
@@ -621,11 +626,12 @@ class Test_QB_Particles(unittest.TestCase):
             df_proba_survival_and_blocking_conditional = est.estimate_proba_survival_and_blocking_conditional()
             self.plot_results(df_proba_survival_and_blocking_conditional,
                               K,
+                              nparticles,
+                              nmeantimes,
+                              buffer_size_activation,
                               mean_lifetime,
                               reactivate,
                               finalize_type,
-                              nparticles,
-                              nmeantimes,
                               seed)
 
         # Note: `est` is the object used for the estimation process (so that we can do further calculations outside if needed)
@@ -644,7 +650,8 @@ class Test_QB_Particles(unittest.TestCase):
                     expected_survival_time, \
                     (mean_lifetime, reactivate, finalize_type, nparticles, nmeantimes)
                     
-    def analyze_convergence(self,   finalize_type=FinalizeType.REMOVE_CENSORED,
+    def analyze_convergence(self,   buffer_size_activation,
+                                    finalize_type=FinalizeType.REMOVE_CENSORED,
                                     replications=5,
                                     # For the following range specifications,
                                     # each new value is the previous value TIMES the third element of the tuple
@@ -666,6 +673,7 @@ class Test_QB_Particles(unittest.TestCase):
                                                                ('K', []),
                                                                ('nparticles', []),
                                                                ('nmeantimes', []),
+                                                               ('buffer_size_activation', []),
                                                                ('rep', []),
                                                                ('seed', []),
                                                                ('integral', []),
@@ -680,7 +688,13 @@ class Test_QB_Particles(unittest.TestCase):
         K = K_min
         while K <= K_max:
             self.queue.K = K
-            print("\n---> NEW K (Queue's capacity = {})".format(self.queue.getCapacity()))
+            
+            # When the buffer size for activation parameter is smaller than 1 it is considered a proportion of the queue's capacity
+            if buffer_size_activation < 1:
+                buffer_size_activation_value = int( buffer_size_activation * K )
+            else:
+                buffer_size_activation_value = buffer_size_activation
+            print("\n---> NEW K (Queue's capacity = {}, buffer size for activation = {})".format(self.queue.getCapacity(), buffer_size_activation_value))
 
             print("Computing TRUE blocking probability...", end=" --> ")
             time_pr_start = timer()
@@ -700,12 +714,18 @@ class Test_QB_Particles(unittest.TestCase):
                     for rep in range(replications):
                         print("\n\tReplication {} of {}".format(rep+1, replications))
                         print("\t1) Estimating the expected survival time using NO reactivation...", end=" --> ")
+                        # NOTE THAT THE FIRST REPLICATION (rep=0) HAS THE SAME SEED FOR ALL PARAMETER SETTINGS
+                        # This is nice because we can a little bit better compare the effect of the different parameter settings
+                        # (but not so much anyway, because the values that are generated as the parameter settings
+                        # change impact whatever is generated next --e.g. the initial events for particle 2
+                        # will change if more events are generated for particle 1 when the simulation time increases...)
                         seed_rep = seed + rep * int(np.round(100*np.random.random()))
                         reactivate = False
                         mean_lifetime = None
                         time_mc_start = timer()
                         est_mc, proba_blocking_mc, total_blocking_time_mc, total_survival_time_mc, mean_lifetime_mc, params_mc = \
                             self.run(
+                                    buffer_size_activation_value,
                                     mean_lifetime,
                                     reactivate,
                                     finalize_type,
@@ -723,6 +743,7 @@ class Test_QB_Particles(unittest.TestCase):
                         time_fv_start = timer()
                         est_fv, proba_blocking_integral, proba_blocking_laplacian, integral, gamma, params_fv = \
                             self.run(
+                                    buffer_size_activation_value,
                                     mean_lifetime_mc,
                                     reactivate,
                                     finalize_type,
@@ -747,6 +768,7 @@ class Test_QB_Particles(unittest.TestCase):
                                                                             ('K', [K]),
                                                                             ('nparticles', [nparticles]),
                                                                             ('nmeantimes', [nmeantimes]),
+                                                                            ('buffer_size_activation', [buffer_size_activation]),
                                                                             ('rep', [rep+1]),
                                                                             ('seed', [seed_rep]),
                                                                             ('integral', [integral]),
@@ -767,11 +789,12 @@ class Test_QB_Particles(unittest.TestCase):
                         df_proba_survival_and_blocking_conditional = est_fv.estimate_proba_survival_and_blocking_conditional()
                         self.plot_results(df_proba_survival_and_blocking_conditional,
                                           K,
+                                          nparticles,
+                                          nmeantimes,
+                                          buffer_size_activation,
                                           mean_lifetime_mc,
                                           reactivate,
                                           finalize_type,
-                                          nparticles,
-                                          nmeantimes,
                                           seed)
 
                     if False:
@@ -803,19 +826,21 @@ class Test_QB_Particles(unittest.TestCase):
 
     def plot_results(self, df_proba_survival_and_blocking_conditional, *args, log=False):
         K = args[0]
-        mean_lifetime = args[1]
-        reactivate = args[2]
-        finalize_type = args[3]
-        nparticles = args[4]
-        nmeantimes = args[5]
-        seed = args[6]
+        nparticles = args[1]
+        nmeantimes = args[2]
+        buffer_size_activation = args[3]
+        mean_lifetime = args[4]
+        reactivate = args[5]
+        finalize_type = args[6]
+        seed = args[7]
         if log:
             print("K={}".format(K))
+            print("nparticles={}".format(nparticles))
+            print("nmeantimes={}".format(nmeantimes))
+            print("buffer_size_activation={}".format(buffer_size_activation))
             print("mean_lifetime={}".format(mean_lifetime))
             print("reactivate={}".format(reactivate))
             print("finalize_type={}".format(finalize_type.name))
-            print("nparticles={}".format(nparticles))
-            print("nmeantimes={}".format(nmeantimes))
             print("seed={}".format(seed))
 
         plt.figure()
@@ -842,14 +867,14 @@ class Test_QB_Particles(unittest.TestCase):
         plt.sca(ax)
         ax.legend(['P(T>t / s=1)'], loc='upper left')
         ax2.legend(['P(BLOCK / T>t,s=1)'], loc='upper right')
-        plt.title("K={}, job rates={}, service rates={}, mean_lifetime={:.1f}" \
-                  ", reactivate={}, finalize={}, N={}, nmeantimes={}, seed={}" \
-                  .format(K,
+        plt.title("K={}, N={}, nmeantimes={}, activation={}, job rates={}, service rates={}, mean_lifetime={:.1f}" \
+                  ", reactivate={}, finalize={}, seed={}" \
+                  .format(K, nparticles, nmeantimes, buffer_size_activation,
                           self.job_rates,
                           self.rate_death,
                           #self.queue.getBirthRate() / self.queue.getDeathRate(),
                           mean_lifetime or np.nan, reactivate, finalize_type.name[0:3],
-                          nparticles, nmeantimes, seed
+                          seed
                           ))
         ax.title.set_fontsize(9)
 
@@ -1164,10 +1189,11 @@ else:
 
     time_start = timer()
     results_convergence = test.analyze_convergence(
+                                    buffer_size_activation=0.5,
                                     finalize_type=FinalizeType.ABSORB_CENSORED,
-                                    replications=10,
-                                    K_range=(5, 20, 2), 
-                                    nparticles_range=(100, 800, 2),
+                                    replications=5,
+                                    K_range=(5, 40, 2), 
+                                    nparticles_range=(100, 400, 2),
                                     nmeantimes_range=(20, 40, 2), 
                                     seed=1717,
                                     log=False)
@@ -1179,19 +1205,21 @@ else:
 
     print("Execution time: {:.1f} min".format((time_end - time_start) / 60))
 
+    # Plots
+    results_convergence_agg = test.plot_convergence_analysis_allvalues(results_convergence)
+    test.plot_convergence_analysis_maxvalues(results_convergence)
+
     # OLD filename save
     #filename = "../../RL-002-QueueBlocking/results/fv_approx1_convergence_rho={:.3f}.csv"
     #results_convergence.to_csv(filename.format(rho))
     #print("Results of simulation saved to {}".format(filename))  
-    
+
     #filename = "../../RL-002-QueueBlocking/results/RL-QB-20210205-SimulationMultiServer3-JobClass2-K=5&10&20,N=100&200&400&800,T=20&40 (RAW).csv"
+    #filename = "../../RL-002-QueueBlocking/results/RL-QB-20210211-SimulationSingleServer-K=5&10,N=100&200,T=20&40 (RAW).csv"
     #results_convergence.to_csv(filename)
     #print("Results of simulation saved to {}".format(os.path.abspath(filename)))
 
     #filename = "../../RL-002-QueueBlocking/results/RL-QB-20210205-SimulationMultiServer3-JobClass2-K=5&10&20,N=100&200&400&800,T=20&40.csv"
+    #filename = "../../RL-002-QueueBlocking/results/RL-QB-20210211-SimulationSingleServer-K=5&10,N=100&200,T=20&40.csv"
     #results_convergence_agg.to_csv(filename)
     #print("Results of simulation saved to {}".format(os.path.abspath(filename)))
-
-    # Plots
-    results_convergence_agg = test.plot_convergence_analysis_allvalues(results_convergence)
-    test.plot_convergence_analysis_maxvalues(results_convergence)

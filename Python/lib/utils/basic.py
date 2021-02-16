@@ -71,8 +71,8 @@ def insort(alist, value, unique=False):
     """
     # Index where to insert the value respecting the list order
     # NOTE that, when the value is already in the list, bisect()
-    # returns an index number that would insert the value AFTER
-    # all the indices where the value is found in the list.
+    # returns an index number that is ONE more the index where
+    # the value is found in the list.
     idx = bisect.bisect(alist, value)
     if idx > 0 and alist[idx-1] == value:
         found = True
