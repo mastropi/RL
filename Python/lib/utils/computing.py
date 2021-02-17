@@ -31,6 +31,58 @@ def comb(n,k):
         
     return int( num / den )
 
+def compute_blocking_probability_birth_death_process(nservers :int, capacity :int, rhos :list):
+    """
+    Computes the true blocking probability of a birth-death process with R servers and total capacity C.
+    
+    Arguments:
+    nservers: int
+        Number of servers in the system.
+
+    capacity: int
+        Capacity of the system: maximum size of the buffer placed at the entrance of the system.
+
+    rhos: list
+        List of the server intensities: lambda / mu for each server in the system, where lambda is the job
+        arrival rate and mu is the service rate. 
+    """
+    if not isinstance(rhos, list):
+        raise ValueError("Input parameter `rho` must be a list with the same length as `nservers`: {}".format(rhos))
+    if nservers != len(rhos):
+        raise ValueError("Input parameter `rho` must have the same length as `nservers` ({}): {}".format(nservers, rhos))
+         
+    R = nservers
+    C = capacity
+    if R == 1:
+        proba_blocking = rhos[0]**C / np.sum([ rhos[0]**i for i in range(C+1) ])
+    else:
+        const = 0
+        ncases_total = 0
+        prod = [0]*(C+1)   # Array to store the contributions to the normalizing constant for each 1 <= c <= C
+        for c in range(C+1):
+            ncases = comb(c+R-1,c)
+            combos_generator = all_combos_with_sum(R,c)
+            count = 0
+            while True:
+                try:
+                    n = next(combos_generator)
+                    assert len(n) == len(rhos), "The length of v and rho rates coincide ({}, {})".format(len(n), len(rhos))
+                    prod[c] += np.prod( [(1- r)*r**nr for r, nr in zip(rhos, n)] )
+                    count += 1
+                except StopIteration:
+                    break
+            combos_generator.close()
+            const += prod[c]
+            assert count == ncases
+            ncases_total += ncases
+        assert const <= 1, "The normalizing constant is <= 1"
+        assert abs(sum(prod)/const - 1.0) < 1E-6
+
+        # Blocking probability
+        proba_blocking = prod[C] / const
+
+    return proba_blocking       
+
 def stationary_distribution_birth_death_process(nservers :int, capacity :int, rhos :list):
     if len(rhos) != nservers:
         raise ValueError("The length of the process density ({}) must be equal to the number of servers in the system ({})".format(len(rhos), nservers))
@@ -223,7 +275,7 @@ if __name__ == "__main__":
                 assert v == [18, 0, 2]
             if count == expected_count:
                 assert v == [0, 0, 20]
-        except StopIteration as e:
+        except StopIteration:
             break
     combos.close()
     assert count == expected_count, "The number of combinations generated is {} ({})".format(expected_count, count)

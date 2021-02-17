@@ -24,7 +24,7 @@ import Python.lib.queues as queues
 import Python.lib.estimators as estimators
 from Python.lib.queues import Event
 from Python.lib.estimators import FinalizeType
-from Python.lib.utils.computing import all_combos_with_sum, comb
+from Python.lib.utils.computing import compute_blocking_probability_birth_death_process
 
 #from importlib import reload
 #reload(estimators)
@@ -61,6 +61,17 @@ class Test_QB_Particles(unittest.TestCase):
         self.queue = queues.QueueMM(self.rate_birth, self.rate_death, self.nservers, self.capacity)
 
         self.plotFlag = True
+
+    def compute_rhos(self):
+        "Computes the rho rates for each server based on arrival rates, service rates, and assignment probabilities"
+        R = self.nservers
+        J = len(self.job_rates) # Number of job classes
+        rhos = [0]*self.nservers
+        for r in range(R):
+            for c in range(J):
+                rhos[r] += self.policy[c][r] * self.job_rates[c] / self.rate_death[r]
+        
+        return rhos
 
     def tests_on_one_queue(self):
         print("\nRunning test " + self.id())
@@ -423,7 +434,7 @@ class Test_QB_Particles(unittest.TestCase):
         proba_blocking = est.estimate_proba_blocking()
         K = self.capacity
         print("\nBlocking probability estimate: {:.1f}%".format(proba_blocking*100))
-        proba_blocking_K = self.compute_true_blocking_probability(K, self.rhos)
+        proba_blocking_K = compute_blocking_probability_birth_death_process(self.nservers, K, self.rhos)
         if proba_blocking_K is not None:
             print("Theoretical value: {:.1f}%".format(proba_blocking_K*100))
 
@@ -431,6 +442,8 @@ class Test_QB_Particles(unittest.TestCase):
         print(est.setup())
 
         self.plot_results(df_proba_survival_and_blocking_conditional,
+                          est.queue.getBirthRates(),
+                          est.queue.getDeathRates(),
                           K,
                           nparticles,
                           nmeantimes,
@@ -443,68 +456,166 @@ class Test_QB_Particles(unittest.TestCase):
         return  df_proba_survival_and_blocking_conditional, \
                 (reactivate, finalize_type, nparticles, nmeantimes)
 
-    def compute_rhos(self):
-        "Computes the rho rates for each server based on arrival rates, service rates, and assignment probabilities"
-        R = self.nservers
-        J = len(self.job_rates) # Number of job classes
-        rhos = [0]*self.nservers
-        for r in range(R):
-            for c in range(J):
-                rhos[r] += self.policy[c][r] * self.job_rates[c] / self.rate_death[r]
-        
-        return rhos
-
-    def compute_true_blocking_probability(self, K, rhos):
-        "Computes the true blocking probability of the system (if possible)"
-        if self.nservers == 1:
-            proba_blocking_K = rhos[0]**K / np.sum([ rhos[0]**i for i in range(K+1) ])
-        else:
-            R = self.nservers
-            const = 0
-            ncases_total = 0
-            prod = [0]*(K+1)   # Array to store the contributions to the normalizing for each 1 <= k <= K
-            for k in range(K+1):
-                ncases = comb(k+R-1,k)
-                combos = all_combos_with_sum(R,k)
-                count = 0
-                while True:
-                    try:
-                        v = next(combos)
-                        assert len(v) == len(rhos), "The length of v and rho rates coincide ({}, {})".format(len(v), len(rhos))
-                        prod[k] += np.prod( [(1- r)*r**nr for r, nr in zip(rhos, v)] )
-                        count += 1
-                    except StopIteration as e:
-                        break
-                combos.close()
-                const += prod[k]
-                assert count == ncases
-                ncases_total += ncases
-            assert const <= 1, "The normalizing constant is <= 1"
-            assert abs(sum(prod)/const - 1.0) < 1E-6
-            
-            # Blocking probability
-            proba_blocking_K = prod[K] / const
-
-        return proba_blocking_K        
-
-    def test_algorithm(self):
-        print("\nRunning test " + self.id())
-        reactivate = True
+    @classmethod
+    def test_fv_implementation(cls):
+        #--- Test one server
+        nservers = 1
+        K = 5
+        rate_birth = 0.5
+        job_rates = [rate_birth]
+        rate_death = [1]
+        policy = [[1]]
+        queue = queues.QueueMM(rate_birth, rate_death, nservers, K)
+    
+        # Simulation parameters
+        nmeantimes = 50
         finalize_type = FinalizeType.ABSORB_CENSORED
-        nparticles = 50
+
+        # The test of the Fleming-Viot implementation is carried out as follows:
+        # - Set K to a small value (e.g. K=5)
+        # - Increase the number of particles N
+        # - Set a large simulation time (e.g. nmeantimes=50)
+        # - Increase the number of particles N check that the error
+        # between the estimated and true blocking probability decreases as 1/sqrt(N)
+        # (according to Propostion 2.1 in Matt's draft)
+        buffer_size_activation = 1 #int(test.capacity/2)
+        finalize_type = FinalizeType.ABSORB_CENSORED
         nmeantimes = 10
         seed = 1717
-        self.run(
-                mean_lifetime=None,
-                reactivate=reactivate,
-                finalize_type=finalize_type,
-                nparticles=nparticles,
-                nmeantimes=nmeantimes,
-                seed=seed,
-                plotFlag=True,
-                log=False)
+        plotFlag = False
+        log = False
 
-    def run(self,   buffer_size_activation=1,
+        replications = 10
+        nparticles_min = 50
+        nparticles_max = 600
+        nparticles_step_prop = 0.5  # STEP proportion: N(n+1) = (1 + prop)*N(n), so that we scale the step as the number of particles increases
+        nparticles = nparticles_min
+        df_results = pd.DataFrame(columns=['N', 'replication', 'Pr(MC)', 'Time(MC)', 'E(T)', 'Pr(FV)', 'Time(FV)', 'Pr(K)', 'exec_time(s)'])
+        time_start_all = timer()
+        case = 0
+        ncases = int( np.log(nparticles_max / nparticles_min) / np.log(1 + nparticles_step_prop)) + 1
+        while nparticles <= nparticles_max:
+            case += 1 
+            print("Running simulation for nparticles={} on {} replications ({} of {})...".format(nparticles, replications, case, ncases))
+        
+            for r in range(1, replications+1):
+                print("\tReplication {} of {}...".format(r, replications), end=" ")
+                seed_rep = seed + r - 1
+
+                # 1) MC: Run simulation to estimate expected return time to absorption set via Monte-Carlo 
+                # Note that we use only ONE particle, as we need to guarantee that we observe enough
+                # time for the system to be absorbed several times.
+                # In order to make the comparison between the MC estimate of the blocking probability
+                # (which is done as well!) and the FV estimate, i.e. to have an honest comparison,
+                # we use the same N*T value in both situations, which, since N=1 in MC we choose
+                # T(MC) = T(FV)*N(FV).
+                time_start = timer()
+                est_mc = estimators.EstimatorQueueBlockingFlemingViot(1, queue,
+                                                           buffer_size_activation=buffer_size_activation,
+                                                           nmeantimes=nmeantimes*nparticles,
+                                                           job_rates=job_rates,
+                                                           service_rates=None,
+                                                           policy=policy,
+                                                           mean_lifetime=None,
+                                                           reactivate=False,
+                                                           finalize_type=finalize_type,
+                                                           plotFlag=plotFlag,
+                                                           seed=seed_rep, log=log)
+                proba_blocking_mc, total_blocking_time, total_survival_time, expected_survival_time = est_mc.simulate()
+                if nparticles == nparticles_min:
+                    # Compute the theoretical blocking probability only at the first iteration
+                    rhos = est_mc.rhos
+                    proba_blocking_true = compute_blocking_probability_birth_death_process(nservers, K, rhos)
+    
+                # b) FV: Fleming-Viot
+                # The estimated expected return time to the absorption set is used as input
+                est_fv = estimators.EstimatorQueueBlockingFlemingViot(nparticles, queue,
+                                                           buffer_size_activation=buffer_size_activation,
+                                                           nmeantimes=nmeantimes,
+                                                           job_rates=job_rates,
+                                                           service_rates=None,
+                                                           policy=policy,
+                                                           mean_lifetime=expected_survival_time,
+                                                           reactivate=True,
+                                                           finalize_type=finalize_type,
+                                                           plotFlag=plotFlag,
+                                                           seed=seed_rep, log=log)
+                proba_blocking_fv_integral, proba_blocking_fv_laplacian, integral, gamma = est_fv.simulate()
+                time_end = timer()
+                exec_time = time_end - time_start
+                print("execution time: {:.1f} sec".format(exec_time))
+            
+                # Results
+                assert est_mc.maxtime == est_fv.maxtime*nparticles, \
+                    "The simulation time of the MC ({:.1f}) and the FV ({:.1f}) runs are comparable" \
+                    .format(est_mc.maxtime, est_fv.maxtime*nparticles)
+                print("\tP(K) by MC: {:.3f}%, E(T) = {:.1f} (simulation time = {:.1f})".format(proba_blocking_mc*100, expected_survival_time, est_mc.maxtime))
+                print("\tP(K) estimated by FV1: {:.3f}% (simulation time = {:.1f})".format(proba_blocking_fv_integral*100, est_fv.maxtime))
+                print("\tP(K) estimated by FV2: {:.3f}% (simulation time = {:.1f})".format(proba_blocking_fv_laplacian*100, est_fv.maxtime))
+                print("\tTrue P(K): {:.3f}%".format(proba_blocking_true*100))
+                
+                if r == 1:
+                    # Plot the survival curve and condition blocking probability for the first replication
+                    df_proba_survival_and_blocking_conditional = est_fv.estimate_proba_survival_and_blocking_conditional()
+                    cls.plot_results(df_proba_survival_and_blocking_conditional,
+                                      est_mc.queue.getBirthRates(),
+                                      est_mc.queue.getDeathRates(),
+                                      K,
+                                      nparticles,
+                                      nmeantimes,
+                                      buffer_size_activation,
+                                      expected_survival_time,
+                                      True,
+                                      finalize_type,
+                                      seed_rep)                    
+    
+                # Store the results
+                df_append = pd.DataFrame([[nparticles, r, proba_blocking_mc, est_mc.maxtime, expected_survival_time, proba_blocking_fv_integral, est_fv.maxtime, proba_blocking_true, exec_time]], columns=df_results.columns, index=[case])
+                df_results = df_results.append(df_append)
+            
+            nparticles += int( nparticles_step_prop*nparticles )
+        time_end_all = timer()
+
+        print("Total execution time: {:.1f} min".format((time_end_all - time_start_all) / 60))
+        title = "Simulation results for c={}, K={}, rhos={}, ({}<=N<={}), T<={:.0f}".format(nservers, K, rhos, nparticles_min, nparticles_max, est_fv.maxtime)
+        print(title)
+        print("Raw results by N:")
+        print(df_results)
+        
+        df_results_agg_by_N = cls.aggregation_bygroups(df_results, ['N'], ['Pr(MC)', 'Pr(FV)'])
+        print("Aggregated results by N:")
+        print(df_results_agg_by_N)
+
+        plt.figure()
+        legend_lines_mc = []
+        legend_lines_fv = []
+        legend_lines_ref = []
+        ax = plt.gca()
+        plt.plot(df_results['N'], df_results['Pr(MC)']*100, 'r.', markersize=2)
+        line_mc = plt.errorbar(list(df_results_agg_by_N.index), df_results_agg_by_N['mean']['Pr(MC)']*100, yerr=2*df_results_agg_by_N['SE']['Pr(FV)']*100, capsize=4, color='red', marker='x')
+        legend_lines_mc += [line_mc]
+        plt.plot(df_results['N'], df_results['Pr(FV)']*100, 'g.', markersize=2)
+        line_fv = plt.errorbar(list(df_results_agg_by_N.index), df_results_agg_by_N['mean']['Pr(FV)']*100, yerr=2*df_results_agg_by_N['SE']['Pr(FV)']*100, capsize=4, color='green', marker='x')
+        legend_lines_fv += [line_fv]
+        line_ref = ax.hlines(df_results.iloc[0]['Pr(K)']*100, df_results.iloc[0]['N'], df_results.iloc[-1]['N'], color='gray', linestyles='dashed')
+        legend_lines_ref += [line_ref]
+        # Ref: https://matplotlib.org/3.3.3/gallery/statistics/boxplot_color.html
+        #bplot_mc = plt.boxplot(df_results['Pr(MC)']*100, vert=True, notch=True, patch_artist=True)
+        #for patch in bplot_mc['boxes']:
+        #    patch.set_facecolor('lightred')
+        #bplot_fv = plt.boxplot(df_results['Pr(FV)']*100, vert=True, notch=True, patch_artist=True)
+        #for patch in bplot_fv['boxes']:
+        #    patch.set_facecolor('lightgreen')
+        plt.title(title)
+        #ax.set_xlim([0, ax.get_xlim()[1]])
+        ax.set_ylim([0, ax.get_ylim()[1]])
+        ax.set_xlabel("N (number of particles)")
+        ax.set_ylabel("Blocking probability (%)")
+        ax.legend(legend_lines_mc + legend_lines_fv + legend_lines_ref, ['MC +/- 2SE', 'FV +/- 2SE', 'True'], fontsize='x-small')
+
+        return df_results, df_results_agg_by_N
+
+    def run_simulation(self,   buffer_size_activation=1,
                     mean_lifetime=None,
                     reactivate=True,
                     finalize_type=FinalizeType.ABSORB_CENSORED,
@@ -625,6 +736,8 @@ class Test_QB_Particles(unittest.TestCase):
             print("Plotting...")
             df_proba_survival_and_blocking_conditional = est.estimate_proba_survival_and_blocking_conditional()
             self.plot_results(df_proba_survival_and_blocking_conditional,
+                              est.queue.getBirthRates(),
+                              est.queue.getDeathRates(),
                               K,
                               nparticles,
                               nmeantimes,
@@ -698,7 +811,7 @@ class Test_QB_Particles(unittest.TestCase):
 
             print("Computing TRUE blocking probability...", end=" --> ")
             time_pr_start = timer()
-            proba_blocking_K = self.compute_true_blocking_probability(K, self.rhos)
+            proba_blocking_K = compute_blocking_probability_birth_death_process(self.nservers, K, self.rhos)
             time_pr_end = timer()
             print("{:.1f} sec".format(time_pr_end - time_pr_start))
             print("Pr(K)={:.6f}%".format(proba_blocking_K*100))
@@ -724,7 +837,7 @@ class Test_QB_Particles(unittest.TestCase):
                         mean_lifetime = None
                         time_mc_start = timer()
                         est_mc, proba_blocking_mc, total_blocking_time_mc, total_survival_time_mc, mean_lifetime_mc, params_mc = \
-                            self.run(
+                            self.run_simulation(
                                     buffer_size_activation_value,
                                     mean_lifetime,
                                     reactivate,
@@ -742,7 +855,7 @@ class Test_QB_Particles(unittest.TestCase):
                         reactivate = True
                         time_fv_start = timer()
                         est_fv, proba_blocking_integral, proba_blocking_laplacian, integral, gamma, params_fv = \
-                            self.run(
+                            self.run_simulation(
                                     buffer_size_activation_value,
                                     mean_lifetime_mc,
                                     reactivate,
@@ -788,6 +901,8 @@ class Test_QB_Particles(unittest.TestCase):
                                   .format(proba_blocking_mc*100, proba_blocking_integral*100, proba_blocking_laplacian*100))
                         df_proba_survival_and_blocking_conditional = est_fv.estimate_proba_survival_and_blocking_conditional()
                         self.plot_results(df_proba_survival_and_blocking_conditional,
+                                          est_mc.queue.getBirthRates(),
+                                          est_mc.queue.getDeathRates(),
                                           K,
                                           nparticles,
                                           nmeantimes,
@@ -824,16 +939,25 @@ class Test_QB_Particles(unittest.TestCase):
 
         return df_proba_blocking_estimates
 
-    def plot_results(self, df_proba_survival_and_blocking_conditional, *args, log=False):
-        K = args[0]
-        nparticles = args[1]
-        nmeantimes = args[2]
-        buffer_size_activation = args[3]
-        mean_lifetime = args[4]
-        reactivate = args[5]
-        finalize_type = args[6]
-        seed = args[7]
+    @classmethod
+    # Note that a class method can be invoked from an instance as well!
+    # Ref: https://stackoverflow.com/questions/30190061/python-why-can-i-call-a-class-method-with-an-instance
+    def plot_results(cls, df_proba_survival_and_blocking_conditional, *args, log=False):
+        birth_rates = args[0]
+        death_rates = args[1]
+        rhos = [b/d for b, d in zip(birth_rates, death_rates)]
+        K = args[2]
+        nparticles = args[3]
+        nmeantimes = args[4]
+        buffer_size_activation = args[5]
+        mean_lifetime = args[6]
+        reactivate = args[7]
+        finalize_type = args[8]
+        seed = args[9]
         if log:
+            print("arrival rates={}".format(birth_rates))
+            print("service rates={}".format(death_rates))
+            print("rhos={}".format(rhos))
             print("K={}".format(K))
             print("nparticles={}".format(nparticles))
             print("nmeantimes={}".format(nmeantimes))
@@ -867,18 +991,17 @@ class Test_QB_Particles(unittest.TestCase):
         plt.sca(ax)
         ax.legend(['P(T>t / s=1)'], loc='upper left')
         ax2.legend(['P(BLOCK / T>t,s=1)'], loc='upper right')
-        plt.title("K={}, N={}, nmeantimes={}, activation={}, job rates={}, service rates={}, mean_lifetime={:.1f}" \
+        plt.title("K={}, N={}, nmeantimes={}, activation={}, rhos={}, mean_lifetime={:.1f}" \
                   ", reactivate={}, finalize={}, seed={}" \
                   .format(K, nparticles, nmeantimes, buffer_size_activation,
-                          self.job_rates,
-                          self.rate_death,
-                          #self.queue.getBirthRate() / self.queue.getDeathRate(),
+                          rhos,
                           mean_lifetime or np.nan, reactivate, finalize_type.name[0:3],
                           seed
                           ))
         ax.title.set_fontsize(9)
 
-    def aggregation_bygroups(self, df, groupvars, analvars,
+    @classmethod
+    def aggregation_bygroups(cls, df, groupvars, analvars,
                              dict_stats={'n': 'count', 'mean': np.mean, 'std': np.std, 'min': np.min, 'max': np.max}):
         """
         Computes the given summary statistics in the input data frame on the analysis variables
@@ -1125,64 +1248,73 @@ class Test_QB_Particles(unittest.TestCase):
 # DM-2020/12/23: To change which portion of the below code to run, change the IF condition
 # to `== "__main__"` or to `!= "__main__"` accordingly
 if __name__ == "__main__":
-    #unittest.main()
+    run_unit_tests = True
+    if run_unit_tests:
+        #suite = unittest.TestSuite()
+        #suite.addTest(Test_QB_Particles("test_fv_implementation"))
+        #runner = unittest.TextTestRunner()
+        #runner.run(suite)
 
-    # DM-2020/08/24: Instead of using unittest.main(), use the following to test the FV system
-    # because there is a very weird error generated by the fact that queue.size inside
-    # the EstimatorQueueBlockingFlemingViot class is interpreted of being of class
-    # unittest.runner.TextTestResult (or similar)!! instead of simply returning the size
-    # attribute of the `queue` object!!!
-    test = Test_QB_Particles()
-    #test.test_algorithm()
-
-    time_start = timer()
-
-    finalize_type = FinalizeType.ABSORB_CENSORED
-    nparticles = 100
-    nmeantimes = 50
-    seed = 1717
-    plotFlag = True
-    log = False
-    est_mc,     proba_blocking_mc, \
-                total_blocking_time, \
-                total_survival_time, \
-                expected_survival_time, \
-                params_mc = test.run(   mean_lifetime=None,
-                                        reactivate=False,
-                                        finalize_type=finalize_type,
-                                        nparticles=nparticles,
-                                        nmeantimes=nmeantimes,
-                                        seed=seed,
-                                        plotFlag=plotFlag,
-                                        log=log)
-    est_fv,     proba_blocking_integral_fv, \
-                proba_blocking_laplacian_fv, \
-                integral_fv, \
-                gamma_fv, \
-                params_fv = test.run(   mean_lifetime=expected_survival_time,
-                                        reactivate=True,
-                                        finalize_type=finalize_type,
-                                        nparticles=nparticles,
-                                        nmeantimes=nmeantimes,
-                                        seed=seed,
-                                        plotFlag=plotFlag,
-                                        log=log)
-
-    print("\n**** Summary of estimation ****")
-    assert est_mc.maxtime == est_fv.maxtime, "The maximum simulation time of the MC and of the FV process coincide"
-    #blocking_time = est_mc.get_all_total_blocking_time()
-    #survival_time = est_mc.get_all_total_survival_time()
-    #rate_blocking_time_mc = blocking_time / survival_time
-    #print("Blocking time (MC --slow method): {:.3f}%".format(rate_blocking_time_mc*100))
-    print("P(K) by MC: {:.3f}%".format(proba_blocking_mc*100))
-    print("P(K) estimated by FV1: {:.6f}%".format(proba_blocking_integral_fv*100))
-    print("P(K) estimated by FV2: {:.6f}%".format(proba_blocking_laplacian_fv*100))
-    proba_blocking_true = test.compute_true_blocking_probability(test.capacity, test.rhos)
-    if proba_blocking_true is not None:
-        print("True P(K): {:.6f}%".format(proba_blocking_true*100))
-
-    time_end = timer()
-    print("Execution time: {:.1f} min".format((time_end - time_start) / 60))
+        results, results_agg = Test_QB_Particles.test_fv_implementation()
+    else:
+        # DM-2020/08/24: Instead of using unittest.main(), use the following to test the FV system
+        # because there is a very weird error generated by the fact that queue.size inside
+        # the EstimatorQueueBlockingFlemingViot class is interpreted of being of class
+        # unittest.runner.TextTestResult (or similar)!! instead of simply returning the size
+        # attribute of the `queue` object!!!
+        test = Test_QB_Particles()
+        
+        time_start = timer()
+        #buffer_size_activation = 1
+        buffer_size_activation = int(test.capacity/2)
+        finalize_type = FinalizeType.ABSORB_CENSORED
+        nparticles = 100
+        nmeantimes = 50
+        seed = 1717
+        plotFlag = True
+        log = False
+        est_mc,     proba_blocking_mc, \
+                    total_blocking_time, \
+                    total_survival_time, \
+                    expected_survival_time, \
+                    params_mc = test.run_simulation(   buffer_size_activation=buffer_size_activation,
+                                            mean_lifetime=None,
+                                            reactivate=False,
+                                            finalize_type=finalize_type,
+                                            nparticles=nparticles,
+                                            nmeantimes=nmeantimes,
+                                            seed=seed,
+                                            plotFlag=plotFlag,
+                                            log=log)
+        est_fv,     proba_blocking_integral_fv, \
+                    proba_blocking_laplacian_fv, \
+                    integral_fv, \
+                    gamma_fv, \
+                    params_fv = test.run_simulation(   buffer_size_activation=buffer_size_activation,
+                                            mean_lifetime=expected_survival_time,
+                                            reactivate=True,
+                                            finalize_type=finalize_type,
+                                            nparticles=nparticles,
+                                            nmeantimes=nmeantimes,
+                                            seed=seed,
+                                            plotFlag=plotFlag,
+                                            log=log)
+    
+        print("\n**** Summary of estimation ****")
+        assert est_mc.maxtime == est_fv.maxtime, "The maximum simulation time of the MC and of the FV process coincide"
+        #blocking_time = est_mc.get_all_total_blocking_time()
+        #survival_time = est_mc.get_all_total_survival_time()
+        #rate_blocking_time_mc = blocking_time / survival_time
+        #print("Blocking time (MC --slow method): {:.3f}%".format(rate_blocking_time_mc*100))
+        print("P(K) by MC: {:.3f}%".format(proba_blocking_mc*100))
+        print("P(K) estimated by FV1: {:.6f}%".format(proba_blocking_integral_fv*100))
+        print("P(K) estimated by FV2: {:.6f}%".format(proba_blocking_laplacian_fv*100))
+        proba_blocking_true = compute_blocking_probability_birth_death_process(test.nservers, test.capacity, test.rhos)
+        if proba_blocking_true is not None:
+            print("True P(K): {:.6f}%".format(proba_blocking_true*100))
+    
+        time_end = timer()
+        print("Execution time: {:.1f} min".format((time_end - time_start) / 60))
 else:
     # Lines to execute "by hand" (i.e. at the Python prompt)
     test = Test_QB_Particles()

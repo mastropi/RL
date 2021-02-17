@@ -1672,6 +1672,8 @@ class EstimatorQueueBlockingFlemingViot:
                     #        .format(event_type_prev, activation_times)  
                     activation_times += [t]
                 elif event_type == EventType.ABSORPTION:
+                    #if P == 86 and self.reactivate:
+                    #    self.plot_trajectories_by_server(P)
                     assert event_type_prev == EventType.ACTIVATION and len(activation_times) > 0, \
                             "The previous event of an ABSORPTION is always an ACTIVATION ({}, p={}, P={}, t={}))" \
                             .format(event_type_prev.name, p, P, t)
@@ -2748,17 +2750,17 @@ if __name__ == "__main__":
                                                finalize_type=finalize_type,
                                                plotFlag=plotFlag,
                                                seed=seed, log=log)
-    proba_blocking_integral_fv, proba_blocking_laplacian_fv, integral, gamma = est_fv.simulate()
+    proba_blocking_fv_integral, proba_blocking_fv_laplacian, integral, gamma = est_fv.simulate()
     time_end = timer()
     print("\nTest #1: execution time: {:.1f} min".format((time_end - time_start) / 60))
 
     # c) Assertions
-    print("P(K) by MC: {:.3f}%".format(proba_blocking_mc*100))
-    print("P(K) estimated by FV1: {:.6f}%".format(proba_blocking_integral_fv*100))
-    print("P(K) estimated by FV2: {:.6f}%".format(proba_blocking_laplacian_fv*100))
+    print("P(K) by MC: {:.6f}%".format(proba_blocking_mc*100))
+    print("P(K) estimated by FV1: {:.6f}%".format(proba_blocking_fv_integral*100))
+    print("P(K) estimated by FV2: {:.6f}%".format(proba_blocking_fv_laplacian*100))
     assert("{:.3f}%".format(proba_blocking_mc*100) == "0.014%")
-    assert("{:.6f}%".format(proba_blocking_integral_fv*100) == "0.098156%")
-    assert("{:.6f}%".format(proba_blocking_laplacian_fv*100) == "0.000000%")
+    assert("{:.6f}%".format(proba_blocking_fv_integral*100) == "0.098156%")
+    assert("{:.6f}%".format(proba_blocking_fv_laplacian*100) == "0.000000%")
     # Note: True P(K): 0.048852%
 
 
@@ -2800,15 +2802,15 @@ if __name__ == "__main__":
                                                finalize_type=finalize_type,
                                                plotFlag=plotFlag,
                                                seed=seed, log=log)
-    proba_blocking_integral_fv, proba_blocking_laplacian_fv, integral, gamma = est_fv.simulate()
+    proba_blocking_fv_integral, proba_blocking_fv_laplacian, integral, gamma = est_fv.simulate()
     time_end = timer()
     print("\nTest #2: execution time: {:.1f} min".format((time_end - time_start) / 60))
 
     # c) Assertions
-    print("P(K) by MC: {:.3f}%".format(proba_blocking_mc*100))
-    print("P(K) estimated by FV1: {:.6f}%".format(proba_blocking_integral_fv*100))
-    print("P(K) estimated by FV2: {:.6f}%".format(proba_blocking_laplacian_fv*100))
+    print("P(K) by MC: {:.6f}%".format(proba_blocking_mc*100))
+    print("P(K) estimated by FV1: {:.6f}%".format(proba_blocking_fv_integral*100))
+    print("P(K) estimated by FV2: {:.6f}%".format(proba_blocking_fv_laplacian*100))
     assert("{:.3f}%".format(proba_blocking_mc*100) == "0.025%")
-    assert("{:.6f}%".format(proba_blocking_integral_fv*100) == "0.132987%")
-    assert("{:.6f}%".format(proba_blocking_laplacian_fv*100) == "0.000000%")
+    assert("{:.6f}%".format(proba_blocking_fv_integral*100) == "0.132987%")
+    assert("{:.6f}%".format(proba_blocking_fv_laplacian*100) == "0.000000%")
     # Note: True P(K): 0.124693%
