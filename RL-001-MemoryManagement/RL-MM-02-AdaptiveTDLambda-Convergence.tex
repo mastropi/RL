@@ -1,0 +1,204 @@
+% Template source: ICRA6_and_Risk_LatexTemplate.tex (ICRA template 2015, received from Montserrat Guillen)
+% LaTeX documentation: https://www.latex-project.org/help/documentation/
+% of which User's Guide: https://www.latex-project.org/help/documentation/usrguide.pdf
+% Also check related links: https://www.latex-project.org/help/links/
+% Comprehensive Tex Archive Network: https://www.ctan.org/
+
+%***************************
+% List of mathematical symbols: https://oeis.org/wiki/List_of_LaTeX_mathematical_symbols
+%***************************
+
+\documentclass[11pt,A4paper]{article}
+%\documentclass[11pt,twoside,A4paper]{article}
+xx
+\usepackage[papersize={21cm,29.7cm},left=3.5cm,top=3cm,right=3.5cm,bottom=2.5cm]{geometry}
+\usepackage{latexsym,enumerate}
+\usepackage{amsmath,amsthm,amsopn,amstext,amscd,amsfonts,amssymb}
+\usepackage{graphics,graphicx}
+\usepackage{setspace}
+%\usepackage[spanish]{babel}
+\usepackage[english]{babel}
+\usepackage[T1]{fontenc}
+\usepackage{uarial}
+\renewcommand{\familydefault}{\sfdefault}
+\usepackage{blindtext}
+\usepackage{titlesec}
+
+\usepackage{subfig}
+\singlespace
+
+\author{Daniel Mastropietro}
+\title{Convergence of Adaptive TD($\lambda$)}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\section{Introduction}
+
+We consider a variation of the TD($\lambda$) algorithm where the choice of $\lambda$ is done in an adaptive way, based on the TD error observed at each time step, so that smaller TD errors give a value of $\lambda$ closer to 0 and larger TD errors give a value of $\lambda$ closer to 1.
+
+
+\section{Adaptive TD($\lambda$) algorithm}
+
+The algorithm proposes to adapt $\lambda$ at each learning time step by defining its value as a function of the TD error $\delta_t$:  
+
+\medskip
+$\delta_t = R_{t+1} + \gamma V(S_{t+1}) - V(S_t)$
+\medskip
+
+where $V(s)$ is the estimated state value function for state $s$, and $S_t$ is the state of the environment at time $t$.
+
+The value of $\lambda$ is now allowed to change at each time step $t$ and is proposed as a sigmoid function of the $\delta_t$ error *relative* to the estimated state value function at time $t$, namely:  
+
+\medskip
+$\lambda_t = 1 - exp(- |\delta^{rel}_t| )$  
+\medskip
+
+where $\delta^{rel}_t$ is given by:  
+
+\begin{itemize}
+\item $0$ if $V(S_t) = 0$ and $\delta_t = 0$  
+\item $+\infty$ if $V(S_t) = 0$ and $\delta_t \neq 0$  
+\item $\frac{\delta_t}{V(S_t)}$ o.w.  
+\end{itemize}
+
+Note that $\lambda_t \to 0^+$ when $\delta^{rel}_t \to 0$ and $\lambda_t \to 1^-$ when $|\delta^{rel}_t| \to +\infty$.
+
+\section{Convergence of the value function estimation algorithm by adaptive TD($\lambda$)}
+
+We outline the proof of convergence following the proof outlined in \cite{sutton-barto-2018}, p. 206 for the TD(0) algorithm on the same task of estimating the value function using a linear model.
+
+Using the eligibility traces of the TD($\lambda$) algorithm, the update formula at each time $t$ for the $d$-dimensional weights $\mathbf{w}$ of the linear model estimation of the value function $v_\pi(s) = \mathbf{w}^\intercal \mathbf{x}(s)$ under policy $\pi$ and $d$-dimensional features $\mathbf{x}$ is given by:
+
+\[
+\mathbf{w}_{t+1} = \mathbf{w}_t + \alpha (R_{t+1} + \gamma \mathbf{w}_t^\intercal \mathbf{x}_{t+1} - \mathbf{w}_t^\intercal \mathbf{x}_t)
+						\sum_{n=0}^{t}{ (\gamma \lambda_{t-n})^{t-n} \mathbf{x}_n}
+\]
+
+where $\mathbf{x}_t$ is the feature vector of the state $S_t$ visited at time $t$ in the countable state space $S$ (i.e. $\mathbf{x}_t$ is short for $\mathbf{x}(S_t)$), $\alpha > 0$ is the learning rate, and $0 < \gamma <= 1$ is the discount factor for future rewards.
+
+Note that in the TD(0) case the last summation term is simply equal to $\mathbf{x}_t$.
+
+\medskip
+
+To prove convergence we take expected values on the above expression over all states $s \in S$ to get:
+
+\[ E[ \mathbf{w}_{t+1} / \mathbf{w}_t ] = (\mathbf{I} - \alpha \mathbf{A}) \mathbf{w}_t + \alpha \mathbf{b}, \]
+
+where:
+
+\[ \mathbf{A} = E[ \sum_{n=0}^{t}{ (\gamma \lambda_{t-n})^{t-n} \mathbf{x}_n ( \mathbf{x}_t - \gamma \mathbf{x}_{t+1} )^\intercal } ] \]
+
+is a $d \times d$ matrix, and:
+
+\[ \mathbf{b} = E[ R_{t+1} \sum_{n=0}^{t}{ (\gamma \lambda_{t-n})^{t-n} \mathbf{x}_n} ] \]
+
+is a $d \times 1$ vector.
+
+The goal is to prove convergence of this iterative algorithm by proving that the $\mathbf{I} - \alpha \mathbf{A}$ matrix is a contraction operator, which is the case when the $A$ matrix is positive definite.
+
+To verify whether $\mathbf{A}$ is positive definite, we compute the expected value of the terms that make up the matrix when the system has reached stationarity, i.e. when the probability distribution of the states $\mu(s)$ is stationary from one time step to the next, namely:
+
+\[ \mu = \mathbf{P}^\intercal \mu, \]
+
+\medskip
+
+where $\mathbf{\mu}$ is the $|S|$-dimensional vector with the stationary mass probability distribution, and $\mathbf{P}$ is the transition matrix of the Markov chain under the fixed policy $\pi$.
+
+\medskip
+
+We first compute the expectation of the first term, namely:
+
+\[ \mathbf{A}_1 = E[ \sum_{n=0}^{t}{ (\gamma \lambda_{t-n})^{t-n} \mathbf{x}_n} \mathbf{x}_t^\intercal ], \]
+
+which, by a change of variables $k = t - n$, can be written more conveniently as:
+
+\begin{equation} \label{expectation1}
+\mathbf{A}_1 = E[ \sum_{k=0}^{t}{ (\gamma \lambda_k)^{k} \mathbf{x}_{t-k} \mathbf{x}_t^\intercal } ] = \sum_{k=0}^{t}{ (\gamma \lambda_k)^{k} E[ \mathbf{x}(S_{t-k}) \mathbf{x}^\intercal(S_t) } ].
+\end{equation}
+
+The expectation term inside the summation is equal to:
+
+\[ E[ \mathbf{x}(S_{t-k}) \mathbf{x}^\intercal(S_t) ] = \sum_{s} \sum_{s'} { \mu(s, s') \mathbf{x}(s) \mathbf{x}^\intercal(s') }, \]
+
+where $\mu(s,s')$ is the stationary distribution of the bivariate state space $|S| \times |S|$ at states $s$ and $s'$, which can be expressed as a function of the state transition probabilities as:
+
+\[ \mu(s, s') = \mathbf{Pr}(S_{t-k}=s, S_t=s') = \mathbf{Pr}(S_t=s' / S_{t-k}=s) \mathbf{Pr}(S_{t-k}=s) = p_{ss'}(k) \mu(s), \]
+
+where $p_{ss'}(k)$ is the $k$-step transition probability from state $s$ to state $s'$.
+
+\medskip
+
+If we call $\beta_k = \gamma \lambda_k$, and rearrange the terms, we get the following expression for Eq. \eqref{expectation1}:
+
+\medskip
+
+\begin{equation} \label{expectation1-result}
+\mathbf{A}_1 = \sum_{s} \sum_{s'} {\mu(s) \mathbf{x}(s) q_{ss'}(t) \mathbf{x}^\intercal(s') },
+\end{equation}
+
+where $q_{ss'}(t) = \sum_{k=0}^{t}{ \beta_k^{k} p_{ss'}(k) }$, or in matrix form:
+
+\begin{equation} \label{A1}
+\mathbf{A}_1 = \bf X D Q_t X^\intercal,
+\end{equation}
+
+where:
+
+$\mathbf{X}$ is the $d \times |S|$ matrix that has $\mathbf{x}(s)$ at column $s$,
+
+$\mathbf{D}$ is the $|S| \times |S|$ diagonal matrix whose values are equal to the stationary distribution $\mu$,
+
+$\mathbf{Q}_t = \sum_{k=0}^{t}{ \beta_k^{k} \mathbf{P}^k }$.
+
+\medskip
+
+Now, the expectation of the second term making up matrix $\mathbf{A}$,
+
+\[ \mathbf{A}_2 = -\gamma E[ \sum_{n=0}^{t}{ (\gamma \lambda_{t-n})^{t-n} \mathbf{x}_n} \mathbf{x}_{t+1}^\intercal ], \]
+
+is essentially the same as the expectation of the first term, with the difference of the $-\gamma$ multiplying factor and the fact that the transposed vector $\mathbf{x}$ is measured at time $t+1$ instead of at time $t$. This simply implies that $p_{ss'}(k)$ is replaced with $p_{ss'}(k+1)$ in the expression for $q_{ss'}(t)$ above, leading to:
+
+\begin{equation} \label{A2}
+\mathbf{A}_2 = -\gamma \bf X D P Q_t X^\intercal,
+\end{equation}
+
+where $\mathbf{P}$ is the state transition matrix under policy $\pi$.
+
+Combining \eqref{A1} and \eqref{A2} we get the following expression for $\mathbf{A}$:
+
+\begin{equation}
+\mathbf{A} = \bf X D (I - \gamma P) Q_t X^\intercal.
+\end{equation}
+
+(The expression for TD(0) is $\mathbf{A} = \bf X D (I - \gamma P) X^\intercal$.)
+
+\medskip
+
+We now need to prove that $\mathbf{D (I - \gamma P) Q}_t$ is a positive definite matrix.
+
+Note that, if $\lambda_k = 1$ for all $k$ in the expression for $Q_t$, which is the (approximate) MC case, we have:
+
+\[ \mathbf{Q}_t = \sum_{k=0}^{t}{ \gamma^{k} \mathbf{P}^k }, \]
+
+and therefore $\mathbf{(I - \gamma P) Q}_t$ reduces to $\mathbf{(I - \gamma P}^{t+1})$, hence:
+
+\[ \mathbf{A} = \mathbf{X D (I - \gamma P}^{t+1}) \mathbf{X}^\intercal. \]
+
+In this case, $\mathbf{D (I - \gamma P}^{t+1})$ is positive definite as ${\bf P}^{t+1}$ is a transition matrix, and the positive definiteness of $\bf D (I - \gamma P)$ is proven in \cite{sutton-barto-2018}, p. 207.
+
+For the general case of $0 < \lambda_k < 1$, note that $\mathbf{Q}_t$ is a positive definite matrix, as it is a linear combination of positive definite matrices $\mathbf{P}^k$. However, the product of positive definite matrices is not necessarily positive definite (make up 2D counter example%where $\mathbf{C = AB}$ is the product of the following two symmetric matrices $\mathbf{A} = (3, -1; -1, 2)$ and $\mathbf{B} = (2, -1; -1, 4)$, which gives $\mathbf{C} = (14, -11; -11, 18)$, a non positive definite matrix since the diagonal elements are NOT larger than the sum of the absolute off-diagonal values
+).
+
+\medskip
+
+So more work is needed here in order to prove positive definiteness of $\mathbf{A}$ for the general $\lambda_k$ case.
+
+
+\newpage
+
+\bibliography{RL}
+\bibliographystyle{plain}
+
+\end{document}
