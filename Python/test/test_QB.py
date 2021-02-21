@@ -467,10 +467,6 @@ class Test_QB_Particles(unittest.TestCase):
         policy = [[1]]
         queue = queues.QueueMM(rate_birth, rate_death, nservers, K)
     
-        # Simulation parameters
-        nmeantimes = 50
-        finalize_type = FinalizeType.ABSORB_CENSORED
-
         # The test of the Fleming-Viot implementation is carried out as follows:
         # - Set K to a small value (e.g. K=5)
         # - Increase the number of particles N
@@ -478,6 +474,8 @@ class Test_QB_Particles(unittest.TestCase):
         # - Increase the number of particles N check that the error
         # between the estimated and true blocking probability decreases as 1/sqrt(N)
         # (according to Propostion 2.1 in Matt's draft)
+
+        # Simulation parameters
         buffer_size_activation = 1 #int(test.capacity/2)
         finalize_type = FinalizeType.ABSORB_CENSORED
         nmeantimes = 10
@@ -518,7 +516,7 @@ class Test_QB_Particles(unittest.TestCase):
                                                            policy=policy,
                                                            mean_lifetime=None,
                                                            reactivate=False,
-                                                           finalize_type=finalize_type,
+                                                           finalize_type=FinalizeType.REMOVE_CENSORED,
                                                            plotFlag=plotFlag,
                                                            seed=seed_rep, log=log)
                 proba_blocking_mc, total_blocking_time, total_survival_time, expected_survival_time = est_mc.simulate()

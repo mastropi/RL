@@ -213,3 +213,21 @@ def merge_values_in_time(t1, y1, t2, y2):
             .format(t1_merged, t2_merged)
 
     return t1_merged, y1_merged, y2_merged
+
+
+if __name__ == "__main__":
+    #-------------------- merge_values_in_time ------------------------#
+    print("Testing merge_values_in_time()")
+    t1 = [0.0, 2.5, 3.2, 7.2, 11.3]
+    y1 = [4, 3, 2, 1, 0]
+    t2 = [0.0, 1.1, 2.51, 2.87, 3.3, 4.8, 6.9]
+    y2 = [0, 0, 1, 2, 1, 1, 0]
+    
+    t, y1f, y2f = merge_values_in_time(t1, y1, t2, y2)
+
+    print("Merged lists:")
+    print(np.c_[t, y1f, y2f])
+    assert t == [0.0, 1.1, 2.5, 2.51, 2.87, 3.2, 3.3, 4.8, 6.9, 7.2, 11.3]
+    assert y1f == [4, 4, 3, 3, 3, 2, 2, 2, 2, 1, 0]
+    assert y2f == [0, 0, 0, 1, 2, 2, 1, 1, 0, 0, 0]    
+    #-------------------- merge_values_in_time ------------------------#
