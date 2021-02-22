@@ -130,6 +130,15 @@ class EstimatorQueueBlockingFlemingViot:
         cannot be computed.
         default: None
 
+    proba_survival_given_activation: (opt) pandas data frame
+        A separate estimation of the probability of survival given the process started at the activation set:
+        Pr(T>t / s in activation set).
+        Typically this estimation is obtained by running the process in "Monte-Carlo mode",
+        i.e. with parameter reactivate=False.
+        It should be a pandas data frame with at least two columns:
+        - 't': the times at which the survival probability is measured. 
+        - 'P(T>t / s=1)': the survival probability for each t.
+
     reactivate: (opt) bool
         Whether to reactivate a particle after absorption to a positive position.
         Note that absorption occurs when the particle goes to position (0, 0, ..., 0)
@@ -169,7 +178,8 @@ class EstimatorQueueBlockingFlemingViot:
                  buffer_size_activation=1,
                  nmeantimes=3, job_rates=[0.8, 0.7], service_rates=None,
                  policy=[[0.5, 0.5, 0.0], [0.0, 0.5, 0.5]],
-                 mean_lifetime=None, reactivate=True, finalize_type=FinalizeType.ABSORB_CENSORED,
+                 mean_lifetime=None, proba_survival_given_activation=None,
+                 reactivate=True, finalize_type=FinalizeType.ABSORB_CENSORED,
                  seed=None, plotFlag=False, log=False):
         if reactivate and nparticles < 2:
             raise ValueError("The number of particles must be at least 2 when reactivate=True ({})".format(nparticles))
@@ -210,9 +220,16 @@ class EstimatorQueueBlockingFlemingViot:
 
         if mean_lifetime is not None and (np.isnan(mean_lifetime) or mean_lifetime <= 0):
             raise ValueError("The mean life time must be positive ({})".format(mean_lifetime))
+
+        if  proba_survival_given_activation is not None \
+            and not isinstance(proba_survival_given_activation, pd.DataFrame) \
+            and 't' not in proba_survival_given_activation.columns \
+            and 'P(T>t / s=1)' not in proba_survival_given_activation.columns:
+            raise ValueError("The proba_survival_given_activation parameter must be a data frame having 't' and 'P(T>t / s=1)' as data frame columns")
         #-- Parameter checks
 
         self.mean_lifetime = mean_lifetime  # A possibly separate estimation of the expected survival time
+        self.proba_survival_given_activation = proba_survival_given_activation  # A possibly separate estimation of the probability of survival having started at the activation set (based on the probability of occurrence of such set)
         self.reactivate = reactivate        # Whether the particle is reactivated to a positive position after absorption
         self.finalize_type = finalize_type  # How to finalize the simulation
         self.plotFlag = plotFlag
@@ -272,7 +289,6 @@ class EstimatorQueueBlockingFlemingViot:
         self.proba_block_by_t = None            # List the same length as t containing P(BLOCK / T>t,s=1)
         self.expected_survival_time = np.nan    # Expected survival time starting from s=0
         self.proba_blocking = np.nan            # Blocking probability (the ultimate goal of this simulation!)
-                                                # It's computed as Integral( proba_surv_by_t * proba_block_by_t ) / expected_survival_time
 
         # 1) Initialize the particles in the system
         # (after deleting the variable in case it exists, so that we do not use more memory)
@@ -1662,7 +1678,7 @@ class EstimatorQueueBlockingFlemingViot:
             event_type_prev = None
             for t, event_type in zip(dict_info['t'], dict_info['E']):
                 if event_type == EventType.ACTIVATION:
-                    ## NOTE: (2021/02/18) Fictitious ACTIVATION times are NOT added to the list of activation times
+                    ## NOTE: (2021/02/18) Fictitious ACTIVATION times (ACTIVATION_F) are NOT added to the list of activation times
                     ## because these should NOT be used to compute the absorption times that are used to
                     ## compute Pr(T>t / s=1). In fact, if they were used, the absorption times that are added
                     ## to self.sk would be too small (< EPSILON_TIME, because a fictitious activation time
@@ -1678,10 +1694,8 @@ class EstimatorQueueBlockingFlemingViot:
                                 .format(p, P, event_type)
                     activation_times += [t]
                 elif event_type == EventType.ABSORPTION:
-                    ## NOTE: (2021/02/18) Fictitious ABSORPTION tmes are NOT considered because they may
+                    ## NOTE: (2021/02/18) Fictitious ABSORPTION times (ABSORPTION_F) are NOT considered because they may
                     ## underestimate the return time to absorption, making Pr(T>t / s=1) be smaller than it should.                        
-                    #if P == 86 and self.reactivate:
-                    #    self.plot_trajectories_by_server(P)
                     assert event_type_prev == EventType.ACTIVATION, \
                             "The previous event of an ABSORPTION is always an ACTIVATION of fictitious ACTIVATION (event_type_prev={}, p={}, P={}, t={}))" \
                             .format(event_type_prev.name, p, P, t)
@@ -1704,7 +1718,7 @@ class EstimatorQueueBlockingFlemingViot:
                 elif event_type in [EventType.BLOCK, EventType.UNBLOCK]:
                     # We insert the ABSOLUTE time for BLOCK and UNBLOCK events
                     # since this is used to compute the empirical distribution at the absolute time t
-                    # NOTE: (2021/02/18) We do NOT insert fictitious UNBLOCK times
+                    # NOTE: (2021/02/18) We do NOT insert fictitious UNBLOCK times (UNBLOCK_F)
                     # (added at the end of the simulation to avoid assertion failures)
                     # because we do not want to distort the estimation of blocking time with a too short
                     # duration happening just because the simulation ended and the particle was blocked at that time...) 
@@ -1753,17 +1767,24 @@ class EstimatorQueueBlockingFlemingViot:
 
     def insert_relative_time(self, t: float, activation_times: list, event_type: EventType):
         """
-        Inserts a new relative time segment in the list of killing times,
-        which are measured relative to the latest activation time.
+        Inserts new relative time segments in the list of killing times,
+        based on the given absolute time `t` and on the given list of activation times:
+        the inserted relative times are computed as the absolute time measured
+        relative to EACH of the given activation times, as long as they are smaller than t.
+        
+        A warning is issued when a negative relative time would have been inserted.
         """
+        #print("")
         for a in activation_times:
             s = t - a
             if s < 0:
-                break
+                print("WARNING: The activation event from which the absolute time t={:.3f} should be measured is NOT in the PAST but in the FUTURE! {:.3f}".format(t, a))
+                continue
             assert event_type in [EventType.ABSORPTION, EventType.ABSORPTION_F, EventType.CENSORING], \
                     "The event type when inserting the relative time for time t={}" \
                     " is either ABSORPTION, fictitious ABSORPTION_F, or CENSORING ({})" \
                     .format(t, event_type.name)
+            #print("REACTIVATE={}: Inserting time w.r.t. a={:.3f}, t={:.3f}: s={:.3f}".format(self.reactivate, a, t, s))
             idx_insort, found = insort(self.sk, s, unique=True)
             # DM-2021/02/11: The following assertion was commented out because very rarely it could fail (see examples below)
             # In addition, I added the uniqut=True above so that no repeated values are added to the list of killed times... BUT IS THIS THE CORRECT THING TO DO??
@@ -1880,14 +1901,23 @@ class EstimatorQueueBlockingFlemingViot:
 
 
     #----------------------------- Functions to analyze the simulation ------------------------
-    def compute_survival_probability_from_counts(self, counts_alive: list):
+    def compute_survival_probability_from_counts(self, t :list, counts_alive :list):
         """
-        Computes the survival probability (Pr(T>t)) at each time step where counts change.
-        The input data is the array containing the counts of alive particle by time step.
+        Computes the survival probability (Pr(T>t)) at each time step where counts change
+
+        Arguments:
+        t: list
+            Times at which the number of particles alive change.
+
+        counts_alive: list
+            Number of particles alive after each time in `t`.
+
+        Return: list
+            Probability of survival at each time in `t` computed as counts_alive / counts_alive[0].
         """
-        if len(self.t) <= 1:
+        if len(t) <= 1:
             return [1.0]
-        
+
         assert counts_alive is not None and len(counts_alive) > 0, \
                     "The input list is not None and has at least 1 element".format(counts_alive)
         if False:
@@ -1967,10 +1997,11 @@ class EstimatorQueueBlockingFlemingViot:
 
     def estimate_proba_survival_given_activation(self):
         """
-        Computes the survival probability given the particle started at position 1
-        
-        A data frame is returned containing the times at which the probability is estimated
-        and the probability estimate itself.
+        Computes the survival probability given the particle started at the activation set
+
+        A data frame is returned containing the following columns:
+        - 't': the times at which the survival probability is estimated.
+        - 'P(T>t / s=1)': the survival probability at each t.
         """
         assert len(self.sk) > 1, "The length of the survival times array is at least 2 ({})".format(self.sk)
         assert self.sk[-1], "The last value of the survival time segments array is 0.0 ({:.2f})".format(self.sk[-1])
@@ -1986,17 +2017,19 @@ class EstimatorQueueBlockingFlemingViot:
         # NOTE: The list containing the survival probability is NOT stored in the object
         # because the one we store in the object is the list that is aligned with the times
         # at which the conditional blocking probability is measured.
-        proba_surv_by_t = self.compute_survival_probability_from_counts(self.counts_alive)
+        proba_surv_by_t = self.compute_survival_probability_from_counts(self.sk, self.counts_alive)
         return pd.DataFrame.from_items([('t', self.sk), ('P(T>t / s=1)', proba_surv_by_t)])
 
     def estimate_proba_survival_and_blocking_conditional(self):
         """
-        Computes the following quantities which are returned in a data frame:
-        - time at which a change in any quantity happens
-        - P(T>t / s=1): survival probability given start position = 1
-        - P(BLOCK / T>t,s=1): blocking probability given survived and start position = 1
-        - gamma: killing rate
-        - blocking time estimate = Pr(BLOCK) * (Expected Survival Time starting at position = 0)
+        Computes the following quantities which are returned in a data frame with the following columns:
+        - 't': time at which a change in any quantity happens
+        Quantities used in Approximation 1 of the blocking probability estimate:
+        - 'P(T>t / s=1)': survival probability given start position = 1
+        - 'P(BLOCK / T>t,s=1)': blocking probability given survived and start position = 1
+        Quantities used in Approximation 2 of the blocking probability estimate:
+        - 'Killing Rate': killing rate a.k.a. gamma parameter
+        - 'Blocking Time Estimate' = Pr(BLOCK) * (Expected Survival Time starting at position = 0)
         """
 
         # Since we must compute this probability CONDITIONED to the event T > t,
@@ -2025,9 +2058,16 @@ class EstimatorQueueBlockingFlemingViot:
                 print("SURVIVAL: times and counts_alive: \n{}".format(np.c_[self.sk, self.counts_alive, [c/self.counts_alive[0] for c in self.counts_alive] ]))
                 print("BLOCKING: times and counts_blocked:\n{}".format(np.c_[self.sbu, self.counts_blocked, [c/self.N for c in self.counts_blocked]]))
 
-        self.t, counts_alive, counts_blocked = merge_values_in_time(self.sk, self.counts_alive, self.sbu, self.counts_blocked)
+        if self.proba_survival_given_activation is not None:
+            # The estimated survival probability given activation was given by the user
+            self.t, self.proba_surv_by_t, counts_blocked = merge_values_in_time(
+                                                                        list(self.proba_survival_given_activation['t']),
+                                                                        list(self.proba_survival_given_activation['P(T>t / s=1)']),
+                                                                        self.sbu, self.counts_blocked)
+        else:
+            self.t, counts_alive, counts_blocked = merge_values_in_time(self.sk, self.counts_alive, self.sbu, self.counts_blocked)
+            self.proba_surv_by_t = self.compute_survival_probability_from_counts(self.t, counts_alive)
 
-        self.proba_surv_by_t = self.compute_survival_probability_from_counts(counts_alive)
         self.proba_block_by_t = self.compute_probability_from_counts(counts_blocked)
         self.gamma = self.compute_killing_rate()
         self.blocking_time_estimate = self.compute_blocking_time_estimate()
@@ -2131,6 +2171,10 @@ class EstimatorQueueBlockingFlemingViot:
 
     def estimate_proba_blocking_via_integral(self, expected_survival_time):
         "Computes the blocking probability via Approximation 1 in Matt's draft"
+        assert  len(self.t) == len(self.proba_surv_by_t) and \
+                len(self.proba_surv_by_t) == len(self.proba_block_by_t), \
+                "The length of the time, proba_surv_by_t, and proba_block_by_t are the same ({}, {}, {})" \
+                .format(len(self.t), len(self.proba_surv_by_t), len(self.proba_surv_by_t)) 
         # Integrate => Multiply the survival, the conditional blocking probabilities, and delta(t) and sum
         integral = 0.0
         for i in range(0, len(self.proba_surv_by_t)-1):

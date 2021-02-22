@@ -478,7 +478,7 @@ class Test_QB_Particles(unittest.TestCase):
         # Simulation parameters
         buffer_size_activation = 1 #int(test.capacity/2)
         finalize_type = FinalizeType.ABSORB_CENSORED
-        nmeantimes = 10
+        nmeantimes = 20
         seed = 1717
         plotFlag = False
         log = False
@@ -520,6 +520,7 @@ class Test_QB_Particles(unittest.TestCase):
                                                            plotFlag=plotFlag,
                                                            seed=seed_rep, log=log)
                 proba_blocking_mc, total_blocking_time, total_survival_time, expected_survival_time = est_mc.simulate()
+                proba_survival_given_activation = est_mc.estimate_proba_survival_given_activation()
                 if nparticles == nparticles_min:
                     # Compute the theoretical blocking probability only at the first iteration
                     rhos = est_mc.rhos
@@ -534,6 +535,7 @@ class Test_QB_Particles(unittest.TestCase):
                                                            service_rates=None,
                                                            policy=policy,
                                                            mean_lifetime=expected_survival_time,
+                                                           proba_survival_given_activation=proba_survival_given_activation,
                                                            reactivate=True,
                                                            finalize_type=finalize_type,
                                                            plotFlag=plotFlag,
@@ -554,6 +556,7 @@ class Test_QB_Particles(unittest.TestCase):
                 
                 if r == 1:
                     # Plot the survival curve and condition blocking probability for the first replication
+                    df_proba_survival_and_blocking_conditional_mc = est_mc.estimate_proba_survival_and_blocking_conditional()
                     df_proba_survival_and_blocking_conditional = est_fv.estimate_proba_survival_and_blocking_conditional()
                     cls.plot_results(df_proba_survival_and_blocking_conditional,
                                       est_mc.queue.getBirthRates(),
@@ -565,7 +568,30 @@ class Test_QB_Particles(unittest.TestCase):
                                       expected_survival_time,
                                       True,
                                       finalize_type,
-                                      seed_rep)                    
+                                      seed_rep)
+                    
+                    if False:
+                        # Compare the survival probability given activation between MC and FV estimations
+                        # (assuming FV does NOT receive the estimate from MC when constructing the object above, clearly!)
+                        killing_rates = df_proba_survival_and_blocking_conditional_mc['Killing Rate']
+                        killing_rates_notnan = killing_rates[ ~np.isnan(killing_rates) ]
+                        gamma = np.mean( killing_rates_notnan.iloc[-20:-1] )   # Take the estimate of gamma from the tail of the killing rate values, as its estimate is more valid as t -> Infinity
+                        gamma_std = np.std( killing_rates_notnan.iloc[-20:-1] )
+                        t = df_proba_survival_and_blocking_conditional_mc['t']
+                        n_killings_mc = len(est_mc.sk)
+                        n_killings_fv = len(est_fv.sk)
+                        plt.figure()
+                        ax = plt.gca()
+                        ax.step(t, df_proba_survival_and_blocking_conditional_mc['P(T>t / s=1)'], 'r-', where='post')
+                        ax.step(df_proba_survival_and_blocking_conditional['t'], df_proba_survival_and_blocking_conditional['P(T>t / s=1)'], 'g-', where='post')
+                        ax.plot(t, np.exp(-gamma*t), 'k--')
+                        ax.set_xlabel("t")
+                        ax.set_ylabel("P(T>t, s=1)")
+                        ax.set_xlim([0, 20]) #np.max(t)])
+                        plt.title("Comparison between the MC estimate and the FV estimate of P(T>t / s=1)")
+                        ax.legend(["MC (based on {} killings)".format(n_killings_mc),
+                                   "FV (based on {} killings)".format(n_killings_fv),
+                                   "exp(-gamma*t) (avg. gamma={:.3f} +/- {:.3f})".format(gamma, gamma_std)])
     
                 # Store the results
                 df_append = pd.DataFrame([[nparticles, r, proba_blocking_mc, est_mc.maxtime, expected_survival_time, proba_blocking_fv_integral, est_fv.maxtime, proba_blocking_true, exec_time]], columns=df_results.columns, index=[case])

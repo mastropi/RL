@@ -183,7 +183,7 @@ def merge_values_in_time(t1, y1, t2, y2):
     if t1[0] != 0 or t2[0] != 0:
         raise ValueError("The first value in each list of times must be 0.")
     if sorted(t1) != t1 or sorted(t2) != t2:
-        raise ValueError("At least one of the time lists is not sorted increasingly.")
+        raise ValueError("At least one of the time lists is not sorted increasingly.\nt1={}\nt2={}".format(t1, t2))
 
     t1_merged = t1.copy()
     y1_merged = y1.copy()
