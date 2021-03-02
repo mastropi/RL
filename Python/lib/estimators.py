@@ -2795,6 +2795,7 @@ if __name__ == "__main__":
     log = False
 
     #--- Test #1: One server
+    print("Test #1: Single server system")
     K = 10
     rate_birth = 0.5
     job_rates = [rate_birth]
@@ -2803,24 +2804,27 @@ if __name__ == "__main__":
     queue = queues.QueueMM(rate_birth, rate_death, 1, K)
 
     # Simulation
-    # a) Monte-Carlo (to estimate expected survival time)
     nparticles = 100
     nmeantimes = 50
     finalize_type = FinalizeType.ABSORB_CENSORED
-    est_mc = EstimatorQueueBlockingFlemingViot(nparticles, queue,
+
+    # a) Monte-Carlo (to estimate expected survival time)
+    print("Running Monte-Carlo simulation on 1 particle and T={}x...".format(nparticles*nmeantimes))
+    est_mc = EstimatorQueueBlockingFlemingViot(1, queue,
                                                buffer_size_activation=1,
-                                               nmeantimes=nmeantimes,
+                                               nmeantimes=nparticles*nmeantimes,
                                                job_rates=job_rates,
                                                service_rates=None,
                                                policy=policy,
                                                mean_lifetime=None,
                                                reactivate=False,
-                                               finalize_type=finalize_type,
+                                               finalize_type=FinalizeType.REMOVE_CENSORED,
                                                plotFlag=plotFlag,
                                                seed=seed, log=log)
     proba_blocking_mc, total_blocking_time, total_survival_time, expected_survival_time = est_mc.simulate()
 
     # b) Fleming-Viot
+    print("Running Fleming-Viot simulation on {} particles and T={}x...".format(nparticles, nmeantimes))
     est_fv = EstimatorQueueBlockingFlemingViot(nparticles, queue,
                                                buffer_size_activation=1,
                                                nmeantimes=nmeantimes,
@@ -2834,19 +2838,20 @@ if __name__ == "__main__":
                                                seed=seed, log=log)
     proba_blocking_fv_integral, proba_blocking_fv_laplacian, integral, gamma = est_fv.simulate()
     time_end = timer()
-    print("\nTest #1: execution time: {:.1f} min".format((time_end - time_start) / 60))
+    print("Test #1: execution time: {:.1f} min".format((time_end - time_start) / 60))
 
     # c) Assertions
     print("P(K) by MC: {:.6f}%".format(proba_blocking_mc*100))
     print("P(K) estimated by FV1: {:.6f}%".format(proba_blocking_fv_integral*100))
     print("P(K) estimated by FV2: {:.6f}%".format(proba_blocking_fv_laplacian*100))
-    assert("{:.3f}%".format(proba_blocking_mc*100) == "0.014%")
-    assert("{:.6f}%".format(proba_blocking_fv_integral*100) == "0.098156%")
+    assert("{:.6f}%".format(proba_blocking_mc*100) == "0.032064%")
+    assert("{:.6f}%".format(proba_blocking_fv_integral*100) == "0.095846%")
     assert("{:.6f}%".format(proba_blocking_fv_laplacian*100) == "0.000000%")
     # Note: True P(K): 0.048852%
 
 
     #--- Test #2: Multi-server
+    print("\nTest #2: Multiple-server system")
     nservers = 3
     K = 20
     job_rates = [0.8, 0.7]
@@ -2855,24 +2860,27 @@ if __name__ == "__main__":
     queue = queues.QueueMM(rate_birth, rate_death, nservers, K)
 
     # Simulation
-    # a) Monte-Carlo (to estimate expected survival time)
     nparticles = 100
     nmeantimes = 50
     finalize_type = FinalizeType.ABSORB_CENSORED
-    est_mc = EstimatorQueueBlockingFlemingViot(nparticles, queue,
+
+    # a) Monte-Carlo (to estimate expected survival time)
+    print("Running Monte-Carlo simulation on 1 particle and T={}x...".format(nparticles*nmeantimes))
+    est_mc = EstimatorQueueBlockingFlemingViot(1, queue,
                                                buffer_size_activation=1,
-                                               nmeantimes=nmeantimes,
+                                               nmeantimes=nparticles*nmeantimes,
                                                job_rates=job_rates,
                                                service_rates=None,
                                                policy=policy,
                                                mean_lifetime=None,
                                                reactivate=False,
-                                               finalize_type=finalize_type,
+                                               finalize_type=FinalizeType.REMOVE_CENSORED,
                                                plotFlag=plotFlag,
                                                seed=seed, log=log)
     proba_blocking_mc, total_blocking_time, total_survival_time, expected_survival_time = est_mc.simulate()
 
     # b) Fleming-Viot
+    print("Running Fleming-Viot simulation on {} particles and T={}x...".format(nparticles, nmeantimes))
     est_fv = EstimatorQueueBlockingFlemingViot(nparticles, queue,
                                                buffer_size_activation=1,
                                                nmeantimes=nmeantimes,
@@ -2886,13 +2894,13 @@ if __name__ == "__main__":
                                                seed=seed, log=log)
     proba_blocking_fv_integral, proba_blocking_fv_laplacian, integral, gamma = est_fv.simulate()
     time_end = timer()
-    print("\nTest #2: execution time: {:.1f} min".format((time_end - time_start) / 60))
+    print("Test #2: execution time: {:.1f} min".format((time_end - time_start) / 60))
 
     # c) Assertions
     print("P(K) by MC: {:.6f}%".format(proba_blocking_mc*100))
     print("P(K) estimated by FV1: {:.6f}%".format(proba_blocking_fv_integral*100))
     print("P(K) estimated by FV2: {:.6f}%".format(proba_blocking_fv_laplacian*100))
-    assert("{:.3f}%".format(proba_blocking_mc*100) == "0.025%")
-    assert("{:.6f}%".format(proba_blocking_fv_integral*100) == "0.132987%")
+    assert("{:.6f}%".format(proba_blocking_mc*100) == "0.027690%")
+    assert("{:.6f}%".format(proba_blocking_fv_integral*100) == "0.082433%")
     assert("{:.6f}%".format(proba_blocking_fv_laplacian*100) == "0.000000%")
-    # Note: True P(K): 0.124693%
+    # Note: True P(K): 0.124693% (taken from the actual simulation I perform normally to evaluate the algorithm in test_QB.py)
