@@ -1642,22 +1642,15 @@ class EstimatorQueueBlockingFlemingViot:
                           "\nThe computation of the counts by time segment cannot proceed." \
                           "\nRun first the finalize() method and rerun.")
 
-        # Initialize the lists that will store information about the counts by time
-        self.sk = [0.0]
-        self.sbu = [0.0]
-        # The following counts are initialized to 0 because:
-        # - they correspond to the number of particles counted in the time segment 
-        # defined by the value in sk or sbu and Infinity, and they are updated ONLY when
-        # a new time is observed, in which case the non-zero count goes to the segment
-        # just inserted (if it's the first one, the segment is [0, t) where t is the
-        # event time triggering the update of the counts).
-        # - the capacity of the queue is assumed larger than 1, as the status of a particle
-        # CANNOT be both ACTIVE and BLOCKED, because if we allowed this we would need to
-        # change the way events are stored in the info_particles list of dictionaries,
-        # as now only one event type is accepted at each event time. 
-        self.counts_alive = [0]
-        self.counts_blocked = [0]
-        # Go over each particle
+        # Go over each particle and sort the SPECIAL EVENT times giving rise to the
+        # the time segments that correspond to the estimated survival function and
+        # the proportion of blocked particles function so that their calculation is faster
+        # than when inserting each time separately into the list of times
+        # (which requires a costly search for the correct insertion index) 
+        relative_absorption_times = []
+        absolute_blocking_times = []
+        blocking_events = []
+        time1 = timer()
         for p, dict_info in enumerate(self.info_particles):
             P = dict_info['particle number']
             #print("Processing particle ID p={}, P={} out of {} particles".format(p, P, len(self.info_particles)))
@@ -1704,13 +1697,13 @@ class EstimatorQueueBlockingFlemingViot:
                         # - reactivate=True
                         # - the particle is reactivated to a position that is NOT in the set of activation states
                         # and it does NOT touch any event in the activation set before the end of the simulation.
-                        self.insert_relative_time(t, activation_times, event_type)
+                        relative_absorption_times += self.compute_relative_absorption_times(t, activation_times)
                         # The list of activation times is reset to empty after an absorption
                         # because all the existing activation times have been used to populate self.sk
                         # in the above call to insert_relative_time().
                         activation_times = []              
                     if False:
-                        # We may want to disable this assertion if they take too long
+                        # We may want to disable this assertion if it takes too long
                         assert sorted(self.sk) == list(np.unique(self.sk)), \
                                 "The list of survival time segments contains unique values" \
                                 " after insertion of event {} for particle p={}, P={}" \
@@ -1722,7 +1715,8 @@ class EstimatorQueueBlockingFlemingViot:
                     # (added at the end of the simulation to avoid assertion failures)
                     # because we do not want to distort the estimation of blocking time with a too short
                     # duration happening just because the simulation ended and the particle was blocked at that time...) 
-                    self.insert_absolute_time(t, event_type)
+                    absolute_blocking_times += [t]
+                    blocking_events += [event_type]
                     if event_type == EventType.UNBLOCK:
                         assert event_type_prev == EventType.BLOCK, \
                                 "The event coming before an UNBLOCK event is a BLOCK event ({})" \
@@ -1734,13 +1728,69 @@ class EstimatorQueueBlockingFlemingViot:
                                 " after insertion of event {} for particle p={}, P={}" \
                                 .format(event_type.name, p, P)
                 event_type_prev = event_type
+        if False:
+            print("Execution time for analyzing the special events: {:.1f} sec".format(timer() - time1))
+            ## 0 sec!! So, this is NOT the bottleneck!!
 
+        #-- Compute the counts of particles in each time segment (ALIVE and BLOCKED)
+        # Note that each count in the respective count list gives the number of particles
+        # in the corresponding condition (ALIVE or BLOCKED) to the RIGHT of the corresponding
+        # time value.
+        # Ex: for blocked particles
+        # time segments = [0.0, 0.2, 0.5, 1.3, 1.8]
+        # event types = [N/A, B, B, U, U]
+        # counts = [0, 1, 2, 1, 0]
+        # which means:
+        # - [0.0, 0.2): 0 blocked
+        # - [0.2, 0.5): 1 blocked
+        # - [0.5, 1.3): 2 blocked
+        # - [1.3, 1.8): 1 blocked
+        # - [1.8, Inf): 0 blocked
+        # Note also that the capacity of the queue has been checked to be larger than the buffer activation size,
+        # which means that the status of a particle CANNOT be both ACTIVE and BLOCKED,
+        # because if we allowed this we would need to change the way events are stored in the info_particles list
+        # of dictionaries, as currently only one event type is accepted at each event time.
+        
+        # Counts of particles in each absorption time segment
+        time1 = timer()
+        self.sk = [0.0] + [t for t in np.sort(relative_absorption_times)]
+        self.counts_alive = list(range(len(relative_absorption_times), -1, -1))
+            ## e.g. [4, 3, 2, 1, 0] when there are 4 absorption times
+            ## Note that the length of the list in this case is 5, i.e. 4+1, which is the length of self.sk, OK!
         assert len(self.counts_alive) == len(self.sk), \
                 "The length of counts_alive ({}) is the same as the length of self.sk ({})" \
                 .format(len(self.counts_alive), len(self.sk))
+        if False:
+            print("Execution time for counting ABSORPTION times: {:.1f} sec".format(timer() - time1))
+            ## 0 sec!! So, this is NOT the bottleneck!!
+
+        # Counts of blocked particles in each blocking time segment
+        # This case is a little more complicated than the above because we need to know
+        # which event happens at each time (either BLOCK or UNBLOCK)
+        time1 = timer()
+        blocking_events_order = np.argsort(absolute_blocking_times)
+        self.sbu = [0.0] + [absolute_blocking_times[o] for o in blocking_events_order]
+        blocking_events = [blocking_events[o] for o in blocking_events_order]
+        # Initialize the counts list
+        self.counts_blocked = [0]
+        for event_type in blocking_events:
+            counts_blocked_last_segment = self.counts_blocked[-1] 
+            assert event_type in [EventType.BLOCK, EventType.UNBLOCK], \
+                "The event types in the blocking_events list are either BLOCK or UNBLOCK: ".format(event_type)
+            if event_type == EventType.BLOCK:
+                self.counts_blocked += [ counts_blocked_last_segment + 1 ]
+            else:
+                assert counts_blocked_last_segment > 0, \
+                    "The number of blocked particles when an UNBLOCK event happens is positive: ".format(counts_blocked_last_segment)
+                self.counts_blocked += [ counts_blocked_last_segment - 1 ]
         assert len(self.counts_blocked) == len(self.sbu), \
                 "The length of counts_alive ({}) is the same as the length of self.sk ({})" \
                 .format(len(self.counts_blocked), len(self.sbu))
+        if False:
+            print("Execution time for counting BLOCKING times: {:.1f} sec".format(timer() - time1))
+            ## 0 sec!! So, this is NOT the bottleneck!!
+
+        # Other assertions about the distribution of counts
         if self.finalize_type in [FinalizeType.ABSORB_CENSORED, FinalizeType.REMOVE_CENSORED]:
             assert self.counts_alive[-1] == 0, "The last element of the counts_alive list is 0 ({})".format(self.counts_alive[-1])
             assert self.counts_blocked[0] == 0, "The first element of the counts_blocked list is 0 ({})".format(self.counts_blocked[0])
@@ -1750,7 +1800,25 @@ class EstimatorQueueBlockingFlemingViot:
                 print("Relative absorption times and counts:\n{}".format(np.c_[np.array(self.sk), np.array(self.counts_alive)]))
                 print("Relative blocking times:\n{}".format(np.c_[np.array(self.sbu), np.array(self.counts_blocked)]))
 
-    def insert_absolute_time(self, t: float, event_type: EventType):
+    def compute_relative_absorption_times(self, t: float, activation_times: list):
+        """
+        Computes the relative times associated to an absolute absorption time `t`
+        with respect to the given list of activation times.
+        The relative times are computed as the absolute time measured
+        relative to EACH of the given activation times, as long as they are smaller than t.
+
+        A warning is issued when a negative relative time is obtained.
+        """
+        s = []  # List of relative times computed for t
+        for a in activation_times:
+            if t - a < 0:
+                print("WARNING: The activation event from which the absolute time t={:.3f} should be measured is NOT in the PAST but in the FUTURE! {:.3f}".format(t, a))
+                continue
+            s += [t - a]
+    
+        return s
+
+    def deprecated_insert_absolute_time(self, t: float, event_type: EventType):
         "Inserts a new absolute time segment in the list of blocking/unblocking times"
         assert event_type in [EventType.BLOCK, EventType.UNBLOCK, EventType.UNBLOCK_F], \
                 "The event type when inserting the absolute time t={}" \
@@ -1765,7 +1833,7 @@ class EstimatorQueueBlockingFlemingViot:
         #print("Time to insert: {:.3f} BETWEEN indices {} and {} (MAX idx={}):".format(t, idx_insort-1, idx_insort, len(self.counts_blocked)-1))
         self._update_counts_blocked(idx_insort, event_type, new=not found)
 
-    def insert_relative_time(self, t: float, activation_times: list, event_type: EventType):
+    def deprecated_insert_relative_time(self, t: float, activation_times: list, event_type: EventType):
         """
         Inserts new relative time segments in the list of killing times,
         based on the given absolute time `t` and on the given list of activation times:
@@ -1801,7 +1869,7 @@ class EstimatorQueueBlockingFlemingViot:
             #Note that the repeated value is inserted by insort(), that's why it appears twice.
             self._update_counts_alive(idx_insort, event_type)
 
-    def _update_counts_alive(self, idx_to_insert: int, event_type: EventType):
+    def _deprecated_update_counts_alive(self, idx_to_insert: int, event_type: EventType):
         """
         Updates the counts of particles alive in each time segment where the count can change
         following the activation of a new particle.
@@ -1857,7 +1925,7 @@ class EstimatorQueueBlockingFlemingViot:
             # we are assuming that the particle is still alive up to Infinity.)  
             self.counts_alive[idx_to_insert] += 1
 
-    def _update_counts_blocked(self, idx_to_insert_or_update, event_type, new=True):
+    def _deprecated_update_counts_blocked(self, idx_to_insert_or_update, event_type, new=True):
         """
         Updates the counts of blocked particles in each time segment where the count can change
         following the blocking or unblocking of a new particle.
