@@ -8,10 +8,11 @@ Created on Mon May 25 11:07:56 2020
 
 
 def violinplot(axis, dataset, positions=None, showmeans=True, showmedians=True,
-               color_body=None, color_lines=None, color_means=None, color_medians=None, linewidth=2):
+               color_body=None, color_lines=None, color_means=None, color_medians=None,
+               widths=0.1, linewidth=2):
     """
     Create customized violin plots in the given axis generated with the matplotlib.pyplot module
-    
+
     IMPORTANT: the matplotlib.pyplot.violinpot() function does NOT accept an empty list as part of the
     `dataset` for plotting and any NaN values present make the whole violin plot (e.g. for a given group)
     not be shown!   
@@ -19,13 +20,13 @@ def violinplot(axis, dataset, positions=None, showmeans=True, showmedians=True,
     Arguments:
     axis: matplotlib.Axes
         Axis where the plot should be generated (possibly added to an existing plot).
-    
+
     dataset:
         The `dataset` argument of the violinplot() function.
         A violin plot is generated for each separate element present in this argument.
         For instance, `dataset` could be a list of lists, in which case one separate violin plot
         is plotted for each list at the positions given in `positions`.
-    
+
     positions:
         The `positions` argument of the violinplot() function.
         Normally a list of numbers of axis coordinates where the violin plots should be plotted.
@@ -34,7 +35,8 @@ def violinplot(axis, dataset, positions=None, showmeans=True, showmedians=True,
     The customized output of the matplotlib.pyplot.violinplot() function, with colors changed.
     """
     violinplot_parts = axis.violinplot(dataset,
-                                       positions=positions, showmeans=showmeans, showmedians=showmedians)
+                                       positions=positions, showmeans=showmeans, showmedians=showmedians,
+                                       widths=widths)
     # Set the color of body and lines
     # Ref:
     # - body: https://matplotlib.org/3.2.1/gallery/statistics/customized_violin.html)
