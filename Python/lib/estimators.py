@@ -125,9 +125,9 @@ class EstimatorQueueBlockingFlemingViot:
 
     mean_lifetime: (opt) positive float
         Mean particle lifetime to be used as the expected survival time.
-        This is useful when reactivate=True and start=1, as in that case
-        the particles never touch position 0, which means that the mean lifetime
-        cannot be computed.
+        This is useful when reactivate=True, as in that case
+        the particles never touch any state in the absorption set (e.g. those with buffer-size/position=0),
+        which means that the mean lifetime cannot be computed in that scenario.
         default: None
 
     proba_survival_given_activation: (opt) pandas data frame
@@ -495,14 +495,14 @@ class EstimatorQueueBlockingFlemingViot:
 
 
         #----------------- Attributes for survival and blocking time calculation --------------
-        # Arrays that are used to estimate the expected survival time (time to killing from position 0)
+        # Arrays that are used to estimate the expected survival time (time to killing starting at an absorption state)
         if start_event_type == EventType.ABSORPTION:
-            # Latest times the particles changed to position 0 is 0.0 as they start at position 0
+            # Latest times the particles changed to an absorption state equals 0.0 as they all start at an absorption state
             self.times0 = np.zeros(self.N, dtype=float)
         else:
-            # Latest times the particles changed to position 0 is unknown as they don't start at position 0
+            # Latest times the particles changed to an absorption state is unknown as they don't start at an absorption state
             self.times0 = np.nan*np.ones(self.N, dtype=float)
-        self.ktimes0_sum = np.zeros(self.N, dtype=float)    # Times to absorption from latest time it changed to position 0
+        self.ktimes0_sum = np.zeros(self.N, dtype=float)    # Times to absorption from latest time it changed to an absorption state
         self.ktimes0_n = np.zeros(self.N, dtype=int)        # Number of times the particles were absorbed
 
         # Arrays that are used to estimate the blocking proportion as a rough estimate of the blocking probability
@@ -515,7 +515,7 @@ class EstimatorQueueBlockingFlemingViot:
         #-------------------- Attributes for blocking probability estimation ------------------
         # Attributes used directly in the computation of the estimated measures that contribute to the probability of blocking.
         self.sk = [0]   # Times of an ABSORPTION (Killing) relative to ALL the activation times of the absorbed particle.
-                        # The list is updated whenever an active particle is absorbed (i.e. touches position 0)
+                        # The list is updated whenever an active particle is absorbed (i.e. touches an absorption state)
                         # GOAL: define the disjoint time segments on which the estimated survival probability is constant.
                         # SIZE AT THE END OF SIMULATION: as many as particles have been activated during the simulation.
         self.sbu = [0]  # Times of a BLOCK/UNBLOCK relative to the activation times of the particle.
@@ -526,7 +526,7 @@ class EstimatorQueueBlockingFlemingViot:
         # Note that these initial values are ALWAYS 0, regardless of the initial position of the particles
         # (whether 0 or 1). For more details see the comments in the compute_counts() method.
         self.counts_alive = [0] # Number of particles that are alive in each time segment defined by sk
-                                # => have not been absorbed by position 0.
+                                # => have not been absorbed.
                                 # The time segment associated to the count has the time value in the sk array
                                 # as its lower bound.
                                 # Size: same as the times of ABSORPTION array
@@ -638,12 +638,31 @@ class EstimatorQueueBlockingFlemingViot:
             self.plot_trajectories_by_particle()
 
         if self.LOG:
-            print("Total simulation time: {:.1f} min".format((time_end - time_start) / 60))
+            total_elapsed_time = (time_end - time_start)
+            print("Total simulation time: {:.1f} min".format(total_elapsed_time / 60))
             print("Split as:")
-            print("\tSimulation of initial trajectories until first absorption: {:.1f} min".format((time1 - time_start) / 60))
-            print("\tSimulation of trajectories until end of simulation: {:.1f} min".format((time2 - time1) / 60))
-            print("\tCompute counts: {:.1f} min".format((time3 - time2) / 60))
-            print("\tEstimate probability (Approx. 1 and 2): {:.1f} min".format((time_end - time3) / 60))
+            print("\tSimulation of initial trajectories until first absorption: {:.1f} min ({:.1f}%)".format((time1 - time_start) / 60, (time1 - time_start) / total_elapsed_time*100))
+            print("\tSimulation of trajectories until end of simulation: {:.1f} min ({:.1f}%)".format((time2 - time1) / 60, (time2 - time1) / total_elapsed_time*100))
+                ## THE ABOVE IS THE BOTTLENECK! (99.9% of the time goes here for reactivate=False, and 85%-98% for reactivate=True, see example below)
+            print("\tCompute counts: {:.1f} min ({:.1f}%)".format((time3 - time2) / 60, (time3 - time2) / total_elapsed_time*100))
+            print("\tEstimate probability (Approx. 1 and 2): {:.1f} min ({:.1f}%)".format((time_end - time3) / 60, (time_end - time3) / total_elapsed_time*100))
+            ## Ex of simulation time from test case below:
+            ## Test #2: Multiple-server system (3 servers)
+            ## Running Monte-Carlo simulation on 1 particle and T=5000x...
+            ## Total simulation time: 0.3 min
+            ## Split as:
+            ##    Simulation of initial trajectories until first absorption: 0.0 min (0.1%)
+            ##    Simulation of trajectories until end of simulation: 0.3 min (99.9%)
+            ##    Compute counts: 0.0 min (0.0%)
+            ##    Estimate probability (Approx. 1 and 2): 0.0 min (0.0%)
+            ##
+            ## Running Fleming-Viot simulation on 100 particles and T=50x...
+            ## Total simulation time: 0.4 min
+            ## Split as:
+            ##    Simulation of initial trajectories until first absorption: 0.0 min (12.2%)
+            ##    Simulation of trajectories until end of simulation: 0.3 min (87.6%)
+            ##    Compute counts: 0.0 min (0.0%)
+            ##    Estimate probability (Approx. 1 and 2): 0.0 min (0.1%)
 
         if self.reactivate:
             return self.proba_blocking_integral, self.proba_blocking_laplacian, integral, gamma
@@ -1421,7 +1440,7 @@ class EstimatorQueueBlockingFlemingViot:
     def _update_survival_time_from_zero(self, P, time_of_absorption):
         ref_time = 0.0 if np.isnan(self.times0[P]) else self.times0[P]
 
-        # Refer the survival time to the latest time the particle was at position 0
+        # Refer the survival time to the latest time the particle was absorbed
         # and add it to the previously measured survival time
         assert time_of_absorption > ref_time, \
                 "The time of absorption ({}) contributing to the mean survival time calculation" \
@@ -1433,11 +1452,11 @@ class EstimatorQueueBlockingFlemingViot:
         if False:
             with printoptions(precision=3, suppress=True):
                 print("\n>>>> Particle P={}: absorption @t={:.3f}".format(P, time_of_absorption))
-                print(">>>> Previous times at position 0: {:.3f}".format(self.times0[P]))
+                print(">>>> Previous absorption time: {:.3f}".format(self.times0[P]))
                 print(">>>> Total Survival times for ALL particles: {}".format(np.array(self.ktimes0_sum)))
                 print(">>>> Total Survival units for ALL particles: {}".format(np.array(self.ktimes0_n)))
 
-        # Update the latest time the particle was at position 0
+        # Update the latest time the particle was absorbed
         self.times0[P] = time_of_absorption
 
         if False:
@@ -1456,8 +1475,7 @@ class EstimatorQueueBlockingFlemingViot:
         assert not np.isnan(self.timesb[P]), "The last blocking time is not NaN ({:.3f})".format(self.timesb[P])
         last_blocking_time = self.timesb[P]
 
-        # Refer the survival time to the latest time the particle was at position 0
-        # and add it to the previously measured survival time
+        # Refer the unblocking time to the latest time the particle was blocked
         assert time_of_unblocking > last_blocking_time, \
                 "The time of unblocking ({}) contributing to the total blocking time calculation" \
                 " is larger than the latest blocking time for particle {} ({})" \
@@ -1980,7 +1998,7 @@ class EstimatorQueueBlockingFlemingViot:
 
     def compute_blocking_time_estimate(self):
         """
-        Computes Pr(K) * (Expected Survival time given start at position 0) where
+        Computes Pr(K) * (Expected Survival time given start at an absorption state) where
         Pr(K) is the calculation of the blocking probability using Approximation 2 in Matt's draft.
         
         A modification is done on this estimate to increase robustness or stability of the estimation,
@@ -2152,20 +2170,23 @@ class EstimatorQueueBlockingFlemingViot:
         if not self.finalize_type in [FinalizeType.NONE, FinalizeType.ESTIMATE_CENSORED]:
             assert sum(self.is_particle_active) == 0, "The number of active particles is 0 ({})".format(sum(self.is_particle_active))
 
+        total_survival_time = np.sum(self.ktimes0_sum)
+        total_survival_n = np.sum(self.ktimes0_n)
+
         if False:
             print("Estimating expected survival time...")
-            print("ktimes0_sum: {}".format(self.ktimes0_sum))
-            print("ktimes0_n: {}".format(self.ktimes0_n))
+            print("Total survival time over all particles (N={}): {:.1f}".format(self.N, total_survival_time))
+            print("Number of observed returned times to absorption over all {} particles: {}".format(self.N, total_survival_n))
 
-        if np.sum(self.ktimes0_n) == 0:
+        if total_survival_n == 0:
             print("WARNING (estimation of return time to absorption set): No particle has been absorbed.\n" +
-                  "The estimated return time to the set of absorption states is estimated as the average of the simulated times for each particle.")
+                  "The estimated return time to the set of absorption states is estimated as the average of the simulated times over all particles.")
             self.expected_survival_time = np.mean([self.particles[P].getMostRecentEventTime() for P in range(self.N)])
         else:
-            if np.sum(self.ktimes0_n) < 0.5*self.N:
+            if total_survival_n < 0.5*self.N:
                 print("WARNING (estimation of return time to absorption set): The number of observed return times to the absorption set is smaller than half the number of particles ({} < number of particles ({})).\n".format(self.ktimes0_n, self.N) +
                       "The estimated return time may be unreliable.")
-            self.expected_survival_time = np.sum(self.ktimes0_sum) / np.sum(self.ktimes0_n)
+            self.expected_survival_time = total_survival_time / total_survival_n
 
         return self.expected_survival_time
 
@@ -2277,10 +2298,14 @@ class EstimatorQueueBlockingFlemingViot:
         - the estimated blocking probability as the proportion of blocking time over survival time
         - the total blocking time over all particles
         - the total survival time over all particles
-        - the estimated expected survival time (starting from position 0)
+        - the estimated expected survival time (starting from the set of absorption states)
         """
         total_blocking_time = np.sum(self.btimes_sum)
         total_survival_time = np.sum(self.ktimes0_sum)
+        if total_survival_time == 0:
+            print("WARNING (estimation of blocking probability by MC): No particle has been absorbed.\n" +
+                  "The total return time to the set of absorption states is estimated as the total simulated time over all particles.")
+            total_survival_time = np.sum([self.particles[P].getMostRecentEventTime() for P in range(self.N)])
         blocking_time_rate = total_blocking_time / total_survival_time
         expected_survival_time = self.estimate_expected_return_time_to_absorption()
         return blocking_time_rate, total_blocking_time, total_survival_time, expected_survival_time
@@ -2470,14 +2495,14 @@ class EstimatorQueueBlockingFlemingViot:
         return survival_time
 
     def get_total_survival_time(self, P):
-        "Returns the total survival time for a particle (from position 0 back to position 0)"
+        "Returns the total survival time for a particle (from an absorption state back to an absorption state)"
         all_survival_periods = self.get_all_survival_periods()
         return np.sum(all_survival_periods[P]['Survival Period Span'])
 
     def get_all_survival_periods(self):
         """
         Returns the survival periods for each particle number P
-        (these are the periods in which the particle goes from position 0 back to position 0).
+        (these are the periods in which the particle goes from an absorption state back to an absorption state).
         Censoring times are included as valid ending survival period times.
         
         Return: list of pandas DataFrame
@@ -2522,11 +2547,11 @@ class EstimatorQueueBlockingFlemingViot:
 
     def get_survival_times(self):
         """
-        Returns the survival times from position 0 for all particles
+        Returns the survival times from an absorption state for all particles
         
         Return: tuple
         The tuple contains information about the survival periods (i.e. the contiguous time
-        during which a particle goes from position 0 back to position 0 for the first time)
+        during which a particle goes from an absorption state back to an absorption state for the first time)
         - a list with the number of survival periods observed for each particles
         - a list with the total time span of the survival periods for each particle
         """
@@ -2838,6 +2863,7 @@ if __name__ == "__main__":
                                                seed=seed, log=log)
     proba_blocking_fv_integral, proba_blocking_fv_laplacian, integral, gamma = est_fv.simulate()
     time_end = timer()
+    ## 2021/03/01: 0.3 min
     print("Test #1: execution time: {:.1f} min".format((time_end - time_start) / 60))
 
     # c) Assertions
@@ -2894,6 +2920,7 @@ if __name__ == "__main__":
                                                seed=seed, log=log)
     proba_blocking_fv_integral, proba_blocking_fv_laplacian, integral, gamma = est_fv.simulate()
     time_end = timer()
+    ## 2021/03/01: 0.8 min
     print("Test #2: execution time: {:.1f} min".format((time_end - time_start) / 60))
 
     # c) Assertions
