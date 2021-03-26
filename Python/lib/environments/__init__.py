@@ -18,17 +18,18 @@ from sympy.physics.mechanics.tests.test_system import states
 class EnvironmentDiscrete(discrete.DiscreteEnv):
     """
     Class defining methods that are generic to ALL environments.
+
+    Constructor parameters:
+    - nS: number of possible states
+    - nA: number of possible actions
+    - P: probability of each state-action pair
+    - isd: initial state distribution
+    - dim: environment dimension (e.g. 1D gridworld, 2D gridworld, etc.), which is just informative 
+    - terminal_states: set containing the terminal states of the environment
+    - terminal_rewards: list containing the values of the rewards at the terminal states
     """
+
     def __init__(self, nS, nA, P, isd, dim=1, terminal_states=set(), terminal_rewards=[]):
-        """
-        Calls the constructor of the super class which requires:
-        - nS: number of possible states
-        - nA: number of possible actions
-        - P: probability of each state-action pair
-        - isd: initial state distribution
-        - terminal_states: set containing the terminal states of the environment
-        - terminal_rewards: list containing the values of the rewards at the terminal states
-        """
         super().__init__(nS, nA, P, isd)
 
         # Dimension of the environment (e.g. 1D (gridworld), 2D (gridworld), etc.)

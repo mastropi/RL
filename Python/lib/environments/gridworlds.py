@@ -215,7 +215,7 @@ class EnvGridworld2D(EnvironmentDiscrete):
         isd = np.zeros(nS)
         while not it.finished:
             s = it.iterindex
-            y, x = it.multi_index
+            y, x = it.multi_index   # 0 <= y <= shape[0]-1, 0 <= x <= shape[1]-1
 
             # Initial state distribution
             if not is_terminal(s):

@@ -22,12 +22,16 @@ if __name__ == "__main__":
     import runpy
     runpy.run_path('../../setup.py')
 
-    import Python.lib.queues as queues
+    from Python.lib.environments.queues import EnvQueueSingleBufferWithJobClasses
+    import Python.lib.agents as agents
+    from agents.policies.parameterized import PolQueueRandomizedLinearStep
+    import Python.lib.queues as queues  # The keyword `queues` is used in test code
     from Python.lib.queues import Event, GenericQueue
     from Python.lib.utils.basic import array_of_objects, find, find_last, insort, merge_values_in_time
     from Python.lib.utils.computing import stationary_distribution_birth_death_process, stationary_distribution_birth_death_process_at_capacity
 else:
-    from . import queues
+    from .environments.queues import EnvQueueSingleBufferWithJobClasses
+    from .agents.policies.parameterized import PolQueueRandomizedLinearStep
     from .queues import Event, GenericQueue
     from .utils.basic import array_of_objects, find, find_last, insort, merge_values_in_time
     from .utils.computing import stationary_distribution_birth_death_process, stationary_distribution_birth_death_process_at_capacity
@@ -90,6 +94,15 @@ class EstimatorQueueBlockingFlemingViot:
         - setDeathRates()
         - resize()
 
+    job_rates: list
+        List of arrival rate for every possible job class. The job class values are the indices of the given list. 
+
+    service_rates: (opt) list
+        Service rates of each server.
+        When given, it overrides the death rates given in the `queue` parameter.
+        Otherwise, the death rates of the `queue` parameter are used as service rates.
+        default: None
+
     buffer_size_activation: (opt) int
         Buffer size that makes the particle be active, i.e. go from the state space of absorption states
         to the rest of the state space.
@@ -105,23 +118,23 @@ class EstimatorQueueBlockingFlemingViot:
         highest arrival rate class.
         default: 3
 
-    job_rates: (opt) list
-        List of arrival rate for every possible job class. The job class values are the indices of the given list. 
-        default: [0.8, 0.7]
+    policy_accept: (opt) policy
+        Policy that defines the acceptance of an arriving job to the queue.
+        It is expected to define a queue environment of type EnvQueueSingleBufferWithJobClasses
+        on which the policy is applied that defines the rewards received for accepting or rejecting
+        a job of a given class.
+        The queue environment should have at least the following methods defined:
+        - getNumJobClasses()
+        - setJobClass() which sets the class of the arriving job
+        default: None (which means that all jobs are accepted)
 
-    service_rates: (opt) list
-        Service rates of each server.
-        When given, it overrides the death rates given in the `queue` parameter.
-        Otherwise, the death rates of the `queue` parameter are used as service rates.
-        default: None
-
-    policy: (opt) list of lists
+    policy_assign: (opt) list of lists
         List of probabilities of assigning each job class associated to each job rate given in `job_rates`
         to a server in the queue.
         Ex: In a scenario with 2 job classes and 3 servers, the following policy assigns job class 0
         to server 0 or 1 with equal probability and job class 1 to server 1 or 2 with equal probability:
         [[0.5, 0.5, 0.0], [0.0, 0.5, 0.5]]
-        default: [[0.5, 0.5, 0.0], [0.0, 0.5, 0.5]]
+        default: None (in which case the assignment probability is uniform over the servers)
 
     mean_lifetime: (opt) positive float
         Mean particle lifetime to be used as the expected survival time.
@@ -174,10 +187,12 @@ class EstimatorQueueBlockingFlemingViot:
         Whether to show messages of what is happening with the particles.
         default: False
     """
-    def __init__(self, nparticles: int, queue: GenericQueue,
+    def __init__(self, nparticles :int, queue :GenericQueue, job_rates :list,
+                 service_rates=None,
                  buffer_size_activation=1,
-                 nmeantimes=3, job_rates=[0.8, 0.7], service_rates=None,
-                 policy=[[0.5, 0.5, 0.0], [0.0, 0.5, 0.5]],
+                 nmeantimes=3,
+                 policy_accept=None,
+                 policy_assign=None,
                  mean_lifetime=None, proba_survival_given_activation=None,
                  reactivate=True, finalize_type=FinalizeType.ABSORB_CENSORED,
                  seed=None, plotFlag=False, log=False):
@@ -186,14 +201,16 @@ class EstimatorQueueBlockingFlemingViot:
             import sys
             sys.exit(-1)
         self.N = nparticles
-        self.queue = copy.deepcopy(queue) # We copy the queue so that we do NOT change the `queue` object calling this function
+        self.queue = copy.deepcopy(queue)   # We copy the queue so that we do NOT change the `queue` object calling this function
+        self.job_rates = job_rates          # This should be a list of arrival rates for each job class (which are the indices of this list)
         self.buffer_size_activation = buffer_size_activation        # Buffer size defining the ACTIVATION set of server sizes (n1, n2, ..., nR)
         self.set_activation = { self.buffer_size_activation }       # Set of the ACTIVATION buffer sizes, which defines the boundary set of states between the absorption state set and the rest of states.
         self.set_absorption = set( range(buffer_size_activation) )  # Set of ABSORPTION BUFFER SIZES, whose possible R-length states (n1, n2, ..., nR) (R=nservers) are used as starting points to estimate the expected survival time
-        self.policy = policy            # This should be a mapping from job class to server.
-                                        # As a simple example to begin with, here it is defined as a vector of probabilities for each job class
-                                        # where the probability is the assignment of the job class to each server, where the number of servers is assumed to be 3. 
-        self.job_rates = job_rates      # This should be a list of arrival rates for each job class
+        self.policy_accept = policy_accept          # Policy for acceptance of new arriving job of a given class
+        if policy_assign is None:                   # Assignment policy of a job to a server. It should be a mapping from job class to server.
+            # When no assignment probability is given, it is defined as uniform over the servers for each job class
+            policy_assign = [ [1.0 / self.queue.getNServers()] * self.queue.getNServers() ] * len(self.job_rates) 
+        self.policy_assign = policy_assign
 
         # Update the birth and death rates of the given queue
         # NOTE: (2021/02/10) Currently the birth rates   
@@ -207,6 +224,11 @@ class EstimatorQueueBlockingFlemingViot:
         self.nservers = self.queue.getNServers()
 
         #-- Parameter checks
+        if self.policy_accept is not None and self.policy_accept.env.getNumJobClasses() != len(self.job_rates):
+            raise ValueError("The number of job classes defined in the queue environment ({}) " + \
+                             "must be the same as the number of job rates given as argument to the constructor ({})" \
+                             .format(self.policy_accept.env.getNumJobClasses(), len(self.job_rates)))
+
         if self.queue.getCapacity() <= 1:
             # This condition must be satisfied because ONLY ONE EVENT is accepted for each event time
             # i.e. ACTIVATION, BLOCK, UNBLOCK or ABSORPTION.
@@ -559,7 +581,7 @@ class EstimatorQueueBlockingFlemingViot:
         equivalent_birth_rates = [0]*R
         for r in range(R):
             for c in range(J):
-                equivalent_birth_rates[r] += self.policy[c][r] * self.job_rates[c]
+                equivalent_birth_rates[r] += self.policy_assign[c][r] * self.job_rates[c]
         
         return equivalent_birth_rates
 
@@ -594,12 +616,13 @@ class EstimatorQueueBlockingFlemingViot:
         self.generate_trajectories_at_startup()
         time1 = timer()
         # Check trajectories
-        if False:
+        if True:
             for P in range(self.N):
                 self.plot_trajectories_by_server(P)
             self.plot_trajectories_by_particle()
+        input("Press key...")
 
-        if self.LOG:
+        if True: #self.LOG:
             print("Generating trajectories for each particle until END OF SIMULATION TIME (T={})...".format(self.maxtime))
         self.generate_trajectories_until_end_of_simulation()
         time2 = timer()
@@ -748,7 +771,7 @@ class EstimatorQueueBlockingFlemingViot:
         # - whatever the case, whether we *generate* or *retrieve* the "next event time", we still generate
         # NEW event values for ALL servers for both birth/death types of event, which simply go to the
         # queue of the respective server. For BIRTH events, the queue of the server *assigned* to the generated
-        # job class is increased; for DEATH events, the queue of each server is increased.
+        # job class is increased; for DEATH events, the queue of each server is decreased.
         self._generate_birth_times(P)
         self._generate_death_times(P)
         
@@ -760,7 +783,7 @@ class EstimatorQueueBlockingFlemingViot:
         Generates new arrival times for each job class, based on the job arrival rates,
         and assigns each job to one of the given particle's servers based on the assignment policy.
         
-        The policy is assumed to be a mapping from job class to server number.
+        The assignment policy is assumed to be a mapping from job class to server number.
 
         The effect of this method is the following:
         - The queue of jobs in each server is updated with the new assigned job (storing job class and event time).
@@ -782,28 +805,52 @@ class EstimatorQueueBlockingFlemingViot:
             print("times last jobs[P]: {}".format(self.times_last_jobs[P]))
             print("times next events in queue: {}".format(self.times_next_events_in_queue[P]))
         if not are_all_next_birth_times_smaller_than_all_latest_generated_jobclass_times(P):
-            # The time of the first event in at least one of the server queues is LARGER than the
+            # In at least one of the server queues, the time of the "first event to be served" is LARGER than the
             # SMALLEST time already generated for the arriving job classes for this particle
             # This means that at least one of the times generated for the NEXT arriving job class
             # could be SMALLER than the time of the next event to be born in a server queue, making
             # that event to be positioned SECOND in the queue of the server assigned to the job class
             # (i.e. behind the newly generated time for the next arriving job class, assuming it is assigned
             # to that server, of course). And this implies that the next event to be born would be
-            # born earlier than the event that is first in the queue. 
+            # born earlier than the event that is currently "first to be served" in the server queue. 
             # => Generate a birth time for ALL the job CLASSES and assign them to a server
 
             # Generate the next arriving job class times
             birth_times_relative_for_jobs = np.random.exponential( 1/np.array(self.job_rates) )
-            time_last_job = copy.deepcopy(self.times_last_jobs[P])
-            self.times_last_jobs[P] += birth_times_relative_for_jobs 
+            # Make a copy of the absolute times of the last jobs (one value per job class),
+            # prior to updating their values. This is done just for INFORMATIONAL purposes.
+            times_last_jobs_prev_P = copy.deepcopy(self.times_last_jobs[P])
+            # Update the absolute times of the last jobs (one value per job class)
+            self.times_last_jobs[P] += birth_times_relative_for_jobs
 
-            # Assign the job class associated to each birth time to one of the servers based on the policy
             job_classes = range( len(self.job_rates) )
+            if self.policy_accept is not None:
+                # Use the acceptance policy to decide whether we accept each job IN THE ORDER THEY ARRIVE 
+                times_last_jobs_P = copy.deepcopy(self.times_last_jobs[P])
+                order = np.argsort(times_last_jobs_P)
+                job_classes_accepted = []
+                #print("P={}:\ntimes_last_jobs_P: {}".format(P, times_last_jobs_P))
+                #print("order: {}".format(order))
+                for job_class in [job_classes[o] for o in order]:
+                    #print("job_class: {}".format(job_class))
+                    #print("state: {}".format(self.policy_accept.env.getState()))
+                    self.policy_accept.env.setJobClass(job_class)
+                    action = self.policy_accept.choose_action()
+                    if action == 1:
+                        #print("ENTRO")
+                        assert self.particles[P].getBufferSize() < self.particles[P].getCapacity(), \
+                               "The buffer is NOT at full capacity when a job is accepted by the acceptance policy"
+                        job_classes_accepted += [job_class]
+                        next_state, reward, done, info = self.policy_accept.env.step(action)
+            else:
+                job_classes_accepted = job_classes
+
+            # Assign the accepted job class associated to each birth time to one of the servers based on the assignment policy
             servers = range(self.nservers)
-            for job_class in job_classes:
+            for job_class in job_classes_accepted:
                 # IMPORTANT: The assigned server can be repeated for different job classes
                 # => we might have a queue of jobs for a particular server (which is handled here)
-                assigned_server = np.random.choice(servers, p=self.policy[job_class])
+                assigned_server = np.random.choice(servers, p=self.policy_assign[job_class])
                 assert assigned_server < self.nservers, \
                         "The assigned server ({}) is one of the possible servers [0, {}]".format(assigned_server, self.nservers-1)
     
@@ -814,7 +861,7 @@ class EstimatorQueueBlockingFlemingViot:
                 self.jobclasses_next_events_in_queue[P][assigned_server].insert(idx_insort, job_class)
                 if self.LOG:
                     print("job class: {}".format(job_class))
-                    print("job time (PREVIOUS): {}".format(time_last_job[job_class]))
+                    print("job time (PREVIOUS): {}".format(times_last_jobs_prev_P[job_class]))
                     print("job time (RELATIVE): {}".format(birth_times_relative_for_jobs[job_class]))
                     print("job time (ABSOLUTE): {}".format(self.times_last_jobs[P][job_class]))
                     print("assigned server: {}".format(assigned_server))
@@ -913,6 +960,11 @@ class EstimatorQueueBlockingFlemingViot:
         self.particles[P].apply_event( type_of_event,
                                        time_of_event,
                                        server )
+        # TOFIX: (2021/03/25) Update the queue environment that keeps track of rewards, etc.
+        # We should NOT have a separate environment containing a queue where we ALSO need to keep track of the buffer size...
+        # (ALSO = "besides keeping track of the buffer size in the self.queue object")
+        self.policy_accept.env.setBufferSize( self.particles[P].getBufferSize() )  
+
         if self.LOG:    # True
             print("\nP={}: Applied {} @t={:.3f} to server {}...".format(P, type_of_event, time_of_event, server) + (self.particles[P].getLastChange(server) == 0 and " --> NO CHANGE!" or ""))
         if type_of_event == Event.BIRTH:
@@ -2820,114 +2872,179 @@ if __name__ == "__main__":
     log = False
 
     #--- Test #1: One server
-    print("Test #1: Single server system")
-    K = 10
-    rate_birth = 0.5
-    job_rates = [rate_birth]
-    rate_death = [1]
-    policy = [[1]]
-    queue = queues.QueueMM(rate_birth, rate_death, 1, K)
-
-    # Simulation
-    nparticles = 100
-    nmeantimes = 50
-    finalize_type = FinalizeType.ABSORB_CENSORED
-
-    # a) Monte-Carlo (to estimate expected survival time)
-    print("Running Monte-Carlo simulation on 1 particle and T={}x...".format(nparticles*nmeantimes))
-    est_mc = EstimatorQueueBlockingFlemingViot(1, queue,
-                                               buffer_size_activation=1,
-                                               nmeantimes=nparticles*nmeantimes,
-                                               job_rates=job_rates,
-                                               service_rates=None,
-                                               policy=policy,
-                                               mean_lifetime=None,
-                                               reactivate=False,
-                                               finalize_type=FinalizeType.REMOVE_CENSORED,
-                                               plotFlag=plotFlag,
-                                               seed=seed, log=log)
-    proba_blocking_mc, total_blocking_time, total_survival_time, expected_survival_time = est_mc.simulate()
-
-    # b) Fleming-Viot
-    print("Running Fleming-Viot simulation on {} particles and T={}x...".format(nparticles, nmeantimes))
-    est_fv = EstimatorQueueBlockingFlemingViot(nparticles, queue,
-                                               buffer_size_activation=1,
-                                               nmeantimes=nmeantimes,
-                                               job_rates=job_rates,
-                                               service_rates=None,
-                                               policy=policy,
-                                               mean_lifetime=expected_survival_time,
-                                               reactivate=True,
-                                               finalize_type=finalize_type,
-                                               plotFlag=plotFlag,
-                                               seed=seed, log=log)
-    proba_blocking_fv_integral, proba_blocking_fv_laplacian, integral, gamma = est_fv.simulate()
-    time_end = timer()
-    ## 2021/03/01: 0.3 min
-    print("Test #1: execution time: {:.1f} min".format((time_end - time_start) / 60))
-
-    # c) Assertions
-    print("P(K) by MC: {:.6f}%".format(proba_blocking_mc*100))
-    print("P(K) estimated by FV1: {:.6f}%".format(proba_blocking_fv_integral*100))
-    print("P(K) estimated by FV2: {:.6f}%".format(proba_blocking_fv_laplacian*100))
-    assert("{:.6f}%".format(proba_blocking_mc*100) == "0.032064%")
-    assert("{:.6f}%".format(proba_blocking_fv_integral*100) == "0.095846%")
-    assert("{:.6f}%".format(proba_blocking_fv_laplacian*100) == "0.000000%")
-    # Note: True P(K): 0.048852%
+    if False:
+        print("Test #1: Single server system")
+        K = 10
+        rate_birth = 0.5
+        job_rates = [rate_birth]
+        rate_death = [1]
+        queue = queues.QueueMM(rate_birth, rate_death, 1, K)
+    
+        # Simulation
+        nparticles = 100
+        nmeantimes = 50
+        finalize_type = FinalizeType.ABSORB_CENSORED
+    
+        # a) Monte-Carlo (to estimate expected survival time)
+        print("Running Monte-Carlo simulation on 1 particle and T={}x...".format(nparticles*nmeantimes))
+        est_mc = EstimatorQueueBlockingFlemingViot(1, queue, job_rates,
+                                                   service_rates=None,
+                                                   buffer_size_activation=1,
+                                                   nmeantimes=nparticles*nmeantimes,
+                                                   mean_lifetime=None,
+                                                   reactivate=False,
+                                                   finalize_type=FinalizeType.REMOVE_CENSORED,
+                                                   plotFlag=plotFlag,
+                                                   seed=seed, log=log)
+        proba_blocking_mc, total_blocking_time, total_survival_time, expected_survival_time = est_mc.simulate()
+    
+        # b) Fleming-Viot
+        print("Running Fleming-Viot simulation on {} particles and T={}x...".format(nparticles, nmeantimes))
+        est_fv = EstimatorQueueBlockingFlemingViot(nparticles, queue, job_rates,
+                                                   service_rates=None,
+                                                   buffer_size_activation=1,
+                                                   nmeantimes=nmeantimes,
+                                                   mean_lifetime=expected_survival_time,
+                                                   reactivate=True,
+                                                   finalize_type=finalize_type,
+                                                   plotFlag=plotFlag,
+                                                   seed=seed, log=log)
+        proba_blocking_fv_integral, proba_blocking_fv_laplacian, integral, gamma = est_fv.simulate()
+        time_end = timer()
+        ## 2021/03/01: 0.3 min
+        print("Test #1: execution time: {:.1f} min".format((time_end - time_start) / 60))
+    
+        # c) Assertions
+        print("P(K) by MC: {:.6f}%".format(proba_blocking_mc*100))
+        print("P(K) estimated by FV1: {:.6f}%".format(proba_blocking_fv_integral*100))
+        print("P(K) estimated by FV2: {:.6f}%".format(proba_blocking_fv_laplacian*100))
+        assert("{:.6f}%".format(proba_blocking_mc*100) == "0.032064%")
+        assert("{:.6f}%".format(proba_blocking_fv_integral*100) == "0.095846%")
+        assert("{:.6f}%".format(proba_blocking_fv_laplacian*100) == "0.000000%")
+        # Note: True P(K): 0.048852%
 
 
     #--- Test #2: Multi-server
-    print("\nTest #2: Multiple-server system")
-    nservers = 3
-    K = 20
-    job_rates = [0.8, 0.7]
-    rate_death = [1, 1, 1]
-    policy = [[0.5, 0.5, 0.0], [0.0, 0.5, 0.5]]
-    queue = queues.QueueMM(rate_birth, rate_death, nservers, K)
+    if False:
+        print("\nTest #2: Multiple-server system")
+        nservers = 3
+        K = 20
+        job_rates = [0.8, 0.7]
+        rate_death = [1, 1, 1]
+        policy_assign = [[0.5, 0.5, 0.0], [0.0, 0.5, 0.5]]
+        queue = queues.QueueMM(rate_birth, rate_death, nservers, K)
+    
+        # Simulation
+        nparticles = 100
+        nmeantimes = 50
+        finalize_type = FinalizeType.ABSORB_CENSORED
+    
+        # a) Monte-Carlo (to estimate expected survival time)
+        print("Running Monte-Carlo simulation on 1 particle and T={}x...".format(nparticles*nmeantimes))
+        est_mc = EstimatorQueueBlockingFlemingViot(1, queue, job_rates,
+                                                   service_rates=None,
+                                                   buffer_size_activation=1,
+                                                   nmeantimes=nparticles*nmeantimes,
+                                                   policy_assign=policy_assign,
+                                                   mean_lifetime=None,
+                                                   reactivate=False,
+                                                   finalize_type=FinalizeType.REMOVE_CENSORED,
+                                                   plotFlag=plotFlag,
+                                                   seed=seed, log=log)
+        proba_blocking_mc, total_blocking_time, total_survival_time, expected_survival_time = est_mc.simulate()
+    
+        # b) Fleming-Viot
+        print("Running Fleming-Viot simulation on {} particles and T={}x...".format(nparticles, nmeantimes))
+        est_fv = EstimatorQueueBlockingFlemingViot(nparticles, queue, job_rates,
+                                                   service_rates=None,
+                                                   buffer_size_activation=1,
+                                                   nmeantimes=nmeantimes,
+                                                   policy_assign=policy_assign,
+                                                   mean_lifetime=expected_survival_time,
+                                                   reactivate=True,
+                                                   finalize_type=finalize_type,
+                                                   plotFlag=plotFlag,
+                                                   seed=seed, log=log)
+        proba_blocking_fv_integral, proba_blocking_fv_laplacian, integral, gamma = est_fv.simulate()
+        time_end = timer()
+        ## 2021/03/01: 0.8 min
+        print("Test #2: execution time: {:.1f} min".format((time_end - time_start) / 60))
+    
+        # c) Assertions
+        print("P(K) by MC: {:.6f}%".format(proba_blocking_mc*100))
+        print("P(K) estimated by FV1: {:.6f}%".format(proba_blocking_fv_integral*100))
+        print("P(K) estimated by FV2: {:.6f}%".format(proba_blocking_fv_laplacian*100))
+        assert("{:.6f}%".format(proba_blocking_mc*100) == "0.027690%")
+        assert("{:.6f}%".format(proba_blocking_fv_integral*100) == "0.082433%")
+        assert("{:.6f}%".format(proba_blocking_fv_laplacian*100) == "0.000000%")
+        # Note: True P(K): 0.124693% (taken from the actual simulation I perform normally to evaluate the algorithm in test_QB.py)
+    
+    
+    if True:
+        #--- Test #3: One server with acceptance policy
+        print("\nTest #3: Single server system with ACCEPTANCE policy on different JOB CLASSES")
+        K = 10
+        rate_birth = 0.5
+        job_rates = [0.3, 0.8, 0.7, 0.9]
+        rate_death = [1]
+        acceptance_rewards = [1, 0.8, 0.3, 0.2]     # One acceptance reward for each job class
+        env_queue = EnvQueueSingleBufferWithJobClasses(K, len(job_rates), acceptance_rewards)
+        # Acceptance thresholds
+        # - There is one threshold defined for each buffer size
+        # - Their values are in the range of the job classes (0, ..., #job classes)
+        # - Any job with class smaller or equal than the threshold
+        # for the buffer size at the moment of the job arrival is accepted by the policy 
+        acceptance_thresholds = [2]*(K+1) 
+        policy_accept = PolQueueRandomizedLinearStep(env_queue, acceptance_thresholds)
+        queue = queues.QueueMM(rate_birth, rate_death, 1, K)
+    
+        # Simulation
+        nparticles = 3
+        nmeantimes = 5
+        finalize_type = FinalizeType.ABSORB_CENSORED
 
-    # Simulation
-    nparticles = 100
-    nmeantimes = 50
-    finalize_type = FinalizeType.ABSORB_CENSORED
-
-    # a) Monte-Carlo (to estimate expected survival time)
-    print("Running Monte-Carlo simulation on 1 particle and T={}x...".format(nparticles*nmeantimes))
-    est_mc = EstimatorQueueBlockingFlemingViot(1, queue,
-                                               buffer_size_activation=1,
-                                               nmeantimes=nparticles*nmeantimes,
-                                               job_rates=job_rates,
-                                               service_rates=None,
-                                               policy=policy,
-                                               mean_lifetime=None,
-                                               reactivate=False,
-                                               finalize_type=FinalizeType.REMOVE_CENSORED,
-                                               plotFlag=plotFlag,
-                                               seed=seed, log=log)
-    proba_blocking_mc, total_blocking_time, total_survival_time, expected_survival_time = est_mc.simulate()
-
-    # b) Fleming-Viot
-    print("Running Fleming-Viot simulation on {} particles and T={}x...".format(nparticles, nmeantimes))
-    est_fv = EstimatorQueueBlockingFlemingViot(nparticles, queue,
-                                               buffer_size_activation=1,
-                                               nmeantimes=nmeantimes,
-                                               job_rates=job_rates,
-                                               service_rates=None,
-                                               policy=policy,
-                                               mean_lifetime=expected_survival_time,
-                                               reactivate=True,
-                                               finalize_type=finalize_type,
-                                               plotFlag=plotFlag,
-                                               seed=seed, log=log)
-    proba_blocking_fv_integral, proba_blocking_fv_laplacian, integral, gamma = est_fv.simulate()
-    time_end = timer()
-    ## 2021/03/01: 0.8 min
-    print("Test #2: execution time: {:.1f} min".format((time_end - time_start) / 60))
-
-    # c) Assertions
-    print("P(K) by MC: {:.6f}%".format(proba_blocking_mc*100))
-    print("P(K) estimated by FV1: {:.6f}%".format(proba_blocking_fv_integral*100))
-    print("P(K) estimated by FV2: {:.6f}%".format(proba_blocking_fv_laplacian*100))
-    assert("{:.6f}%".format(proba_blocking_mc*100) == "0.027690%")
-    assert("{:.6f}%".format(proba_blocking_fv_integral*100) == "0.082433%")
-    assert("{:.6f}%".format(proba_blocking_fv_laplacian*100) == "0.000000%")
-    # Note: True P(K): 0.124693% (taken from the actual simulation I perform normally to evaluate the algorithm in test_QB.py)
+        # a) Monte-Carlo (to estimate expected survival time)
+        print("Running Monte-Carlo simulation on 1 particle and T={}x...".format(nparticles*nmeantimes))
+        est_mc = EstimatorQueueBlockingFlemingViot(1, queue, job_rates,
+                                                   service_rates=None,
+                                                   buffer_size_activation=1,
+                                                   nmeantimes=nparticles*nmeantimes,
+                                                   policy_accept=policy_accept,
+                                                   policy_assign=None,
+                                                   mean_lifetime=None,
+                                                   reactivate=False,
+                                                   finalize_type=FinalizeType.REMOVE_CENSORED,
+                                                   plotFlag=True,
+                                                   seed=seed, log=log)
+        proba_blocking_mc, total_blocking_time, total_survival_time, expected_survival_time = est_mc.simulate()
+    
+        """
+        # b) Fleming-Viot
+        print("Running Fleming-Viot simulation on {} particles and T={}x...".format(nparticles, nmeantimes))
+        est_fv = EstimatorQueueBlockingFlemingViot(nparticles, queue, job_rates,
+                                                   service_rates=None,
+                                                   buffer_size_activation=1,
+                                                   nmeantimes=nmeantimes,
+                                                   policy_accept=policy_accept,
+                                                   policy_assign=policy_assign,
+                                                   mean_lifetime=expected_survival_time,
+                                                   reactivate=True,
+                                                   finalize_type=finalize_type,
+                                                   plotFlag=True,
+                                                   seed=seed, log=log)
+        proba_blocking_fv_integral, proba_blocking_fv_laplacian, integral, gamma = est_fv.simulate()
+        """
+        time_end = timer()
+        ## 2021/03/01: 0.3 min
+        print("Test #1: execution time: {:.1f} min".format((time_end - time_start) / 60))
+    
+        # c) Assertions
+        print("P(K) by MC: {:.6f}%".format(proba_blocking_mc*100))
+        """
+        print("P(K) estimated by FV1: {:.6f}%".format(proba_blocking_fv_integral*100))
+        print("P(K) estimated by FV2: {:.6f}%".format(proba_blocking_fv_laplacian*100))
+        assert("{:.6f}%".format(proba_blocking_mc*100) == "0.032064%")
+        assert("{:.6f}%".format(proba_blocking_fv_integral*100) == "0.095846%")
+        assert("{:.6f}%".format(proba_blocking_fv_laplacian*100) == "0.000000%")
+        # Note: True P(K): 0.048852%
+        """
