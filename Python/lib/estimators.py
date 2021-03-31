@@ -2988,7 +2988,9 @@ if __name__ == "__main__":
         job_rates = [0.3, 0.8, 0.7, 0.9]
         rate_death = [1]
         acceptance_rewards = [1, 0.8, 0.3, 0.2]     # One acceptance reward for each job class
-        env_queue = EnvQueueSingleBufferWithJobClasses(K, len(job_rates), acceptance_rewards)
+        nservers = len(rate_death)
+        queue = GenericQueue(K, nservers)
+        env_queue = EnvQueueSingleBufferWithJobClasses(queue, job_rates, acceptance_rewards)
         # Acceptance thresholds
         # - There is one threshold defined for each buffer size
         # - Their values are in the range of the job classes (0, ..., #job classes)
@@ -2997,7 +2999,7 @@ if __name__ == "__main__":
         acceptance_thresholds = [2]*(K+1) 
         policy_accept = PolQueueRandomizedLinearStep(env_queue, acceptance_thresholds)
         queue = queues.QueueMM(rate_birth, rate_death, 1, K)
-    
+
         # Simulation
         nparticles = 3
         nmeantimes = 5
@@ -3040,11 +3042,9 @@ if __name__ == "__main__":
     
         # c) Assertions
         print("P(K) by MC: {:.6f}%".format(proba_blocking_mc*100))
-        """
-        print("P(K) estimated by FV1: {:.6f}%".format(proba_blocking_fv_integral*100))
-        print("P(K) estimated by FV2: {:.6f}%".format(proba_blocking_fv_laplacian*100))
-        assert("{:.6f}%".format(proba_blocking_mc*100) == "0.032064%")
-        assert("{:.6f}%".format(proba_blocking_fv_integral*100) == "0.095846%")
-        assert("{:.6f}%".format(proba_blocking_fv_laplacian*100) == "0.000000%")
+        #print("P(K) estimated by FV1: {:.6f}%".format(proba_blocking_fv_integral*100))
+        #print("P(K) estimated by FV2: {:.6f}%".format(proba_blocking_fv_laplacian*100))
+        assert("{:.6f}%".format(proba_blocking_mc*100) == "17.815469%")
+        #assert("{:.6f}%".format(proba_blocking_fv_integral*100) == "0.095846%")
+        #assert("{:.6f}%".format(proba_blocking_fv_laplacian*100) == "0.000000%")
         # Note: True P(K): 0.048852%
-        """

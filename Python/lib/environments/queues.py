@@ -18,8 +18,10 @@ if __name__ == "__main__":
     runpy.run_path('../../../setup.py')
 
     from Python.lib.environments import EnvironmentDiscrete
+    from Python.lib.queues import GenericQueue, QueueMM
 else:
     from . import EnvironmentDiscrete
+    from ..queues import GenericQueue, QueueMM
 
 class deprecated_EnvQueueSingleBufferWithJobClasses(EnvironmentDiscrete):
     """
@@ -106,7 +108,7 @@ class deprecated_EnvQueueSingleBufferWithJobClasses(EnvironmentDiscrete):
         return self.rewards
     
     
-class EnvQueueSingleBufferWithJobClasses(gym.Env):
+class deprecated2_EnvQueueSingleBufferWithJobClasses(gym.Env):
     """
     Queue environment with a single buffer receiving jobs of different classes.
 
@@ -201,6 +203,97 @@ class EnvQueueSingleBufferWithJobClasses(gym.Env):
         self.job_class = job_class
 
 
+class EnvQueueSingleBufferWithJobClasses(gym.Env):
+    """
+    Queue environment with a single buffer receiving jobs of different classes.
+
+    Arguments:
+    queue: GenericQueue
+        The queue object that governs the dynamics of the environment.
+
+    job_rates: list
+        A list containing the arriving job rates for each valid job class.
+
+    rewards: list
+        List of rewards for each job class whose rate is given in job_rates.
+    """
+
+    def __init__(self, queue :GenericQueue, job_rates :list, rewards :list):
+        if len(rewards) != len(job_rates):
+            raise ValueError("The number of rewards ({}) must be the same as the number of job rates ({})".format(len(rewards), len(job_rates)))
+
+        self.queue = QueueMM([np.nan]*queue.getNServers(), [np.nan]*queue.getNServers(), queue.getNServers(), queue.getCapacity())
+        self.job_rates = job_rates
+        self.rewards = rewards
+
+        # Create temporary variables that are shorter to reference and still easy to understand
+        K = self.queue.getCapacity()
+        J = len(self.job_rates)
+
+        # Action and observation spaces
+        self.action_space = spaces.Discrete(2)  # Either Reject (0) or Accept (1) an arriving job class
+        self.observation_space = spaces.Tuple( (spaces.Discrete(K+1), spaces.Discrete(J)) )
+
+        self.reset()
+
+    def reset(self):
+        self.buffer_size = 0
+        self.job_class = None
+
+    def step(self, action):
+        assert self.job_class is not None, "The job class of the arrived job is defined"
+
+        if not self.action_space.contains(action):
+            raise ValueError("Invalid action: {}\nValid actions are: 0, 1, ..., {}".format(action, self.action_space.n-1))
+
+        reward = 0
+        if action == 1:
+            if self.buffer_size == self.queue.getCapacity():
+                warn("Action '{}' not taken because the buffer is at full capacity ({})!".format(action, self.getCapacity()))
+            else:
+                reward = self.rewards[ self.job_class ]
+                # Change the state of the system
+                # (the job class is set to None because no new job has yet arrived)
+                self.buffer_size += 1
+        
+        # Reset the job class to None because it was just considered for the given action
+        self.job_class = None
+
+        return self.getState(), reward, False, {}        
+
+    #------ GETTERS ------#
+    def getCapacity(self):
+        return self.queue.getCapacity()
+
+    def getJobRates(self):
+        return self.job_rates
+
+    def getNumJobClasses(self):
+        return len(self.job_rates)
+
+    def getRewards(self):
+        return self.rewards
+
+    def getActions(self):
+        return range(self.action_space.n)
+
+    def getState(self):
+        return (self.buffer_size, self.job_class)
+
+    #------ SETTERS ------#
+    def setBufferSize(self, buffer_size :int):
+        "Sets the buffer size of the queue"
+        if int(buffer_size) != buffer_size or buffer_size < 0 or buffer_size > self.getCapacity():
+            raise ValueError("The buffer size value is invalid ({}). It must be an integer between {} and {}".format(buffer_size, 0, self.getCapacity()))
+        self.buffer_size = buffer_size
+
+    def setJobClass(self, job_class):
+        "Sets the job class of a new arriving job"
+        if int(job_class) != job_class or job_class < 0 or job_class >= self.getNumJobClasses():
+            raise ValueError("The job class is invalid ({}). It must be an integer between {} and {}".format(job_class, 0, self.getNumJobClasses()-1))
+        self.job_class = job_class
+
+
 if __name__ == "__main__":
     #------------------------- Unit tests -----------------------------#
     #--- Test #1: Create a queue environment in DEPRECATED class
@@ -235,8 +328,8 @@ if __name__ == "__main__":
             print("")
 
     #--- Test #2: Create a queue environment
-    print("Running test #2: Queue environment inheriting from gym.Env...")
-    env = EnvQueueSingleBufferWithJobClasses(6, 4, [1, 0.8, 0.3, 0.2])
+    print("\nRunning test #2: Queue environment inheriting from gym.Env...")
+    env = deprecated2_EnvQueueSingleBufferWithJobClasses(6, 4, [1, 0.8, 0.3, 0.2])
     K = env.getCapacity()
     J = env.getNumJobClasses()
     R = env.getRewards()
@@ -250,9 +343,10 @@ if __name__ == "__main__":
     assert state == (0, job_class)
     # Action = reject
     next_state, reward, done, info = env.step(0)
-    assert next_state == state
+    assert next_state == (0, None)
     assert reward == 0
     # Action = accept
+    env.setJobClass(job_class)
     next_state, reward, done, info = env.step(1)
     assert next_state == (buffer_size_orig + 1, None)
     assert reward == env.getRewards()[job_class]
@@ -265,9 +359,51 @@ if __name__ == "__main__":
     assert state == (env.capacity, job_class)
     # Action = reject
     next_state, reward, done, info = env.step(0)
-    assert next_state == state
+    assert next_state == (env.capacity, None)
     assert reward == 0
     # Action = accept (not taken because buffer is full)
+    env.setJobClass(job_class)
     next_state, reward, done, info = env.step(1)
-    assert next_state == state
+    assert next_state == (env.capacity, None)
+    assert reward == 0
+
+    #--- Test #3: Create a queue environment
+    print("\nRunning test #3: Queue environment with GenericQueue as parameter...")
+    queue = GenericQueue(6, 3)
+    env = EnvQueueSingleBufferWithJobClasses(queue, [0.3, 0.8, 0.7, 0.9], [1, 0.8, 0.3, 0.2])
+    K = env.getCapacity()
+    J = env.getNumJobClasses()
+    R = env.getRewards()
+    nS = len(env.getActions())
+
+    #-- Arriving job on buffer not full
+    buffer_size_orig = 0
+    job_class = 1
+    env.setJobClass(job_class)
+    state = env.getState()
+    assert state == (0, job_class)
+    # Action = reject
+    next_state, reward, done, info = env.step(0)
+    assert next_state == (0, None)
+    assert reward == 0
+    # Action = accept
+    env.setJobClass(job_class)
+    next_state, reward, done, info = env.step(1)
+    assert next_state == (buffer_size_orig + 1, None)
+    assert reward == env.getRewards()[job_class]
+
+    #-- Arriving job on full buffer
+    env.setBufferSize(env.getCapacity())
+    job_class = 1
+    env.setJobClass(job_class)
+    state = env.getState()
+    assert state == (env.getCapacity(), job_class)
+    # Action = reject
+    next_state, reward, done, info = env.step(0)
+    assert next_state == (env.getCapacity(), None)
+    assert reward == 0
+    # Action = accept (not taken because buffer is full)
+    env.setJobClass(job_class)
+    next_state, reward, done, info = env.step(1)
+    assert next_state == (env.getCapacity(), None)
     assert reward == 0
