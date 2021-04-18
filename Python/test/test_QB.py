@@ -10,12 +10,13 @@ import runpy
 runpy.run_path('../../setup.py')
 
 import os
+import sys
 import numpy as np
 import pandas as pd
 import copy
 
 from timeit import default_timer as timer
-#from datetime import timedelta 
+from datetime import datetime
 import unittest
 from unittest_data_provider import data_provider
 import matplotlib
@@ -37,14 +38,12 @@ from Python.lib.utils.computing import compute_blocking_probability_birth_death_
 
 class Test_QB_Particles(unittest.TestCase):
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, nservers=1, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.log = False
-        self.rate_birth = 0.5
         self.capacity = 5
-        
-        #self.nservers = 1
-        self.nservers = 3
+        self.rate_birth = 0.7
+        self.nservers = nservers
 
         if self.nservers == 1:
             # One server
@@ -56,7 +55,8 @@ class Test_QB_Particles(unittest.TestCase):
             self.job_rates = [0.8, 0.7]
             self.rate_death = [1, 1, 1]
             self.policy = [[0.5, 0.5, 0.0], [0.0, 0.5, 0.5]]
-
+        else:
+            raise ValueError("Given Number of servers ({}) is invalid. Valid values are: 1, 3".format(nservers))
         # rho rates for each server based on arrival rates and assignment probabilities
         self.rhos = self.compute_rhos()
 
@@ -791,17 +791,18 @@ class Test_QB_Particles(unittest.TestCase):
                                     # For the following range specifications,
                                     # each new value is the previous value TIMES the third element of the tuple
                                     # Both min and max are included in the values considered for the simulation
-                                    K_range=(5, 40, 2),
+                                    K_values=[5, 10, 20, 40],
                                     buffer_size_activation_values=[1],
                                     nparticles_range=(10, 80, 2),
                                     nmeantimes_range=(50, 800, 2), 
                                     seed=1717,
                                     log=False):
-        K_min, K_max, K_mult = K_range 
+        assert sorted(K_values) == K_values, "The values of K are sorted: {}".format(K_values)
+        K_min = K_values[0]
         nparticles_min, nparticles_max, nparticles_mult = nparticles_range 
         nmeantimes_min, nmeantimes_max, nmeantimes_mult = nmeantimes_range
         # Number of simulations to run based on the input parameters defining simulation characteristics
-        nsimul = int(   (np.ceil( np.log10(K_max / K_min) / np.log10(K_mult)) + 1) * \
+        nsimul = int(   len(K_values) * \
                         len(buffer_size_activation_values) * \
                         (np.ceil( np.log10(nparticles_max / nparticles_min) / np.log10(nparticles_mult)) + 1) * \
                         (np.ceil( np.log10(nmeantimes_max / nmeantimes_min) / np.log10(nmeantimes_mult)) + 1) )
@@ -823,8 +824,7 @@ class Test_QB_Particles(unittest.TestCase):
                                                                ])
         np.random.seed(seed)
         case = 0
-        K = K_min
-        while K <= K_max:
+        for K in K_values:
             self.queue.K = K
             print("\n---> NEW K (Queue's capacity = {})".format(self.queue.getCapacity()))
 
@@ -846,9 +846,10 @@ class Test_QB_Particles(unittest.TestCase):
                 time_pr_end = timer()
                 print("{:.1f} sec".format(time_pr_end - time_pr_start))
                 print("Pr(K)={:.6f}%".format(proba_blocking_K*100))
-    
-                nparticles = nparticles_min
-                while nparticles <= nparticles_max:
+
+                # Increase the number of particles as the blocking probability dicreases, so that the estimation error is smaller
+                nparticles = int( nparticles_min * K / K_min )
+                while nparticles <= int( nparticles_max * K / K_min ):
                     print("\n\t\t---> NEW NPARTICLES ({})".format(nparticles))
                     nmeantimes = nmeantimes_min
                     while nmeantimes <= nmeantimes_max:
@@ -901,7 +902,9 @@ class Test_QB_Particles(unittest.TestCase):
     
                             # Compute the rate of blocking time w.r.t. total simulation time
                             # in order to have a rough estimation of the blocking probability
-                            assert est_mc.maxtime == nparticles*est_fv.maxtime, "The simulation time of the MC process and the FV process are comparable"
+                            assert abs(est_mc.maxtime - nparticles*est_fv.maxtime) < 1E-4, \
+                                "The simulation time of the MC process (T(MC)=N*T(FV)={}) and the FV process (N*T(FV)={}) are comparable" \
+                                .format(est_mc.maxtime, nparticles*est_fv.maxtime)
                             #rate_blocking_time_mc = est_mc.get_all_total_blocking_time() / (est_mc.maxtime * nparticles)
                             #rate_blocking_time_fv = est_fv.get_all_total_blocking_time() / (est_fv.maxtime * nparticles)
                             #print("Blocking time rate MC: {:.3f}%".format(rate_blocking_time_mc*100))
@@ -945,32 +948,20 @@ class Test_QB_Particles(unittest.TestCase):
                                                   reactivate,
                                                   finalize_type,
                                                   seed)
-    
-                        if False:
-                            # DM-2020/08/23: Stop at a simulation showing large values of PFV2(K) (e.g. 72% when the true P(K) = 10%!)
-                            if K == 5 and nparticles == 10 and True: # niter == 400:
-                                import sys
-                                sys.exit()
-    
+
                         if nmeantimes < nmeantimes_max:
                             # Give the opportunity to reach nmeantimes_max (in case nmeantimes*nmeantimes_mult goes beyond nmeantimes_max)
                             nmeantimes = np.min([nmeantimes*nmeantimes_mult, nmeantimes_max])
                         else:
                             # We should stop iterating on nmeantimes at the next iteration
                             nmeantimes = nmeantimes * nmeantimes_mult
-                    if nparticles < nparticles_max:
+                    if nparticles < int( nparticles_max * K / K_min ):
                         # Give the opportunity to reach nparticles_max (in case nparticles*nparticles_mult goes beyond nparticles_max)
-                        nparticles = np.min([nparticles*nparticles_mult, nparticles_max])
+                        nparticles = np.min([nparticles*nparticles_mult, int( nparticles_max * K / K_min )])
                     else:
                         # We should stop iterating on nparticles at the next iteration
                         nparticles = nparticles * nparticles_mult
                 buffer_size_activation_value_prev = buffer_size_activation_value
-            if K < K_max:
-                # Give the opportunity to reach K_max (in case K + K_mult goes beyond K_max)
-                K = np.min([K*K_mult, K_max])
-            else:
-                # We should stop iterating on K at the next iteration
-                K = K * K_mult
 
         return df_proba_blocking_estimates
 
@@ -1348,6 +1339,8 @@ class Test_QB_Particles(unittest.TestCase):
         # Rows to plot
         if subset is not None:
             df2plot = df[subset]
+        else:
+            df2plot = df
 
         # Compute the max absolute values of all Y's to plot, so we can visually compare the plots
         yabsmax = np.nanmax(np.r_[ np.abs(df[yvar2plot_mc]), np.abs(df[yvar2plot_fv])] )*100
@@ -1398,7 +1391,7 @@ if __name__ != "__main__":
         # the EstimatorQueueBlockingFlemingViot class is interpreted of being of class
         # unittest.runner.TextTestResult (or similar)!! instead of simply returning the size
         # attribute of the `queue` object!!!
-        test = Test_QB_Particles()
+        test = Test_QB_Particles(nservers=3)
         
         time_start = timer()
         buffer_size_activation = 1
@@ -1453,17 +1446,32 @@ if __name__ != "__main__":
         print("Execution time: {:.1f} min".format((time_end - time_start) / 60))
 else:
     # Lines to execute "by hand" (i.e. at the Python prompt)
-    test = Test_QB_Particles()
+    test = Test_QB_Particles(nservers=1)
 
+    dt_start = datetime.today().strftime("%Y-%m-%d %H:%M:%S")
+    dt_suffix = datetime.today().strftime("%Y%m%d_%H%M%S")
+    logfile = "../../RL-002-QueueBlocking/logs/analyze_convergence_{}.log".format(dt_suffix)
+    resultsfile = "../../RL-002-QueueBlocking/results/analyze_convergence_{}_results.csv".format(dt_suffix)
+    resultsfile_agg = "../../RL-002-QueueBlocking/results/analyze_convergence_{}_results_agg.csv".format(dt_suffix)
+
+    # Redirect the standard output to a file
+    # Ref: https://www.stackabuse.com/writing-to-a-file-with-pythons-print-function/
+    fh_log = open(logfile, "w")
+    print("Log file '{}' has been open for output.".format(logfile))
+    print("Started at: {}".format(dt_start))
+    stdout_sys = sys.stdout
+    sys.stdout = fh_log
+
+    print("Started at: {}".format(dt_start))
     time_start = timer()
     results_convergence = test.analyze_convergence(
                                     finalize_type=FinalizeType.ABSORB_CENSORED,
                                     replications=8,
-                                    K_range=(5, 40, 2), 
-                                    buffer_size_activation_values=[1, 0.2, 0.3, 0.4, 0.5],
-                                    nparticles_range=(400, 400, 2),
+                                    K_values=[5], #[5, 10, 20, 30, 40],
+                                    buffer_size_activation_values=[1], #[1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
+                                    nparticles_range=(200, 200, 2),
                                     nmeantimes_range=(50, 50, 2),
-                                    seed=1717,
+                                    seed=1313, #1717,
                                     log=False)
     time_end = timer()
 
@@ -1471,7 +1479,7 @@ else:
     print(results_convergence.head())
     print(results_convergence.tail())
 
-    print("Execution time: {:.1f} min".format((time_end - time_start) / 60))
+    print("Execution time: {:.1f} min, {:.1f} hours".format((time_end - time_start) / 60, (time_end - time_start) / 3600))
 
     # Aggregate results
     results_convergence_agg = test.aggregation_bygroups(results_convergence,
@@ -1479,8 +1487,9 @@ else:
                                                         ["PMC(K)", "PFV1(K)", "Pr(K)"])
 
     # Plots
-    nparticles_max = 400
-    results_convergence_errors = test.plot_errors(results_convergence, "buffer_size_activation", subset=results_convergence["nparticles"]==nparticles_max, widths=0.05)
+    #nparticles_max = 400
+    #results_convergence_errors = test.plot_errors(results_convergence, "buffer_size_activation", subset=results_convergence["nparticles"]==nparticles_max, widths=0.05)
+    results_convergence_errors = test.plot_errors(results_convergence, "buffer_size_activation", widths=0.05)
 
     #results_convergence_agg = test.plot_aggregated_convergence_results(results_convergence)
     #test.plot_aggregated_convergence_results_maxvalues(results_convergence)
@@ -1494,14 +1503,24 @@ else:
     #filename = "../../RL-002-QueueBlocking/results/RL-QB-20210211-SimulationSingleServer-K=5&10,N=100&200,T=20&40.csv"
     #filename = "../../RL-002-QueueBlocking/results/RL-QB-20210301-SimulationSingleServer-K=5&10&20&40,B=1&0.2&0.4&0.6,N=200&400,T=30.csv"
     #filename = "../../RL-002-QueueBlocking/results/RL-QB-20210301-SimulationSingleServer-K=5&10&20&40,B=1&0.2&0.4&0.6,N=400,T=50.csv"
-    filename = "../../RL-002-QueueBlocking/results/RL-QB-20210301-SimulationSingleServer-K=40,B=0.2&0.25&0.3&0.35&0.4,N=400,T=50.csv"
-    #results_convergence.to_csv(filename)
-    #print("Results of simulation saved to {}".format(os.path.abspath(filename)))
+    #filename = "../../RL-002-QueueBlocking/results/RL-QB-20210301-SimulationSingleServer-K=40,B=0.2&0.25&0.3&0.35&0.4,N=400,T=50.csv"
+    results_convergence.to_csv(resultsfile)
+    print("Results of simulation saved to {}".format(os.path.abspath(resultsfile)))
 
     #filename = "../../RL-002-QueueBlocking/results/RL-QB-20210205-SimulationMultiServer3-JobClass2-K=5&10&20,N=100&200&400&800,T=20&40 (AGG).csv"
     #filename = "../../RL-002-QueueBlocking/results/RL-QB-20210211-SimulationSingleServer-K=5&10,N=100&200,T=20&40 (AGG).csv"
     #filename = "../../RL-002-QueueBlocking/results/RL-QB-20210301-SimulationSingleServer-K=5&10&20&40,B=1&0.2&0.4&0.6,N=200&400,T=30 (AGG).csv"
     #filename = "../../RL-002-QueueBlocking/results/RL-QB-20210301-SimulationSingleServer-K=5&10&20&40,B=1&0.2&0.4&0.6,N=400,T=50 (AGG).csv"
-    filename = "../../RL-002-QueueBlocking/results/RL-QB-20210301-SimulationSingleServer-K=40,B=0.2&0.25&0.3&0.35&0.4,N=400,T=50 (AGG).csv"
-    #results_convergence_agg.to_csv(filename)
-    #print("Results of simulation saved to {}".format(os.path.abspath(filename)))
+    #filename = "../../RL-002-QueueBlocking/results/RL-QB-20210301-SimulationSingleServer-K=40,B=0.2&0.25&0.3&0.35&0.4,N=400,T=50 (AGG).csv"
+    results_convergence_agg.to_csv(resultsfile_agg)
+    print("Aggregated results of simulation saved to {}".format(os.path.abspath(resultsfile_agg)))
+
+    dt_end = datetime.today().strftime("%Y-%m-%d %H:%M:%S")
+    print("Ended at: {}".format(dt_end))
+    
+    fh_log.close()
+
+    # Reset the standard output
+    sys.stdout = stdout_sys
+    print("Ended at: {}".format(dt_end))
+    print("Execution time: {:.1f} min, {:.1f} hours".format((time_end - time_start) / 60, (time_end - time_start) / 3600))
