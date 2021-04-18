@@ -98,7 +98,7 @@ class Test_QB_Particles(unittest.TestCase):
     def test_simulation_of_events_on_a_system_with_one_particle(self):
         print("\nRunning test " + self.id())
         nmeantimes = 100
-        est = estimators.EstimatorQueueBlockingFlemingViot(1, self.queue,
+        est = estimators.EstimatorQueueBlockingFlemingViot(1, self.queue, 0.5,
                                                            nmeantimes=nmeantimes,
                                                            reactivate=False)
         
@@ -146,7 +146,7 @@ class Test_QB_Particles(unittest.TestCase):
                                         nmeantimes=20,
                                         seed=1713,
                                         log=False): 
-        est = estimators.EstimatorQueueBlockingFlemingViot(nparticles, self.queue,
+        est = estimators.EstimatorQueueBlockingFlemingViot(nparticles, self.queue, 0.5,
                                                            nmeantimes=nmeantimes,
                                                            reactivate=reactivate,
                                                            finalize_type=finalize_type,
@@ -238,7 +238,7 @@ class Test_QB_Particles(unittest.TestCase):
         #finalize_type = FinalizeType.ABSORB_CENSORED
         #finalize_type = FinalizeType.REMOVE_CENSORED
         #seed = 1713
-        est = estimators.EstimatorQueueBlockingFlemingViot(nparticles, self.queue,
+        est = estimators.EstimatorQueueBlockingFlemingViot(nparticles, self.queue, 0.5,
                                                            nmeantimes=nmeantimes,
                                                            reactivate=reactivate,
                                                            finalize_type=finalize_type,
@@ -510,12 +510,11 @@ class Test_QB_Particles(unittest.TestCase):
                 # we use the same N*T value in both situations, which, since N=1 in MC we choose
                 # T(MC) = T(FV)*N(FV).
                 time_start = timer()
-                est_mc = estimators.EstimatorQueueBlockingFlemingViot(1, queue,
+                est_mc = estimators.EstimatorQueueBlockingFlemingViot(1, queue, job_rates,
+                                                           service_rates=None,
                                                            buffer_size_activation=buffer_size_activation,
                                                            nmeantimes=nmeantimes*nparticles,
-                                                           job_rates=job_rates,
-                                                           service_rates=None,
-                                                           policy=policy,
+                                                           policy_assign=policy,
                                                            mean_lifetime=None,
                                                            reactivate=False,
                                                            finalize_type=FinalizeType.REMOVE_CENSORED,
@@ -530,12 +529,11 @@ class Test_QB_Particles(unittest.TestCase):
     
                 # b) FV: Fleming-Viot
                 # The estimated expected return time to the absorption set is used as input
-                est_fv = estimators.EstimatorQueueBlockingFlemingViot(nparticles, queue,
+                est_fv = estimators.EstimatorQueueBlockingFlemingViot(nparticles, queue, job_rates,
+                                                           service_rates=None,
                                                            buffer_size_activation=buffer_size_activation,
                                                            nmeantimes=nmeantimes,
-                                                           job_rates=job_rates,
-                                                           service_rates=None,
-                                                           policy=policy,
+                                                           policy_assign=policy,
                                                            mean_lifetime=expected_survival_time,
                                                            proba_survival_given_activation=proba_survival_given_activation,
                                                            reactivate=True,
@@ -645,20 +643,19 @@ class Test_QB_Particles(unittest.TestCase):
                     mean_lifetime=None,
                     reactivate=True,
                     finalize_type=FinalizeType.ABSORB_CENSORED,
-                    nparticles=100,
-                    nmeantimes=1000,
+                    nparticles=200,
+                    nmeantimes=50,
                     seed=1717,
                     plotFlag=True,
                     log=False):
         queue = self.queue
         job_rates = self.job_rates
         policy = self.policy
-        est = estimators.EstimatorQueueBlockingFlemingViot(nparticles, queue,
+        est = estimators.EstimatorQueueBlockingFlemingViot(nparticles, queue, job_rates,
+                                                           service_rates=None,
                                                            buffer_size_activation=buffer_size_activation,
                                                            nmeantimes=nmeantimes,
-                                                           job_rates=job_rates,
-                                                           service_rates=None,
-                                                           policy=policy,
+                                                           policy_assign=policy,
                                                            mean_lifetime=mean_lifetime,
                                                            reactivate=reactivate,
                                                            finalize_type=finalize_type,
@@ -1384,7 +1381,8 @@ class Test_QB_Particles(unittest.TestCase):
         return df
 
 # DM-2020/12/23: To change which portion of the below code to run, change the IF condition
-# to `== "__main__"` or to `!= "__main__"` accordingly
+# to `== "__main__"` or to `!= "__main__"` accordingly, taking into account that when running
+# this file as a script (F5) __name__ is equal to "__main__".
 if __name__ != "__main__":
     run_unit_tests = True
     if run_unit_tests:
