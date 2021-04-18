@@ -187,7 +187,7 @@ class EstimatorQueueBlockingFlemingViot:
         Whether to show messages of what is happening with the particles.
         default: False
     """
-    def __init__(self, nparticles :int, queue :GenericQueue, job_rates :list,
+    def __init__(self, nparticles :int, queue, job_rates :list,
                  service_rates=None,
                  buffer_size_activation=1,
                  nmeantimes=3,
@@ -200,7 +200,7 @@ class EstimatorQueueBlockingFlemingViot:
             raise ValueError("The number of particles must be at least 2 when reactivate=True ({})".format(nparticles))
             import sys
             sys.exit(-1)
-        self.N = nparticles
+        self.N = int( nparticles )          # Make sure the number of particles is of int type
         self.queue = copy.deepcopy(queue)   # We copy the queue so that we do NOT change the `queue` object calling this function
         self.job_rates = job_rates          # This should be a list of arrival rates for each job class (which are the indices of this list)
         self.buffer_size_activation = buffer_size_activation        # Buffer size defining the ACTIVATION set of server sizes (n1, n2, ..., nR)
@@ -616,11 +616,11 @@ class EstimatorQueueBlockingFlemingViot:
         self.generate_trajectories_at_startup()
         time1 = timer()
         # Check trajectories
-        if True:
+        if False:
             for P in range(self.N):
                 self.plot_trajectories_by_server(P)
             self.plot_trajectories_by_particle()
-        input("Press key...")
+            input("Press ENTER...")
 
         if True: #self.LOG:
             print("Generating trajectories for each particle until END OF SIMULATION TIME (T={})...".format(self.maxtime))
@@ -963,7 +963,8 @@ class EstimatorQueueBlockingFlemingViot:
         # TOFIX: (2021/03/25) Update the queue environment that keeps track of rewards, etc.
         # We should NOT have a separate environment containing a queue where we ALSO need to keep track of the buffer size...
         # (ALSO = "besides keeping track of the buffer size in the self.queue object")
-        self.policy_accept.env.setBufferSize( self.particles[P].getBufferSize() )  
+        if self.policy_accept is not None:
+            self.policy_accept.env.setBufferSize( self.particles[P].getBufferSize() )  
 
         if self.LOG:    # True
             print("\nP={}: Applied {} @t={:.3f} to server {}...".format(P, type_of_event, time_of_event, server) + (self.particles[P].getLastChange(server) == 0 and " --> NO CHANGE!" or ""))
@@ -2086,7 +2087,9 @@ class EstimatorQueueBlockingFlemingViot:
 
         # NOTE: The list containing the survival probability is NOT stored in the object
         # because the one we store in the object is the list that is aligned with the times
-        # at which the conditional blocking probability is measured.
+        # at which the conditional blocking probability is measured (which most likely has
+        # more time points at which it is measured than the one we are computing here --where
+        # the measurement times are independent of the conditional blocking probability calculation).
         proba_surv_by_t = self.compute_survival_probability_from_counts(self.sk, self.counts_alive)
         return pd.DataFrame.from_items([('t', self.sk), ('P(T>t / s=1)', proba_surv_by_t)])
 
@@ -2872,7 +2875,7 @@ if __name__ == "__main__":
     log = False
 
     #--- Test #1: One server
-    if False:
+    if True:
         print("Test #1: Single server system")
         K = 10
         rate_birth = 0.5
@@ -2925,7 +2928,7 @@ if __name__ == "__main__":
 
 
     #--- Test #2: Multi-server
-    if False:
+    if True:
         print("\nTest #2: Multiple-server system")
         nservers = 3
         K = 20
