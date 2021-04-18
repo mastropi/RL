@@ -210,21 +210,39 @@ class EnvQueueSingleBufferWithJobClasses(gym.Env):
     Arguments:
     queue: GenericQueue
         The queue object that governs the dynamics of the environment.
+        An `queue` attribute is defined as a QueueMM class (subclass of GenericQueue).
 
     job_rates: list
         A list containing the arriving job rates for each valid job class.
 
     rewards: list
         List of rewards for each job class whose rate is given in job_rates.
+
+    policy_assign: (opt) list of lists
+        Assignment policy defined as a list of assignment probabilities for each job class
+        (associated to job rates) to a server in the queue.
+        Ex: In a scenario with 2 job classes and 3 servers, the following policy assigns job class 0
+        to server 0 or 1 with equal probability and job class 1 to server 1 or 2 with equal probability:
+        [[0.5, 0.5, 0.0], [0.0, 0.5, 0.5]]
+        default: None (in which case the assignment probability is uniform over the servers)
     """
 
-    def __init__(self, queue :GenericQueue, job_rates :list, rewards :list):
+    def __init__(self, queue :GenericQueue, job_rates :list, rewards :list, policy_assign :list=None):
         if len(rewards) != len(job_rates):
             raise ValueError("The number of rewards ({}) must be the same as the number of job rates ({})".format(len(rewards), len(job_rates)))
 
         self.queue = QueueMM([np.nan]*queue.getNServers(), [np.nan]*queue.getNServers(), queue.getNServers(), queue.getCapacity())
         self.job_rates = job_rates
         self.rewards = rewards
+
+        # Job-class to server assignment policy
+        if policy_assign is None:
+            # When no assignment probability is given, it is defined to be uniform over the servers for each job class
+            policy_assign = [ [1.0 / self.queue.getNServers()] * self.queue.getNServers() ] * len(self.job_rates) 
+        self.policy_assign = policy_assign
+
+        # Job-rates by server (assuming they are pre-assigned)
+        self.job_rates_by_server = self.compute_arrival_rates_by_server()
 
         # Create temporary variables that are shorter to reference and still easy to understand
         K = self.queue.getCapacity()
@@ -260,6 +278,27 @@ class EnvQueueSingleBufferWithJobClasses(gym.Env):
         self.job_class = None
 
         return self.getState(), reward, False, {}        
+
+    def compute_arrival_rates_by_server(self):
+        """
+        Computes the equivalent job arrival rates for each server from the job arrival rates (to the single buffer)
+        and the assignment policy.
+
+        This can be used when the job is pre-assigned to a server at the moment of arrival (as opposed to being
+        assigned when a server queue is freed.
+
+        Return: list
+            The equivalent job arrival rates for each server r, computed as:
+            job_arrival_rate[r] = sum_{c over job classes} { job_rate[c] * Pr(assign job c to server r) }            
+        """
+        R = self.queue.getNServers()
+        J = len(self.job_rates)         # Number of job classes
+        job_arrival_rates = [0]*R
+        for r in range(R):
+            for c in range(J):
+                job_arrival_rates[r] += self.policy_assign[c][r] * self.job_rates[c]
+
+        return job_arrival_rates
 
     #------ GETTERS ------#
     def getCapacity(self):
@@ -297,113 +336,121 @@ class EnvQueueSingleBufferWithJobClasses(gym.Env):
 if __name__ == "__main__":
     #------------------------- Unit tests -----------------------------#
     #--- Test #1: Create a queue environment in DEPRECATED class
-    print("Running test #1: Deprecated queue environment inheriting from toy_text.discrete.DiscreteEnv...")
-    env = deprecated_EnvQueueSingleBufferWithJobClasses(6, 4, [1, 0.8, 0.3, 0.2])
-    K = env.getCapacity()
-    J = env.getNumJobClasses()
-    R = env.getRewards()
-    nS = env.getNumStates()
-
-    print("Initial state distribution:")
-    s = -1
-    for k in range(K):
-        print("k={}:".format(k), end=" [")
-        sep = ""
-        for j in range(J):
-            s += 1
-            print("{}{}".format(sep, env.isd[s]), end="")
-            sep = ", "
-        print("]")
-
-    print("Transition probabilities:")
-    s = -1
-    for k in range(K):
-        for j in range(J):
-            s += 1
-            print("s=({}, {}):".format(k, j))
-            for a in sorted(env.P[s].keys()):
-                print("a={}:".format(a), end= "\n")
-                for transition_info in env.P[s][a]:
-                    print("\tnext state: {} (p={})".format(transition_info[1], transition_info[0]))
-            print("")
+    if False:
+        print("Running test #1: Deprecated queue environment inheriting from toy_text.discrete.DiscreteEnv...")
+        env = deprecated_EnvQueueSingleBufferWithJobClasses(6, 4, [1, 0.8, 0.3, 0.2])
+        K = env.getCapacity()
+        J = env.getNumJobClasses()
+        R = env.getRewards()
+        nS = env.getNumStates()
+    
+        print("Initial state distribution:")
+        s = -1
+        for k in range(K):
+            print("k={}:".format(k), end=" [")
+            sep = ""
+            for j in range(J):
+                s += 1
+                print("{}{}".format(sep, env.isd[s]), end="")
+                sep = ", "
+            print("]")
+    
+        print("Transition probabilities:")
+        s = -1
+        for k in range(K):
+            for j in range(J):
+                s += 1
+                print("s=({}, {}):".format(k, j))
+                for a in sorted(env.P[s].keys()):
+                    print("a={}:".format(a), end= "\n")
+                    for transition_info in env.P[s][a]:
+                        print("\tnext state: {} (p={})".format(transition_info[1], transition_info[0]))
+                print("")
 
     #--- Test #2: Create a queue environment
-    print("\nRunning test #2: Queue environment inheriting from gym.Env...")
-    env = deprecated2_EnvQueueSingleBufferWithJobClasses(6, 4, [1, 0.8, 0.3, 0.2])
-    K = env.getCapacity()
-    J = env.getNumJobClasses()
-    R = env.getRewards()
-    nS = len(env.getActions())
-
-    #-- Arriving job on buffer not full
-    buffer_size_orig = 0
-    job_class = 1
-    env.setJobClass(job_class)
-    state = env.getState()
-    assert state == (0, job_class)
-    # Action = reject
-    next_state, reward, done, info = env.step(0)
-    assert next_state == (0, None)
-    assert reward == 0
-    # Action = accept
-    env.setJobClass(job_class)
-    next_state, reward, done, info = env.step(1)
-    assert next_state == (buffer_size_orig + 1, None)
-    assert reward == env.getRewards()[job_class]
-
-    #-- Arriving job on full buffer
-    env.setBufferSize(env.capacity)
-    job_class = 1
-    env.setJobClass(job_class)
-    state = env.getState()
-    assert state == (env.capacity, job_class)
-    # Action = reject
-    next_state, reward, done, info = env.step(0)
-    assert next_state == (env.capacity, None)
-    assert reward == 0
-    # Action = accept (not taken because buffer is full)
-    env.setJobClass(job_class)
-    next_state, reward, done, info = env.step(1)
-    assert next_state == (env.capacity, None)
-    assert reward == 0
+    if False:
+        print("\nRunning test #2: Queue environment inheriting from gym.Env...")
+        env = deprecated2_EnvQueueSingleBufferWithJobClasses(6, 4, [1, 0.8, 0.3, 0.2])
+        K = env.getCapacity()
+        J = env.getNumJobClasses()
+        R = env.getRewards()
+        nS = len(env.getActions())
+    
+        #-- Arriving job on buffer not full
+        buffer_size_orig = 0
+        job_class = 1
+        env.setJobClass(job_class)
+        state = env.getState()
+        assert state == (0, job_class)
+        # Action = reject
+        next_state, reward, done, info = env.step(0)
+        assert next_state == (0, None)
+        assert reward == 0
+        # Action = accept
+        env.setJobClass(job_class)
+        next_state, reward, done, info = env.step(1)
+        assert next_state == (buffer_size_orig + 1, None)
+        assert reward == env.getRewards()[job_class]
+    
+        #-- Arriving job on full buffer
+        env.setBufferSize(env.capacity)
+        job_class = 1
+        env.setJobClass(job_class)
+        state = env.getState()
+        assert state == (env.capacity, job_class)
+        # Action = reject
+        next_state, reward, done, info = env.step(0)
+        assert next_state == (env.capacity, None)
+        assert reward == 0
+        # Action = accept (not taken because buffer is full)
+        env.setJobClass(job_class)
+        next_state, reward, done, info = env.step(1)
+        assert next_state == (env.capacity, None)
+        assert reward == 0
 
     #--- Test #3: Create a queue environment
-    print("\nRunning test #3: Queue environment with GenericQueue as parameter...")
-    queue = GenericQueue(6, 3)
-    env = EnvQueueSingleBufferWithJobClasses(queue, [0.3, 0.8, 0.7, 0.9], [1, 0.8, 0.3, 0.2])
-    K = env.getCapacity()
-    J = env.getNumJobClasses()
-    R = env.getRewards()
-    nS = len(env.getActions())
-
-    #-- Arriving job on buffer not full
-    buffer_size_orig = 0
-    job_class = 1
-    env.setJobClass(job_class)
-    state = env.getState()
-    assert state == (0, job_class)
-    # Action = reject
-    next_state, reward, done, info = env.step(0)
-    assert next_state == (0, None)
-    assert reward == 0
-    # Action = accept
-    env.setJobClass(job_class)
-    next_state, reward, done, info = env.step(1)
-    assert next_state == (buffer_size_orig + 1, None)
-    assert reward == env.getRewards()[job_class]
-
-    #-- Arriving job on full buffer
-    env.setBufferSize(env.getCapacity())
-    job_class = 1
-    env.setJobClass(job_class)
-    state = env.getState()
-    assert state == (env.getCapacity(), job_class)
-    # Action = reject
-    next_state, reward, done, info = env.step(0)
-    assert next_state == (env.getCapacity(), None)
-    assert reward == 0
-    # Action = accept (not taken because buffer is full)
-    env.setJobClass(job_class)
-    next_state, reward, done, info = env.step(1)
-    assert next_state == (env.getCapacity(), None)
-    assert reward == 0
+    if True:
+        print("\nRunning test #3: Queue environment with a GenericQueue as parameter...")
+        queue = GenericQueue(6, 1)
+        env = EnvQueueSingleBufferWithJobClasses(queue, [0.3, 0.8, 0.7, 0.9], [1, 0.8, 0.3, 0.2])
+        K = env.getCapacity()
+        J = env.getNumJobClasses()
+        R = env.getRewards()
+        nS = len(env.getActions())
+    
+        #-- Equivalent job arrival rates (by server)
+        print("Job arrival rates: {}".format(env.job_rates))
+        print("Equivalent arrival rates by server: {}".format(env.job_rates_by_server))
+        assert env.job_rates_by_server == [ np.sum(env.job_rates) ]
+    
+        #-- Arriving job on buffer not full
+        buffer_size_orig = 0
+        job_class = 1
+        env.setJobClass(job_class)
+        state = env.getState()
+        assert state == (0, job_class)
+        # Action = reject
+        next_state, reward, done, info = env.step(0)
+        assert next_state == (0, None)
+        assert reward == 0
+        # Action = accept
+        env.setJobClass(job_class)
+        next_state, reward, done, info = env.step(1)
+        assert next_state == (buffer_size_orig + 1, None)
+        assert reward == env.getRewards()[job_class]
+    
+        #-- Arriving job on full buffer
+        env.setBufferSize(env.getCapacity())
+        job_class = 1
+        env.setJobClass(job_class)
+        state = env.getState()
+        assert state == (env.getCapacity(), job_class)
+        # Action = reject
+        next_state, reward, done, info = env.step(0)
+        assert next_state == (env.getCapacity(), None)
+        assert reward == 0
+        # Action = accept (not taken because buffer is full)
+        env.setJobClass(job_class)
+        next_state, reward, done, info = env.step(1)
+        assert next_state == (env.getCapacity(), None)
+        assert reward == 0
