@@ -205,12 +205,12 @@ class deprecated2_EnvQueueSingleBufferWithJobClasses(gym.Env):
 
 class EnvQueueSingleBufferWithJobClasses(gym.Env):
     """
-    Queue environment with a single buffer receiving jobs of different classes.
+    Queue environment with a single buffer receiving jobs of different classes
+    being served by a one or multiple servers.
 
     Arguments:
-    queue: GenericQueue
-        The queue object that governs the dynamics of the environment.
-        An `queue` attribute is defined as a QueueMM class (subclass of GenericQueue).
+    queue: QueueMM
+        The queue object that governs the dynamics of the environment through the definition of a server system.
 
     job_rates: list
         A list containing the arriving job rates for each valid job class.
@@ -227,11 +227,11 @@ class EnvQueueSingleBufferWithJobClasses(gym.Env):
         default: None (in which case the assignment probability is uniform over the servers)
     """
 
-    def __init__(self, queue :GenericQueue, job_rates :list, rewards :list, policy_assign :list=None):
+    def __init__(self, queue :QueueMM, job_rates :list, rewards :list, policy_assign :list=None):
         if len(rewards) != len(job_rates):
             raise ValueError("The number of rewards ({}) must be the same as the number of job rates ({})".format(len(rewards), len(job_rates)))
 
-        self.queue = QueueMM([np.nan]*queue.getNServers(), [np.nan]*queue.getNServers(), queue.getNServers(), queue.getCapacity())
+        self.queue = queue
         self.job_rates = job_rates
         self.rewards = rewards
 
@@ -307,8 +307,20 @@ class EnvQueueSingleBufferWithJobClasses(gym.Env):
     def getJobRates(self):
         return self.job_rates
 
+    def getJobRatesByServer(self):
+        return self.job_rates_by_server
+
+    def getServiceRates(self):
+        return self.queue.getDeathRates()
+
+    def getAssignPolicy(self):
+        return self.policy_assign 
+
     def getNumJobClasses(self):
         return len(self.job_rates)
+
+    def getNumServers(self):
+        return self.queue.getNServers()
 
     def getRewards(self):
         return self.rewards
