@@ -3360,6 +3360,94 @@ if __name__ == "__main__":
         for rep in range(replications):
             plot_survival_curve(df_proba_survival[rep])
         plt.title("Buffer size for activation = {}: survival curve over different replications".format(buffer_size_activation))
+
+    #--- Test #4: variability of Phi(t), the red curve
+    if False:
+        print("Test #4: compare variability of Phi(t) among different replications --goal: find out why we get so much variability in the FV estimation of the blocking probability (CV ~ 60%!)")
+        ## CONCLUSION: The curve has a large variability...
+        K = 20
+        rate_birth = 0.5
+        job_rates = [rate_birth]
+        rate_death = [1]
+        queue = queues.QueueMM(rate_birth, rate_death, 1, K)
+
+        # Simulation
+        nparticles = 200
+        nmeantimes = 50
+        finalize_type = FinalizeType.ABSORB_CENSORED
+
+        replications = 12
+
+        # Monte-Carlo (to estimate expected survival time)
+        buffer_size_activation = 8
+        # Dictionary where the different curve estimates will be stored so that we can merge them
+        # into the same time axis that is common to all replications which will allow us to average over them
+        dict_proba_block = dict()
+        colormap = cm.get_cmap("jet")
+        for rep in range(replications):
+            print("\nRep {} of {}: Running Monte-Carlo simulation on single-server system to estimate the conditional blocking probability curve for buffer_size_activation={} on N={} particles and simulation time T={}x...".format(rep+1, replications, buffer_size_activation, nparticles, nmeantimes))
+            est_block = EstimatorQueueBlockingFlemingViot(nparticles, queue, job_rates,
+                                                       service_rates=None,
+                                                       buffer_size_activation=buffer_size_activation,
+                                                       nmeantimes=nmeantimes,
+                                                       mean_lifetime=None,
+                                                       reactivate=True,
+                                                       finalize_type=finalize_type,
+                                                       plotFlag=plotFlag,
+                                                       seed=seed+rep, log=log)
+            block_times, block_counts = est_block.simulate_fv()
+            df_proba_block = est_block.estimate_proba_blocking_conditional_given_activation()
+
+            if True:
+                #print("last t = {:.1f}".format(df_proba_block['t'].iloc[-1]))
+                plot_blocking_probability_curve(df_proba_block, color=colormap( rep / replications ))
+
+            # Store the new series in the dictionary of series
+            # We convert the series to lists because this is the input type needed by merge_values_in_time() below
+            t_new = list( df_proba_block['t'] )
+            y_new = list( df_proba_block['Phi(t,K / s=1)'] )
+            if rep == 0:
+                dict_proba_block['t'] = t_new
+                dict_proba_block['y'+str(rep)] = y_new
+            if rep > 0:
+                # Merge the past series with the new one
+                # NOTE that since the past series have already been merged
+                # the time values are the same for ALL the series and they contain
+                # ALL The time where ANY of the past series change value.
+                # This means that the t_merged resulting from merging each of those past series
+                # to the new series just observed will be the same!
+                for past_rep in range(rep):
+                    # Time values that is common for all the series ALREADY aligned
+                    t_past_rep = dict_proba_block['t']
+                    y_past_rep = dict_proba_block['y'+str(past_rep)]
+                    print("\tMerging series #{}, len=({}, {}) with series #{}, len=({}, {})..." \
+                          .format(past_rep+1, len(t_past_rep), len(y_past_rep),
+                                  rep+1, len(t_new), len(y_new)))
+                    t_merged, dict_proba_block['y'+str(past_rep)], y_rep = \
+                            merge_values_in_time(t_past_rep, y_past_rep,
+                                                      t_new, y_new,
+                                                 unique=True)
+                    print("\t--> Merged series: len(t)={}".format(len(t_merged)))
+
+                # Update the lists in the dictionary after the last past series has been merged with the new one
+                dict_proba_block['t'] = t_merged
+                dict_proba_block['y'+str(rep)] = y_rep
+
+        df_proba_block_all_reps = pd.DataFrame({'t': dict_proba_block['t']})
+        for rep in range(replications):
+            assert len(dict_proba_block['t']) == len(dict_proba_block['y'+str(rep)])
+            df_proba_block_all_reps['y'+str(rep)] = dict_proba_block['y'+str(rep)]
+        # Compute the pointwise average and standard errors of the curves
+        colnames = df_proba_block_all_reps.columns[1:rep+1]
+        df_proba_block_all_reps['y_mean'] = np.mean(df_proba_block_all_reps[colnames], axis=1)
+        df_proba_block_all_reps['y_se'] = np.std(df_proba_block_all_reps[colnames], axis=1) / np.sqrt(rep)
+        if False:
+            with printoptions(precision=3, suppress=True):
+                print(df_proba_block_all_reps)
+
+        plt.figure()
+        plot_curve_with_bands(df_proba_block_all_reps['t'], df_proba_block_all_reps['y_mean'], 2*df_proba_block_all_reps['y_se'], col='r-', color='red',
+                              xlabel='t', title="K={}, Buffer size for activation = {}, N={}: Phi(t,K) over different replications".format(K, buffer_size_activation, nparticles))
     #----------------------- Unit tests on specific methods --------------------------#
 
     

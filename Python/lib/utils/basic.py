@@ -62,9 +62,15 @@ def insort(alist, value, unique=False):
     
     The value is not inserted if unique=True and the value already existed in the list.
 
+    Arguments:
+    unique: bool
+        Whether the values in `alist` should be unique.
+        If True, `value` is NOT inserted in `alist`,
+        but the index where it would have been inserted is returned.
+
     Return: tuple
     The tuple contains two elements:
-    - the index of the sorted insertion if unique=False or the value does not already
+    - the index of the sorted insertion if unique=False or if the value does not already
     exist in the list, or the index of the last occurrence of `value` in the input list
     otherwise.
     - a flag stating whether the value already existed in the list 
@@ -148,7 +154,7 @@ def find_last(alist, value):
             return i
     return -1
 
-def merge_values_in_time(t1, y1, t2, y2):
+def merge_values_in_time(t1, y1, t2, y2, unique=True):
     """
     Merges two list of values measured at different times into two separate lists
     of values measured both at the same times.
@@ -160,16 +166,19 @@ def merge_values_in_time(t1, y1, t2, y2):
 
     Arguments:
     t1: list
-    List of times associated to the first list of measurements y1, assumed sorted increasingly. 
+        List of times associated to the first list of measurements y1, assumed sorted increasingly. 
 
     y1: list
-    List of measurements associated to the first times list t1.
+        List of measurements associated to the first times list t1.
 
     t2: list
-    List of times associated to the second list of measurements y2, assumed sorted increasingly. 
+        List of times associated to the second list of measurements y2, assumed sorted increasingly. 
 
     y2: list
-    List of measurements associated to the first times list t1.
+        List of measurements associated to the first times list t1.
+
+    unique: bool
+        Whether the merged t values should be unique.  
 
     Return: tuple
     - List of merged times
@@ -178,6 +187,8 @@ def merge_values_in_time(t1, y1, t2, y2):
     """
 
     #-------- Parse input parameters
+    if not isinstance(t1, list) or not isinstance(t2, list) or not isinstance(y1, list) or not isinstance(y2, list):
+        raise ValueError("The time and measurement values (ti, yi) should be given as list. They are of type: t1: {}, t2: {}, y1: {}, y2: {}".format(type(t1), type(t2), type(y1), type(y2)))
     if len(t1) != len(y1) or len(t2) != len(y2):
         raise ValueError("The time values (ti) should have the same length as their respective measurements (yi)")
     if t1[0] != 0 or t2[0] != 0:
@@ -193,16 +204,18 @@ def merge_values_in_time(t1, y1, t2, y2):
     # Insert values in the first pair of lists
     for t in t2:
         if (t > 0):
-            idx_insort, found = insort(t1_merged, t)
+            idx_insort, found = insort(t1_merged, t, unique=unique)
             assert idx_insort > 0, "The index to insert the new time is larger than 0 ({})".format(idx_insort)
-            y1_merged.insert(idx_insort, y1_merged[idx_insort-1])
+            if not unique or not found:
+                y1_merged.insert(idx_insort, y1_merged[idx_insort-1])
 
     # Insert values in the second pair of lists
     for t in t1:
         if (t > 0):
-            idx_insort, found = insort(t2_merged, t)
+            idx_insort, found = insort(t2_merged, t, unique=unique)
             assert idx_insort > 0, "The index to insert the new time is larger than 0 ({})".format(idx_insort)
-            y2_merged.insert(idx_insort, y2_merged[idx_insort-1])
+            if not unique or not found:
+                y2_merged.insert(idx_insort, y2_merged[idx_insort-1])
 
     assert len(t1_merged) == len(y1_merged) == len(t2_merged) == len(y2_merged), \
             "The length of the first pair of merged lists is the same" \
