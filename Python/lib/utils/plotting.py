@@ -31,6 +31,13 @@ def violinplot(axis, dataset, positions=None, showmeans=True, showmedians=True,
         The `positions` argument of the violinplot() function.
         Normally a list of numbers of axis coordinates where the violin plots should be plotted.
 
+    widths:
+        The `widths` argument of the violinplot() function.
+        This is a VERY IMPORTANT parameter as it defines the width of the violins themselves.
+        Its value can be a scalar and it has to be in the scale of the horizontal axis, so that
+        the violins themselves are visible!
+        E.g. it could be defined as (max(positions) - min(positions)) / 10 
+
     Return:
     The customized output of the matplotlib.pyplot.violinplot() function, with colors changed.
     """

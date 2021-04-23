@@ -84,6 +84,24 @@ def compute_blocking_probability_birth_death_process(nservers :int, capacity :in
     return proba_blocking       
 
 def stationary_distribution_birth_death_process(nservers :int, capacity :int, rhos :list):
+    """
+    Computes the stationary distribution of a birth-death process for all its possible states.
+
+    Arguments:
+    nservers: int
+        The number of servers in the system, which defines the dimension of the state space.
+
+    capacity: int
+        The capacity for which the stationary distribution of states should be computed.
+
+    rhos: list
+        The intensity of each server (intensity = arrival-rate / service-rate).
+
+    Return: tuple
+    The tuple contains the following elements:
+    - a list of each possible state n = (n1, n2, ..., nR) such that the sum of the n(j)'s is equal to the given capacity.
+    - a list with the probability of occurrence of each state given in the first list under stationarity.  
+    """
     if len(rhos) != nservers:
         raise ValueError("The length of the process density ({}) must be equal to the number of servers in the system ({})".format(len(rhos), nservers))
     if capacity < 0:
@@ -111,7 +129,7 @@ def stationary_distribution_birth_death_process(nservers :int, capacity :int, rh
         ncases_expected = comb(c+R-1,c)
         ind = slice(last_case+1, last_case+1+ncases_expected)
         
-        x[ind], dist[ind] = stationary_distribution_birth_death_process_at_capacity(R, c, rhos, ncases_expected)
+        x[ind], dist[ind] = stationary_distribution_birth_death_process_at_capacity_unnormalized(R, c, rhos, ncases_expected)
 
         const += sum(dist[ind])
         ncases_total += ncases_expected
@@ -119,16 +137,37 @@ def stationary_distribution_birth_death_process(nservers :int, capacity :int, rh
         last_case += ncases_expected
     dist /= const
     assert ncases_total == ncases_total_expected, "The number of TOTAL generated combinations for R={}, C<={} ({}) is equal to the expected number of combinations ({})".format(R, C, ncases_total, ncases_total_expected)
-    assert const <= 1, "The normalizing constant is <= 1"
+    assert const <= 1, "The normalizing constant is <= 1 ({})".format(const)
     assert abs(sum(dist) - 1.0) < 1E-6, "The sum of the distribution function is 1 ({:.6f})".format(sum(dist))
 
     return x, dist
 
-def stationary_distribution_birth_death_process_at_capacity(nservers :int, capacity :int, rhos :list, ncases_expected=None):
+def stationary_distribution_birth_death_process_at_capacity_unnormalized(nservers :int, capacity :int, rhos :list, ncases_expected=None):
     """
-    Returns the UNNORMALIZED stationary distribution of a birth-death process for the state subspace
-    associated to a fixed capacity, i.e. for all the n = (n1, n2, ..., nR)
-    such that their sum is equal to the given capacity.
+    Computes the UNNORMALIZED stationary distribution of a birth-death process for the state subspace
+    associated to a fixed capacity, i.e. for all the n = (n1, n2, ..., nR) such that their sum is equal
+    to a given capacity.
+
+    Arguments:
+    nservers: int
+        The number of servers in the system, which defines the dimension of the state space.
+
+    capacity: int
+        The capacity for which the stationary distribution of states should be computed.
+
+    rhos: list
+        The intensity of each server (intensity = arrival-rate / service-rate).
+
+    ncases_expected: (opt) int
+        The expected number of states satisfying the capacity condition mentioned in the description.
+        This number may have been computed elsewhere and it is used here if given, in order to avoid
+        its recalculation.
+
+    Return: tuple
+    The tuple contains the following elements:
+    - a list of each possible state n = (n1, n2, ..., nR) such that the sum of the n(j)'s is equal to the given capacity.
+    - a list with the unnormalized probability of occurrence of each state given in the first list.  
+    In order to normalize it to a distribution, each value should be divided by the sum of all the values in the list.
     """
     R = nservers
     C = capacity
