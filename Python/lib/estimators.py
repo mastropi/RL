@@ -464,9 +464,8 @@ class EstimatorQueueBlockingFlemingViot:
                         # The list is updated whenever an active particle is absorbed (i.e. touches an absorption state)
                         # GOAL: define the disjoint time segments on which the estimated survival probability is constant.
                         # SIZE AT THE END OF SIMULATION: as many as particles have been activated during the simulation.
-        self.sbu = [0]  # Times of a BLOCK/UNBLOCK relative to the activation times of the particle.
-                        # Size: As many elements as trajectories beginning at position 1 that come from particles
-                        # becoming either blocked or unblocked.
+        self.sbu = [0]  # ABSOLUTE times of a BLOCK/UNBLOCK.
+                        # Size: As many elements as number of times the particle becomes blocked or unblocked. 
 
         # Particle counts used in the computation of the estimated measures
         # Note that these initial values are ALWAYS 0, regardless of the initial position of the particles
@@ -708,7 +707,7 @@ class EstimatorQueueBlockingFlemingViot:
             ##    Estimate probability (Approx. 1 and 2): 0.0 min (0.1%)
 
         if self.reactivate:
-            return self.proba_blocking_integral, self.proba_blocking_laplacian, integral, gamma
+            return self.proba_blocking_integral, self.proba_blocking_laplacian, integral, self.mean_lifetime, gamma
         else:
             return proba_blocking, total_blocking_time, total_survival_time, expected_survival_time 
 
@@ -759,7 +758,7 @@ class EstimatorQueueBlockingFlemingViot:
             #input("Press ENTER...")
 
         if True: #self.LOG:
-            print("Generating trajectories for each particle until END OF SIMULATION TIME (T={})...".format(self.maxtime))
+            print("Generating trajectories for each particle until END OF SIMULATION TIME (T={:.1f})...".format(self.maxtime))
         self.generate_trajectories_until_end_of_simulation()
         time2 = timer()
         # Check trajectories
@@ -3059,11 +3058,13 @@ def estimate_blocking_mc(env_queue :EnvQueueSingleBufferWithJobClasses, dict_par
     MULTIPLIER = dict_params_simul['multiplier_for_extended_simulation_time']
 
     if dict_params_info is None:
-        dict_params_info['plot'] = False
-        dict_params_info['log'] = False
+        dict_params_info = {'plot': False, 'log': False}
+    else:
+        if not set(['plot', 'log']).issubset( dict_params_info.keys() ):
+            raise ValueError("Not all required parameters were given in input dictionary 'dict_params_info'.\nRequired parameters are: " \
+                             .format(set(['plot', 'log'])))
 
     time_start = timer()
-
     # Object that is used to estimate via Monte-Carlo:
     # - E(T): the expected survival time given a BORDER absorption state
     # - P(T>t): the survival probability given a BORDER activation state 
@@ -3110,15 +3111,17 @@ def estimate_blocking_fv(env_queue :EnvQueueSingleBufferWithJobClasses, dict_par
     MULTIPLIER = dict_params_simul['multiplier_for_extended_simulation_time']
 
     if dict_params_info is None:
-        dict_params_info['plot'] = False
-        dict_params_info['log'] = False
+        dict_params_info = {'plot': False, 'log': False}
+    else:
+        if not set(['plot', 'log']).issubset( dict_params_info.keys() ):
+            raise ValueError("Not all required parameters were given in input dictionary 'dict_params_info'.\nRequired parameters are: " \
+                             .format(set(['plot', 'log'])))
 
     time_start = timer()
-
     # Object that is used to estimate via Monte-Carlo:
     # - E(T): the expected survival time given a BORDER absorption state
     # - P(T>t): the survival probability given a BORDER activation state
-    est_mc = EstimatorQueueBlockingFlemingViot(1, env_queue.queue, env_queue.getJobRates(),
+    est_surv = EstimatorQueueBlockingFlemingViot(1, env_queue.queue, env_queue.getJobRates(),
                                                service_rates=env_queue.getServiceRates(),
                                                buffer_size_activation=dict_params_simul['buffer_size_activation'],
                                                nmeantimes=MULTIPLIER * dict_params_simul['nmeantimes'] * dict_params_simul['nparticles'],
@@ -3132,18 +3135,18 @@ def estimate_blocking_fv(env_queue :EnvQueueSingleBufferWithJobClasses, dict_par
                                                log=dict_params_info['log'])
 
     print("\tStep 1 of 3: Estimating the expected survival time given absorption at boundary set...")
-    est_mc.simulate_survival(EventType.ABSORPTION, N_min=1)
-    expected_survival_time = est_mc.estimate_expected_return_time_to_absorption()
+    est_surv.simulate_survival(EventType.ABSORPTION, N_min=1)
+    expected_survival_time = est_surv.estimate_expected_return_time_to_absorption()
 
     print("\tStep 2 of 3: Estimating the survival probability given activation...")
-    est_mc.seed = est_mc.seed + 1
-    est_mc.simulate_survival(EventType.ACTIVATION, N_min=1)
-    proba_survival_given_activation = est_mc.estimate_proba_survival_given_activation()
+    est_surv.seed = est_surv.seed + 1
+    est_surv.simulate_survival(EventType.ACTIVATION, N_min=1)
+    proba_survival_given_activation = est_surv.estimate_proba_survival_given_activation()
 
     # Fleming-Viot estimation
     # The estimated expected return time to absorption and the survival curve are used as input
     print("\tStep 3 of 3: Estimating blocking probability using Fleming-Viot (using E(T) = {:.1f} out of simul time={})..." \
-          .format(expected_survival_time, est_mc.maxtime))
+          .format(expected_survival_time, est_surv.maxtime))
     est_fv = EstimatorQueueBlockingFlemingViot(dict_params_simul['nparticles'], env_queue.queue, env_queue.getJobRates(),
                                                service_rates=env_queue.getServiceRates(),
                                                buffer_size_activation=dict_params_simul['buffer_size_activation'],
@@ -3156,7 +3159,7 @@ def estimate_blocking_fv(env_queue :EnvQueueSingleBufferWithJobClasses, dict_par
                                                seed=dict_params_simul['seed']+2,
                                                plotFlag=dict_params_info['plot'],
                                                log=dict_params_info['log'])
-    proba_blocking_fv_integral, _, _, _ = est_fv.simulate(EventType.ACTIVATION)
+    proba_blocking_fv, _, integral, expected_survival_time, _ = est_fv.simulate(EventType.ACTIVATION)
     if dict_params_info['plot']:
         df_proba_survival_and_blocking_conditional = est_fv.estimate_proba_survival_and_blocking_conditional() 
         plot_curve_estimates(df_proba_survival_and_blocking_conditional,
@@ -3174,7 +3177,7 @@ def estimate_blocking_fv(env_queue :EnvQueueSingleBufferWithJobClasses, dict_par
     exec_time = time_end - time_start
     print("execution time: {:.1f} sec".format(exec_time))
 
-    return proba_blocking_fv_integral, est_fv
+    return proba_blocking_fv, integral, expected_survival_time, est_fv
 
 def plot_curve_estimates(df_proba_survival_and_blocking_conditional, *args, log=False):
     birth_rates = args[0]
@@ -3185,7 +3188,7 @@ def plot_curve_estimates(df_proba_survival_and_blocking_conditional, *args, log=
     nmeantimes = args[4]
     buffer_size_activation = args[5]
     mean_lifetime = args[6]
-    reactivate = args[7]
+    multiplier = args[7]
     finalize_type = args[8]
     seed = args[9]
     if log:
@@ -3197,7 +3200,7 @@ def plot_curve_estimates(df_proba_survival_and_blocking_conditional, *args, log=
         print("nmeantimes={}".format(nmeantimes))
         print("buffer_size_activation={}".format(buffer_size_activation))
         print("mean_lifetime={}".format(mean_lifetime))
-        print("reactivate={}".format(reactivate))
+        print("multiplier={}".format(multiplier))
         print("finalize_type={}".format(finalize_type.name))
         print("seed={}".format(seed))
 
@@ -3226,10 +3229,10 @@ def plot_curve_estimates(df_proba_survival_and_blocking_conditional, *args, log=
     ax.legend(['P(T>t / s=1)'], loc='upper left')
     ax2.legend(['P(BLOCK / T>t,s=1)'], loc='upper right')
     plt.title("K={}, N={}, activation size={}, nmeantimes={}, rhos={}, mean_lifetime={:.1f}" \
-              ", reactivate={}, finalize={}, seed={}" \
+              ", multiplier={}, finalize={}, seed={}" \
               .format(K, nparticles, buffer_size_activation, nmeantimes,
                       rhos,
-                      mean_lifetime or np.nan, reactivate, finalize_type.name[0:3],
+                      mean_lifetime or np.nan, multiplier, finalize_type.name[0:3],
                       seed
                       ))
     ax.title.set_fontsize(9)
@@ -3495,7 +3498,7 @@ if __name__ == "__main__":
                                                    finalize_type=finalize_type,
                                                    plotFlag=plotFlag,
                                                    seed=seed, log=log)
-        proba_blocking_fv_integral, proba_blocking_fv_laplacian, integral, gamma = est_fv.simulate(EventType.ACTIVATION)
+        proba_blocking_fv_integral, proba_blocking_fv_laplacian, integral, expected_survival_time, gamma = est_fv.simulate(EventType.ACTIVATION)
         time_end = timer()
         ## 2021/03/01: 0.3 min
         print("Test #1: execution time: {:.1f} min".format((time_end - time_start) / 60))
@@ -3592,7 +3595,7 @@ if __name__ == "__main__":
                                                    finalize_type=finalize_type,
                                                    plotFlag=plotFlag,
                                                    seed=seed, log=log)
-        proba_blocking_fv_integral, proba_blocking_fv_laplacian, integral, gamma = est_fv.simulate(EventType.ACTIVATION)
+        proba_blocking_fv_integral, proba_blocking_fv_laplacian, integral, expected_survival_time, gamma = est_fv.simulate(EventType.ACTIVATION)
         time_end = timer()
         ## 2021/03/01: 0.8 min
         print("Test #2: execution time: {:.1f} min".format((time_end - time_start) / 60))
@@ -3661,7 +3664,7 @@ if __name__ == "__main__":
                                                    finalize_type=finalize_type,
                                                    plotFlag=True,
                                                    seed=seed, log=log)
-        proba_blocking_fv_integral, proba_blocking_fv_laplacian, integral, gamma = est_fv.simulate(EventType.ACTIVATION)
+        proba_blocking_fv_integral, proba_blocking_fv_laplacian, integral, expected_survival_time, gamma = est_fv.simulate(EventType.ACTIVATION)
         """
         time_end = timer()
         ## 2021/03/01: 0.3 min
@@ -3676,3 +3679,4 @@ if __name__ == "__main__":
         #assert("{:.6f}%".format(proba_blocking_fv_laplacian*100) == "0.000000%")
         # Note: True P(K): 0.048852%
     #------------------------- Unit tests on the process -----------------------------#
+
