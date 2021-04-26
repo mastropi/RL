@@ -27,7 +27,7 @@ import Python.lib.queues as queues
 import Python.lib.estimators as estimators
 from Python.lib.queues import Event
 from Python.lib.environments.queues import EnvQueueSingleBufferWithJobClasses
-from Python.lib.estimators import EventType, FinalizeType, plot_curve_estimates
+from Python.lib.estimators import EventType, FinalizeType, FinalizeCondition, plot_curve_estimates
 from Python.lib.utils.computing import compute_blocking_probability_birth_death_process
 
 #from importlib import reload
@@ -1063,7 +1063,7 @@ class Test_QB_Particles(unittest.TestCase):
                                                            mean_lifetime=mean_lifetime,
                                                            proba_survival_given_activation=proba_survival_given_activation,
                                                            reactivate=reactivate,
-                                                           finalize_type=finalize_type,
+                                                           finalize_info={'type': finalize_type, 'condition': FinalizeCondition.ACTIVE},
                                                            plotFlag=plotFlag,
                                                            seed=seed, log=log)
         if log:
@@ -1074,7 +1074,8 @@ class Test_QB_Particles(unittest.TestCase):
         if reactivate:
             proba_blocking_integral, proba_blocking_laplacian, integral, expected_survival_time, gamma = est.simulate(EventType.ACTIVATION)
         else:
-            proba_blocking_mc, total_blocking_time, total_survival_time, expected_survival_time = est.simulate(EventType.ACTIVATION)
+            proba_blocking_mc, total_blocking_time, total_survival_time = est.simulate(EventType.ACTIVATION)
+            expected_survival_time = est.estimate_expected_return_time_to_absorption()
 
         if False:
             # Estimate the probability of blocking in the Monte Carlo case for benchmarking
@@ -1169,9 +1170,11 @@ class Test_QB_Particles(unittest.TestCase):
                               K,
                               nparticles,
                               nmeantimes,
+                              not reactivate and est.maxtime or np.nan,
+                              reactivate and est.maxtime or np.nan,
                               buffer_size_activation,
                               mean_lifetime,
-                              reactivate,
+                              1,        # multiplier for N*T(FV)
                               finalize_type,
                               seed)
 
@@ -1322,7 +1325,7 @@ class Test_QB_Particles(unittest.TestCase):
                                                                                    policy_assign=self.policy,
                                                                                    mean_lifetime=None,
                                                                                    reactivate=False,
-                                                                                   finalize_type=finalize_type,
+                                                                                   finalize_info={'type': finalize_type, 'condition': FinalizeCondition.ACTIVE},
                                                                                    seed=seed_rep,
                                                                                    plotFlag=False,
                                                                                    log=log)
@@ -1339,7 +1342,7 @@ class Test_QB_Particles(unittest.TestCase):
                                                                                    policy_assign=self.policy,
                                                                                    mean_lifetime=None,
                                                                                    reactivate=False,
-                                                                                   finalize_type=FinalizeType.REMOVE_CENSORED,
+                                                                                   finalize_info={'type': FinalizeType.REMOVE_CENSORED, 'condition': FinalizeCondition.ACTIVE},
                                                                                    seed=seed_rep,
                                                                                    plotFlag=False,
                                                                                    log=log)
@@ -1410,9 +1413,11 @@ class Test_QB_Particles(unittest.TestCase):
                                                   K,
                                                   nparticles,
                                                   nmeantimes,
+                                                  est_mc.maxtime,
+                                                  est_fv.maxtime,
                                                   buffer_size_activation_value,
                                                   expected_survival_time,
-                                                  reactivate,
+                                                  1,        # multiplier for N*T(FV)
                                                   finalize_type,
                                                   seed)
 
@@ -1441,7 +1446,7 @@ class Test_QB_Particles(unittest.TestCase):
                                     buffer_size_activation_values=[1],
                                     seed=1717,
                                     dict_params_out=None,
-                                    dict_params_info={'plot': True}):
+                                    dict_params_info={'plot': False, 'log': False}):
         assert len(nparticles_values) == len(K_values), "The number of values in the nparticles parameter is the same as in K_values."
         assert len(nmeantimes_values) == len(K_values), "The number of values in the nmeantimes parameter is the same as in K_values."
         assert len(multiplier_values) == len(K_values), "The number of values in the multiplier parameter is the same as in K_values."
@@ -1569,7 +1574,7 @@ class Test_QB_Particles(unittest.TestCase):
                                                                 ('PFV(K)', proba_blocking_fv),
                                                                 ('Pr(K)', proba_blocking_true),
                                                                 ('maxtime(MC)', est_mc.maxtime),
-                                                                ('maxtime(Fv)', est_fv.maxtime),
+                                                                ('maxtime(FV)', est_fv.maxtime),
                                                                 ('ratio_maxtime_mc_fv', est_mc.maxtime / (nparticles*est_fv.maxtime)),
                                                             ], orient='columns')
                     df_new_estimates.set_index( pd.Index([(case-1)*replications + rep+1]) )
@@ -1578,18 +1583,21 @@ class Test_QB_Particles(unittest.TestCase):
                                                              axis=0)
     
                     df_proba_survival_and_blocking_conditional = est_fv.estimate_proba_survival_and_blocking_conditional()
+
+                    # Plot the blue and red curves contributing to the integral used in the FV estimation
                     if rep <= 2:
-                        # Plot the blue and red curves contributing to the integral used in the FV estimation
                         plot_curve_estimates(df_proba_survival_and_blocking_conditional,
                                           est_fv.queue.getBirthRates(),
                                           est_fv.queue.getDeathRates(),
                                           K,
                                           nparticles,
                                           nmeantimes,
+                                          est_mc.maxtime,
+                                          est_fv.maxtime,
                                           buffer_size_activation_value,
                                           expected_survival_time,
                                           multiplier,
-                                          est_fv.finalize_type,
+                                          est_fv.getFinalizeType(),
                                           seed)
                 buffer_size_activation_value_prev = buffer_size_activation_value
 
@@ -2112,10 +2120,9 @@ if __name__ != "__main__":
         #runner = unittest.TextTestRunner()
         #runner.run(suite)
 
-        stdout_sys, fh_log, logfile, resultsfile, resultsfile_agg = createLogFileHandleAndResultsFileNames(prefix="test_fv_implementation")
+        dt_start, stdout_sys, fh_log, logfile, resultsfile, resultsfile_agg = createLogFileHandleAndResultsFileNames(prefix="test_fv_implementation")
 
         #******************* ACTUAL EXECUTION ***************
-        time_start = timer()
         #results, results_agg = Test_QB_Particles.deprecated_test_fv_implementation(K=5, buffer_size_activation=1) # run with rho=0.5 and rho=0.7 (defined inside the function)
         #results, results_agg = Test_QB_Particles.deprecated_test_fv_implementation(K=20, buffer_size_activation=1)# run with rho=0.7
         #results, results_agg = Test_QB_Particles.deprecated_test_fv_implementation(K=20, buffer_size_activation=8)# run with rho=0.7
@@ -2128,7 +2135,6 @@ if __name__ != "__main__":
         #results, results_agg = Test_QB_Particles.test_fv_implementation_standardized(K=20, buffer_size_activation=0.5)
         #results, results_agg = Test_QB_Particles.test_fv_implementation_standardized(K=30, buffer_size_activation=0.5)
         #results, results_agg = Test_QB_Particles.test_fv_implementation_standardized(K=40, buffer_size_activation=0.5)
-        time_end = timer()
         #******************* ACTUAL EXECUTION ***************
 
         results.to_csv(resultsfile)
@@ -2136,16 +2142,8 @@ if __name__ != "__main__":
     
         results_agg.to_csv(resultsfile_agg)
         print("Aggregated results of simulation saved to {}".format(os.path.abspath(resultsfile_agg)))
-    
-        dt_end = datetime.today().strftime("%Y-%m-%d %H:%M:%S")
-        print("Ended at: {}".format(dt_end))
-        
-        fh_log.close()
-    
-        # Reset the standard output
-        sys.stdout = stdout_sys
-        print("Ended at: {}".format(dt_end))
-        print("Execution time: {:.1f} min, {:.1f} hours".format((time_end - time_start) / 60, (time_end - time_start) / 3600))
+
+        closeLogFile(fh_log, stdout_sys, dt_start)
     else:
         # DM-2020/08/24: Instead of using unittest.main(), use the following to test the FV system
         # because there is a very weird error generated by the fact that queue.size inside
@@ -2167,8 +2165,9 @@ if __name__ != "__main__":
                     total_blocking_time, \
                     total_survival_time, \
                     expected_survival_time, \
-                    params_mc = test.run_simulation(   buffer_size_activation=buffer_size_activation,
-                                           mean_lifetime=None,
+                    params_mc = test.run_simulation(
+                                            buffer_size_activation=buffer_size_activation,
+                                            mean_lifetime=None,
                                             proba_survival_given_activation=None,
                                             reactivate=False,
                                             finalize_type=FinalizeType.REMOVE_CENSORED,
@@ -2181,7 +2180,8 @@ if __name__ != "__main__":
                     proba_blocking_laplacian_fv, \
                     integral_fv, \
                     gamma_fv, \
-                    params_fv = test.run_simulation(   buffer_size_activation=buffer_size_activation,
+                    params_fv = test.run_simulation(
+                                            buffer_size_activation=buffer_size_activation,
                                             mean_lifetime=expected_survival_time,
                                             proba_survival_given_activation=None,
                                             reactivate=True,
@@ -2235,8 +2235,7 @@ else:
                                     seed=1313,
                                     dict_params_out={'logfilehandle': fh_log,
                                                      'resultsfile': resultsfile,
-                                                     'resultsfile_agg': resultsfile_agg},
-                                    dict_params_info={'plot': True})
+                                                     'resultsfile_agg': resultsfile_agg})
     """
     """
     results_convergence = test.analyze_convergence_standardized(
@@ -2249,8 +2248,8 @@ else:
                                     seed=1313,
                                     dict_params_out={'logfilehandle': fh_log,
                                                      'resultsfile': resultsfile,
-                                                     'resultsfile_agg': resultsfile_agg},
-                                    dict_params_info={'plot': True})
+                                                     'resultsfile_agg': resultsfile_agg})
+    """
     """
     results_convergence = test.analyze_convergence_standardized(
                                     replications=12,
