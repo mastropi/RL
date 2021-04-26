@@ -154,7 +154,7 @@ def find_last(alist, value):
             return i
     return -1
 
-def merge_values_in_time(t1, y1, t2, y2, unique=True):
+def merge_values_in_time(t1, y1, t2, y2, unique=False):
     """
     Merges two list of values measured at different times into two separate lists
     of values measured both at the same times.
@@ -178,12 +178,16 @@ def merge_values_in_time(t1, y1, t2, y2, unique=True):
         List of measurements associated to the first times list t1.
 
     unique: bool
-        Whether the merged t values should be unique.  
+        Whether the merged t values should be unique while merging unique values in input t1 and t2.
+        If repeated values are found in the input time lists t1 and t2, the respective y1 or y2 value
+        associated to the index of the LAST occurrence of the repeated time value is kept.
 
     Return: tuple
     - List of merged times
-    - List with the first list of measurements resulting after merge 
-    - List with the second list of measurements resulting after merge 
+    - List with the first list of measurements resulting after merge, possibly after cleaning up
+    the respective time list of repeated time values, and keeping the last occurrence.
+    - List with the second list of measurements resulting after merge, possibly after cleaning up
+    the respective time list of repeated time values, and keeping the last occurrence.
     """
 
     #-------- Parse input parameters
@@ -196,10 +200,23 @@ def merge_values_in_time(t1, y1, t2, y2, unique=True):
     if sorted(t1) != t1 or sorted(t2) != t2:
         raise ValueError("At least one of the time lists is not sorted increasingly.\nt1={}\nt2={}".format(t1, t2))
 
-    t1_merged = t1.copy()
-    y1_merged = y1.copy()
-    t2_merged = t2.copy()
-    y2_merged = y2.copy()
+    if unique:
+        # Remove duplicates from each input time list to merge
+        # For each measurement series y, the y value for the FIRST occurrence of the repeated time value is kept 
+        t1_merged, idx1 = np.unique(t1, return_index=True)
+        t1_merged = list(t1_merged)
+        idx1_next = list(idx1[1:]) + list([ idx1[-1]+1 ])
+        y1_merged = [y1[i-1] for i in idx1_next]
+
+        t2_merged, idx2 = list( np.unique(t2, return_index=True) )
+        t2_merged = list(t2_merged)
+        idx2_next = list(idx2[1:]) + list([ idx2[-1]+1 ])
+        y2_merged = [y2[i-1] for i in idx2_next]
+    else:
+        t1_merged = t1.copy()
+        y1_merged = y1.copy()
+        t2_merged = t2.copy()
+        y2_merged = y2.copy()
 
     # Insert values in the first pair of lists
     for t in t2:
@@ -230,17 +247,77 @@ def merge_values_in_time(t1, y1, t2, y2, unique=True):
 
 if __name__ == "__main__":
     #-------------------- merge_values_in_time ------------------------#
-    print("Testing merge_values_in_time()")
+    print("\n--- merge_values_in_time(): Test #1 on unique time values across series")
     t1 = [0.0, 2.5, 3.2, 7.2, 11.3]
-    y1 = [4, 3, 2, 1, 0]
+    y1 = [  4,   3,   2,   1,    0]
     t2 = [0.0, 1.1, 2.51, 2.87, 3.3, 4.8, 6.9]
-    y2 = [0, 0, 1, 2, 1, 1, 0]
-    
-    t, y1f, y2f = merge_values_in_time(t1, y1, t2, y2)
+    y2 = [  0,   0,    1,    2,   1,   1,   0]
+
+    t, y1f, y2f = merge_values_in_time(t1, y1, t2, y2, unique=True)
 
     print("Merged lists:")
     print(np.c_[t, y1f, y2f])
     assert t == [0.0, 1.1, 2.5, 2.51, 2.87, 3.2, 3.3, 4.8, 6.9, 7.2, 11.3]
     assert y1f == [4, 4, 3, 3, 3, 2, 2, 2, 2, 1, 0]
-    assert y2f == [0, 0, 0, 1, 2, 2, 1, 1, 0, 0, 0]    
+    assert y2f == [0, 0, 0, 1, 2, 2, 1, 1, 0, 0, 0]   
+
+    #-------------------------
+    print("\n--- merge_values_in_time(): Test #2 on UNIQUE time values WITHIN series but some repeated time values across series (UNIQUE=True)")
+    t1 = [0.0, 2.5, 3.2, 7.2, 11.3]
+    y1 = [  4,   3,   2,   1,    0]
+    t2 = [0.0, 1.1, 2.50, 2.87, 3.3, 4.8, 6.9]  # The difference with Test #1 data is here, at element idx=2 which is now 2.5 instead of 2.51
+    y2 = [  0,   0,    1,    2,   1,   1,   0]
+
+    t, y1f, y2f = merge_values_in_time(t1, y1, t2, y2, unique=True)
+
+    print("Merged lists:")
+    print(np.c_[t, y1f, y2f])
+    assert t == [0.0, 1.1, 2.5, 2.87, 3.2, 3.3, 4.8, 6.9, 7.2, 11.3]
+    assert y1f == [4, 4, 3, 3, 2, 2, 2, 2, 1, 0]
+    assert y2f == [0, 0, 1, 2, 2, 1, 1, 0, 0, 0]
+
+    #-------------------------
+    print("\n--- merge_values_in_time(): Test #3 on UNIQUE time values WITHIN series but some repeated time values across series (UNIQUE=False)")
+    t1 = [0.0, 2.5, 3.2, 7.2, 11.3]
+    y1 = [  4,   3,   2,   1,    0]
+    t2 = [0.0, 1.1, 2.50, 2.87, 3.3, 4.8, 6.9]
+    y2 = [  0,   0,    1,    2,   1,   1,   0]
+
+    t, y1f, y2f = merge_values_in_time(t1, y1, t2, y2, unique=False)
+
+    print("Merged lists:")
+    print(np.c_[t, y1f, y2f])
+    assert t == [0.0, 1.1, 2.5, 2.5, 2.87, 3.2, 3.3, 4.8, 6.9, 7.2, 11.3]
+    assert y1f == [4,   4,   3,   3,    3,   2,   2,   2,   2,   1,    0]
+    assert y2f == [0,   0,   1,   1,    2,   2,   1,   1,   0,   0,    0]
+
+    #-------------------------
+    print("\n--- merge_values_in_time(): Test #4 on REPEATED time values WITHIN series and some repeated time values across series (UNIQUE=True)")
+    t1 = [0.0, 2.5, 3.2, 3.2, 3.2, 7.2, 11.3]   # 3.2 is repeated 3 times
+    y1 = [  4,   3,   4,   5,   6,   5,    4]
+    t2 = [0.0, 1.1, 2.50, 2.87, 3.3, 4.8, 6.9]
+    y2 = [  0,   0,    1,    2,   1,   1,   0]
+
+    t, y1f, y2f = merge_values_in_time(t1, y1, t2, y2, unique=True)
+
+    print("Merged lists:")
+    print(np.c_[t, y1f, y2f])
+    assert t == [0.0, 1.1, 2.5, 2.87, 3.2, 3.3, 4.8, 6.9, 7.2, 11.3]
+    assert y1f == [4,   4,   3,    3,   6,   6,   6,   6,   5,    4]
+    assert y2f == [0,   0,   1,    2,   2,   1,   1,   0,   0,    0]
+
+    #-------------------------
+    print("\n--- merge_values_in_time(): Test #5 same as Test #4 but with Unique=False")
+    t1 = [0.0, 2.5, 3.2, 3.2, 7.2, 11.3]
+    y1 = [  4,   3,   4,   5,   4,    3]
+    t2 = [0.0, 1.1, 2.50, 2.87, 3.3, 4.8, 6.9]  # The difference with Test #1 data is here, at element idx=2 which is now 2.5 instead of 2.51
+    y2 = [  0,   0,    1,    2,   1,   1,   0]
+
+    t, y1f, y2f = merge_values_in_time(t1, y1, t2, y2, unique=False)
+
+    print("Merged lists:")
+    print(np.c_[t, y1f, y2f])
+    assert t == [0.0, 1.1, 2.5, 2.5, 2.87, 3.2, 3.2, 3.3, 4.8, 6.9, 7.2, 11.3]
+    assert y1f == [4,   4,   3,   3,    3,   4,   5,   5,   5,   5,   4,    3]
+    assert y2f == [0,   0,   1,   1,    2,   2,   2,   1,   1,   0,   0,    0]
     #-------------------- merge_values_in_time ------------------------#
