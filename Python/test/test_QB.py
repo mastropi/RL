@@ -510,7 +510,8 @@ class Test_QB_Particles(unittest.TestCase):
                 'nparticles': nparticles,
                 'nmeantimes': nmeantimes,
                 'buffer_size_activation': buffer_size_activation_value,
-                'multiplier_for_extended_simulation_time': 1.2, #10 * (K/10),
+                'multiplier_for_extended_simulation_time': 1, #10 * (K/10),
+                'multiplier_adjust_for_activation': False,
                 'seed': seed,
                     }
 
@@ -523,7 +524,9 @@ class Test_QB_Particles(unittest.TestCase):
                 proba_blocking_mc, est_mc = estimators.estimate_blocking_mc(env_queue, dict_params_simul, dict_params_info=dict_params_info)
 
                 print("\n\t--> Running Fleming-Viot estimation...")
-                proba_blocking_fv, integral, expected_survival_time, est_fv = estimators.estimate_blocking_fv(env_queue, dict_params_simul, dict_params_info=dict_params_info, est=est_mc)
+                proba_blocking_fv, integral, expected_survival_time, \
+                    n_survival_curve_observations, n_expected_survival_observations, \
+                        est_fv = estimators.estimate_blocking_fv(env_queue, dict_params_simul, dict_params_info=dict_params_info)
                 time_end = timer()
                 exec_time = time_end - time_start
                 print("execution time: {:.1f} sec".format(exec_time))
@@ -537,9 +540,9 @@ class Test_QB_Particles(unittest.TestCase):
                 assert est_mc.maxtime - est_fv.maxtime*nparticles >= -0.001*est_fv.maxtime, \
                     "The simulation time of the MC ({:.1f}) is longer than that of FV ({:.1f})" \
                     .format(est_mc.maxtime, est_fv.maxtime*nparticles)
-                print("\tP(K) by MC: {:.3f}% (simulation time = {:.1f})".format(proba_blocking_mc*100, est_mc.maxtime))
-                print("\tP(K) estimated by FV: {:.3f}%, E(T) = {:.1f} (simulation time = {:.1f})".format(proba_blocking_fv*100, est_fv.mean_lifetime, est_fv.maxtime))
-                print("\tTrue P(K): {:.3f}%".format(proba_blocking_true*100))
+                print("\tP(K) by MC: {:.6f}% (simulation time = {:.1f})".format(proba_blocking_mc*100, est_mc.maxtime))
+                print("\tP(K) estimated by FV: {:.6f}%, E(T) = {:.1f} (simulation time = {:.1f})".format(proba_blocking_fv*100, est_fv.mean_lifetime, est_fv.maxtime))
+                print("\tTrue P(K): {:.6f}%".format(proba_blocking_true*100))
 
                 # Store the results
                 df_append = pd.DataFrame([[nparticles, r, proba_blocking_mc, est_mc.maxtime, est_fv.mean_lifetime, proba_blocking_fv, est_fv.maxtime, proba_blocking_true, exec_time]],
@@ -646,7 +649,7 @@ class Test_QB_Particles(unittest.TestCase):
         if reactivate:
             proba_blocking_integral, proba_blocking_laplacian, integral, expected_survival_time, gamma = est.simulate(EventType.ACTIVATION)
         else:
-            proba_blocking_mc, total_blocking_time, total_survival_time = est.simulate(EventType.ACTIVATION)
+            proba_blocking_mc, total_blocking_time, total_survival_time, total_survival_n = est.simulate(EventType.ACTIVATION)
             expected_survival_time = est.estimate_expected_return_time_to_absorption()
 
         if False:
@@ -1019,7 +1022,7 @@ class Test_QB_Particles(unittest.TestCase):
                                     buffer_size_activation_values=[1],
                                     seed=1717,
                                     dict_params_out=None,
-                                    dict_params_info={'plot': False, 'log': False}):
+                                    dict_params_info={'plot': True, 'log': False}):
         assert len(nparticles_values) == len(K_values), "The number of values in the nparticles parameter is the same as in K_values."
         assert len(nmeantimes_values) == len(K_values), "The number of values in the nmeantimes parameter is the same as in K_values."
         assert len(multiplier_values) == len(K_values), "The number of values in the multiplier parameter is the same as in K_values."
@@ -1121,7 +1124,9 @@ class Test_QB_Particles(unittest.TestCase):
                     proba_blocking_mc, est_mc = estimators.estimate_blocking_mc(env_queue, dict_params_simul, dict_params_info=dict_params_info)
     
                     print("\t\t*** FLEMING-VIOT ESTIMATION ***")
-                    proba_blocking_fv, integral, expected_survival_time, est_fv = estimators.estimate_blocking_fv(env_queue, dict_params_simul, dict_params_info=dict_params_info, est=est_mc)
+                    proba_blocking_fv, integral, expected_survival_time, \
+                        n_survival_curve_observations, n_expected_survival_observations, \
+                            est_fv = estimators.estimate_blocking_fv(env_queue, dict_params_simul, dict_params_info=dict_params_info)
     
                     print("\t\tP(K) by MC: {:.6f}%".format(proba_blocking_mc*100))
                     print("\t\tP(K) estimated by FV (E(T)={:.1f}): {:.6f}%".format(expected_survival_time, proba_blocking_fv*100))
@@ -1179,6 +1184,8 @@ class Test_QB_Particles(unittest.TestCase):
                                           est_fv.maxtime,
                                           buffer_size_activation_value,
                                           expected_survival_time,
+                                          n_survival_curve_observations,
+                                          n_expected_survival_observations,
                                           multiplier,
                                           est_fv.getFinalizeType(),
                                           seed)
@@ -1695,7 +1702,7 @@ def closeLogFile(fh_log, stdout_sys, dt_start):
 # DM-2020/12/23: To change which portion of the below code to run, change the IF condition
 # to `== "__main__"` or to `!= "__main__"` accordingly, taking into account that when running
 # this file as a script (F5) __name__ is equal to "__main__".
-if __name__ != "__main__":
+if __name__ == "__main__":
     run_unit_tests = True
     if run_unit_tests:
         #suite = unittest.TestSuite()
@@ -1714,10 +1721,10 @@ if __name__ != "__main__":
         #results, results_agg = Test_QB_Particles.test_fv_implementation(K=20, buffer_size_activation=8)
         
         #results, results_agg = Test_QB_Particles.test_fv_implementation_standardized(K=20, buffer_size_activation=8)
-        results, results_agg = Test_QB_Particles.test_fv_implementation_standardized(K=10, buffer_size_activation=0.5)
+        #results, results_agg = Test_QB_Particles.test_fv_implementation_standardized(K=10, buffer_size_activation=0.5)
         #results, results_agg = Test_QB_Particles.test_fv_implementation_standardized(K=20, buffer_size_activation=0.5)
         #results, results_agg = Test_QB_Particles.test_fv_implementation_standardized(K=30, buffer_size_activation=0.5)
-        #results, results_agg = Test_QB_Particles.test_fv_implementation_standardized(K=40, buffer_size_activation=0.5)
+        results, results_agg = Test_QB_Particles.test_fv_implementation_standardized(K=40, buffer_size_activation=0.5)
         #******************* ACTUAL EXECUTION ***************
 
         results.to_csv(resultsfile)
