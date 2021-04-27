@@ -2393,8 +2393,9 @@ class EstimatorQueueBlockingFlemingViot:
             self.proba_surv_by_t = self.compute_survival_probability_from_counts(self.t, counts_alive)
 
         self.proba_block_by_t = self.compute_probability_from_counts(counts_blocked)
-        self.gamma = self.compute_killing_rate()
-        self.blocking_time_estimate = self.compute_blocking_time_estimate()
+        self.gamma = None #self.compute_killing_rate()
+        self.blocking_time_estimate = None #self.compute_blocking_time_estimate()
+        
             ## Note: blocking time estimate = Pr(K) * Expected survival time
             ## This is the Approximation 2 proposed by Matt where we use an estimate
             ## of phi(t,K), the probability of blocking given survival to time t, at
@@ -2591,7 +2592,7 @@ class EstimatorQueueBlockingFlemingViot:
         proba_blocking_integral, integral = self.estimate_proba_blocking_via_integral(self.mean_lifetime)
 
         #-- Blocking probability estimate via Approximation 2: estimate the Laplacian eigenvalue (gamma) and eigenvector (h(1))
-        proba_blocking_laplacian, gamma = self.estimate_proba_blocking_via_laplacian(self.mean_lifetime)
+        proba_blocking_laplacian, gamma = None, None #self.estimate_proba_blocking_via_laplacian(self.mean_lifetime)
 
         return proba_blocking_integral, proba_blocking_laplacian, integral, gamma
 
