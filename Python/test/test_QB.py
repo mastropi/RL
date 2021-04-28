@@ -486,15 +486,15 @@ class Test_QB_Particles(unittest.TestCase):
             buffer_size_activation_value = int( buffer_size_activation*K )
         else:
             buffer_size_activation_value = buffer_size_activation
-        nmeantimes = 5 #20
+        nmeantimes = 20 #50
         seed = 1717
 
         # Info parameters 
         dict_params_info = {'plot': True, 'log': False}
 
-        replications = 4 #12
-        nparticles_min = 50
-        nparticles_max = 100 #800
+        replications = 8
+        nparticles_min = 100
+        nparticles_max = 400
         nparticles_step_prop = 1  # STEP proportion: N(n+1) = (1 + prop)*N(n), so that we scale the step as the number of particles increases
         nparticles = nparticles_min
         df_results = pd.DataFrame(columns=['N', 'replication', 'Pr(MC)', 'Time(MC)', 'E(T)', 'Pr(FV)', 'Time(FV)', 'Pr(K)', 'exec_time(s)'])
@@ -516,7 +516,7 @@ class Test_QB_Particles(unittest.TestCase):
                     }
 
             for r in range(1, replications+1):
-                print("\tReplication {} of {}...".format(r, replications))
+                print("\n\n\n\n\tReplication {} of {}...".format(r, replications))
                 dict_params_simul['seed'] = seed + r - 1
 
                 time_start = timer()
@@ -529,7 +529,7 @@ class Test_QB_Particles(unittest.TestCase):
                         est_fv = estimators.estimate_blocking_fv(env_queue, dict_params_simul, dict_params_info=dict_params_info)
                 time_end = timer()
                 exec_time = time_end - time_start
-                print("execution time: {:.1f} sec".format(exec_time))
+                print("execution time MC + FV: {:.1f} sec, {:.1f} min".format(exec_time, exec_time/60))
 
                 if nparticles == nparticles_min and r == 1:
                     rhos = est_mc.rhos
@@ -549,6 +549,8 @@ class Test_QB_Particles(unittest.TestCase):
                                          columns=df_results.columns, index=[case])
                 df_results = df_results.append(df_append)
 
+            print("Results:")
+            print(df_results)
             nparticles += int( nparticles_step_prop*nparticles )
         time_end_all = timer()
 
@@ -1722,9 +1724,9 @@ if __name__ == "__main__":
         
         #results, results_agg = Test_QB_Particles.test_fv_implementation_standardized(K=20, buffer_size_activation=8)
         #results, results_agg = Test_QB_Particles.test_fv_implementation_standardized(K=10, buffer_size_activation=0.5)
-        #results, results_agg = Test_QB_Particles.test_fv_implementation_standardized(K=20, buffer_size_activation=0.5)
+        results, results_agg = Test_QB_Particles.test_fv_implementation_standardized(K=20, buffer_size_activation=0.5)
         #results, results_agg = Test_QB_Particles.test_fv_implementation_standardized(K=30, buffer_size_activation=0.5)
-        results, results_agg = Test_QB_Particles.test_fv_implementation_standardized(K=40, buffer_size_activation=0.5)
+        #results, results_agg = Test_QB_Particles.test_fv_implementation_standardized(K=40, buffer_size_activation=0.5)
         #******************* ACTUAL EXECUTION ***************
 
         results.to_csv(resultsfile)
@@ -1867,14 +1869,14 @@ else:
                                                      'resultsfile_agg': resultsfile_agg})
     """
     results_convergence = test.analyze_convergence_standardized(
-                                    replications=2,
-                                    K_values=[40],
-                                    nparticles_values=[5],   # Larger N to improve the estimation of Phi(t)
-                                    nmeantimes_values=[300],     # Smaller T because the larger particle N already guarantees a large simulation time for the 1-particle system that estimates P(T>t) and E(T)
-                                    multiplier_values=[1.2],
-                                    multiplier_adjust_with_activation=True,
-                                    buffer_size_activation_values=[0.75],
-                                    seed=1314,
+                                    replications=12,
+                                    K_values=[5],
+                                    nparticles_values=[200],   # Larger N to improve the estimation of Phi(t)
+                                    nmeantimes_values=[50],     # Smaller T because the larger particle N already guarantees a large simulation time for the 1-particle system that estimates P(T>t) and E(T)
+                                    multiplier_values=[1],
+                                    multiplier_adjust_with_activation=False,
+                                    buffer_size_activation_values=[1, 2, 3],
+                                    seed=1313,
                                     dict_params_out={'logfilehandle': fh_log,
                                                      'resultsfile': resultsfile,
                                                      'resultsfile_agg': resultsfile_agg})

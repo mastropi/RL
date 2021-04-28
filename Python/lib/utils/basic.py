@@ -126,9 +126,8 @@ def find_first(alist, value):
     value: any object
         A value/object to search in `alist`.
 
-    Return: list
-        A list containing the smallest index where the list element is equal to `value`
-        or -1 if `value` is not present.
+    Return: int
+        The smallest index in `alist` that is equal to `value` or -1 if `value` is not present in `alist`.
     """
     for i, v in enumerate(alist):
         if v == value:
@@ -137,7 +136,7 @@ def find_first(alist, value):
 
 def find_last(alist, value):
     """
-    Returns the smallest index in `alist` that is equal to `value`
+    Returns the largest index in `alist` that is equal to `value`
 
     Arguments:
     alist: list
@@ -145,14 +144,61 @@ def find_last(alist, value):
     value: any object
         A value/object to search in `alist`.
 
-    Return: list
-        A list containing the largest index where the list element is equal to `value`
-        or -1 if `value` is not present.
+    Return: int
+        The largest index in `alist` where `value` is found  or -1 if `value` is not found.
     """
     for i in range(len(alist)-1, -1, -1):
         if alist[i] == value:
             return i
     return -1
+
+def find_first_value_in_list(alist, value):
+    """
+    Returns the smallest index in `alist` (a list of lists) that contains `value`
+
+    Arguments:
+    alist: list of lists
+        List in whose elements, which are lists, `value` is searched for.
+    value: any object
+        A value/object to search in `alist` as element of one of its lists.
+
+    Return: int
+        The smallest index in `alist` where `value` is found  or -1 if `value` is not found.
+    """
+    for i, values in enumerate(alist):
+        if value in values:
+            return i
+    return -1
+
+def find_last_value_in_list(alist, value):
+    """
+    Returns the largest index in `alist` (a list of lists) that contains `value`
+
+    Arguments:
+    alist: list of lists
+        List in whose elements, which are lists, `value` is searched for.
+    value: any object
+        A value/object to search in `alist` as element of one of its lists.
+
+    Return: int
+        The largest index in `alist` where `value` is found  or -1 if `value` is not found.
+    """
+    for i in range(len(alist)-1, -1, -1):
+        if value in alist[i]:
+            return i
+    return -1
+
+def list_contains_either(container :list, content):
+    "Checks whether a list contains an element or at least one element of another list"
+    if not isinstance(content, list):
+        content = [ content ]
+
+    if container is not None:
+        for elem in container:
+            if elem in content:
+                return True
+
+    return False
 
 def merge_values_in_time(t1, y1, t2, y2, unique=False):
     """
@@ -246,6 +292,35 @@ def merge_values_in_time(t1, y1, t2, y2, unique=False):
 
 
 if __name__ == "__main__":
+    #----------------- find_first/last_value_in_list ------------------#
+    print("\n--- find_first/last_value_in_list(): Test #1")
+    ll = [[1, 3], ['A', 'B'], [3]]
+    assert find_first_value_in_list(ll, 3) == 0
+    assert find_first_value_in_list(ll, 'B') == 1
+    assert find_first_value_in_list(ll, 'C') == -1
+
+    assert find_last_value_in_list(ll, 3) == 2
+    assert find_last_value_in_list(ll, 'B') == 1
+    assert find_last_value_in_list(ll, 'C') == -1
+    #----------------- find_first/last_value_in_list ------------------#
+
+    
+    #---------------------- list_contains_either  ---------------------#
+    print("\n--- list_contains_either(): Test #1")
+    container = [1, 3, 3]
+    content1 = 3
+    content2 = 2
+    content3 = [2, 3]
+    content4 = [1, 2]
+    content5 = [5, 5, 7]
+    assert list_contains_either(container, content1)
+    assert not list_contains_either(container, content2)
+    assert list_contains_either(container, content3)
+    assert list_contains_either(container, content4)
+    assert not list_contains_either(container, content5)
+    #---------------------- list_contains_either  ---------------------#
+    
+    
     #-------------------- merge_values_in_time ------------------------#
     print("\n--- merge_values_in_time(): Test #1 on unique time values across series")
     t1 = [0.0, 2.5, 3.2, 7.2, 11.3]
