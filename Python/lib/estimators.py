@@ -3528,7 +3528,7 @@ def estimate_blocking_fv(env_queue :EnvQueueSingleBufferWithJobClasses,
                                                plotFlag=dict_params_info['plot'],
                                                log=dict_params_info['log'])
     proba_blocking_fv, _, integral, _, _ = est_fv.simulate(EventType.ACTIVATION)
-    if dict_params_info['plot']:
+    if False: #dict_params_info['plot']:
         df_proba_survival_and_blocking_conditional = est_fv.estimate_proba_survival_and_blocking_conditional() 
         plot_curve_estimates(df_proba_survival_and_blocking_conditional,
                           est_fv.queue.getBirthRates(),

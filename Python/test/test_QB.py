@@ -483,10 +483,10 @@ class Test_QB_Particles(unittest.TestCase):
 
         # Simulation parameters
         if buffer_size_activation < 1:
-            buffer_size_activation_value = int( buffer_size_activation*K )
+            buffer_size_activation_value = int( round(buffer_size_activation*K) )
         else:
             buffer_size_activation_value = buffer_size_activation
-        nmeantimes = 20 #50
+        nmeantimes = 50
         seed = 1717
 
         # Info parameters 
@@ -1085,9 +1085,14 @@ class Test_QB_Particles(unittest.TestCase):
             for buffer_size_activation in buffer_size_activation_values:
                 # When the buffer size for activation parameter is smaller than 1 it is considered a proportion of the queue's capacity
                 if buffer_size_activation < 1:
-                    buffer_size_activation_value = max(1, int( buffer_size_activation * K ))
+                    buffer_size_activation_value = max(1, int( round( buffer_size_activation * K ) ))
                 else:
                     buffer_size_activation_value = buffer_size_activation
+                    # Convert the buffer size activatoin into a proportion so that it appears
+                    # in the right place in the PLOT w.r.t. the other buffer_size_activation proportions
+                    # (and not e.g. to the RIGHT of all other proportion values,
+                    # which makes interpretatoin of the plot more difficult)
+                    buffer_size_activation = buffer_size_activation_value / K
                 # Do not repeat the previous buffer size activation value (which may happen when the parameter is given as a proportion)
                 if buffer_size_activation_value == buffer_size_activation_value_prev:
                     continue
@@ -1200,9 +1205,11 @@ class Test_QB_Particles(unittest.TestCase):
 
             if dict_params_info['plot']:
                 # Estimates themselves
+                plot_estimates(df_proba_blocking_estimates, "buffer_size_activation_value", widths=0.5, subset=df_proba_blocking_estimates["K"]==K)
                 plot_estimates(df_proba_blocking_estimates, "buffer_size_activation", widths=0.05, subset=df_proba_blocking_estimates["K"]==K)
                 # Errors
                 df_proba_blocking_estimates_with_errors = compute_errors(df_proba_blocking_estimates)
+                plot_errors(df_proba_blocking_estimates_with_errors, "buffer_size_activation_value", widths=0.5, subset=df_proba_blocking_estimates["K"]==K)
                 plot_errors(df_proba_blocking_estimates_with_errors, "buffer_size_activation", widths=0.05, subset=df_proba_blocking_estimates["K"]==K)
 
         time_end = timer()
@@ -1704,7 +1711,7 @@ def closeLogFile(fh_log, stdout_sys, dt_start):
 # DM-2020/12/23: To change which portion of the below code to run, change the IF condition
 # to `== "__main__"` or to `!= "__main__"` accordingly, taking into account that when running
 # this file as a script (F5) __name__ is equal to "__main__".
-if __name__ == "__main__":
+if __name__ != "__main__":
     run_unit_tests = True
     if run_unit_tests:
         #suite = unittest.TestSuite()
@@ -1870,12 +1877,12 @@ else:
     """
     results_convergence = test.analyze_convergence_standardized(
                                     replications=12,
-                                    K_values=[5],
-                                    nparticles_values=[200],   # Larger N to improve the estimation of Phi(t)
-                                    nmeantimes_values=[50],     # Smaller T because the larger particle N already guarantees a large simulation time for the 1-particle system that estimates P(T>t) and E(T)
-                                    multiplier_values=[1],
+                                    K_values=[10, 20],
+                                    nparticles_values=[400, 400],   # Larger N to improve the estimation of Phi(t)
+                                    nmeantimes_values=[50, 50],     # Smaller T because the larger particle N already guarantees a large simulation time for the 1-particle system that estimates P(T>t) and E(T)
+                                    multiplier_values=[1, 1],
                                     multiplier_adjust_with_activation=False,
-                                    buffer_size_activation_values=[1, 2, 3],
+                                    buffer_size_activation_values=[1, 0.25, 0.5],
                                     seed=1313,
                                     dict_params_out={'logfilehandle': fh_log,
                                                      'resultsfile': resultsfile,
