@@ -8,11 +8,13 @@ Created on Thu Jun  4 19:12:23 2020
 
 from enum import Enum, unique
 
+import warnings
 import copy     # Used to generate different instances of the queue under analysis
 import bisect
 
 import numpy as np
 from numpy import printoptions
+from numpy.ma.testutils import assert_close
 import pandas as pd
 from matplotlib import pyplot as plt, cm    # cm is for colormaps (e.g. cm.get_cmap())
 from timeit import default_timer as timer
@@ -883,7 +885,81 @@ class EstimatorQueueBlockingFlemingViot:
 
         return self.rtimes_obs_sum, self.rtimes_obs_n
 
+    def simulate_expected_survival_time(self, N_min :int=1):
+        """
+        Simulates the queue system to estimate the expected survival time, E(T),
+        given the initial state is in the absorption set.
 
+        A simulation is run N times where initial states are chosen following the stationary distribution
+        of the absorption states, already stored internally in the object.
+
+        Arguments:
+        N_min: (opt) int
+            Minimum number of particles to simulate in each set of start states.
+            default: 30 
+
+        Return: tuple
+        Tuple with the following elements:
+        - estimated expected survival time, E(T) 
+        - list with the observed absorption times for each particle
+        """
+        absorbed = lambda P: self._check_particle_state_based_on_most_recent_change(P, EventType.ABSORPTION)
+
+        self.reset()
+        nparticles_by_start_state = self.reset_positions(EventType.ABSORPTION, N_min=N_min)
+
+        #-- Simulate each particle until absorption or end of simulation
+        time_start = timer()
+        if True: #self.LOG:
+            print("simulate_expected_survival_time: Generating trajectories for {} particles until absorption...".format(self.N))
+        self.generate_trajectories_at_startup()
+        time_end = timer()
+        # Check trajectories
+        if False:
+            #for P in range(self.N):
+            #    self.plot_trajectories_by_server(P)
+            self.plot_trajectories_by_particle()
+            #input("Press ENTER...")
+
+        if True: #self.LOG:
+            total_elapsed_time = (time_end - time_start)
+            print("Total simulation time for Expected Survival Time estimation (E(T)): {:.1f} min".format(total_elapsed_time / 60))
+
+        survival_times = [0.0] * self.N                                 # Observed survvial time for each particle 
+        expected_survival_times = [0.0] * len(self.states_absorption_at_boundary)   # Estimated expected survival time for each start state 
+        expected_survival_times_se = [0.0] * len(self.states_absorption_at_boundary)# Standard Error of the estimated expected survival time for each start state 
+        expected_survival_time = 0.0                                    # Estimated expected survival time for start state in the absorption set
+        idx_state_space = -1
+        P_first_in_block = 0
+        for nparticles_in_block in nparticles_by_start_state:
+            idx_state_space += 1
+            P_last_in_block = P_first_in_block + nparticles_in_block - 1
+            for P in range(P_first_in_block, P_last_in_block + 1):
+                survival_times[P] = self.particles[P].getMostRecentEventTime()
+                if not absorbed(P):
+                    warnings.warn("Particle P={} has NOT been absorbed and the maximum simulation time (T={:.1f}) has been reached..." \
+                                  "\nThe expected survival time for this particle is underestimated.".format(P, survival_times[P]))
+                expected_survival_times[ idx_state_space ] += survival_times[P]
+                expected_survival_time += survival_times[P]
+            expected_survival_times[ idx_state_space ] /= nparticles_in_block
+            expected_survival_times_se[ idx_state_space ] = np.std(survival_times[P_first_in_block:P_last_in_block+1]) / np.sqrt(nparticles_in_block)
+            P_first_in_block = P_last_in_block + 1
+        expected_survival_time /= self.N
+
+        if False:
+            print("Estimated expected survival times by start state:")
+            for i, (x, p, n, T, SE) in enumerate( zip( self.states_absorption_at_boundary, self.dist_absorption, nparticles_by_start_state, expected_survival_times, expected_survival_times_se ) ):
+                print("{}: x={}, p={} --> N={} T={:.3f} +/- {:.3f} ({:.1f}%)".format(i, x, p, n, T, SE, SE/T*100))
+        if True:
+            print("------ Total: N={}, E(T)={:.1f}".format(np.sum(nparticles_by_start_state), expected_survival_time))
+        assert_close( np.sum([ ns*Ts for ns, Ts in zip(nparticles_by_start_state, expected_survival_times) ]) / self.N, expected_survival_time )
+
+        if True: #self.LOG:
+            total_elapsed_time = (time_end - time_start)
+            print("simulate_expected_survival_time: Total simulation time: {:.1f} min\n".format(total_elapsed_time / 60))
+
+        return expected_survival_time, survival_times
+    
     def generate_trajectories_at_startup(self):
         for P in range(self.N):
             self.iterations[P] = 0
@@ -3660,6 +3736,38 @@ if __name__ == "__main__":
     seed = 1717
     plotFlag = False
     log = False
+
+    #--- Test #1: simulate_expected_survival_time()
+    if False:
+        print("Test #1: simulate_expected_survival_time() method")
+        K = 20
+        rate_birth = 0.5
+        job_rates = [rate_birth]
+        rate_death = [1]
+        queue = queues.QueueMM(rate_birth, rate_death, 1, K)
+    
+        # Simulation
+        nparticles0 = 200 #5
+        nmeantimes0 = 50
+        finalize_type = FinalizeType.REMOVE_CENSORED
+    
+        # Monte-Carlo (to estimate expected survival time)
+        buffer_size_activations = [1, 5, 8]
+        for buffer_size_activation in buffer_size_activations:
+            nparticles = nparticles0 * buffer_size_activation
+            nmeantimes = nmeantimes0 #* buffer_size_activation
+            print("\nRunning Monte-Carlo simulation on single-server system to estimate expected survival time for buffer_size_activation={} on N={} particles and simulation time T={}x...".format(buffer_size_activation, nparticles, nmeantimes))
+            est_exp = EstimatorQueueBlockingFlemingViot(nparticles, queue, job_rates,
+                                                       service_rates=None,
+                                                       buffer_size_activation=buffer_size_activation,
+                                                       nmeantimes=nparticles*nmeantimes,
+                                                       mean_lifetime=None,
+                                                       reactivate=False,
+                                                       finalize_info={'type': finalize_type, 'condition': FinalizeCondition.ACTIVE},
+                                                       plotFlag=plotFlag,
+                                                       seed=seed, log=log)
+            expected_survival_time, survival_times = est_exp.simulate_expected_survival_time()
+            print("Estimated expected survival time E(T)={:.3f}".format(expected_survival_time))
 
     #--- Test #2: simulate_survival()
     if False:
