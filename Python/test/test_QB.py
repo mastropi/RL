@@ -444,23 +444,11 @@ class Test_QB_Particles(unittest.TestCase):
         print("Simulation setup:")
         print(est.setup())
 
-        plot_curve_estimates(df_proba_survival_and_blocking_conditional,
-                          est.queue.getBirthRates(),
-                          est.queue.getDeathRates(),
-                          K,
-                          nparticles,
-                          nmeantimes,
-                          buffer_size_activation,
-                          None,
-                          reactivate,
-                          finalize_type,
-                          seed)
-
         return  df_proba_survival_and_blocking_conditional, \
                 (reactivate, finalize_type, nparticles, nmeantimes)
 
     @classmethod
-    def test_fv_implementation_standardized(cls, K=5, buffer_size_activation=1):
+    def test_fv_implementation(cls, K=5, buffer_size_activation=1):
         "2021/04/19: Analyze convergence of the FV algorithm as number of particles N increases"
 
         #--- Test one server
@@ -492,8 +480,8 @@ class Test_QB_Particles(unittest.TestCase):
         # Info parameters 
         dict_params_info = {'plot': True, 'log': False}
 
-        replications = 8
-        nparticles_min = 100
+        replications = 5
+        nparticles_min = 200
         nparticles_max = 400
         nparticles_step_prop = 1  # STEP proportion: N(n+1) = (1 + prop)*N(n), so that we scale the step as the number of particles increases
         nparticles = nparticles_min
@@ -525,7 +513,7 @@ class Test_QB_Particles(unittest.TestCase):
 
                 print("\n\t--> Running Fleming-Viot estimation...")
                 proba_blocking_fv, integral, expected_survival_time, \
-                    n_survival_curve_observations, n_expected_survival_observations, \
+                    n_survival_curve_observations, n_survival_time_observations, \
                         est_fv = estimators.estimate_blocking_fv(env_queue, dict_params_simul, dict_params_info=dict_params_info)
                 time_end = timer()
                 exec_time = time_end - time_start
@@ -619,402 +607,7 @@ class Test_QB_Particles(unittest.TestCase):
 
         return df_results, df_results_agg_by_N
 
-    def run_simulation(self,   buffer_size_activation=1,
-                    mean_lifetime=None,
-                    proba_survival_given_activation=None,
-                    reactivate=True,
-                    finalize_type=FinalizeType.ABSORB_CENSORED,
-                    nparticles=200,
-                    nmeantimes=50,
-                    seed=1717,
-                    plotFlag=True,
-                    log=False):
-        queue = self.queue
-        job_rates = self.job_rates
-        policy = self.policy
-        est = estimators.EstimatorQueueBlockingFlemingViot(nparticles, queue, job_rates,
-                                                           service_rates=None,
-                                                           buffer_size_activation=buffer_size_activation,
-                                                           nmeantimes=nmeantimes,
-                                                           policy_assign=policy,
-                                                           mean_lifetime=mean_lifetime,
-                                                           proba_survival_given_activation=proba_survival_given_activation,
-                                                           reactivate=reactivate,
-                                                           finalize_info={'type': finalize_type, 'condition': FinalizeCondition.ACTIVE},
-                                                           plotFlag=plotFlag,
-                                                           seed=seed, log=log)
-        if log:
-            print("\n(START) Simulation setup: (REACTIVATE={})".format(reactivate))
-            print(est.setup())
-            print("Simulating...")
-
-        if reactivate:
-            proba_blocking_integral, proba_blocking_laplacian, integral, expected_survival_time, gamma = est.simulate(EventType.ACTIVATION)
-        else:
-            proba_blocking_mc, total_blocking_time, total_survival_time, total_survival_n = est.simulate(EventType.ACTIVATION)
-            expected_survival_time = est.estimate_expected_return_time_to_absorption()
-
-        if False:
-            # Estimate the probability of blocking in the Monte Carlo case for benchmarking
-            # as the proportion of time blocked over all elapsed time (= total survival time).
-            print("Estimating blocking time rate over all {} particles (K={})...".format(nparticles, self.capacity))
-
-            print("\tComputing survival time over all {} particles...".format(nparticles))
-            ts1 = timer()
-            all_total_survival_time = est.get_all_total_survival_time()
-            ts2 = timer()
-            print("\t\ttook {:.1f} sec".format((ts2 - ts1)))
-
-            print("\tComputing blocking time over all {} particles...".format(nparticles))
-            tb1 = timer()
-            all_total_blocking_time = est.get_all_total_blocking_time()
-            tb2 = timer()
-            print("\t\ttook {:.1f} sec".format((tb2 - tb1)))
-
-            if not reactivate:
-                prop_blocking_time = all_total_blocking_time / all_total_survival_time
-            else:
-                prop_blocking_time = None
-    
-            if False:
-                print("\n\nRelevant events for each particle ID:")
-                for P in range(len(est.info_particles)):
-                    print("Particle ID P={} (P={} --> Q={} (q={})" \
-                          .format(P,
-                                  est.info_particles[P]['particle number'],
-                                  est.info_particles[P]['reactivated number'], 
-                                  est.info_particles[P]['reactivated ID']),
-                          end="")
-                    if est.info_particles[P]['t0'] is not None:
-                        print(" -> x={} @t={:.3f} @iter={})" \
-                              .format(est.info_particles[P]['x'], est.info_particles[P]['t0'], est.info_particles[P]['iter']))
-                    else:
-                        print(")")
-                    print(np.c_[est.info_particles[P]['t'], est.info_particles[P]['E']])
-                    print("\n")
-    
-            if True: #log and not reactivate:
-                if False:
-                    print("Total blocking time by particle:")
-                    blocking_periods = est.get_all_blocking_periods()
-                    survival_periods = est.get_all_survival_periods()
-                    for P in range(est.N):
-                        print("\n\nParticle {}".format(P))
-                        print("Block periods:")
-                        print(blocking_periods[P])
-        
-                        print("\nSurvival periods:")
-                        print(survival_periods[P])
-    
-                        total_blocking_time_P = est.get_total_blocking_time(P)
-                        total_survival_time_P = est.get_total_survival_time(P)
-                        print("")
-                        print("Total blocking time = {:.3f}".format(total_blocking_time_P))
-                        print("Total survival time = {:.3f}".format(total_survival_time_P))
-                        print("% blocking time = {:.1f}%".format(total_blocking_time_P / total_survival_time_P * 100))
-                        print("\n")
-                print("\nTotal blocking time for ALL particles:")
-                print("Total blocking time (all particles) = {:.3f}".format(all_total_blocking_time))
-                print("Total survival time (all particles) = {:.3f}".format(all_total_survival_time))
-                print("% blocking time = {:.1f}%".format(all_total_blocking_time / all_total_survival_time * 100))
-                print("\n")
-        else:
-            prop_blocking_time = None
-
-        K = self.capacity
-        if log:
-            if reactivate:
-                print("\nEstimation of blocking probability via Fleming-Viot (Approximation 1 & 2):")
-                print("Integral = {:.6f}".format(integral))
-                print("Gamma = {:.6f}".format(gamma))
-                print("Blocking probability estimate (Approx. 1): {:.6f}%".format(proba_blocking_integral*100))
-                print("Blocking probability estimate (Approx. 2): {:.6f}%".format(proba_blocking_laplacian*100))
-            else:
-                print("\nEstimation of blocking probability via Monte-Carlo:")
-                print("Expected Survival Time = {:.3f}".format(expected_survival_time))
-                print("Blocking probability estimate (proportion of blocking time / survival time): {:.3f}%".format(proba_blocking_mc*100))
-            print("Last time the system has a known state: {:.3f}".format( est.get_time_latest_known_state() ))
-    
-            print("\n(END) Simulation setup: (REACTIVATE={})".format(reactivate))
-            print(est.setup())
-
-        if plotFlag:
-            print("Plotting...")
-            df_proba_survival_and_blocking_conditional = est.estimate_proba_survival_and_blocking_conditional()
-            plot_curve_estimates(df_proba_survival_and_blocking_conditional,
-                              est.queue.getBirthRates(),
-                              est.queue.getDeathRates(),
-                              K,
-                              nparticles,
-                              nmeantimes,
-                              not reactivate and est.maxtime or np.nan,
-                              reactivate and est.maxtime or np.nan,
-                              buffer_size_activation,
-                              mean_lifetime,
-                              1,        # multiplier for N*T(FV)
-                              finalize_type,
-                              seed)
-
-        # Note: `est` is the object used for the estimation process (so that we can do further calculations outside if needed)
-        if reactivate:
-            return  est, \
-                    proba_blocking_integral, \
-                    proba_blocking_laplacian, \
-                    integral, \
-                    gamma, \
-                    (mean_lifetime, reactivate, finalize_type, nparticles, nmeantimes)
-        else:
-            return  est, \
-                    proba_blocking_mc, \
-                    total_blocking_time, \
-                    total_survival_time, \
-                    expected_survival_time, \
-                    (mean_lifetime, reactivate, finalize_type, nparticles, nmeantimes)
-                    
-    def analyze_convergence(self,   finalize_type=FinalizeType.REMOVE_CENSORED,
-                                    replications=5,
-                                    # For the following range specifications,
-                                    # each new value is the previous value TIMES the third element of the tuple
-                                    # Both min and max are included in the values considered for the simulation
-                                    K_values=[5, 10, 20, 40],
-                                    buffer_size_activation_values=[1],
-                                    nparticles_range=(10, 80, 2),
-                                    nmeantimes_range=(50, 800, 2), 
-                                    seed=1717,
-                                    log=False):
-        assert sorted(K_values) == K_values, "The values of K are sorted: {}".format(K_values)
-        K_min = K_values[0]
-
-        nparticles_min, nparticles_max, nparticles_mult = nparticles_range 
-        len_nparticles = int(np.ceil( np.log10(nparticles_max / nparticles_min) / np.log10(nparticles_mult)) + 1)
-
-        nmeantimes_min, nmeantimes_max, nmeantimes_mult = nmeantimes_range
-        len_nmeantimes =int(np.ceil( np.log10(nmeantimes_max / nmeantimes_min) / np.log10(nmeantimes_mult)) + 1)
-        # Number of simulations to run based on the input parameters defining simulation characteristics
-        nsimul = int(   len(K_values) * \
-                        len(buffer_size_activation_values) * \
-                        len_nparticles * \
-                        len_nmeantimes )
-
-        df_proba_blocking_estimates = pd.DataFrame.from_items([
-                                                               ('K', []),
-                                                               ('nparticles', []),
-                                                               ('nmeantimes', []),
-                                                               ('buffer_size_activation', []),
-                                                               ('buffer_size_activation_value', []),
-                                                               ('rep', []),
-                                                               ('seed', []),
-                                                               ('integral', []),
-                                                               ('E(T)', []),
-                                                               ('PMC(K)', []),
-                                                               ('PFV(K)', []),
-                                                               ('PFV2(K)', []),
-                                                               ('Pr(K)', []),
-                                                               ])
-        np.random.seed(seed)
-        case = 0
-        print("System: # servers = {}, rhos = {}".format(self.nservers, self.rhos))
-        for K in K_values:
-            self.queue.K = K
-            print("\n---> NEW K (Queue's capacity = {})".format(self.queue.getCapacity()))
-
-            buffer_size_activation_value_prev = None
-
-            # Arrays that store the relevant estimated values for the MC simulation
-            # for each replication, nparticles, and nmeantimes.
-            # This is used to retrieve the results of the MC simulation that is run
-            # just for the FIRST value of buffer_size_activation,
-            # in order to compare them with the FV estimation on all values of buffer_size_activation
-            # and to store them in the output table
-            expected_survival_time_mc_estimates = np.zeros((len_nparticles, len_nmeantimes, replications))
-            proba_blocking_mc_estimates = np.zeros((len_nparticles, len_nmeantimes, replications))
-            
-            for buffer_size_activation in buffer_size_activation_values:
-                # When the buffer size for activation parameter is smaller than 1 it is considered a proportion of the queue's capacity
-                if buffer_size_activation < 1:
-                    buffer_size_activation_value = max(1, int( buffer_size_activation * K ))
-                else:
-                    buffer_size_activation_value = buffer_size_activation
-                # Do not repeat the previous buffer size activation value (which may happen when the parameter is given as a proportion)
-                if buffer_size_activation_value == buffer_size_activation_value_prev:
-                    continue
-                print("\n\t---> NEW BUFFER SIZE({})".format(buffer_size_activation_value))
-    
-                print("Computing TRUE blocking probability...", end=" --> ")
-                time_pr_start = timer()
-                proba_blocking_K = compute_blocking_probability_birth_death_process(self.nservers, K, self.rhos)
-                time_pr_end = timer()
-                print("{:.1f} sec".format(time_pr_end - time_pr_start))
-                print("Pr(K)={:.6f}%".format(proba_blocking_K*100))
-
-                # Increase the number of particles as the blocking probability dicreases, so that the estimation error is smaller
-                nparticles = int( nparticles_min * K / K_min )
-                idx_nparticles = -1
-                while nparticles <= int( nparticles_max * K / K_min ):
-                    idx_nparticles += 1
-                    print("\n\t\t---> NEW NPARTICLES ({})".format(nparticles))
-                    nmeantimes = nmeantimes_min
-                    idx_nmeantimes = -1
-                    while nmeantimes <= nmeantimes_max:
-                        idx_nmeantimes += 1
-                        case += 1
-                        print("******************!!!!!!! Simulation {} of {} !!!!!!*****************\n\tK={}, buffer_size_activation={}, particles={}, nmeantimes={}" \
-                              .format(case, nsimul, K, buffer_size_activation_value, nparticles, nmeantimes))
-
-                        for rep in range(replications):
-                            # NOTE THAT THE FIRST REPLICATION (rep=0) HAS THE SAME SEED FOR ALL PARAMETER SETTINGS
-                            # This is nice because we can a little bit better compare the effect of the different parameter settings
-                            # (but not so much anyway, because the values that are generated as the parameter settings
-                            # change impact whatever is generated next --e.g. the initial events for particle 2
-                            # will change if more events are generated for particle 1 when the simulation time increases...)
-                            print("\n\tReplication {} of {}".format(rep+1, replications))
-                            seed_rep = seed + rep # * int(np.round(100*np.random.random()))
-
-                            if True: #buffer_size_activation_value == buffer_size_activation_values[0]:
-                                # Only run the Monte-Carlo estimation for the first value of buffer size activation because this value has NO impact on the MC estimation!
-                                print("\t1) Estimating blocking probability using Monte-Carlo")
-                                reactivate = False
-                                mean_lifetime = None
-                                proba_survival_given_activation = None
-                                time_mc_start = timer()
-                                est_mc, proba_blocking_mc_estimates[idx_nparticles][idx_nmeantimes][rep], total_blocking_time_mc, total_survival_time_mc, expected_survival_time_mc_estimates[idx_nparticles][idx_nmeantimes][rep], params_mc = \
-                                    self.run_simulation(
-                                            buffer_size_activation_value,
-                                            mean_lifetime,
-                                            proba_survival_given_activation,
-                                            reactivate,
-                                            FinalizeType.REMOVE_CENSORED,
-                                            1,
-                                            nparticles*nmeantimes,
-                                            seed_rep,
-                                            plotFlag=False,
-                                            log=log)
-                                time_mc_end = timer()
-                                print("{:.1f} sec".format(time_mc_end - time_mc_start))
-                            expected_survival_time = expected_survival_time_mc_estimates[idx_nparticles][idx_nmeantimes][rep]
-                            """
-                            time_exp_start = timer()
-                            print("\t2) Estimating the expected survival time...", end=" --> ")
-                            est_exp = estimators.EstimatorQueueBlockingFlemingViot(nparticles, self.queue, self.job_rates,
-                                                                                   service_rates=None,
-                                                                                   buffer_size_activation=buffer_size_activation_value,
-                                                                                   nmeantimes=nparticles*nmeantimes,
-                                                                                   policy_assign=self.policy,
-                                                                                   mean_lifetime=None,
-                                                                                   reactivate=False,
-                                                                                   finalize_info={'type': finalize_type, 'condition': FinalizeCondition.ACTIVE},
-                                                                                   seed=seed_rep,
-                                                                                   plotFlag=False,
-                                                                                   log=log)
-                            expected_survival_time, _ = est_exp.simulate_expected_survival_time(N_min=5)
-                            time_exp_end = timer()
-                            print("{:.1f} sec".format(time_exp_end - time_exp_start))
-                            """
-                            time_surv_start = timer()
-                            print("\t3) Estimating the survival probability given activation...", end=" --> ")
-                            est_surv = estimators.EstimatorQueueBlockingFlemingViot(nparticles, self.queue, self.job_rates,
-                                                                                   service_rates=None,
-                                                                                   buffer_size_activation=buffer_size_activation_value,
-                                                                                   nmeantimes=nparticles*nmeantimes,
-                                                                                   policy_assign=self.policy,
-                                                                                   mean_lifetime=None,
-                                                                                   reactivate=False,
-                                                                                   finalize_info={'type': FinalizeType.REMOVE_CENSORED, 'condition': FinalizeCondition.ACTIVE},
-                                                                                   seed=seed_rep,
-                                                                                   plotFlag=False,
-                                                                                   log=log)
-                            est_surv.simulate_survival()
-                            proba_survival_given_activation = est_surv.estimate_proba_survival_given_activation()
-                            time_surv_end = timer()
-                            print("{:.1f} sec".format(time_surv_end - time_surv_start))
-
-                            print("\t4) Estimating blocking probability using Fleming-Viot (using E(T) = {:.1f})..." \
-                                  .format(expected_survival_time), end=" --> ")
-                            reactivate = True
-                            time_fv_start = timer()
-                            est_fv, proba_blocking_integral, proba_blocking_laplacian, integral, gamma, params_fv = \
-                                self.run_simulation(
-                                        buffer_size_activation_value,
-                                        expected_survival_time,
-                                        proba_survival_given_activation,
-                                        reactivate,
-                                        finalize_type,
-                                        nparticles,
-                                        nmeantimes,
-                                        seed_rep,
-                                        plotFlag=False,
-                                        log=log)
-                            time_fv_end = timer()
-                            print("{:.1f} sec".format(time_fv_end - time_fv_start))
-
-                            # Compute the rate of blocking time w.r.t. total simulation time
-                            # in order to have a rough estimation of the blocking probability
-                            assert abs(est_mc.maxtime - nparticles*est_fv.maxtime) < 1E-4, \
-                                "The simulation time of the MC process (T(MC)=N*T(FV)={}) and the FV process (N*T(FV)={}) are comparable" \
-                                .format(est_mc.maxtime, nparticles*est_fv.maxtime)
-                            #rate_blocking_time_mc = est_mc.get_all_total_blocking_time() / (est_mc.maxtime * nparticles)
-                            #rate_blocking_time_fv = est_fv.get_all_total_blocking_time() / (est_fv.maxtime * nparticles)
-                            #print("Blocking time rate MC: {:.3f}%".format(rate_blocking_time_mc*100))
-                            #print("Blocking time rate FV: {:.3f}%".format(rate_blocking_time_fv*100))
-    
-                            df_proba_blocking_estimates = pd.concat([df_proba_blocking_estimates,
-                                                                     pd.DataFrame({
-                                                                                'K': K,
-                                                                                'nparticles': nparticles,
-                                                                                'nmeantimes': nmeantimes,
-                                                                                'buffer_size_activation': buffer_size_activation,
-                                                                                'buffer_size_activation_value': buffer_size_activation_value,
-                                                                                'rep': rep+1,
-                                                                                'seed': seed_rep,
-                                                                                'integral': integral,
-                                                                                'E(T)': expected_survival_time,
-                                                                                'PMC(K)': proba_blocking_mc_estimates[idx_nparticles][idx_nmeantimes][rep],
-                                                                                'PFV(K)': proba_blocking_integral,
-                                                                                'PFV2(K)': proba_blocking_laplacian,
-                                                                                'Pr(K)': proba_blocking_K,
-                                                                                }, index=[(case-1)*replications + rep+1])],
-                                                                     axis=0)
-
-                            if proba_blocking_K is not None:
-                                print("\t--> PMC(K)={:.6f}% vs. Pr(K)={:.6f}% vs. PFV1(K)={:.6f}% vs. PFV2(K)={:.6f}% vs. Pr(K)={:.6f}%" \
-                                      .format(proba_blocking_mc_estimates[idx_nparticles][idx_nmeantimes][rep]*100, proba_blocking_K*100, proba_blocking_integral*100, proba_blocking_laplacian*100, proba_blocking_K*100))
-                            else:
-                                print("\t--> PMC(K)={:.6f}% vs. PFV1(K)={:.6f}% vs. PFV2(K)={:.6f}%" \
-                                      .format(proba_blocking_mc_estimates[idx_nparticles][idx_nmeantimes][rep]*100, proba_blocking_integral*100, proba_blocking_laplacian*100))
-                            df_proba_survival_and_blocking_conditional = est_fv.estimate_proba_survival_and_blocking_conditional()
-                            if rep == 0:
-                                # Plot the blue and red curves contributing to the integral used in the FV estimation
-                                plot_curve_estimates(df_proba_survival_and_blocking_conditional,
-                                                  est_fv.queue.getBirthRates(),
-                                                  est_fv.queue.getDeathRates(),
-                                                  K,
-                                                  nparticles,
-                                                  nmeantimes,
-                                                  est_mc.maxtime,
-                                                  est_fv.maxtime,
-                                                  buffer_size_activation_value,
-                                                  expected_survival_time,
-                                                  1,        # multiplier for N*T(FV)
-                                                  finalize_type,
-                                                  seed)
-
-                        if nmeantimes < nmeantimes_max:
-                            # Give the opportunity to reach nmeantimes_max (in case nmeantimes*nmeantimes_mult goes beyond nmeantimes_max)
-                            nmeantimes = np.min([nmeantimes*nmeantimes_mult, nmeantimes_max])
-                        else:
-                            # We should stop iterating on nmeantimes at the next iteration
-                            nmeantimes = nmeantimes * nmeantimes_mult
-                    if nparticles < int( nparticles_max * K / K_min ):
-                        # Give the opportunity to reach nparticles_max (in case nparticles*nparticles_mult goes beyond nparticles_max)
-                        nparticles = np.min([nparticles*nparticles_mult, int( nparticles_max * K / K_min )])
-                    else:
-                        # We should stop iterating on nparticles at the next iteration
-                        nparticles = nparticles * nparticles_mult
-                buffer_size_activation_value_prev = buffer_size_activation_value
-
-        return df_proba_blocking_estimates
-
-    def analyze_convergence_standardized(self,
+    def analyze_estimates(self,
                                     replications=5,
                                     K_values=[10, 20, 30, 40],
                                     nparticles_values=[200, 400, 800, 1600],
@@ -1132,7 +725,7 @@ class Test_QB_Particles(unittest.TestCase):
     
                     print("\t\t*** FLEMING-VIOT ESTIMATION ***")
                     proba_blocking_fv, integral, expected_survival_time, \
-                        n_survival_curve_observations, n_expected_survival_observations, \
+                        n_survival_curve_observations, n_survival_time_observations, \
                             est_fv = estimators.estimate_blocking_fv(env_queue, dict_params_simul, dict_params_info=dict_params_info)
     
                     print("\t\tP(K) by MC: {:.6f}%".format(proba_blocking_mc*100))
@@ -1182,20 +775,22 @@ class Test_QB_Particles(unittest.TestCase):
                     # Plot the blue and red curves contributing to the integral used in the FV estimation
                     if rep <= 2:
                         plot_curve_estimates(df_proba_survival_and_blocking_conditional,
-                                          est_fv.queue.getBirthRates(),
-                                          est_fv.queue.getDeathRates(),
-                                          K,
-                                          nparticles,
-                                          nmeantimes,
-                                          est_mc.maxtime,
-                                          est_fv.maxtime,
-                                          buffer_size_activation_value,
-                                          expected_survival_time,
-                                          n_survival_curve_observations,
-                                          n_expected_survival_observations,
-                                          multiplier,
-                                          est_fv.getFinalizeType(),
-                                          seed)
+                                             dict_params={
+                                                'birth_rates': est_fv.queue.getBirthRates(),
+                                                'death_rates': est_fv.queue.getDeathRates(),
+                                                'K': est_fv.queue.getCapacity(),
+                                                'nparticles': dict_params_simul['nparticles'],
+                                                'nmeantimes': dict_params_simul['nmeantimes'],
+                                                'maxtime_mc': est_mc.maxtime,
+                                                'maxtime_fv': est_fv.maxtime,
+                                                'buffer_size_activation': buffer_size_activation_value,
+                                                'mean_lifetime': expected_survival_time,
+                                                'n_survival_curve_observations': n_survival_curve_observations,
+                                                'n_survival_time_observations': n_survival_time_observations,
+                                                'proba_blocking_fv': proba_blocking_fv,
+                                                'finalize_type': est_fv.getFinalizeType(),
+                                                'seed': seed
+                                                })
                 buffer_size_activation_value_prev = buffer_size_activation_value
 
             # Show the results obtained for the current K
@@ -1722,23 +1317,16 @@ if __name__ != "__main__":
         dt_start, stdout_sys, fh_log, logfile, resultsfile, resultsfile_agg = createLogFileHandleAndResultsFileNames(prefix="test_fv_implementation")
 
         #******************* ACTUAL EXECUTION ***************
-        #results, results_agg = Test_QB_Particles.deprecated_test_fv_implementation(K=5, buffer_size_activation=1) # run with rho=0.5 and rho=0.7 (defined inside the function)
-        #results, results_agg = Test_QB_Particles.deprecated_test_fv_implementation(K=20, buffer_size_activation=1)# run with rho=0.7
-        #results, results_agg = Test_QB_Particles.deprecated_test_fv_implementation(K=20, buffer_size_activation=8)# run with rho=0.7
-        #results, results_agg = Test_QB_Particles.test_fv_implementation(K=5, buffer_size_activation=1)
-        #results, results_agg = Test_QB_Particles.test_fv_implementation(K=5, buffer_size_activation=0.5)
         #results, results_agg = Test_QB_Particles.test_fv_implementation(K=20, buffer_size_activation=8)
-        
-        #results, results_agg = Test_QB_Particles.test_fv_implementation_standardized(K=20, buffer_size_activation=8)
-        #results, results_agg = Test_QB_Particles.test_fv_implementation_standardized(K=10, buffer_size_activation=0.5)
-        results, results_agg = Test_QB_Particles.test_fv_implementation_standardized(K=20, buffer_size_activation=0.5)
-        #results, results_agg = Test_QB_Particles.test_fv_implementation_standardized(K=30, buffer_size_activation=0.5)
-        #results, results_agg = Test_QB_Particles.test_fv_implementation_standardized(K=40, buffer_size_activation=0.5)
+        #results, results_agg = Test_QB_Particles.test_fv_implementation(K=10, buffer_size_activation=0.5)
+        results, results_agg = Test_QB_Particles.test_fv_implementation(K=20, buffer_size_activation=0.5)
+        #results, results_agg = Test_QB_Particles.test_fv_implementation(K=30, buffer_size_activation=0.5)
+        #results, results_agg = Test_QB_Particles.test_fv_implementation(K=40, buffer_size_activation=0.5)
         #******************* ACTUAL EXECUTION ***************
 
         results.to_csv(resultsfile)
         print("Results of simulation saved to {}".format(os.path.abspath(resultsfile)))
-    
+
         results_agg.to_csv(resultsfile_agg)
         print("Aggregated results of simulation saved to {}".format(os.path.abspath(resultsfile_agg)))
 
@@ -1810,82 +1398,101 @@ else:
     # Lines to execute "by hand" (i.e. at the Python prompt)
     test = Test_QB_Particles(nservers=1)
 
-    dt_start, stdout_sys, fh_log, logfile, resultsfile, resultsfile_agg = createLogFileHandleAndResultsFileNames(prefix="analyze_convergence")
-    
-    """
-    results_convergence = test.analyze_convergence(
-                                    finalize_type=FinalizeType.ABSORB_CENSORED,
-                                    replications=12,
-                                    K_values=[10, 20, 30, 40], #[5, 10, 20], #[5, 10, 20, 30, 40],
-                                    buffer_size_activation_values=[1, 0.2, 0.4, 0.6], #[1, 0.2, 0.4, 0.6], #[1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
-                                    nparticles_range=(200, 200, 2),
-                                    nmeantimes_range=(50, 50, 2),
-                                    seed=1313, #1717,
-                                    log=False)
-    """
-    """
-    results_convergence = test.analyze_convergence_standardized(
-                                    replications=12,
-                                    K_values=[10, 20, 30, 40],
-                                    nparticles_values=[200, 400, 800, 1600],
-                                    nmeantimes_values=[50, 50, 50, 50],
-                                    multiplier_values=[10, 15, 20, 25],
-                                    buffer_size_activation_values=[1, 0.2, 0.4, 0.6, 0.8],
-                                    seed=1313,
-                                    dict_params_out={'logfilehandle': fh_log,
-                                                     'resultsfile': resultsfile,
-                                                     'resultsfile_agg': resultsfile_agg})
-    """
-    """
-    results_convergence = test.analyze_convergence_standardized(
-                                    replications=12,
-                                    K_values=[10, 20],
-                                    nparticles_values=[200, 400],
-                                    nmeantimes_values=[50, 50],
-                                    multiplier_values=[1.2, 1.2],
-                                    buffer_size_activation_values=[1, 0.2, 0.4, 0.6, 0.8],
-                                    seed=1313,
-                                    dict_params_out={'logfilehandle': fh_log,
-                                                     'resultsfile': resultsfile,
-                                                     'resultsfile_agg': resultsfile_agg})
-    """
-    """
-    results_convergence = test.analyze_convergence_standardized(
-                                    replications=12,
-                                    K_values=[30, 40],
-                                    nparticles_values=[800, 1600],
-                                    nmeantimes_values=[50, 50],
-                                    multiplier_values=[1.2, 5],
-                                    buffer_size_activation_values=[1, 0.2, 0.4, 0.5, 0.7],
-                                    seed=1313,
-                                    dict_params_out={'logfilehandle': fh_log,
-                                                     'resultsfile': resultsfile,
-                                                     'resultsfile_agg': resultsfile_agg})
-    """
-    """
-    results_convergence = test.analyze_convergence_standardized(
-                                    replications=12,
-                                    K_values=[40],
-                                    nparticles_values=[800],
-                                    nmeantimes_values=[50],
-                                    multiplier_values=[1.2],
-                                    buffer_size_activation_values=[1, 0.25, 0.5],
-                                    seed=1313,
-                                    dict_params_out={'logfilehandle': fh_log,
-                                                     'resultsfile': resultsfile,
-                                                     'resultsfile_agg': resultsfile_agg})
-    """
-    results_convergence = test.analyze_convergence_standardized(
-                                    replications=12,
-                                    K_values=[10, 20],
-                                    nparticles_values=[400, 400],   # Larger N to improve the estimation of Phi(t)
-                                    nmeantimes_values=[50, 50],     # Smaller T because the larger particle N already guarantees a large simulation time for the 1-particle system that estimates P(T>t) and E(T)
-                                    multiplier_values=[1, 1],
-                                    multiplier_adjust_with_activation=False,
-                                    buffer_size_activation_values=[1, 0.25, 0.5],
-                                    seed=1313,
-                                    dict_params_out={'logfilehandle': fh_log,
-                                                     'resultsfile': resultsfile,
-                                                     'resultsfile_agg': resultsfile_agg})
+    dt_start, stdout_sys, fh_log, logfile, resultsfile, resultsfile_agg = createLogFileHandleAndResultsFileNames(prefix="analyze_estimates")
+
+    # NOTES on the below calls to simulation execution:
+    # - Use larger N values to improve the estimation of Phi(t)
+    # - When larger N values are used smaller T values (simulation time) can be used
+    # because the larger particle N already guarantees a large simulation time for
+    # the 1-particle system that estimates P(T>t).
+    tests2run = [4]
+    if 1 in tests2run:
+        results_convergence = test.analyze_estimates(
+                                        replications=12,
+                                        K_values=[10, 20, 30, 40],
+                                        nparticles_values=[200, 400, 800, 1600],
+                                        nmeantimes_values=[50, 50, 50, 50],
+                                        multiplier_values=[10, 15, 20, 25],
+                                        buffer_size_activation_values=[1, 0.2, 0.4, 0.6, 0.8],
+                                        seed=1313,
+                                        dict_params_out={'logfilehandle': fh_log,
+                                                         'resultsfile': resultsfile,
+                                                         'resultsfile_agg': resultsfile_agg})
+    if 2 in tests2run:
+        results_convergence = test.analyze_estimates(
+                                        replications=12,
+                                        K_values=[10, 20],
+                                        nparticles_values=[200, 400],
+                                        nmeantimes_values=[50, 50],
+                                        multiplier_values=[1.2, 1.2],
+                                        buffer_size_activation_values=[1, 0.2, 0.4, 0.6, 0.8],
+                                        seed=1313,
+                                        dict_params_out={'logfilehandle': fh_log,
+                                                         'resultsfile': resultsfile,
+                                                         'resultsfile_agg': resultsfile_agg})
+    if 3 in tests2run:
+        results_convergence = test.analyze_estimates(
+                                        replications=12,
+                                        K_values=[30, 40],
+                                        nparticles_values=[800, 1600],
+                                        nmeantimes_values=[50, 50],
+                                        multiplier_values=[1.2, 5],
+                                        buffer_size_activation_values=[1, 0.2, 0.4, 0.5, 0.7],
+                                        seed=1313,
+                                        dict_params_out={'logfilehandle': fh_log,
+                                                         'resultsfile': resultsfile,
+                                                         'resultsfile_agg': resultsfile_agg})
+    if 4 in tests2run:
+        results_convergence = test.analyze_estimates(
+                                        replications=12,
+                                        K_values=[10],
+                                        nparticles_values=[400],
+                                        nmeantimes_values=[50],
+                                        multiplier_values=[1],
+                                        multiplier_adjust_with_activation=False,
+                                        buffer_size_activation_values=[0.1, 0.25, 0.5],
+                                        seed=1313,
+                                        dict_params_out={'logfilehandle': fh_log,
+                                                         'resultsfile': resultsfile,
+                                                         'resultsfile_agg': resultsfile_agg})
+    if 5 in tests2run:
+        results_convergence = test.analyze_estimates(
+                                        replications=12,
+                                        K_values=[20],
+                                        nparticles_values=[600],
+                                        nmeantimes_values=[50],
+                                        multiplier_values=[1],
+                                        multiplier_adjust_with_activation=False,
+                                        buffer_size_activation_values=[0.1, 0.25, 0.5],
+                                        seed=1313,
+                                        dict_params_out={'logfilehandle': fh_log,
+                                                         'resultsfile': resultsfile,
+                                                         'resultsfile_agg': resultsfile_agg})
+    if 6 in tests2run:
+        results_convergence = test.analyze_estimates(
+                                        replications=12,
+                                        K_values=[30],
+                                        nparticles_values=[800],
+                                        nmeantimes_values=[50],
+                                        multiplier_values=[1],
+                                        multiplier_adjust_with_activation=False,
+                                        buffer_size_activation_values=[0.1, 0.25, 0.5],
+                                        seed=1313,
+                                        dict_params_out={'logfilehandle': fh_log,
+                                                         'resultsfile': resultsfile,
+                                                         'resultsfile_agg': resultsfile_agg})
+    if 7 in tests2run:
+        results_convergence = test.analyze_estimates(
+                                        replications=12,
+                                        K_values=[40],
+                                        nparticles_values=[1200],
+                                        nmeantimes_values=[50],
+                                        multiplier_values=[1],
+                                        multiplier_adjust_with_activation=False,
+                                        buffer_size_activation_values=[0.1, 0.25, 0.5],
+                                        seed=1313,
+                                        dict_params_out={'logfilehandle': fh_log,
+                                                         'resultsfile': resultsfile,
+                                                         'resultsfile_agg': resultsfile_agg})
 
     closeLogFile(fh_log, stdout_sys, dt_start)

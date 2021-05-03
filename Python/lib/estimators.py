@@ -3578,20 +3578,22 @@ def estimate_blocking_fv(env_queue :EnvQueueSingleBufferWithJobClasses,
     if False: #dict_params_info['plot']:
         df_proba_survival_and_blocking_conditional = est_fv.estimate_proba_survival_and_blocking_conditional() 
         plot_curve_estimates(df_proba_survival_and_blocking_conditional,
-                          est_fv.queue.getBirthRates(),
-                          est_fv.queue.getDeathRates(),
-                          est_fv.queue.getCapacity(),
-                          dict_params_simul['nparticles'],
-                          dict_params_simul['nmeantimes'],
-                          est_surv.maxtime,
-                          est_fv.maxtime,
-                          dict_params_simul['buffer_size_activation'],
-                          expected_survival_time,
-                          n_survival_curve_observations,
-                          n_survival_time_observations,
-                          MULTIPLIER,
-                          finalize_type,
-                          seed)
+                          dict_params={
+                            'birth_rates': est_fv.queue.getBirthRates(),
+                            'death_rates': est_fv.queue.getDeathRates(),
+                            'K': est_fv.queue.getCapacity(),
+                            'nparticles': dict_params_simul['nparticles'],
+                            'nmeantimes': dict_params_simul['nmeantimes'],
+                            'maxtime_mc': est_surv.maxtime,
+                            'maxtime_fv': est_fv.maxtime,
+                            'buffer_size_activation': dict_params_simul['buffer_size_activation'],
+                            'mean_lifetime': expected_survival_time,
+                            'n_survival_curve_observations': n_survival_curve_observations,
+                            'n_survival_time_observations': n_survival_time_observations,
+                            'proba_blocking_fv': proba_blocking_fv,
+                            'finalize_type': finalize_type,
+                            'seed': seed
+                            })
     time_end = timer()
     exec_time = time_end - time_start
     print("execution time: {:.1f} sec, {:.1f} min".format(exec_time, exec_time/60))
@@ -3600,38 +3602,24 @@ def estimate_blocking_fv(env_queue :EnvQueueSingleBufferWithJobClasses,
             n_survival_curve_observations, n_survival_time_observations, \
             est_fv
 
-def plot_curve_estimates(df_proba_survival_and_blocking_conditional, *args, log=False):
-    birth_rates = args[0]
-    death_rates = args[1]
-    rhos = [b/d for b, d in zip(birth_rates, death_rates)]
-    K = args[2]
-    nparticles = args[3]
-    nmeantimes = args[4]
-    maxtime_mc = args[5]
-    maxtime_fv = args[6]
-    buffer_size_activation = args[7]
-    mean_lifetime = args[8]
-    n_survival_curve_observations = args[9]
-    n_survival_time_observations = args[10]
-    multiplier = args[11]
-    finalize_type = args[12]
-    seed = args[13]
+def plot_curve_estimates(df_proba_survival_and_blocking_conditional, dict_params, log=False):
+    rhos = [b/d for b, d in zip(dict_params['birth_rates'], dict_params['death_rates'])]
     if log:
-        print("arrival rates={}".format(birth_rates))
-        print("service rates={}".format(death_rates))
+        print("arrival rates={}".format(dict_params['birth_rates']))
+        print("service rates={}".format(dict_params['death_rates']))
         print("rhos={}".format(rhos))
-        print("K={}".format(K))
-        print("nparticles={}".format(nparticles))
-        print("nmeantimes={}".format(nmeantimes))
-        print("maxtime(1 particle)={:.1f}".format(maxtime_mc))
-        print("maxtime(N particles)={:.1f}".format(maxtime_fv))
-        print("buffer_size_activation={}".format(buffer_size_activation))
-        print("mean_lifetime={}".format(mean_lifetime))
-        print("#obs for P(T>t) estimation={}".format(n_survival_curve_observations))
-        print("#obs for E(T) estimation={}".format(n_survival_time_observations))
-        print("multiplier={}".format(multiplier))
-        print("finalize_type={}".format(finalize_type.name))
-        print("seed={}".format(seed))
+        print("K={}".format(dict_params['K']))
+        print("nparticles={}".format(dict_params['nparticles']))
+        print("nmeantimes={}".format(dict_params['nmeantimes']))
+        print("maxtime(1 particle)={:.1f}".format(dict_params['maxtime_mc']))
+        print("maxtime(N particles)={:.1f}".format(dict_params['maxtime_fv']))
+        print("buffer_size_activation={}".format(dict_params['buffer_size_activation']))
+        print("mean_lifetime={}".format(dict_params['mean_lifetime']))
+        print("#obs for P(T>t) estimation={}".format(dict_params['n_survival_curve_observations']))
+        print("#obs for E(T) estimation={}".format(dict_params['n_survival_time_observations']))
+        print("Pr(K)={:6f}%".format(dict_params['proba_blocking_fv']*100))
+        print("finalize_type={}".format(dict_params['finalize_type'.name]))
+        print("seed={}".format(dict_params['seed']))
 
     plt.figure()
     color1 = 'blue'
@@ -3659,15 +3647,15 @@ def plot_curve_estimates(df_proba_survival_and_blocking_conditional, *args, log=
     ax2.tick_params(axis='y', color=color2)
     ax2.yaxis.label.set_color(color2)
     plt.sca(ax)
-    ax.legend(['P(T>t / s={})\n(n={})'.format(buffer_size_activation, n_survival_curve_observations)], loc='upper left')
-    ax2.legend(['P(BLOCK / T>t,s={})'.format(buffer_size_activation)], loc='upper right')
+    ax.legend(['P(T>t / s={})\n(n={})'.format(dict_params['buffer_size_activation'], dict_params['n_survival_curve_observations'])], loc='upper left')
+    ax2.legend(['P(BLOCK / T>t,s={})\n(P(BLOCK)={:.6f}%)'.format(dict_params['buffer_size_activation'], dict_params['proba_blocking_fv']*100)], loc='upper right')
     plt.title("K={}, rhos={}, N={}, activation size={}, maxtime(1)={:.1f}, maxtime(N)={:.1f}, mean_lifetime={}(n={})" \
-              ", multiplier={}, seed={}" \
-              .format(K, rhos, nparticles, buffer_size_activation, maxtime_mc, maxtime_fv,
-                      mean_lifetime is not None and "{:.1f}".format(mean_lifetime) or np.nan,
-                      n_survival_time_observations,
-                      multiplier,# finalize_type.name[0:3],
-                      seed
+              ", finalize={}, seed={}" \
+              .format(dict_params['K'], rhos, dict_params['nparticles'], dict_params['buffer_size_activation'], dict_params['maxtime_mc'], dict_params['maxtime_fv'],
+                      dict_params['mean_lifetime'] is not None and "{:.1f}".format(dict_params['mean_lifetime']) or np.nan,
+                      dict_params['n_survival_time_observations'],
+                      dict_params['finalize_type'].name[0:3],
+                      dict_params['seed']
                       ))
     ax.title.set_fontsize(9)
 
