@@ -448,19 +448,28 @@ class Test_QB_Particles(unittest.TestCase):
                 (reactivate, finalize_type, nparticles, nmeantimes)
 
     @classmethod
-    def test_fv_implementation(cls, K=5, buffer_size_activation=1):
+    def test_fv_implementation(cls, nservers=1, K=5, buffer_size_activation=1):
         "2021/04/19: Analyze convergence of the FV algorithm as number of particles N increases"
 
         #--- Test one server
-        nservers = 1
         rate_birth = 0.7
-        job_rates = [rate_birth]
-        rate_death = [1]
-        policy = [[1]]
-        queue = queues.QueueMM(rate_birth, rate_death, nservers, K)
-        # Queue environment (to pass to the simulation functions)
-        env_queue = EnvQueueSingleBufferWithJobClasses(queue, job_rates=job_rates, rewards=[1], policy_assign=policy)
-
+        if nservers == 1:
+            job_rates = [rate_birth]
+            rate_death = [1]
+            policy = [[1]]
+            queue = queues.QueueMM(rate_birth, rate_death, nservers, K)
+            # Queue environment (to pass to the simulation functions)
+            env_queue = EnvQueueSingleBufferWithJobClasses(queue, job_rates=job_rates, rewards=[1], policy_assign=policy)
+        elif nservers == 3:
+            job_rates = [0.8, 0.7]
+            rate_death = [1, 1, 1]
+            policy = [[0.5, 0.5, 0.0], [0.0, 0.5, 0.5]]
+            queue = queues.QueueMM(rate_birth, rate_death, nservers, K)
+            # Queue environment (to pass to the simulation functions)
+            env_queue = EnvQueueSingleBufferWithJobClasses(queue, job_rates=job_rates, rewards=[1, 1], policy_assign=policy)
+        else:
+            raise ValueError("Given Number of servers ({}) is invalid. Valid values are: 1, 3".format(nservers))
+            
         # The test of the Fleming-Viot implementation is carried out as follows:
         # - Set K to a small value (e.g. K=5)
         # - Increase the number of particles N
@@ -480,9 +489,9 @@ class Test_QB_Particles(unittest.TestCase):
         # Info parameters 
         dict_params_info = {'plot': True, 'log': False}
 
-        replications = 5
-        nparticles_min = 200
-        nparticles_max = 400
+        replications = 8
+        nparticles_min = 800
+        nparticles_max = 1600
         nparticles_step_prop = 1  # STEP proportion: N(n+1) = (1 + prop)*N(n), so that we scale the step as the number of particles increases
         nparticles = nparticles_min
         df_results = pd.DataFrame(columns=['N', 'replication', 'Pr(MC)', 'Time(MC)', 'E(T)', 'Pr(FV)', 'Time(FV)', 'Pr(K)', 'exec_time(s)'])
@@ -1400,7 +1409,7 @@ if __name__ == "__main__":
         print("Execution time: {:.1f} min".format((time_end - time_start) / 60))
 else:
     # Lines to execute "by hand" (i.e. at the Python prompt)
-    test = Test_QB_Particles(nservers=1)
+    test = Test_QB_Particles(nservers=3)
 
     dt_start, stdout_sys, fh_log, logfile, resultsfile, resultsfile_agg = createLogFileHandleAndResultsFileNames(prefix="analyze_estimates")
 
