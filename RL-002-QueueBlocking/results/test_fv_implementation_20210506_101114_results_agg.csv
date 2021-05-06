@@ -1,0 +1,4 @@
+,n,n,mean,mean,std,std,min,min,max,max,SE,SE
+,Pr(MC),Pr(FV),Pr(MC),Pr(FV),Pr(MC),Pr(FV),Pr(MC),Pr(FV),Pr(MC),Pr(FV),Pr(MC),Pr(FV)
+N,,,,,,,,,,,,
+20,2,2,0.0,2.133785267491295e-05,0.0,3.0176280644780917e-05,0.0,0.0,0.0,4.26757053498259e-05,0.0,2.133785267491295e-05
