@@ -753,7 +753,7 @@ class EstimatorQueueBlockingFlemingViot:
             self.proba_blocking_integral = proba_blocking_integral
             self.proba_blocking_laplacian = proba_blocking_laplacian
         else:
-            proba_blocking, total_blocking_time, total_survival_time, total_survival_n = self.estimate_proba_blocking_mc()
+            proba_blocking, total_blocking_time, total_return_time, total_return_n = self.estimate_proba_blocking_mc()
         time_end = timer()
 
         if False:
@@ -789,7 +789,7 @@ class EstimatorQueueBlockingFlemingViot:
         if self.reactivate:
             return self.proba_blocking_integral, self.proba_blocking_laplacian, integral, self.mean_lifetime, gamma
         else:
-            return proba_blocking, total_blocking_time, total_survival_time, total_survival_n 
+            return proba_blocking, total_blocking_time, total_return_time, total_return_n 
 
     def simulate_fv(self):
         """
@@ -2831,50 +2831,32 @@ class EstimatorQueueBlockingFlemingViot:
 
     def estimate_proba_blocking_mc(self):
         """
-        Estimates the blocking probability using Monte Carlo and computes the expected survival time
+        Estimates the blocking probability using Monte Carlo
         
         The blocking probability is estimated as the ratio between the total blocking time and
-        the total survival time over all particles.
+        the total return time to the start state over all particles.
         
         Note that this methodology of summing ALL times over ALL particles, avoids having to weight
-        the mean lifetime estimation of each particle, as we don't need to weight the mean lifetime
-        estimated for each particle with the number of samples that mean lifetime is based on.
+        the mean return time estimation of each particle, as we don't need to weight it with the
+        number of samples the return time is based on.
 
         Return: tuple
         The tuple contains the following elements:
-        - the estimated blocking probability as the proportion of blocking time over survival time
+        - the estimated blocking probability as the proportion of blocking time over return time
         - the total blocking time over all particles
-        - the total survival time over all particles
-        - the number of times the survival time was measured
+        - the total return time to the start position over all particles
+        - the number of times the return time was measured
         """
         assert self.N == 1, "The number of simulated particles is 1"
 
-        # TODO: (2021/04/27) Fix the computation of the denominator of the estimated blocking probability by computing the total return time to the START STATE (as opposed to computing the sum of all the times to absorption --killing times)
-        # In fact, we are now computing the total killing time, as opposed to the total return time to the start state.
-        # Doing this is still usually fine when computing the blocking probability because:
-        # - the killing time is either:
-        #    - equal to the return time to the start state (0) (IN WHICH CASE WE ARE IN BUSINESS)
-        #        --> this happens when the first return time to the start state (0)
-        #        coincides with time at which killing occurs (which happens when the start state is visited again for the first time 
-        #        by coming from above in the state space), OR
-        #    - equal to the sum of all the times of return to the start state (0) (from BELOW) PLUS
-        #    the time elapsed from that moment until killing occurs.
-        #    (IN WHICH CASE WE ARE STILL IN BUSINESS, as long as the final killing time is observed and not censored
-        #    because we are still summing all he blocking times in the numerator. 
-        # - even though the first measured killing time is NOT a return time to the start state 0,
-        # (because when we call this function --which is responsible of computing the blocking probability via MC--,
-        # we simulate the system by starting at an ACTIVATION state, NOT at the boundary of the ABSORPTION set (s=0))
-        # that kiling time we measure is the ONLY ONE not starting at 0, ALL the following killing times are measured
-        # w.r.t. the system starting at 0.
         total_blocking_time = np.sum(self.btimes_sum)
-        total_survival_time = np.sum(self.ktimes0_sum)
-        total_survival_n = np.sum(self.ktimes0_n)
-        if total_survival_time == 0:
+        _, total_return_time, total_return_n = self.estimate_expected_return_time()
+        if total_return_time == 0:
             print("WARNING (estimation of blocking probability by MC): No particle has been absorbed.\n" +
                   "The total return time to the set of absorption states is estimated as the total simulated time over all particles.")
-            total_survival_time = np.sum([self.particles[P].getMostRecentEventTime() for P in range(self.N)])
-        blocking_time_rate = total_blocking_time / total_survival_time
-        return blocking_time_rate, total_blocking_time, total_survival_time, total_survival_n
+            total_return_time = np.sum([self.particles[P].getMostRecentEventTime() for P in range(self.N)])
+        blocking_time_rate = total_blocking_time / total_return_time
+        return blocking_time_rate, total_blocking_time, total_return_time, total_return_n
     #----------------------------- Functions to analyze the simulation ------------------------
 
 
@@ -3458,6 +3440,7 @@ def estimate_blocking_mc(env_queue :EnvQueueSingleBufferWithJobClasses, dict_par
     est_mc = EstimatorQueueBlockingFlemingViot(1, env_queue.queue, env_queue.getJobRates(),
                                                service_rates=env_queue.getServiceRates(),
                                                buffer_size_activation=dict_params_simul['buffer_size_activation'],
+                                               positions_observe=dict_params_simul['buffer_size_activation'],
                                                nmeantimes=MULTIPLIER * dict_params_simul['nparticles'] * dict_params_simul['nmeantimes'],
                                                policy_assign=env_queue.getAssignPolicy(),
                                                mean_lifetime=None,
@@ -3469,8 +3452,8 @@ def estimate_blocking_mc(env_queue :EnvQueueSingleBufferWithJobClasses, dict_par
                                                log=dict_params_info['log'])
 
     print("\tStep 1 of 1: Estimating the blocking probability by Monte-Carlo (seed={})...".format(est_mc.seed))
-    proba_blocking_mc, _, total_survival_time, n_survival_observations = est_mc.simulate(EventType.ACTIVATION)
-    print("\t--> Number of observations for Pr(K) estimation: {} ({:.1f})% of simulation time T={:.1f})".format(n_survival_observations, total_survival_time / est_mc.maxtime * 100, est_mc.maxtime))
+    proba_blocking_mc, _, total_return_time, n_return_observations = est_mc.simulate(EventType.ACTIVATION)
+    print("\t--> Number of observations for Pr(K) estimation: {} ({:.1f}% of simulation time T={:.1f})".format(n_return_observations, total_return_time / est_mc.maxtime * 100, est_mc.maxtime))
     time_end = timer()
     exec_time = time_end - time_start
     print("execution time: {:.1f} sec, {:.1f} min".format(exec_time, exec_time/60))
@@ -3588,7 +3571,7 @@ def estimate_blocking_fv(env_queue :EnvQueueSingleBufferWithJobClasses,
     est_abs = EstimatorQueueBlockingFlemingViot(1, env_queue.queue, env_queue.getJobRates(),
                                                service_rates=env_queue.getServiceRates(),
                                                buffer_size_activation=dict_params_simul['buffer_size_activation'],
-                                               positions_observe=[ dict_params_simul['buffer_size_activation'] - 1 ],
+                                               positions_observe=dict_params_simul['buffer_size_activation'] - 1,
                                                nmeantimes=MULTIPLIER * dict_params_simul['nparticles'] * dict_params_simul['nmeantimes'],
                                                policy_assign=env_queue.getAssignPolicy(),
                                                mean_lifetime=None,
@@ -4032,7 +4015,7 @@ if __name__ == "__main__":
                                                    finalize_info={'type': FinalizeType.REMOVE_CENSORED, 'condition': FinalizeCondition.ACTIVE},
                                                    plotFlag=plotFlag,
                                                    seed=seed, log=log)
-        proba_blocking_mc, total_blocking_time, total_survival_time, total_survival_n = est_mc.simulate(EventType.ACTIVATION)
+        proba_blocking_mc, total_blocking_time, total_return_time, total_survival_n = est_mc.simulate(EventType.ACTIVATION)
         expected_survival_time, _, _ = est_mc.estimate_expected_absorption_time()
 
         # b) Fleming-Viot
@@ -4129,7 +4112,7 @@ if __name__ == "__main__":
                                                    finalize_info={'type': FinalizeType.REMOVE_CENSORED, 'condition': FinalizeCondition.ACTIVE},
                                                    plotFlag=plotFlag,
                                                    seed=seed, log=log)
-        proba_blocking_mc, total_blocking_time, total_survival_time, total_survival_n = est_mc.simulate(EventType.ACTIVATION)
+        proba_blocking_mc, total_blocking_time, total_return_time, total_survival_n = est_mc.simulate(EventType.ACTIVATION)
         expected_survival_time, _, _ = est_mc.estimate_expected_absorption_time()
 
         # b) Fleming-Viot
@@ -4197,7 +4180,7 @@ if __name__ == "__main__":
                                                    finalize_info={'type': FinalizeType.REMOVE_CENSORED, 'condition': FinalizeCondition.ACTIVE},
                                                    plotFlag=True,
                                                    seed=seed, log=log)
-        proba_blocking_mc, total_blocking_time, total_survival_time, total_survival_n = est_mc.simulate(EventType.ACTIVATION)
+        proba_blocking_mc, total_blocking_time, total_return_time, total_survival_n = est_mc.simulate(EventType.ACTIVATION)
         expected_survival_time, _, _ = est_mc.estimate_expected_absorption_time()
 
         """
