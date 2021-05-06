@@ -313,6 +313,9 @@ class EnvQueueSingleBufferWithJobClasses(gym.Env):
     def getServiceRates(self):
         return self.queue.getDeathRates()
 
+    def getIntensities(self):
+        return [b/d for b, d in zip(self.getJobRatesByServer(), self.getServiceRates())]
+
     def getAssignPolicy(self):
         return self.policy_assign 
 

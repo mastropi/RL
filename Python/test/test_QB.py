@@ -437,7 +437,7 @@ class Test_QB_Particles(unittest.TestCase):
         proba_blocking = est.estimate_proba_blocking()
         K = self.capacity
         print("\nBlocking probability estimate: {:.1f}%".format(proba_blocking*100))
-        proba_blocking_K = compute_blocking_probability_birth_death_process(self.nservers, K, self.rhos)
+        proba_blocking_K = compute_blocking_probability_birth_death_process(self.rhos, K)
         if proba_blocking_K is not None:
             print("Theoretical value: {:.1f}%".format(proba_blocking_K*100))
 
@@ -488,7 +488,7 @@ class Test_QB_Particles(unittest.TestCase):
         df_results = pd.DataFrame(columns=['N', 'replication', 'Pr(MC)', 'Time(MC)', 'E(T)', 'Pr(FV)', 'Time(FV)', 'Pr(K)', 'exec_time(s)'])
         case = 0
         ncases = int( np.log(nparticles_max / nparticles_min) / np.log(1 + nparticles_step_prop)) + 1
-        print("System: # servers={}, K={}, rhos={}, buffer_size_activation={}".format(nservers, K, rate_birth / rate_death[0], buffer_size_activation_value))
+        print("System: # servers={}, K={}, rhos={}, buffer_size_activation={}".format(nservers, K, env_queue.getIntensities(), buffer_size_activation_value))
         time_start_all = timer()
         while nparticles <= nparticles_max:
             case += 1 
@@ -514,7 +514,7 @@ class Test_QB_Particles(unittest.TestCase):
                 print("\n\t--> Running Fleming-Viot estimation...")
                 proba_blocking_fv, integral, expected_survival_time, \
                     n_survival_curve_observations, n_survival_time_observations, \
-                        est_fv = estimators.estimate_blocking_fv(env_queue, dict_params_simul, dict_params_info=dict_params_info)
+                        est_fv, est_abs, est_surv = estimators.estimate_blocking_fv(env_queue, dict_params_simul, dict_params_info=dict_params_info)
                 time_end = timer()
                 exec_time = time_end - time_start
                 print("execution time MC + FV: {:.1f} sec, {:.1f} min".format(exec_time, exec_time/60))
@@ -522,7 +522,7 @@ class Test_QB_Particles(unittest.TestCase):
                 if nparticles == nparticles_min and r == 1:
                     rhos = est_mc.rhos
                     print("Computing TRUE blocking probability for nservers={}, K={}, rhos={}...".format(nservers, K, rhos))
-                    proba_blocking_true = compute_blocking_probability_birth_death_process(nservers, K, rhos)
+                    proba_blocking_true = compute_blocking_probability_birth_death_process(rhos, K)
 
                 # Results
                 assert est_mc.maxtime - est_fv.maxtime*nparticles >= -0.001*est_fv.maxtime, \
@@ -543,7 +543,7 @@ class Test_QB_Particles(unittest.TestCase):
         time_end_all = timer()
 
         print("Total execution time: {:.1f} min".format((time_end_all - time_start_all) / 60))
-        title = "Simulation results for #servers={}, K={}, rhos={}, ({}<=N<={}), T<={:.0f}".format(nservers, K, rhos, nparticles_min, nparticles_max, est_fv.maxtime)
+        title = "Simulation results for #servers={}, K={}, rhos={}, ({}<=N<={}), T<={:.0f}, Rep={}".format(nservers, K, rhos, nparticles_min, nparticles_max, est_fv.maxtime, replications)
         print(title)
         print("Raw results by N:")
         print(df_results)
@@ -558,7 +558,7 @@ class Test_QB_Particles(unittest.TestCase):
         legend_lines_ref = []
         ax = plt.gca()
         plt.plot(df_results['N'], df_results['Pr(MC)']*100, 'r.', markersize=2)
-        line_mc = plt.errorbar(list(df_results_agg_by_N.index), df_results_agg_by_N['mean']['Pr(MC)']*100, yerr=2*df_results_agg_by_N['SE']['Pr(FV)']*100, capsize=4, color='red', marker='x')
+        line_mc = plt.errorbar(list(df_results_agg_by_N.index), df_results_agg_by_N['mean']['Pr(MC)']*100, yerr=2*df_results_agg_by_N['SE']['Pr(MC)']*100, capsize=4, color='red', marker='x')
         legend_lines_mc += [line_mc]
         plt.plot(df_results['N'], df_results['Pr(FV)']*100, 'g.', markersize=2)
         line_fv = plt.errorbar(list(df_results_agg_by_N.index), df_results_agg_by_N['mean']['Pr(FV)']*100, yerr=2*df_results_agg_by_N['SE']['Pr(FV)']*100, capsize=4, color='green', marker='x')
@@ -572,7 +572,7 @@ class Test_QB_Particles(unittest.TestCase):
         #bplot_fv = plt.boxplot(df_results['Pr(FV)']*100, vert=True, notch=True, patch_artist=True)
         #for patch in bplot_fv['boxes']:
         #    patch.set_facecolor('lightgreen')
-        plt.title(title)
+        plt.title(title, fontsize=10)
         #ax.set_xlim([0, ax.get_xlim()[1]])
         ax.set_ylim([0, ax.get_ylim()[1]])
         ax.set_xlabel("N (number of particles)")
@@ -596,7 +596,7 @@ class Test_QB_Particles(unittest.TestCase):
         
         ax_mc.hlines(df_results.iloc[0]['Pr(K)']*100, df_results.iloc[0]['N'], df_results.iloc[-1]['N'], color='gray', linestyles='dashed')
         ax_fv.hlines(df_results.iloc[0]['Pr(K)']*100, df_results.iloc[0]['N'], df_results.iloc[-1]['N'], color='gray', linestyles='dashed')
-        plt.suptitle(title)
+        plt.suptitle(title, fontsize=10)
         # Set a common vertical axis
         ymax = max([ax_mc.get_ylim()[1], ax_fv.get_ylim()[1]])
         ax_mc.set_ylim([0, ymax])
@@ -605,7 +605,7 @@ class Test_QB_Particles(unittest.TestCase):
         ax_fv.set_ylim([0, ymax])
         ax_fv.set_xlabel("N (number of particles)")
 
-        return df_results, df_results_agg_by_N
+        return df_results, df_results_agg_by_N, est_mc, est_fv, est_abs, est_surv
 
     def analyze_estimates(self,
                                     replications=5,
@@ -665,7 +665,7 @@ class Test_QB_Particles(unittest.TestCase):
     
             print("Computing TRUE blocking probability...", end=" --> ")
             time_pr_start = timer()
-            proba_blocking_true = compute_blocking_probability_birth_death_process(self.nservers, K, self.rhos)
+            proba_blocking_true = compute_blocking_probability_birth_death_process(self.rhos, K)
             time_pr_end = timer()
             print("{:.1f} sec".format(time_pr_end - time_pr_start))
             print("Pr(K)={:.6f}%".format(proba_blocking_true*100))
@@ -726,7 +726,7 @@ class Test_QB_Particles(unittest.TestCase):
                     print("\t\t*** FLEMING-VIOT ESTIMATION ***")
                     proba_blocking_fv, integral, expected_survival_time, \
                         n_survival_curve_observations, n_survival_time_observations, \
-                            est_fv = estimators.estimate_blocking_fv(env_queue, dict_params_simul, dict_params_info=dict_params_info)
+                            est_fv, est_abs, est_surv = estimators.estimate_blocking_fv(env_queue, dict_params_simul, dict_params_info=dict_params_info)
     
                     print("\t\tP(K) by MC: {:.6f}%".format(proba_blocking_mc*100))
                     print("\t\tP(K) estimated by FV (E(T)={:.1f}): {:.6f}%".format(expected_survival_time, proba_blocking_fv*100))
@@ -741,31 +741,33 @@ class Test_QB_Particles(unittest.TestCase):
                     # Notes:
                     # - We use the from_items() method as opposed to injecting  the data from a dictionary
                     # in order to preserve the order of the columns!
-                    # - We also need to pass the parameter orient='columns' because the value of each column is a scalar
-                    # and Python thus doesn't know whether to place the value in the rows or in the columns!
-                    # - THere is no `index` parameter in the from_items() method so we need to set the index
+                    # - We need to enclose the value set for each column in [] in order to avoid the error message
+                    # "when passing all scalar values, you must pass an index",
+                    # which is NOT solved by using the parameter orient='columns', or at least it is not always solved...
+                    # I have no clue when that would work!
+                    # - There is no `index` parameter in the from_items() method so we need to set the index
                     # value afterwards by calling the set_index() method in conjunction with a pd.Index() call.
                     # Using set_index([1]) does NOT work because it says that the value 1 is an invalid key!!
                     df_new_estimates = pd.DataFrame.from_items([
-                                                                ('rhos', len(self.rhos) == 1 and self.rhos or len(self.rhos) > 1 and format(self.rhos)),
-                                                                ('K', K),
-                                                                ('nparticles', nparticles),
-                                                                ('nmeantimes', nmeantimes),
-                                                                ('multiplier', multiplier),
-                                                                ('buffer_size_activation', buffer_size_activation),
-                                                                ('buffer_size_activation_value', buffer_size_activation_value),
-                                                                ('rep', rep+1),
-                                                                ('seed', seed_rep),
-                                                                ('integral', integral),
-                                                                ('E(T)', expected_survival_time),
-                                                                ('PMC(K)', proba_blocking_mc),
-                                                                ('PFV(K)', proba_blocking_fv),
-                                                                ('Pr(K)', proba_blocking_true),
-                                                                ('maxtime(MC)', est_mc.maxtime),
-                                                                ('maxtime(FV)', est_fv.maxtime),
-                                                                ('ratio_maxtime_mc_fv', est_mc.maxtime / (nparticles*est_fv.maxtime)),
-                                                            ], orient='columns')
-                    df_new_estimates.set_index( pd.Index([(case-1)*replications + rep+1]) )
+                                                                ('rhos', [len(self.rhos) == 1 and self.rhos or len(self.rhos) > 1 and format(self.rhos)]),
+                                                                ('K', [K]),
+                                                                ('nparticles', [nparticles]),
+                                                                ('nmeantimes', [nmeantimes]),
+                                                                ('multiplier', [multiplier]),
+                                                                ('buffer_size_activation', [buffer_size_activation]),
+                                                                ('buffer_size_activation_value', [buffer_size_activation_value]),
+                                                                ('rep', [rep+1]),
+                                                                ('seed', [seed_rep]),
+                                                                ('integral', [integral]),
+                                                                ('E(T)', [expected_survival_time]),
+                                                                ('PMC(K)', [proba_blocking_mc]),
+                                                                ('PFV(K)', [proba_blocking_fv]),
+                                                                ('Pr(K)', [proba_blocking_true]),
+                                                                ('maxtime(MC)', [est_mc.maxtime]),
+                                                                ('maxtime(FV)', [est_fv.maxtime]),
+                                                                ('ratio_maxtime_mc_fv', [est_mc.maxtime / (nparticles*est_fv.maxtime)]),
+                                                            ]) #, orient='columns')
+                    df_new_estimates.set_index( pd.Index([(case-1)*replications + rep+1]), inplace=True )
                     df_proba_blocking_estimates = pd.concat([df_proba_blocking_estimates,
                                                              df_new_estimates],
                                                              axis=0)
@@ -1181,7 +1183,7 @@ def plot_estimates(df_results, x, subset=None, widths=0.1,
         plotting.violinplot(ax2,  y2,
                             positions=x_values, showmeans=True, showmedians=False, linewidth=2, widths=widths,
                             color_body="green", color_lines="green", color_means="green")
-        ymax = np.max(np.r_[y1, y2])
+        ymax = np.max([ np.max(np.r_[y1, y2]), proba_blocking_K])
         for ax in axes:
             ax.set_ylim([0, ymax])
             ax.set_xlabel(x)
@@ -1306,7 +1308,7 @@ def closeLogFile(fh_log, stdout_sys, dt_start):
 # DM-2020/12/23: To change which portion of the below code to run, change the IF condition
 # to `== "__main__"` or to `!= "__main__"` accordingly, taking into account that when running
 # this file as a script (F5) __name__ is equal to "__main__".
-if __name__ != "__main__":
+if __name__ == "__main__":
     run_unit_tests = True
     if run_unit_tests:
         #suite = unittest.TestSuite()
@@ -1319,9 +1321,11 @@ if __name__ != "__main__":
         #******************* ACTUAL EXECUTION ***************
         #results, results_agg = Test_QB_Particles.test_fv_implementation(K=20, buffer_size_activation=8)
         #results, results_agg = Test_QB_Particles.test_fv_implementation(K=10, buffer_size_activation=0.5)
-        results, results_agg = Test_QB_Particles.test_fv_implementation(K=20, buffer_size_activation=0.5)
+        results, results_agg, est_mc, est_fv, est_abs, est_surv = Test_QB_Particles.test_fv_implementation(nservers=3, K=20, buffer_size_activation=0.5)
         #results, results_agg = Test_QB_Particles.test_fv_implementation(K=30, buffer_size_activation=0.5)
-        #results, results_agg = Test_QB_Particles.test_fv_implementation(K=40, buffer_size_activation=0.5)
+        #results, results_agg = Test_QB_Particles.test_fv_implementation(nservers=3, K=40, buffer_size_activation=0.25)
+        #results, results_agg, est_mc, est_fv, est_abs, est_surv = Test_QB_Particles.test_fv_implementation(nservers=3, K=40, buffer_size_activation=0.5)
+        #results, results_agg = Test_QB_Particles.test_fv_implementation(nservers=3, K=40, buffer_size_activation=0.7)
         #******************* ACTUAL EXECUTION ***************
 
         results.to_csv(resultsfile)
@@ -1388,7 +1392,7 @@ if __name__ != "__main__":
         print("P(K) by MC: {:.3f}%".format(proba_blocking_mc*100))
         print("P(K) estimated by FV1: {:.6f}%".format(proba_blocking_integral_fv*100))
         print("P(K) estimated by FV2: {:.6f}%".format(proba_blocking_laplacian_fv*100))
-        proba_blocking_true = compute_blocking_probability_birth_death_process(test.nservers, test.capacity, test.rhos)
+        proba_blocking_true = compute_blocking_probability_birth_death_process(test.rhos, test.capacity)
         if proba_blocking_true is not None:
             print("True P(K): {:.6f}%".format(proba_blocking_true*100))
     

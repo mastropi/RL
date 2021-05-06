@@ -31,27 +31,25 @@ def comb(n,k):
         
     return int( num / den )
 
-def compute_blocking_probability_birth_death_process(nservers :int, capacity :int, rhos :list):
+def compute_blocking_probability_birth_death_process(rhos :list, capacity :int):
     """
     Computes the true blocking probability of a birth-death process with R servers and total capacity C.
     
     Arguments:
-    nservers: int
-        Number of servers in the system.
+    rhos: list
+        List of the server intensities: lambda / mu for each server in the system, where lambda is the job
+        arrival rate and mu is the service rate.
 
     capacity: int
         Capacity of the system: maximum size of the buffer placed at the entrance of the system.
 
-    rhos: list
-        List of the server intensities: lambda / mu for each server in the system, where lambda is the job
-        arrival rate and mu is the service rate. 
+    Return: float
+    The probability that the process is at its max capacity.
     """
-    if not isinstance(rhos, list):
-        raise ValueError("Input parameter `rho` must be a list with the same length as `nservers`: {}".format(rhos))
-    if nservers != len(rhos):
-        raise ValueError("Input parameter `rho` must have the same length as `nservers` ({}): {}".format(nservers, rhos))
+    if not isinstance(rhos, list) or len(rhos) == 0:
+        raise ValueError("Input parameter `rho` must be a non-empty list: {}".format(rhos))
          
-    R = nservers
+    R = len(rhos)
     C = capacity
     if R == 1:
         proba_blocking = rhos[0]**C / np.sum([ rhos[0]**i for i in range(C+1) ])
@@ -99,7 +97,7 @@ def stationary_distribution_birth_death_process(nservers :int, capacity :int, rh
 
     Return: tuple
     The tuple contains the following elements:
-    - a list of each possible state n = (n1, n2, ..., nR) such that the sum of the n(j)'s is equal to the given capacity.
+    - a list of each possible state n = (n1, n2, ..., nR) such that the sum of the n(j)'s is less than or equal to the given capacity.
     - a list with the probability of occurrence of each state given in the first list under stationarity.  
     """
     if len(rhos) != nservers:
