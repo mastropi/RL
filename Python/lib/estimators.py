@@ -703,7 +703,7 @@ class EstimatorQueueBlockingFlemingViot:
         for r in range(R):
             for c in range(J):
                 equivalent_birth_rates[r] += self.policy_assign[c][r] * self.job_rates[c]
-        
+
         return equivalent_birth_rates
 
     #--------------------------------- Functions to simulate ----------------------------------
@@ -928,7 +928,6 @@ class EstimatorQueueBlockingFlemingViot:
 
         return self.rtimes_obs_sum, self.rtimes_obs_n
 
-
     def generate_trajectories_at_startup(self):
         for P in range(self.N):
             self.iterations[P] = 0
@@ -1114,7 +1113,7 @@ class EstimatorQueueBlockingFlemingViot:
                 print("currently assigned job classes by server: {}".format(self.jobclasses_next_events_in_queue[P]))        
                 print("currently assigned job times by server: {}".format(self.times_next_events_in_queue[P]))        
 
-        # Assign the birth times for each server by picking the first job in each server's queue 
+        # Assign the birth times for each server by picking the first job in each server's queue
         for server in range(self.nservers):
             if len(self.times_next_events_in_queue[P][server]) > 0:
                 # Only update the time of the next birth event if there is a job in the server's queue 
@@ -3798,15 +3797,17 @@ if __name__ == "__main__":
         if title is not None:
             plt.title(title)
 
+    tests2run = [3.1]
+
     #----------------------- Unit tests on specific methods --------------------------#
     time_start = timer()
     seed = 1717
     plotFlag = False
     log = False
 
-    #--- Test #2: simulate_survival()
-    if False:
-        print("Test #2: simulate_survival() method")
+    #--- Test #1.1: simulate_survival()
+    if 1.1 in tests2run:
+        print("Test #1.1: simulate_survival() method")
         K = 20
         rate_birth = 0.5
         job_rates = [rate_birth]
@@ -3854,9 +3855,9 @@ if __name__ == "__main__":
             plot_survival_curve(df_proba_survival_start_at_absorption, col='r-')
             plot_survival_curve(df_proba_survival, title="Buffer size for activation = {}, E(T)={:.1f} (red: MC, start@ABS; blue: start@ACT)".format(buffer_size_activation, expected_survival_time))
 
-    #--- Test #3: variability of survival curve
-    if False:
-        print("Test #3: compare variability of survival curve among different replications --goal: find out why we get so much variability in the FV estimation of the blocking probability (CV ~ 60%!)")
+    #--- Test #1.2: variability of survival curve
+    if 1.2 in tests2run:
+        print("Test #1.2: compare variability of survival curve among different replications --goal: find out why we get so much variability in the FV estimation of the blocking probability (CV ~ 60%!)")
         ## CONCLUSION:
         K = 20
         rate_birth = 0.5
@@ -3894,9 +3895,9 @@ if __name__ == "__main__":
             plot_survival_curve(df_proba_survival[rep])
         plt.title("Buffer size for activation = {}: survival curve over different replications".format(buffer_size_activation))
 
-    #--- Test #4: variability of Phi(t), the red curve
-    if False:
-        print("Test #4: compare variability of Phi(t) among different replications --goal: find out why we get so much variability in the FV estimation of the blocking probability (CV ~ 60%!)")
+    #--- Test #1.3: variability of Phi(t), the red curve
+    if 1.3 in tests2run:
+        print("Test #1.3: compare variability of Phi(t) among different replications --goal: find out why we get so much variability in the FV estimation of the blocking probability (CV ~ 60%!)")
         ## CONCLUSION: The curve has a large variability...
         K = 20
         rate_birth = 0.5
@@ -3990,9 +3991,9 @@ if __name__ == "__main__":
     plotFlag = False
     log = False
 
-    #--- Test #1.1: One server
-    if False:
-        print("Test #1: Single server system")
+    #--- Test #2.1: One server
+    if 2.1 in tests2run:
+        print("Test #2.1: Single server system")
         K = 10
         rate_birth = 0.5
         job_rates = [rate_birth]
@@ -4043,9 +4044,9 @@ if __name__ == "__main__":
         assert("{:.6f}%".format(proba_blocking_fv_laplacian*100) == "0.000000%")
         # Note: True P(K): 0.048852%
 
-    #--- Test #1.2: One server with full process already taken care of
-    if False:
-        print("Test #1: Single server system")
+    #--- Test #2.2: One server with full process already taken care of
+    if 2.2 in tests2run:
+        print("Test #2.2: Single server system")
         nservers = 1
         K = 20
         rate_birth = 0.5
@@ -4084,67 +4085,72 @@ if __name__ == "__main__":
         print("Ended at: {}".format(dt_end))
         print("Execution time: {:.1f} min, {:.1f} hours".format((time_end - time_start) / 60, (time_end - time_start) / 3600))
 
-    #--- Test #2: Multi-server
-    if False:
-        print("\nTest #2: Multiple-server system")
+    #--- Test #3.1: Multi-server
+    if 3.1 in tests2run:
+        print("\nTest #3.1: Multiple-server system")
         nservers = 3
-        K = 20
+        K = 5
         rate_birth = 0.5 # This value is not really used but it's needed to construct the `queue` object
         job_rates = [0.8, 0.7]
         rate_death = [1, 1, 1]
         policy_assign = [[0.5, 0.5, 0.0], [0.0, 0.5, 0.5]]
         queue = queues.QueueMM(rate_birth, rate_death, nservers, K)
-    
+        # Queue environment (to pass to the simulation functions)
+        env_queue = EnvQueueSingleBufferWithJobClasses(queue, job_rates=job_rates, rewards=[1]*len(job_rates), policy_assign=policy_assign)
+
+        print("Computing TRUE blocking probability...")
+        proba_blocking_K = compute_blocking_probability_birth_death_process(env_queue.getIntensities(), K)
+
         # Simulation
-        nparticles = 100
-        nmeantimes = 50
+        nparticles = 10
+        nmeantimes = 5
         finalize_type = FinalizeType.ABSORB_CENSORED
 
         # a) Monte-Carlo (to estimate expected survival time)
         print("Running Monte-Carlo simulation on 1 particle and T={}x...".format(nparticles*nmeantimes))
         est_mc = EstimatorQueueBlockingFlemingViot(1, queue, job_rates,
-                                                   service_rates=None,
-                                                   buffer_size_activation=1,
+                                                   service_rates=env_queue.getServiceRates(),
+                                                   buffer_size_activation=3,
+                                                   positions_observe=3,
                                                    nmeantimes=nparticles*nmeantimes,
-                                                   policy_assign=policy_assign,
+                                                   policy_assign=env_queue.getAssignPolicy(),
                                                    mean_lifetime=None,
                                                    reactivate=False,
                                                    finalize_info={'type': FinalizeType.REMOVE_CENSORED, 'condition': FinalizeCondition.ACTIVE},
+                                                   seed=seed,
                                                    plotFlag=plotFlag,
-                                                   seed=seed, log=log)
-        proba_blocking_mc, total_blocking_time, total_return_time, total_survival_n = est_mc.simulate(EventType.ACTIVATION)
+                                                   log=log)
+        proba_blocking_mc, total_blocking_time, total_return_time, total_return_n = est_mc.simulate(EventType.ACTIVATION)
         expected_survival_time, _, _ = est_mc.estimate_expected_absorption_time()
 
         # b) Fleming-Viot
         print("Running Fleming-Viot simulation on {} particles and T={}x...".format(nparticles, nmeantimes))
         est_fv = EstimatorQueueBlockingFlemingViot(nparticles, queue, job_rates,
-                                                   service_rates=None,
-                                                   buffer_size_activation=1,
+                                                   service_rates=env_queue.getServiceRates(),
+                                                   buffer_size_activation=3,
                                                    nmeantimes=nmeantimes,
-                                                   policy_assign=policy_assign,
+                                                   policy_assign=env_queue.getAssignPolicy(),
                                                    mean_lifetime=expected_survival_time,
                                                    reactivate=True,
                                                    finalize_info={'type': finalize_type, 'condition': FinalizeCondition.ACTIVE},
+                                                   seed=seed, 
                                                    plotFlag=plotFlag,
-                                                   seed=seed, log=log)
-        proba_blocking_fv_integral, proba_blocking_fv_laplacian, integral, expected_survival_time, gamma = est_fv.simulate(EventType.ACTIVATION)
+                                                   log=log)
+        proba_blocking_fv, _, integral, _, _ = est_fv.simulate(EventType.ACTIVATION)
         time_end = timer()
         ## 2021/03/01: 0.8 min
         print("Test #2: execution time: {:.1f} min".format((time_end - time_start) / 60))
     
         # c) Assertions
+        print("P(K) true: {:.6f}%".format(proba_blocking_K*100))    # K=5: 11.98%
         print("P(K) by MC: {:.6f}%".format(proba_blocking_mc*100))
-        print("P(K) estimated by FV1: {:.6f}%".format(proba_blocking_fv_integral*100))
-        print("P(K) estimated by FV2: {:.6f}%".format(proba_blocking_fv_laplacian*100))
-        assert("{:.6f}%".format(proba_blocking_mc*100) == "0.027690%")
-        assert("{:.6f}%".format(proba_blocking_fv_integral*100) == "0.082433%")
-        assert("{:.6f}%".format(proba_blocking_fv_laplacian*100) == "0.000000%")
-        # Note: True P(K): 0.124693% (taken from the actual simulation I perform normally to evaluate the algorithm in test_QB.py)
-    
-    
-    if True:
-        #--- Test #3: One server with acceptance policy
-        print("\nTest #3: Single server system with ACCEPTANCE policy on different JOB CLASSES")
+        print("P(K) estimated by FV: {:.6f}%".format(proba_blocking_fv*100))
+        assert("{:.6f}%".format(proba_blocking_mc*100) == "10.713005%")
+        assert("{:.6f}%".format(proba_blocking_fv*100) == "7.321676%")
+
+    #--- Test #4.1: One server with acceptance policy
+    if 4.1 in tests2run:
+        print("\nTest #4.1: Single server system with ACCEPTANCE policy on different JOB CLASSES")
         K = 10
         rate_birth = 0.5
         job_rates = [0.3, 0.8, 0.7, 0.9]
@@ -4180,7 +4186,7 @@ if __name__ == "__main__":
                                                    finalize_info={'type': FinalizeType.REMOVE_CENSORED, 'condition': FinalizeCondition.ACTIVE},
                                                    plotFlag=True,
                                                    seed=seed, log=log)
-        proba_blocking_mc, total_blocking_time, total_return_time, total_survival_n = est_mc.simulate(EventType.ACTIVATION)
+        proba_blocking_mc, total_blocking_time, total_return_time, total_return_n = est_mc.simulate(EventType.ACTIVATION)
         expected_survival_time, _, _ = est_mc.estimate_expected_absorption_time()
 
         """
@@ -4207,7 +4213,7 @@ if __name__ == "__main__":
         print("P(K) by MC: {:.6f}%".format(proba_blocking_mc*100))
         #print("P(K) estimated by FV1: {:.6f}%".format(proba_blocking_fv_integral*100))
         #print("P(K) estimated by FV2: {:.6f}%".format(proba_blocking_fv_laplacian*100))
-        assert("{:.6f}%".format(proba_blocking_mc*100) == "17.815469%")
+        assert("{:.6f}%".format(proba_blocking_mc*100) == "16.971406%")
         #assert("{:.6f}%".format(proba_blocking_fv_integral*100) == "0.095846%")
         #assert("{:.6f}%".format(proba_blocking_fv_laplacian*100) == "0.000000%")
         # Note: True P(K): 0.048852%
