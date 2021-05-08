@@ -59,7 +59,7 @@ class Test_QB_Particles(unittest.TestCase):
         else:
             raise ValueError("Given Number of servers ({}) is invalid. Valid values are: 1, 3".format(nservers))
         # rho rates for each server based on arrival rates and assignment probabilities
-        self.rhos = self.compute_rhos()
+        self.rate_birth, self.rhos = self.compute_rhos()
 
         self.queue = queues.QueueMM(self.rate_birth, self.rate_death, self.nservers, self.capacity)
 
@@ -69,12 +69,14 @@ class Test_QB_Particles(unittest.TestCase):
         "Computes the rho rates for each server based on arrival rates, service rates, and assignment probabilities"
         R = self.nservers
         J = len(self.job_rates) # Number of job classes
+        lambdas = [0]*self.nservers
         rhos = [0]*self.nservers
         for r in range(R):
             for c in range(J):
-                rhos[r] += self.policy[c][r] * self.job_rates[c] / self.rate_death[r]
-        
-        return rhos
+                lambdas[r] += self.policy[c][r] * self.job_rates[c]
+            rhos[r] = lambdas[r] / self.rate_death[r]
+
+        return lambdas, rhos
 
     def tests_on_one_queue(self):
         print("\nRunning test " + self.id())
@@ -678,11 +680,11 @@ class Test_QB_Particles(unittest.TestCase):
             time_pr_end = timer()
             print("{:.1f} sec".format(time_pr_end - time_pr_start))
             print("Pr(K)={:.6f}%".format(proba_blocking_true*100))
-    
+
             # Create the queue environment that is simulated below
-            env_queue = EnvQueueSingleBufferWithJobClasses(queue, job_rates=self.job_rates, rewards=[1]*len(self.job_rates))
+            env_queue = EnvQueueSingleBufferWithJobClasses(queue, job_rates=self.job_rates, rewards=[1]*len(self.job_rates), policy_assign=self.policy)
                 ## The rewards are not used at this point, so I just set them to 1 for all job classes.
-    
+
             buffer_size_activation_value_prev = None
             for buffer_size_activation in buffer_size_activation_values:
                 # When the buffer size for activation parameter is smaller than 1 it is considered a proportion of the queue's capacity
@@ -728,7 +730,7 @@ class Test_QB_Particles(unittest.TestCase):
                         'multiplier_for_extended_simulation_time': multiplier,
                         'seed': seed_rep,
                             }
-    
+
                     print("\t\t*** MONTE-CARLO ESTIMATION ***")
                     proba_blocking_mc, est_mc = estimators.estimate_blocking_mc(env_queue, dict_params_simul, dict_params_info=dict_params_info)
     
@@ -736,7 +738,7 @@ class Test_QB_Particles(unittest.TestCase):
                     proba_blocking_fv, integral, expected_survival_time, \
                         n_survival_curve_observations, n_survival_time_observations, \
                             est_fv, est_abs, est_surv = estimators.estimate_blocking_fv(env_queue, dict_params_simul, dict_params_info=dict_params_info)
-    
+
                     print("\t\tP(K) by MC: {:.6f}%".format(proba_blocking_mc*100))
                     print("\t\tP(K) estimated by FV (E(T)={:.1f}): {:.6f}%".format(expected_survival_time, proba_blocking_fv*100))
                     print("\t\tTrue P(K): {:.6f}%".format(proba_blocking_true*100))
@@ -745,7 +747,7 @@ class Test_QB_Particles(unittest.TestCase):
                     assert est_mc.maxtime - nparticles*est_fv.maxtime > -0.001*est_fv.maxtime, \
                         "The simulation time of the MC process ({:.1f}) is equal or longer than N times the simulation time of the FV process ({:.1f})" \
                         .format(est_mc.maxtime, nparticles*est_fv.maxtime)
-    
+
                     # Add the observed measure to the output data frame with the results
                     # Notes:
                     # - We use the from_items() method as opposed to injecting  the data from a dictionary
@@ -780,7 +782,7 @@ class Test_QB_Particles(unittest.TestCase):
                     df_proba_blocking_estimates = pd.concat([df_proba_blocking_estimates,
                                                              df_new_estimates],
                                                              axis=0)
-    
+
                     df_proba_survival_and_blocking_conditional = est_fv.estimate_proba_survival_and_blocking_conditional()
 
                     # Plot the blue and red curves contributing to the integral used in the FV estimation
@@ -821,22 +823,22 @@ class Test_QB_Particles(unittest.TestCase):
         time_end = timer()
         time_elapsed = time_end - time_start
         print("Execution time: {:.1f} sec, {:.1f} min, {:.1f} hours".format(time_elapsed, time_elapsed / 60, time_elapsed / 3600))
-    
+
         print("Top and bottom 5 records in the results data frame:")
         print(df_proba_blocking_estimates.head())
         print(df_proba_blocking_estimates.tail())
-    
+
         # Aggregate results
         df_proba_blocking_estimates_agg = aggregation_bygroups(df_proba_blocking_estimates,
                                                                ["K", "buffer_size_activation", "nparticles"],
                                                                ["PMC(K)", "PFV(K)", "Pr(K)"])
-    
+
         df_proba_blocking_estimates.to_csv(resultsfile)
         print("Results of simulation saved to {}".format(os.path.abspath(resultsfile)))
-    
+
         df_proba_blocking_estimates_agg.to_csv(resultsfile_agg)
         print("Aggregated results of simulation saved to {}".format(os.path.abspath(resultsfile_agg)))
-    
+
         return df_proba_blocking_estimates, df_proba_blocking_estimates_agg
 
     @classmethod
