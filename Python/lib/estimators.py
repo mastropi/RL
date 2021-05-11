@@ -3986,6 +3986,63 @@ if __name__ == "__main__":
         if title is not None:
             plt.title(title)
 
+    def compute_observed_rates(df):
+        "Computes the observed birth rate lambda and death rate mu from a simulated trajectory"
+        trefb = 0.0      # Reference time for each observed birth time
+        trefd = np.nan   # Reference time for each observed death time
+        btimes = []
+        dtimes = []
+        ncases = 0
+        for i, t in enumerate(df['t']):
+            if np.isnan(trefd) and df['x'].iloc[i] > 0:
+                trefd = t
+                #print("---> i={}, trefd={}".format(i, trefd))
+            if i > 0:
+                ncases += 1
+                if df['x'].iloc[i] - df['x'].iloc[i-1] >= 0:
+                    # A BIRTH occured (the delta x is 0 when the job arrives but the queue was full)
+                    btimes += [t - trefb]
+                    trefb = t
+                else:
+                    # A DEATH occured
+                    #print("i={}: trefd={}, tprev={}, t={}, size_prev={}, size={}, dt={}".format(i, trefd, df['t'].iloc[i-1], t, df['x'].iloc[i-1], df['x'].iloc[i], t-tref))
+                    assert not np.isnan(trefd), "i={}: trefd={}, tprev={}, t={}, size_prev={}, size={}".format(i, trefd, df['t'].iloc[i-1], t, df['x'].iloc[i-1], df['x'].iloc[i])
+                    dtimes += [t - trefd]
+                    if df['x'].iloc[i] > 0:
+                        trefd = t
+                        #print("------> i={}, tref={}".format(i, tref))
+                    else:
+                        trefd = np.nan
+
+        return 1/np.mean(btimes), len(btimes), 1/np.mean(dtimes), len(dtimes)
+
+    def check_expected_survival_time(est):
+        "Checks the values used to compute E(T)"
+        # Expected value when the absorption set is 0
+        x, dist = stationary_distribution_birth_death_process(est_mc.nservers, est_mc.queue.K, est_mc.rhos)
+        ET_expected = 1/dist[0] + 1/np.sum(est.queue.getBirthRates())
+
+        # Observed values
+        idx_abs = np.where([EventType.ABSORPTION in value for value in est.info_particles[0]['E']])[0]
+        times_abs = [est.info_particles[0]['t'][idx] for idx in idx_abs]
+        times_abs_diff = np.diff(times_abs)
+        ET = np.mean(times_abs_diff)
+        print("\nE(T): (n={}) Mean = {:.3f}, Median = {:.3f}".format( len(times_abs_diff), ET, np.median(times_abs_diff) ))
+
+        # Plot and histogram
+        (fig, axes) = plt.subplots(1, 2, figsize=(10,4))
+        ax1 = axes[0]
+        ax2 = axes[1]
+        #ax1.plot(times_abs[1:], times_abs_diff)
+        #ax1.xlabel("t")
+        ax1.plot(times_abs_diff)
+        ax1.set_xlabel("Time index")
+        #ax1.title.set_text("Times used in the estimation of E(T). Expected={:.3f}".format(ET_expected))
+        ax1.set_ylabel("T")
+        plt.suptitle("Times used in the estimation of E(T)={:.3f}. Expected={:.3f}".format(ET, ET_expected))
+
+        ax2.hist(times_abs_diff, orientation="horizontal", bins=20)
+
     tests2run = [3.1]
 
     #----------------------- Unit tests on specific methods --------------------------#
@@ -4038,7 +4095,7 @@ if __name__ == "__main__":
                                                        seed=seed, log=log)
             est_mc.simulate(EventType.ABSORPTION)
             df_proba_survival_start_at_absorption = est_mc.estimate_proba_survival_given_activation()
-            expected_survival_time, _, _ = est_mc.estimate_expected_absorption_time()
+            expected_survival_time, total_survival_time, total_survival_n = est_mc.estimate_expected_absorption_time()
 
             plt.figure()
             plot_survival_curve(df_proba_survival_start_at_absorption, col='r-')
@@ -4183,8 +4240,8 @@ if __name__ == "__main__":
     #--- Test #2.1: One server
     if 2.1 in tests2run:
         print("Test #2.1: Single server system")
-        K = 10
-        rate_birth = 0.5
+        K = 20 #10
+        rate_birth = 0.7 #0.5
         job_rates = [rate_birth]
         rate_death = [1]
         queue = queues.QueueMM(rate_birth, rate_death, 1, K)
@@ -4193,21 +4250,37 @@ if __name__ == "__main__":
         nparticles = 100
         nmeantimes = 50
         finalize_type = FinalizeType.ABSORB_CENSORED
-    
+
         # a) Monte-Carlo (to estimate expected survival time)
         print("Running Monte-Carlo simulation on 1 particle and T={}x...".format(nparticles*nmeantimes))
         est_mc = EstimatorQueueBlockingFlemingViot(1, queue, job_rates,
                                                    service_rates=None,
                                                    buffer_size_activation=1,
+                                                   positions_observe=0,
                                                    nmeantimes=nparticles*nmeantimes,
                                                    mean_lifetime=None,
                                                    reactivate=False,
                                                    finalize_info={'type': FinalizeType.REMOVE_CENSORED, 'condition': FinalizeCondition.ACTIVE},
                                                    plotFlag=plotFlag,
                                                    seed=seed, log=log)
-        proba_blocking_mc, total_blocking_time, total_return_time, total_survival_n = est_mc.simulate(EventType.ACTIVATION)
-        expected_survival_time, _, _ = est_mc.estimate_expected_absorption_time()
+        proba_blocking_mc, total_blocking_time, total_return_time, total_survival_n = est_mc.simulate(EventType.ABSORPTION) #EventType.ACTIVATION)
+        expected_survival_time, total_survival_time, total_survival_n = est_mc.estimate_expected_absorption_time()
+        
+        # Check observed lambda and mu
+        df = pd.DataFrame({'t': est_mc.all_times_buffer[0], 'x': est_mc.all_positions_buffer[0]})
+        lmbda, nlambda, mu, nmu = compute_observed_rates(df)
+        print("\nComputing observed lambda and mu...")
+        print("Observed lambda={:.3f} (n={})".format(lmbda, nlambda))
+        print("Expected lambda={:.3f}".format(est_mc.queue.getBirthRates()[0]))
+        print("Observed mu={:.3f} (n={})".format(mu, nmu))
+        print("Expected mu={:.3f}".format(est_mc.queue.getDeathRates()[0]))
+        print("Observed rho={}".format(lmbda/ mu))
+        print("Expected rho={}".format(est_mc.rhos[0]))
 
+        # Check E(T)
+        check_expected_survival_time(est_mc)
+
+        """
         # b) Fleming-Viot
         print("Running Fleming-Viot simulation on {} particles and T={}x...".format(nparticles, nmeantimes))
         est_fv = EstimatorQueueBlockingFlemingViot(nparticles, queue, job_rates,
@@ -4223,7 +4296,7 @@ if __name__ == "__main__":
         time_end = timer()
         ## 2021/03/01: 0.3 min
         print("Test #1: execution time: {:.1f} min".format((time_end - time_start) / 60))
-    
+
         # c) Assertions
         print("P(K) by MC: {:.6f}%".format(proba_blocking_mc*100))
         print("P(K) estimated by FV1: {:.6f}%".format(proba_blocking_fv_integral*100))
@@ -4232,7 +4305,7 @@ if __name__ == "__main__":
         assert("{:.6f}%".format(proba_blocking_fv_integral*100) == "0.095885%")
         assert("{:.6f}%".format(proba_blocking_fv_laplacian*100) == "0.000000%")
         # Note: True P(K): 0.048852%
-
+        """
     #--- Test #2.2: One server with full process already taken care of
     if 2.2 in tests2run:
         print("Test #2.2: Single server system")
@@ -4278,29 +4351,33 @@ if __name__ == "__main__":
     if 3.1 in tests2run:
         print("\nTest #3.1: Multiple-server system")
         nservers = 3
-        K = 5
+        K = 20
         rate_birth = 0.5 # This value is not really used but it's needed to construct the `queue` object
-        job_rates = [0.8, 0.7]
+        job_rates = [0.8, 0.7] #[0.7, 0.7] #[0.8, 0.7]
         rate_death = [1, 1, 1]
-        policy_assign = [[0.5, 0.5, 0.0], [0.0, 0.5, 0.5]]
+        policy_assign = [[0.5, 0.5, 0.0], [0.0, 0.5, 0.5]]#[[1/3, 1/3, 1/3], [1/3, 1/3, 1/3]] #[[0.5, 0.5, 0.0], [0.0, 0.5, 0.5]]
         queue = queues.QueueMM(rate_birth, rate_death, nservers, K)
         # Queue environment (to pass to the simulation functions)
         env_queue = EnvQueueSingleBufferWithJobClasses(queue, job_rates=job_rates, rewards=[1]*len(job_rates), policy_assign=policy_assign)
+
+        # Theoretical expected values for E(T):
+        # K=5, rhos=[0.4, 0.75, 0.35]: E(T) = 8.1
+        # K=20, rhos=[0.4, 0.75, 0.35]: E(T) = 10.4
 
         print("Computing TRUE blocking probability...")
         proba_blocking_K = compute_blocking_probability_birth_death_process(env_queue.getIntensities(), K)
 
         # Simulation
-        nparticles = 10
-        nmeantimes = 5
+        nparticles = 200
+        nmeantimes = 50
         finalize_type = FinalizeType.ABSORB_CENSORED
 
         # a) Monte-Carlo (to estimate expected survival time)
-        print("Running Monte-Carlo simulation on 1 particle and T={}x...".format(nparticles*nmeantimes))
+        print("Running Monte-Carlo simulation on 1 particle, K={}, T={}x...".format(K, nparticles*nmeantimes))
         est_mc = EstimatorQueueBlockingFlemingViot(1, queue, job_rates,
                                                    service_rates=env_queue.getServiceRates(),
-                                                   buffer_size_activation=3,
-                                                   positions_observe=3,
+                                                   buffer_size_activation=10,
+                                                   positions_observe=9,
                                                    nmeantimes=nparticles*nmeantimes,
                                                    policy_assign=env_queue.getAssignPolicy(),
                                                    mean_lifetime=None,
@@ -4309,14 +4386,40 @@ if __name__ == "__main__":
                                                    seed=seed,
                                                    plotFlag=plotFlag,
                                                    log=log)
-        proba_blocking_mc, total_blocking_time, total_return_time, total_return_n = est_mc.simulate(EventType.ACTIVATION)
-        expected_survival_time, _, _ = est_mc.estimate_expected_absorption_time()
+        #proba_blocking_mc, total_blocking_time, total_return_time, total_return_n = est_mc.simulate(EventType.ACTIVATION)
+        proba_blocking_mc, total_blocking_time, total_return_time, total_return_n = est_mc.simulate(EventType.ABSORPTION)
+        expected_survival_time, total_survival_time, total_survival_n = est_mc.estimate_expected_absorption_time()
 
+        # Check observed lambdas and mus
+        df = np.empty((nservers,), dtype=pd.DataFrame)
+        lambdas = np.nan*np.ones((nservers,))
+        mus = np.nan*np.ones((nservers,))
+        nlambdas = np.zeros((nservers,), dtype=int)
+        nmus = np.zeros((nservers,), dtype=int)
+        print("")
+        for server in range(nservers):
+            print("Computing observed lambda and mu for server {}...".format(server))
+            df[server] = pd.DataFrame({'t': est_mc.all_times_by_server[0][server], 'x': est_mc.all_positions_by_server[0][server]})
+            lambdas[server], nlambdas[server], mus[server], nmus[server] = compute_observed_rates(df[server])
+        print("\nComputing observed lambda and mu...")
+        print("Observed lambdas={} (n={})".format(lambdas, nlambdas))
+        print("Expected lambda={}".format(est_mc.queue.getBirthRates()))
+        print("Observed mu={} (n={})".format(mus, nmus))
+        print("Expected mu={}".format(est_mc.queue.getDeathRates()))
+        print("Observed rhos={}".format([l/m for l, m in zip(lambdas, mus)]))
+        print("Expected rhos={}".format(est_mc.rhos))
+
+        # Check E(T)
+        check_expected_survival_time(est_mc)
+        """
+        proba_blocking_mc = np.nan
+        """
+        
         # b) Fleming-Viot
-        print("Running Fleming-Viot simulation on {} particles and T={}x...".format(nparticles, nmeantimes))
+        print("Running Fleming-Viot simulation on {} particles, K={}, T={}x...".format(nparticles, K, nmeantimes))
         est_fv = EstimatorQueueBlockingFlemingViot(nparticles, queue, job_rates,
                                                    service_rates=env_queue.getServiceRates(),
-                                                   buffer_size_activation=3,
+                                                   buffer_size_activation=10,#3,
                                                    nmeantimes=nmeantimes,
                                                    policy_assign=env_queue.getAssignPolicy(),
                                                    mean_lifetime=expected_survival_time,
