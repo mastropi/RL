@@ -4334,9 +4334,9 @@ if __name__ == "__main__":
         print("P(K) true: {:.6f}%".format(proba_blocking_K*100))    # K=5: 11.98%
         print("P(K) by MC: {:.6f}%".format(proba_blocking_mc*100))
         print("P(K) estimated by FV: {:.6f}%".format(proba_blocking_fv*100))
-        assert("{:.6f}%".format(proba_blocking_mc*100) == "10.713005%")
-        assert("{:.6f}%".format(proba_blocking_fv*100) == "7.321676%")
-
+        assert("{:.6f}%".format(proba_blocking_mc*100) == "11.487418%") #10.713005%")
+        assert("{:.6f}%".format(proba_blocking_fv*100) == "7.200364%") #"7.321676%")
+        
     #--- Test #4.1: One server with acceptance policy
     if 4.1 in tests2run:
         print("\nTest #4.1: Single server system with ACCEPTANCE policy on different JOB CLASSES")
