@@ -3723,7 +3723,8 @@ def estimate_blocking_fv(env_queue :EnvQueueSingleBufferWithJobClasses,
     # (i.e. we don't know the distribution of the states through which the process enters the absorption set under stationarity)  
     # (Ref: 2-hour call with Matt on Tue, 27-Apr-2021 and Asmussen, pag. 170 when he talks about regenerative processes).
     # 
-    # In BOTH CASES censored particles are REMOVED, where censoring is defined by the particle being ACTIVE (i.e. not yet absorbed)    
+    # In BOTH CASES censored particles are REMOVED, where censoring is defined by the particle being ACTIVE (i.e. not yet absorbed)
+    """
     if est is None:
         time_start = timer()
         est_surv = EstimatorQueueBlockingFlemingViot(dict_params_simul['nparticles'], env_queue.queue, env_queue.getJobRates(),
@@ -3754,7 +3755,8 @@ def estimate_blocking_fv(env_queue :EnvQueueSingleBufferWithJobClasses,
         n_survival_curve_observations = est_surv.counts_alive[0]
         print("\t--> Number of observations for P(T>t) estimation: {} (N={})".format(n_survival_curve_observations, est_surv.N))
     proba_survival_given_activation = est_surv.estimate_proba_survival_given_activation()
-
+    """
+    est_surv = None # Just for the return to the outside world
     time_start = timer()
     est_abs = EstimatorQueueBlockingFlemingViot(1, env_queue.queue, env_queue.getJobRates(),
                                                service_rates=env_queue.getServiceRates(),
@@ -3790,20 +3792,23 @@ def estimate_blocking_fv(env_queue :EnvQueueSingleBufferWithJobClasses,
     finalize_type = FinalizeType.ABSORB_CENSORED
     seed = dict_params_simul['seed'] + 1
     print("\tStep 3 of 3: Running Fleming-Viot simulation using an ACTIVATION start state to estimate blocking probability using E(T) = {:.1f} (out of simul time={:.1f}) (seed={})..." \
-          .format(expected_survival_time, est_surv.maxtime, seed))
+          .format(expected_survival_time, est_abs.maxtime, seed))
     est_fv = EstimatorQueueBlockingFlemingViot(dict_params_simul['nparticles'], env_queue.queue, env_queue.getJobRates(),
                                                service_rates=env_queue.getServiceRates(),
                                                buffer_size_activation=dict_params_simul['buffer_size_activation'],
-                                               nmeantimes=dict_params_simul['nmeantimes'],
+                                               nmeantimes=dict_params_simul['nmeantimes'],      #5*dict_params_simul['nmeantimes'],
                                                policy_assign=env_queue.getAssignPolicy(),
                                                mean_lifetime=expected_survival_time,
-                                               proba_survival_given_activation=proba_survival_given_activation,
+                                               proba_survival_given_activation=None, #proba_survival_given_activation,
                                                reactivate=True,
                                                finalize_info={'type': finalize_type, 'condition': FinalizeCondition.ACTIVE},
                                                seed=seed,
                                                plotFlag=dict_params_info['plot'],
                                                log=dict_params_info['log'])
     proba_blocking_fv, _, integral, _, _ = est_fv.simulate(EventType.ACTIVATION)
+    activation_states, dist_activation_states = est_abs.get_activation_states_distribution()
+    n_survival_curve_observations = np.sum(dist_activation_states)
+    print("\t--> Number of observations for P(T>t) estimation: {} (N={})".format(n_survival_curve_observations, est_fv.N))
     if dict_params_info['plot']:
         df_proba_survival_and_blocking_conditional = est_fv.estimate_proba_survival_and_blocking_conditional() 
         plot_curve_estimates(df_proba_survival_and_blocking_conditional,
@@ -3813,7 +3818,7 @@ def estimate_blocking_fv(env_queue :EnvQueueSingleBufferWithJobClasses,
                             'K': est_fv.queue.getCapacity(),
                             'nparticles': dict_params_simul['nparticles'],
                             'nmeantimes': dict_params_simul['nmeantimes'],
-                            'maxtime_mc': est_surv.maxtime,
+                            'maxtime_mc': est_abs.maxtime,
                             'maxtime_fv': est_fv.maxtime,
                             'buffer_size_activation': dict_params_simul['buffer_size_activation'],
                             'mean_lifetime': expected_survival_time,
@@ -3823,7 +3828,8 @@ def estimate_blocking_fv(env_queue :EnvQueueSingleBufferWithJobClasses,
                             'finalize_type': finalize_type,
                             'seed': seed
                             })
-        plot_distribution_states(est_surv.states_activation, n_particles_by_start_state, freq2=est_surv.dist_activation, label_top=10, title="Distribution of ACTIVATION states")
+        #plot_distribution_states(est_surv.states_activation, n_particles_by_start_state, freq2=est_surv.dist_activation, label_top=10, title="Distribution of ACTIVATION states")
+        plot_distribution_states(activation_states, dist_activation_states, freq2=est_fv.dist_activation, label_top=10, title="Distribution of ACTIVATION states")
         plot_distribution_states(absorption_states, dist_absorption_states, freq2=est_abs.dist_absorption_set_at_boundary, label_top=10, title="Distribution of ABSORPTION states")
 
     time_end = timer()
