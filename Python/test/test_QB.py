@@ -496,7 +496,7 @@ class Test_QB_Particles(unittest.TestCase):
         nparticles_max = 1600
         nparticles_step_prop = 1  # STEP proportion: N(n+1) = (1 + prop)*N(n), so that we scale the step as the number of particles increases
         nparticles = nparticles_min
-        df_results = pd.DataFrame(columns=['N', 'replication', 'Pr(MC)', 'Time(MC)', 'E(T)', 'Pr(FV)', 'Time(FV)', 'Pr(K)', 'exec_time(s)'])
+        df_results = pd.DataFrame(columns=['K', 'BSA', 'N', 'replication', 'Pr(MC)', 'Time(MC)', 'E(T)', 'Pr(FV)', 'Time(FV)', 'Pr(K)', 'seed', 'exec_time(s)'])
         case = 0
         ncases = int( np.log(nparticles_max / nparticles_min) / np.log(1 + nparticles_step_prop)) + 1
         print("System: # servers={}, K={}, rhos={}, buffer_size_activation={}".format(nservers, K, env_queue.getIntensities(), buffer_size_activation_value))
@@ -544,7 +544,7 @@ class Test_QB_Particles(unittest.TestCase):
                 print("\tTrue P(K): {:.6f}%".format(proba_blocking_true*100))
 
                 # Store the results
-                df_append = pd.DataFrame([[nparticles, r, proba_blocking_mc, est_mc.maxtime, est_fv.mean_lifetime, proba_blocking_fv, est_fv.maxtime, proba_blocking_true, exec_time]],
+                df_append = pd.DataFrame([[K, buffer_size_activation_value, nparticles, r, proba_blocking_mc, est_mc.maxtime, est_fv.mean_lifetime, proba_blocking_fv, est_fv.maxtime, proba_blocking_true, dict_params_simul['seed'], exec_time]],
                                          columns=df_results.columns, index=[case])
                 df_results = df_results.append(df_append)
 
@@ -673,7 +673,7 @@ class Test_QB_Particles(unittest.TestCase):
             print("\n\n---> NEW K (Queue's capacity = {})".format(queue.getCapacity()))
             print("---> (nparticles={}, nmeantimes={}, multiplier for extended simulation ONE particle={}, adjust multiplier={})" \
                   .format(nparticles, nmeantimes_values, multiplier_values, multiplier_adjust_with_activation))
-    
+
             print("Computing TRUE blocking probability...", end=" --> ")
             time_pr_start = timer()
             proba_blocking_true = compute_blocking_probability_birth_death_process(self.rhos, K)
@@ -1330,11 +1330,19 @@ if __name__ == "__main__":
         dt_start, stdout_sys, fh_log, logfile, resultsfile, resultsfile_agg = createLogFileHandleAndResultsFileNames(prefix="test_fv_implementation")
 
         #******************* ACTUAL EXECUTION ***************
+        #results, results_agg, est_mc, est_fv, est_abs, est_surv = Test_QB_Particles.test_fv_implementation(nservers=1, K=20, buffer_size_activation=0.25)
+        #results, results_agg, est_mc, est_fv, est_abs, est_surv = Test_QB_Particles.test_fv_implementation(nservers=1, K=20, buffer_size_activation=0.5)
+        #results, results_agg, est_mc, est_fv, est_abs, est_surv = Test_QB_Particles.test_fv_implementation(nservers=1, K=20, buffer_size_activation=0.75)
+        results, results_agg, est_mc, est_fv, est_abs, est_surv = Test_QB_Particles.test_fv_implementation(nservers=1, K=20, buffer_size_activation=0.9)
+
+        #results, results_agg, est_mc, est_fv, est_abs, est_surv = Test_QB_Particles.test_fv_implementation(nservers=3, K=5, buffer_size_activation=1)
         #results, results_agg = Test_QB_Particles.test_fv_implementation(K=20, buffer_size_activation=8)
         #results, results_agg = Test_QB_Particles.test_fv_implementation(K=10, buffer_size_activation=0.5)
-        results, results_agg, est_mc, est_fv, est_abs, est_surv = Test_QB_Particles.test_fv_implementation(nservers=3, K=20, buffer_size_activation=0.5)
+        #results, results_agg, est_mc, est_fv, est_abs, est_surv = Test_QB_Particles.test_fv_implementation(nservers=3, K=20, buffer_size_activation=0.5)
+
         #results, results_agg = Test_QB_Particles.test_fv_implementation(K=30, buffer_size_activation=0.5)
-        #results, results_agg = Test_QB_Particles.test_fv_implementation(nservers=3, K=40, buffer_size_activation=0.25)
+
+        #results, results_agg, est_mc, est_fv, est_abs, est_surv = Test_QB_Particles.test_fv_implementation(nservers=3, K=40, buffer_size_activation=0.25)
         #results, results_agg, est_mc, est_fv, est_abs, est_surv = Test_QB_Particles.test_fv_implementation(nservers=3, K=40, buffer_size_activation=0.5)
         #results, results_agg = Test_QB_Particles.test_fv_implementation(nservers=3, K=40, buffer_size_activation=0.7)
         #******************* ACTUAL EXECUTION ***************
@@ -1413,14 +1421,15 @@ else:
     # Lines to execute "by hand" (i.e. at the Python prompt)
     test = Test_QB_Particles(nservers=3)
 
-    dt_start, stdout_sys, fh_log, logfile, resultsfile, resultsfile_agg = createLogFileHandleAndResultsFileNames(prefix="analyze_estimates")
+    #dt_start, stdout_sys, fh_log, logfile, resultsfile, resultsfile_agg = createLogFileHandleAndResultsFileNames(prefix="analyze_estimates")
+    fh_log = None; resultsfile = None; resultsfile_agg = None
 
     # NOTES on the below calls to simulation execution:
     # - Use larger N values to improve the estimation of Phi(t)
     # - When larger N values are used smaller T values (simulation time) can be used
     # because the larger particle N already guarantees a large simulation time for
     # the 1-particle system that estimates P(T>t).
-    tests2run = [4]
+    tests2run = [5]
     if 1 in tests2run:
         results_convergence = test.analyze_estimates(
                                         replications=12,
@@ -1472,13 +1481,13 @@ else:
                                                          'resultsfile_agg': resultsfile_agg})
     if 5 in tests2run:
         results_convergence = test.analyze_estimates(
-                                        replications=12,
+                                        replications=2,
                                         K_values=[20],
-                                        nparticles_values=[600],
-                                        nmeantimes_values=[50],
+                                        nparticles_values=[5],
+                                        nmeantimes_values=[10],
                                         multiplier_values=[1],
                                         multiplier_adjust_with_activation=False,
-                                        buffer_size_activation_values=[0.1, 0.25, 0.5],
+                                        buffer_size_activation_values=[4], #[0.1, 0.25, 0.5],
                                         seed=1313,
                                         dict_params_out={'logfilehandle': fh_log,
                                                          'resultsfile': resultsfile,
