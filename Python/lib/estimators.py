@@ -995,7 +995,6 @@ class EstimatorQueueBlockingFlemingViot:
 
         # Generate OR retrieve the next set of death and birth times by server
         # Note that:
-        self._generate_birth_times(P)
         # - DEATH TIMES: we *generate* a new death time for a server ONLY when the server's queue
         # at the current simulation time (i.e. at the time of last change of the state of the system
         # --self.times_latest_known_state) is NOT empty.
@@ -1007,6 +1006,11 @@ class EstimatorQueueBlockingFlemingViot:
         # at the position in the queue derived from the generated birth time value and its comparison
         # with the other birth times already in the server's queue.
         self._generate_death_times(P)
+        # NOTE: When using _generate_birth_times() which first generates arriving job classes
+        # and then assigns each new job to a server based on the assignment policy,
+        # we need to ACTIVATE (i.e. uncomment) the two lines in _apply_next_event()
+        # that are enclosed by the labels "DM-2021/05/10-START"-"DM-2021/05/10-END".
+        self._generate_birth_times_from_equivalent_rates(P)
 
     def _generate_birth_times(self, P):
         """
@@ -1133,6 +1137,20 @@ class EstimatorQueueBlockingFlemingViot:
             assert len(self.times_in_server_queue[P][server]) > 0, "P={}: The queue in server {} is not empty.".format(P, server)
             self.times_next_birth_events[P][server] = self.times_in_server_queue[P][server][0]
 
+    def _generate_birth_times_from_equivalent_rates(self, P):
+        """
+        Generates new birth times for EACH server in the particle that does NOT have a "next birth time".
+        The equivalent arrival rates are used instead of the job class arrival rate + assignment policy.
+        """
+
+        for server in range(self.nservers):
+            if np.isnan(self.times_next_birth_events[P][server]):
+                # Generate the next birth time for the server
+                # NOTE: (2021/05/09) The birth ABSOLUTE time is computed by adding the newly generated relative time
+                # to the time of the latest known state for the particle,
+                # i.e. the time at which the latest event was applied.
+                birth_time_relative = self.particles[P].generate_event_time(Event.BIRTH, server)
+                self.times_next_birth_events[P][server] = self.times_latest_known_state[P] + birth_time_relative
     def _generate_death_times(self, P):
         """
         Generates death times for each server with jobs in its queue
@@ -1288,13 +1306,13 @@ class EstimatorQueueBlockingFlemingViot:
             print("\nP={}: Applied {} @t={:.3f} to server {}...".format(P, type_of_event, time_of_event, server) + (self.particles[P].getLastChange(server) == 0 and " --> NO CHANGE!" or ""))
         if type_of_event == Event.BIRTH:
             # Remove the job from the server's queue, as it is now being PROCESSED by the server
-            if self.LOG:
-                print("Job queue in server {} (the first job will be removed for processing by server): {}".format(server, self.times_next_events_in_queue[P][server]))
-            self.times_in_server_queue[P][server].pop(0)
-            self.jobclasses_in_server_queue[P][server].pop(0)
             # It's important to keep in the servers's queue JUST the information about the jobs WAITING
             # and NOT those being served because the NEXT BIRTH TIME for each server is chosen based on the
             # times of the WAITING jobs (see _generate_birth_times()). 
+            # DM-2021/05/10-START: Activate the following lines when assigning job classes to server using the assignment policy 
+            #self.times_in_server_queue[P][server].pop(0)
+            #self.jobclasses_in_server_queue[P][server].pop(0)
+            # DM-2021/05/10-END
             self.times_next_birth_events[P][server] = np.nan
         elif type_of_event == Event.DEATH:
             if self.LOG:
