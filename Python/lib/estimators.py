@@ -949,7 +949,7 @@ class EstimatorQueueBlockingFlemingViot:
         Generates one iteration of event times for a particle.
         
         This implies:
-        - A set of event times (one per server) is generated for the particle.
+        - A set of birth and death event times (one set of times per server) is generated for the particle.
         - The event with the smallest event time is applied to the particle.
 
         Return: bool
@@ -973,15 +973,15 @@ class EstimatorQueueBlockingFlemingViot:
         # the servers in the state of the latest observed event, which should be extended as the state
         # of the server at the maximum simulation time.
         server_next_event, type_next_event, time_next_event = self._get_next_event(P)
-        if not np.isnan(time_next_event):
-            if end_of_simulation(time_next_event):
-                return True
-            else:
-                if self.LOG:
-                    print("\n++++++ P={}: APPLY an event ++++++".format(P))
-                self._apply_next_event(P, server_next_event, type_next_event, time_next_event)
-                self._update_return_time(P, time_next_event)
-                self.assertSystemConsistency(P)
+        assert not np.isnan(time_next_event)
+        if end_of_simulation(time_next_event):
+            return True
+        else:
+            if self.LOG:
+                print("\n++++++ P={}: APPLY an event ++++++".format(P))
+            self._apply_next_event(P, server_next_event, type_next_event, time_next_event)
+            self._update_return_time(P, time_next_event)
+            self.assertSystemConsistency(P)
 
         return False
 
@@ -993,54 +993,84 @@ class EstimatorQueueBlockingFlemingViot:
         assert self.isValidParticle(P), "The particle number is valid (0<=P<{}) ({})".format(self.N, P)
         self.assertTimeMostRecentEventAndTimesNextEvents(P)
 
-        # Generate OR retrieve the next set of birth and death times by server
+        # Generate OR retrieve the next set of death and birth times by server
         # Note that:
-        # - we either "generate" or "retrieve" the new birth/death times depending on whether
-        # the queue of next events for the server and event type is empty or not, respectively.
-        # In fact, if the queue is NOT empty, we just pick the first event time in the queue.
-        # - whatever the case, whether we *generate* or *retrieve* the "next event time", we still generate
-        # NEW event values for ALL servers for both birth/death types of event, which simply go to the
-        # queue of the respective server. For BIRTH events, the queue of the server *assigned* to the generated
-        # job class is increased; for DEATH events, the queue of each server is decreased.
         self._generate_birth_times(P)
+        # - DEATH TIMES: we *generate* a new death time for a server ONLY when the server's queue
+        # at the current simulation time (i.e. at the time of last change of the state of the system
+        # --self.times_latest_known_state) is NOT empty.
+        # - BIRTH TIMES: we either *generate* or *retrieve* the new birth times depending on whether
+        # the queue of next events for the server is empty or not, and on a condition about the
+        # generated arrival times of the job classes which is a little complicated to explain here
+        # (see details in the method called below).
+        # If a new birth time is generated for a server, it is added to the server's queue
+        # at the position in the queue derived from the generated birth time value and its comparison
+        # with the other birth times already in the server's queue.
         self._generate_death_times(P)
 
     def _generate_birth_times(self, P):
         """
-        Generates new arrival times for each job class, based on the job arrival rates,
-        and assigns each job to one of the given particle's servers based on the assignment policy.
+        Generates new birth times for EACH server in the given particle.
         
+        The process is carried out as follows: job arrival times are generated for each job class
+        and each new job is assigned to one of the servers based on the assignment policy. The process
+        is repeated until all servers have at least ONE job in their queue (so that no "next birth time"
+        in a server is NaN, making it possible to compute the next event to be observed in the system
+        as the MINIMUM over all non-NaN next birth and next death events).
+
         The assignment policy is assumed to be a mapping from job class to server number.
 
         The effect of this method is the following:
         - The queue of jobs in each server is updated with the new assigned job (storing job class and event time).
         - The times of the next birth events by server is updated when the generated birth event is the first job
-        assigned to the server's queue. Otherwise, the time of the next birth event in the sever is kept.
+        assigned to the server's queue. Otherwise, the time of the next birth event in the server is maintained.
         """
-        def are_all_next_birth_times_smaller_than_all_latest_generated_jobclass_times(P):
-            resp = True
-            smallest_time_last_jobclass = np.min(self.times_last_jobs[P])
+
+        #--------------------------------- Auxiliary functions --------------------------------
+        def at_least_one_server_may_not_yet_hold_the_next_birth_time(P):
+            """
+            The situation described by the function name happens when
+            the currently stored "next birth time" for at least one server
+            (given by self.times_in_server_queue[P][server][0]) is either:
+            - INEXISTENT
+            - LARGER than the SMALLEST time among those generated for the next arriving job
+            of each class the last time these times were generated (self.times_last_jobs[P]).
+
+            This means that at least one of the times of the next arriving job classes
+            COULD be smaller than the time of the next job to be served by one of the servers
+            (the possibility depends on the server which those jobs are assigned to, which is a random process),
+            and such situation makes the time of the next job to be served by such server not yet defined.
+
+            NOTE that this condition is ALWAYS satisfied at the very first call of this function
+            (i.e. at the beginning of the simulation of the particle's trajectory) since
+            the list of times of jobs assigned to each server is empty.
+            """
+            resp = False
+            smallest_time_among_jobclasses = np.min(self.times_last_jobs[P])
+            assert not np.isnan(smallest_time_among_jobclasses)
             for server in range(self.nservers):
-                if len(self.times_next_events_in_queue[P][server]) == 0 or \
-                   self.times_next_events_in_queue[P][server][0] > smallest_time_last_jobclass:
-                    resp = False
+                if len(self.times_in_server_queue[P][server]) == 0 or \
+                   self.times_in_server_queue[P][server][0] > smallest_time_among_jobclasses:
+                    resp = True
                     break
             return resp
+        #--------------------------------- Auxiliary functions --------------------------------
 
         if False:
-            print("P={}".format(P))
+            print("\n_generate_birth_times (START): P={}".format(P))
             print("times last jobs[P]: {}".format(self.times_last_jobs[P]))
-            print("times next events in queue: {}".format(self.times_next_events_in_queue[P]))
-        if not are_all_next_birth_times_smaller_than_all_latest_generated_jobclass_times(P):
-            # In at least one of the server queues, the time of the "first event to be served" is LARGER than the
-            # SMALLEST time already generated for the arriving job classes for this particle
-            # This means that at least one of the times generated for the NEXT arriving job class
-            # could be SMALLER than the time of the next event to be born in a server queue, making
-            # that event to be positioned SECOND in the queue of the server assigned to the job class
-            # (i.e. behind the newly generated time for the next arriving job class, assuming it is assigned
-            # to that server, of course). And this implies that the next event to be born would be
-            # born earlier than the event that is currently "first to be served" in the server queue. 
+            print("times next events in server queues:")
+            for s in range(self.nservers):
+                print("\t{}: {}".format(s, self.times_in_server_queue[P][s]))
+
+        while at_least_one_server_may_not_yet_hold_the_next_birth_time(P):
+            # We still don't know what's the time of the next birth event in all servers
             # => Generate a birth time for ALL the job CLASSES and assign them to a server
+
+            # TODO: (2021/05/08) Implement process abstraction as follows
+            #times_last_jobs_prev_P = self._generate_next_times_jobclasses(P)    # -> updates self.times_last_jobs[P] for each job class
+            #job_classes_accepted = self._accept_reject_job(P)
+            #self._assign_accepted_jobs_to_servers(P, job_classes_accepted, times_last_jobs_prev_P)
 
             # Generate the next arriving job class times
             birth_times_relative_for_jobs = np.random.exponential( 1/np.array(self.job_rates) )
@@ -1100,12 +1130,8 @@ class EstimatorQueueBlockingFlemingViot:
 
         # Assign the birth times for each server by picking the first job in each server's queue
         for server in range(self.nservers):
-            if len(self.times_next_events_in_queue[P][server]) > 0:
-                # Only update the time of the next birth event if there is a job in the server's queue 
-            else:
-                # No job is in the queue of the server => there is no next birth event yet...
-                self.times_next_birth_events[P][server] = np.nan
-                self.times_next_birth_events[P][server] = self.times_in_server_queue[P][server][0]
+            assert len(self.times_in_server_queue[P][server]) > 0, "P={}: The queue in server {} is not empty.".format(P, server)
+            self.times_next_birth_events[P][server] = self.times_in_server_queue[P][server][0]
 
     def _generate_death_times(self, P):
         """
