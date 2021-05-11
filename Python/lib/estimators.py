@@ -427,55 +427,43 @@ class EstimatorQueueBlockingFlemingViot:
         #---------------------------------- Next events information ---------------------------
         # Attributes used to store information about the (possible) next events to be applied
 
-        #-- Types and times of next events (one event for each server)
+        #-- Servers, types and times of next events (one per particle)
+        # NOTE: The plural in the variable names (e.g. 'servers', 'times') refer to the fact they contain info about particleS
         # All event times are ABSOLUTE, i.e. the exponential time is generated for each server
         # (which is a RELATIVE time --relative to the previous event) and this relative time is converted to
         # absolute by adding the time of the previous event. Working with absolute times facilitates the process.
-        self.types_next_events = np.empty((self.N, self.nservers), dtype=Event)
-        self.times_next_events = np.nan*np.ones((self.N, self.nservers), dtype=float)
+        self.servers_next_event = -1 * np.ones((self.N,), dtype=int)    # In what server will the next event happen; note that we initialize the unknown value as -1 (instead of e.g. np.nan) because we want the array to store integer values, not float 
+        self.types_next_event = np.empty((self.N,), dtype=Event)
+        self.times_next_event = np.nan*np.ones((self.N,), dtype=float)
         self.times_next_events2 = np.zeros((self.N, self.nservers, 2), dtype=float) # `2` is the number of possible events: birth and death
-        self.times_next_birth_events = np.zeros((self.N, self.nservers), dtype=float)
-        self.times_next_death_events = np.zeros((self.N, self.nservers), dtype=float)
+        self.times_next_birth_events = np.nan*np.ones((self.N, self.nservers), dtype=float)
+        self.times_next_death_events = np.nan*np.ones((self.N, self.nservers), dtype=float)
 
         #-- Arriving jobs information
-        # Times and job classes associated to the next events in the queue of each server
+        # Times and classes associated to jobs in the queue of each server
         # It is important to store this information in order to properly handle the situation when
         # different arriving jobs are assigned to the SAME server in a given iteration
         # (see method _generate_birth_times())
-        self.times_next_events_in_queue = array_of_objects((self.N, self.nservers), dtype=list, value=[])
-        self.jobclasses_next_events_in_queue = array_of_objects((self.N, self.nservers), dtype=list, value=[])
-
-        #-- Serviced jobs information
-        # Service times in each server (accumulated in a "queue" as they are generated)
-        # They represent all the ABSOLUTE times at which a job is served (i.e. a DEATH occurs) in a server 
-        # It is important to store this information in order to properly handle the situation when
-        # new DEATH events are generated for a server, but the previously generated DEATH event
-        # was not yet "consumed" because we don't yet have the information of a positive BIRTH event
-        # for a server against which we can compare the death event and decide the type of the next event
-        # to apply for the server. 
-        # (see method _generate_death_times())
-        self.times_next_services = array_of_objects((self.N, self.nservers), dtype=list, value=[])
-            ## The above is an array of size N x #servers x 2, where 2 is the number of events: birth and death
-            ## We initialize it as a zero-array because we consider that the very first event in each server and particle
-            ## takes place at time 0.0.
+        # NOTE: The first element in the queue of each server has information about the first WAITING job
+        # (as opposed to containing information about the job CURRENTLY BEING SERVED)
+        self.times_in_server_queue = array_of_objects((self.N, self.nservers), dtype=list, value=[])
+        self.jobclasses_in_server_queue = array_of_objects((self.N, self.nservers), dtype=list, value=[])
         #---------------------------------- Next events information ---------------------------
 
 
-        #--------------------------- Last jobs and services information -----------------------
-        # Times (ABSOLUTE) of the last jobs arrived for each class and of the last jobs served by each server
+        #--------------------------- Times of the last arriving jobs --------------------------
+        # Times (ABSOLUTE) of the last jobs arrived for each class
         # These are needed in order to compute the ABSOLUTE time of the next arriving job of each class
-        # and of the next served job for each server, since the arrival and service times are generated
-        # RELATIVE to the time of the latest respective event.
+        # since the arrival times are generated RELATIVE to the time of the latest arrival.
         # The times of the last jobs arrived per class is also used to decide WHEN new arriving job times
         # should be generated and thus make the process more efficient (as opposed to generating new arriving job times
         # at every iteration (i.e. at every call to generate_one_iteration()) which may quickly fill
         # up the server queues with times that will never be used, significantly slowing down the simulation process)        
         self.times_last_jobs = np.zeros((self.N, len(self.job_rates)), dtype=float)
-        self.times_last_services = np.zeros((self.N, self.nservers), dtype=float)
         #--------------------------- Last jobs and services information -----------------------
 
 
-        #------------------------- Absorption times and active particles ----------------------
+        #---------------------------------- Absorption times ----------------------------------
         #-- Distribution of absorption states used to analyze if the observed distribution at the end of the simulation looks reasonable
         self.dist_absorption_states = [0] * len(self.states_absorption_set_at_boundary)
 
@@ -488,7 +476,7 @@ class EstimatorQueueBlockingFlemingViot:
                                                 'P': [],        # List of particle numbers associated to each absorption time in 't'
                                                 'S': [],        # List of absorption state indices (these indices represent one of the possible states returned by the function computing the distribution of the states at the boundary of the absorption set)
                                                 })
-        #------------------------- Absorption times and active particles ----------------------
+        #---------------------------------- Absorption times ----------------------------------
 
 
         #----------------- Attributes for survival and blocking time calculation --------------
@@ -534,7 +522,7 @@ class EstimatorQueueBlockingFlemingViot:
 
 
         # Latest time at which we know the state of the system for each particle.
-        # This means, that for all times <= this time we now precisely the size of ALL servers in the system.
+        # This means, that for all times <= this time we know precisely the size of ALL servers in the system.
         self.times_latest_known_state = np.zeros((self.N,), dtype=float)
 
         if self.LOG:
@@ -940,7 +928,7 @@ class EstimatorQueueBlockingFlemingViot:
             # needed to know which server should be updated next
             # --see function _generate_trajectory_until_absorption_or_end_of_simulation() or similar)
             end_of_simulation = self.generate_one_iteration(P)
-            
+
             # Continue iterating until absorption or until the max simulation time is reached
             self._generate_trajectory_until_absorption_or_end_of_simulation(P, end_of_simulation)            
 
@@ -1016,9 +1004,6 @@ class EstimatorQueueBlockingFlemingViot:
         # job class is increased; for DEATH events, the queue of each server is decreased.
         self._generate_birth_times(P)
         self._generate_death_times(P)
-        
-        # Find the next event times based on the current next birth and death times on all servers
-        self._find_next_event_times(P)
 
     def _generate_birth_times(self, P):
         """
@@ -1099,56 +1084,62 @@ class EstimatorQueueBlockingFlemingViot:
                 # Insert the new job time in order into the server's queue containing job birth times
                 # Note that the order of the jobs is NOT guaranteed because the server's queue may contain
                 # jobs of different classes, whose arrival times are generated independently from each other.
-                idx_insort, _ = insort(self.times_next_events_in_queue[P][assigned_server], self.times_last_jobs[P][job_class], unique=False)
-                self.jobclasses_next_events_in_queue[P][assigned_server].insert(idx_insort, job_class)
+                idx_insort, _ = insort(self.times_in_server_queue[P][assigned_server], self.times_last_jobs[P][job_class], unique=False)
+                self.jobclasses_in_server_queue[P][assigned_server].insert(idx_insort, job_class)
                 if self.LOG:
                     print("job class: {}".format(job_class))
                     print("job time (PREVIOUS): {}".format(times_last_jobs_prev_P[job_class]))
                     print("job time (RELATIVE): {}".format(birth_times_relative_for_jobs[job_class]))
                     print("job time (ABSOLUTE): {}".format(self.times_last_jobs[P][job_class]))
                     print("assigned server: {}".format(assigned_server))
-                    print("queue of assigned server: {}".format(self.times_next_events_in_queue[P][assigned_server]))
+                    print("queue of assigned server: {}".format(self.times_in_server_queue[P][assigned_server]))
     
             if self.LOG:
-                print("currently assigned job classes by server: {}".format(self.jobclasses_next_events_in_queue[P]))        
-                print("currently assigned job times by server: {}".format(self.times_next_events_in_queue[P]))        
+                print("currently assigned job classes by server: {}".format(self.jobclasses_in_server_queue[P]))        
+                print("currently assigned job times by server: {}".format(self.times_in_server_queue[P]))        
 
         # Assign the birth times for each server by picking the first job in each server's queue
         for server in range(self.nservers):
             if len(self.times_next_events_in_queue[P][server]) > 0:
                 # Only update the time of the next birth event if there is a job in the server's queue 
-                self.times_next_birth_events[P][server] = self.times_next_events_in_queue[P][server][0]
             else:
                 # No job is in the queue of the server => there is no next birth event yet...
                 self.times_next_birth_events[P][server] = np.nan
+                self.times_next_birth_events[P][server] = self.times_in_server_queue[P][server][0]
 
     def _generate_death_times(self, P):
         """
-        Generates and stores a set of death times for each server in the system
+        Generates death times for each server with jobs in its queue
 
         The effect of this method is the following:
         - The list of job service times in each server is updated with the new death time generated for the server.
         - The times of the next service event (death event) by server is updated when the generated death event
         is the first service time assigned to the server. Otherwise, the time of the next death event in the sever is kept. 
         """
-        # Generate a death time for each server whose queue is empty and store them as ABSOLUTE values
+        # Generate a death time for each server whose queue is NOT empty and store them as ABSOLUTE values
+        if DEBUG_TIME_GENERATION:
+            print("\n_generate_death_times (START): P={}".format(P))
+            print("times next DEATH event: {}".format(self.times_next_death_events[P]))
+
         for server in range(self.nservers):
-            if len(self.times_next_services[P][server]) == 0:
+            if self.particles[P].getServerSize(server) > 0 and np.isnan(self.times_next_death_events[P][server]):
                 # Generate the next death time for the server
+                # NOTE: (2021/05/09) The death ABSOLUTE time is computed by adding the newly generated relative time
+                # to the time of the latest known state for the particle,
+                # i.e. the time at which the latest event was applied, that made the particle's state CHANGE.
+                # (Recall that every time an event is applied the state HAS to change, as we are no longer applying
+                # death events to empty server queues!)
                 death_time_relative = self.particles[P].generate_event_time(Event.DEATH, server)
-                self.times_last_services[P][server] += death_time_relative
+                self.times_next_death_events[P][server] = self.times_latest_known_state[P] + death_time_relative
+                if DEBUG_TIME_GENERATION:
+                    print("server {}: Current time={:.3f}, Exponential DEATH time={:.3f}, ABSOLUTE time={:.3f}" \
+                          .format(server, self.times_latest_known_state[P], death_time_relative, self.times_next_death_events[P][server]))
 
-                # Add the death time to the list of service times already generated for each server
-                # (which by construction are sorted increasingly)
-                self.times_next_services[P][server] += [ self.times_last_services[P][server] ]
-    
-                # Update the time of the next DEATH event
-                # (which DOESN'T change from the value already stored there
-                # if the list of death times was not empty before including
-                # the death time just generated for the server)
-                self.times_next_death_events[P][server] = self.times_next_services[P][server][0]
+        if DEBUG_TIME_GENERATION:
+            print("_generate_death_times (END): P={}".format(P))
+            print("times next DEATH events by server: {}".format(self.times_next_death_events[P]))
 
-    def _find_next_event_times(self, P):
+    def _deprecated_find_next_event_times(self, P):
         "Finds the next event times for the given particle"
         # Store the next birth and death times as columns by server for their comparison
         # so that we can easily choose which type of event comes next by server.   
@@ -1169,7 +1160,7 @@ class EstimatorQueueBlockingFlemingViot:
             print("TYPES NEXT EVENTS for P={}: {}".format(P, self.types_next_events[P]))
             print("TIMES NEXT EVENTS for P={}: {}".format(P, self.times_next_events[P]))
 
-    def _get_next_event(self, P):
+    def _deprecated_get_next_event(self, P):
         """
         Computes the information necessary to apply the next event to a particle
 
@@ -1189,6 +1180,54 @@ class EstimatorQueueBlockingFlemingViot:
 
         return server_with_smallest_time, type_of_event, time_of_event
 
+    def _get_next_event(self, P):
+        """
+        Retrieves the relevant information about the next event for the given particle
+        by choosing the event with the smallest time among all possible next events
+        for each server (e.g. BIRTH or DEATH).
+
+        Note that a DEATH event is not possible in a server if its queue has length 0.
+        In such case, the time of the next death event is NaN, and such time is NOT considered
+        for the computation of the smallest event time.
+
+        Return: tuple
+        The tuple contains:
+        - the server number on which the next event takes place.
+        - the type of the next event.
+        - the time at which the next event takes place.
+        """
+        # Store the next birth and death times as columns by server for their comparison
+        # so that we can easily find the server in which the next event takes place  
+        self.times_next_events2[P] = np.c_[self.times_next_birth_events[P], self.times_next_death_events[P]]
+        ## The above way of storing the times of the next BIRTH and DEATH events assumes
+        ## that the BIRTH event is associated to the (index) value 0 and the DEATH event
+        ## is associated to the index value 1.
+        ## This is defined in the definition of the Event Enum which sets BIRTH = 0 and DEATH = 1.
+
+        # 2D index in the above array of the smallest non-NaN next birth and death event times
+        server_next_event, idx_type_next_event = np.where( self.times_next_events2[P] == np.nanmin(self.times_next_events2[P]) )
+        assert len(server_next_event) > 0 and len(idx_type_next_event) > 0
+        # Take care of the HIGHLY EXTREMELY UNLIKELY scenario when there is more than one occurence with the minimum time.
+        # Also, this step is important because the output from the np.where() function is a tuple of ARRAYS
+        # and we want each of the output value to be a SCALAR.
+        # By retrieving the first element of each array we take care of both issues.
+        server = server_next_event[0]
+        idx_type_event = idx_type_next_event[0]
+
+        # Update the relevant object attributes with this piece of information
+        self.servers_next_event[P] = server
+        self.types_next_event[P] = Event(idx_type_event)
+        self.times_next_event[P] = self.times_next_events2[P][ server, idx_type_event ]
+
+        if DEBUG_TIME_GENERATION:
+            print("\n_get_next_event: P={}".format(P))
+            print("Next birth times to choose from: {}".format(self.times_next_birth_events[P]))
+            print("Next death times to choose from: {}".format(self.times_next_death_events[P]))
+            print("TYPE OF CHOSEN NEXT EVENT: {}".format(self.types_next_event[P]))
+            print("TIME OF CHOSEN NEXT EVENT: {}".format(self.times_next_event[P]))
+
+        return self.servers_next_event[P], self.types_next_event[P], self.times_next_event[P]
+
     def _apply_next_event(self, P, server, type_of_event :Event, time_of_event :float):
         """
         Applies the next event to a particle at the given server, of the given type, at the given time.
@@ -1199,28 +1238,42 @@ class EstimatorQueueBlockingFlemingViot:
             - the job that is waiting first in the queue of jobs to be served is removed if it's a BIRTH event.
             - the job being served by the server is removed if it's a DEATH event.
         """
-        self.particles[P].apply_event( type_of_event,
-                                       time_of_event,
-                                       server )
+        previous_buffer_size = self.particles[P].getBufferSize()
+        change_size_of_server = self.particles[P].apply_event( type_of_event,
+                                                               time_of_event,
+                                                               server )
+        if previous_buffer_size < self.particles[P].getCapacity():
+            assert change_size_of_server != 0, \
+                "P={}: server {} on which the event of type {} was applied at time {:.3f} changed size.".format(P, server, type_of_event, time_of_event)
+        elif previous_buffer_size == self.particles[P].getCapacity() and type_of_event == Event.BIRTH:
+            assert change_size_of_server == 0, \
+                "P={}: server {} which was blocked and experienced a BIRTH event at time {:.3f} did NOT change size.".format(P, server, time_of_event)
+        elif previous_buffer_size == self.particles[P].getCapacity() and type_of_event == Event.DEATH:
+            assert change_size_of_server < 0, \
+                "P={}: server {} which was blocked and experienced a DEATH event at time {:.3f} changed size.".format(P, server, time_of_event)
         # TOFIX: (2021/03/25) Update the queue environment that keeps track of rewards, etc.
         # We should NOT have a separate environment containing a queue where we ALSO need to keep track of the buffer size...
         # (ALSO = "besides keeping track of the buffer size in the self.queue object")
         if self.policy_accept is not None:
             self.policy_accept.env.setBufferSize( self.particles[P].getBufferSize() )  
 
+        # Set to NaN the "next time" of the event just applied at the given server
         if self.LOG:    # True
             print("\nP={}: Applied {} @t={:.3f} to server {}...".format(P, type_of_event, time_of_event, server) + (self.particles[P].getLastChange(server) == 0 and " --> NO CHANGE!" or ""))
         if type_of_event == Event.BIRTH:
             # Remove the job from the server's queue, as it is now being PROCESSED by the server
             if self.LOG:
                 print("Job queue in server {} (the first job will be removed for processing by server): {}".format(server, self.times_next_events_in_queue[P][server]))
-            self.times_next_events_in_queue[P][server].pop(0)
-            self.jobclasses_next_events_in_queue[P][server].pop(0)
+            self.times_in_server_queue[P][server].pop(0)
+            self.jobclasses_in_server_queue[P][server].pop(0)
+            # It's important to keep in the servers's queue JUST the information about the jobs WAITING
+            # and NOT those being served because the NEXT BIRTH TIME for each server is chosen based on the
+            # times of the WAITING jobs (see _generate_birth_times()). 
+            self.times_next_birth_events[P][server] = np.nan
         elif type_of_event == Event.DEATH:
-            # Remove the job from the server processing line, as its process has now FINISHED
             if self.LOG:
-                print("Job service times list {} (the first job will be removed as server finished processing it): {}".format(server, self.times_next_services[P][server]))
-            self.times_next_services[P][server].pop(0)
+                print("\n_apply_next_event: P={}, server={}: DEATH - Job finished at time t={:.3f}".format(P, server, time_of_event))
+            self.times_next_death_events[P][server] = np.nan
 
         # Update the latest time we know the state of the system
         self.times_latest_known_state[P] = time_of_event
@@ -1371,6 +1424,7 @@ class EstimatorQueueBlockingFlemingViot:
                 # and these special events are checked based on the information stored in the self.particles[P] attribute
                 # which is updated by the _set_new_particle_position() call. 
                 self._set_new_particle_position(P, t0, position_Q_at_t0)
+                self._reset_birth_and_death_times(P)
                 self._update_info_particles_and_blocking_statistics(P)
             else:
                 # In NO reactivation mode, we need to generate ONE iteration before CONTINUING with the simulation below,
@@ -1521,6 +1575,17 @@ class EstimatorQueueBlockingFlemingViot:
         # Update the list stating whether each particle is active
         self._update_active_particles(P)
 
+    def _reset_birth_and_death_times(self, P):
+        """
+        Resets the next birth and death times for all servers to NaN, as at start of simulation.
+        
+        This is typically called after reactivation of a particle, when the particle
+        changes position abruptly and therefore we need to reset the all next event times in each server
+        to NaN because it's like starting a new trajectory from scratch. 
+        """
+        self.times_next_birth_events[P] = np.nan*np.ones((self.nservers,), dtype=float)
+        self.times_next_death_events[P] = np.nan*np.ones((self.nservers,), dtype=float)
+
     def _update_info_particles_and_blocking_statistics(self, P):
         """
         Updates the info_particles attribute with the new particle's position
@@ -1613,8 +1678,9 @@ class EstimatorQueueBlockingFlemingViot:
         Returns the position (buffer size) before the latest change taking place in the particle.
         
         The previous buffer size is equal to the current buffer size if the latest change was 0.
-        (which happens for instance when a server at 0 experiences a DEATH event or a server at
-        maximum capacity experiences a BIRTH event).
+        (which happens ONLY when a server at maximum capacity experiences a BIRTH event, as
+        no DEATH events take place when the server's queue is empty because the time for the next death event
+        for such server is NaN).
 
         If the type of the latest event is a RESIZE, the previous buffer size is computed from
         the latest size change in ALL servers (as opposed to the latest size change which under normal
@@ -1803,6 +1869,8 @@ class EstimatorQueueBlockingFlemingViot:
         self.dict_info_absorption_times['P'].insert(idx_insort, P)
         try:
             idx_state_of_absorption = self.states_absorption_set_at_boundary.index(state_of_absorption)
+            ## IMPORTANT: In order for the state_of_absorption to be findable in the list of absorption states
+            ## it MUST be a list!! (as opposed to e.g. a numpy array)
         except:
             raise Warning("The given state of absorption ({}) has not been found among the valid absorption states:\n{}" \
                           .format(state_of_absorption, self.states_absorption_set_at_boundary))
@@ -3309,7 +3377,7 @@ class EstimatorQueueBlockingFlemingViot:
                 "coincides with the time of the next {} currently stored in the times_next_events2 for particle {} on server {} ({:.3f})" \
                 .format(type_of_last_event, P, server_last_updated, self.times_next_events2[P][server_last_updated][type_of_last_event.value]) + \
                 "\nTimes of next events of both types for server {}: {}".format(server_last_updated, self.times_next_events2[P][server_last_updated]) + \
-                "\nTimes of next events in server {}'s queue: {}".format(server_last_updated, self.times_next_events_in_queue[P][server_last_updated])
+                "\nTimes of next events in server {}'s queue: {}".format(server_last_updated, self.times_in_server_queue[P][server_last_updated])
 
     def assertTimeToInsertInTrajectories(self, P, server=0):
         #for p in range(self.N):
