@@ -37,6 +37,9 @@ else:
     from .utils.basic import array_of_objects, find, find_last, find_last_value_in_list, insort, list_contains_either, merge_values_in_time
     from .utils.computing import compute_blocking_probability_birth_death_process, stationary_distribution_birth_death_process, stationary_distribution_birth_death_process_at_capacity_unnormalized
 
+DEBUG_TIME_GENERATION = False
+DEBUG_TRAJECTORIES = False
+
 @unique # Unique enumeration values (i.e. on the RHS of the equal sign)
 class EventType(Enum):
     ACTIVATION = +1
@@ -695,6 +698,7 @@ class EstimatorQueueBlockingFlemingViot:
         return equivalent_birth_rates
 
     #--------------------------------- Functions to simulate ----------------------------------
+    #------------ HIGH LEVEL SIMULATION ------------
     def simulate(self, start_event_type :EventType):
         """
         Simulates the system of particles and estimates the blocking probability
@@ -834,8 +838,8 @@ class EstimatorQueueBlockingFlemingViot:
             self.generate_trajectories_until_end_of_simulation()
             time2 = timer()
             # Check trajectories
-            if False: #self.N == 1:
-                if False:
+            if DEBUG_TRAJECTORIES: #and self.N == 1:
+                if True:
                     for P in range(self.N):
                         self.plot_trajectories_by_server(P)
                 self.plot_trajectories_by_particle()
@@ -915,7 +919,10 @@ class EstimatorQueueBlockingFlemingViot:
             print("\tCompute counts: {:.1f} min ({:.1f}%)".format((time_end - time1) / 60, (time_end - time1) / total_elapsed_time*100))
 
         return self.rtimes_obs_sum, self.rtimes_obs_n
+    #------------ HIGH LEVEL SIMULATION ------------
 
+
+    #------------ LOW LEVEL SIMULATION -------------
     def generate_trajectories_at_startup(self):
         for P in range(self.N):
             self.iterations[P] = 0
@@ -1005,6 +1012,8 @@ class EstimatorQueueBlockingFlemingViot:
         # If a new birth time is generated for a server, it is added to the server's queue
         # at the position in the queue derived from the generated birth time value and its comparison
         # with the other birth times already in the server's queue.
+        if DEBUG_TIME_GENERATION:
+            print("\n\n***** _generate_next_events: P={}: CURRENT STATE: {} @t={:.3f}*****".format(P, self.particles[P].getServerSizes(), self.times_latest_known_state[P]))
         self._generate_death_times(P)
         # NOTE: When using _generate_birth_times() which first generates arriving job classes
         # and then assigns each new job to a server based on the assignment policy,
@@ -1060,7 +1069,7 @@ class EstimatorQueueBlockingFlemingViot:
             return resp
         #--------------------------------- Auxiliary functions --------------------------------
 
-        if False:
+        if DEBUG_TIME_GENERATION:
             print("\n_generate_birth_times (START): P={}".format(P))
             print("times last jobs[P]: {}".format(self.times_last_jobs[P]))
             print("times next events in server queues:")
@@ -1137,11 +1146,21 @@ class EstimatorQueueBlockingFlemingViot:
             assert len(self.times_in_server_queue[P][server]) > 0, "P={}: The queue in server {} is not empty.".format(P, server)
             self.times_next_birth_events[P][server] = self.times_in_server_queue[P][server][0]
 
+        if DEBUG_TIME_GENERATION:
+            print("_generate_birth_times (END): P={}".format(P))
+            print("times last jobs[P]: {}".format(self.times_last_jobs[P]))
+            print("times next events in server queues:")
+            for s in range(self.nservers):
+                print("\t{}: {}".format(s, self.times_in_server_queue[P][s]))
+
     def _generate_birth_times_from_equivalent_rates(self, P):
         """
         Generates new birth times for EACH server in the particle that does NOT have a "next birth time".
         The equivalent arrival rates are used instead of the job class arrival rate + assignment policy.
         """
+
+        if DEBUG_TIME_GENERATION:
+            print("\n_generate_birth_times_from_equivalent_rates (START): P={}".format(P))
 
         for server in range(self.nservers):
             if np.isnan(self.times_next_birth_events[P][server]):
@@ -1151,6 +1170,13 @@ class EstimatorQueueBlockingFlemingViot:
                 # i.e. the time at which the latest event was applied.
                 birth_time_relative = self.particles[P].generate_event_time(Event.BIRTH, server)
                 self.times_next_birth_events[P][server] = self.times_latest_known_state[P] + birth_time_relative
+                if DEBUG_TIME_GENERATION:
+                    print("server {}: Current time={:.3f}, Exponential BIRTH time={:.3f}, ABSOLUTE time={:.3f}" \
+                          .format(server, self.times_latest_known_state[P], birth_time_relative, self.times_next_birth_events[P][server]))
+
+        if DEBUG_TIME_GENERATION:
+            print("_generate_birth_times_from_equivalent_rates (END): P={}".format(P))
+
     def _generate_death_times(self, P):
         """
         Generates death times for each server with jobs in its queue
@@ -1309,16 +1335,32 @@ class EstimatorQueueBlockingFlemingViot:
             # It's important to keep in the servers's queue JUST the information about the jobs WAITING
             # and NOT those being served because the NEXT BIRTH TIME for each server is chosen based on the
             # times of the WAITING jobs (see _generate_birth_times()). 
+            if DEBUG_TIME_GENERATION:
+                print("\n_apply_next_event: P={}, server={}: BIRTH - Job started at time t={:.3f}".format(P, server, time_of_event))
             # DM-2021/05/10-START: Activate the following lines when assigning job classes to server using the assignment policy 
             #self.times_in_server_queue[P][server].pop(0)
             #self.jobclasses_in_server_queue[P][server].pop(0)
             # DM-2021/05/10-END
             self.times_next_birth_events[P][server] = np.nan
         elif type_of_event == Event.DEATH:
-            if self.LOG:
+            if DEBUG_TIME_GENERATION:
                 print("\n_apply_next_event: P={}, server={}: DEATH - Job finished at time t={:.3f}".format(P, server, time_of_event))
             self.times_next_death_events[P][server] = np.nan
 
+        if DEBUG_TIME_GENERATION:
+            print("\n\n***** _apply_next_event: P={}: NEW STATE: {} @t={:.3f}*****".format(P, self.particles[P].getServerSizes(), time_of_event))
+            print("Jobs in server queues:".format(P))
+            print("times:")
+            for s in range(self.nservers):
+                print("\t{}: {}".format(s, self.times_in_server_queue[P][s]))  
+            print("job classes:")  
+            for s in range(self.nservers):
+                print("\t{}: {}".format(s, self.jobclasses_in_server_queue[P][s]))  
+            print("Next birth times: {}".format(self.times_next_birth_events[P]))
+            print("Next death times: {}".format(self.times_next_death_events[P]))
+            print("*******************************************************")
+            print("\n\n")
+       
         # Update the latest time we know the state of the system
         self.times_latest_known_state[P] = time_of_event
 
@@ -2505,7 +2547,7 @@ class EstimatorQueueBlockingFlemingViot:
                     .format(idx, len(self.counts_blocked)) + \
                     "found so far is between 0 and N={} ({}) \n({})" \
                     .format(self.N, self.counts_blocked[idx], self.counts_blocked)
-    #--------------------------------- Functions to simulate ----------------------------------
+    #--------------------------- Functions to wrap up the simulation --------------------------
 
 
     #----------------------------- Functions to analyze the simulation ------------------------
