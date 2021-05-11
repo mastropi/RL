@@ -3870,6 +3870,9 @@ def plot_curve_estimates(df_proba_survival_and_blocking_conditional, dict_params
     ax2 = ax.twinx()
     ax2.step(df_proba_survival_and_blocking_conditional['t'], df_proba_survival_and_blocking_conditional['P(BLOCK / T>t,s=1)'],
              'r-', where='post')
+    # Plot the product
+    ax2.step(df_proba_survival_and_blocking_conditional['t'], df_proba_survival_and_blocking_conditional['P(T>t / s=1)']*df_proba_survival_and_blocking_conditional['P(BLOCK / T>t,s=1)'],
+             'g-', where='post')
     # Set the maximum value of the secondary vertical axis (red curve) 
     #y2max = None
     #y2max = 0.05
@@ -3900,7 +3903,7 @@ def plot_distribution_states(states, freq, freq2=None, label_top=10, title="Dist
     Optionally a second distribution on the same states is plotted for comparison.
     """
     assert len(states) == len(freq)
-    if freq is not None:
+    if freq2 is not None:
         assert len(states) == len(freq2)
 
     # Prepare the data to plot
@@ -3928,7 +3931,7 @@ def plot_distribution_states(states, freq, freq2=None, label_top=10, title="Dist
         ax1.set_xlim(0, ymax)
         ax2.set_xlim(0, ymax)
         ax3.set_xlim(-ymax, ymax)
-        ax1.title.set_text("Observed freq. during simulation")
+        ax1.title.set_text("Observed freq. during simulation\n(n={})".format(np.sum(freq)))
         ax2.title.set_text("Restricted Markov chain")
         ax3.title.set_text("Difference (right - left)")
     plt.suptitle(title)
