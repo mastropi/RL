@@ -466,6 +466,11 @@ class EstimatorQueueBlockingFlemingViot:
         #--------------------------- Last jobs and services information -----------------------
 
 
+        #----------------------------- Activation states distribution -------------------------
+        self.dist_activation_states = [0] * len(self.states_activation)
+        #----------------------------- Activation states distribution -------------------------
+
+
         #---------------------------------- Absorption times ----------------------------------
         #-- Distribution of absorption states used to analyze if the observed distribution at the end of the simulation looks reasonable
         self.dist_absorption_states = [0] * len(self.states_absorption_set_at_boundary)
@@ -658,6 +663,8 @@ class EstimatorQueueBlockingFlemingViot:
                                                                                 # (the events of interest are those affecting the
                                                                                 # estimation of the blocking probability:
                                                                                 # activation, absorption, block, unblock)
+                                                   'S': [ list(self.particles[P].getServerSizes()) ], # State index associated to the special event
+                                                        ## IMPORTANT: We need to convert the state to a list in order to be findable by the .index() function of lists used in e.g. compute_counts() 
                                                    't0': None,                  # Absorption /reactivation time
                                                    'x': None,                   # Position after reactivation
                                                    'particle number': P,        # Source particle (queue) from which reactivation happened (only used when reactivate=True)
@@ -949,7 +956,7 @@ class EstimatorQueueBlockingFlemingViot:
             for P in range(self.N):
                 with printoptions(precision=3, suppress=True):
                     print("Particle {}:".format(P))
-                    print(np.c_[np.array(self.info_particles[P]['t']), np.array(self.info_particles[P]['E'])])
+                    print(np.c_[np.array(self.info_particles[P]['t']), np.array(self.info_particles[P]['E']), np.array(self.info_particles[P]['S'])])
 
     def generate_one_iteration(self, P):
         """
@@ -1576,11 +1583,14 @@ class EstimatorQueueBlockingFlemingViot:
 
         # Add a new entry to the info_particles list that represents the reactivated particle
         # Its position is assigned to the position of the reassigned particle Q at time t,
-        # and the information about the event times ('t') and event types ('E') are empty
-        # (because nothing has happened yet to the reactivated particle.
+        # and the information about the event times ('t'), event types ('E'), and particle state ('S') are empty
+        # (because the information about the new position is defined OUTSIDE this method
+        # by the method _update_info_particles_and_blocking_statistics(), called just after this method is called,
+        # because that method is called by other "processes" as well).
         position_Q = self.get_position(Q, t)
         self.info_particles += [ dict({'t': [],
                                        'E': [],
+                                       'S': [],
                                        't0': t,
                                        'x': position_Q,
                                        'particle number': P,
@@ -1695,6 +1705,7 @@ class EstimatorQueueBlockingFlemingViot:
                     .format(p, len(self.info_particles))
             self.info_particles[p]['t'] += [ self.times_buffer[P] ]
             self.info_particles[p]['E'] += [ event_types ]
+            self.info_particles[p]['S'] += [ list(self.particles[P].getServerSizes()) ]
 
             # Update the blocking times if any blocking/unblocking event took place 
             self._update_blocking_statistics(P, event_types)
@@ -1962,6 +1973,11 @@ class EstimatorQueueBlockingFlemingViot:
                           .format(state_of_absorption, self.states_absorption_set_at_boundary))
         self.dict_info_absorption_times['S'].insert(idx_insort, idx_state_of_absorption)
 
+    #------------ LOW LEVEL SIMULATION -------------
+    #--------------------------------- Functions to simulate ----------------------------------
+
+
+    #------------------- Functions to store information about the simulation ------------------
     def _update_absorption_times(self, P, time_of_absorption):
         ref_time = 0.0 if np.isnan(self.times0[P]) else self.times0[P]
 
@@ -2013,7 +2029,10 @@ class EstimatorQueueBlockingFlemingViot:
                 print("\n>>>> Particle P={}: unblocking @t={:.3f}".format(P, time_of_unblocking))
                 print(">>>> Previous blocking times: {:.3f}".format(self.timesb[P]))
                 print(">>>> \tNew total blocking time (btimes_sum): {:.3f}".format(self.btimes_sum[P]))
+    #------------------- Functions to store information about the simulation ------------------
 
+
+    #--------------------------- Functions to wrap up the simulation --------------------------
     def finalize(self):
         """
         Finalizes the simulation process by treating particles that are active,
@@ -2312,7 +2331,7 @@ class EstimatorQueueBlockingFlemingViot:
             # following an ABSORPTION event for the particle.
             activation_times = []
             event_types_prev = []
-            for t, event_types in zip(dict_info['t'], dict_info['E']):
+            for t, event_types, state in zip(dict_info['t'], dict_info['E'], dict_info['S']):
                 if list_contains_either(event_types, EventType.ACTIVATION):
                     ## NOTE: (2021/02/18) Fictitious ACTIVATION times (ACTIVATION_F) are NOT added to the list of activation times
                     ## because these should NOT be used to compute the absorption times that are used to
@@ -2332,6 +2351,18 @@ class EstimatorQueueBlockingFlemingViot:
                                 "There must be NO event after an absorption because the particle is absorbed, i.e. it dies (p={}, P={}, {})" \
                                 .format(p, P, event_types)
                     activation_times += [t]
+                    # Keep track of the distribution of activation states
+                    try:
+                        idx_state_activation = self.states_activation.index(state)
+                        ## IMPORTANT: In order for state to be findable in the list of absorption states
+                        ## it MUST be a list!! (as opposed to e.g. a numpy array)
+                    except:
+                        raise Warning("P={}: The given activation state ({}) has not been found among the valid activation states:\n{}" \
+                          .format(P, state, self.states_activation))
+                    activation_state = self.states_activation[idx_state_activation]
+                    self.dist_activation_states[idx_state_activation] += 1
+                    if self.LOG:
+                        print("Popped activation time {:.3f} for particle P={} activated at state {}".format(t, P, activation_state))
                 elif list_contains_either(event_types, EventType.ABSORPTION) and event_types_prev != []:    # (2021/04/24) The `event_types_prev != []` is added as a condition to take care of the special first absorption event that happens when the particle starts at an ABSORPTION state. 
                     ## NOTE: (2021/02/18) Fictitious ABSORPTION times (ABSORPTION_F) are NOT considered because they may
                     ## underestimate the return time to absorption, making Pr(T>t / s=1) be smaller than it should.                        
@@ -3076,6 +3107,10 @@ class EstimatorQueueBlockingFlemingViot:
 
     def get_number_active_particles(self):
         return sum(self.is_particle_active)
+
+    def get_activation_states_distribution(self):
+        "Returns a duple containing the list of possible activation states, and their observed frequency of occurrence during simulation"
+        return self.states_activation, self.dist_activation_states
 
     def get_absorption_states_distribution(self):
         "Returns a duple containing the list of possible absorption states, and their observed frequency of occurrence during simulation"
