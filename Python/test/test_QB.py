@@ -491,9 +491,9 @@ class Test_QB_Particles(unittest.TestCase):
         # Info parameters 
         dict_params_info = {'plot': True, 'log': False}
 
-        replications = 8
+        replications = 12
         nparticles_min = 800
-        nparticles_max = 1600
+        nparticles_max = 3200
         nparticles_step_prop = 1  # STEP proportion: N(n+1) = (1 + prop)*N(n), so that we scale the step as the number of particles increases
         nparticles = nparticles_min
         df_results = pd.DataFrame(columns=['K', 'BSA', 'N', 'replication', 'Pr(MC)', 'Time(MC)', 'E(T)', 'Pr(FV)', 'Time(FV)', 'Pr(K)', 'seed', 'exec_time(s)'])
@@ -744,10 +744,32 @@ class Test_QB_Particles(unittest.TestCase):
                     print("\t\tTrue P(K): {:.6f}%".format(proba_blocking_true*100))
 
                     # Check the results are comparable
-                    assert est_mc.maxtime - nparticles*est_fv.maxtime > -0.001*est_fv.maxtime, \
-                        "The simulation time of the MC process ({:.1f}) is equal or longer than N times the simulation time of the FV process ({:.1f})" \
-                        .format(est_mc.maxtime, nparticles*est_fv.maxtime)
-
+                    #assert est_mc.maxtime - nparticles*est_fv.maxtime > -0.001*est_fv.maxtime, \
+                    #    "The simulation time of the MC process ({:.1f}) is equal or longer than N times the simulation time of the FV process ({:.1f})" \
+                    #    .format(est_mc.maxtime, nparticles*est_fv.maxtime)
+                    mc_time = est_mc.get_simulation_time()
+                    mc_nevents = est_mc.get_number_events()
+                    print("MC simulation:\n- time = {:.1f}\n- #events = {}".format(mc_time, mc_nevents))
+                    fv_time_surv = est_surv.get_simulation_time(which="latest")
+                    fv_time_abs = est_abs.get_simulation_time()
+                    fv_time_fv = est_fv.get_simulation_time()
+                    fv_time = fv_time_surv + fv_time_abs + fv_time_fv
+                    fv_time_surv_prop = fv_time_surv / fv_time
+                    fv_time_abs_prop = fv_time_abs / fv_time
+                    fv_time_fv_prop = fv_time_fv / fv_time
+                    fv_nevents_surv = est_surv.get_number_events()
+                    fv_nevents_abs = est_abs.get_number_events()
+                    fv_nevents_fv = est_fv.get_number_events()
+                    fv_nevents = fv_nevents_surv + fv_nevents_abs + fv_nevents_fv
+                    fv_nevents_surv_prop = fv_nevents_surv / fv_nevents
+                    fv_nevents_abs_prop = fv_nevents_abs / fv_nevents
+                    fv_nevents_fv_prop = fv_nevents_fv / fv_nevents
+                    print("FV simulation:")
+                    print("- time = {:.1f} (surv={:.1f} ({:.1f}%), abs={:.1f} ({:.1f}%), fv={:.1f} ({:.1f}%))" \
+                          .format(fv_time, fv_time_surv, fv_time_surv_prop*100, fv_time_abs, fv_time_abs_prop*100, fv_time_fv, fv_time_fv_prop*100))
+                    print("- #events = {} (surv={} ({:.1f}%), abs={} ({:.1f}%), fv={} ({:.1f}%))" \
+                          .format(fv_nevents, fv_nevents_surv, fv_nevents_surv_prop*100, fv_nevents_abs, fv_nevents_abs_prop*100, fv_nevents_fv, fv_nevents_fv_prop*100))
+                    print("Ratio FV / MC: time={:.1f}, nevents={:.1f}".format(fv_time / mc_time, fv_nevents / mc_nevents))
                     # Add the observed measure to the output data frame with the results
                     # Notes:
                     # - We use the from_items() method as opposed to injecting  the data from a dictionary
@@ -839,7 +861,8 @@ class Test_QB_Particles(unittest.TestCase):
         df_proba_blocking_estimates_agg.to_csv(resultsfile_agg)
         print("Aggregated results of simulation saved to {}".format(os.path.abspath(resultsfile_agg)))
 
-        return df_proba_blocking_estimates, df_proba_blocking_estimates_agg
+        return df_proba_blocking_estimates, df_proba_blocking_estimates_agg, \
+                est_mc, est_fv, est_abs, est_surv
 
     @classmethod
     def plot_aggregated_convergence_results(cls, results_convergence):
@@ -1319,7 +1342,7 @@ def closeLogFile(fh_log, stdout_sys, dt_start):
 # DM-2020/12/23: To change which portion of the below code to run, change the IF condition
 # to `== "__main__"` or to `!= "__main__"` accordingly, taking into account that when running
 # this file as a script (F5) __name__ is equal to "__main__".
-if __name__ == "__main__":
+if __name__ != "__main__":
     run_unit_tests = True
     if run_unit_tests:
         #suite = unittest.TestSuite()
@@ -1333,7 +1356,9 @@ if __name__ == "__main__":
         #results, results_agg, est_mc, est_fv, est_abs, est_surv = Test_QB_Particles.test_fv_implementation(nservers=1, K=20, buffer_size_activation=0.25)
         #results, results_agg, est_mc, est_fv, est_abs, est_surv = Test_QB_Particles.test_fv_implementation(nservers=1, K=20, buffer_size_activation=0.5)
         #results, results_agg, est_mc, est_fv, est_abs, est_surv = Test_QB_Particles.test_fv_implementation(nservers=1, K=20, buffer_size_activation=0.75)
-        results, results_agg, est_mc, est_fv, est_abs, est_surv = Test_QB_Particles.test_fv_implementation(nservers=1, K=20, buffer_size_activation=0.9)
+        #results, results_agg, est_mc, est_fv, est_abs, est_surv = Test_QB_Particles.test_fv_implementation(nservers=1, K=20, buffer_size_activation=0.9)
+
+        results, results_agg, est_mc, est_fv, est_abs, est_surv = Test_QB_Particles.test_fv_implementation(nservers=1, K=40, buffer_size_activation=0.5)
 
         #results, results_agg, est_mc, est_fv, est_abs, est_surv = Test_QB_Particles.test_fv_implementation(nservers=3, K=5, buffer_size_activation=1)
         #results, results_agg = Test_QB_Particles.test_fv_implementation(K=20, buffer_size_activation=8)
@@ -1419,10 +1444,11 @@ if __name__ == "__main__":
         print("Execution time: {:.1f} min".format((time_end - time_start) / 60))
 else:
     # Lines to execute "by hand" (i.e. at the Python prompt)
-    test = Test_QB_Particles(nservers=3)
+    test = Test_QB_Particles(nservers=1)
+    #test = Test_QB_Particles(nservers=3)
 
-    #dt_start, stdout_sys, fh_log, logfile, resultsfile, resultsfile_agg = createLogFileHandleAndResultsFileNames(prefix="analyze_estimates")
-    fh_log = None; resultsfile = None; resultsfile_agg = None
+    dt_start, stdout_sys, fh_log, logfile, resultsfile, resultsfile_agg = createLogFileHandleAndResultsFileNames(prefix="analyze_estimates")
+    #fh_log = None; resultsfile = None; resultsfile_agg = None
 
     # NOTES on the below calls to simulation execution:
     # - Use larger N values to improve the estimation of Phi(t)
@@ -1431,7 +1457,7 @@ else:
     # the 1-particle system that estimates P(T>t).
     tests2run = [5]
     if 1 in tests2run:
-        results_convergence = test.analyze_estimates(
+        results, results_agg, est_mc, est_fv, est_abs, est_surv = test.analyze_estimates(
                                         replications=12,
                                         K_values=[10, 20, 30, 40],
                                         nparticles_values=[200, 400, 800, 1600],
@@ -1443,7 +1469,7 @@ else:
                                                          'resultsfile': resultsfile,
                                                          'resultsfile_agg': resultsfile_agg})
     if 2 in tests2run:
-        results_convergence = test.analyze_estimates(
+        results, results_agg, est_mc, est_fv, est_abs, est_surv = test.analyze_estimates(
                                         replications=12,
                                         K_values=[10, 20],
                                         nparticles_values=[200, 400],
@@ -1455,7 +1481,7 @@ else:
                                                          'resultsfile': resultsfile,
                                                          'resultsfile_agg': resultsfile_agg})
     if 3 in tests2run:
-        results_convergence = test.analyze_estimates(
+        results, results_agg, est_mc, est_fv, est_abs, est_surv = test.analyze_estimates(
                                         replications=12,
                                         K_values=[30, 40],
                                         nparticles_values=[800, 1600],
@@ -1467,7 +1493,7 @@ else:
                                                          'resultsfile': resultsfile,
                                                          'resultsfile_agg': resultsfile_agg})
     if 4 in tests2run:
-        results_convergence = test.analyze_estimates(
+        results, results_agg, est_mc, est_fv, est_abs, est_surv = test.analyze_estimates(
                                         replications=12,
                                         K_values=[10],
                                         nparticles_values=[400],
@@ -1480,20 +1506,20 @@ else:
                                                          'resultsfile': resultsfile,
                                                          'resultsfile_agg': resultsfile_agg})
     if 5 in tests2run:
-        results_convergence = test.analyze_estimates(
-                                        replications=2,
+        results, results_agg, est_mc, est_fv, est_abs, est_surv = test.analyze_estimates(
+                                        replications=12,
                                         K_values=[20],
-                                        nparticles_values=[5],
-                                        nmeantimes_values=[10],
+                                        nparticles_values=[1000],
+                                        nmeantimes_values=[50],
                                         multiplier_values=[1],
                                         multiplier_adjust_with_activation=False,
-                                        buffer_size_activation_values=[4], #[0.1, 0.25, 0.5],
+                                        buffer_size_activation_values=[0.1, 0.25, 0.5, 0.8],
                                         seed=1313,
                                         dict_params_out={'logfilehandle': fh_log,
                                                          'resultsfile': resultsfile,
                                                          'resultsfile_agg': resultsfile_agg})
     if 6 in tests2run:
-        results_convergence = test.analyze_estimates(
+        results, results_agg, est_mc, est_fv, est_abs, est_surv = test.analyze_estimates(
                                         replications=12,
                                         K_values=[30],
                                         nparticles_values=[800],
@@ -1506,7 +1532,7 @@ else:
                                                          'resultsfile': resultsfile,
                                                          'resultsfile_agg': resultsfile_agg})
     if 7 in tests2run:
-        results_convergence = test.analyze_estimates(
+        results, results_agg, est_mc, est_fv, est_abs, est_surv = test.analyze_estimates(
                                         replications=12,
                                         K_values=[40],
                                         nparticles_values=[1200],
@@ -1519,4 +1545,5 @@ else:
                                                          'resultsfile': resultsfile,
                                                          'resultsfile_agg': resultsfile_agg})
 
-    closeLogFile(fh_log, stdout_sys, dt_start)
+    if fh_log is not None:
+        closeLogFile(fh_log, stdout_sys, dt_start)

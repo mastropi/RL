@@ -2168,8 +2168,7 @@ class EstimatorQueueBlockingFlemingViot:
                         dict_info['t'] += [time_to_insert]
                         dict_info['E'] += [ [EventType.ABSORPTION_F] ]
                     """
-                    # Update the latest time of known state for particle P to the valid event time
-                    # leading to the particle ID p just removed
+                    # Update the latest time of known state for particle P to the latest valid event time
                     if len(dict_info['E']) > 0:
                         assert  self.finalize_info['condition'] == FinalizeCondition.ACTIVE and list_contains_either(dict_info['E'][-1], EventType.ABSORPTION) or \
                                 self.finalize_info['condition'] == FinalizeCondition.NOT_START_POSITION and list_contains_either(dict_info['E'][-1], EventType.START_POSITION), \
@@ -2199,7 +2198,7 @@ class EstimatorQueueBlockingFlemingViot:
                 # - the list of alive time segments
                 # - the list of block/unblock time segments
                 # The inserted time(s) happen AFTER the maximum simulation time.
-                time_to_insert = self.maxtime + self.EPSILON_TIME*np.random.random()
+                time_to_insert = self.maxtime + self.generate_epsilon_random_time()
 
                 # 2) Update the information of special events so that calculations are consistent
                 # with how trajectories are expected to behave (e.g. they go through ACTIVATION
@@ -2225,7 +2224,7 @@ class EstimatorQueueBlockingFlemingViot:
                         dict_info['t'] += [time_to_insert]
                         dict_info['E'] += [ [EventType.UNBLOCK_F] ]
                         # Increase each of the times to insert for the insertion of the next event
-                        time_to_insert += self.EPSILON_TIME*np.random.random()
+                        time_to_insert += self.generate_epsilon_random_time()
                         # Update the total blocking time
                         self._update_blocking_time(P, time_to_insert)
                     if not self._is_particle_activated(P):
@@ -2234,7 +2233,7 @@ class EstimatorQueueBlockingFlemingViot:
                         dict_info['E'] += [ [EventType.ACTIVATION_F] ]
                         # Increase each of the time to insert for the insertion of the
                         # fictitious absorption event coming next (to avoid time value repetitions)
-                        time_to_insert += self.EPSILON_TIME*np.random.random()
+                        time_to_insert += self.generate_epsilon_random_time()
                     
                     # Finally add the fictitious ABSORPTION time
                     dict_info['t'] += [time_to_insert]
@@ -2251,6 +2250,17 @@ class EstimatorQueueBlockingFlemingViot:
                 self._update_absorption_times(P, time_to_insert)
 
         self.is_simulation_finalized = True
+
+    def generate_epsilon_random_time(self):
+        """
+        We generate a very small time of the order of EPSILON_TIME
+        with a random component to avoid a possible repetition of of time values
+        which could complicate calculations.
+        
+        The randomly generated value is between 0.1*EPSILON_TIME and EPSILON_TIME
+        so that we don't incurr into underflows.
+        """
+        return self.EPSILON_TIME * max( 0.1, np.random.random() )
 
     def compute_counts(self):
         """
@@ -3053,6 +3063,37 @@ class EstimatorQueueBlockingFlemingViot:
 
     def getStartPosition(self, P):
         return self.all_positions_buffer[P][0]
+
+    def get_number_events(self):
+        """
+        Returns the number of ALL events taking place in the simulation (for all particles).
+        Only one out of two consecutive events recorded with a time difference of less than
+        EPSILON_TIME are counted. In fact, the second event of such pair is either:
+        - a particle that is reactivated --> in this case we should only count the absorption event
+        - a fictitious event added when finalizing the simulation (by finalize())
+
+        This can be used to evaluate how much information we extract from the system.
+        """
+        nevents = 0
+        for P in range(len(self.all_times_buffer)):
+            time_diff = np.diff(self.all_times_buffer[P])
+            nevents += np.sum( time_diff > self.EPSILON_TIME )
+        return nevents
+
+    def get_simulation_time(self, which="max"):
+        """
+        Returns the total simulation time used by all particles.
+        What this time is depends on parameter `which`:
+        - when "max" => N * maxtime
+        - o.w. => sum of latest known state by particle.
+        IMPORTANT: Note that if the finalize() process has already taken place
+        the latest known state of a particle will be the time AFTER the removal of any subtrajectory
+        in case the finalization type is .REMOVE_CENSORED.
+        """
+        if which == "max":
+            return self.N*self.maxtime
+        else:
+            return np.sum( self.times_latest_known_state )
 
     def get_position(self, P, t):
         """
