@@ -3670,7 +3670,15 @@ def estimate_blocking_mc(env_queue :EnvQueueSingleBufferWithJobClasses, dict_par
                                                service_rates=env_queue.getServiceRates(),
                                                buffer_size_activation=dict_params_simul['buffer_size_activation'],
                                                positions_observe=dict_params_simul['buffer_size_activation'],
-                                               nmeantimes=MULTIPLIER * dict_params_simul['nparticles'] * dict_params_simul['nmeantimes'],
+                                               nmeantimes=3 * MULTIPLIER * dict_params_simul['nparticles'] * dict_params_simul['nmeantimes'],
+                                                   ## We multiply by 3 to take into account all the simulations carried out by the FV estimation
+                                                   ## PLUS a security margin (2+1), and thus make the two approaches comparable:
+                                                   ## 1) (10% of time/events) Simulation of N particles until absorption to estimate P(T>t)
+                                                   ## 2) (40% of time/events) Simulation of 1 particle for N*T(FV) to estimate E(T)
+                                                   ## 3) (50% of time/events) Simulation of N particles for T(FV) to estimate Phi(t)
+                                                   ## NOTE that the time used to estimate the survival curve may vary
+                                                   ## considerably as it depends on the system parameters, because the simulation is stopped
+                                                   ## at the first absorption of the particle and this time depends on the simulation parameters.
                                                policy_assign=env_queue.getAssignPolicy(),
                                                mean_lifetime=None,
                                                proba_survival_given_activation=None,
@@ -3765,7 +3773,6 @@ def estimate_blocking_fv(env_queue :EnvQueueSingleBufferWithJobClasses,
     # (Ref: 2-hour call with Matt on Tue, 27-Apr-2021 and Asmussen, pag. 170 when he talks about regenerative processes).
     # 
     # In BOTH CASES censored particles are REMOVED, where censoring is defined by the particle being ACTIVE (i.e. not yet absorbed)
-    """
     if est is None:
         time_start = timer()
         est_surv = EstimatorQueueBlockingFlemingViot(dict_params_simul['nparticles'], env_queue.queue, env_queue.getJobRates(),
@@ -3796,8 +3803,17 @@ def estimate_blocking_fv(env_queue :EnvQueueSingleBufferWithJobClasses,
         n_survival_curve_observations = est_surv.counts_alive[0]
         print("\t--> Number of observations for P(T>t) estimation: {} (N={})".format(n_survival_curve_observations, est_surv.N))
     proba_survival_given_activation = est_surv.estimate_proba_survival_given_activation()
-    """
-    est_surv = None # Just for the return to the outside world
+    #est_surv = None # Just for the return to the outside world
+
+    # TODO: (2021/05/08) Use the expected survival time estimated by the MC simulation as E(T)
+    # In fact, the only difference between the following simulation and the MC simulation is the start state
+    # which is ABSORPTION here and in MC is ACTIVATION. However, all the measurements of killing times
+    # are valid for estimating E(T / s=0) except for the first measurement coming from the very first absorption
+    # which is an estimator of E(T / s=1). For larger BSA values we should disregard this first measurement
+    # (because it would be quite different from the measurements for E(T / s=0)), and for this we should
+    # change the way the average killing time is computed in the Estimator object (by estimate_expected_absorption_time()),
+    # or eitherwhise keep track of the first absorption time in the object so that we can remove its contribution
+    # (the latter should be simpler).
     time_start = timer()
     est_abs = EstimatorQueueBlockingFlemingViot(1, env_queue.queue, env_queue.getJobRates(),
                                                service_rates=env_queue.getServiceRates(),
@@ -3840,14 +3856,14 @@ def estimate_blocking_fv(env_queue :EnvQueueSingleBufferWithJobClasses,
                                                nmeantimes=dict_params_simul['nmeantimes'],      #5*dict_params_simul['nmeantimes'],
                                                policy_assign=env_queue.getAssignPolicy(),
                                                mean_lifetime=expected_survival_time,
-                                               proba_survival_given_activation=None, #proba_survival_given_activation,
+                                               proba_survival_given_activation=proba_survival_given_activation,
                                                reactivate=True,
                                                finalize_info={'type': finalize_type, 'condition': FinalizeCondition.ACTIVE},
                                                seed=seed,
                                                plotFlag=dict_params_info['plot'],
                                                log=dict_params_info['log'])
     proba_blocking_fv, _, integral, _, _ = est_fv.simulate(EventType.ACTIVATION)
-    activation_states, dist_activation_states = est_abs.get_activation_states_distribution()
+    activation_states, dist_activation_states = est_fv.get_activation_states_distribution()
     n_survival_curve_observations = np.sum(dist_activation_states)
     print("\t--> Number of observations for P(T>t) estimation: {} (N={})".format(n_survival_curve_observations, est_fv.N))
     if dict_params_info['plot']:
@@ -3869,9 +3885,9 @@ def estimate_blocking_fv(env_queue :EnvQueueSingleBufferWithJobClasses,
                             'finalize_type': finalize_type,
                             'seed': seed
                             })
-        #plot_distribution_states(est_surv.states_activation, n_particles_by_start_state, freq2=est_surv.dist_activation, label_top=10, title="Distribution of ACTIVATION states")
-        plot_distribution_states(activation_states, dist_activation_states, freq2=est_fv.dist_activation, label_top=10, title="Distribution of ACTIVATION states")
-        plot_distribution_states(absorption_states, dist_absorption_states, freq2=est_abs.dist_absorption_set_at_boundary, label_top=10, title="Distribution of ABSORPTION states")
+        plot_distribution_states(est_surv.states_activation, n_particles_by_start_state, freq2=est_surv.dist_activation, label_top=10, title="Distribution of ACTIVATION states (SURV)")
+        plot_distribution_states(activation_states, dist_activation_states, freq2=est_fv.dist_activation, label_top=10, title="Distribution of ACTIVATION states (FV)")
+        plot_distribution_states(absorption_states, dist_absorption_states, freq2=est_abs.dist_absorption_set_at_boundary, label_top=10, title="Distribution of ABSORPTION states (ABS)")
 
     time_end = timer()
     exec_time = time_end - time_start
