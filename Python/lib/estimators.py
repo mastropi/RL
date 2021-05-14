@@ -222,7 +222,8 @@ class EstimatorQueueBlockingFlemingViot:
                  policy_accept=None,
                  policy_assign=None,
                  mean_lifetime=None, proba_survival_given_activation=None,
-                 reactivate=True, finalize_info={'type': FinalizeType.ABSORB_CENSORED, 'condition': FinalizeCondition.ACTIVE},
+                 reactivate=True,
+                 finalize_info={'maxevents': np.Inf, 'type': FinalizeType.ABSORB_CENSORED, 'condition': FinalizeCondition.ACTIVE},
                  seed=None, plotFlag=False, log=False):
         if reactivate and nparticles < 2:
             raise ValueError("The number of particles must be at least 2 when reactivate=True ({})".format(nparticles))
@@ -299,6 +300,7 @@ class EstimatorQueueBlockingFlemingViot:
         self.proba_survival_given_activation = proba_survival_given_activation  # A possibly separate estimation of the probability of survival having started at the activation set (based on the probability of occurrence of such set)
         self.reactivate = reactivate        # Whether the particle is reactivated to a positive position after absorption
         self.finalize_info = finalize_info  # How to finalize the simulation
+        self.finalize_info['maxevents'] = finalize_info.get('maxevents', np.Inf)    # np.Inf is the default value to get if the key is not found
         self.plotFlag = plotFlag
         self.seed = seed
         self.LOG = log
@@ -342,10 +344,13 @@ class EstimatorQueueBlockingFlemingViot:
         #          (e.g. BIRTH and DEATH)
         #
 
-        # Reset the iteration counter
-        # (which starts at 1 when simulation runs,
-        # and its value is set by the simulation process when calling update_state()) 
-        self.iter = 0
+        # Reset the total number of events counter
+        # Note that this is different from the information conveyed by self.iterations
+        # which is a list over all particles, as the latter keeps track of the number of iterations
+        # or events a particle has been through and IS RESET WHENEVER A PARTICLE IS REACTIVATED
+        # (because that's how it is designed, and it's done like that so that we can run a few assertions
+        # --see self.assertTimeMostRecentEventAndTimesNextEvents())
+        self.nevents = 0
         
         # Variable the keeps track whether the finalize process (at the end of the simulation)
         # has been carried out or not
@@ -837,7 +842,7 @@ class EstimatorQueueBlockingFlemingViot:
             #input("Press ENTER...")
 
         if True: #self.LOG:
-            print("Generating trajectories for each particle until END OF SIMULATION TIME (T={:.1f})...".format(self.maxtime))
+            print("Generating trajectories for each particle until END OF SIMULATION (T={:.1f} or #events={})...".format(self.maxtime, self.finalize_info['maxevents']))
 
         if stop_at_first_absorption:
             time2 = None
@@ -969,7 +974,7 @@ class EstimatorQueueBlockingFlemingViot:
         Return: bool
         Whether the end of the simulation has been reached.
         """
-        end_of_simulation = lambda t: t >= self.maxtime 
+        end_of_simulation = lambda t, nevents: t >= self.maxtime or nevents >= self.finalize_info['maxevents'] 
 
         assert self.isValidParticle(P), "The particle number is valid (0<=P<{}) ({})".format(self.N, P)
 
@@ -988,7 +993,7 @@ class EstimatorQueueBlockingFlemingViot:
         # of the server at the maximum simulation time.
         server_next_event, type_next_event, time_next_event = self._get_next_event(P)
         assert not np.isnan(time_next_event)
-        if end_of_simulation(time_next_event):
+        if end_of_simulation(time_next_event, self.nevents):
             return True
         else:
             if self.LOG:
@@ -1371,7 +1376,10 @@ class EstimatorQueueBlockingFlemingViot:
         # Update the latest time we know the state of the system
         self.times_latest_known_state[P] = time_of_event
 
-        # Increase the iteration because the iteration is associated to the application of a new event in ONE server
+        # Increase the overall events counter
+        self.nevents += 1
+
+        # Increase the iteration counter because it is associated to the application of a new event in ONE server
         self.iterations[P] += 1
 
         # Update the position information of the particle so that we can plot the trajectories
@@ -1641,9 +1649,8 @@ class EstimatorQueueBlockingFlemingViot:
         # because it's like starting again. In fact, all the server times now
         # are ALIGNED to the SAME reactivation time, and this is like the very beginning
         # of the simulation, where all server times were at 0.
-        # This is important, because the number of iterations run on the particle decides
-        # whether the _generate_next_events() method (when iterations = 0) or
-        # #the _update_next_events_latest_server() method (when iterations > 0) is called.
+        # This is only important if we want to pass assertions on the most recent
+        # event times and next event times (see self.assertTimeMostRecentEventAndTimesNextEvents())
         self.iterations[P] = 0
 
         #-- Update current and historical information
@@ -1858,7 +1865,7 @@ class EstimatorQueueBlockingFlemingViot:
 
     def _has_particle_become_activated(self, P):
         """
-        Whether the particle is activated, which is indicated by the fact that
+        Whether the particle has just become activated, which is indicated by the fact that
         before the latest change, the particle's position (buffer size) is NOT in the set of activation buffer sizes
         and now is one of the activation buffer sizes.
 
@@ -1870,12 +1877,11 @@ class EstimatorQueueBlockingFlemingViot:
 
         previous_buffer_size = self._get_previous_buffer_size(P)
 
-        #return last_position_change != 0 and self._is_particle_activated(P)
         return previous_buffer_size not in self.set_activation and self._is_particle_activated(P)
 
     def _has_particle_become_absorbed(self, P):
         """
-        Whether the particle is absorbed, which is indicated by the fact that
+        Whether the particle has just become absorbed, which is indicated by the fact that
         before the latest change, the particle's position (buffer size) is NOT in the set of absorbed buffer sizes
         and now is one of the absorbed buffer sizes.
 
@@ -1887,12 +1893,11 @@ class EstimatorQueueBlockingFlemingViot:
 
         previous_buffer_size = self._get_previous_buffer_size(P)
 
-        #return last_position_change < 0 and self._is_particle_absorbed(P)
         return previous_buffer_size not in self.set_absorption and self._is_particle_absorbed(P)
 
     def _has_particle_become_blocked(self, P):
         """
-        Whether the particle becomes blocked, which is indicated by a positive change in the system's buffer size
+        Whether the particle has just become blocked, which is indicated by a positive change in the system's buffer size
         and a system's buffer size equal to its capacity after the change.
         
         Arguments:
@@ -1903,12 +1908,11 @@ class EstimatorQueueBlockingFlemingViot:
 
         previous_buffer_size = self._get_previous_buffer_size(P)
         
-        #return last_position_change > 0 and self._is_particle_blocked(P)       
         return previous_buffer_size < self.particles[P].getCapacity() and self._is_particle_blocked(P)
 
     def _has_particle_become_unblocked(self, P):
         """
-        Whether the particle becomes unblocked, which is indicated by a negative change in the system's buffer size
+        Whether the particle has just become unblocked, which is indicated by a negative change in the system's buffer size
         and a system's buffer size equal to its capacity before the change.
 
         Arguments:
@@ -1919,12 +1923,11 @@ class EstimatorQueueBlockingFlemingViot:
 
         previous_buffer_size = self._get_previous_buffer_size(P)
 
-        #return last_position_change < 0 and self.particles[P].getBufferSize() == self.particles[P].getCapacity() + last_position_change
         return previous_buffer_size == self.particles[P].getCapacity() and self._is_particle_unblocked(P)
 
     def _has_particle_returned_to_positions(self, P, positions :list):
         """
-        Whether the particle has returned to any of the given positions (buffer sizes)
+        Whether the particle has just returned to any of the given positions (buffer sizes)
 
         Arguments:
         P: non-negative int
