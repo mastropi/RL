@@ -14,7 +14,9 @@ import sys
 import numpy as np
 import pandas as pd
 import copy
+import re
 
+from warnings import warn
 from timeit import default_timer as timer
 from datetime import datetime
 import unittest
@@ -450,7 +452,7 @@ class Test_QB_Particles(unittest.TestCase):
                 (reactivate, finalize_type, nparticles, nmeantimes)
 
     @classmethod
-    def test_fv_implementation(cls, nservers=1, K=5, buffer_size_activation=1):
+    def test_fv_implementation(cls, nservers=1, K=5, buffer_size_activation=1, figfile=None):
         "2021/04/19: Analyze convergence of the FV algorithm as number of particles N increases"
 
         #--- Test one server
@@ -491,12 +493,28 @@ class Test_QB_Particles(unittest.TestCase):
         # Info parameters 
         dict_params_info = {'plot': True, 'log': False}
 
-        replications = 12
+        replications = 8
         nparticles_min = 800
         nparticles_max = 3200
         nparticles_step_prop = 1  # STEP proportion: N(n+1) = (1 + prop)*N(n), so that we scale the step as the number of particles increases
         nparticles = nparticles_min
-        df_results = pd.DataFrame(columns=['K', 'BSA', 'N', 'replication', 'Pr(MC)', 'Time(MC)', 'E(T)', 'Pr(FV)', 'Time(FV)', 'Pr(K)', 'seed', 'exec_time(s)'])
+        df_results = pd.DataFrame(columns=['K',
+                                           'BSA',
+                                           'N',
+                                           'replication',
+                                           'Pr(MC)',
+                                           'Time(MC)',
+                                           '# Events(MC)',
+                                           '# Cycles(MC)',
+                                           'E(T)',
+                                           '# Cycles(E(T))',
+                                           'Pr(FV)',
+                                           'Time(FV)',
+                                           '# Events(FV)',
+                                           '# Samples Surv',
+                                           'Pr(K)',
+                                           'seed',
+                                           'exec_time'])
         case = 0
         ncases = int( np.log(nparticles_max / nparticles_min) / np.log(1 + nparticles_step_prop)) + 1
         print("System: # servers={}, K={}, rhos={}, buffer_size_activation={}".format(nservers, K, env_queue.getIntensities(), buffer_size_activation_value))
@@ -519,16 +537,28 @@ class Test_QB_Particles(unittest.TestCase):
                 dict_params_simul['seed'] = seed + r - 1
 
                 time_start = timer()
-                print("\t--> Running Monte-Carlo estimation...")
-                proba_blocking_mc, est_mc = estimators.estimate_blocking_mc(env_queue, dict_params_simul, dict_params_info=dict_params_info)
 
                 print("\n\t--> Running Fleming-Viot estimation...")
+                dict_params_simul['maxevents'] = np.Inf
                 proba_blocking_fv, integral, expected_survival_time, \
                     n_survival_curve_observations, n_survival_time_observations, \
-                        est_fv, est_abs, est_surv = estimators.estimate_blocking_fv(env_queue, dict_params_simul, dict_params_info=dict_params_info)
+                        est_fv, est_abs, est_surv, dict_stats_fv = estimators.estimate_blocking_fv(env_queue, dict_params_simul, dict_params_info=dict_params_info)
+
+                print("\t--> Running Monte-Carlo estimation...")
+                dict_params_simul['maxevents'] = dict_stats_fv['nevents']
+                proba_blocking_mc, \
+                    n_return_observations, \
+                        est_mc, dict_stats_mc = estimators.estimate_blocking_mc(env_queue, dict_params_simul, dict_params_info=dict_params_info)
+
                 time_end = timer()
                 exec_time = time_end - time_start
                 print("execution time MC + FV: {:.1f} sec, {:.1f} min".format(exec_time, exec_time/60))
+
+                # Check comparability in terms of # events in each simulation (MC vs. FV)
+                if dict_stats_mc['nevents'] != dict_stats_fv['nevents']:
+                    message = "!!!! #events(MC) != #events(FV) ({}, {}) !!!!".format(dict_stats_mc['nevents'], dict_stats_fv['nevents'])
+                    print(message)  # Shown in the log
+                    warn(message)   # Shown in the console
 
                 if nparticles == nparticles_min and r == 1:
                     rhos = est_mc.rhos
@@ -536,15 +566,31 @@ class Test_QB_Particles(unittest.TestCase):
                     proba_blocking_true = compute_blocking_probability_birth_death_process(rhos, K)
 
                 # Results
-                assert est_mc.maxtime - est_fv.maxtime*nparticles >= -0.001*est_fv.maxtime, \
-                    "The simulation time of the MC ({:.1f}) is longer than that of FV ({:.1f})" \
-                    .format(est_mc.maxtime, est_fv.maxtime*nparticles)
+                #assert est_mc.maxtime - est_fv.maxtime*nparticles >= -0.001*est_fv.maxtime, \
+                #   "The simulation time of the MC ({:.1f}) is longer than that of FV ({:.1f})" \
+                #    .format(est_mc.maxtime, est_fv.maxtime*nparticles)
                 print("\tP(K) by MC: {:.6f}% (simulation time = {:.1f})".format(proba_blocking_mc*100, est_mc.maxtime))
                 print("\tP(K) estimated by FV: {:.6f}%, E(T) = {:.1f} (simulation time = {:.1f})".format(proba_blocking_fv*100, est_fv.mean_lifetime, est_fv.maxtime))
                 print("\tTrue P(K): {:.6f}%".format(proba_blocking_true*100))
 
                 # Store the results
-                df_append = pd.DataFrame([[K, buffer_size_activation_value, nparticles, r, proba_blocking_mc, est_mc.maxtime, est_fv.mean_lifetime, proba_blocking_fv, est_fv.maxtime, proba_blocking_true, dict_params_simul['seed'], exec_time]],
+                df_append = pd.DataFrame([[K,
+                                           buffer_size_activation_value,
+                                           nparticles,
+                                           r,
+                                           proba_blocking_mc,
+                                           dict_stats_mc['time'],
+                                           dict_stats_mc['nevents'],
+                                           n_return_observations,
+                                           est_fv.mean_lifetime,
+                                           n_survival_time_observations,
+                                           proba_blocking_fv,
+                                           dict_stats_fv['time'],
+                                           dict_stats_fv['nevents'],
+                                           n_survival_curve_observations,
+                                           proba_blocking_true,
+                                           dict_params_simul['seed'],
+                                           exec_time]],
                                          columns=df_results.columns, index=[case])
                 df_results = df_results.append(df_append)
 
@@ -558,10 +604,17 @@ class Test_QB_Particles(unittest.TestCase):
         print(title)
         print("Raw results by N:")
         print(df_results)
+        showtitle = False
         
-        df_results_agg_by_N = aggregation_bygroups(df_results, ['N'], ['Pr(MC)', 'Pr(FV)'])
+        df_results_agg_by_N = aggregation_bygroups(df_results, ['N'], ['# Events(MC)', 'Pr(MC)', 'Pr(FV)'])
         print("Aggregated results by N:")
         print(df_results_agg_by_N)
+
+        # Add back the average of # events to the full data frame      
+        df_results = pd.merge(df_results, df_results_agg_by_N['mean'][['# Events(MC)']],
+                              left_on='N', right_index=True, suffixes=["", "_mean"])
+        # Convert average to integer
+        df_results = df_results.astype({'# Events(MC)_mean': np.int})
 
         plt.figure()
         legend_lines_mc = []
@@ -592,30 +645,40 @@ class Test_QB_Particles(unittest.TestCase):
     
         # Violin plots
         (ax_mc, ax_fv) = plt.figure(figsize=(8,4)).subplots(1,2)
+        nevents_values = np.unique(df_results['# Events(MC)_mean'])
         N_values = np.unique(df_results['N'])
-        violin_widths = (N_values[-1] - N_values[0]) / 10
-        plotting.violinplot(ax_mc,  [df_results[ df_results['N']==x ]['Pr(MC)']*100 for x in N_values],
-                                    positions=N_values, showmeans=True, showmedians=False, linewidth=2, widths=violin_widths,
+        violin_widths_mc = (nevents_values[-1] - nevents_values[0]) / 10
+        violin_widths_fv = (N_values[-1] - N_values[0]) / 10
+        plotting.violinplot(ax_mc,  [df_results[ df_results['# Events(MC)_mean']==x ]['Pr(MC)']*100 for x in nevents_values],
+                                    positions=nevents_values, showmeans=True, showmedians=False, linewidth=2, widths=violin_widths_mc,
                                     color_body="red", color_lines="red", color_means="red")
         plotting.violinplot(ax_fv,  [df_results[ df_results['N']==x ]['Pr(FV)']*100 for x in N_values],
-                                    positions=N_values, showmeans=True, showmedians=False, linewidth=2, widths=violin_widths,
+                                    positions=N_values, showmeans=True, showmedians=False, linewidth=2, widths=violin_widths_fv,
                                     color_body="green", color_lines="green", color_means="green")            
         # Add the observed points
         # (THIS DOES NOT WORK, AS NOW POINTS ARE ADDED! However, note that the violin plots extend to the min and max values in the data, because showextrema=True by default in the violinplot() call)
-        ax_mc.plot(df_results['N'], df_results['Pr(MC)']*100, 'r.', markersize=2)
+        ax_mc.plot(df_results['# Events(MC)'], df_results['Pr(MC)']*100, 'r.', markersize=2)
         ax_fv.plot(df_results['N'], df_results['Pr(FV)']*100, 'g.', markersize=2)
         
-        ax_mc.hlines(df_results.iloc[0]['Pr(K)']*100, df_results.iloc[0]['N'], df_results.iloc[-1]['N'], color='gray', linestyles='dashed')
+        ax_mc.hlines(df_results.iloc[0]['Pr(K)']*100, df_results.iloc[0]['# Events(MC)_mean'], df_results.iloc[-1]['# Events(MC)_mean'], color='gray', linestyles='dashed')
         ax_fv.hlines(df_results.iloc[0]['Pr(K)']*100, df_results.iloc[0]['N'], df_results.iloc[-1]['N'], color='gray', linestyles='dashed')
-        plt.suptitle(title, fontsize=10)
+        if showtitle:
+            plt.suptitle(title, fontsize=10)
         # Set a common vertical axis
         ymax = max([ax_mc.get_ylim()[1], ax_fv.get_ylim()[1]])
         ax_mc.set_ylim([0, ymax])
-        ax_mc.set_xlabel("N (number of particles)")
+        ax_mc.set_xlabel("Average number of events")
         ax_mc.set_ylabel("Blocking probability (%)")
+        ax_fv.yaxis.set_ticks([]); ax_fv.yaxis.set_ticklabels([])  # Remove ticks and labels from the right plot as the axis is the same as on the left plot
         ax_fv.set_ylim([0, ymax])
         ax_fv.set_xlabel("N (number of particles)")
 
+        if figfile is not None:
+            plt.gcf().subplots_adjust(left=0.15)
+                ## To avoid cut off of vertical axis label!!
+                ## Ref: https://stackoverflow.com/questions/6774086/why-is-my-xlabel-cut-off-in-my-matplotlib-plot 
+            plt.savefig(figfile)
+            
         return df_results, df_results_agg_by_N, est_mc, est_fv, est_abs, est_surv
 
     def analyze_estimates(self,
@@ -627,36 +690,25 @@ class Test_QB_Particles(unittest.TestCase):
                                     multiplier_adjust_with_activation=False,
                                     buffer_size_activation_values=[1],
                                     seed=1717,
-                                    dict_params_out=None,
+                                    dict_params_out=dict(),
                                     dict_params_info={'plot': True, 'log': False}):
+        #--- Parse input parameters
         assert len(nparticles_values) == len(K_values), "The number of values in the nparticles parameter is the same as in K_values."
         assert len(nmeantimes_values) == len(K_values), "The number of values in the nmeantimes parameter is the same as in K_values."
         assert len(multiplier_values) == len(K_values), "The number of values in the multiplier parameter is the same as in K_values."
-    
+
+        resultsfile = dict_params_out.get('resultsfile', "_results.csv")
+        resultsfile_agg = dict_params_out.get('resultsfile_agg', "_results_agg.csv")
+        savefig = dict_params_out.get('savefig', False)
+        if savefig:
+            figfile = re.sub("\.[a-z]*$", ".png", resultsfile)
+        #--- Parse input parameters
+
         # Upper bound for the number of simulations to run
         # (it's an upper bound because when buffer_size_activation is a proportion, there may be repeated values for the actual buffer_size_activation used) 
         nsimul = int(   len(K_values) * \
                         len(buffer_size_activation_values))
     
-        df_proba_blocking_estimates = pd.DataFrame.from_items([
-                                                               ('rhos', []),
-                                                               ('K', []),
-                                                               ('nparticles', []),
-                                                               ('nmeantimes', []),
-                                                               ('multiplier', []),
-                                                               ('buffer_size_activation', []),
-                                                               ('buffer_size_activation_value', []),
-                                                               ('rep', []),
-                                                               ('seed', []),
-                                                               ('integral', []),
-                                                               ('E(T)', []),
-                                                               ('PMC(K)', []),
-                                                               ('PFV(K)', []),
-                                                               ('Pr(K)', []),
-                                                               ('maxtime(MC)', []),
-                                                               ('maxtime(FV)', []),
-                                                               ('ratio_maxtime_mc_fv', []),
-                                                               ])
         np.random.seed(seed)
         case = 0
         idx_K = -1
@@ -715,6 +767,7 @@ class Test_QB_Particles(unittest.TestCase):
                 print("******************!!!!!!! Simulation {} of {} !!!!!!*****************\n\tK={}, nparticles={}, nmeantimes={}, multiplier={}, buffer_size_activation={}" \
                       .format(case, nsimul, K, nparticles, nmeantimes, multiplier, buffer_size_activation_value))
                 for rep in range(replications):
+                    time_start_rep = timer()
                     # NOTE THAT THE FIRST REPLICATION (rep=0) HAS THE SAME SEED FOR ALL PARAMETER SETTINGS
                     # This is nice because we can a little bit better compare the effect of the different parameter settings
                     # (but not so much anyway, because the values that are generated as the parameter settings change
@@ -731,45 +784,42 @@ class Test_QB_Particles(unittest.TestCase):
                         'seed': seed_rep,
                             }
 
-                    print("\t\t*** MONTE-CARLO ESTIMATION ***")
-                    proba_blocking_mc, est_mc = estimators.estimate_blocking_mc(env_queue, dict_params_simul, dict_params_info=dict_params_info)
-    
                     print("\t\t*** FLEMING-VIOT ESTIMATION ***")
+                    dict_params_simul['maxevents'] = np.Inf
                     proba_blocking_fv, integral, expected_survival_time, \
                         n_survival_curve_observations, n_survival_time_observations, \
-                            est_fv, est_abs, est_surv = estimators.estimate_blocking_fv(env_queue, dict_params_simul, dict_params_info=dict_params_info)
+                            est_fv, est_abs, est_surv, dict_stats_fv = estimators.estimate_blocking_fv(env_queue, dict_params_simul, dict_params_info=dict_params_info)
 
+                    print("\t\t*** MONTE-CARLO ESTIMATION ***")
+                    dict_params_simul['maxevents'] = dict_stats_fv['nevents']
+                    proba_blocking_mc, \
+                        n_return_observations, \
+                            est_mc, dict_stats_mc = estimators.estimate_blocking_mc(env_queue, dict_params_simul, dict_params_info=dict_params_info)
+
+                    # Show estimations
                     print("\t\tP(K) by MC: {:.6f}%".format(proba_blocking_mc*100))
                     print("\t\tP(K) estimated by FV (E(T)={:.1f}): {:.6f}%".format(expected_survival_time, proba_blocking_fv*100))
                     print("\t\tTrue P(K): {:.6f}%".format(proba_blocking_true*100))
 
-                    # Check the results are comparable
-                    #assert est_mc.maxtime - nparticles*est_fv.maxtime > -0.001*est_fv.maxtime, \
-                    #    "The simulation time of the MC process ({:.1f}) is equal or longer than N times the simulation time of the FV process ({:.1f})" \
-                    #    .format(est_mc.maxtime, nparticles*est_fv.maxtime)
-                    mc_time = est_mc.get_simulation_time()
-                    mc_nevents = est_mc.get_number_events()
-                    print("MC simulation:\n- time = {:.1f}\n- #events = {}".format(mc_time, mc_nevents))
-                    fv_time_surv = est_surv.get_simulation_time(which="latest")
-                    fv_time_abs = est_abs.get_simulation_time()
-                    fv_time_fv = est_fv.get_simulation_time()
-                    fv_time = fv_time_surv + fv_time_abs + fv_time_fv
-                    fv_time_surv_prop = fv_time_surv / fv_time
-                    fv_time_abs_prop = fv_time_abs / fv_time
-                    fv_time_fv_prop = fv_time_fv / fv_time
-                    fv_nevents_surv = est_surv.get_number_events()
-                    fv_nevents_abs = est_abs.get_number_events()
-                    fv_nevents_fv = est_fv.get_number_events()
-                    fv_nevents = fv_nevents_surv + fv_nevents_abs + fv_nevents_fv
-                    fv_nevents_surv_prop = fv_nevents_surv / fv_nevents
-                    fv_nevents_abs_prop = fv_nevents_abs / fv_nevents
-                    fv_nevents_fv_prop = fv_nevents_fv / fv_nevents
+                    # Analyze the fairness of the comparison of results based on simulation time number of observed events
+                    print("-- FAIRNESS --")
                     print("FV simulation:")
                     print("- time = {:.1f} (surv={:.1f} ({:.1f}%), abs={:.1f} ({:.1f}%), fv={:.1f} ({:.1f}%))" \
-                          .format(fv_time, fv_time_surv, fv_time_surv_prop*100, fv_time_abs, fv_time_abs_prop*100, fv_time_fv, fv_time_fv_prop*100))
+                          .format(dict_stats_fv['time'], dict_stats_fv['time_surv'], dict_stats_fv['time_surv_prop']*100, \
+                                                         dict_stats_fv['time_abs'], dict_stats_fv['time_abs_prop']*100,
+                                                         dict_stats_fv['time_fv'], dict_stats_fv['time_fv_prop']*100))
                     print("- #events = {} (surv={} ({:.1f}%), abs={} ({:.1f}%), fv={} ({:.1f}%))" \
-                          .format(fv_nevents, fv_nevents_surv, fv_nevents_surv_prop*100, fv_nevents_abs, fv_nevents_abs_prop*100, fv_nevents_fv, fv_nevents_fv_prop*100))
-                    print("Ratio FV / MC: time={:.1f}, nevents={:.1f}".format(fv_time / mc_time, fv_nevents / mc_nevents))
+                          .format(dict_stats_fv['nevents'], dict_stats_fv['nevents_surv'], dict_stats_fv['nevents_surv_prop']*100,
+                                                            dict_stats_fv['nevents_abs'], dict_stats_fv['nevents_abs_prop']*100,
+                                                            dict_stats_fv['nevents_fv'], dict_stats_fv['nevents_fv_prop']*100))
+                    print("MC simulation:\n- time = {:.1f}\n- #events = {}".format(dict_stats_mc['time'], dict_stats_mc['nevents']))
+                    print("Ratio MC / FV: time={:.1f}, nevents={:.1f}".format(dict_stats_mc['time'] / dict_stats_fv['time'], dict_stats_mc['nevents'] / dict_stats_fv['nevents']))
+
+                    if dict_stats_mc['nevents'] != dict_stats_fv['nevents']:
+                        message = "!!!! #events(MC) != #events(FV) ({}, {}) !!!!".format(dict_stats_mc['nevents'], dict_stats_fv['nevents'])
+                        print(message)  # Shown in the log
+                        warn(message)   # Shown in the console
+
                     # Add the observed measure to the output data frame with the results
                     # Notes:
                     # - We use the from_items() method as opposed to injecting  the data from a dictionary
@@ -793,22 +843,37 @@ class Test_QB_Particles(unittest.TestCase):
                                                                 ('seed', [seed_rep]),
                                                                 ('integral', [integral]),
                                                                 ('E(T)', [expected_survival_time]),
+                                                                ('n(ET)', [n_survival_time_observations]),
                                                                 ('PMC(K)', [proba_blocking_mc]),
+                                                                ('time(MC)', [dict_stats_mc['time']]),
+                                                                ('n(MC)', [dict_stats_mc['nevents']]),
+                                                                ('n(RT)', [n_return_observations]),
                                                                 ('PFV(K)', [proba_blocking_fv]),
+                                                                ('time(FV)', [dict_stats_fv['time']]),
+                                                                ('n(FV)', [dict_stats_fv['nevents']]),
+                                                                ('n(PT)', [n_survival_curve_observations]),
                                                                 ('Pr(K)', [proba_blocking_true]),
-                                                                ('maxtime(MC)', [est_mc.maxtime]),
-                                                                ('maxtime(FV)', [est_fv.maxtime]),
-                                                                ('ratio_maxtime_mc_fv', [est_mc.maxtime / (nparticles*est_fv.maxtime)]),
+                                                                ('ratio_mc_fv_time', [dict_stats_mc['time'] / dict_stats_fv['time']]),
+                                                                ('ratio_mc_fv_events', [dict_stats_mc['nevents'] / dict_stats_fv['nevents']]),
                                                             ]) #, orient='columns')
                     df_new_estimates.set_index( pd.Index([(case-1)*replications + rep+1]), inplace=True )
-                    df_proba_blocking_estimates = pd.concat([df_proba_blocking_estimates,
-                                                             df_new_estimates],
-                                                             axis=0)
+                    if case == 1 and rep == 0:
+                        # First loop iteration
+                        # => Create the output data frame
+                        df_proba_blocking_estimates = df_new_estimates
+                    else:
+                        df_proba_blocking_estimates = pd.concat([df_proba_blocking_estimates,
+                                                                 df_new_estimates],
+                                                                 axis=0)
 
                     df_proba_survival_and_blocking_conditional = est_fv.estimate_proba_survival_and_blocking_conditional()
 
+                    time_end_rep = timer()
+                    exec_time = time_end_rep - time_start_rep
+                    print("\n---> Execution time MC + FV: {:.1f} sec, {:.1f} min".format(exec_time, exec_time/60))
+
                     # Plot the blue and red curves contributing to the integral used in the FV estimation
-                    if rep <= 2:
+                    if rep < 0: #<= 2:
                         plot_curve_estimates(df_proba_survival_and_blocking_conditional,
                                              dict_params={
                                                 'birth_rates': est_fv.queue.getBirthRates(),
@@ -835,12 +900,14 @@ class Test_QB_Particles(unittest.TestCase):
 
             if dict_params_info['plot']:
                 # Estimates themselves
-                plot_estimates(df_proba_blocking_estimates, "buffer_size_activation_value", widths=0.5, subset=df_proba_blocking_estimates["K"]==K)
-                plot_estimates(df_proba_blocking_estimates, "buffer_size_activation", widths=0.05, subset=df_proba_blocking_estimates["K"]==K)
+                plot_estimates(df_proba_blocking_estimates, "buffer_size_activation_value", xlabel="J: size of absorption set", widths=0.5, subset=df_proba_blocking_estimates["K"]==K)
+                plot_estimates(df_proba_blocking_estimates, "buffer_size_activation", xlabel="J: size of absorption set", widths=0.05, subset=df_proba_blocking_estimates["K"]==K, showtitle=False)
+                if savefig:
+                    plt.savefig(figfile)
                 # Errors
                 df_proba_blocking_estimates_with_errors = compute_errors(df_proba_blocking_estimates)
-                plot_errors(df_proba_blocking_estimates_with_errors, "buffer_size_activation_value", widths=0.5, subset=df_proba_blocking_estimates["K"]==K)
-                plot_errors(df_proba_blocking_estimates_with_errors, "buffer_size_activation", widths=0.05, subset=df_proba_blocking_estimates["K"]==K)
+                plot_errors(df_proba_blocking_estimates_with_errors, "buffer_size_activation_value", xlabel="J: size of absorption set", widths=0.5, subset=df_proba_blocking_estimates["K"]==K)
+                plot_errors(df_proba_blocking_estimates_with_errors, "buffer_size_activation", xlabel="J: size of absorption set", widths=0.05, subset=df_proba_blocking_estimates["K"]==K)
 
         time_end = timer()
         time_elapsed = time_end - time_start
@@ -853,7 +920,7 @@ class Test_QB_Particles(unittest.TestCase):
         # Aggregate results
         df_proba_blocking_estimates_agg = aggregation_bygroups(df_proba_blocking_estimates,
                                                                ["K", "buffer_size_activation", "nparticles"],
-                                                               ["PMC(K)", "PFV(K)", "Pr(K)"])
+                                                               ["E(T)", "PMC(K)", "PFV(K)", "Pr(K)"])
 
         df_proba_blocking_estimates.to_csv(resultsfile)
         print("Results of simulation saved to {}".format(os.path.abspath(resultsfile)))
@@ -1121,6 +1188,10 @@ def aggregation_bygroups(df, groupvars, analvars,
     If the 'std' and 'n' (count) summary statistics is part of the `dict_stats` dictionary,
     the Standard Error (SE) is also computed as 'std' / sqrt('n')
     """
+    # Cast all analysis variables to float in order to compute statistics like mean, std, etc.!!
+    # Ref: https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.astype.html
+    for var in analvars:
+        df = df.astype({var: np.float})
     df_grouped = df.groupby(groupvars, as_index=True, group_keys=False)
     df_agg = df_grouped[analvars].agg(dict_stats)
     stat_names = dict_stats.keys() 
@@ -1163,7 +1234,8 @@ def compute_errors(df_results,
     return df
 
 def plot_estimates(df_results, x, subset=None, widths=0.1,
-                   grp_K="K", y_mc="PMC(K)", y_fv="PFV(K)", y_true="Pr(K)", rep="rep"):
+                   grp_K="K", y_mc="PMC(K)", y_fv="PFV(K)", y_true="Pr(K)", rep="rep",
+                   xlabel=None, showtitle=True):
     """
     Plots the distribution of estimates as violin plots for the MC and the FV methods
     against a variable of interest, x.
@@ -1186,11 +1258,16 @@ def plot_estimates(df_results, x, subset=None, widths=0.1,
     Return: pandas DataFrame
         DataFrame containing the observations in the input data frame used for plotting.
     """
+    #--- Parse input parameters
     # Rows to plot
     if subset is not None:
         df2plot = df_results[subset]
     else:
         df2plot = df_results
+
+    if xlabel is None:
+        xlabel = x
+    #--- Parse input parameters
 
     # Get the values of the group variable on which we generate a SEPARATE plot
     # by computing its frequency distribution
@@ -1219,18 +1296,21 @@ def plot_estimates(df_results, x, subset=None, widths=0.1,
                             color_body="green", color_lines="green", color_means="green")
         ymax = np.max([ np.max(np.r_[y1, y2]), proba_blocking_K])
         for ax in axes:
+            ax.set_xlim([0, 1])
             ax.set_ylim([0, ymax])
-            ax.set_xlabel(x)
-            ax.set_ylabel("K={:.0f} Estimated blocking probability (%)".format(K))
+            ax.set_xlabel(xlabel)
+            ax.set_ylabel("Estimated blocking probability (%)".format(K))
             ax.axhline(proba_blocking_K*100, color="gray")
-        plt.suptitle("Distribution of blocking probability estimates of Pr(K={:.0f}) = {:.6f}% on {} replications" \
-                 .format(K, proba_blocking_K*100, replications) +
-                 "\nMonte Carlo (red) vs. Fleming Viot (green)")
+        if showtitle:
+            plt.suptitle("Distribution of blocking probability estimates of Pr(K={:.0f}) = {:.6f}% on {} replications" \
+                         .format(K, proba_blocking_K*100, replications) +
+                         "\nMonte Carlo (red) vs. Fleming Viot (green)")
 
     return df2plot
 
 def plot_errors(df_results, x, subset=None, widths=0.1,
-                grp_K="K", error_mc="error_rel_mc", error_fv="error_rel_fv", rep="rep"):
+                grp_K="K", error_mc="error_rel_mc", error_fv="error_rel_fv", rep="rep",
+                xlabel=None, showtitle=True):
     """
     Plots the distribution of estimation errors as violin plots for the MC and the FV methods
     against a variable of interest, x.
@@ -1256,11 +1336,16 @@ def plot_errors(df_results, x, subset=None, widths=0.1,
     Return: pandas DataFrame
         DataFrame containing the observations in the input data frame used for plotting.
     """
+    #--- Parse input parameters
     # Rows to plot
     if subset is not None:
         df2plot = df_results[subset]
     else:
         df2plot = df_results
+
+    if xlabel is None:
+        xlabel = x
+    #--- Parse input parameters
 
     # Get the values of the group variable on which we generate a SEPARATE plot
     # by computing its frequency distribution
@@ -1291,12 +1376,13 @@ def plot_errors(df_results, x, subset=None, widths=0.1,
                                     color_body="green", color_lines="green", color_means="green")
         for ax in axes:
             ax.set_ylim((-yabsmax*1.1, yabsmax*1.1))
-            ax.set_xlabel(x)
+            ax.set_xlabel(xlabel)
             ax.set_ylabel("K={:.0f} -- Relative Error (%)".format(K))
             ax.axhline(0.0, color="gray")
-        plt.suptitle("Error distribution of blocking probability estimation Pr(K={:.0f}) on {} replications" \
-                 .format(K, replications) +
-                 "\nMonte Carlo (red) vs. Fleming Viot (green)")
+        if showtitle:
+            plt.suptitle("Error distribution of blocking probability estimation Pr(K={:.0f}) on {} replications" \
+                         .format(K, replications) +
+                         "\nMonte Carlo (red) vs. Fleming Viot (green)")
 
     return df2plot
 
@@ -1342,7 +1428,7 @@ def closeLogFile(fh_log, stdout_sys, dt_start):
 # DM-2020/12/23: To change which portion of the below code to run, change the IF condition
 # to `== "__main__"` or to `!= "__main__"` accordingly, taking into account that when running
 # this file as a script (F5) __name__ is equal to "__main__".
-if __name__ != "__main__":
+if __name__ == "__main__":
     run_unit_tests = True
     if run_unit_tests:
         #suite = unittest.TestSuite()
@@ -1351,14 +1437,15 @@ if __name__ != "__main__":
         #runner.run(suite)
 
         dt_start, stdout_sys, fh_log, logfile, resultsfile, resultsfile_agg = createLogFileHandleAndResultsFileNames(prefix="test_fv_implementation")
+        figfile = re.sub("\.[a-z]*$", ".png", resultsfile)
 
         #******************* ACTUAL EXECUTION ***************
         #results, results_agg, est_mc, est_fv, est_abs, est_surv = Test_QB_Particles.test_fv_implementation(nservers=1, K=20, buffer_size_activation=0.25)
-        #results, results_agg, est_mc, est_fv, est_abs, est_surv = Test_QB_Particles.test_fv_implementation(nservers=1, K=20, buffer_size_activation=0.5)
+        #results, results_agg, est_mc, est_fv, est_abs, est_surv = Test_QB_Particles.test_fv_implementation(nservers=1, K=20, buffer_size_activation=0.5, figfile=figfile)
         #results, results_agg, est_mc, est_fv, est_abs, est_surv = Test_QB_Particles.test_fv_implementation(nservers=1, K=20, buffer_size_activation=0.75)
         #results, results_agg, est_mc, est_fv, est_abs, est_surv = Test_QB_Particles.test_fv_implementation(nservers=1, K=20, buffer_size_activation=0.9)
 
-        results, results_agg, est_mc, est_fv, est_abs, est_surv = Test_QB_Particles.test_fv_implementation(nservers=1, K=40, buffer_size_activation=0.5)
+        results, results_agg, est_mc, est_fv, est_abs, est_surv = Test_QB_Particles.test_fv_implementation(nservers=1, K=40, buffer_size_activation=0.5, figfile=figfile)
 
         #results, results_agg, est_mc, est_fv, est_abs, est_surv = Test_QB_Particles.test_fv_implementation(nservers=3, K=5, buffer_size_activation=1)
         #results, results_agg = Test_QB_Particles.test_fv_implementation(K=20, buffer_size_activation=8)
@@ -1458,12 +1545,12 @@ else:
     tests2run = [5]
     if 1 in tests2run:
         results, results_agg, est_mc, est_fv, est_abs, est_surv = test.analyze_estimates(
-                                        replications=12,
-                                        K_values=[10, 20, 30, 40],
-                                        nparticles_values=[200, 400, 800, 1600],
-                                        nmeantimes_values=[50, 50, 50, 50],
-                                        multiplier_values=[10, 15, 20, 25],
-                                        buffer_size_activation_values=[1, 0.2, 0.4, 0.6, 0.8],
+                                        replications=2,
+                                        K_values=[20], #[10, 20, 30, 40],
+                                        nparticles_values=[20], #[200, 400, 800, 1600],
+                                        nmeantimes_values=[5], #[50, 50, 50, 50],
+                                        multiplier_values=[1], #[10, 15, 20, 25],
+                                        buffer_size_activation_values=[10], #[1, 0.2, 0.4, 0.6, 0.8],
                                         seed=1313,
                                         dict_params_out={'logfilehandle': fh_log,
                                                          'resultsfile': resultsfile,
@@ -1517,7 +1604,8 @@ else:
                                         seed=1313,
                                         dict_params_out={'logfilehandle': fh_log,
                                                          'resultsfile': resultsfile,
-                                                         'resultsfile_agg': resultsfile_agg})
+                                                         'resultsfile_agg': resultsfile_agg,
+                                                         'savefig': True})
     if 6 in tests2run:
         results, results_agg, est_mc, est_fv, est_abs, est_surv = test.analyze_estimates(
                                         replications=12,
@@ -1543,7 +1631,8 @@ else:
                                         seed=1313,
                                         dict_params_out={'logfilehandle': fh_log,
                                                          'resultsfile': resultsfile,
-                                                         'resultsfile_agg': resultsfile_agg})
+                                                         'resultsfile_agg': resultsfile_agg,
+                                                         'savefig': True})
 
     if fh_log is not None:
         closeLogFile(fh_log, stdout_sys, dt_start)

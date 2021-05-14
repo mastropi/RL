@@ -2835,6 +2835,8 @@ class EstimatorQueueBlockingFlemingViot:
                                         ('Blocking Time Estimate', self.blocking_time_estimate)])
 
     def estimate_expected_absorption_time(self):
+        "Estimates the expected absorption time, i.e. the expected hitting time of the absorption set (whatever the start state)"
+
         # The following disregards the particles that were still alive when the simulation stopped
         # These measurements are censored, so we could improve the estimate of the expected value
         # by using the Kaplan-Meier estimator of the survival curve, that takes censoring into account.
@@ -2855,7 +2857,7 @@ class EstimatorQueueBlockingFlemingViot:
         # - P(Death < Birth) should be easily computed since Death and Birth are two independent exponential random variables
         #
         # SO WE COULD INVESTIGATE THIS!
-        # (if needed to improve the estimation of the expected survival time, but I don't think will be necessary
+        # (if needed to improve the estimation of the expected survival time, but I don't think it will be necessary
         # as the censoring times are a VERY SMALL percentage if the simulation runs for a long time, so the effect
         # of their values is negligible!!)
         # 
@@ -3083,15 +3085,17 @@ class EstimatorQueueBlockingFlemingViot:
             nevents += np.sum( time_diff > self.EPSILON_TIME )
         return nevents
 
-    def get_simulation_time(self, which="max"):
+    def get_simulation_time(self, which="last"):
         """
         Returns the total simulation time used by all particles.
-        What this time is depends on parameter `which`:
+
+        The concept of simulation time depends on parameter `which`:
         - when "max" => N * maxtime
-        - o.w. => sum of latest known state by particle.
+        - when "last" (or o.w.) => sum of latest known state by particle.
+
         IMPORTANT: Note that if the finalize() process has already taken place
         the latest known state of a particle will be the time AFTER the removal of any subtrajectory
-        in case the finalization type is .REMOVE_CENSORED.
+        in case the finalization type is REMOVE_CENSORED.
         """
         if which == "max":
             return self.N*self.maxtime
@@ -3529,7 +3533,8 @@ class EstimatorQueueBlockingFlemingViot:
         """
         Checks consistency of information stored in the "next event" attributes w.r.t.
         the information on the most recent event when the next event times are generated
-        for the steady state of the simulation (i.e. NOT for iteration = 0).
+        for the steady state of the simulation (i.e. NOT for self.iterations[P] = 0,
+        which is also the case when the particle has just been reactivated).
         """
         _, server_last_updated, type_of_last_event, time_of_last_event = self.particles[P].getMostRecentEventInfo()
         if self.iterations[P] > 0 and \
@@ -3632,6 +3637,9 @@ def estimate_blocking_mc(env_queue :EnvQueueSingleBufferWithJobClasses, dict_par
         - 'buffer_size_activation'
         - 'multiplier_for_extended_simulation_time'
         - 'seed'
+        OPTIONAL:
+        - 'maxevents': maximum number of events for which the simulation should run.
+        This is used to make sure different simulations run on different methods (e.g. FV and MC) are comparable.
 
     dict_params_info: (opt) dict
         Dictionary containing general info parameters as follows:
@@ -3686,7 +3694,10 @@ def estimate_blocking_mc(env_queue :EnvQueueSingleBufferWithJobClasses, dict_par
                                                mean_lifetime=None,
                                                proba_survival_given_activation=None,
                                                reactivate=False,
-                                               finalize_info={'type': FinalizeType.REMOVE_CENSORED, 'condition': FinalizeCondition.NOT_START_POSITION},
+                                               finalize_info={'maxevents': dict_params_simul.get('maxevents', np.Inf),
+                                                              'type': FinalizeType.REMOVE_CENSORED, #FinalizeType.ESTIMATE_CENSORED,
+                                                              'condition': FinalizeCondition.NOT_START_POSITION
+                                                              },
                                                seed=dict_params_simul['seed'],
                                                plotFlag=dict_params_info['plot'],
                                                log=dict_params_info['log'])
@@ -3698,7 +3709,18 @@ def estimate_blocking_mc(env_queue :EnvQueueSingleBufferWithJobClasses, dict_par
     exec_time = time_end - time_start
     print("execution time: {:.1f} sec, {:.1f} min".format(exec_time, exec_time/60))
 
-    return proba_blocking_mc, est_mc
+    # Compute simulation statistics
+    time = est_mc.get_simulation_time(which="last")
+    nevents = est_mc.nevents #est_mc.get_number_events()
+    #assert nevents == est_mc.nevents
+    dict_stats = dict({
+        'time': time,
+        'nevents': nevents,
+            })
+
+    return  proba_blocking_mc, \
+            n_return_observations, \
+            est_mc, dict_stats
 
 def estimate_blocking_fv(env_queue :EnvQueueSingleBufferWithJobClasses,
                          dict_params_simul :dict,
@@ -3841,8 +3863,9 @@ def estimate_blocking_fv(env_queue :EnvQueueSingleBufferWithJobClasses,
     print("\t--> Number of observations for E(T) estimation ({:.1f}): {} on the {} particles {:.1f}% of total simulation time N(={})*T={:.1f}) each." \
           .format(expected_survival_time, n_survival_time_observations, est_abs.N, total_survival_time / (est_abs.N * est_abs.maxtime) * 100, dict_params_simul['nparticles'], est_abs.N * est_abs.maxtime))
     absorption_states, dist_absorption_states = est_abs.get_absorption_states_distribution()
-    print("Distribution of absorption states:")
-    print_states_distribution(absorption_states, dist_absorption_states)
+    if est_abs.nservers > 1:
+        print("Distribution of absorption states:")
+        print_states_distribution(absorption_states, dist_absorption_states)
     time_end = timer()
     exec_time = time_end - time_start
     print("execution time: {:.1f} sec, {:.1f} min".format(exec_time, exec_time/60))
@@ -3867,8 +3890,8 @@ def estimate_blocking_fv(env_queue :EnvQueueSingleBufferWithJobClasses,
                                                log=dict_params_info['log'])
     proba_blocking_fv, _, integral, _, _ = est_fv.simulate(EventType.ACTIVATION)
     activation_states, dist_activation_states = est_fv.get_activation_states_distribution()
-    n_survival_curve_observations = np.sum(dist_activation_states)
-    print("\t--> Number of observations for P(T>t) estimation: {} (N={})".format(n_survival_curve_observations, est_fv.N))
+    n_survival_curve_observations = est_fv.counts_alive[0]
+    print("\t--> Number of observations for P(T>t) estimation from FV simulation: {} (N={})".format(n_survival_curve_observations, est_fv.N))
     if dict_params_info['plot']:
         df_proba_survival_and_blocking_conditional = est_fv.estimate_proba_survival_and_blocking_conditional() 
         plot_curve_estimates(df_proba_survival_and_blocking_conditional,
@@ -3888,17 +3911,53 @@ def estimate_blocking_fv(env_queue :EnvQueueSingleBufferWithJobClasses,
                             'finalize_type': finalize_type,
                             'seed': seed
                             })
-        plot_distribution_states(est_surv.states_activation, n_particles_by_start_state, freq2=est_surv.dist_activation, label_top=10, title="Distribution of ACTIVATION states (SURV)")
-        plot_distribution_states(activation_states, dist_activation_states, freq2=est_fv.dist_activation, label_top=10, title="Distribution of ACTIVATION states (FV)")
-        plot_distribution_states(absorption_states, dist_absorption_states, freq2=est_abs.dist_absorption_set_at_boundary, label_top=10, title="Distribution of ABSORPTION states (ABS)")
+        if est_fv.nservers > 1:
+            plot_distribution_states(est_surv.states_activation, n_particles_by_start_state, freq2=est_surv.dist_activation, label_top=10, title="Distribution of ACTIVATION states (SURV)")
+            plot_distribution_states(activation_states, dist_activation_states, freq2=est_fv.dist_activation, label_top=10, title="Distribution of ACTIVATION states (FV)")
+            plot_distribution_states(absorption_states, dist_absorption_states, freq2=est_abs.dist_absorption_set_at_boundary, label_top=10, title="Distribution of ABSORPTION states (ABS)")
 
     time_end = timer()
     exec_time = time_end - time_start
     print("execution time: {:.1f} sec, {:.1f} min".format(exec_time, exec_time/60))
 
+    # Compute simulation statistics
+    time_surv = est_surv.get_simulation_time(which="last")  # We use "last" because the simulation stops at the first absorption of each particle 
+    time_abs = est_abs.get_simulation_time(which="max")     # We use "max" because we know that every particle reached maxtime (o.w. the simulation would not have finished)
+    time_fv = est_fv.get_simulation_time(which="max")       # We use "max" because we know that every particle reached maxtime (o.w. the simulation would not have finished)
+    time = time_surv + time_abs + time_fv
+    time_surv_prop = time_surv / time
+    time_abs_prop = time_abs / time
+    time_fv_prop = time_fv / time
+    nevents_surv = est_surv.nevents #est_surv.get_number_events()
+    nevents_abs = est_abs.nevents #est_abs.get_number_events()
+    nevents_fv = est_fv.nevents #est_fv.get_number_events()
+    #assert nevents_surv == est_surv.nevents
+    #assert nevents_abs == est_abs.nevents
+    #assert nevents_fv == est_fv.nevents
+    nevents = nevents_surv + nevents_abs + nevents_fv
+    nevents_surv_prop = nevents_surv / nevents
+    nevents_abs_prop = nevents_abs / nevents
+    nevents_fv_prop = nevents_fv / nevents
+    dict_stats = dict({
+        'time': time,
+        'time_surv': time_surv,
+        'time_abs': time_abs,
+        'time_fv': time_fv,
+        'time_surv_prop': time_surv_prop,
+        'time_abs_prop': time_abs_prop,
+        'time_fv_prop': time_fv_prop,
+        'nevents': nevents,
+        'nevents_surv': nevents_surv,
+        'nevents_abs': nevents_abs,
+        'nevents_fv': nevents_fv,
+        'nevents_surv_prop': nevents_surv_prop,
+        'nevents_abs_prop': nevents_abs_prop,
+        'nevents_fv_prop': nevents_fv_prop,
+            })
+
     return  proba_blocking_fv, integral, expected_survival_time, \
             n_survival_curve_observations, n_survival_time_observations, \
-            est_fv, est_abs, est_surv
+            est_fv, est_abs, est_surv, dict_stats
 
 def plot_curve_estimates(df_proba_survival_and_blocking_conditional, dict_params, log=False):
     rhos = [b/d for b, d in zip(dict_params['birth_rates'], dict_params['death_rates'])]
