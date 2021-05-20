@@ -899,17 +899,6 @@ class Test_QB_Particles(unittest.TestCase):
                   .format(self.nservers, self.rhos, K, nparticles, est_fv.maxtime, nparticles, nmeantimes, multiplier))
             print(df_proba_blocking_estimates)
 
-            if dict_params_info['plot']:
-                # Estimates themselves
-                plot_estimates(df_proba_blocking_estimates, "buffer_size_activation_value", xlabel="J: size of absorption set", widths=0.5, subset=df_proba_blocking_estimates["K"]==K)
-                plot_estimates(df_proba_blocking_estimates, "buffer_size_activation", xlabel="J: size of absorption set", widths=0.05, subset=df_proba_blocking_estimates["K"]==K, showtitle=False)
-                if savefig:
-                    plt.savefig(figfile)
-                # Errors
-                df_proba_blocking_estimates_with_errors = compute_errors(df_proba_blocking_estimates)
-                plot_errors(df_proba_blocking_estimates_with_errors, "buffer_size_activation_value", xlabel="J: size of absorption set", widths=0.5, subset=df_proba_blocking_estimates["K"]==K)
-                plot_errors(df_proba_blocking_estimates_with_errors, "buffer_size_activation", xlabel="J: size of absorption set", widths=0.05, subset=df_proba_blocking_estimates["K"]==K)
-
         time_end = timer()
         time_elapsed = time_end - time_start
         print("Execution time: {:.1f} sec, {:.1f} min, {:.1f} hours".format(time_elapsed, time_elapsed / 60, time_elapsed / 3600))
@@ -928,6 +917,18 @@ class Test_QB_Particles(unittest.TestCase):
 
         df_proba_blocking_estimates_agg.to_csv(resultsfile_agg)
         print("Aggregated results of simulation saved to {}".format(os.path.abspath(resultsfile_agg)))
+
+        for K in K_values:
+            if dict_params_info['plot']:
+                # Estimates themselves
+                plot_estimates(df_proba_blocking_estimates, "buffer_size_activation_value", xlabel="Size of absorption set as fraction of K", widths=0.5, subset=df_proba_blocking_estimates["K"]==K)
+                plot_estimates(df_proba_blocking_estimates, "buffer_size_activation", xlabel="Size of absorption set as fraction of K", widths=0.05, subset=df_proba_blocking_estimates["K"]==K, showtitle=False)
+                if savefig:
+                    plt.savefig(figfile)
+                # Errors
+                df_proba_blocking_estimates_with_errors = compute_errors(df_proba_blocking_estimates)
+                plot_errors(df_proba_blocking_estimates_with_errors, "buffer_size_activation_value", xlabel="J: size of absorption set", widths=0.5, subset=df_proba_blocking_estimates["K"]==K)
+                plot_errors(df_proba_blocking_estimates_with_errors, "buffer_size_activation", xlabel="J: size of absorption set", widths=0.05, subset=df_proba_blocking_estimates["K"]==K)
 
         return df_proba_blocking_estimates, df_proba_blocking_estimates_agg, \
                 est_mc, est_fv, est_abs, est_surv
@@ -1166,6 +1167,170 @@ class Test_QB_Particles(unittest.TestCase):
         df4iter = df[ df[grp_part] == nparticles_max ]
         df_byiter = aggregation_bygroups(df4iter, [grp_K, grp_time], analvars)
         plot(df_byiter, grp_K, grp_time, legend, se_mult=2)
+
+#------------------- Functions --------------------
+def test_mc_implementation(nservers, K, paramsfile, nmeantimes=50, repmax=None, figfile=None):
+    "2021/05/14: Run the MC simulation with simulation parameters read from a CSV file"
+
+    #--- Test one server
+    rate_birth = 0.7
+    if nservers == 1:
+        job_rates = [rate_birth]
+        rate_death = [1]
+        policy = [[1]]
+        queue = queues.QueueMM(rate_birth, rate_death, nservers, K)
+        # Queue environment (to pass to the simulation functions)
+        env_queue = EnvQueueSingleBufferWithJobClasses(queue, job_rates=job_rates, rewards=[1], policy_assign=policy)
+    elif nservers == 3:
+        job_rates = [0.8, 0.7]
+        rate_death = [1, 1, 1]
+        policy = [[0.5, 0.5, 0.0], [0.0, 0.5, 0.5]]
+        queue = queues.QueueMM(rate_birth, rate_death, nservers, K)
+        # Queue environment (to pass to the simulation functions)
+        env_queue = EnvQueueSingleBufferWithJobClasses(queue, job_rates=job_rates, rewards=[1, 1], policy_assign=policy)
+    else:
+        raise ValueError("Given Number of servers ({}) is invalid. Valid values are: 1, 3".format(nservers))
+    rhos = [b/d for b, d in zip(queue.getBirthRates(), queue.getDeathRates())]
+
+    # Info parameters 
+    dict_params_info = {'plot': True, 'log': False}
+
+    # Read data with parameter settings for the run
+    df_parameters = pd.read_csv(paramsfile)
+    df_parameters.rename(index=str, columns={'Unnamed: 0': 'setcase'}, inplace=True)
+
+    df_results = pd.DataFrame(columns=['K',
+                                       'BSA',
+                                       'N',
+                                       'replication',
+                                       'Pr(MC)',
+                                       'Time(MC)',
+                                       '# Events(MC)',
+                                       '# Cycles(MC)',
+                                       'Pr(K)',
+                                       'seed',
+                                       'exec_time'])
+    ncases = df_parameters.shape[0]
+    print("System: # servers={}".format(nservers))
+    print("Simulation parameters read from {} for Monte-Carlo simulation".format(paramsfile))
+    max_fv = 0  # Maximum P(K) estimation by FV read from the data in order to properly scale the MC plot
+    time_start_all = timer()
+    for case in range(ncases):
+        paramK = df_parameters['K'][case]
+        # Only run the simulation for the value of K given in the input parameter of the function
+        if K == paramK:
+            max_fv = max( max_fv, df_parameters['Pr(FV)'][case] )
+            setcase = df_parameters['setcase'][case]
+            buffer_size_activation = df_parameters['BSA'][case]
+            nparticles = df_parameters['N'][case]
+            nevents = df_parameters['# Events(FV)'][case]
+            rep = df_parameters['replication'][case]
+            seed = df_parameters['seed'][case]
+            proba_blocking_true = df_parameters['Pr(K)'][case]
+            if rep == 1:
+                print("\n*** Running replications for set case #{} on T={}x, #events={}: K={}, BSA={}, N={}, seed={}".format(setcase, nmeantimes, nevents, K, buffer_size_activation, nparticles, seed))
+            print("\n\tReplication {}...".format(rep), end=" ")
+
+            dict_params_simul = {
+                'nparticles': nparticles,
+                'nmeantimes': nmeantimes,
+                'buffer_size_activation': buffer_size_activation,
+                'multiplier_for_extended_simulation_time': 1,
+                'multiplier_adjust_for_activation': False,
+                'seed': seed,
+                    }
+
+            if repmax is None or rep <= repmax:
+                time_start = timer()
+    
+                print("--> Running Monte-Carlo simulation...")
+                dict_params_simul['maxevents'] = nevents
+                proba_blocking_mc, \
+                    n_return_observations, \
+                        est_mc, dict_stats_mc = estimators.estimate_blocking_mc(env_queue, dict_params_simul, dict_params_info=dict_params_info)
+    
+                time_end = timer()
+                exec_time = time_end - time_start
+                print("execution time: {:.1f} sec, {:.1f} min".format(exec_time, exec_time/60))
+                print("\tP(K) by MC: {:.6f}% (simulation time = {:.1f} out of max={:.1f})".format(proba_blocking_mc*100, est_mc.get_simulation_time(), est_mc.maxtime))
+                print("\tTrue P(K): {:.6f}%".format(proba_blocking_true*100))
+    
+                # Store the results
+                df_append = pd.DataFrame([[K,
+                                           buffer_size_activation,
+                                           nparticles,
+                                           rep,
+                                           proba_blocking_mc,
+                                           dict_stats_mc['time'],
+                                           dict_stats_mc['nevents'],
+                                           n_return_observations,
+                                           proba_blocking_true,
+                                           dict_params_simul['seed'],
+                                           exec_time]],
+                                         columns=df_results.columns, index=[case])
+                df_results = df_results.append(df_append)
+
+    time_end_all = timer()
+
+    print("Total execution time: {:.1f} min".format((time_end_all - time_start_all) / 60))
+    title = "Monte-Carlo simulation results for #servers={}, rhos={}, K={}:".format(nservers, rhos, K)
+    print(title)
+    print(df_results)
+    showtitle = False
+    
+    df_results_agg_by_N = aggregation_bygroups(df_results, ['N'], ['# Events(MC)', 'Pr(MC)'])
+    print("Aggregated results by N:")
+    print(df_results_agg_by_N)
+
+    # Add back the average of # events to the full data frame      
+    df_results = pd.merge(df_results, df_results_agg_by_N['mean'][['# Events(MC)']],
+                          left_on='N', right_index=True, suffixes=["", "_mean"])
+    # Convert average to integer
+    df_results = df_results.astype({'# Events(MC)_mean': np.int})
+
+    plt.figure()
+    legend_lines_mc = []
+    legend_lines_ref = []
+    ax = plt.gca()
+    plt.plot(df_results['N'], df_results['Pr(MC)']*100, 'r.', markersize=2)
+    line_mc = plt.errorbar(list(df_results_agg_by_N.index), df_results_agg_by_N['mean']['Pr(MC)']*100, yerr=2*df_results_agg_by_N['SE']['Pr(MC)']*100, capsize=4, color='red', marker='x')
+    legend_lines_mc += [line_mc]
+    line_ref = ax.hlines(df_results.iloc[0]['Pr(K)']*100, df_results.iloc[0]['N'], df_results.iloc[-1]['N'], color='gray', linestyles='dashed')
+    legend_lines_ref += [line_ref]
+    plt.title(title, fontsize=10)
+    #ax.set_xlim([0, ax.get_xlim()[1]])
+    ymax = max( ax.get_ylim()[1], max_fv )
+    ax.set_ylim([0, ymax])
+    ax.set_xlabel("N (number of particles)")
+    ax.set_ylabel("Blocking probability (%)")
+    ax.legend(legend_lines_mc + legend_lines_ref, ['MC +/- 2SE', 'True'], fontsize='x-small')
+
+    # Violin plots
+    (ax_mc) = plt.figure(figsize=(8,4)).subplots(1,1)
+    nevents_values = np.unique(df_results['# Events(MC)_mean'])
+    violin_widths_mc = (nevents_values[-1] - nevents_values[0]) / 10
+    plotting.violinplot(ax_mc,  [df_results[ df_results['# Events(MC)_mean']==x ]['Pr(MC)']*100 for x in nevents_values],
+                                positions=nevents_values, showmeans=True, showmedians=False, linewidth=2, widths=violin_widths_mc,
+                                color_body="red", color_lines="red", color_means="red")
+    # Add the observed points
+    ax_mc.plot(df_results['# Events(MC)'], df_results['Pr(MC)']*100, 'r.', markersize=2)
+    
+    ax_mc.hlines(df_results.iloc[0]['Pr(K)']*100, df_results.iloc[0]['# Events(MC)_mean'], df_results.iloc[-1]['# Events(MC)_mean'], color='gray', linestyles='dashed')
+    if showtitle:
+        plt.suptitle(title, fontsize=10)
+    # Set a common vertical axis
+    ymax = max( ax_mc.get_ylim()[1], max_fv )
+    ax_mc.set_ylim([0, ymax])
+    ax_mc.set_xlabel("Average number of events")
+    ax_mc.set_ylabel("Blocking probability (%)")
+
+    if figfile is not None:
+        plt.gcf().subplots_adjust(left=0.15)
+            ## To avoid cut off of vertical axis label!!
+            ## Ref: https://stackoverflow.com/questions/6774086/why-is-my-xlabel-cut-off-in-my-matplotlib-plot 
+        plt.savefig(figfile)
+        
+    return df_results, df_results_agg_by_N, est_mc 
 
 def aggregation_bygroups(df, groupvars, analvars,
                          dict_stats={'n': 'count', 'mean': np.mean, 'std': np.std, 'min': np.min, 'max': np.max}):
@@ -1424,12 +1589,13 @@ def closeLogFile(fh_log, stdout_sys, dt_start):
     sys.stdout = stdout_sys
     print("Ended at: {}".format(dt_end))
     print("Execution time: {:.1f} min, {:.1f} hours".format(time_elapsed / 60, time_elapsed / 3600))
+#------------------- Functions --------------------
 
 
 # DM-2020/12/23: To change which portion of the below code to run, change the IF condition
 # to `== "__main__"` or to `!= "__main__"` accordingly, taking into account that when running
 # this file as a script (F5) __name__ is equal to "__main__".
-if __name__ == "__main__":
+if __name__ != "__main__":
     run_unit_tests = True
     if run_unit_tests:
         #suite = unittest.TestSuite()
@@ -1543,7 +1709,7 @@ else:
     # - When larger N values are used smaller T values (simulation time) can be used
     # because the larger particle N already guarantees a large simulation time for
     # the 1-particle system that estimates P(T>t).
-    tests2run = [5]
+    tests2run = [7]
     if 1 in tests2run:
         results, results_agg, est_mc, est_fv, est_abs, est_surv = test.analyze_estimates(
                                         replications=2,
@@ -1622,13 +1788,13 @@ else:
                                                          'resultsfile_agg': resultsfile_agg})
     if 7 in tests2run:
         results, results_agg, est_mc, est_fv, est_abs, est_surv = test.analyze_estimates(
-                                        replications=12,
+                                        replications=8,
                                         K_values=[40],
-                                        nparticles_values=[1200],
+                                        nparticles_values=[3200],
                                         nmeantimes_values=[50],
                                         multiplier_values=[1],
                                         multiplier_adjust_with_activation=False,
-                                        buffer_size_activation_values=[0.1, 0.25, 0.5],
+                                        buffer_size_activation_values=[0.2, 0.4, 0.5, 0.6],
                                         seed=1313,
                                         dict_params_out={'logfilehandle': fh_log,
                                                          'resultsfile': resultsfile,
