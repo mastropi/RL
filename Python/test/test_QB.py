@@ -774,7 +774,7 @@ class Test_QB_Particles(unittest.TestCase):
                     # impact whatever is generated next --e.g. the initial events for particle 2
                     # will change if more events are generated for particle 1 when the simulation time increases...)
                     print("\n\t\t### Replication {} of {} ###".format(rep+1, replications))
-                    seed_rep = seed + rep
+                    seed_rep = seed + 10*rep
     
                     dict_params_simul = {
                         'nparticles': nparticles,
@@ -792,6 +792,7 @@ class Test_QB_Particles(unittest.TestCase):
 
                     print("\t\t*** MONTE-CARLO ESTIMATION ***")
                     dict_params_simul['maxevents'] = dict_stats_fv['nevents']
+                    dict_params_simul['seed'] = 1327*seed_rep
                     proba_blocking_mc, \
                         n_return_observations, \
                             est_mc, dict_stats_mc = estimators.estimate_blocking_mc(env_queue, dict_params_simul, dict_params_info=dict_params_info)

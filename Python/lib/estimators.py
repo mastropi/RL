@@ -3840,6 +3840,7 @@ def estimate_blocking_fv(env_queue :EnvQueueSingleBufferWithJobClasses,
     # or eitherwhise keep track of the first absorption time in the object so that we can remove its contribution
     # (the latter should be simpler).
     time_start = timer()
+    seed = dict_params_simul['seed'] + 1
     est_abs = EstimatorQueueBlockingFlemingViot(1, env_queue.queue, env_queue.getJobRates(),
                                                service_rates=env_queue.getServiceRates(),
                                                buffer_size_activation=dict_params_simul['buffer_size_activation'],
@@ -3850,7 +3851,7 @@ def estimate_blocking_fv(env_queue :EnvQueueSingleBufferWithJobClasses,
                                                proba_survival_given_activation=None,
                                                reactivate=False,
                                                finalize_info={'type': FinalizeType.REMOVE_CENSORED, 'condition': FinalizeCondition.ACTIVE},
-                                               seed=dict_params_simul['seed'],
+                                               seed=seed,
                                                plotFlag=dict_params_info['plot'],
                                                log=dict_params_info['log'])
     print("\tStep 2 of 3: Simulating using an ABSORPTION start state to estimate E(T / s=abs), the expected killing time given we start at the boundary of the absorption set (seed={})...".format(est_abs.seed))
@@ -3873,7 +3874,7 @@ def estimate_blocking_fv(env_queue :EnvQueueSingleBufferWithJobClasses,
     # Fleming-Viot estimation
     # The estimated expected return time to absorption and the survival curve are used as input
     finalize_type = FinalizeType.ABSORB_CENSORED
-    seed = dict_params_simul['seed'] + 1
+    seed = dict_params_simul['seed'] + 2
     print("\tStep 3 of 3: Running Fleming-Viot simulation using an ACTIVATION start state to estimate blocking probability using E(T) = {:.1f} (out of simul time={:.1f}) (seed={})..." \
           .format(expected_survival_time, est_abs.maxtime, seed))
     est_fv = EstimatorQueueBlockingFlemingViot(dict_params_simul['nparticles'], env_queue.queue, env_queue.getJobRates(),
