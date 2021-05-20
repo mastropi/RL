@@ -452,7 +452,8 @@ class Test_QB_Particles(unittest.TestCase):
                 (reactivate, finalize_type, nparticles, nmeantimes)
 
     @classmethod
-    def test_fv_implementation(cls, nservers=1, K=5, buffer_size_activation=1, figfile=None):
+    def test_fv_implementation(cls, nservers=1, K=5, buffer_size_activation=1,
+                               markersize=3, fontsize=13, showtitle=False, figfile=None):
         "2021/04/19: Analyze convergence of the FV algorithm as number of particles N increases"
 
         #--- Test one server
@@ -534,18 +535,23 @@ class Test_QB_Particles(unittest.TestCase):
 
             for r in range(1, replications+1):
                 print("\n\n\n\n\tReplication {} of {}...".format(r, replications))
-                dict_params_simul['seed'] = seed + r - 1
+                seed_rep = seed + 10*(r - 1)
+                    ## We multiply by 10 to leave enough "space" to assign seeds in between
+                    ## two consecutive replications to assign to the different FV steps
+                    ## (est_surv, est_abs, est_fv)
 
                 time_start = timer()
 
                 print("\n\t--> Running Fleming-Viot estimation...")
                 dict_params_simul['maxevents'] = np.Inf
+                dict_params_simul['seed'] = seed_rep
                 proba_blocking_fv, integral, expected_survival_time, \
                     n_survival_curve_observations, n_survival_time_observations, \
                         est_fv, est_abs, est_surv, dict_stats_fv = estimators.estimate_blocking_fv(env_queue, dict_params_simul, dict_params_info=dict_params_info)
 
                 print("\t--> Running Monte-Carlo estimation...")
                 dict_params_simul['maxevents'] = dict_stats_fv['nevents']
+                dict_params_simul['seed'] = seed_rep + 2  # This is the same seed used in the FV simulation in estimate_blocking_fv(), so we can compare better
                 proba_blocking_mc, \
                     n_return_observations, \
                         est_mc, dict_stats_mc = estimators.estimate_blocking_mc(env_queue, dict_params_simul, dict_params_info=dict_params_info)
@@ -606,80 +612,120 @@ class Test_QB_Particles(unittest.TestCase):
         print(df_results)
         showtitle = False
         
-        df_results_agg_by_N = aggregation_bygroups(df_results, ['N'], ['# Events(MC)', 'Pr(MC)', 'Pr(FV)'])
+        df_results_agg_by_N = aggregation_bygroups(df_results, ['N'], ['# Events(MC)', '# Cycles(MC)', 'Pr(MC)', '# Events(FV)', 'Pr(FV)'])
         print("Aggregated results by N:")
         print(df_results_agg_by_N)
 
         # Add back the average of # events to the full data frame      
-        df_results = pd.merge(df_results, df_results_agg_by_N['mean'][['# Events(MC)']],
+        df_results = pd.merge(df_results, df_results_agg_by_N['mean'][['# Events(MC)', '# Cycles(MC)', '# Events(FV)']],
                               left_on='N', right_index=True, suffixes=["", "_mean"])
         # Convert average to integer
         df_results = df_results.astype({'# Events(MC)_mean': np.int})
+        df_results = df_results.astype({'# Cycles(MC)_mean': np.int})
+        df_results = df_results.astype({'# Events(FV)_mean': np.int})
 
-        plt.figure()
-        legend_lines_mc = []
-        legend_lines_fv = []
-        legend_lines_ref = []
-        ax = plt.gca()
-        plt.plot(df_results['N'], df_results['Pr(MC)']*100, 'r.', markersize=2)
-        line_mc = plt.errorbar(list(df_results_agg_by_N.index), df_results_agg_by_N['mean']['Pr(MC)']*100, yerr=2*df_results_agg_by_N['SE']['Pr(MC)']*100, capsize=4, color='red', marker='x')
-        legend_lines_mc += [line_mc]
-        plt.plot(df_results['N'], df_results['Pr(FV)']*100, 'g.', markersize=2)
-        line_fv = plt.errorbar(list(df_results_agg_by_N.index), df_results_agg_by_N['mean']['Pr(FV)']*100, yerr=2*df_results_agg_by_N['SE']['Pr(FV)']*100, capsize=4, color='green', marker='x')
-        legend_lines_fv += [line_fv]
-        line_ref = ax.hlines(df_results.iloc[0]['Pr(K)']*100, df_results.iloc[0]['N'], df_results.iloc[-1]['N'], color='gray', linestyles='dashed')
-        legend_lines_ref += [line_ref]
-        # Ref: https://matplotlib.org/3.3.3/gallery/statistics/boxplot_color.html
-        #bplot_mc = plt.boxplot(df_results['Pr(MC)']*100, vert=True, notch=True, patch_artist=True)
-        #for patch in bplot_mc['boxes']:
-        #    patch.set_facecolor('lightred')
-        #bplot_fv = plt.boxplot(df_results['Pr(FV)']*100, vert=True, notch=True, patch_artist=True)
-        #for patch in bplot_fv['boxes']:
-        #    patch.set_facecolor('lightgreen')
-        plt.title(title, fontsize=10)
-        #ax.set_xlim([0, ax.get_xlim()[1]])
-        ax.set_ylim([0, ax.get_ylim()[1]])
-        ax.set_xlabel("N (number of particles)")
-        ax.set_ylabel("Blocking probability (%)")
-        ax.legend(legend_lines_mc + legend_lines_fv + legend_lines_ref, ['MC +/- 2SE', 'FV +/- 2SE', 'True'], fontsize='x-small')
+        #-------- Plots
+        #-- 1) Average P(K) + error bars
+        (ax_fv, ax_mc) = plt.figure(figsize=(8,4)).subplots(1,2)
+        
+        # MC
+        ax_mc.plot(df_results['N'], df_results['Pr(MC)']*100, 'k.', markersize=markersize)
+        line_mc = ax_mc.errorbar(list(df_results_agg_by_N.index), df_results_agg_by_N['mean']['Pr(MC)']*100, yerr=2*df_results_agg_by_N['SE']['Pr(MC)']*100, capsize=4, color='red', marker='x')
+        line_ref_mc = ax_mc.hlines(df_results.iloc[0]['Pr(K)']*100, df_results.iloc[0]['N'], df_results.iloc[-1]['N'], color='gray', linestyles='dashed')
+        legend_mc = [line_mc, line_ref_mc]
+
+        # FV
+        ax_fv.plot(df_results['N'], df_results['Pr(FV)']*100, 'k.', markersize=markersize)
+        line_fv = ax_fv.errorbar(list(df_results_agg_by_N.index), df_results_agg_by_N['mean']['Pr(FV)']*100, yerr=2*df_results_agg_by_N['SE']['Pr(FV)']*100, capsize=4, color='green', marker='x')
+        line_ref_fv = ax_fv.hlines(df_results.iloc[0]['Pr(K)']*100, df_results.iloc[0]['N'], df_results.iloc[-1]['N'], color='gray', linestyles='dashed')
+        legend_fv = [line_fv, line_ref_fv]
+        if showtitle:
+            plt.title(title, fontsize=10)
+
+        # Axis limits
+        ymin = min(ax_mc.get_ylim()[0], ax_fv.get_ylim()[0])
+        ymax = max(ax_mc.get_ylim()[1], ax_fv.get_ylim()[1])
+        ax_mc.set_xlim([0, ax_mc.get_xlim()[1]])
+        ax_mc.set_ylim([ymin, ymax])
+        ax_mc.set_xlabel("N (number of particles)", fontsize=fontsize)
+        ax_mc.set_ylabel("Blocking probability (%)", fontsize=fontsize)
+        ax_mc.legend(legend_mc, ['MC: Avg(P(K)) +/- 2SE', 'True P(K)'])#, fontsize='x-small')
+        ax_fv.yaxis.set_ticks([]); ax_fv.yaxis.set_ticklabels([])  # Remove ticks and labels from the right plot as the axis is the same as on the left plot
+        ax_fv.set_xlim([0, ax_fv.get_xlim()[1]])
+        ax_fv.set_ylim([ymin, ymax])
+        ax_fv.set_xlabel("N (number of particles)", fontsize=fontsize)
+        ax_fv.legend(legend_fv, ['FV: Avg(P(K)) +/- 2SE', 'True P(K)'])#, fontsize='x-small')
     
-        # Violin plots
-        (ax_mc, ax_fv) = plt.figure(figsize=(8,4)).subplots(1,2)
-        nevents_values = np.unique(df_results['# Events(MC)_mean'])
+        #-- 2) Violin plots
+        (ax_fv, ax_mc) = plt.figure(figsize=(8,4)).subplots(1,2)
+        #x_mc = '# Events(MC)_mean'
+        x_mc = '# Cycles(MC)_mean'
+        x_mc_label = "Average number of cycles"
+        x_mc2 = '# Events(MC)_mean'
+        x_mc2_label = "Average number of events"
+        x_fv2 = '# Events(FV)_mean'
+        x_fv2_label = x_mc2_label
+        ax_left = ax_fv
+        ax_right = ax_mc
         N_values = np.unique(df_results['N'])
-        violin_widths_mc = (nevents_values[-1] - nevents_values[0]) / 10
+        x_mc_values = np.unique(df_results[x_mc])
+        x_mc2_values = np.unique(df_results[x_mc2])
+        x_fv2_values = np.unique(df_results[x_fv2])
+        violin_widths_mc = (x_mc_values[-1] - x_mc_values[0]) / 10
         violin_widths_fv = (N_values[-1] - N_values[0]) / 10
-        plotting.violinplot(ax_mc,  [df_results[ df_results['# Events(MC)_mean']==x ]['Pr(MC)']*100 for x in nevents_values],
-                                    positions=nevents_values, showmeans=True, showmedians=False, linewidth=2, widths=violin_widths_mc,
+        plotting.violinplot(ax_mc,  [df_results[ df_results[x_mc]==x ]['Pr(MC)']*100 for x in x_mc_values],
+                                    positions=x_mc_values, showmeans=True, showmedians=False, linewidth=2, widths=violin_widths_mc,
                                     color_body="red", color_lines="red", color_means="red")
         plotting.violinplot(ax_fv,  [df_results[ df_results['N']==x ]['Pr(FV)']*100 for x in N_values],
                                     positions=N_values, showmeans=True, showmedians=False, linewidth=2, widths=violin_widths_fv,
                                     color_body="green", color_lines="green", color_means="green")            
         # Add the observed points
-        # (THIS DOES NOT WORK, AS NOW POINTS ARE ADDED! However, note that the violin plots extend to the min and max values in the data, because showextrema=True by default in the violinplot() call)
-        ax_mc.plot(df_results['# Events(MC)'], df_results['Pr(MC)']*100, 'r.', markersize=2)
-        ax_fv.plot(df_results['N'], df_results['Pr(FV)']*100, 'g.', markersize=2)
-        
-        ax_mc.hlines(df_results.iloc[0]['Pr(K)']*100, df_results.iloc[0]['# Events(MC)_mean'], df_results.iloc[-1]['# Events(MC)_mean'], color='gray', linestyles='dashed')
-        ax_fv.hlines(df_results.iloc[0]['Pr(K)']*100, df_results.iloc[0]['N'], df_results.iloc[-1]['N'], color='gray', linestyles='dashed')
+        npoints = df_results.shape[0]
+        jitter = 1 + 0.1*(np.random.random(npoints) - 0.5)
+        ax_mc.plot(df_results[x_mc]*jitter, df_results['Pr(MC)']*100, 'k.', markersize=markersize)
+        ax_fv.plot(df_results['N']*jitter, df_results['Pr(FV)']*100, 'k.', markersize=markersize)
+
+        line_ref_mc = ax_mc.hlines(df_results.iloc[0]['Pr(K)']*100, df_results.iloc[0][x_mc], df_results.iloc[-1][x_mc], color='gray', linestyles='dashed')
+        line_ref_fv = ax_fv.hlines(df_results.iloc[0]['Pr(K)']*100, df_results.iloc[0]['N'], df_results.iloc[-1]['N'], color='gray', linestyles='dashed')
+        #legend_mc = [line_mc, line_ref_mc]
+        #legend_fv = [line_fv, line_ref_fv]
         if showtitle:
-            plt.suptitle(title, fontsize=10)
+            plt.suptitle(title, fontsize=int(fontsize*1.1))
+
         # Set a common vertical axis
-        ymax = max([ax_mc.get_ylim()[1], ax_fv.get_ylim()[1]])
-        ax_mc.set_ylim([0, ymax])
-        ax_mc.set_xlabel("Average number of events")
-        ax_mc.set_ylabel("Blocking probability (%)")
-        ax_fv.yaxis.set_ticks([]); ax_fv.yaxis.set_ticklabels([])  # Remove ticks and labels from the right plot as the axis is the same as on the left plot
-        ax_fv.set_ylim([0, ymax])
-        ax_fv.set_xlabel("N (number of particles)")
+        #ymin = min(ax_mc.get_ylim()[0], ax_fv.get_ylim()[0])
+        ymin = 0
+        ymax = max(ax_mc.get_ylim()[1], ax_fv.get_ylim()[1])
+        ax_mc.set_xlim([0, ax_mc.get_xlim()[1]])
+        ax_mc.set_ylim([ymin, ymax])
+        ax_mc.set_xlabel(x_mc_label, fontsize=fontsize)
+        ax_mc.legend(legend_mc, ['MC: Dist. P(K)', 'True P(K)'])#, fontsize='x-small')
+        ax_left.ticklabel_format(style='plain') # Ref: SO: prevent-scientific-notation-in-matplotlib-pyplot
+        #ax_left.set_yticklabels(["{:g}".format(y.get_position()[1]) for y in ax_left.get_yticklabels()])  # Avoid the 1e-5 at the corner of the axis (which overlap with the duplicated X-axis placed on top)
+        ax_left.set_ylabel("Blocking probability (%)", fontsize=fontsize)
+        ax_right.yaxis.set_ticks([]); ax_right.yaxis.set_ticklabels([])  # Remove ticks and labels from the right plot as the axis is the same as on the left plot
+        ax_fv.set_xlim([0, ax_fv.get_xlim()[1]])
+        ax_fv.set_ylim([ymin, ymax])
+        ax_fv.set_xlabel("N (number of particles)", fontsize=fontsize)
+        ax_fv.legend(legend_fv, ['FV: Dist. P(K)', 'True P(K)'])#, fontsize='x-small')
+
+        # Add secondary x-axis to show the number of events in both FV and MC
+        ax_mc2 = ax_mc.twiny()
+        ax_mc2.set_xlim(ax_mc.get_xlim())
+        ax_mc2.set_xticks(x_mc_values)
+        ax_mc2.set_xticklabels(["{:,.0f}".format(x) for x in x_mc2_values], rotation=90)
+        ax_mc2.set_xlabel(x_mc2_label)
+        ax_fv2 = ax_fv.twiny()
+        ax_fv2.set_xlim(ax_fv.get_xlim())
+        ax_fv2.set_xticks(N_values)
+        ax_fv2.set_xticklabels(["{:,.0f}".format(x) for x in x_fv2_values], rotation=90)
+        ax_fv2.set_xlabel(x_fv2_label)
 
         if figfile is not None:
-            plt.gcf().subplots_adjust(left=0.15)
-                ## To avoid cut off of vertical axis label!!
-                ## Ref: https://stackoverflow.com/questions/6774086/why-is-my-xlabel-cut-off-in-my-matplotlib-plot 
+            plt.gcf().subplots_adjust(left=0.15, top=0.75)
             plt.savefig(figfile)
             
-        return df_results, df_results_agg_by_N, est_mc, est_fv, est_abs, est_surv
+        return df_results, df_results_agg_by_N, est_mc, est_fv, est_abs, est_surv, ax_mc, ax_fv
 
     def analyze_estimates(self,
                                     replications=5,
@@ -775,6 +821,9 @@ class Test_QB_Particles(unittest.TestCase):
                     # will change if more events are generated for particle 1 when the simulation time increases...)
                     print("\n\t\t### Replication {} of {} ###".format(rep+1, replications))
                     seed_rep = seed + 10*rep
+                        ## We multiply by 10 to leave enough "space" to assign seeds in between
+                        ## two consecutive replications to assign to the different FV steps
+                        ## (est_surv, est_abs, est_fv)
     
                     dict_params_simul = {
                         'nparticles': nparticles,
@@ -918,12 +967,13 @@ class Test_QB_Particles(unittest.TestCase):
         df_proba_blocking_estimates_agg.to_csv(resultsfile_agg)
         print("Aggregated results of simulation saved to {}".format(os.path.abspath(resultsfile_agg)))
 
-        for K in K_values:
-            if dict_params_info['plot']:
+        if dict_params_info['plot']:
+            for K in K_values:
                 # Estimates themselves
-                plot_estimates(df_proba_blocking_estimates, "buffer_size_activation_value", xlabel="Size of absorption set as fraction of K", widths=0.5, subset=df_proba_blocking_estimates["K"]==K)
-                plot_estimates(df_proba_blocking_estimates, "buffer_size_activation", xlabel="Size of absorption set as fraction of K", widths=0.05, subset=df_proba_blocking_estimates["K"]==K, showtitle=False)
+                plot_estimates(df_proba_blocking_estimates, "buffer_size_activation_value", xlabel="Size of absorption set A as fraction of K", subset=df_proba_blocking_estimates["K"]==K)
+                plot_estimates(df_proba_blocking_estimates, "buffer_size_activation", xlabel="Size of absorption set A as fraction of K", subset=df_proba_blocking_estimates["K"]==K, showtitle=False)
                 if savefig:
+                    plt.gcf().subplots_adjust(left=0.2, bottom=0.2)
                     plt.savefig(figfile)
                 # Errors
                 df_proba_blocking_estimates_with_errors = compute_errors(df_proba_blocking_estimates)
@@ -1399,9 +1449,92 @@ def compute_errors(df_results,
 
     return df
 
-def plot_estimates(df_results, x, subset=None, widths=0.1,
+def plot_estimates1(df_results, x, y, subset=None,
+                   grp_K="K", y_true="Pr(K)", rep="rep",
+                   violin_width_factor=0.2, color="green", xlabel=None,
+                   markersize=7, fontsize=13, showtitle=False, figfile=None):
+    """
+    Plots the distribution of estimates as violin plots for the MC and the FV methods
+    against a variable of interest, x.
+
+    Arguments:
+    df_results: pandas DataFrame
+        DataFrame with the results of the simulation which should contain
+        at least the following columns:
+        - `grp_K`: grouping variable by which a separate plot is made
+        - `x`: variable of interest to plot on the X-axis
+        - `y`: variable containing the estimate of `y_true` to plot
+        - `y_true`: variable containing the true value estimated by MC and FV (used as a reference line)
+        - `rep`: index identifying the simulation replication
+
+    subset: expression
+        An expression to filter the rows to plot.
+        Ex: df_results["nparticles"]==400
+
+    Return: pandas DataFrame
+        DataFrame containing the observations in the input data frame used for plotting.
+    """
+    #--- Parse input parameters
+    # Rows to plot
+    if subset is not None:
+        df2plot = df_results[subset]
+    else:
+        df2plot = df_results
+
+    if xlabel is None:
+        xlabel = x
+    #--- Parse input parameters
+
+    # Get the values of the group variable on which we generate a SEPARATE plot
+    # by computing its frequency distribution
+    K_values = df2plot[grp_K].value_counts(sort=False).index
+    replications = int(np.max(df2plot[rep]))    # For informational purposes
+    for K in K_values:
+        ind = (df2plot[grp_K] == K)
+        # Compute the frequency of occurrence of the x values
+        # so that we get the values from the index of the frequency table
+        x_values = df2plot[ind][x].value_counts(sort=False).index
+        # Widths of violins as 10% of the x value range (so that violins are visible --as opposed to just seeing a vertical line)
+        proba_blocking_K = df2plot[ind][y_true].iloc[0]
+        #print("K={:.0f}: {}".format(K, x_values))
+        plt.figure()
+        ax = plt.gca()
+        #ax = plt.gca()
+        #plt.plot([x_values[0], x_values[-1]], [0.0, 0.0], color="gray")
+        # We create a violin plot for each set of not NaN errors (MC & FV), one set per x value
+        y_values = [df2plot[ind & (df2plot[x]==x_value)][y].dropna()*100 for x_value in x_values]
+        widths = violin_width_factor * (x_values[-1] - x_values[0])
+        plotting.violinplot(ax,  y_values,
+                            positions=x_values, showmeans=True, showmedians=False, linewidth=2, widths=widths,
+                            color_body=color, color_lines=color, color_means=color)
+
+        # Plot points
+        npoints = df2plot[ind].shape[0]
+        jitter = 1 + 0.1*(np.random.random(npoints) - 0.5)
+        ax.plot(df2plot[ind][x]*jitter, df2plot[ind][y]*100, 'k.', markersize=markersize)
+
+        # Reference line with the true value
+        ax.axhline(proba_blocking_K*100, color="gray", linestyle="dashed")
+
+        ymax = 1.1*np.max(np.r_[df2plot[ind][y]*100, proba_blocking_K*100])
+        ax.set_xlim([0, 1])
+        ax.set_ylim([-0.05*ymax, ymax])
+        ax.set_xlabel(xlabel, fontsize=fontsize)
+        ax.set_ylabel("Blocking probability (%)", fontsize=fontsize)
+        plt.xticks(fontsize=fontsize)
+        plt.yticks(fontsize=fontsize)
+        
+        plt.gcf().subplots_adjust(left=0.3)
+        if showtitle:
+            plt.suptitle("Distribution of blocking probability estimates of Pr(K={:.0f}) = {:.6f}% on {} replications" \
+                         .format(K, proba_blocking_K*100, replications) +
+                         "\nMonte Carlo (red) vs. Fleming Viot (green)")
+
+    return df2plot
+
+def plot_estimates(df_results, x, subset=None,
                    grp_K="K", y_mc="PMC(K)", y_fv="PFV(K)", y_true="Pr(K)", rep="rep",
-                   xlabel=None, showtitle=True):
+                   xlabel=None, markersize=7, fontsize=13, showtitle=False, figfile=None):
     """
     Plots the distribution of estimates as violin plots for the MC and the FV methods
     against a variable of interest, x.
@@ -1444,6 +1577,8 @@ def plot_estimates(df_results, x, subset=None, widths=0.1,
         # Compute the frequency of occurrence of the x values
         # so that we get the values from the index of the frequency table
         x_values = df2plot[ind][x].value_counts(sort=False).index
+        # Widths of violins as 10% of the x value range (so that violins are visible --as opposed to just seeing a vertical line)
+        widths = (x_values[-1] - x_values[0]) / 10
         proba_blocking_K = df2plot[ind][y_true].iloc[0]
         #print("K={:.0f}: {}".format(K, x_values))
         (fig, axes) = plt.subplots(1, 2, figsize=(12,4))
@@ -1460,13 +1595,22 @@ def plot_estimates(df_results, x, subset=None, widths=0.1,
         plotting.violinplot(ax2,  y2,
                             positions=x_values, showmeans=True, showmedians=False, linewidth=2, widths=widths,
                             color_body="green", color_lines="green", color_means="green")
-        ymax = np.max([ np.max(np.r_[y1, y2]), proba_blocking_K])
+
+        # Plot points
+        npoints = df2plot.shape[0]
+        jitter = 1 + 0.1*(np.random.random(npoints) - 0.5)
+        ax1.plot(df2plot[x_values]*jitter, df2plot['Pr(MC)']*100, 'k.', markersize=markersize)
+        ax2.plot(df2plot[x_values]*jitter, df2plot['Pr(FV)']*100, 'k.', markersize=markersize)
+
+        ymax = np.max([ np.max(np.r_[y1, y2]), proba_blocking_K ])
         for ax in axes:
             ax.set_xlim([0, 1])
             ax.set_ylim([0, ymax])
-            ax.set_xlabel(xlabel)
-            ax.set_ylabel("Estimated blocking probability (%)".format(K))
-            ax.axhline(proba_blocking_K*100, color="gray")
+            ax.set_xlabel(xlabel, fontsize=fontsize)
+            ax.set_ylabel("Estimated blocking probability (%)", fontsize=fontsize)
+            ax.axhline(proba_blocking_K*100, color="gray", linestyle="dashed")
+        plt.xticks(fontsize=fontsize)
+        plt.yticks(fontsize=fontsize)
         if showtitle:
             plt.suptitle("Distribution of blocking probability estimates of Pr(K={:.0f}) = {:.6f}% on {} replications" \
                          .format(K, proba_blocking_K*100, replications) +
@@ -1595,7 +1739,7 @@ def closeLogFile(fh_log, stdout_sys, dt_start):
 # DM-2020/12/23: To change which portion of the below code to run, change the IF condition
 # to `== "__main__"` or to `!= "__main__"` accordingly, taking into account that when running
 # this file as a script (F5) __name__ is equal to "__main__".
-if __name__ != "__main__":
+if __name__ == "__main__":
     run_unit_tests = True
     if run_unit_tests:
         #suite = unittest.TestSuite()
@@ -1608,11 +1752,11 @@ if __name__ != "__main__":
 
         #******************* ACTUAL EXECUTION ***************
         #results, results_agg, est_mc, est_fv, est_abs, est_surv = Test_QB_Particles.test_fv_implementation(nservers=1, K=20, buffer_size_activation=0.25)
-        #results, results_agg, est_mc, est_fv, est_abs, est_surv = Test_QB_Particles.test_fv_implementation(nservers=1, K=20, buffer_size_activation=0.5, figfile=figfile)
+        #results, results_agg, est_mc, est_fv, est_abs, est_surv, ax_mc, ax_fv = Test_QB_Particles.test_fv_implementation(nservers=1, K=20, buffer_size_activation=0.5, figfile=figfile)
         #results, results_agg, est_mc, est_fv, est_abs, est_surv = Test_QB_Particles.test_fv_implementation(nservers=1, K=20, buffer_size_activation=0.75)
         #results, results_agg, est_mc, est_fv, est_abs, est_surv = Test_QB_Particles.test_fv_implementation(nservers=1, K=20, buffer_size_activation=0.9)
 
-        results, results_agg, est_mc, est_fv, est_abs, est_surv = Test_QB_Particles.test_fv_implementation(nservers=1, K=40, buffer_size_activation=0.5, figfile=figfile)
+        results, results_agg, est_mc, est_fv, est_abs, est_surv, ax_mc, ax_fv = Test_QB_Particles.test_fv_implementation(nservers=1, K=40, buffer_size_activation=0.5, figfile=figfile)
 
         #results, results_agg, est_mc, est_fv, est_abs, est_surv = Test_QB_Particles.test_fv_implementation(nservers=3, K=5, buffer_size_activation=1)
         #results, results_agg = Test_QB_Particles.test_fv_implementation(K=20, buffer_size_activation=8)
@@ -1696,8 +1840,7 @@ if __name__ != "__main__":
     
         time_end = timer()
         print("Execution time: {:.1f} min".format((time_end - time_start) / 60))
-else:
-    # Lines to execute "by hand" (i.e. at the Python prompt)
+else:    # Lines to execute "by hand" (i.e. at the Python prompt)
     test = Test_QB_Particles(nservers=1)
     #test = Test_QB_Particles(nservers=3)
 
@@ -1761,13 +1904,13 @@ else:
                                                          'resultsfile_agg': resultsfile_agg})
     if 5 in tests2run:
         results, results_agg, est_mc, est_fv, est_abs, est_surv = test.analyze_estimates(
-                                        replications=12,
+                                        replications=8,
                                         K_values=[20],
-                                        nparticles_values=[1000],
+                                        nparticles_values=[3200],
                                         nmeantimes_values=[50],
                                         multiplier_values=[1],
                                         multiplier_adjust_with_activation=False,
-                                        buffer_size_activation_values=[0.1, 0.25, 0.5, 0.8],
+                                        buffer_size_activation_values=[0.2, 0.4, 0.5, 0.6, 0.8],
                                         seed=1313,
                                         dict_params_out={'logfilehandle': fh_log,
                                                          'resultsfile': resultsfile,
@@ -1794,7 +1937,7 @@ else:
                                         nmeantimes_values=[50],
                                         multiplier_values=[1],
                                         multiplier_adjust_with_activation=False,
-                                        buffer_size_activation_values=[0.2, 0.4, 0.5, 0.6],
+                                        buffer_size_activation_values=[0.2, 0.4, 0.5, 0.6, 0.8],
                                         seed=1313,
                                         dict_params_out={'logfilehandle': fh_log,
                                                          'resultsfile': resultsfile,

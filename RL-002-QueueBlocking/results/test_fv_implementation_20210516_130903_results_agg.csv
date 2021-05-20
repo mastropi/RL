@@ -1,0 +1,4 @@
+,n,n,n,mean,mean,mean,std,std,std,min,min,min,max,max,max,SE,SE,SE
+,# Events(MC),Pr(MC),Pr(FV),# Events(MC),Pr(MC),Pr(FV),# Events(MC),Pr(MC),Pr(FV),# Events(MC),Pr(MC),Pr(FV),# Events(MC),Pr(MC),Pr(FV),# Events(MC),Pr(MC),Pr(FV)
+N,,,,,,,,,,,,,,,,,,
+6400,8,8,8,1453432.0,0.0,2.0716460087931832e-07,2196.923043063382,0.0,4.931739710012765e-08,1450370.0,0.0,1.4983702938906105e-07,1456616.0,0.0,2.933433051017812e-07,776.7295907475515,0.0,1.7436332959985017e-08
