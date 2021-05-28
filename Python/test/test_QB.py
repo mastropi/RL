@@ -23,7 +23,9 @@ import unittest
 from unittest_data_provider import data_provider
 import matplotlib
 from matplotlib import pyplot as plt, cm, ticker as mtick
-import Python.lib.utils.plotting  as plotting
+from Python.lib.utils.basic import aggregation_bygroups
+
+import Python.lib.utils.plotting as plotting
 
 import Python.lib.queues as queues
 import Python.lib.estimators as estimators
@@ -488,15 +490,15 @@ class Test_QB_Particles(unittest.TestCase):
             buffer_size_activation_value = int( round(buffer_size_activation*K) )
         else:
             buffer_size_activation_value = buffer_size_activation
-        nmeantimes = 50
+        nmeantimes = 10 #50
         seed = 1717
 
         # Info parameters 
         dict_params_info = {'plot': True, 'log': False}
 
-        replications = 8
-        nparticles_min = 800
-        nparticles_max = 3200
+        replications = 3 #8
+        nparticles_min = 20 #800
+        nparticles_max = 40 #3200
         nparticles_step_prop = 1  # STEP proportion: N(n+1) = (1 + prop)*N(n), so that we scale the step as the number of particles increases
         nparticles = nparticles_min
         df_results = pd.DataFrame(columns=['K',
@@ -617,7 +619,7 @@ class Test_QB_Particles(unittest.TestCase):
         print(df_results_agg_by_N)
 
         # Add back the average of # events to the full data frame      
-        df_results = pd.merge(df_results, df_results_agg_by_N['mean'][['# Events(MC)', '# Cycles(MC)', '# Events(FV)']],
+        df_results = pd.merge(df_results, df_results_agg_by_N.xs('mean', axis=1, level=1)[['# Events(MC)', '# Cycles(MC)', '# Events(FV)']],
                               left_on='N', right_index=True, suffixes=["", "_mean"])
         # Convert average to integer
         df_results = df_results.astype({'# Events(MC)_mean': np.int})
@@ -630,13 +632,13 @@ class Test_QB_Particles(unittest.TestCase):
         
         # MC
         ax_mc.plot(df_results['N'], df_results['Pr(MC)']*100, 'k.', markersize=markersize)
-        line_mc = ax_mc.errorbar(list(df_results_agg_by_N.index), df_results_agg_by_N['mean']['Pr(MC)']*100, yerr=2*df_results_agg_by_N['SE']['Pr(MC)']*100, capsize=4, color='red', marker='x')
+        line_mc = ax_mc.errorbar(list(df_results_agg_by_N.index), df_results_agg_by_N['Pr(MC)']['mean']*100, yerr=2*df_results_agg_by_N['Pr(MC)']['SE']*100, capsize=4, color='red', marker='x')
         line_ref_mc = ax_mc.hlines(df_results.iloc[0]['Pr(K)']*100, df_results.iloc[0]['N'], df_results.iloc[-1]['N'], color='gray', linestyles='dashed')
         legend_mc = [line_mc, line_ref_mc]
 
         # FV
         ax_fv.plot(df_results['N'], df_results['Pr(FV)']*100, 'k.', markersize=markersize)
-        line_fv = ax_fv.errorbar(list(df_results_agg_by_N.index), df_results_agg_by_N['mean']['Pr(FV)']*100, yerr=2*df_results_agg_by_N['SE']['Pr(FV)']*100, capsize=4, color='green', marker='x')
+        line_fv = ax_fv.errorbar(list(df_results_agg_by_N.index), df_results_agg_by_N['Pr(FV)']['mean']*100, yerr=2*df_results_agg_by_N['Pr(FV)']['SE']*100, capsize=4, color='green', marker='x')
         line_ref_fv = ax_fv.hlines(df_results.iloc[0]['Pr(K)']*100, df_results.iloc[0]['N'], df_results.iloc[-1]['N'], color='gray', linestyles='dashed')
         legend_fv = [line_fv, line_ref_fv]
         if showtitle:
@@ -1057,14 +1059,14 @@ class Test_QB_Particles(unittest.TestCase):
                             color_green = cmap_green(color_strength)
 
                         # Lines in each plot (shown with error bars)
-                        yerr_mc = se_mult*df2plot['SE'][y_mc]
-                        yerr_fv = se_mult*df2plot['SE'][y_fv]
-                        yerr_ref_mc = se_mult*df2plot['SE'][proba_true]       # Referece value are the blocking rates
-                        line_mc = ax_mc.errorbar(axis_values, df2plot['mean'][y_mc]*100, yerr=yerr_mc*100,
+                        yerr_mc = se_mult*df2plot[y_mc]['SE']
+                        yerr_fv = se_mult*df2plot[y_fv]['SE']
+                        yerr_ref_mc = se_mult*df2plot[proba_true]['SE']       # Reference value is the blocking probability
+                        line_mc = ax_mc.errorbar(axis_values, df2plot[y_mc]['mean']*100, yerr=yerr_mc*100,
                                     capsize=4, color=color_red, marker='.')
-                        line_fv = ax_fv.errorbar(axis_values, df2plot['mean'][y_fv]*100, yerr=yerr_fv*100,
+                        line_fv = ax_fv.errorbar(axis_values, df2plot[y_fv]['mean']*100, yerr=yerr_fv*100,
                                     capsize=4, color=color_green, marker='.')
-                        line_ref_mc = ax_mc.errorbar(axis_values, df2plot['mean'][proba_true]*100, yerr=yerr_ref_mc*100,
+                        line_ref_mc = ax_mc.errorbar(axis_values, df2plot[proba_true]['mean']*100, yerr=yerr_ref_mc*100,
                                     capsize=4, color="black", marker='.', linestyle='dashed')
 
                         # Legend lines and labels in each plot (MC and FV)
@@ -1171,18 +1173,18 @@ class Test_QB_Particles(unittest.TestCase):
                     ax = axes
                 else:
                     ax = axes[idx]
-                ax.errorbar(df2plot.loc[K].index, df2plot.loc[K]['mean'][y_mc], yerr=se_mult*df2plot.loc[K]['SE'][y_mc],
+                ax.errorbar(df2plot.loc[K].index, df2plot.loc[K][y_mc]['mean'], yerr=se_mult*df2plot.loc[K][y_mc]['SE'],
                             capsize=4, color='red', marker='.')
-                ax.errorbar(df2plot.loc[K].index, df2plot.loc[K]['mean'][y_fv], yerr=se_mult*df2plot.loc[K]['SE'][y_fv],
+                ax.errorbar(df2plot.loc[K].index, df2plot.loc[K][y_fv]['mean'], yerr=se_mult*df2plot.loc[K][y_fv]['SE'],
                             capsize=4, color='green', marker='.')
-                ax.errorbar(df2plot.loc[K].index, df2plot.loc[K]['mean'][proba_true], yerr=se_mult*df2plot.loc[K]['SE'][proba_true],
+                ax.errorbar(df2plot.loc[K].index, df2plot.loc[K][proba_true]['mean'], yerr=se_mult*df2plot.loc[K][proba_true]['SE'],
                             capsize=4, color='black', marker='.', linestyle='dashed')
                 #ax.axhline(y=P_true, color='black', linestyle='dashed')
                 ax.set_xlabel(grp_axis)
                 ax.set_ylabel('K = {:.0f}'.format(K))
-                ymax = np.max(np.r_[df2plot.loc[K]['mean'][y_mc] + se_mult*df2plot.loc[K]['SE'][y_mc],
-                                    df2plot.loc[K]['mean'][y_fv] + se_mult*df2plot.loc[K]['SE'][y_fv],
-                                    df2plot.loc[K]['mean'][proba_true] + se_mult*df2plot.loc[K]['SE'][proba_true]])
+                ymax = np.max(np.r_[df2plot.loc[K][y_mc]['mean'] + se_mult*df2plot.loc[K][y_mc]['SE'],
+                                    df2plot.loc[K][y_fv]['mean'] + se_mult*df2plot.loc[K][y_fv]['SE'],
+                                    df2plot.loc[K][proba_true]['mean'] + se_mult*df2plot.loc[K][proba_true]['SE']])
                 ax.set_ylim((0, ymax*1.1))
                 ax.legend([legend_label_mc,
                            legend_label_fv,
@@ -1333,7 +1335,7 @@ def test_mc_implementation(nservers, K, paramsfile, nmeantimes=50, repmax=None, 
     print(df_results_agg_by_N)
 
     # Add back the average of # events to the full data frame      
-    df_results = pd.merge(df_results, df_results_agg_by_N['mean'][['# Events(MC)']],
+    df_results = pd.merge(df_results, df_results_agg_by_N['# Events(MC)']['mean'],
                           left_on='N', right_index=True, suffixes=["", "_mean"])
     # Convert average to integer
     df_results = df_results.astype({'# Events(MC)_mean': np.int})
@@ -1343,7 +1345,7 @@ def test_mc_implementation(nservers, K, paramsfile, nmeantimes=50, repmax=None, 
     legend_lines_ref = []
     ax = plt.gca()
     plt.plot(df_results['N'], df_results['Pr(MC)']*100, 'r.', markersize=2)
-    line_mc = plt.errorbar(list(df_results_agg_by_N.index), df_results_agg_by_N['mean']['Pr(MC)']*100, yerr=2*df_results_agg_by_N['SE']['Pr(MC)']*100, capsize=4, color='red', marker='x')
+    line_mc = plt.errorbar(list(df_results_agg_by_N.index), df_results_agg_by_N['Pr(MC)']['mean']*100, yerr=2*df_results_agg_by_N['Pr(MC)']['SE']*100, capsize=4, color='red', marker='x')
     legend_lines_mc += [line_mc]
     line_ref = ax.hlines(df_results.iloc[0]['Pr(K)']*100, df_results.iloc[0]['N'], df_results.iloc[-1]['N'], color='gray', linestyles='dashed')
     legend_lines_ref += [line_ref]
@@ -1381,43 +1383,6 @@ def test_mc_implementation(nservers, K, paramsfile, nmeantimes=50, repmax=None, 
         plt.savefig(figfile)
         
     return df_results, df_results_agg_by_N, est_mc 
-
-def aggregation_bygroups(df, groupvars, analvars,
-                         dict_stats={'n': 'count', 'mean': np.mean, 'std': np.std, 'min': np.min, 'max': np.max}):
-    """
-    Computes the given summary statistics in the input data frame on the analysis variables
-    by the given group variables.
-    
-    Arguments:
-    groupvars: list
-        List of grouping variables.
-
-    analvars: list
-        List of analysis variables whose statistics is of interest.
-
-    dict_stats: dict
-        Dictionary with the summary statistics names and functions to compute them.
-        default: {'n': 'count', 'mean': np.mean, 'std': np.std, 'min': 'min', 'max': 'max'}
-
-    Return: data frame
-    Data frame containing the summary statistics results.
-    If the 'std' and 'n' (count) summary statistics is part of the `dict_stats` dictionary,
-    the Standard Error (SE) is also computed as 'std' / sqrt('n')
-    """
-    # Cast all analysis variables to float in order to compute statistics like mean, std, etc.!!
-    # Ref: https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.astype.html
-    for var in analvars:
-        df = df.astype({var: np.float})
-    df_grouped = df.groupby(groupvars, as_index=True, group_keys=False)
-    df_agg = df_grouped[analvars].agg(dict_stats)
-    stat_names = dict_stats.keys() 
-    if 'std' in stat_names and 'n' in stat_names:
-        df_agg_se = df_agg['std'][analvars] / np.sqrt(df_agg['n'][analvars])
-        # Rename the column names to reflect the column represents the Standard Error (as opposed to the Standard Deviation)
-        df_agg_se.set_axis([['SE']*len(analvars), analvars], axis=1, inplace=True)
-        df_agg = pd.concat([df_agg, df_agg_se], axis=1)
-
-    return df_agg
 
 def compute_errors(df_results,
                    y_mc="PMC(K)", y_fv="PFV(K)", y_true="Pr(K)"):
@@ -1747,16 +1712,19 @@ if __name__ == "__main__":
         #runner = unittest.TextTestRunner()
         #runner.run(suite)
 
-        dt_start, stdout_sys, fh_log, logfile, resultsfile, resultsfile_agg = createLogFileHandleAndResultsFileNames(prefix="test_fv_implementation")
-        figfile = re.sub("\.[a-z]*$", ".png", resultsfile)
+        #dt_start, stdout_sys, fh_log, logfile, resultsfile, resultsfile_agg = createLogFileHandleAndResultsFileNames(prefix="test_fv_implementation")
+        #figfile = re.sub("\.[a-z]*$", ".png", resultsfile)
+        fh_log = None; resultsfile = None; resultsfile_agg = None; figfile = None
 
         #******************* ACTUAL EXECUTION ***************
+        results, results_agg, est_mc, est_fv, est_abs, est_surv, ax_mc, ax_fv = Test_QB_Particles.test_fv_implementation(nservers=1, K=5, buffer_size_activation=0.5, figfile=figfile)
+        
         #results, results_agg, est_mc, est_fv, est_abs, est_surv = Test_QB_Particles.test_fv_implementation(nservers=1, K=20, buffer_size_activation=0.25)
         #results, results_agg, est_mc, est_fv, est_abs, est_surv, ax_mc, ax_fv = Test_QB_Particles.test_fv_implementation(nservers=1, K=20, buffer_size_activation=0.5, figfile=figfile)
         #results, results_agg, est_mc, est_fv, est_abs, est_surv = Test_QB_Particles.test_fv_implementation(nservers=1, K=20, buffer_size_activation=0.75)
         #results, results_agg, est_mc, est_fv, est_abs, est_surv = Test_QB_Particles.test_fv_implementation(nservers=1, K=20, buffer_size_activation=0.9)
 
-        results, results_agg, est_mc, est_fv, est_abs, est_surv, ax_mc, ax_fv = Test_QB_Particles.test_fv_implementation(nservers=1, K=40, buffer_size_activation=0.5, figfile=figfile)
+        #results, results_agg, est_mc, est_fv, est_abs, est_surv, ax_mc, ax_fv = Test_QB_Particles.test_fv_implementation(nservers=1, K=40, buffer_size_activation=0.5, figfile=figfile)
 
         #results, results_agg, est_mc, est_fv, est_abs, est_surv = Test_QB_Particles.test_fv_implementation(nservers=3, K=5, buffer_size_activation=1)
         #results, results_agg = Test_QB_Particles.test_fv_implementation(K=20, buffer_size_activation=8)
@@ -1776,7 +1744,8 @@ if __name__ == "__main__":
         results_agg.to_csv(resultsfile_agg)
         print("Aggregated results of simulation saved to {}".format(os.path.abspath(resultsfile_agg)))
 
-        closeLogFile(fh_log, stdout_sys, dt_start)
+        if fh_log is not None:
+            closeLogFile(fh_log, stdout_sys, dt_start)
     else:
         # DM-2020/08/24: Instead of using unittest.main(), use the following to test the FV system
         # because there is a very weird error generated by the fact that queue.size inside
@@ -1844,23 +1813,23 @@ else:    # Lines to execute "by hand" (i.e. at the Python prompt)
     test = Test_QB_Particles(nservers=1)
     #test = Test_QB_Particles(nservers=3)
 
-    dt_start, stdout_sys, fh_log, logfile, resultsfile, resultsfile_agg = createLogFileHandleAndResultsFileNames(prefix="analyze_estimates")
-    #fh_log = None; resultsfile = None; resultsfile_agg = None
+    #dt_start, stdout_sys, fh_log, logfile, resultsfile, resultsfile_agg = createLogFileHandleAndResultsFileNames(prefix="analyze_estimates")
+    fh_log = None; resultsfile = None; resultsfile_agg = None
 
     # NOTES on the below calls to simulation execution:
     # - Use larger N values to improve the estimation of Phi(t)
     # - When larger N values are used smaller T values (simulation time) can be used
     # because the larger particle N already guarantees a large simulation time for
     # the 1-particle system that estimates P(T>t).
-    tests2run = [7]
+    tests2run = [1]
     if 1 in tests2run:
         results, results_agg, est_mc, est_fv, est_abs, est_surv = test.analyze_estimates(
-                                        replications=2,
-                                        K_values=[20], #[10, 20, 30, 40],
+                                        replications=3,
+                                        K_values=[5], #[10, 20, 30, 40],
                                         nparticles_values=[20], #[200, 400, 800, 1600],
                                         nmeantimes_values=[5], #[50, 50, 50, 50],
                                         multiplier_values=[1], #[10, 15, 20, 25],
-                                        buffer_size_activation_values=[10], #[1, 0.2, 0.4, 0.6, 0.8],
+                                        buffer_size_activation_values=[0.25, 0.5], #[1, 0.2, 0.4, 0.6, 0.8],
                                         seed=1313,
                                         dict_params_out={'logfilehandle': fh_log,
                                                          'resultsfile': resultsfile,

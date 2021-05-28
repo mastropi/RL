@@ -9,6 +9,7 @@ Created on Thu Jun 07 21:43:52 2020
 import bisect   # To insert elements in order in a list (bisect.insort(list, element)
 import copy
 import numpy as np
+import pandas as pd
 
 def array_of_objects(size, value=None, dtype=list):
     """
@@ -289,6 +290,131 @@ def merge_values_in_time(t1, y1, t2, y2, unique=False):
             .format(t1_merged, t2_merged)
 
     return t1_merged, y1_merged, y2_merged
+
+def deprecated_aggregation_bygroups(df, groupvars, analvars,
+                         dict_stats={'n': 'count', 'mean': "mean", 'std': "std", 'min': "min", 'max': "max"}):
+    """
+    Computes the given summary statistics in the input data frame on the analysis variables
+    by the given group variables.
+    
+    Arguments:
+    groupvars: str or list
+        String with the grouping variable name or list of grouping variables.
+
+    analvars: str or list
+        String with the analysis variable name or list of analysis variables
+        whose statistics is of interest.
+
+    dict_stats: dict
+        Dictionary with the summary statistics names and functions to compute them.
+        default: {'n': 'count', 'mean': "mean", 'std': "std", 'min': "min", 'max': "max"}
+
+    Return: data frame
+    Data frame containing the summary statistics results.
+    If the 'std' and 'n' (count) summary statistics is part of the `dict_stats` dictionary,
+    the Standard Error (SE) is also computed as 'std' / sqrt('n')
+    """
+    # NOTE: The following logic is so complicated because the behaviour of the agg() function
+    # of a pd.groupby object is DIFFERENT depending on whether there is only ONE analysis variables
+    # or more than one... GRRRRR(*@*@(*#@&$(*@&#$(*&@$*(&(*()*!@)(!!!!! 
+
+    # Make sure analvars is a list from now on
+    if isinstance(analvars, str):
+        analvars = [analvars]
+
+    # Cast all analysis variables to float in order to compute statistics like mean, std, etc.!!
+    # Ref: https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.astype.html
+    for var in analvars:
+        df = df.astype({var: np.float})
+
+    # Create the groupby object
+    df_grouped = df.groupby(groupvars, as_index=True, group_keys=False)
+
+    # Distinguish between one and several analysis variables
+    if len(analvars) == 1:
+        colnames = analvars[0]
+    else:
+        colnames = analvars
+
+    # Aggregate the analysis variables
+    df_agg = df_grouped[colnames].agg(dict_stats)
+
+    # Distinguish between one and several analysis variables
+    if len(analvars) == 1:
+        # Create the MultiIndex that would have been created if there were multiple analysis variables
+        # NOTE: in the creation of the MultiIndex, both `levels` and `labels` are mandatory,
+        # which are lists of lists:
+        # - `levels` defines the levels of the multi-level index as lists of names, one list per level.
+        # - `labels` defines the presence of each multi-level combination as data frame columns
+        # (considering that not all combinations of level indices are to be present as columns of the data frame); 
+        # the first row refers to indices in the first level, the second row refers to indices in the second level.
+        # In the below particular case, the second level of labels are all 0's because it refers to the only analysis
+        # variable in `analvars`.
+        list_of_stats = df_agg.columns
+        nstats = len(list_of_stats)
+        midx = pd.MultiIndex(levels=[list_of_stats, analvars], labels=[range(nstats), [0]*nstats])
+        df_agg.columns = midx
+
+    # Compute the Standard Error (SE) when both 'std' and 'n' have been requested
+    stat_names = dict_stats.keys()
+    if 'std' in stat_names and 'n' in stat_names:
+        df_agg_se = df_agg['std'][colnames] / np.sqrt(df_agg['n'][colnames])
+        # Rename the column names to reflect the column represents the Standard Error (as opposed to the Standard Deviation)
+        if len(analvars) == 1:
+            df_agg_se = df_agg_se.to_frame()
+        df_agg_se.set_axis([['SE']*len(analvars), analvars], axis=1, inplace=True)
+        print(df_agg_se)
+        df_agg = pd.concat([df_agg, df_agg_se], axis=1)
+
+    return df_agg
+
+
+def aggregation_bygroups(df, groupvars, analvars,
+                         stats=["count", "mean", "std", "min", "max"]):
+    """
+    Computes the given summary statistics in the input data frame on the analysis variables
+    by the given group variables.
+    
+    Arguments:
+    groupvars: str or list
+        String with the grouping variable name or list of grouping variables.
+
+    analvars: str or list
+        String with the analysis variable name or list of analysis variables
+        whose statistics is of interest.
+
+    stats: list
+        List with the summary statistics names and/or functions to compute them.
+        When both "std" and "n" are requested the standard error is also computed
+        as "std" / sqrt("n') and stored in the output dataset as statistic "SE".
+        default: ["count", "mean", "std", "min", "max"]
+
+    Return: data frame
+    Data frame containing the summary statistics results.
+    If the 'std' and 'n' (count) summary statistics is part of the `dict_stats` dictionary,
+    the Standard Error (SE) is also computed as 'std' / sqrt('n')
+    """
+    # Cast all analysis variables to float in order to compute statistics like mean, std, etc.!!
+    # Ref: https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.astype.html
+    for var in analvars:
+        df = df.astype({var: np.float})
+
+    # Create the groupby object
+    df_grouped = df.groupby(groupvars, as_index=True, group_keys=False)
+        ## I don't know what's the effect of group_keys=False as I don't see any difference with group_keys=True
+
+    # Aggregate the analysis variables
+    df_agg = df_grouped[analvars].agg(stats)
+
+    # Compute the Standard Error (SE) when both 'std' and 'n' have been requested
+    if 'std' in stats and 'count' in stats:
+        df_agg_se = df_agg.xs('std', axis=1, level=1) / np.sqrt( df_agg.xs('count', axis=1, level=1) )
+        df_agg_se.set_axis([analvars, ['SE']*len(analvars)], axis=1, inplace=True)
+        # Concatenate the columns and reorder them with reindex() so that each variable's statistics appear together!
+        # Ref: https://stackoverflow.com/questions/11194610/how-can-i-reorder-multi-indexed-dataframe-columns-at-a-specific-level
+        df_agg = pd.concat([df_agg, df_agg_se], axis=1).reindex(analvars, axis=1, level=0)
+
+    return df_agg
 
 
 if __name__ == "__main__":
