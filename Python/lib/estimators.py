@@ -4161,6 +4161,7 @@ def print_states_distribution(states, freq):
 
 if __name__ == "__main__":
     
+    #------------------------------ Auxiliary functions ------------------------------#
     def plot_survival_curve(df_proba_survival, col='b-', title=None):
         plt.step(df_proba_survival['t'], df_proba_survival['P(T>t / s=1)'], col, where='post')
         ax = plt.gca()
@@ -4219,18 +4220,47 @@ if __name__ == "__main__":
 
         return 1/np.mean(btimes), len(btimes), 1/np.mean(dtimes), len(dtimes)
 
-    def check_expected_survival_time(est):
-        "Checks the values used to compute E(T)"
-        # Expected value when the absorption set is 0
-        x, dist = stationary_distribution_birth_death_process(est_mc.nservers, est_mc.queue.K, est_mc.rhos)
-        ET_expected = 1/dist[0] + 1/np.sum(est.queue.getBirthRates())
+    def compute_true_expected_survival_time(est):
+        "Computes the true expected survival time when the absorption set is 0"
+        if est.buffer_size_activation == 1:
+            # The absorption set is 0
+            # => we can compute the true expected survival time
+            x, dist = stationary_distribution_birth_death_process(est.nservers, est.queue.K, est.rhos)
+            ET_expected = 1/dist[0] + 1/np.sum(est.queue.getBirthRates())
+        else:
+            ET_expected = None
 
-        # Observed values
-        idx_abs = np.where([EventType.ABSORPTION in value for value in est.info_particles[0]['E']])[0]
+        return ET_expected
+
+    def plot_event_times_dist(est, event_type :EventType):
+        """
+        Plots the distribution of observed times of the given events and returns their average
+
+        Arguments:
+        est: EstimatorQueueBlockingFlemingViot
+            Object used to simulate the queue and estimate the blocking probability under FV or MC.
+
+        event_type: EventType
+            Type of event defining the observed times to collect.
+
+        Return: tuple
+        duple with the following values:
+        - average of the observed event times
+        - true expected event time (E(T)) when the event type is ABSORPTION and the absorption set is 0,
+        or None otherwise.
+        """
+        if event_type == EventType.ABSORPTION:
+            ET_expected = compute_true_expected_survival_time(est)
+        else:
+            ET_expected = None
+
+        # Observed event times
+        idx_abs = np.where([event_type in value for value in est.info_particles[0]['E']])[0]
         times_abs = [est.info_particles[0]['t'][idx] for idx in idx_abs]
         times_abs_diff = np.diff(times_abs)
+        # Expected value
         ET = np.mean(times_abs_diff)
-        print("\nE(T): (n={}) Mean = {:.3f}, Median = {:.3f}".format( len(times_abs_diff), ET, np.median(times_abs_diff) ))
+        print("\nAverage observed {} time: E(T): (n={}) Mean = {:.3f}, Median = {:.3f}".format( event_type.name, len(times_abs_diff), ET, np.median(times_abs_diff) ))
 
         # Plot and histogram
         (fig, axes) = plt.subplots(1, 2, figsize=(10,4))
@@ -4242,9 +4272,12 @@ if __name__ == "__main__":
         ax1.set_xlabel("Time index")
         #ax1.title.set_text("Times used in the estimation of E(T). Expected={:.3f}".format(ET_expected))
         ax1.set_ylabel("T")
-        plt.suptitle("Times used in the estimation of E(T)={:.3f}. Expected={:.3f}".format(ET, ET_expected))
-
         ax2.hist(times_abs_diff, orientation="horizontal", bins=20)
+        plt.suptitle("Times used in the estimation of expected {} time: E(T)={:.3f}".format(event_type.name, ET) + (ET_expected is None and " " or "; Expected={:.3f}".format(ET_expected)))
+
+        return ET, ET_expected
+    #------------------------------ Auxiliary functions ------------------------------#
+
 
     tests2run = [3.1]
 
@@ -4481,7 +4514,7 @@ if __name__ == "__main__":
         print("Expected rho={}".format(est_mc.rhos[0]))
 
         # Check E(T)
-        check_expected_survival_time(est_mc)
+        plot_event_times_dist(est_mc, EventType.ABSORPTION)
 
         """
         # b) Fleming-Viot
@@ -4615,7 +4648,7 @@ if __name__ == "__main__":
         print("Expected rhos={}".format(est_mc.rhos))
 
         # Check E(T)
-        check_expected_survival_time(est_mc)
+        plot_event_times_dist(est_mc, EventType.ABSORPTION)
         """
         proba_blocking_mc = np.nan
         """
@@ -4646,7 +4679,7 @@ if __name__ == "__main__":
         print("P(K) true: {:.6f}%".format(proba_blocking_K*100))    # K=5: 11.98%
         print("P(K) by MC: {:.6f}% (#events={})".format(proba_blocking_mc*100, est_mc.nevents))
         print("P(K) estimated by FV: {:.6f}% (#events={})".format(proba_blocking_fv*100, est_fv.nevents))
-        # Assertions for nservers=3, K=5, BSA=3 (both MC and FV), N=20, nmeantimes=5
+        # Assertions for seed=1717, nservers=3, K=5, BSA=3 (both MC and FV), N=20, nmeantimes=5
         assert "{:.6f}%".format(proba_blocking_mc*100) == "11.288100%" #11.487418%") #10.713005%")
         assert "{:.6f}%".format(proba_blocking_fv*100) == "7.182663%" #7.200364%") #"7.321676%")
         assert est_mc.nevents == 432
