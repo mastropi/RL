@@ -1,0 +1,9 @@
+# Python 3 standard library includes the packages listed here: https://docs.python.org/3/library/index.html
+
+# Required packages listed in alphabetical order
+numpy==1.18.3
+pandas==0.22.0
+
+# Suggested packages listed in alphabetical order
+pytest==3.3.2
+unittest_data_provider==1.0.1
