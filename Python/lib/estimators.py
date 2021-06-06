@@ -463,21 +463,21 @@ class EstimatorQueueBlockingFlemingViot:
         # (see method _generate_birth_times())
         # NOTE: The first element in the queue of each server has information about the first WAITING job
         # (as opposed to containing information about the job CURRENTLY BEING SERVED)
-        self.times_in_server_queue = array_of_objects((self.N, self.nservers), dtype=list, value=[])
-        self.jobclasses_in_server_queue = array_of_objects((self.N, self.nservers), dtype=list, value=[])
+        self.times_in_server_queues = array_of_objects((self.N, self.nservers), dtype=list, value=[])
+        self.jobclasses_in_server_queues = array_of_objects((self.N, self.nservers), dtype=list, value=[])
         #---------------------------------- Next events information ---------------------------
 
 
-        #--------------------------- Times of the last arriving jobs --------------------------
-        # Times (ABSOLUTE) of the last jobs arrived for each class
+        #--------------------------- Times of the latest arrived jobs -------------------------
+        # Times (ABSOLUTE) of the latest jobs arrived for each class
         # These are needed in order to compute the ABSOLUTE time of the next arriving job of each class
         # since the arrival times are generated RELATIVE to the time of the latest arrival.
-        # The times of the last jobs arrived per class is also used to decide WHEN new arriving job times
+        # The times of the latest jobs arrived per class is also used to decide WHEN new arriving job times
         # should be generated and thus make the process more efficient (as opposed to generating new arriving job times
         # at every iteration (i.e. at every call to generate_one_iteration()) which may quickly fill
         # up the server queues with times that will never be used, significantly slowing down the simulation process)        
-        self.times_last_jobs = np.zeros((self.N, len(self.job_rates)), dtype=float)
-        #--------------------------- Last jobs and services information -----------------------
+        self.times_latest_arrived_jobs = np.zeros((self.N, len(self.job_rates)), dtype=float)
+        #--------------------------- Times of the latest arrived jobs -------------------------
 
 
         #----------------------------- Activation states distribution -------------------------
@@ -837,6 +837,19 @@ class EstimatorQueueBlockingFlemingViot:
         return self.sbu, self.counts_blocked
 
     def run_simulation(self, stop_at_first_absorption=False):
+        """
+        Run the simulation
+        
+        Arguments:
+        stop_at_first_absorption: bool
+            Whether the simulation of each particle should stop at the first absorption of the particle.
+            This is used when we are interested in measuring the time until absorption, e.g. to estimate
+            P(T>t) given activation. 
+            default: False
+
+        Return: tuple
+        Triple with start times of each major step, plus the end time of the simulation. 
+        """
         time_start = timer()
         if self.LOG:
             print("simulate: Generating trajectories for each particle until first absorption...")
@@ -1039,163 +1052,8 @@ class EstimatorQueueBlockingFlemingViot:
         # and then assigns each new job to a server based on the assignment policy,
         # we need to ACTIVATE (i.e. uncomment) the two lines in _apply_next_event()
         # that are enclosed by the labels "DM-2021/05/10-START"-"DM-2021/05/10-END".
-        self._generate_birth_times_from_equivalent_rates(P)
-
-    def _generate_birth_times(self, P):
-        """
-        Generates new birth times for EACH server in the given particle.
-        
-        The process is carried out as follows: job arrival times are generated for each job class
-        and each new job is assigned to one of the servers based on the assignment policy. The process
-        is repeated until all servers have at least ONE job in their queue (so that no "next birth time"
-        in a server is NaN, making it possible to compute the next event to be observed in the system
-        as the MINIMUM over all non-NaN next birth and next death events).
-
-        The assignment policy is assumed to be a mapping from job class to server number.
-
-        The effect of this method is the following:
-        - The queue of jobs in each server is updated with the new assigned job (storing job class and event time).
-        - The times of the next birth events by server is updated when the generated birth event is the first job
-        assigned to the server's queue. Otherwise, the time of the next birth event in the server is maintained.
-        """
-
-        #--------------------------------- Auxiliary functions --------------------------------
-        def at_least_one_server_may_not_yet_hold_the_next_birth_time(P):
-            """
-            The situation described by the function name happens when
-            the currently stored "next birth time" for at least one server
-            (given by self.times_in_server_queue[P][server][0]) is either:
-            - INEXISTENT
-            - LARGER than the SMALLEST time among those generated for the next arriving job
-            of each class the last time these times were generated (self.times_last_jobs[P]).
-
-            This means that at least one of the times of the next arriving job classes
-            COULD be smaller than the time of the next job to be served by one of the servers
-            (the possibility depends on the server which those jobs are assigned to, which is a random process),
-            and such situation makes the time of the next job to be served by such server not yet defined.
-
-            NOTE that this condition is ALWAYS satisfied at the very first call of this function
-            (i.e. at the beginning of the simulation of the particle's trajectory) since
-            the list of times of jobs assigned to each server is empty.
-            """
-            resp = False
-            smallest_time_among_jobclasses = np.min(self.times_last_jobs[P])
-            assert not np.isnan(smallest_time_among_jobclasses)
-            for server in range(self.nservers):
-                if len(self.times_in_server_queue[P][server]) == 0 or \
-                   self.times_in_server_queue[P][server][0] > smallest_time_among_jobclasses:
-                    resp = True
-                    break
-            return resp
-        #--------------------------------- Auxiliary functions --------------------------------
-
-        if DEBUG_TIME_GENERATION:
-            print("\n_generate_birth_times (START): P={}".format(P))
-            print("times last jobs[P]: {}".format(self.times_last_jobs[P]))
-            print("times next events in server queues:")
-            for s in range(self.nservers):
-                print("\t{}: {}".format(s, self.times_in_server_queue[P][s]))
-
-        while at_least_one_server_may_not_yet_hold_the_next_birth_time(P):
-            # We still don't know what's the time of the next birth event in all servers
-            # => Generate a birth time for ALL the job CLASSES and assign them to a server
-
-            # TODO: (2021/05/08) Implement process abstraction as follows
-            #times_last_jobs_prev_P = self._generate_next_times_jobclasses(P)    # -> updates self.times_last_jobs[P] for each job class
-            #job_classes_accepted = self._accept_reject_job(P)
-            #self._assign_accepted_jobs_to_servers(P, job_classes_accepted, times_last_jobs_prev_P)
-
-            # Generate the next arriving job class times
-            birth_times_relative_for_jobs = np.random.exponential( 1/np.array(self.job_rates) )
-            # Make a copy of the absolute times of the last jobs (one value per job class),
-            # prior to updating their values. This is done just for INFORMATIONAL purposes.
-            times_last_jobs_prev_P = copy.deepcopy(self.times_last_jobs[P])
-            # Update the absolute times of the last jobs (one value per job class)
-            self.times_last_jobs[P] += birth_times_relative_for_jobs
-
-            job_classes = range( len(self.job_rates) )
-            if self.policy_accept is not None:
-                # Use the acceptance policy to decide whether we accept each job IN THE ORDER THEY ARRIVE 
-                times_last_jobs_P = copy.deepcopy(self.times_last_jobs[P])
-                order = np.argsort(times_last_jobs_P)
-                job_classes_accepted = []
-                #print("P={}:\ntimes_last_jobs_P: {}".format(P, times_last_jobs_P))
-                #print("order: {}".format(order))
-                for job_class in [job_classes[o] for o in order]:
-                    #print("job_class: {}".format(job_class))
-                    #print("state: {}".format(self.policy_accept.env.getState()))
-                    self.policy_accept.env.setJobClass(job_class)
-                    action = self.policy_accept.choose_action()
-                    if action == 1:
-                        #print("ENTRO")
-                        assert self.particles[P].getBufferSize() < self.particles[P].getCapacity(), \
-                               "The buffer is NOT at full capacity when a job is accepted by the acceptance policy"
-                        job_classes_accepted += [job_class]
-                        next_state, reward, done, info = self.policy_accept.env.step(action)
-            else:
-                job_classes_accepted = job_classes
-
-            # Assign the accepted job class associated to each birth time to one of the servers based on the assignment policy
-            servers = range(self.nservers)
-            for job_class in job_classes_accepted:
-                # IMPORTANT: The assigned server can be repeated for different job classes
-                # => we might have a queue of jobs for a particular server (which is handled here)
-                assigned_server = np.random.choice(servers, p=self.policy_assign[job_class])
-                assert assigned_server < self.nservers, \
-                        "The assigned server ({}) is one of the possible servers [0, {}]".format(assigned_server, self.nservers-1)
-    
-                # Insert the new job time in order into the server's queue containing job birth times
-                # Note that the order of the jobs is NOT guaranteed because the server's queue may contain
-                # jobs of different classes, whose arrival times are generated independently from each other.
-                idx_insort, _ = insort(self.times_in_server_queue[P][assigned_server], self.times_last_jobs[P][job_class], unique=False)
-                self.jobclasses_in_server_queue[P][assigned_server].insert(idx_insort, job_class)
-                if self.LOG:
-                    print("job class: {}".format(job_class))
-                    print("job time (PREVIOUS): {}".format(times_last_jobs_prev_P[job_class]))
-                    print("job time (RELATIVE): {}".format(birth_times_relative_for_jobs[job_class]))
-                    print("job time (ABSOLUTE): {}".format(self.times_last_jobs[P][job_class]))
-                    print("assigned server: {}".format(assigned_server))
-                    print("queue of assigned server: {}".format(self.times_in_server_queue[P][assigned_server]))
-    
-            if self.LOG:
-                print("currently assigned job classes by server: {}".format(self.jobclasses_in_server_queue[P]))        
-                print("currently assigned job times by server: {}".format(self.times_in_server_queue[P]))        
-
-        # Assign the birth times for each server by picking the first job in each server's queue
-        for server in range(self.nservers):
-            assert len(self.times_in_server_queue[P][server]) > 0, "P={}: The queue in server {} is not empty.".format(P, server)
-            self.times_next_birth_events[P][server] = self.times_in_server_queue[P][server][0]
-
-        if DEBUG_TIME_GENERATION:
-            print("_generate_birth_times (END): P={}".format(P))
-            print("times last jobs[P]: {}".format(self.times_last_jobs[P]))
-            print("times next events in server queues:")
-            for s in range(self.nservers):
-                print("\t{}: {}".format(s, self.times_in_server_queue[P][s]))
-
-    def _generate_birth_times_from_equivalent_rates(self, P):
-        """
-        Generates new birth times for EACH server in the particle that does NOT have a "next birth time".
-        The equivalent arrival rates are used instead of the job class arrival rate + assignment policy.
-        """
-
-        if DEBUG_TIME_GENERATION:
-            print("\n_generate_birth_times_from_equivalent_rates (START): P={}".format(P))
-
-        for server in range(self.nservers):
-            if np.isnan(self.times_next_birth_events[P][server]):
-                # Generate the next birth time for the server
-                # NOTE: (2021/05/09) The birth ABSOLUTE time is computed by adding the newly generated relative time
-                # to the time of the latest known state for the particle,
-                # i.e. the time at which the latest event was applied.
-                birth_time_relative = self.particles[P].generate_event_time(Event.BIRTH, server)
-                self.times_next_birth_events[P][server] = self.times_latest_known_state[P] + birth_time_relative
-                if DEBUG_TIME_GENERATION:
-                    print("server {}: Current time={:.3f}, Exponential BIRTH time={:.3f}, ABSOLUTE time={:.3f}" \
-                          .format(server, self.times_latest_known_state[P], birth_time_relative, self.times_next_birth_events[P][server]))
-
-        if DEBUG_TIME_GENERATION:
-            print("_generate_birth_times_from_equivalent_rates (END): P={}".format(P))
+        #self._generate_birth_times_from_equivalent_rates(P)
+        self._generate_birth_times(P)
 
     def _generate_death_times(self, P):
         """
@@ -1228,6 +1086,179 @@ class EstimatorQueueBlockingFlemingViot:
         if DEBUG_TIME_GENERATION:
             print("_generate_death_times (END): P={}".format(P))
             print("times next DEATH events by server: {}".format(self.times_next_death_events[P]))
+
+    def _generate_birth_times(self, P):
+        """
+        Generates new birth times for EACH server in the given particle.
+        
+        The process is carried out as follows: job arrival times are generated for each job class
+        and each new job is assigned to one of the servers based on the assignment policy. The process
+        is repeated until all servers have at least ONE job in their queue (so that no "next birth time"
+        in a server is NaN, making it possible to compute the next event to be observed in the system
+        as the MINIMUM over all non-NaN next birth and next death events).
+
+        The assignment policy is assumed to be a mapping from job class to server number.
+
+        The effect of this method is the following:
+        - The queue of jobs in each server is updated with the new assigned job (storing job class and event time).
+        - The times of the next birth events by server is updated when the generated birth event is the first job
+        assigned to the server's queue. Otherwise, the time of the next birth event in the server is maintained.
+        """
+
+        #--------------------------------- Auxiliary functions --------------------------------
+        def at_least_one_server_may_not_yet_hold_the_next_birth_time(P):
+            """
+            The situation described by the function name happens when
+            the currently stored "next birth time" for at least one server
+            (given by self.times_in_server_queues[P][server][0]) is either:
+            - INEXISTENT
+            - LARGER than the SMALLEST time among those generated for the next arriving job of each class
+            the last time these times were generated (self.times_latest_arrived_jobs[P]).
+
+            This means that at least one of the times of the next arriving job classes
+            COULD be smaller than the time of the next job to be served by one of the servers
+            (the possibility depends on the server to which those jobs are assigned, which is a random process),
+            and such situation makes the time of the next job to be served by such server to be not yet defined.
+
+            NOTE that this condition is ALWAYS satisfied at the very first call of this function
+            (i.e. at the beginning of the simulation of the particle's trajectory) since
+            the list of times of jobs assigned to each server is empty.
+            """
+            resp = False
+            smallest_time_among_jobclasses = np.min(self.times_latest_arrived_jobs[P])
+            assert not np.isnan(smallest_time_among_jobclasses)
+            for server in range(self.nservers):
+                if len(self.times_in_server_queues[P][server]) == 0 or \
+                   self.times_in_server_queues[P][server][0] > smallest_time_among_jobclasses:
+                    resp = True
+                    break
+            return resp
+
+        def generate_next_times_jobclasses(P):
+            "It updates self.times_latest_arrived_jobs[P] with the ABSOLUTE next arrival times for each job class"
+            # Generate the next arriving job class times
+            birth_times_relative_for_jobs = np.random.exponential( 1/np.array(self.job_rates) )
+            # Make a copy of the absolute times of the latest jobs (one value per job class),
+            # prior to updating their values. This is done just for INFORMATIONAL purposes.
+            times_latest_arrived_jobs_prev_P = copy.deepcopy(self.times_latest_arrived_jobs[P])
+            # Update the absolute times of the latest jobs (one value per job class)
+            self.times_latest_arrived_jobs[P] += birth_times_relative_for_jobs
+            if DEBUG_TIME_GENERATION:
+                for job_class in range( len(self.job_rates) ):
+                    print("job class {}: Current time={:.3f}, Previous arrived job time={:.3f}, Exponential BIRTH time={:.3f}, ABSOLUTE time={:.3f}" \
+                          .format(job_class, self.times_latest_known_state[P], times_latest_arrived_jobs_prev_P[job_class], birth_times_relative_for_jobs[job_class], self.times_latest_arrived_jobs[P][job_class]))
+
+        def accept_jobs(P):
+            "Decides which jobs to accept based on the job acceptance policy"
+            job_classes = range( len(self.job_rates) )
+            if self.policy_accept is not None:
+                # Use the acceptance policy to decide whether we accept each job IN THE ORDER THEY ARRIVE 
+                times_latest_arrived_jobs_P = copy.deepcopy(self.times_latest_arrived_jobs[P])
+                order = np.argsort(times_latest_arrived_jobs_P)
+                job_classes_accepted = []
+                #print("P={}:\ntimes_latest_arrived_jobs_P: {}".format(P, times_latest_arrived_jobs_P))
+                #print("order: {}".format(order))
+                for job_class in [job_classes[o] for o in order]:
+                    #print("job_class: {}".format(job_class))
+                    #print("state: {}".format(self.policy_accept.env.getState()))
+                    self.policy_accept.env.setJobClass(job_class)
+                    action = self.policy_accept.choose_action()
+                    if action == 1:
+                        #print("ENTRO")
+                        assert self.particles[P].getBufferSize() < self.particles[P].getCapacity(), \
+                               "The buffer is NOT at full capacity when a job is accepted by the acceptance policy"
+                        job_classes_accepted += [job_class]
+                        next_state, reward, done, info = self.policy_accept.env.step(action)
+            else:
+                job_classes_accepted = job_classes
+
+            return job_classes_accepted
+
+        def assign_accepted_jobs_to_servers(P, job_classes):
+            """
+            Assigns the accepted jobs to servers based on the assignment policy.
+            The self.times_in_server_queues[P] and self.jobclasses_in_server_queues[P] attributes
+            are updated with this information.
+            """
+            servers = range(self.nservers)
+            for job_class in job_classes:
+                # IMPORTANT: The assigned server can be repeated for different job classes
+                # => we might have a queue of jobs for a particular server (which is handled here)
+                if self.nservers == 1:
+                    # There is really no assignment to be done, as only one possibility exists
+                    assigned_server = 0
+                else:
+                    assigned_server = np.random.choice(servers, p=self.policy_assign[job_class])
+                assert assigned_server < self.nservers, \
+                        "The assigned server ({}) is one of the possible servers [0, {}]".format(assigned_server, self.nservers-1)
+    
+                # Insert the new job time in order into the server's queue containing job birth times
+                # Note that the order of the jobs is NOT guaranteed because the server's queue may contain
+                # jobs of different classes, whose arrival times are generated independently from each other.
+                idx_insort, _ = insort(self.times_in_server_queues[P][assigned_server], self.times_latest_arrived_jobs[P][job_class], unique=False)
+                self.jobclasses_in_server_queues[P][assigned_server].insert(idx_insort, job_class)
+                if self.LOG:
+                    print("job class: {}".format(job_class))
+                    #print("job time (PREVIOUS): {}".format(times_latest_arrived_jobs_prev_P[job_class]))
+                    #print("job time (RELATIVE): {}".format(birth_times_relative_for_jobs[job_class]))
+                    print("job time (ABSOLUTE): {}".format(self.times_latest_arrived_jobs[P][job_class]))
+                    print("assigned server: {}".format(assigned_server))
+                    print("queue of assigned server: {}".format(self.times_in_server_queues[P][assigned_server]))
+        #--------------------------------- Auxiliary functions --------------------------------
+
+        if DEBUG_TIME_GENERATION:
+            print("\n_generate_birth_times (START): P={}".format(P))
+            print("times latest jobs[P]: {}".format(self.times_latest_arrived_jobs[P]))
+            print("times next events in server queues:")
+            for s in range(self.nservers):
+                print("\t{}: {}".format(s, self.times_in_server_queues[P][s]))
+
+        while at_least_one_server_may_not_yet_hold_the_next_birth_time(P):
+            # We still don't know what's the time of the next birth event in all servers
+            # => Generate a birth time for ALL the job CLASSES and assign them to a server
+            generate_next_times_jobclasses(P)       # This updates self.times_latest_arrived_jobs[P] for each job class
+            job_classes_accepted = accept_jobs(P)   # This updates self.times_in_server_queues[P] and self.jobclasses_in_server_queues[P]
+            assign_accepted_jobs_to_servers(P, job_classes_accepted)
+
+            if self.LOG:
+                print("currently assigned job classes by server: {}".format(self.jobclasses_in_server_queues[P]))        
+                print("currently assigned job times by server: {}".format(self.times_in_server_queues[P]))        
+
+        # Assign the birth times for each server by picking the first job in each server's queue
+        for server in range(self.nservers):
+            assert len(self.times_in_server_queues[P][server]) > 0, "P={}: The queue in server {} is not empty.".format(P, server)
+            self.times_next_birth_events[P][server] = self.times_in_server_queues[P][server][0]
+
+        if DEBUG_TIME_GENERATION:
+            print("_generate_birth_times (END): P={}".format(P))
+            print("times latest jobs[P]: {}".format(self.times_latest_arrived_jobs[P]))
+            print("times next events in server queues:")
+            for s in range(self.nservers):
+                print("\t{}: {}".format(s, self.times_in_server_queues[P][s]))
+
+    def _generate_birth_times_from_equivalent_rates(self, P):
+        """
+        Generates new birth times for EACH server in the particle that does NOT have a "next birth time".
+        The equivalent arrival rates are used instead of the job class arrival rate + assignment policy.
+        """
+
+        if DEBUG_TIME_GENERATION:
+            print("\n_generate_birth_times_from_equivalent_rates (START): P={}".format(P))
+
+        for server in range(self.nservers):
+            if np.isnan(self.times_next_birth_events[P][server]):
+                # Generate the next birth time for the server
+                # NOTE: (2021/05/09) The birth ABSOLUTE time is computed by adding the newly generated relative time
+                # to the time of the latest known state for the particle,
+                # i.e. the time at which the latest event was applied.
+                birth_time_relative = self.particles[P].generate_event_time(Event.BIRTH, server)
+                self.times_next_birth_events[P][server] = self.times_latest_known_state[P] + birth_time_relative
+                if DEBUG_TIME_GENERATION:
+                    print("server {}: Current time={:.3f}, Exponential BIRTH time={:.3f}, ABSOLUTE time={:.3f}" \
+                          .format(server, self.times_latest_known_state[P], birth_time_relative, self.times_next_birth_events[P][server]))
+
+        if DEBUG_TIME_GENERATION:
+            print("_generate_birth_times_from_equivalent_rates (END): P={}".format(P))
 
     def _deprecated_find_next_event_times(self, P):
         "Finds the next event times for the given particle"
@@ -1358,8 +1389,8 @@ class EstimatorQueueBlockingFlemingViot:
             if DEBUG_TIME_GENERATION:
                 print("\n_apply_next_event: P={}, server={}: BIRTH - Job started at time t={:.3f}".format(P, server, time_of_event))
             # DM-2021/05/10-START: Activate the following lines when assigning job classes to server using the assignment policy 
-            #self.times_in_server_queue[P][server].pop(0)
-            #self.jobclasses_in_server_queue[P][server].pop(0)
+            self.times_in_server_queues[P][server].pop(0)
+            self.jobclasses_in_server_queues[P][server].pop(0)
             # DM-2021/05/10-END
             self.times_next_birth_events[P][server] = np.nan
         elif type_of_event == Event.DEATH:
@@ -1372,10 +1403,10 @@ class EstimatorQueueBlockingFlemingViot:
             print("Jobs in server queues:".format(P))
             print("times:")
             for s in range(self.nservers):
-                print("\t{}: {}".format(s, self.times_in_server_queue[P][s]))  
+                print("\t{}: {}".format(s, self.times_in_server_queues[P][s]))  
             print("job classes:")  
             for s in range(self.nservers):
-                print("\t{}: {}".format(s, self.jobclasses_in_server_queue[P][s]))  
+                print("\t{}: {}".format(s, self.jobclasses_in_server_queues[P][s]))  
             print("Next birth times: {}".format(self.times_next_birth_events[P]))
             print("Next death times: {}".format(self.times_next_death_events[P]))
             print("*******************************************************")
@@ -1536,7 +1567,7 @@ class EstimatorQueueBlockingFlemingViot:
                 # and these special events are checked based on the information stored in the self.particles[P] attribute
                 # which is updated by the _set_new_particle_position() call. 
                 self._set_new_particle_position(P, t0, position_Q_at_t0)
-                self._reset_birth_and_death_times(P)
+                self._reset_birth_and_death_times(P)    # NOTE: This reset is done because conceptually a reactivated particle is like a re-born particle, so the simulation should start from scratch.    
                 self._update_info_particles_and_blocking_statistics(P)
             else:
                 # In NO reactivation mode, we need to generate ONE iteration before CONTINUING with the simulation below,
@@ -1562,8 +1593,7 @@ class EstimatorQueueBlockingFlemingViot:
     def _create_new_particle(self, P, Q, t):
         """
         Creates a new particle in the system at the given time t,
-        whose position starts at the position of particle Q assigned to the absorbed particle P
-        after reactivation.
+        whose position starts at the position of particle Q assigned to the absorbed particle P after reactivation.
         The information of the new particle is stored as a new entry in the info_particles list
         representing the ID of a new reactivated particle from absorbed particle P.
 
@@ -1625,6 +1655,20 @@ class EstimatorQueueBlockingFlemingViot:
         # is no longer active as that particle ID is associated to an ABSORBED particle.
         self.particle_reactivation_ids[P] = len(self.info_particles) - 1
 
+        # Reset the following information about arriving jobs and server queues in particle P
+        # (which are tantamount to the fact that, conceptually, a reactivated particle is re-born,
+        # i.e. the simulation of its trajectory should start from scratch): 
+        # - the times and job classes in each server's queue are reset to empty,
+        # i.e. the same situation we had at the beginning of the simulation.
+        # - the times of the latest arrived jobs to the particle's buffer are set to
+        # the absorption time, i.e. the same situation we had at the beginning of the simulation,
+        # EXCEPT that we shift the times of the latest arrived job for each class to the current time
+        # (the absorption time), since this is the reference time used to define the absolute time of
+        # the next event as the simulation for this particle proceeds.
+        self.times_in_server_queues[P] = array_of_objects((self.nservers,), dtype=list, value=[])
+        self.jobclasses_in_server_queues[P] = array_of_objects((self.nservers,), dtype=list, value=[]) 
+        self.times_latest_arrived_jobs[P] = t * np.ones((len(self.job_rates),), dtype=float)
+
         if self.LOG: #True:
             with printoptions(precision=3, suppress=True):
                 print("\nInfo PARTICLES for particle ID={}, after particle P={} reactivated to particle Q={} (ID q={}) at time t={}:".format(q, P, Q, q, t))
@@ -1666,7 +1710,7 @@ class EstimatorQueueBlockingFlemingViot:
 
         #-- Update current and historical information
         # Information by server
-        self.times_by_server[P] = t             # NOTE that this time is the same for ALL servers, a situation that, under normal simulation without reactivation, only happens at the beginning of the simulation (time=0)
+        self.times_by_server[P] = np.repeat(t, self.nservers)             # NOTE that this time is the same for ALL servers, a situation that, under normal simulation without reactivation, only happens at the beginning of the simulation (time=0)
         self.positions_by_server[P] = position
         # UPDATE the trajectories information
         # (so that we can use the self.trajectories attribute to compute statistics
@@ -1691,11 +1735,11 @@ class EstimatorQueueBlockingFlemingViot:
 
     def _reset_birth_and_death_times(self, P):
         """
-        Resets the next birth and death times for all servers to NaN, as at start of simulation.
-        
+        Resets the next birth and death times for all servers to NaN for the given particle
+
         This is typically called after reactivation of a particle, when the particle
-        changes position abruptly and therefore we need to reset the all next event times in each server
-        to NaN because it's like starting a new trajectory from scratch. 
+        changes position abruptly and therefore we need to reset all next event times in each server
+        to NaN because it's like starting a new trajectory from scratch.
         """
         self.times_next_birth_events[P] = np.nan*np.ones((self.nservers,), dtype=float)
         self.times_next_death_events[P] = np.nan*np.ones((self.nservers,), dtype=float)
@@ -3633,7 +3677,7 @@ class EstimatorQueueBlockingFlemingViot:
                 "coincides with the time of the next {} currently stored in the times_next_events2 for particle {} on server {} ({:.3f})" \
                 .format(type_of_last_event, P, server_last_updated, self.times_next_events2[P][server_last_updated][type_of_last_event.value]) + \
                 "\nTimes of next events of both types for server {}: {}".format(server_last_updated, self.times_next_events2[P][server_last_updated]) + \
-                "\nTimes of next events in server {}'s queue: {}".format(server_last_updated, self.times_in_server_queue[P][server_last_updated])
+                "\nTimes of next events in server {}'s queue: {}".format(server_last_updated, self.times_in_server_queues[P][server_last_updated])
 
     def assertTimeToInsertInTrajectories(self, P, server=0):
         #for p in range(self.N):
@@ -3847,8 +3891,8 @@ def estimate_blocking_fv(env_queue :EnvQueueSingleBufferWithJobClasses,
         'seed'
         ])
     if not set_required_parameters_simul.issubset( dict_params_simul.keys() ):
-        raise ValueError("Not all required parameters were given in input dictionary 'dict_params_simul'.\nRequired parameters are: " \
-                         .format(set_required_parameters_simul))
+        raise ValueError("Not all required parameters were given in input dictionary 'dict_params_simul'.\nRequired parameters are:\n{}\nGiven:{}" \
+                         .format(sorted(set_required_parameters_simul), sorted(dict_params_simul.keys())))
 
     # Multiplier for the simulation time: MULTIPLIER * nmeantimes * nparticles
     # in order to hopefully get a precise estimate of the survival curve and the expected survival time   
@@ -4258,9 +4302,10 @@ if __name__ == "__main__":
         idx_abs = np.where([event_type in value for value in est.info_particles[0]['E']])[0]
         times_abs = [est.info_particles[0]['t'][idx] for idx in idx_abs]
         times_abs_diff = np.diff(times_abs)
+        nobs = len(times_abs_diff)
         # Expected value
         ET = np.mean(times_abs_diff)
-        print("\nAverage observed {} time: E(T): (n={}) Mean = {:.3f}, Median = {:.3f}".format( event_type.name, len(times_abs_diff), ET, np.median(times_abs_diff) ))
+        print("\nAverage observed {} time: E(T): (n={}) Mean = {:.3f}, Median = {:.3f}".format( event_type.name, nobs, ET, np.median(times_abs_diff) ))
 
         # Plot and histogram
         (fig, axes) = plt.subplots(1, 2, figsize=(10,4))
@@ -4275,11 +4320,11 @@ if __name__ == "__main__":
         ax2.hist(times_abs_diff, orientation="horizontal", bins=20)
         plt.suptitle("Times used in the estimation of expected {} time: E(T)={:.3f}".format(event_type.name, ET) + (ET_expected is None and " " or "; Expected={:.3f}".format(ET_expected)))
 
-        return ET, ET_expected
+        return nobs, ET, ET_expected
     #------------------------------ Auxiliary functions ------------------------------#
 
 
-    tests2run = [3.1]
+    tests2run = [2.1, 2.2, 3.1]
 
     #----------------------- Unit tests on specific methods --------------------------#
     time_start = timer()
@@ -4473,19 +4518,22 @@ if __name__ == "__main__":
     plotFlag = False
     log = False
 
-    #--- Test #2.1: One server
+    #--- Test #2.1: Single server
     if 2.1 in tests2run:
-        print("Test #2.1: Single server system")
-        K = 20 #10
-        rate_birth = 0.7 #0.5
+        print("\nTest #2.1: Single server system")
+        K = 5
+        rate_birth = 0.5
         job_rates = [rate_birth]
         rate_death = [1]
         queue = queues.QueueMM(rate_birth, rate_death, 1, K)
     
         # Simulation
-        nparticles = 100
-        nmeantimes = 50
+        nparticles = 20
+        nmeantimes = 5
         finalize_type = FinalizeType.ABSORB_CENSORED
+
+        print("Computing TRUE blocking probability...")
+        proba_blocking_K = compute_blocking_probability_birth_death_process([rate_birth / rate_death[0]], K)
 
         # a) Monte-Carlo (to estimate expected survival time)
         print("Running Monte-Carlo simulation on 1 particle and T={}x...".format(nparticles*nmeantimes))
@@ -4505,18 +4553,23 @@ if __name__ == "__main__":
         # Check observed lambda and mu
         df = pd.DataFrame({'t': est_mc.all_times_buffer[0], 'x': est_mc.all_positions_buffer[0]})
         lmbda, nlambda, mu, nmu = compute_observed_rates(df)
+        # Check E(T)
+        nET, ET, ET_expected = plot_event_times_dist(est_mc, EventType.ABSORPTION)
+
         print("\nComputing observed lambda and mu...")
         print("Observed lambda={:.3f} (n={})".format(lmbda, nlambda))
         print("Expected lambda={:.3f}".format(est_mc.queue.getBirthRates()[0]))
         print("Observed mu={:.3f} (n={})".format(mu, nmu))
         print("Expected mu={:.3f}".format(est_mc.queue.getDeathRates()[0]))
-        print("Observed rho={}".format(lmbda/ mu))
+        print("Observed rho={:.3f}".format(lmbda/ mu))
         print("Expected rho={}".format(est_mc.rhos[0]))
+        print("Observed E(T)={:.3f} (n={})".format(ET, nET))
+        print("Expected E(T)={:.3f}".format(ET_expected))
+        assert "{:.3f} (n={})".format(lmbda, nlambda) == "0.549 (n=106)"
+        assert "{:.3f} (n={})".format(mu, nmu) == "0.988 (n=106)"
+        assert "{:.3f}".format(lmbda/ mu) == "0.555"
+        assert "{:.3f} (n={})".format(ET, nET) == "3.808 (n=51)"
 
-        # Check E(T)
-        plot_event_times_dist(est_mc, EventType.ABSORPTION)
-
-        """
         # b) Fleming-Viot
         print("Running Fleming-Viot simulation on {} particles and T={}x...".format(nparticles, nmeantimes))
         est_fv = EstimatorQueueBlockingFlemingViot(nparticles, queue, job_rates,
@@ -4528,25 +4581,22 @@ if __name__ == "__main__":
                                                    finalize_info={'type': finalize_type, 'condition': FinalizeCondition.ACTIVE},
                                                    plotFlag=plotFlag,
                                                    seed=seed, log=log)
-        proba_blocking_fv_integral, proba_blocking_fv_laplacian, integral, expected_survival_time, gamma = est_fv.simulate(EventType.ACTIVATION)
+        proba_blocking_fv, _, integral, expected_survival_time, _ = est_fv.simulate(EventType.ACTIVATION)
         time_end = timer()
-        ## 2021/03/01: 0.3 min
-        print("Test #1: execution time: {:.1f} min".format((time_end - time_start) / 60))
+        print("Execution time: {:.1f} min".format((time_end - time_start) / 60))
 
         # c) Assertions
+        print("P(K) true: {:.6f}%".format(proba_blocking_K*100))    # K=5: 1.587302%
         print("P(K) by MC: {:.6f}%".format(proba_blocking_mc*100))
-        print("P(K) estimated by FV1: {:.6f}%".format(proba_blocking_fv_integral*100))
-        print("P(K) estimated by FV2: {:.6f}%".format(proba_blocking_fv_laplacian*100))
-        assert("{:.6f}%".format(proba_blocking_mc*100) == "0.032064%")
-        assert("{:.6f}%".format(proba_blocking_fv_integral*100) == "0.095885%")
-        assert("{:.6f}%".format(proba_blocking_fv_laplacian*100) == "0.000000%")
-        # Note: True P(K): 0.048852%
-        """
-    #--- Test #2.2: One server with full process already taken care of
+        print("P(K) estimated by FV: {:.6f}%".format(proba_blocking_fv*100))
+        assert "{:.6f}%".format(proba_blocking_mc*100) == "0.766072%"
+        assert "{:.6f}%".format(proba_blocking_fv*100) == "0.856183%"
+
+    #--- Test #2.2: Single server with full process already taken care of
     if 2.2 in tests2run:
-        print("Test #2.2: Single server system")
+        print("\nTest #2.2: Single server system")
         nservers = 1
-        K = 20
+        K = 5
         rate_birth = 0.5
         job_rates = [rate_birth]
         rate_death = [1]
@@ -4556,9 +4606,10 @@ if __name__ == "__main__":
 
         # Simulation parameters
         dict_params_simul = {
-            'nparticles': 800,
-            'nmeantimes': 50,
+            'nparticles': 20,
+            'nmeantimes': 5,
             'buffer_size_activation': int(0.5*K),
+            'multiplier_for_extended_simulation_time': 1,
             'seed': 1717,
                 }
 
@@ -4570,18 +4621,15 @@ if __name__ == "__main__":
 
         # Run!
         time_start = timer()
-        replications = 4
-        proba_blocking_fv = np.nan*np.ones(replications)
-        for rep in range(replications):
-            print("\n***** Running replication {} of {} *****".format(rep+1, replications))
-            dict_params_simul['seed'] += rep
-            proba_blocking_fv[rep], _, _, _, _, _ = estimate_blocking_fv(env_queue, dict_params_simul, dict_params_info=dict_params_info)
-            print("\tEstimated blocking probability: Pr(FV)={:.6f}%".format(proba_blocking_fv[rep]*100))
-            print("\tTrue blocking probability: Pr(K)={:.6f}%".format(proba_blocking_K*100))
+        proba_blocking_fv, _, _, _, _, _, _, _, _ = estimate_blocking_fv(env_queue, dict_params_simul, dict_params_info=dict_params_info)
         time_end = timer()
         dt_end = datetime.today().strftime("%Y-%m-%d %H:%M:%S")
         print("Ended at: {}".format(dt_end))
         print("Execution time: {:.1f} min, {:.1f} hours".format((time_end - time_start) / 60, (time_end - time_start) / 3600))
+
+        print("\nTrue blocking probability: Pr(K)={:.6f}%".format(proba_blocking_K*100))
+        print("Estimated blocking probability: Pr(FV)={:.6f}%".format(proba_blocking_fv*100))
+        assert "{:.6f}%".format(proba_blocking_fv*100) == "0.841411%"
 
     #--- Test #3.1: Multi-server
     if 3.1 in tests2run:
@@ -4628,6 +4676,9 @@ if __name__ == "__main__":
         # Check number of events
         assert est_mc.nevents == est_mc.get_number_events()
 
+        # Check E(T)
+        nET, ET, ET_expected = plot_event_times_dist(est_mc, EventType.ABSORPTION)
+
         # Check observed lambdas and mus
         df = np.empty((nservers,), dtype=pd.DataFrame)
         lambdas = np.nan*np.ones((nservers,))
@@ -4646,15 +4697,24 @@ if __name__ == "__main__":
         print("Expected mu={}".format(est_mc.queue.getDeathRates()))
         print("Observed rhos={}".format([l/m for l, m in zip(lambdas, mus)]))
         print("Expected rhos={}".format(est_mc.rhos))
-
-        # Check E(T)
-        plot_event_times_dist(est_mc, EventType.ABSORPTION)
-        """
-        proba_blocking_mc = np.nan
-        """
+        print("Observed E(T)={:.3f} (n={})".format(ET, nET))    # Note: Expected E(T) is None
+        # Assertions when assigning arriving jobs directly to servers
+        # (i.e. function self._generate_birth_times_from_equivalent_rates() is used
+        # instead of function self._generate_birth_times())
+        #assert "{} (n={})".format(lambdas, nlambdas) == "[0.4931664  0.73173961 0.40976685] (n=[ 70 104  58])"
+        #assert "{} (n={})".format(mus, nmus) == "[0.80334525 0.90503059 1.20342909] (n=[63 84 53])"
+        #assert "{}".format([l/m for l, m in zip(lambdas, mus)]) == "[0.6138909721035272, 0.8085247225279031, 0.3404993700888088]"
+        #assert "{:.3f} (n={})".format(ET, nET) == "3.224 (n=43)"
+        # Assertions when assigning arriving jobs using the assignment policy
+        # (i.e. function self._generate_birth_times()
+        # instead of function self._generate_birth_times_from_equivalent_rates())
+        assert "{} (n={})".format(lambdas, nlambdas) == "[0.43643534 0.75263139 0.3164086 ] (n=[ 60 106  45])"
+        assert "{} (n={})".format(mus, nmus) == "[0.84160698 1.06623628 1.02262208] (n=[56 98 40])"
+        assert "{}".format([l/m for l, m in zip(lambdas, mus)]) == "[0.5185738072896648, 0.7058767414271344, 0.30940912806453696]"
+        assert "{:.3f} (n={})".format(ET, nET) == "3.639 (n=39)"
 
         # b) Fleming-Viot
-        print("Running Fleming-Viot simulation on {} particles, K={}, T={}x...".format(nparticles, K, nmeantimes))
+        print("\nRunning Fleming-Viot simulation on {} particles, K={}, T={}x...".format(nparticles, K, nmeantimes))
         est_fv = EstimatorQueueBlockingFlemingViot(nparticles, queue, job_rates,
                                                    service_rates=env_queue.getServiceRates(),
                                                    buffer_size_activation=3,
@@ -4680,10 +4740,20 @@ if __name__ == "__main__":
         print("P(K) by MC: {:.6f}% (#events={})".format(proba_blocking_mc*100, est_mc.nevents))
         print("P(K) estimated by FV: {:.6f}% (#events={})".format(proba_blocking_fv*100, est_fv.nevents))
         # Assertions for seed=1717, nservers=3, K=5, BSA=3 (both MC and FV), N=20, nmeantimes=5
-        assert "{:.6f}%".format(proba_blocking_mc*100) == "11.288100%" #11.487418%") #10.713005%")
-        assert "{:.6f}%".format(proba_blocking_fv*100) == "7.182663%" #7.200364%") #"7.321676%")
-        assert est_mc.nevents == 432
-        assert est_fv.nevents == 495
+        # Assertions when assigning arriving jobs directly to servers
+        # (i.e. function self._generate_birth_times_from_equivalent_rates() is used
+        # instead of function self._generate_birth_times())
+        #assert "{:.6f}%".format(proba_blocking_mc*100) == "11.288100%" #11.487418%") #10.713005%")
+        #assert "{:.6f}%".format(proba_blocking_fv*100) == "7.182663%" #7.200364%") #"7.321676%")
+        #assert est_mc.nevents == 432
+        #assert est_fv.nevents == 495
+        # Assertions when assigning arriving jobs using the assignment policy
+        # (i.e. function self._generate_birth_times()
+        # instead of function self._generate_birth_times_from_equivalent_rates())
+        assert "{:.6f}%".format(proba_blocking_mc*100) == "9.584483%"
+        assert "{:.6f}%".format(proba_blocking_fv*100) == "9.183052%"
+        assert est_mc.nevents == 405
+        assert est_fv.nevents == 439
 
     #--- Test #4.1: One server with acceptance policy
     if 4.1 in tests2run:
@@ -4725,7 +4795,6 @@ if __name__ == "__main__":
                                                    seed=seed, log=log)
         proba_blocking_mc, total_blocking_time, total_return_time, total_return_n = est_mc.simulate(EventType.ACTIVATION)
         expected_survival_time, _, _ = est_mc.estimate_expected_absorption_time()
-
         """
         # b) Fleming-Viot
         print("Running Fleming-Viot simulation on {} particles and T={}x...".format(nparticles, nmeantimes))
@@ -4750,9 +4819,9 @@ if __name__ == "__main__":
         print("P(K) by MC: {:.6f}%".format(proba_blocking_mc*100))
         #print("P(K) estimated by FV1: {:.6f}%".format(proba_blocking_fv_integral*100))
         #print("P(K) estimated by FV2: {:.6f}%".format(proba_blocking_fv_laplacian*100))
-        assert("{:.6f}%".format(proba_blocking_mc*100) == "16.971406%")
-        #assert("{:.6f}%".format(proba_blocking_fv_integral*100) == "0.095846%")
-        #assert("{:.6f}%".format(proba_blocking_fv_laplacian*100) == "0.000000%")
+        assert "{:.6f}%".format(proba_blocking_mc*100) == "16.971406%"
+        #assert "{:.6f}%".format(proba_blocking_fv_integral*100) == "0.095846%"
+        #assert "{:.6f}%".format(proba_blocking_fv_laplacian*100) == "0.000000%"
         # Note: True P(K): 0.048852%
     #------------------------- Unit tests on the process -----------------------------#
 

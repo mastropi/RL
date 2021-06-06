@@ -1452,13 +1452,13 @@ def plot_estimates1(df_results, x, y, subset=None,
 
     # Get the values of the group variable on which we generate a SEPARATE plot
     # by computing its frequency distribution
-    K_values = df2plot[grp_K].value_counts(sort=False).index
+    K_values = df2plot[grp_K].value_counts(sort=True).index
     replications = int(np.max(df2plot[rep]))    # For informational purposes
     for K in K_values:
         ind = (df2plot[grp_K] == K)
         # Compute the frequency of occurrence of the x values
         # so that we get the values from the index of the frequency table
-        x_values = df2plot[ind][x].value_counts(sort=False).index
+        x_values = df2plot[ind][x].value_counts(sort=True).index
         # Widths of violins as 10% of the x value range (so that violins are visible --as opposed to just seeing a vertical line)
         proba_blocking_K = df2plot[ind][y_true].iloc[0]
         #print("K={:.0f}: {}".format(K, x_values))
@@ -1541,7 +1541,7 @@ def plot_estimates(df_results, x, subset=None,
         ind = (df2plot[grp_K] == K)
         # Compute the frequency of occurrence of the x values
         # so that we get the values from the index of the frequency table
-        x_values = df2plot[ind][x].value_counts(sort=False).index
+        x_values = df2plot[ind][x].value_counts(sort=True).index
         # Widths of violins as 10% of the x value range (so that violins are visible --as opposed to just seeing a vertical line)
         widths = (x_values[-1] - x_values[0]) / 10
         proba_blocking_K = df2plot[ind][y_true].iloc[0]
@@ -1564,8 +1564,8 @@ def plot_estimates(df_results, x, subset=None,
         # Plot points
         npoints = df2plot.shape[0]
         jitter = 1 + 0.1*(np.random.random(npoints) - 0.5)
-        ax1.plot(df2plot[x_values]*jitter, df2plot['Pr(MC)']*100, 'k.', markersize=markersize)
-        ax2.plot(df2plot[x_values]*jitter, df2plot['Pr(FV)']*100, 'k.', markersize=markersize)
+        ax1.plot(df2plot[x]*jitter, df2plot[y_mc]*100, 'k.', markersize=markersize)
+        ax2.plot(df2plot[x]*jitter, df2plot[y_fv]*100, 'k.', markersize=markersize)
 
         ymax = np.max([ np.max(np.r_[y1, y2]), proba_blocking_K ])
         for ax in axes:
