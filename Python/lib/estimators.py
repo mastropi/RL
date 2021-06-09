@@ -1260,47 +1260,6 @@ class EstimatorQueueBlockingFlemingViot:
         if DEBUG_TIME_GENERATION:
             print("_generate_birth_times_from_equivalent_rates (END): P={}".format(P))
 
-    def _deprecated_find_next_event_times(self, P):
-        "Finds the next event times for the given particle"
-        # Store the next birth and death times as columns by server for their comparison
-        # so that we can easily choose which type of event comes next by server.   
-        self.times_next_events2[P] = np.c_[self.times_next_birth_events[P], self.times_next_death_events[P]]
-        ## The above way of storing the times of the next BIRTH and DEATH events assumes
-        ## that the BIRTH event is associated to the (index) value 0 and the DEATH event is associated to the index value 1.
-
-        # Find the next event characteristics (type and time) as the one occurring first
-        # among the next birth and death events for EACH server
-        idx_min_times = np.argmin(self.times_next_events2[P], axis=-1)
-        servers = range(self.nservers)
-        self.times_next_events[P] = [ self.times_next_events2[P][server, idx_min] for server, idx_min in zip(servers, idx_min_times) ]
-        self.types_next_events[P] = [ Event.BIRTH if idx_min == 0 else Event.DEATH for idx_min in idx_min_times ]
-
-        if self.LOG:
-            print("next birth times: {}".format(self.times_next_birth_events[P]))
-            print("next death times: {}".format(self.times_next_death_events[P]))
-            print("TYPES NEXT EVENTS for P={}: {}".format(P, self.types_next_events[P]))
-            print("TIMES NEXT EVENTS for P={}: {}".format(P, self.times_next_events[P]))
-
-    def _deprecated_get_next_event(self, P):
-        """
-        Computes the information necessary to apply the next event to a particle
-
-        The next event to apply to a particle is the one that has the smallest time among the next events
-        already computed for the particle.
-
-        Return: tuple
-        The tuple contains:
-        - the server number on which the next event takes place.
-        - the type of the next event.
-        - the time at which the next event takes place.
-        """
-        server_with_smallest_time = np.argmin( self.times_next_events[P] )
-            ## NOTE: if any of the above "next event times" is NaN the minimum is NaN
-        type_of_event = self.types_next_events[P][server_with_smallest_time]
-        time_of_event = self.times_next_events[P][server_with_smallest_time]
-
-        return server_with_smallest_time, type_of_event, time_of_event
-
     def _get_next_event(self, P):
         """
         Retrieves the relevant information about the next event for the given particle
@@ -3294,13 +3253,13 @@ class EstimatorQueueBlockingFlemingViot:
         "Returns a duple containing the list of possible absorption states, and their observed frequency of occurrence during simulation"
         return self.states_absorption_set_at_boundary, self.dist_absorption_states
 
-    def get_all_activation_times(self):
+    def deprecated_get_all_activation_times(self):
         return self.pat, self.atimes
 
-    def get_all_absorption_times(self):
+    def deprecated_get_all_absorption_times(self):
         return self.pkt, self.ktimes
 
-    def get_all_elapsed_times(self):
+    def deprecated_get_all_elapsed_times(self):
         """
         Returns the elapsed time from activation of each ACTIVE sub-trajectory of each particle in the system
         
@@ -3324,7 +3283,7 @@ class EstimatorQueueBlockingFlemingViot:
         order = self._compute_order(times_from_activation)
         return [particles[o] for o in order], [times_from_activation[o] for o in order]
 
-    def get_activation_times_for_active_subtrajectories(self, p):
+    def deprecated_get_activation_times_for_active_subtrajectories(self, p):
         """
         Returns the activation times for all ACTIVE trajectories of particle p,
         that is for all sub-trajectories of the trajectory of particle p that start at position 1.
@@ -3487,17 +3446,17 @@ class EstimatorQueueBlockingFlemingViot:
         """
         return self.ktimes0_n, self.ktimes0_sum
 
-    def get_type_last_event(self, P):
+    def deprecated_get_type_last_event(self, P):
         try:
             return self.particles[P].getTypesLastEvents()
         except:
             self.raiseErrorInvalidParticle(P)
             return None
 
-    def get_all_times_last_event(self):
+    def deprecated_get_all_times_last_event(self):
         return [self.get_time_last_event(P) for P in range(self.N)]
 
-    def get_time_last_event(self, P):
+    def deprecated_get_time_last_event(self, P):
         try:
             return self.particles[P].getTimesLastEvents()
         except:
