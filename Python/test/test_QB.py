@@ -454,7 +454,7 @@ class Test_QB_Particles(unittest.TestCase):
                 (reactivate, finalize_type, nparticles, nmeantimes)
 
     @classmethod
-    def test_fv_implementation(cls, nservers=1, K=5, buffer_size_activation=1,
+    def test_fv_implementation(cls, nservers=1, K=5, buffer_size_activation=1, burnin_cycles_absorption=5,
                                markersize=3, fontsize=13, showtitle=False, figfile=None):
         "2021/04/19: Analyze convergence of the FV algorithm as number of particles N increases"
 
@@ -476,6 +476,7 @@ class Test_QB_Particles(unittest.TestCase):
             env_queue = EnvQueueSingleBufferWithJobClasses(queue, job_rates=job_rates, rewards=[1, 1], policy_assign=policy)
         else:
             raise ValueError("Given Number of servers ({}) is invalid. Valid values are: 1, 3".format(nservers))
+        rhos = [b/d for b, d in zip(queue.getBirthRates(), queue.getDeathRates())]
             
         # The test of the Fleming-Viot implementation is carried out as follows:
         # - Set K to a small value (e.g. K=5)
@@ -530,8 +531,7 @@ class Test_QB_Particles(unittest.TestCase):
                 'nparticles': nparticles,
                 'nmeantimes': nmeantimes,
                 'buffer_size_activation': buffer_size_activation_value,
-                'multiplier_for_extended_simulation_time': 1, #10 * (K/10),
-                'multiplier_adjust_for_activation': False,
+                'burnin_cycles_absorption': burnin_cycles_absorption,
                 'seed': seed,
                     }
 
@@ -578,7 +578,7 @@ class Test_QB_Particles(unittest.TestCase):
                 #   "The simulation time of the MC ({:.1f}) is longer than that of FV ({:.1f})" \
                 #    .format(est_mc.maxtime, est_fv.maxtime*nparticles)
                 print("\tP(K) by MC: {:.6f}% (simulation time = {:.1f})".format(proba_blocking_mc*100, est_mc.maxtime))
-                print("\tP(K) estimated by FV: {:.6f}%, E(T) = {:.1f} (simulation time = {:.1f})".format(proba_blocking_fv*100, est_fv.mean_lifetime, est_fv.maxtime))
+                print("\tP(K) estimated by FV: {:.6f}%, E(T) = {:.1f} (simulation time = {:.1f})".format(proba_blocking_fv*100, est_fv.expected_survival_time, est_fv.maxtime))
                 print("\tTrue P(K): {:.6f}%".format(proba_blocking_true*100))
 
                 # Store the results
@@ -590,7 +590,7 @@ class Test_QB_Particles(unittest.TestCase):
                                            dict_stats_mc['time'],
                                            dict_stats_mc['nevents'],
                                            n_return_observations,
-                                           est_fv.mean_lifetime,
+                                           est_fv.expected_survival_time,
                                            n_survival_time_observations,
                                            proba_blocking_fv,
                                            dict_stats_fv['time'],
@@ -734,16 +734,15 @@ class Test_QB_Particles(unittest.TestCase):
                                     K_values=[10, 20, 30, 40],
                                     nparticles_values=[200, 400, 800, 1600],
                                     nmeantimes_values=[50, 50, 50, 50],
-                                    multiplier_values=[10, 15, 20, 25],
-                                    multiplier_adjust_with_activation=False,
                                     buffer_size_activation_values=[1],
+                                    burnin_cycles_absorption_values=[5, 5, 5, 5],
                                     seed=1717,
                                     dict_params_out=dict(),
                                     dict_params_info={'plot': True, 'log': False}):
         #--- Parse input parameters
         assert len(nparticles_values) == len(K_values), "The number of values in the nparticles parameter is the same as in K_values."
         assert len(nmeantimes_values) == len(K_values), "The number of values in the nmeantimes parameter is the same as in K_values."
-        assert len(multiplier_values) == len(K_values), "The number of values in the multiplier parameter is the same as in K_values."
+        assert len(burnin_cycles_absorption_values) == len(K_values), "The number of values in the multiplier parameter is the same as in K_values."
 
         resultsfile = dict_params_out.get('resultsfile', "_results.csv")
         resultsfile_agg = dict_params_out.get('resultsfile_agg', "_results_agg.csv")
@@ -769,10 +768,10 @@ class Test_QB_Particles(unittest.TestCase):
             queue.K = K
             nparticles = nparticles_values[idx_K]
             nmeantimes = nmeantimes_values[idx_K]
-            multiplier0 = multiplier_values[idx_K]
+            burnin_cycles_absorption = burnin_cycles_absorption_values[idx_K]
             print("\n\n---> NEW K (Queue's capacity = {})".format(queue.getCapacity()))
-            print("---> (nparticles={}, nmeantimes={}, multiplier for extended simulation ONE particle={}, adjust multiplier={})" \
-                  .format(nparticles, nmeantimes_values, multiplier_values, multiplier_adjust_with_activation))
+            print("---> (nparticles={}, nmeantimes={}, #burn-in absorption cycles={})" \
+                  .format(nparticles, nmeantimes_values, burnin_cycles_absorption_values))
 
             print("Computing TRUE blocking probability...", end=" --> ")
             time_pr_start = timer()
@@ -802,18 +801,9 @@ class Test_QB_Particles(unittest.TestCase):
                     continue
                 print("\n\t---> NEW BUFFER SIZE({})".format(buffer_size_activation_value))
 
-                if multiplier_adjust_with_activation:
-                    # Make simulation time of single particle longer when the buffer size for activation is larger
-                    # so that we get better estimates of the survival curve and the expected survival time
-                    # (while guaranteeing a minimum of multiplier = 1)
-                    # e.g. when BSA = 0.5*K, we set multiplier = 5 * "original multiplier"
-                    multiplier = max([ 1, multiplier0  *  10 * buffer_size_activation_value / K ] )
-                else:
-                    multiplier = multiplier0
-
                 case += 1
-                print("******************!!!!!!! Simulation {} of {} !!!!!!*****************\n\tK={}, nparticles={}, nmeantimes={}, multiplier={}, buffer_size_activation={}" \
-                      .format(case, nsimul, K, nparticles, nmeantimes, multiplier, buffer_size_activation_value))
+                print("******************!!!!!!! Simulation {} of {} !!!!!!*****************\n\tK={}, nparticles={}, nmeantimes={}, buffer_size_activation={}, #burn-in absorption cycles={}" \
+                      .format(case, nsimul, K, nparticles, nmeantimes, buffer_size_activation_value, burnin_cycles_absorption))
                 for rep in range(replications):
                     time_start_rep = timer()
                     # NOTE THAT THE FIRST REPLICATION (rep=0) HAS THE SAME SEED FOR ALL PARAMETER SETTINGS
@@ -831,7 +821,7 @@ class Test_QB_Particles(unittest.TestCase):
                         'nparticles': nparticles,
                         'nmeantimes': nmeantimes,
                         'buffer_size_activation': buffer_size_activation_value,
-                        'multiplier_for_extended_simulation_time': multiplier,
+                        'burnin_cycles_absorption': burnin_cycles_absorption,
                         'seed': seed_rep,
                             }
 
@@ -1221,7 +1211,7 @@ class Test_QB_Particles(unittest.TestCase):
         plot(df_byiter, grp_K, grp_time, legend, se_mult=2)
 
 #------------------- Functions --------------------
-def test_mc_implementation(nservers, K, paramsfile, nmeantimes=50, repmax=None, figfile=None):
+def test_mc_implementation(nservers, K, paramsfile, nmeantimes=50, burnin_cycles_absorption=5, repmax=None, figfile=None):
     "2021/05/14: Run the MC simulation with simulation parameters read from a CSV file"
 
     #--- Test one server
@@ -1287,8 +1277,7 @@ def test_mc_implementation(nservers, K, paramsfile, nmeantimes=50, repmax=None, 
                 'nparticles': nparticles,
                 'nmeantimes': nmeantimes,
                 'buffer_size_activation': buffer_size_activation,
-                'multiplier_for_extended_simulation_time': 1,
-                'multiplier_adjust_for_activation': False,
+                'burnin_cycles_absorption': burnin_cycles_absorption,
                 'seed': seed,
                     }
 
@@ -1717,25 +1706,26 @@ if __name__ == "__main__":
         fh_log = None; resultsfile = None; resultsfile_agg = None; figfile = None
 
         #******************* ACTUAL EXECUTION ***************
-        results, results_agg, est_mc, est_fv, est_abs, est_surv, ax_mc, ax_fv = Test_QB_Particles.test_fv_implementation(nservers=1, K=5, buffer_size_activation=0.5, figfile=figfile)
+        #-- Single-server
+        #results, results_agg, est_mc, est_fv, est_abs, est_surv, ax_mc, ax_fv = Test_QB_Particles.test_fv_implementation(nservers=1, K=5, buffer_size_activation=0.5, figfile=figfile)
         
-        #results, results_agg, est_mc, est_fv, est_abs, est_surv = Test_QB_Particles.test_fv_implementation(nservers=1, K=20, buffer_size_activation=0.25)
+        #results, results_agg, est_mc, est_fv, est_abs, est_surv, ax_mc, ax_fv = Test_QB_Particles.test_fv_implementation(nservers=1, K=20, buffer_size_activation=0.25)
         #results, results_agg, est_mc, est_fv, est_abs, est_surv, ax_mc, ax_fv = Test_QB_Particles.test_fv_implementation(nservers=1, K=20, buffer_size_activation=0.5, figfile=figfile)
-        #results, results_agg, est_mc, est_fv, est_abs, est_surv = Test_QB_Particles.test_fv_implementation(nservers=1, K=20, buffer_size_activation=0.75)
-        #results, results_agg, est_mc, est_fv, est_abs, est_surv = Test_QB_Particles.test_fv_implementation(nservers=1, K=20, buffer_size_activation=0.9)
+        #results, results_agg, est_mc, est_fv, est_abs, est_surv, ax_mc, ax_fv = Test_QB_Particles.test_fv_implementation(nservers=1, K=20, buffer_size_activation=0.75)
+        #results, results_agg, est_mc, est_fv, est_abs, est_surv, ax_mc, ax_fv = Test_QB_Particles.test_fv_implementation(nservers=1, K=20, buffer_size_activation=0.9)
 
         #results, results_agg, est_mc, est_fv, est_abs, est_surv, ax_mc, ax_fv = Test_QB_Particles.test_fv_implementation(nservers=1, K=40, buffer_size_activation=0.5, figfile=figfile)
 
-        #results, results_agg, est_mc, est_fv, est_abs, est_surv = Test_QB_Particles.test_fv_implementation(nservers=3, K=5, buffer_size_activation=1)
-        #results, results_agg = Test_QB_Particles.test_fv_implementation(K=20, buffer_size_activation=8)
-        #results, results_agg = Test_QB_Particles.test_fv_implementation(K=10, buffer_size_activation=0.5)
-        #results, results_agg, est_mc, est_fv, est_abs, est_surv = Test_QB_Particles.test_fv_implementation(nservers=3, K=20, buffer_size_activation=0.5)
+        #-- Multi-server
+        #results, results_agg, est_mc, est_fv, est_abs, est_surv, ax_mc, ax_fv = Test_QB_Particles.test_fv_implementation(nservers=3, K=5, buffer_size_activation=0.5, burnin_cycles_absorption=3)
+        #results, results_agg, est_mc, est_fv, est_abs, est_surv, ax_mc, ax_fv = Test_QB_Particles.test_fv_implementation(nservers=3, K=10, buffer_size_activation=0.5)
+        #results, results_agg, est_mc, est_fv, est_abs, est_surv, ax_mc, ax_fv = Test_QB_Particles.test_fv_implementation(nservers=3, K=20, buffer_size_activation=0.5, burnin_cycles_absorption=1)
+        results, results_agg, est_mc, est_fv, est_abs, est_surv, ax_mc, ax_fv = Test_QB_Particles.test_fv_implementation(nservers=3, K=20, buffer_size_activation=0.2, burnin_cycles_absorption=5)
+        #results, results_agg, est_mc, est_fv, est_abs, est_surv, ax_mc, ax_fv = Test_QB_Particles.test_fv_implementation(nservers=3, K=30, buffer_size_activation=0.5)
 
-        #results, results_agg = Test_QB_Particles.test_fv_implementation(K=30, buffer_size_activation=0.5)
-
-        #results, results_agg, est_mc, est_fv, est_abs, est_surv = Test_QB_Particles.test_fv_implementation(nservers=3, K=40, buffer_size_activation=0.25)
-        #results, results_agg, est_mc, est_fv, est_abs, est_surv = Test_QB_Particles.test_fv_implementation(nservers=3, K=40, buffer_size_activation=0.5)
-        #results, results_agg = Test_QB_Particles.test_fv_implementation(nservers=3, K=40, buffer_size_activation=0.7)
+        #results, results_agg, est_mc, est_fv, est_abs, est_surv, ax_mc, ax_fv = Test_QB_Particles.test_fv_implementation(nservers=3, K=40, buffer_size_activation=0.25)
+        #results, results_agg, est_mc, est_fv, est_abs, est_surv, ax_mc, ax_fv = Test_QB_Particles.test_fv_implementation(nservers=3, K=40, buffer_size_activation=0.3, burnin_cycles_absorption=1)
+        #results, results_agg, est_mc, est_fv, est_abs, est_surv, ax_mc, ax_fv = Test_QB_Particles.test_fv_implementation(nservers=3, K=40, buffer_size_activation=0.7)
         #******************* ACTUAL EXECUTION ***************
 
         results.to_csv(resultsfile)
@@ -1828,8 +1818,8 @@ else:    # Lines to execute "by hand" (i.e. at the Python prompt)
                                         K_values=[5], #[10, 20, 30, 40],
                                         nparticles_values=[20], #[200, 400, 800, 1600],
                                         nmeantimes_values=[5], #[50, 50, 50, 50],
-                                        multiplier_values=[1], #[10, 15, 20, 25],
                                         buffer_size_activation_values=[0.25, 0.5], #[1, 0.2, 0.4, 0.6, 0.8],
+                                        burnin_cycles_absorption_values=[5],
                                         seed=1313,
                                         dict_params_out={'logfilehandle': fh_log,
                                                          'resultsfile': resultsfile,
@@ -1840,8 +1830,8 @@ else:    # Lines to execute "by hand" (i.e. at the Python prompt)
                                         K_values=[10, 20],
                                         nparticles_values=[200, 400],
                                         nmeantimes_values=[50, 50],
-                                        multiplier_values=[1.2, 1.2],
                                         buffer_size_activation_values=[1, 0.2, 0.4, 0.6, 0.8],
+                                        burnin_cycles_absorption_values=[5, 5],
                                         seed=1313,
                                         dict_params_out={'logfilehandle': fh_log,
                                                          'resultsfile': resultsfile,
@@ -1852,8 +1842,8 @@ else:    # Lines to execute "by hand" (i.e. at the Python prompt)
                                         K_values=[30, 40],
                                         nparticles_values=[800, 1600],
                                         nmeantimes_values=[50, 50],
-                                        multiplier_values=[1.2, 5],
                                         buffer_size_activation_values=[1, 0.2, 0.4, 0.5, 0.7],
+                                        burnin_cycles_absorption_values=[5, 5],
                                         seed=1313,
                                         dict_params_out={'logfilehandle': fh_log,
                                                          'resultsfile': resultsfile,
@@ -1864,9 +1854,8 @@ else:    # Lines to execute "by hand" (i.e. at the Python prompt)
                                         K_values=[10],
                                         nparticles_values=[400],
                                         nmeantimes_values=[50],
-                                        multiplier_values=[1],
-                                        multiplier_adjust_with_activation=False,
                                         buffer_size_activation_values=[0.1, 0.25, 0.5],
+                                        burnin_cycles_absorption_values=[5],
                                         seed=1313,
                                         dict_params_out={'logfilehandle': fh_log,
                                                          'resultsfile': resultsfile,
@@ -1877,9 +1866,8 @@ else:    # Lines to execute "by hand" (i.e. at the Python prompt)
                                         K_values=[20],
                                         nparticles_values=[3200],
                                         nmeantimes_values=[50],
-                                        multiplier_values=[1],
-                                        multiplier_adjust_with_activation=False,
                                         buffer_size_activation_values=[0.2, 0.4, 0.5, 0.6, 0.8],
+                                        burnin_cycles_absorption_values=[5],
                                         seed=1313,
                                         dict_params_out={'logfilehandle': fh_log,
                                                          'resultsfile': resultsfile,
@@ -1891,9 +1879,8 @@ else:    # Lines to execute "by hand" (i.e. at the Python prompt)
                                         K_values=[30],
                                         nparticles_values=[800],
                                         nmeantimes_values=[50],
-                                        multiplier_values=[1],
-                                        multiplier_adjust_with_activation=False,
                                         buffer_size_activation_values=[0.1, 0.25, 0.5],
+                                        burnin_cycles_absorption_values=[5],
                                         seed=1313,
                                         dict_params_out={'logfilehandle': fh_log,
                                                          'resultsfile': resultsfile,
@@ -1904,9 +1891,8 @@ else:    # Lines to execute "by hand" (i.e. at the Python prompt)
                                         K_values=[40],
                                         nparticles_values=[3200],
                                         nmeantimes_values=[50],
-                                        multiplier_values=[1],
-                                        multiplier_adjust_with_activation=False,
                                         buffer_size_activation_values=[0.2, 0.4, 0.5, 0.6, 0.8],
+                                        burnin_cycles_absorption_values=[5],
                                         seed=1313,
                                         dict_params_out={'logfilehandle': fh_log,
                                                          'resultsfile': resultsfile,
