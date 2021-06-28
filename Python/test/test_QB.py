@@ -747,16 +747,20 @@ class Test_QB_Particles(unittest.TestCase):
                         n_survival_curve_observations, n_survival_time_observations, \
                             est_fv, est_abs, est_surv, dict_stats_fv = estimators.estimate_blocking_fv(env_queue, dict_params_simul, dict_params_info=dict_params_info)
 
-                    print("\t\t*** MONTE-CARLO ESTIMATION ***")
-                    dict_params_simul['maxevents'] = dict_stats_fv['nevents']
-                    dict_params_simul['seed'] = 1327*seed_rep
-                    proba_blocking_mc, \
-                        expected_return_time_mc, \
-                            n_return_observations, \
-                                est_mc, dict_stats_mc = estimators.estimate_blocking_mc(env_queue, dict_params_simul, dict_params_info=dict_params_info)
+                    if run_mc:
+                        print("\t\t*** MONTE-CARLO ESTIMATION ***")
+                        dict_params_simul['maxevents'] = dict_stats_fv['nevents']
+                        dict_params_simul['seed'] = 1327*seed_rep
+                        proba_blocking_mc, \
+                            expected_return_time_mc, \
+                                n_return_observations, \
+                                    est_mc, dict_stats_mc = estimators.estimate_blocking_mc(env_queue, dict_params_simul, dict_params_info=dict_params_info)
+                    else:
+                        proba_blocking_mc, expected_return_time_mc, n_return_observations, est_mc, dict_stats_mc = np.nan, None, None, None, {}
 
                     # Show estimations
-                    print("\t\tP(K) by MC: {:.6f}%".format(proba_blocking_mc*100))
+                    if run_mc:
+                        print("\t\tP(K) by MC: {:.6f}%".format(proba_blocking_mc*100))
                     print("\t\tP(K) estimated by FV (E(T)={:.1f}): {:.6f}%".format(expected_survival_time, proba_blocking_fv*100))
                     print("\t\tTrue P(K): {:.6f}%".format(proba_blocking_true*100))
 
@@ -773,13 +777,13 @@ class Test_QB_Particles(unittest.TestCase):
                     #                                        dict_stats_fv['nevents_fv'], dict_stats_fv['nevents_fv_prop']*100))
                     print("- time = {:.1f}".format(dict_stats_fv['time']))
                     print("- #events = {}".format(dict_stats_fv['nevents']))
-                    print("MC simulation:\n- time = {:.1f}\n- #events = {}".format(dict_stats_mc['time'], dict_stats_mc['nevents']))
-                    print("Ratio MC / FV: time={:.1f}, nevents={:.1f}".format(dict_stats_mc['time'] / dict_stats_fv['time'], dict_stats_mc['nevents'] / dict_stats_fv['nevents']))
-
-                    if dict_stats_mc['nevents'] != dict_stats_fv['nevents']:
-                        message = "!!!! #events(MC) != #events(FV) ({}, {}) !!!!".format(dict_stats_mc['nevents'], dict_stats_fv['nevents'])
-                        print(message)  # Shown in the log
-                        warn(message)   # Shown in the console
+                    if run_mc:
+                        print("MC simulation:\n- time = {:.1f}\n- #events = {}".format(dict_stats_mc['time'], dict_stats_mc['nevents']))
+                        print("Ratio MC / FV: time={:.1f}, nevents={:.1f}".format(dict_stats_mc['time'] / dict_stats_fv['time'], dict_stats_mc['nevents'] / dict_stats_fv['nevents']))
+                        if dict_stats_mc['nevents'] != dict_stats_fv['nevents']:
+                            message = "!!!! #events(MC) != #events(FV) ({}, {}) !!!!".format(dict_stats_mc['nevents'], dict_stats_fv['nevents'])
+                            print(message)  # Shown in the log
+                            warn(message)   # Shown in the console
 
                     # Add the observed measure to the output data frame with the results
                     # Notes:
@@ -802,20 +806,20 @@ class Test_QB_Particles(unittest.TestCase):
                                                                 ('burnin_cycles_absorption', [burnin_cycles_absorption]),
                                                                 ('rep', [rep+1]),
                                                                 ('seed', [seed_rep]),
-                                                                ('PMC(K)', [proba_blocking_mc]),
+                                                                ('Pr(MC)', [proba_blocking_mc]),
                                                                 ('EMC(T)', [expected_return_time_mc]),
-                                                                ('time(MC)', [dict_stats_mc['time']]),
-                                                                ('n(MC)', [dict_stats_mc['nevents']]),
+                                                                ('time(MC)', [dict_stats_mc.get('time')]),
+                                                                ('n(MC)', [dict_stats_mc.get('nevents')]),
                                                                 ('n(RT)', [n_return_observations]),
-                                                                ('PFV(K)', [proba_blocking_fv]),
+                                                                ('Pr(FV)', [proba_blocking_fv]),
                                                                 ('integral', [integral]),
                                                                 ('E(T)', [expected_survival_time]),
                                                                 ('n(FV)', [dict_stats_fv['nevents']]),
                                                                 ('n(PT)', [n_survival_curve_observations]),
                                                                 ('n(ET)', [n_survival_time_observations]),
                                                                 ('Pr(K)', [proba_blocking_true]),
-                                                                ('ratio_mc_fv_time', [dict_stats_mc['time'] / dict_stats_fv['time']]),
-                                                                ('ratio_mc_fv_events', [dict_stats_mc['nevents'] / dict_stats_fv['nevents']]),
+                                                                ('ratio_mc_fv_time', [dict_stats_mc.get('time') is None and np.nan or dict_stats_mc.get('time') / dict_stats_fv['time']]),
+                                                                ('ratio_mc_fv_events', [dict_stats_mc.get('nevents') is None and np.nan or dict_stats_mc.get('nevents') / dict_stats_fv['nevents']]),
                                                             ]) #, orient='columns')
                     df_new_estimates.set_index( pd.Index([(case-1)*replications + rep+1]), inplace=True )
                     if case == 1 and rep == 0:
@@ -870,7 +874,7 @@ class Test_QB_Particles(unittest.TestCase):
         # Aggregate results
         df_proba_blocking_estimates_agg = aggregation_bygroups(df_proba_blocking_estimates,
                                                                ["K", "buffer_size_activation", "nparticles"],
-                                                               ["E(T)", "PMC(K)", "PFV(K)", "Pr(K)"])
+                                                               ["E(T)", "Pr(MC)", "Pr(FV)", "Pr(K)"])
 
         df_proba_blocking_estimates.to_csv(resultsfile)
         print("Results of simulation saved to {}".format(os.path.abspath(resultsfile)))
@@ -878,7 +882,7 @@ class Test_QB_Particles(unittest.TestCase):
         df_proba_blocking_estimates_agg.to_csv(resultsfile_agg)
         print("Aggregated results of simulation saved to {}".format(os.path.abspath(resultsfile_agg)))
 
-        if dict_params_info['plot']:
+        if dict_params_info['plot'] and run_mc:
             for K in K_values:
                 # Estimates themselves
                 plot_estimates(df_proba_blocking_estimates, "buffer_size_activation_value", xlabel="Size of absorption set A as fraction of K", subset=df_proba_blocking_estimates["K"]==K)
@@ -1040,9 +1044,9 @@ class Test_QB_Particles(unittest.TestCase):
         # - the legend (e.g. buffer size)
         groupvars = [grp_K, grp_buffer, grp_part]
         # Analysis variables
-        y_mc = 'PMC(K)'
-        y_fv = 'PFV(K)'      # Approximation 1
-        y_fv2 = 'PFV2(K)'     # Approximation 2
+        y_mc = 'Pr(MC)'
+        y_fv = 'Pr(FV)'      # Approximation 1
+        y_fv2 = 'Pr(FV2)'     # Approximation 2
         proba_true = 'Pr(K)'  # Reference value for comparison of estimated values
         analvars = [y_mc, y_fv, y_fv2, proba_true]
         replications = int(np.max(df['rep']))
@@ -1106,8 +1110,8 @@ class Test_QB_Particles(unittest.TestCase):
         grp_part = 'nparticles'
         grp_time = 'nmeantimes'
         grp_K = 'K'
-        y_mc = 'PMC(K)'
-        y_fv = 'PFV(K)'  # Approximation 1
+        y_mc = 'Pr(MC)'
+        y_fv = 'Pr(FV)'  # Approximation 1
         proba_true = 'Pr(K)'  # Reference values for comparing estimated values against: observed blocking time rate (calculated from the MC simulation)
         analvars = [y_mc, y_fv, proba_true]
         replications = int(np.max(df['rep']))
@@ -1295,7 +1299,7 @@ def test_mc_implementation(nservers, K, paramsfile, nmeantimes=None, repmax=None
     return df_results, df_results_agg_by_N, est_mc 
 
 def compute_errors(df_results,
-                   y_mc="PMC(K)", y_fv="PFV(K)", y_true="Pr(K)"):
+                   y_mc="Pr(MC)", y_fv="Pr(FV)", y_true="Pr(K)"):
     """
     Computes estimation errors on a set of results w.r.t. to a true value
    
@@ -1408,7 +1412,7 @@ def plot_estimates1(df_results, x, y, subset=None,
     return df2plot
 
 def plot_estimates(df_results, x, subset=None,
-                   grp_K="K", y_mc="PMC(K)", y_fv="PFV(K)", y_true="Pr(K)", rep="rep",
+                   grp_K="K", y_mc="Pr(MC)", y_fv="Pr(FV)", y_true="Pr(K)", rep="rep",
                    xlabel=None, markersize=7, fontsize=13, showtitle=False, figfile=None):
     """
     Plots the distribution of estimates as violin plots for the MC and the FV methods
@@ -1785,15 +1789,16 @@ else:    # Lines to execute "by hand" (i.e. at the Python prompt)
     test = Test_QB_Particles(nservers=1)
     #test = Test_QB_Particles(nservers=3)
 
-    #dt_start, stdout_sys, fh_log, logfile, resultsfile, resultsfile_agg, figfile = createLogFileHandleAndResultsFileNames(prefix="analyze_estimates")
-    fh_log = None; resultsfile = None; resultsfile_agg = None
+    run_mc = False
+    dt_start, stdout_sys, fh_log, logfile, resultsfile, resultsfile_agg, figfile = createLogFileHandleAndResultsFileNames(prefix="analyze_estimates")
+    #fh_log = None; resultsfile = None; resultsfile_agg = None
 
     # NOTES on the below calls to simulation execution:
     # - Use larger N values to improve the estimation of Phi(t)
     # - When larger N values are used smaller T values (simulation time) can be used
     # because the larger particle N already guarantees a large simulation time for
     # the 1-particle system that estimates P(T>t).
-    tests2run = [1]
+    tests2run = [7]
     if 1 in tests2run:
         results, results_agg, est_mc, est_fv, est_abs, est_surv = test.analyze_estimates(
                                         replications=3,
@@ -1803,6 +1808,7 @@ else:    # Lines to execute "by hand" (i.e. at the Python prompt)
                                         buffer_size_activation_values=[0.25, 0.5], #[1, 0.2, 0.4, 0.6, 0.8],
                                         burnin_cycles_absorption_values=[5, 3],
                                         seed=1313,
+                                        run_mc=run_mc,
                                         dict_params_out={'logfilehandle': fh_log,
                                                          'resultsfile': resultsfile,
                                                          'resultsfile_agg': resultsfile_agg})
@@ -1815,6 +1821,7 @@ else:    # Lines to execute "by hand" (i.e. at the Python prompt)
                                         buffer_size_activation_values=[1, 0.2, 0.4, 0.6, 0.8],
                                         burnin_cycles_absorption_values=[5, 5],
                                         seed=1313,
+                                        run_mc=run_mc,
                                         dict_params_out={'logfilehandle': fh_log,
                                                          'resultsfile': resultsfile,
                                                          'resultsfile_agg': resultsfile_agg})
@@ -1827,6 +1834,7 @@ else:    # Lines to execute "by hand" (i.e. at the Python prompt)
                                         buffer_size_activation_values=[1, 0.2, 0.4, 0.5, 0.7],
                                         burnin_cycles_absorption_values=[5, 5],
                                         seed=1313,
+                                        run_mc=run_mc,
                                         dict_params_out={'logfilehandle': fh_log,
                                                          'resultsfile': resultsfile,
                                                          'resultsfile_agg': resultsfile_agg})
@@ -1839,6 +1847,7 @@ else:    # Lines to execute "by hand" (i.e. at the Python prompt)
                                         buffer_size_activation_values=[0.1, 0.25, 0.5],
                                         burnin_cycles_absorption_values=[5],
                                         seed=1313,
+                                        run_mc=run_mc,
                                         dict_params_out={'logfilehandle': fh_log,
                                                          'resultsfile': resultsfile,
                                                          'resultsfile_agg': resultsfile_agg})
@@ -1851,6 +1860,7 @@ else:    # Lines to execute "by hand" (i.e. at the Python prompt)
                                         buffer_size_activation_values=[0.2, 0.4, 0.5, 0.6, 0.8],
                                         burnin_cycles_absorption_values=[5],
                                         seed=1313,
+                                        run_mc=run_mc,
                                         dict_params_out={'logfilehandle': fh_log,
                                                          'resultsfile': resultsfile,
                                                          'resultsfile_agg': resultsfile_agg,
@@ -1864,6 +1874,7 @@ else:    # Lines to execute "by hand" (i.e. at the Python prompt)
                                         buffer_size_activation_values=[0.1, 0.25, 0.5],
                                         burnin_cycles_absorption_values=[5],
                                         seed=1313,
+                                        run_mc=run_mc,
                                         dict_params_out={'logfilehandle': fh_log,
                                                          'resultsfile': resultsfile,
                                                          'resultsfile_agg': resultsfile_agg})
@@ -1876,6 +1887,7 @@ else:    # Lines to execute "by hand" (i.e. at the Python prompt)
                                         buffer_size_activation_values=[0.2, 0.4, 0.5, 0.6],
                                         burnin_cycles_absorption_values=[3, 3, 2, 1],
                                         seed=1313,
+                                        run_mc=run_mc,
                                         dict_params_out={'logfilehandle': fh_log,
                                                          'resultsfile': resultsfile,
                                                          'resultsfile_agg': resultsfile_agg})
