@@ -11,6 +11,44 @@ import copy
 import numpy as np
 import pandas as pd
 
+
+def parse_dict_params(dict_params, dict_params_default):
+    """
+    Parses a set of user parameters given as a dictionary by
+    by matching them with a set of default parameter values,
+    completing any missing key with their default value.
+
+    The parsing process accepts nested dictionaries.
+
+    The input dictionary with the user parameters is updated
+    by including all keys in the default parameters dictionary
+    that are not present in the user parameters dictionary. 
+    
+    Arguments:
+    dict_params: dict
+        Dictionary containing user parameter values.
+
+    dict_params_default: dict
+        Dictionary containing the default values for parameters.
+        Any parameters not included in this dictionary but given in `dict_params` are also taken.
+
+    Example:
+    >>> params = {'a': {'w': -7}, 't_new': -13}
+    >>> params_default =  {'a': {'w': 8, 'z': {'k': 2, 'y': "ok"}}, 'y': 3}
+    >>> parse_dict_params(params, params_default)
+    >>> params
+    {'a': {'w': -7, 'z': {'k': 2, 'y': "ok"}}, 'y': 3, 't_new': -13}  
+    """
+    dict_params_keys = dict_params.keys() 
+    # Go over all keys in the default params dictionary
+    # and recursively retrieve their value when the value is in turn a dictionary
+    for key, value in dict_params_default.items():
+        if isinstance(value, dict) and key in dict_params_keys:
+            parse_dict_params(dict_params[key], dict_params_default[key])
+        else:
+            # Get the key from the user parameters and if not given, assign its default value 
+            dict_params[key] = dict_params.get(key, dict_params_default[key])
+
 def array_of_objects(size, value=None, dtype=list):
     """
     Creates an array of objects of the specified type.
@@ -418,6 +456,20 @@ def aggregation_bygroups(df, groupvars, analvars,
 
 
 if __name__ == "__main__":
+    #---------------------- parse_dict_params -------------------------#
+    params = {'a': {'w': -7}, 't_new': -13, 't_new_dict': {'a': 2, 'b': {'c': 5, 'd': None}}}
+    params_default =  {'a': {'w': 8, 'z': {'k': 2, 'y': "ok"}},    # nested parameters
+                       'x': {'a': 2, 'f': 5},   # 'a' key is repeated in this nested dictionary
+                       'y': 3}
+    parse_dict_params(params, params_default)
+    print(params)
+    # NOTE: The order of the keys in both compared dictionaries don't have any influence in the comparison, GREAT! :)
+    assert params == {'a': {'w': -7, 'z': {'k': 2, 'y': "ok"}},
+                      'x': {'a': 2, 'f': 5}, 'y': 3, 
+                      't_new': -13, 't_new_dict': {'a': 2, 'b': {'c': 5, 'd': None}}}
+    #---------------------- parse_dict_params -------------------------#
+
+    
     #----------------- find_first/last_value_in_list ------------------#
     print("\n--- find_first/last_value_in_list(): Test #1")
     ll = [[1, 3], ['A', 'B'], [3]]

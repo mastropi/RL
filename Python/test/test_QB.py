@@ -458,8 +458,7 @@ class Test_QB_Particles(unittest.TestCase):
                                nparticles_min=40, nparticles_max=80, nparticles_step_prop=1,
                                nmeantimes=500,
                                replications=5,
-                               run_mc=True,
-                               plotFlag=True, markersize=3, fontsize=13, showtitle=False, figfile=None):
+                               run_mc=True):
         """
         2021/04/19: Analyze convergence of the FV algorithm as number of particles N increases
 
@@ -577,7 +576,7 @@ class Test_QB_Particles(unittest.TestCase):
                         print(message)  # Shown in the log
                         warn(message)   # Shown in the console
                 else:
-                    proba_blocking_mc, n_return_observations, est_mc, dict_stats_mc = np.nan, None, None, {}
+                    proba_blocking_mc, expected_return_time_mc, n_return_observations, est_mc, dict_stats_mc = np.nan, None, None, None, {}
 
                 time_end = timer()
                 exec_time = time_end - time_start
@@ -629,7 +628,6 @@ class Test_QB_Particles(unittest.TestCase):
         print(title)
         print("Raw results by N:")
         print(df_results)
-        showtitle = False
 
         df_results_agg_by_N = aggregation_bygroups(df_results, ['N'], ['#Events(MC)', '#Cycles(MC)', 'Pr(MC)', '#Events(FV)', 'Pr(FV)'])
         print("Aggregated results by N:")
@@ -643,125 +641,24 @@ class Test_QB_Particles(unittest.TestCase):
             df_results = df_results.astype({'#Events(MC)_mean': np.int})
             df_results = df_results.astype({'#Cycles(MC)_mean': np.int})
         df_results = df_results.astype({'#Events(FV)_mean': np.int})
-
-        #-------- Plots
-        if plotFlag:
-            #-- 1) Average P(K) + error bars
-            (ax_fv, ax_mc) = plt.figure(figsize=(8,4)).subplots(1,2)
             
-            # MC
-            ax_mc.plot(df_results['N'], df_results['Pr(MC)']*100, 'k.', markersize=markersize)
-            line_mc = ax_mc.errorbar(list(df_results_agg_by_N.index), df_results_agg_by_N['Pr(MC)']['mean']*100, yerr=2*df_results_agg_by_N['Pr(MC)']['SE']*100, capsize=4, color='red', marker='x')
-            line_ref_mc = ax_mc.hlines(df_results.iloc[0]['Pr(K)']*100, df_results.iloc[0]['N'], df_results.iloc[-1]['N'], color='gray', linestyles='dashed')
-            legend_mc = [line_mc, line_ref_mc]
-    
-            # FV
-            ax_fv.plot(df_results['N'], df_results['Pr(FV)']*100, 'k.', markersize=markersize)
-            line_fv = ax_fv.errorbar(list(df_results_agg_by_N.index), df_results_agg_by_N['Pr(FV)']['mean']*100, yerr=2*df_results_agg_by_N['Pr(FV)']['SE']*100, capsize=4, color='green', marker='x')
-            line_ref_fv = ax_fv.hlines(df_results.iloc[0]['Pr(K)']*100, df_results.iloc[0]['N'], df_results.iloc[-1]['N'], color='gray', linestyles='dashed')
-            legend_fv = [line_fv, line_ref_fv]
-            if showtitle:
-                plt.title(title, fontsize=10)
-    
-            # Axis limits
-            ymin = min(ax_mc.get_ylim()[0], ax_fv.get_ylim()[0])
-            ymax = max(ax_mc.get_ylim()[1], ax_fv.get_ylim()[1])
-            ax_mc.set_xlim([0, ax_mc.get_xlim()[1]])
-            ax_mc.set_ylim([ymin, ymax])
-            ax_mc.set_xlabel("N (number of particles)", fontsize=fontsize)
-            ax_mc.set_ylabel("Blocking probability (%)", fontsize=fontsize)
-            ax_mc.legend(legend_mc, ['MC: Avg(P(K)) +/- 2SE', 'True P(K)'])#, fontsize='x-small')
-            ax_fv.yaxis.set_ticks([]); ax_fv.yaxis.set_ticklabels([])  # Remove ticks and labels from the right plot as the axis is the same as on the left plot
-            ax_fv.set_xlim([0, ax_fv.get_xlim()[1]])
-            ax_fv.set_ylim([ymin, ymax])
-            ax_fv.set_xlabel("N (number of particles)", fontsize=fontsize)
-            ax_fv.legend(legend_fv, ['FV: Avg(P(K)) +/- 2SE', 'True P(K)'])#, fontsize='x-small')
-        
-            #-- 2) Violin plots
-            (ax_fv, ax_mc) = plt.figure(figsize=(8,4)).subplots(1,2)
-            #x_mc = '#Events(MC)_mean'
-            x_mc = '#Cycles(MC)_mean'
-            x_mc_label = "Average number of cycles"
-            x_mc2 = '#Events(MC)_mean'
-            x_mc2_label = "Average number of events"
-            x_fv2 = '#Events(FV)_mean'
-            x_fv2_label = x_mc2_label
-            ax_left = ax_fv
-            ax_right = ax_mc
-            N_values = np.unique(df_results['N'])
-            x_mc_values = np.unique(df_results[x_mc])
-            x_mc2_values = np.unique(df_results[x_mc2])
-            x_fv2_values = np.unique(df_results[x_fv2])
-            violin_widths_mc = (x_mc_values[-1] - x_mc_values[0]) / 10
-            violin_widths_fv = (N_values[-1] - N_values[0]) / 10
-            plotting.violinplot(ax_mc,  [df_results[ df_results[x_mc]==x ]['Pr(MC)']*100 for x in x_mc_values],
-                                        positions=x_mc_values, showmeans=True, showmedians=False, linewidth=2, widths=violin_widths_mc,
-                                        color_body="red", color_lines="red", color_means="red")
-            plotting.violinplot(ax_fv,  [df_results[ df_results['N']==x ]['Pr(FV)']*100 for x in N_values],
-                                        positions=N_values, showmeans=True, showmedians=False, linewidth=2, widths=violin_widths_fv,
-                                        color_body="green", color_lines="green", color_means="green")            
-            # Add the observed points
-            npoints = df_results.shape[0]
-            jitter = 1 + 0.1*(np.random.random(npoints) - 0.5)
-            ax_mc.plot(df_results[x_mc]*jitter, df_results['Pr(MC)']*100, 'k.', markersize=markersize)
-            ax_fv.plot(df_results['N']*jitter, df_results['Pr(FV)']*100, 'k.', markersize=markersize)
-    
-            line_ref_mc = ax_mc.hlines(df_results.iloc[0]['Pr(K)']*100, df_results.iloc[0][x_mc], df_results.iloc[-1][x_mc], color='gray', linestyles='dashed')
-            line_ref_fv = ax_fv.hlines(df_results.iloc[0]['Pr(K)']*100, df_results.iloc[0]['N'], df_results.iloc[-1]['N'], color='gray', linestyles='dashed')
-            #legend_mc = [line_mc, line_ref_mc]
-            #legend_fv = [line_fv, line_ref_fv]
-            if showtitle:
-                plt.suptitle(title, fontsize=int(fontsize*1.1))
-    
-            # Set a common vertical axis
-            #ymin = min(ax_mc.get_ylim()[0], ax_fv.get_ylim()[0])
-            ymin = 0
-            ymax = max(ax_mc.get_ylim()[1], ax_fv.get_ylim()[1])
-            ax_mc.set_xlim([0, ax_mc.get_xlim()[1]])
-            ax_mc.set_ylim([ymin, ymax])
-            ax_mc.set_xlabel(x_mc_label, fontsize=fontsize)
-            ax_mc.legend(legend_mc, ['MC: Dist. P(K)', 'True P(K)'])#, fontsize='x-small')
-            ax_left.ticklabel_format(style='plain') # Ref: SO: prevent-scientific-notation-in-matplotlib-pyplot
-            #ax_left.set_yticklabels(["{:g}".format(y.get_position()[1]) for y in ax_left.get_yticklabels()])  # Avoid the 1e-5 at the corner of the axis (which overlap with the duplicated X-axis placed on top)
-            ax_left.set_ylabel("Blocking probability (%)", fontsize=fontsize)
-            ax_right.yaxis.set_ticks([]); ax_right.yaxis.set_ticklabels([])  # Remove ticks and labels from the right plot as the axis is the same as on the left plot
-            ax_fv.set_xlim([0, ax_fv.get_xlim()[1]])
-            ax_fv.set_ylim([ymin, ymax])
-            ax_fv.set_xlabel("N (number of particles)", fontsize=fontsize)
-            ax_fv.legend(legend_fv, ['FV: Dist. P(K)', 'True P(K)'])#, fontsize='x-small')
-    
-            # Add secondary x-axis to show the number of events in both FV and MC
-            ax_mc2 = ax_mc.twiny()
-            ax_mc2.set_xlim(ax_mc.get_xlim())
-            ax_mc2.set_xticks(x_mc_values)
-            ax_mc2.set_xticklabels(["{:,.0f}".format(x) for x in x_mc2_values], rotation=90)
-            ax_mc2.set_xlabel(x_mc2_label)
-            ax_fv2 = ax_fv.twiny()
-            ax_fv2.set_xlim(ax_fv.get_xlim())
-            ax_fv2.set_xticks(N_values)
-            ax_fv2.set_xticklabels(["{:,.0f}".format(x) for x in x_fv2_values], rotation=90)
-            ax_fv2.set_xlabel(x_fv2_label)
-    
-            if figfile is not None:
-                plt.gcf().subplots_adjust(left=0.15, top=0.75)
-                plt.savefig(figfile)
-            
-        return df_results, df_results_agg_by_N, est_mc, est_fv, est_abs, est_surv, ax_mc, ax_fv
+        return df_results, df_results_agg_by_N, est_mc, est_fv, est_abs, est_surv
 
-    def analyze_estimates(self,
-                                    replications=5,
-                                    K_values=[10, 20, 30, 40],
-                                    nparticles_values=[200, 400, 800, 1600],
-                                    nmeantimes_values=[50, 50, 50, 50],
-                                    buffer_size_activation_values=[1],
-                                    burnin_cycles_absorption_values=[5, 5, 5, 5],
-                                    seed=1717,
-                                    dict_params_out=dict(),
-                                    dict_params_info={'plot': True, 'log': False}):
+    def analyze_estimates(  self,
+                            replications=5,
+                            K_values=[10, 20, 30, 40],
+                            nparticles_values=[200, 400, 800, 1600],
+                            nmeantimes_values=[50, 50, 50, 50],
+                            buffer_size_activation_values=[1],
+                            burnin_cycles_absorption_values=[5],
+                            seed=1717,
+                            run_mc=True,
+                            dict_params_out=dict(),
+                            dict_params_info={'plot': True, 'log': False}):
         #--- Parse input parameters
         assert len(nparticles_values) == len(K_values), "The number of values in the nparticles parameter is the same as in K_values."
         assert len(nmeantimes_values) == len(K_values), "The number of values in the nmeantimes parameter is the same as in K_values."
-        assert len(burnin_cycles_absorption_values) == len(K_values), "The number of values in the multiplier parameter is the same as in K_values."
+        assert len(burnin_cycles_absorption_values) == len(buffer_size_activation_values), "The number of values in the burnin_cycles_absorption_values parameter is the same as in buffer_size_activation_values."
 
         resultsfile = dict_params_out.get('resultsfile', "_results.csv")
         resultsfile_agg = dict_params_out.get('resultsfile_agg', "_results_agg.csv")
@@ -787,10 +684,9 @@ class Test_QB_Particles(unittest.TestCase):
             queue.K = K
             nparticles = nparticles_values[idx_K]
             nmeantimes = nmeantimes_values[idx_K]
-            burnin_cycles_absorption = burnin_cycles_absorption_values[idx_K]
             print("\n\n---> NEW K (Queue's capacity = {})".format(queue.getCapacity()))
-            print("---> (nparticles={}, nmeantimes={}, #burn-in absorption cycles={})" \
-                  .format(nparticles, nmeantimes_values, burnin_cycles_absorption_values))
+            print("---> (nparticles={}, nmeantimes={})" \
+                  .format(nparticles, nmeantimes_values))
 
             print("Computing TRUE blocking probability...", end=" --> ")
             time_pr_start = timer()
@@ -804,7 +700,7 @@ class Test_QB_Particles(unittest.TestCase):
                 ## The rewards are not used at this point, so I just set them to 1 for all job classes.
 
             buffer_size_activation_value_prev = None
-            for buffer_size_activation in buffer_size_activation_values:
+            for idx_bsa, buffer_size_activation in enumerate(buffer_size_activation_values):
                 # When the buffer size for activation parameter is smaller than 1 it is considered a proportion of the queue's capacity
                 if buffer_size_activation < 1:
                     buffer_size_activation_value = max(1, int( round( buffer_size_activation * K ) ))
@@ -818,7 +714,8 @@ class Test_QB_Particles(unittest.TestCase):
                 # Do not repeat the previous buffer size activation value (which may happen when the parameter is given as a proportion)
                 if buffer_size_activation_value == buffer_size_activation_value_prev:
                     continue
-                print("\n\t---> NEW BUFFER SIZE({})".format(buffer_size_activation_value))
+                burnin_cycles_absorption = burnin_cycles_absorption_values[idx_bsa]
+                print("\n\t---> NEW BUFFER SIZE (BSA={}, BIC={})".format(buffer_size_activation_value, burnin_cycles_absorption))
 
                 case += 1
                 print("******************!!!!!!! Simulation {} of {} !!!!!!*****************\n\tK={}, nparticles={}, nmeantimes={}, buffer_size_activation={}, #burn-in absorption cycles={}" \
@@ -1674,6 +1571,50 @@ def plot_errors(df_results, x, subset=None, widths=0.1,
 
     return df2plot
 
+def plot_results_fv_mc(df_results, nparticles="N", ncycles="#Cycles(MC)_mean",
+                                   prob_fv="Pr(FV)", prob_mc="Pr(MC)", prob_true="Pr(K)",
+                                   plot_mc=True,
+                                   figfile=None):
+    "Plots the estimated blocking probability by number of particles (FV) and average #Cycles (MC)"
+    
+    # Parse input parameters
+    if plot_mc:
+        x = [nparticles, ncycles]
+        y = [prob_fv, prob_mc]
+        figsize = (8,4)
+        subplots = (1,2)
+        colors = ["green", "red"]
+    else:
+        x = nparticles
+        y = prob_fv
+        figsize = (4,4)
+        subplots = (1,1)
+        colors = "green"
+
+    # 1) Average P(K) + error bars
+    plotting.plot(plotting.plot_errorbars,
+                  df_results, x, y,
+                  yref=prob_true, yref_legend="True value",
+                  figsize=figsize, subplots=subplots,
+                  dict_options={'multipliers': {'x': 1, 'y': 100, 'error': 2},
+                                'labels': {'y': "Blocking probability (%)"},
+                                'properties': {'color': colors, 'color_center': colors}})
+    
+    # 2) Violin plots
+    axes = plotting.plot(plotting.plot_violins,
+                         df_results, x, y,
+                         yref=prob_true, yref_legend="True value",
+                         figsize=figsize, subplots=subplots,
+                         dict_options={'multipliers': {'x': 1, 'y': 100},
+                                       'labels': {'y': "Blocking probability (%)"},
+                                       'properties': {'color': colors, 'color_center': colors}})
+    
+    if figfile is not None:
+        plt.gcf().subplots_adjust(left=0.15, top=0.75)
+        plt.savefig(figfile)
+
+    return axes
+
 def createLogFileHandleAndResultsFileNames(path="../../RL-002-QueueBlocking", prefix="run"):
     """
     Redirects the standard output to a file which is used to log messages.
@@ -1718,7 +1659,7 @@ def closeLogFile(fh_log, stdout_sys, dt_start):
 # DM-2020/12/23: To change which portion of the below code to run, change the IF condition
 # to `== "__main__"` or to `!= "__main__"` accordingly, taking into account that when running
 # this file as a script (F5) __name__ is equal to "__main__".
-if __name__ == "__main__":
+if __name__ != "__main__":
     run_unit_tests = True
     if run_unit_tests:
         #suite = unittest.TestSuite()
@@ -1726,13 +1667,14 @@ if __name__ == "__main__":
         #runner = unittest.TextTestRunner()
         #runner.run(suite)
 
-        dt_start, stdout_sys, fh_log, logfile, resultsfile, resultsfile_agg, figfile = createLogFileHandleAndResultsFileNames(prefix="test_fv_implementation")
-        #fh_log = None; resultsfile = None; resultsfile_agg = None; figfile = None
+        run_mc = True
+        #dt_start, stdout_sys, fh_log, logfile, resultsfile, resultsfile_agg, figfile = createLogFileHandleAndResultsFileNames(prefix="test_fv_implementation")
+        fh_log = None; resultsfile = None; resultsfile_agg = None; figfile = None
 
         #******************* ACTUAL EXECUTION ***************
         #-- Single-server
-        #results, results_agg, est_mc, est_fv, est_abs, est_surv, ax_mc, ax_fv = Test_QB_Particles.test_fv_implementation(nservers=1, K=5, buffer_size_activation=0.5, figfile=figfile)
-        
+        results, results_agg, est_mc, est_fv, est_abs, est_surv = Test_QB_Particles.test_fv_implementation(nservers=1, K=5, buffer_size_activation=0.5, replications=2, figfile=figfile, run_mc=run_mc)
+
         #results, results_agg, est_mc, est_fv, est_abs, est_surv, ax_mc, ax_fv = Test_QB_Particles.test_fv_implementation(nservers=1, K=20, buffer_size_activation=0.25)
         #results, results_agg, est_mc, est_fv, est_abs, est_surv, ax_mc, ax_fv = Test_QB_Particles.test_fv_implementation(nservers=1, K=20, buffer_size_activation=0.5, figfile=figfile)
         #results, results_agg, est_mc, est_fv, est_abs, est_surv, ax_mc, ax_fv = Test_QB_Particles.test_fv_implementation(nservers=1, K=20, buffer_size_activation=0.75)
@@ -1747,29 +1689,32 @@ if __name__ == "__main__":
         #    Test_QB_Particles.test_fv_implementation(nservers=3, K=20, buffer_size_activation=0.5, burnin_cycles_absorption=4,
         #                                             nparticles_min=800, nparticles_max=1600, nparticles_step_prop=1,
         #                                             nmeantimes=1400, replications=5,
-        #                                             run_mc=True, plotFlag=True)
+        #                                             run_mc=run_mc, plotFlag=True)
         #results, results_agg, est_mc, est_fv, est_abs, est_surv, ax_mc, ax_fv = \
         #    Test_QB_Particles.test_fv_implementation(nservers=3, K=20, buffer_size_activation=0.2, burnin_cycles_absorption=1,
         #                                             nparticles_min=400, nparticles_max=1200, nparticles_step_prop=1,
         #                                             nmeantimes=500, replications=5,
-        #                                             run_mc=True, plotFlag=True)
+        #                                             run_mc=run_mc, plotFlag=True)
         #results, results_agg, est_mc, est_fv, est_abs, est_surv, ax_mc, ax_fv = Test_QB_Particles.test_fv_implementation(nservers=3, K=30, buffer_size_activation=0.5)
 
         #results, results_agg, est_mc, est_fv, est_abs, est_surv, ax_mc, ax_fv = Test_QB_Particles.test_fv_implementation(nservers=3, K=40, buffer_size_activation=0.25)
         #results, results_agg, est_mc, est_fv, est_abs, est_surv, ax_mc, ax_fv = Test_QB_Particles.test_fv_implementation(nservers=3, K=40, buffer_size_activation=0.3, burnin_cycles_absorption=1)
-        results, results_agg, est_mc, est_fv, est_abs, est_surv, ax_mc, ax_fv = \
-            Test_QB_Particles.test_fv_implementation(nservers=3, K=40, buffer_size_activation=0.5, burnin_cycles_absorption=2,
-                                                     nparticles_min=400, nparticles_max=1600, nparticles_step_prop=1,
-                                                     nmeantimes=100000, replications=5,
-                                                     run_mc=True, plotFlag=True)
+        #results, results_agg, est_mc, est_fv, est_abs, est_surv, ax_mc, ax_fv = \
+        #    Test_QB_Particles.test_fv_implementation(nservers=3, K=40, buffer_size_activation=0.5, burnin_cycles_absorption=2,
+        #                                             nparticles_min=400, nparticles_max=1600, nparticles_step_prop=1,
+        #                                             nmeantimes=100000, replications=5,
+        #                                             run_mc=run_mc, plotFlag=True)
         #results, results_agg, est_mc, est_fv, est_abs, est_surv, ax_mc, ax_fv = Test_QB_Particles.test_fv_implementation(nservers=3, K=40, buffer_size_activation=0.7)
         #******************* ACTUAL EXECUTION ***************
 
+        # Save results
         results.to_csv(resultsfile)
         print("Results of simulation saved to {}".format(os.path.abspath(resultsfile)))
-
         results_agg.to_csv(resultsfile_agg)
         print("Aggregated results of simulation saved to {}".format(os.path.abspath(resultsfile_agg)))
+
+        # Plot results
+        axes = plot_results_fv_mc(results, plot_mc=run_mc)
 
         if fh_log is not None:
             closeLogFile(fh_log, stdout_sys, dt_start)
@@ -1852,11 +1797,11 @@ else:    # Lines to execute "by hand" (i.e. at the Python prompt)
     if 1 in tests2run:
         results, results_agg, est_mc, est_fv, est_abs, est_surv = test.analyze_estimates(
                                         replications=3,
-                                        K_values=[5], #[10, 20, 30, 40],
-                                        nparticles_values=[20], #[200, 400, 800, 1600],
-                                        nmeantimes_values=[5000], #[50, 50, 50, 50],
+                                        K_values=[5, 5], #[10, 20, 30, 40],
+                                        nparticles_values=[20, 40], #[200, 400, 800, 1600],
+                                        nmeantimes_values=[5000, 5000], #[50, 50, 50, 50],
                                         buffer_size_activation_values=[0.25, 0.5], #[1, 0.2, 0.4, 0.6, 0.8],
-                                        burnin_cycles_absorption_values=[5],
+                                        burnin_cycles_absorption_values=[5, 3],
                                         seed=1313,
                                         dict_params_out={'logfilehandle': fh_log,
                                                          'resultsfile': resultsfile,
@@ -1927,14 +1872,13 @@ else:    # Lines to execute "by hand" (i.e. at the Python prompt)
                                         replications=8,
                                         K_values=[40],
                                         nparticles_values=[3200],
-                                        nmeantimes_values=[50],
-                                        buffer_size_activation_values=[0.2, 0.4, 0.5, 0.6, 0.8],
-                                        burnin_cycles_absorption_values=[5],
+                                        nmeantimes_values=[8E5],
+                                        buffer_size_activation_values=[0.2, 0.4, 0.5, 0.6],
+                                        burnin_cycles_absorption_values=[3, 3, 2, 1],
                                         seed=1313,
                                         dict_params_out={'logfilehandle': fh_log,
                                                          'resultsfile': resultsfile,
-                                                         'resultsfile_agg': resultsfile_agg,
-                                                         'savefig': True})
+                                                         'resultsfile_agg': resultsfile_agg})
 
     if fh_log is not None:
         closeLogFile(fh_log, stdout_sys, dt_start)
