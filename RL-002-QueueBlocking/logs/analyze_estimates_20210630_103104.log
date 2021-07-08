@@ -1,0 +1,318 @@
+Started at: 2021-06-30 10:31:04
+System: # servers = 1, rhos = [0.7]
+
+
+---> NEW K (Queue's capacity = 40)
+---> (nparticles=3200, nmeantimes=[800000.0])
+Computing TRUE blocking probability... --> 0.0 sec
+Pr(K)=0.000019%
+
+	---> NEW BUFFER SIZE (BSA=8, BIC=3)
+******************!!!!!!! Simulation 1 of 1 !!!!!!*****************
+	K=40, nparticles=3200, nmeantimes=800000.0, buffer_size_activation=8, #burn-in absorption cycles=3
+
+		### Replication 1 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1717)...
+Total number of activation states: 1 (100.000000% <= p(S) <= 100.000%) (Nmin to expect at 1 case in state with smallest p: Nmin=1)
+Range of particle indices to simulate with start state #1 out of 1: [0, 3199] (n=3200, n/N=1.0, p=1.000000, diff=0.0%, state=[7])
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV procedure.
+--> max time FV process starts = 2155.0 (0.2% of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True.
+--> Simulation time reset from T=1142857.1 to T=161.8.
+Generating trajectories for each particle until END OF SIMULATION (T=161.8)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> Number of observations for P(T>t) estimation from FV simulation: 3200 (N=3200)
+execution time: 4732.3 sec, 78.9 min
+		P(K) estimated by FV (E(T)=57.9): 0.000005%
+		True P(K): 0.000019%
+-- FAIRNESS --
+FV simulation:
+- time = 1258875.8
+- #events = 1914445
+
+---> Execution time MC + FV: 4732.3 sec, 78.9 min
+
+		### Replication 2 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1727)...
+Total number of activation states: 1 (100.000000% <= p(S) <= 100.000%) (Nmin to expect at 1 case in state with smallest p: Nmin=1)
+Range of particle indices to simulate with start state #1 out of 1: [0, 3199] (n=3200, n/N=1.0, p=1.000000, diff=0.0%, state=[7])
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV procedure.
+--> max time FV process starts = 1930.3 (0.2% of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True.
+--> Simulation time reset from T=1142857.1 to T=164.8.
+Generating trajectories for each particle until END OF SIMULATION (T=164.8)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> Number of observations for P(T>t) estimation from FV simulation: 3200 (N=3200)
+execution time: 1369.0 sec, 22.8 min
+		P(K) estimated by FV (E(T)=59.1): 0.000009%
+		True P(K): 0.000019%
+-- FAIRNESS --
+FV simulation:
+- time = 1239532.5
+- #events = 1893403
+
+---> Execution time MC + FV: 1369.6 sec, 22.8 min
+
+		### Replication 3 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1737)...
+Total number of activation states: 1 (100.000000% <= p(S) <= 100.000%) (Nmin to expect at 1 case in state with smallest p: Nmin=1)
+Range of particle indices to simulate with start state #1 out of 1: [0, 3199] (n=3200, n/N=1.0, p=1.000000, diff=0.0%, state=[7])
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV procedure.
+--> max time FV process starts = 2143.4 (0.2% of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True.
+--> Simulation time reset from T=1142857.1 to T=116.6.
+Generating trajectories for each particle until END OF SIMULATION (T=116.6)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> Number of observations for P(T>t) estimation from FV simulation: 3200 (N=3200)
+execution time: 1206.0 sec, 20.1 min
+		P(K) estimated by FV (E(T)=59.2): 0.000044%
+		True P(K): 0.000019%
+-- FAIRNESS --
+FV simulation:
+- time = 1101216.2
+- #events = 1652548
+
+---> Execution time MC + FV: 1206.5 sec, 20.1 min
+
+		### Replication 4 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1747)...
+Total number of activation states: 1 (100.000000% <= p(S) <= 100.000%) (Nmin to expect at 1 case in state with smallest p: Nmin=1)
+Range of particle indices to simulate with start state #1 out of 1: [0, 3199] (n=3200, n/N=1.0, p=1.000000, diff=0.0%, state=[7])
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV procedure.
+--> max time FV process starts = 2292.2 (0.2% of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True.
+--> Simulation time reset from T=1142857.1 to T=172.7.
+Generating trajectories for each particle until END OF SIMULATION (T=172.7)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> Number of observations for P(T>t) estimation from FV simulation: 3200 (N=3200)
+execution time: 1313.4 sec, 21.9 min
+		P(K) estimated by FV (E(T)=59.0): 0.000014%
+		True P(K): 0.000019%
+-- FAIRNESS --
+FV simulation:
+- time = 1290013.0
+- #events = 1970527
+
+---> Execution time MC + FV: 1313.9 sec, 21.9 min
+
+		### Replication 5 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1757)...
+Total number of activation states: 1 (100.000000% <= p(S) <= 100.000%) (Nmin to expect at 1 case in state with smallest p: Nmin=1)
+Range of particle indices to simulate with start state #1 out of 1: [0, 3199] (n=3200, n/N=1.0, p=1.000000, diff=0.0%, state=[7])
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV procedure.
+--> max time FV process starts = 1477.7 (0.1% of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True.
+--> Simulation time reset from T=1142857.1 to T=176.1.
+Generating trajectories for each particle until END OF SIMULATION (T=176.1)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> Number of observations for P(T>t) estimation from FV simulation: 3200 (N=3200)
+execution time: 9965.1 sec, 166.1 min
+		P(K) estimated by FV (E(T)=52.6): 0.000030%
+		True P(K): 0.000019%
+-- FAIRNESS --
+FV simulation:
+- time = 1253737.6
+- #events = 1925654
+
+---> Execution time MC + FV: 9965.9 sec, 166.1 min
+
+		### Replication 6 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1767)...
+Total number of activation states: 1 (100.000000% <= p(S) <= 100.000%) (Nmin to expect at 1 case in state with smallest p: Nmin=1)
+Range of particle indices to simulate with start state #1 out of 1: [0, 3199] (n=3200, n/N=1.0, p=1.000000, diff=0.0%, state=[7])
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV procedure.
+--> max time FV process starts = 1881.7 (0.2% of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True.
+--> Simulation time reset from T=1142857.1 to T=155.5.
+Generating trajectories for each particle until END OF SIMULATION (T=155.5)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> Number of observations for P(T>t) estimation from FV simulation: 3200 (N=3200)
+execution time: 1383.9 sec, 23.1 min
+		P(K) estimated by FV (E(T)=59.4): 0.000037%
+		True P(K): 0.000019%
+-- FAIRNESS --
+FV simulation:
+- time = 1234200.4
+- #events = 1876627
+
+---> Execution time MC + FV: 1384.7 sec, 23.1 min
+
+		### Replication 7 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1777)...
+Total number of activation states: 1 (100.000000% <= p(S) <= 100.000%) (Nmin to expect at 1 case in state with smallest p: Nmin=1)
+Range of particle indices to simulate with start state #1 out of 1: [0, 3199] (n=3200, n/N=1.0, p=1.000000, diff=0.0%, state=[7])
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV procedure.
+--> max time FV process starts = 1441.4 (0.1% of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True.
+--> Simulation time reset from T=1142857.1 to T=203.9.
+Generating trajectories for each particle until END OF SIMULATION (T=203.9)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> Number of observations for P(T>t) estimation from FV simulation: 3200 (N=3200)
+execution time: 1355.4 sec, 22.6 min
+		P(K) estimated by FV (E(T)=60.1): 0.000048%
+		True P(K): 0.000019%
+-- FAIRNESS --
+FV simulation:
+- time = 1374252.2
+- #events = 2117973
+
+---> Execution time MC + FV: 1356.0 sec, 22.6 min
+
+		### Replication 8 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1787)...
+Total number of activation states: 1 (100.000000% <= p(S) <= 100.000%) (Nmin to expect at 1 case in state with smallest p: Nmin=1)
+Range of particle indices to simulate with start state #1 out of 1: [0, 3199] (n=3200, n/N=1.0, p=1.000000, diff=0.0%, state=[7])
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV procedure.
+--> max time FV process starts = 1575.7 (0.1% of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True.
+--> Simulation time reset from T=1142857.1 to T=199.3.
+Generating trajectories for each particle until END OF SIMULATION (T=199.3)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> Number of observations for P(T>t) estimation from FV simulation: 3200 (N=3200)
+execution time: 1427.7 sec, 23.8 min
+		P(K) estimated by FV (E(T)=58.7): 0.000016%
+		True P(K): 0.000019%
+-- FAIRNESS --
+FV simulation:
+- time = 1393600.8
+- #events = 2144347
+
+---> Execution time MC + FV: 1428.5 sec, 23.8 min
+Simulation results for #servers=1, rhos=[0.7], K=40, N=3200, T=199.32404606428912 (800000.0x), max #events=inf
+    rhos   K  nparticles  nmeantimes  buffer_size_activation  \
+1  [0.7]  40        3200    800000.0                     0.2   
+2  [0.7]  40        3200    800000.0                     0.2   
+3  [0.7]  40        3200    800000.0                     0.2   
+4  [0.7]  40        3200    800000.0                     0.2   
+5  [0.7]  40        3200    800000.0                     0.2   
+6  [0.7]  40        3200    800000.0                     0.2   
+7  [0.7]  40        3200    800000.0                     0.2   
+8  [0.7]  40        3200    800000.0                     0.2   
+
+   buffer_size_activation_value  burnin_cycles_absorption  rep  seed  Pr(MC)  \
+1                             8                         3    1  1717     NaN   
+2                             8                         3    2  1727     NaN   
+3                             8                         3    3  1737     NaN   
+4                             8                         3    4  1747     NaN   
+5                             8                         3    5  1757     NaN   
+6                             8                         3    6  1767     NaN   
+7                             8                         3    7  1777     NaN   
+8                             8                         3    8  1787     NaN   
+
+          ...         n(RT)        Pr(FV)  integral       E(T)    n(FV)  \
+1         ...          None  4.770674e-08  0.000003  57.864288  1914445   
+2         ...          None  8.937422e-08  0.000005  59.072954  1893403   
+3         ...          None  4.367387e-07  0.000026  59.235493  1652548   
+4         ...          None  1.431738e-07  0.000008  58.980714  1970527   
+5         ...          None  3.010201e-07  0.000016  52.643556  1925654   
+6         ...          None  3.669937e-07  0.000022  59.382939  1876627   
+7         ...          None  4.770348e-07  0.000029  60.125063  2117973   
+8         ...          None  1.578140e-07  0.000009  58.657322  2144347   
+
+   n(PT)  n(ET)         Pr(K)  ratio_mc_fv_time  ratio_mc_fv_events  
+1   3200   3200  1.910043e-07               NaN                 NaN  
+2   3200   3200  1.910043e-07               NaN                 NaN  
+3   3200   3200  1.910043e-07               NaN                 NaN  
+4   3200   3200  1.910043e-07               NaN                 NaN  
+5   3200   3200  1.910043e-07               NaN                 NaN  
+6   3200   3200  1.910043e-07               NaN                 NaN  
+7   3200   3200  1.910043e-07               NaN                 NaN  
+8   3200   3200  1.910043e-07               NaN                 NaN  
+
+[8 rows x 23 columns]
+Execution time: 22757.4 sec, 379.3 min, 6.3 hours
+Top and bottom 5 records in the results data frame:
+    rhos   K  nparticles  nmeantimes  buffer_size_activation  \
+1  [0.7]  40        3200    800000.0                     0.2   
+2  [0.7]  40        3200    800000.0                     0.2   
+3  [0.7]  40        3200    800000.0                     0.2   
+4  [0.7]  40        3200    800000.0                     0.2   
+5  [0.7]  40        3200    800000.0                     0.2   
+
+   buffer_size_activation_value  burnin_cycles_absorption  rep  seed  Pr(MC)  \
+1                             8                         3    1  1717     NaN   
+2                             8                         3    2  1727     NaN   
+3                             8                         3    3  1737     NaN   
+4                             8                         3    4  1747     NaN   
+5                             8                         3    5  1757     NaN   
+
+          ...         n(RT)        Pr(FV)  integral       E(T)    n(FV)  \
+1         ...          None  4.770674e-08  0.000003  57.864288  1914445   
+2         ...          None  8.937422e-08  0.000005  59.072954  1893403   
+3         ...          None  4.367387e-07  0.000026  59.235493  1652548   
+4         ...          None  1.431738e-07  0.000008  58.980714  1970527   
+5         ...          None  3.010201e-07  0.000016  52.643556  1925654   
+
+   n(PT)  n(ET)         Pr(K)  ratio_mc_fv_time  ratio_mc_fv_events  
+1   3200   3200  1.910043e-07               NaN                 NaN  
+2   3200   3200  1.910043e-07               NaN                 NaN  
+3   3200   3200  1.910043e-07               NaN                 NaN  
+4   3200   3200  1.910043e-07               NaN                 NaN  
+5   3200   3200  1.910043e-07               NaN                 NaN  
+
+[5 rows x 23 columns]
+    rhos   K  nparticles  nmeantimes  buffer_size_activation  \
+4  [0.7]  40        3200    800000.0                     0.2   
+5  [0.7]  40        3200    800000.0                     0.2   
+6  [0.7]  40        3200    800000.0                     0.2   
+7  [0.7]  40        3200    800000.0                     0.2   
+8  [0.7]  40        3200    800000.0                     0.2   
+
+   buffer_size_activation_value  burnin_cycles_absorption  rep  seed  Pr(MC)  \
+4                             8                         3    4  1747     NaN   
+5                             8                         3    5  1757     NaN   
+6                             8                         3    6  1767     NaN   
+7                             8                         3    7  1777     NaN   
+8                             8                         3    8  1787     NaN   
+
+          ...         n(RT)        Pr(FV)  integral       E(T)    n(FV)  \
+4         ...          None  1.431738e-07  0.000008  58.980714  1970527   
+5         ...          None  3.010201e-07  0.000016  52.643556  1925654   
+6         ...          None  3.669937e-07  0.000022  59.382939  1876627   
+7         ...          None  4.770348e-07  0.000029  60.125063  2117973   
+8         ...          None  1.578140e-07  0.000009  58.657322  2144347   
+
+   n(PT)  n(ET)         Pr(K)  ratio_mc_fv_time  ratio_mc_fv_events  
+4   3200   3200  1.910043e-07               NaN                 NaN  
+5   3200   3200  1.910043e-07               NaN                 NaN  
+6   3200   3200  1.910043e-07               NaN                 NaN  
+7   3200   3200  1.910043e-07               NaN                 NaN  
+8   3200   3200  1.910043e-07               NaN                 NaN  
+
+[5 rows x 23 columns]
+Results of simulation saved to E:\Daniel\Projects\PhD-RL-Toulouse\projects\RL-002-QueueBlocking\results\analyze_estimates_20210630_103104_results.csv
+Aggregated results of simulation saved to E:\Daniel\Projects\PhD-RL-Toulouse\projects\RL-002-QueueBlocking\results\analyze_estimates_20210630_103104_results_agg.csv
+Ended at: 2021-06-30 16:50:09
+Execution time: 379.1 min, 6.3 hours

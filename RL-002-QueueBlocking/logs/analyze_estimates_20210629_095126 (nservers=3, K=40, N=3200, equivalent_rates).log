@@ -1,0 +1,670 @@
+Started at: 2021-06-29 09:51:26
+System: # servers = 3, rhos = [0.4, 0.75, 0.35]
+
+
+---> NEW K (Queue's capacity = 40)
+---> (nparticles=3200, nmeantimes=[800000.0])
+Computing TRUE blocking probability... --> 0.4 sec
+Pr(K)=0.000394%
+
+	---> NEW BUFFER SIZE (BSA=8, BIC=3)
+******************!!!!!!! Simulation 1 of 2 !!!!!!*****************
+	K=40, nparticles=3200, nmeantimes=800000.0, buffer_size_activation=8, #burn-in absorption cycles=3
+
+		### Replication 1 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1313)...
+Total number of activation states: 36 (0.122486% <= p(S) <= 25.412%) (Nmin to expect at 1 case in state with smallest p: Nmin=816)
+Range of particle indices to simulate with start state #1 out of 36: [0, 8] (n=9, n/N=0.0028125, p=0.003119, diff=-0.1%, state=[7, 0, 0])
+Range of particle indices to simulate with start state #2 out of 36: [9, 32] (n=24, n/N=0.0075, p=0.005848, diff=0.3%, state=[6, 1, 0])
+Range of particle indices to simulate with start state #3 out of 36: [33, 40] (n=8, n/N=0.0025, p=0.002729, diff=-0.1%, state=[6, 0, 1])
+Range of particle indices to simulate with start state #4 out of 36: [41, 73] (n=33, n/N=0.0103125, p=0.010966, diff=-0.1%, state=[5, 2, 0])
+Range of particle indices to simulate with start state #5 out of 36: [74, 83] (n=10, n/N=0.003125, p=0.005117, diff=-0.4%, state=[5, 1, 1])
+Range of particle indices to simulate with start state #6 out of 36: [84, 91] (n=8, n/N=0.0025, p=0.002388, diff=0.0%, state=[5, 0, 2])
+Range of particle indices to simulate with start state #7 out of 36: [92, 151] (n=60, n/N=0.01875, p=0.020560, diff=-0.1%, state=[4, 3, 0])
+Range of particle indices to simulate with start state #8 out of 36: [152, 178] (n=27, n/N=0.0084375, p=0.009595, diff=-0.1%, state=[4, 2, 1])
+Range of particle indices to simulate with start state #9 out of 36: [179, 192] (n=14, n/N=0.004375, p=0.004478, diff=-0.0%, state=[4, 1, 2])
+Range of particle indices to simulate with start state #10 out of 36: [193, 195] (n=3, n/N=0.0009375, p=0.002090, diff=-0.6%, state=[4, 0, 3])
+Range of particle indices to simulate with start state #11 out of 36: [196, 330] (n=135, n/N=0.0421875, p=0.038551, diff=0.1%, state=[3, 4, 0])
+Range of particle indices to simulate with start state #12 out of 36: [331, 393] (n=63, n/N=0.0196875, p=0.017990, diff=0.1%, state=[3, 3, 1])
+Range of particle indices to simulate with start state #13 out of 36: [394, 426] (n=33, n/N=0.0103125, p=0.008396, diff=0.2%, state=[3, 2, 2])
+Range of particle indices to simulate with start state #14 out of 36: [427, 432] (n=6, n/N=0.001875, p=0.003918, diff=-0.5%, state=[3, 1, 3])
+Range of particle indices to simulate with start state #15 out of 36: [433, 439] (n=7, n/N=0.0021875, p=0.001828, diff=0.2%, state=[3, 0, 4])
+Range of particle indices to simulate with start state #16 out of 36: [440, 639] (n=200, n/N=0.0625, p=0.072283, diff=-0.1%, state=[2, 5, 0])
+Range of particle indices to simulate with start state #17 out of 36: [640, 744] (n=105, n/N=0.0328125, p=0.033732, diff=-0.0%, state=[2, 4, 1])
+Range of particle indices to simulate with start state #18 out of 36: [745, 789] (n=45, n/N=0.0140625, p=0.015742, diff=-0.1%, state=[2, 3, 2])
+Range of particle indices to simulate with start state #19 out of 36: [790, 807] (n=18, n/N=0.005625, p=0.007346, diff=-0.2%, state=[2, 2, 3])
+Range of particle indices to simulate with start state #20 out of 36: [808, 819] (n=12, n/N=0.00375, p=0.003428, diff=0.1%, state=[2, 1, 4])
+Range of particle indices to simulate with start state #21 out of 36: [820, 823] (n=4, n/N=0.00125, p=0.001600, diff=-0.2%, state=[2, 0, 5])
+Range of particle indices to simulate with start state #22 out of 36: [824, 1299] (n=476, n/N=0.14875, p=0.135530, diff=0.1%, state=[1, 6, 0])
+Range of particle indices to simulate with start state #23 out of 36: [1300, 1522] (n=223, n/N=0.0696875, p=0.063247, diff=0.1%, state=[1, 5, 1])
+Range of particle indices to simulate with start state #24 out of 36: [1523, 1612] (n=90, n/N=0.028125, p=0.029515, diff=-0.0%, state=[1, 4, 2])
+Range of particle indices to simulate with start state #25 out of 36: [1613, 1653] (n=41, n/N=0.0128125, p=0.013774, diff=-0.1%, state=[1, 3, 3])
+Range of particle indices to simulate with start state #26 out of 36: [1654, 1673] (n=20, n/N=0.00625, p=0.006428, diff=-0.0%, state=[1, 2, 4])
+Range of particle indices to simulate with start state #27 out of 36: [1674, 1684] (n=11, n/N=0.0034375, p=0.003000, diff=0.1%, state=[1, 1, 5])
+Range of particle indices to simulate with start state #28 out of 36: [1685, 1686] (n=2, n/N=0.000625, p=0.001400, diff=-0.6%, state=[1, 0, 6])
+Range of particle indices to simulate with start state #29 out of 36: [1687, 2491] (n=805, n/N=0.2515625, p=0.254119, diff=-0.0%, state=[0, 7, 0])
+Range of particle indices to simulate with start state #30 out of 36: [2492, 2860] (n=369, n/N=0.1153125, p=0.118589, diff=-0.0%, state=[0, 6, 1])
+Range of particle indices to simulate with start state #31 out of 36: [2861, 3044] (n=184, n/N=0.0575, p=0.055342, diff=0.0%, state=[0, 5, 2])
+Range of particle indices to simulate with start state #32 out of 36: [3045, 3123] (n=79, n/N=0.0246875, p=0.025826, diff=-0.0%, state=[0, 4, 3])
+Range of particle indices to simulate with start state #33 out of 36: [3124, 3167] (n=44, n/N=0.01375, p=0.012052, diff=0.1%, state=[0, 3, 4])
+Range of particle indices to simulate with start state #34 out of 36: [3168, 3181] (n=14, n/N=0.004375, p=0.005624, diff=-0.2%, state=[0, 2, 5])
+Range of particle indices to simulate with start state #35 out of 36: [3182, 3192] (n=11, n/N=0.0034375, p=0.002625, diff=0.3%, state=[0, 1, 6])
+Range of particle indices to simulate with start state #36 out of 36: [3193, 3199] (n=7, n/N=0.0021875, p=0.001225, diff=0.8%, state=[0, 0, 7])
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV procedure.
+--> max time FV process starts = 352.6 (0.0% of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True.
+--> Simulation time reset from T=1142857.1 to T=121.0.
+Generating trajectories for each particle until END OF SIMULATION (T=121.0)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> Number of observations for P(T>t) estimation from FV simulation: 3200 (N=3200)
+execution time: 1677.4 sec, 28.0 min
+		P(K) estimated by FV (E(T)=13.1): 0.000294%
+		True P(K): 0.000394%
+-- FAIRNESS --
+FV simulation:
+- time = 543441.2
+- #events = 1743729
+
+---> Execution time MC + FV: 1677.5 sec, 28.0 min
+
+		### Replication 2 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1323)...
+Total number of activation states: 36 (0.122486% <= p(S) <= 25.412%) (Nmin to expect at 1 case in state with smallest p: Nmin=816)
+Range of particle indices to simulate with start state #1 out of 36: [0, 16] (n=17, n/N=0.0053125, p=0.003119, diff=0.7%, state=[7, 0, 0])
+Range of particle indices to simulate with start state #2 out of 36: [17, 33] (n=17, n/N=0.0053125, p=0.005848, diff=-0.1%, state=[6, 1, 0])
+Range of particle indices to simulate with start state #3 out of 36: [34, 41] (n=8, n/N=0.0025, p=0.002729, diff=-0.1%, state=[6, 0, 1])
+Range of particle indices to simulate with start state #4 out of 36: [42, 86] (n=45, n/N=0.0140625, p=0.010966, diff=0.3%, state=[5, 2, 0])
+Range of particle indices to simulate with start state #5 out of 36: [87, 102] (n=16, n/N=0.005, p=0.005117, diff=-0.0%, state=[5, 1, 1])
+Range of particle indices to simulate with start state #6 out of 36: [103, 109] (n=7, n/N=0.0021875, p=0.002388, diff=-0.1%, state=[5, 0, 2])
+Range of particle indices to simulate with start state #7 out of 36: [110, 180] (n=71, n/N=0.0221875, p=0.020560, diff=0.1%, state=[4, 3, 0])
+Range of particle indices to simulate with start state #8 out of 36: [181, 212] (n=32, n/N=0.01, p=0.009595, diff=0.0%, state=[4, 2, 1])
+Range of particle indices to simulate with start state #9 out of 36: [213, 222] (n=10, n/N=0.003125, p=0.004478, diff=-0.3%, state=[4, 1, 2])
+Range of particle indices to simulate with start state #10 out of 36: [223, 233] (n=11, n/N=0.0034375, p=0.002090, diff=0.6%, state=[4, 0, 3])
+Range of particle indices to simulate with start state #11 out of 36: [234, 339] (n=106, n/N=0.033125, p=0.038551, diff=-0.1%, state=[3, 4, 0])
+Range of particle indices to simulate with start state #12 out of 36: [340, 397] (n=58, n/N=0.018125, p=0.017990, diff=0.0%, state=[3, 3, 1])
+Range of particle indices to simulate with start state #13 out of 36: [398, 422] (n=25, n/N=0.0078125, p=0.008396, diff=-0.1%, state=[3, 2, 2])
+Range of particle indices to simulate with start state #14 out of 36: [423, 437] (n=15, n/N=0.0046875, p=0.003918, diff=0.2%, state=[3, 1, 3])
+Range of particle indices to simulate with start state #15 out of 36: [438, 444] (n=7, n/N=0.0021875, p=0.001828, diff=0.2%, state=[3, 0, 4])
+Range of particle indices to simulate with start state #16 out of 36: [445, 688] (n=244, n/N=0.07625, p=0.072283, diff=0.1%, state=[2, 5, 0])
+Range of particle indices to simulate with start state #17 out of 36: [689, 805] (n=117, n/N=0.0365625, p=0.033732, diff=0.1%, state=[2, 4, 1])
+Range of particle indices to simulate with start state #18 out of 36: [806, 853] (n=48, n/N=0.015, p=0.015742, diff=-0.0%, state=[2, 3, 2])
+Range of particle indices to simulate with start state #19 out of 36: [854, 875] (n=22, n/N=0.006875, p=0.007346, diff=-0.1%, state=[2, 2, 3])
+Range of particle indices to simulate with start state #20 out of 36: [876, 883] (n=8, n/N=0.0025, p=0.003428, diff=-0.3%, state=[2, 1, 4])
+Range of particle indices to simulate with start state #21 out of 36: [884, 895] (n=12, n/N=0.00375, p=0.001600, diff=1.3%, state=[2, 0, 5])
+Range of particle indices to simulate with start state #22 out of 36: [896, 1344] (n=449, n/N=0.1403125, p=0.135530, diff=0.0%, state=[1, 6, 0])
+Range of particle indices to simulate with start state #23 out of 36: [1345, 1534] (n=190, n/N=0.059375, p=0.063247, diff=-0.1%, state=[1, 5, 1])
+Range of particle indices to simulate with start state #24 out of 36: [1535, 1625] (n=91, n/N=0.0284375, p=0.029515, diff=-0.0%, state=[1, 4, 2])
+Range of particle indices to simulate with start state #25 out of 36: [1626, 1660] (n=35, n/N=0.0109375, p=0.013774, diff=-0.2%, state=[1, 3, 3])
+Range of particle indices to simulate with start state #26 out of 36: [1661, 1688] (n=28, n/N=0.00875, p=0.006428, diff=0.4%, state=[1, 2, 4])
+Range of particle indices to simulate with start state #27 out of 36: [1689, 1696] (n=8, n/N=0.0025, p=0.003000, diff=-0.2%, state=[1, 1, 5])
+Range of particle indices to simulate with start state #28 out of 36: [1697, 1701] (n=5, n/N=0.0015625, p=0.001400, diff=0.1%, state=[1, 0, 6])
+Range of particle indices to simulate with start state #29 out of 36: [1702, 2492] (n=791, n/N=0.2471875, p=0.254119, diff=-0.0%, state=[0, 7, 0])
+Range of particle indices to simulate with start state #30 out of 36: [2493, 2857] (n=365, n/N=0.1140625, p=0.118589, diff=-0.0%, state=[0, 6, 1])
+Range of particle indices to simulate with start state #31 out of 36: [2858, 3040] (n=183, n/N=0.0571875, p=0.055342, diff=0.0%, state=[0, 5, 2])
+Range of particle indices to simulate with start state #32 out of 36: [3041, 3133] (n=93, n/N=0.0290625, p=0.025826, diff=0.1%, state=[0, 4, 3])
+Range of particle indices to simulate with start state #33 out of 36: [3134, 3178] (n=45, n/N=0.0140625, p=0.012052, diff=0.2%, state=[0, 3, 4])
+Range of particle indices to simulate with start state #34 out of 36: [3179, 3187] (n=9, n/N=0.0028125, p=0.005624, diff=-0.5%, state=[0, 2, 5])
+Range of particle indices to simulate with start state #35 out of 36: [3188, 3194] (n=7, n/N=0.0021875, p=0.002625, diff=-0.2%, state=[0, 1, 6])
+Range of particle indices to simulate with start state #36 out of 36: [3195, 3199] (n=5, n/N=0.0015625, p=0.001225, diff=0.3%, state=[0, 0, 7])
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV procedure.
+--> max time FV process starts = 360.9 (0.0% of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True.
+--> Simulation time reset from T=1142857.1 to T=233.0.
+Generating trajectories for each particle until END OF SIMULATION (T=233.0)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> Number of observations for P(T>t) estimation from FV simulation: 3200 (N=3200)
+execution time: 3094.8 sec, 51.6 min
+		P(K) estimated by FV (E(T)=13.4): 0.000483%
+		True P(K): 0.000394%
+-- FAIRNESS --
+FV simulation:
+- time = 904340.3
+- #events = 2921824
+
+---> Execution time MC + FV: 3096.7 sec, 51.6 min
+
+		### Replication 3 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1333)...
+Total number of activation states: 36 (0.122486% <= p(S) <= 25.412%) (Nmin to expect at 1 case in state with smallest p: Nmin=816)
+Range of particle indices to simulate with start state #1 out of 36: [0, 3] (n=4, n/N=0.00125, p=0.003119, diff=-0.6%, state=[7, 0, 0])
+Range of particle indices to simulate with start state #2 out of 36: [4, 29] (n=26, n/N=0.008125, p=0.005848, diff=0.4%, state=[6, 1, 0])
+Range of particle indices to simulate with start state #3 out of 36: [30, 40] (n=11, n/N=0.0034375, p=0.002729, diff=0.3%, state=[6, 0, 1])
+Range of particle indices to simulate with start state #4 out of 36: [41, 67] (n=27, n/N=0.0084375, p=0.010966, diff=-0.2%, state=[5, 2, 0])
+Range of particle indices to simulate with start state #5 out of 36: [68, 85] (n=18, n/N=0.005625, p=0.005117, diff=0.1%, state=[5, 1, 1])
+Range of particle indices to simulate with start state #6 out of 36: [86, 91] (n=6, n/N=0.001875, p=0.002388, diff=-0.2%, state=[5, 0, 2])
+Range of particle indices to simulate with start state #7 out of 36: [92, 152] (n=61, n/N=0.0190625, p=0.020560, diff=-0.1%, state=[4, 3, 0])
+Range of particle indices to simulate with start state #8 out of 36: [153, 183] (n=31, n/N=0.0096875, p=0.009595, diff=0.0%, state=[4, 2, 1])
+Range of particle indices to simulate with start state #9 out of 36: [184, 202] (n=19, n/N=0.0059375, p=0.004478, diff=0.3%, state=[4, 1, 2])
+Range of particle indices to simulate with start state #10 out of 36: [203, 209] (n=7, n/N=0.0021875, p=0.002090, diff=0.0%, state=[4, 0, 3])
+Range of particle indices to simulate with start state #11 out of 36: [210, 326] (n=117, n/N=0.0365625, p=0.038551, diff=-0.1%, state=[3, 4, 0])
+Range of particle indices to simulate with start state #12 out of 36: [327, 395] (n=69, n/N=0.0215625, p=0.017990, diff=0.2%, state=[3, 3, 1])
+Range of particle indices to simulate with start state #13 out of 36: [396, 420] (n=25, n/N=0.0078125, p=0.008396, diff=-0.1%, state=[3, 2, 2])
+Range of particle indices to simulate with start state #14 out of 36: [421, 440] (n=20, n/N=0.00625, p=0.003918, diff=0.6%, state=[3, 1, 3])
+Range of particle indices to simulate with start state #15 out of 36: [441, 448] (n=8, n/N=0.0025, p=0.001828, diff=0.4%, state=[3, 0, 4])
+Range of particle indices to simulate with start state #16 out of 36: [449, 683] (n=235, n/N=0.0734375, p=0.072283, diff=0.0%, state=[2, 5, 0])
+Range of particle indices to simulate with start state #17 out of 36: [684, 785] (n=102, n/N=0.031875, p=0.033732, diff=-0.1%, state=[2, 4, 1])
+Range of particle indices to simulate with start state #18 out of 36: [786, 838] (n=53, n/N=0.0165625, p=0.015742, diff=0.1%, state=[2, 3, 2])
+Range of particle indices to simulate with start state #19 out of 36: [839, 858] (n=20, n/N=0.00625, p=0.007346, diff=-0.1%, state=[2, 2, 3])
+Range of particle indices to simulate with start state #20 out of 36: [859, 869] (n=11, n/N=0.0034375, p=0.003428, diff=0.0%, state=[2, 1, 4])
+Range of particle indices to simulate with start state #21 out of 36: [870, 880] (n=11, n/N=0.0034375, p=0.001600, diff=1.1%, state=[2, 0, 5])
+Range of particle indices to simulate with start state #22 out of 36: [881, 1321] (n=441, n/N=0.1378125, p=0.135530, diff=0.0%, state=[1, 6, 0])
+Range of particle indices to simulate with start state #23 out of 36: [1322, 1525] (n=204, n/N=0.06375, p=0.063247, diff=0.0%, state=[1, 5, 1])
+Range of particle indices to simulate with start state #24 out of 36: [1526, 1633] (n=108, n/N=0.03375, p=0.029515, diff=0.1%, state=[1, 4, 2])
+Range of particle indices to simulate with start state #25 out of 36: [1634, 1675] (n=42, n/N=0.013125, p=0.013774, diff=-0.0%, state=[1, 3, 3])
+Range of particle indices to simulate with start state #26 out of 36: [1676, 1690] (n=15, n/N=0.0046875, p=0.006428, diff=-0.3%, state=[1, 2, 4])
+Range of particle indices to simulate with start state #27 out of 36: [1691, 1701] (n=11, n/N=0.0034375, p=0.003000, diff=0.1%, state=[1, 1, 5])
+Range of particle indices to simulate with start state #28 out of 36: [1702, 1705] (n=4, n/N=0.00125, p=0.001400, diff=-0.1%, state=[1, 0, 6])
+Range of particle indices to simulate with start state #29 out of 36: [1706, 2544] (n=839, n/N=0.2621875, p=0.254119, diff=0.0%, state=[0, 7, 0])
+Range of particle indices to simulate with start state #30 out of 36: [2545, 2910] (n=366, n/N=0.114375, p=0.118589, diff=-0.0%, state=[0, 6, 1])
+Range of particle indices to simulate with start state #31 out of 36: [2911, 3063] (n=153, n/N=0.0478125, p=0.055342, diff=-0.1%, state=[0, 5, 2])
+Range of particle indices to simulate with start state #32 out of 36: [3064, 3133] (n=70, n/N=0.021875, p=0.025826, diff=-0.2%, state=[0, 4, 3])
+Range of particle indices to simulate with start state #33 out of 36: [3134, 3170] (n=37, n/N=0.0115625, p=0.012052, diff=-0.0%, state=[0, 3, 4])
+Range of particle indices to simulate with start state #34 out of 36: [3171, 3186] (n=16, n/N=0.005, p=0.005624, diff=-0.1%, state=[0, 2, 5])
+Range of particle indices to simulate with start state #35 out of 36: [3187, 3193] (n=7, n/N=0.0021875, p=0.002625, diff=-0.2%, state=[0, 1, 6])
+Range of particle indices to simulate with start state #36 out of 36: [3194, 3199] (n=6, n/N=0.001875, p=0.001225, diff=0.5%, state=[0, 0, 7])
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV procedure.
+--> max time FV process starts = 393.2 (0.0% of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True.
+--> Simulation time reset from T=1142857.1 to T=129.7.
+Generating trajectories for each particle until END OF SIMULATION (T=129.7)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> Number of observations for P(T>t) estimation from FV simulation: 3200 (N=3200)
+execution time: 1935.5 sec, 32.3 min
+		P(K) estimated by FV (E(T)=12.4): 0.000146%
+		True P(K): 0.000394%
+-- FAIRNESS --
+FV simulation:
+- time = 571782.6
+- #events = 1840041
+
+---> Execution time MC + FV: 1938.5 sec, 32.3 min
+
+		### Replication 4 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1343)...
+Total number of activation states: 36 (0.122486% <= p(S) <= 25.412%) (Nmin to expect at 1 case in state with smallest p: Nmin=816)
+Range of particle indices to simulate with start state #1 out of 36: [0, 7] (n=8, n/N=0.0025, p=0.003119, diff=-0.2%, state=[7, 0, 0])
+Range of particle indices to simulate with start state #2 out of 36: [8, 23] (n=16, n/N=0.005, p=0.005848, diff=-0.1%, state=[6, 1, 0])
+Range of particle indices to simulate with start state #3 out of 36: [24, 32] (n=9, n/N=0.0028125, p=0.002729, diff=0.0%, state=[6, 0, 1])
+Range of particle indices to simulate with start state #4 out of 36: [33, 63] (n=31, n/N=0.0096875, p=0.010966, diff=-0.1%, state=[5, 2, 0])
+Range of particle indices to simulate with start state #5 out of 36: [64, 80] (n=17, n/N=0.0053125, p=0.005117, diff=0.0%, state=[5, 1, 1])
+Range of particle indices to simulate with start state #6 out of 36: [81, 86] (n=6, n/N=0.001875, p=0.002388, diff=-0.2%, state=[5, 0, 2])
+Range of particle indices to simulate with start state #7 out of 36: [87, 171] (n=85, n/N=0.0265625, p=0.020560, diff=0.3%, state=[4, 3, 0])
+Range of particle indices to simulate with start state #8 out of 36: [172, 200] (n=29, n/N=0.0090625, p=0.009595, diff=-0.1%, state=[4, 2, 1])
+Range of particle indices to simulate with start state #9 out of 36: [201, 212] (n=12, n/N=0.00375, p=0.004478, diff=-0.2%, state=[4, 1, 2])
+Range of particle indices to simulate with start state #10 out of 36: [213, 220] (n=8, n/N=0.0025, p=0.002090, diff=0.2%, state=[4, 0, 3])
+Range of particle indices to simulate with start state #11 out of 36: [221, 328] (n=108, n/N=0.03375, p=0.038551, diff=-0.1%, state=[3, 4, 0])
+Range of particle indices to simulate with start state #12 out of 36: [329, 381] (n=53, n/N=0.0165625, p=0.017990, diff=-0.1%, state=[3, 3, 1])
+Range of particle indices to simulate with start state #13 out of 36: [382, 413] (n=32, n/N=0.01, p=0.008396, diff=0.2%, state=[3, 2, 2])
+Range of particle indices to simulate with start state #14 out of 36: [414, 436] (n=23, n/N=0.0071875, p=0.003918, diff=0.8%, state=[3, 1, 3])
+Range of particle indices to simulate with start state #15 out of 36: [437, 444] (n=8, n/N=0.0025, p=0.001828, diff=0.4%, state=[3, 0, 4])
+Range of particle indices to simulate with start state #16 out of 36: [445, 677] (n=233, n/N=0.0728125, p=0.072283, diff=0.0%, state=[2, 5, 0])
+Range of particle indices to simulate with start state #17 out of 36: [678, 796] (n=119, n/N=0.0371875, p=0.033732, diff=0.1%, state=[2, 4, 1])
+Range of particle indices to simulate with start state #18 out of 36: [797, 839] (n=43, n/N=0.0134375, p=0.015742, diff=-0.1%, state=[2, 3, 2])
+Range of particle indices to simulate with start state #19 out of 36: [840, 867] (n=28, n/N=0.00875, p=0.007346, diff=0.2%, state=[2, 2, 3])
+Range of particle indices to simulate with start state #20 out of 36: [868, 877] (n=10, n/N=0.003125, p=0.003428, diff=-0.1%, state=[2, 1, 4])
+Range of particle indices to simulate with start state #21 out of 36: [878, 878] (n=1, n/N=0.0003125, p=0.001600, diff=-0.8%, state=[2, 0, 5])
+Range of particle indices to simulate with start state #22 out of 36: [879, 1320] (n=442, n/N=0.138125, p=0.135530, diff=0.0%, state=[1, 6, 0])
+Range of particle indices to simulate with start state #23 out of 36: [1321, 1525] (n=205, n/N=0.0640625, p=0.063247, diff=0.0%, state=[1, 5, 1])
+Range of particle indices to simulate with start state #24 out of 36: [1526, 1618] (n=93, n/N=0.0290625, p=0.029515, diff=-0.0%, state=[1, 4, 2])
+Range of particle indices to simulate with start state #25 out of 36: [1619, 1655] (n=37, n/N=0.0115625, p=0.013774, diff=-0.2%, state=[1, 3, 3])
+Range of particle indices to simulate with start state #26 out of 36: [1656, 1678] (n=23, n/N=0.0071875, p=0.006428, diff=0.1%, state=[1, 2, 4])
+Range of particle indices to simulate with start state #27 out of 36: [1679, 1688] (n=10, n/N=0.003125, p=0.003000, diff=0.0%, state=[1, 1, 5])
+Range of particle indices to simulate with start state #28 out of 36: [1689, 1691] (n=3, n/N=0.0009375, p=0.001400, diff=-0.3%, state=[1, 0, 6])
+Range of particle indices to simulate with start state #29 out of 36: [1692, 2489] (n=798, n/N=0.249375, p=0.254119, diff=-0.0%, state=[0, 7, 0])
+Range of particle indices to simulate with start state #30 out of 36: [2490, 2857] (n=368, n/N=0.115, p=0.118589, diff=-0.0%, state=[0, 6, 1])
+Range of particle indices to simulate with start state #31 out of 36: [2858, 3041] (n=184, n/N=0.0575, p=0.055342, diff=0.0%, state=[0, 5, 2])
+Range of particle indices to simulate with start state #32 out of 36: [3042, 3125] (n=84, n/N=0.02625, p=0.025826, diff=0.0%, state=[0, 4, 3])
+Range of particle indices to simulate with start state #33 out of 36: [3126, 3164] (n=39, n/N=0.0121875, p=0.012052, diff=0.0%, state=[0, 3, 4])
+Range of particle indices to simulate with start state #34 out of 36: [3165, 3188] (n=24, n/N=0.0075, p=0.005624, diff=0.3%, state=[0, 2, 5])
+Range of particle indices to simulate with start state #35 out of 36: [3189, 3196] (n=8, n/N=0.0025, p=0.002625, diff=-0.0%, state=[0, 1, 6])
+Range of particle indices to simulate with start state #36 out of 36: [3197, 3199] (n=3, n/N=0.0009375, p=0.001225, diff=-0.2%, state=[0, 0, 7])
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV procedure.
+--> max time FV process starts = 444.9 (0.0% of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True.
+--> Simulation time reset from T=1142857.1 to T=210.7.
+Generating trajectories for each particle until END OF SIMULATION (T=210.7)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> Number of observations for P(T>t) estimation from FV simulation: 3200 (N=3200)
+execution time: 4172.1 sec, 69.5 min
+		P(K) estimated by FV (E(T)=12.9): 0.000523%
+		True P(K): 0.000394%
+-- FAIRNESS --
+FV simulation:
+- time = 832910.4
+- #events = 2695231
+
+---> Execution time MC + FV: 4173.8 sec, 69.6 min
+
+		### Replication 5 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1353)...
+Total number of activation states: 36 (0.122486% <= p(S) <= 25.412%) (Nmin to expect at 1 case in state with smallest p: Nmin=816)
+Range of particle indices to simulate with start state #1 out of 36: [0, 5] (n=6, n/N=0.001875, p=0.003119, diff=-0.4%, state=[7, 0, 0])
+Range of particle indices to simulate with start state #2 out of 36: [6, 24] (n=19, n/N=0.0059375, p=0.005848, diff=0.0%, state=[6, 1, 0])
+Range of particle indices to simulate with start state #3 out of 36: [25, 36] (n=12, n/N=0.00375, p=0.002729, diff=0.4%, state=[6, 0, 1])
+Range of particle indices to simulate with start state #4 out of 36: [37, 79] (n=43, n/N=0.0134375, p=0.010966, diff=0.2%, state=[5, 2, 0])
+Range of particle indices to simulate with start state #5 out of 36: [80, 96] (n=17, n/N=0.0053125, p=0.005117, diff=0.0%, state=[5, 1, 1])
+Range of particle indices to simulate with start state #6 out of 36: [97, 103] (n=7, n/N=0.0021875, p=0.002388, diff=-0.1%, state=[5, 0, 2])
+Range of particle indices to simulate with start state #7 out of 36: [104, 175] (n=72, n/N=0.0225, p=0.020560, diff=0.1%, state=[4, 3, 0])
+Range of particle indices to simulate with start state #8 out of 36: [176, 199] (n=24, n/N=0.0075, p=0.009595, diff=-0.2%, state=[4, 2, 1])
+Range of particle indices to simulate with start state #9 out of 36: [200, 213] (n=14, n/N=0.004375, p=0.004478, diff=-0.0%, state=[4, 1, 2])
+Range of particle indices to simulate with start state #10 out of 36: [214, 218] (n=5, n/N=0.0015625, p=0.002090, diff=-0.3%, state=[4, 0, 3])
+Range of particle indices to simulate with start state #11 out of 36: [219, 350] (n=132, n/N=0.04125, p=0.038551, diff=0.1%, state=[3, 4, 0])
+Range of particle indices to simulate with start state #12 out of 36: [351, 399] (n=49, n/N=0.0153125, p=0.017990, diff=-0.1%, state=[3, 3, 1])
+Range of particle indices to simulate with start state #13 out of 36: [400, 429] (n=30, n/N=0.009375, p=0.008396, diff=0.1%, state=[3, 2, 2])
+Range of particle indices to simulate with start state #14 out of 36: [430, 442] (n=13, n/N=0.0040625, p=0.003918, diff=0.0%, state=[3, 1, 3])
+Range of particle indices to simulate with start state #15 out of 36: [443, 446] (n=4, n/N=0.00125, p=0.001828, diff=-0.3%, state=[3, 0, 4])
+Range of particle indices to simulate with start state #16 out of 36: [447, 685] (n=239, n/N=0.0746875, p=0.072283, diff=0.0%, state=[2, 5, 0])
+Range of particle indices to simulate with start state #17 out of 36: [686, 790] (n=105, n/N=0.0328125, p=0.033732, diff=-0.0%, state=[2, 4, 1])
+Range of particle indices to simulate with start state #18 out of 36: [791, 845] (n=55, n/N=0.0171875, p=0.015742, diff=0.1%, state=[2, 3, 2])
+Range of particle indices to simulate with start state #19 out of 36: [846, 874] (n=29, n/N=0.0090625, p=0.007346, diff=0.2%, state=[2, 2, 3])
+Range of particle indices to simulate with start state #20 out of 36: [875, 888] (n=14, n/N=0.004375, p=0.003428, diff=0.3%, state=[2, 1, 4])
+Range of particle indices to simulate with start state #21 out of 36: [889, 896] (n=8, n/N=0.0025, p=0.001600, diff=0.6%, state=[2, 0, 5])
+Range of particle indices to simulate with start state #22 out of 36: [897, 1354] (n=458, n/N=0.143125, p=0.135530, diff=0.1%, state=[1, 6, 0])
+Range of particle indices to simulate with start state #23 out of 36: [1355, 1557] (n=203, n/N=0.0634375, p=0.063247, diff=0.0%, state=[1, 5, 1])
+Range of particle indices to simulate with start state #24 out of 36: [1558, 1649] (n=92, n/N=0.02875, p=0.029515, diff=-0.0%, state=[1, 4, 2])
+Range of particle indices to simulate with start state #25 out of 36: [1650, 1687] (n=38, n/N=0.011875, p=0.013774, diff=-0.1%, state=[1, 3, 3])
+Range of particle indices to simulate with start state #26 out of 36: [1688, 1713] (n=26, n/N=0.008125, p=0.006428, diff=0.3%, state=[1, 2, 4])
+Range of particle indices to simulate with start state #27 out of 36: [1714, 1718] (n=5, n/N=0.0015625, p=0.003000, diff=-0.5%, state=[1, 1, 5])
+Range of particle indices to simulate with start state #28 out of 36: [1719, 1723] (n=5, n/N=0.0015625, p=0.001400, diff=0.1%, state=[1, 0, 6])
+Range of particle indices to simulate with start state #29 out of 36: [1724, 2507] (n=784, n/N=0.245, p=0.254119, diff=-0.0%, state=[0, 7, 0])
+Range of particle indices to simulate with start state #30 out of 36: [2508, 2869] (n=362, n/N=0.113125, p=0.118589, diff=-0.0%, state=[0, 6, 1])
+Range of particle indices to simulate with start state #31 out of 36: [2870, 3057] (n=188, n/N=0.05875, p=0.055342, diff=0.1%, state=[0, 5, 2])
+Range of particle indices to simulate with start state #32 out of 36: [3058, 3136] (n=79, n/N=0.0246875, p=0.025826, diff=-0.0%, state=[0, 4, 3])
+Range of particle indices to simulate with start state #33 out of 36: [3137, 3171] (n=35, n/N=0.0109375, p=0.012052, diff=-0.1%, state=[0, 3, 4])
+Range of particle indices to simulate with start state #34 out of 36: [3172, 3191] (n=20, n/N=0.00625, p=0.005624, diff=0.1%, state=[0, 2, 5])
+Range of particle indices to simulate with start state #35 out of 36: [3192, 3196] (n=5, n/N=0.0015625, p=0.002625, diff=-0.4%, state=[0, 1, 6])
+Range of particle indices to simulate with start state #36 out of 36: [3197, 3199] (n=3, n/N=0.0009375, p=0.001225, diff=-0.2%, state=[0, 0, 7])
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV procedure.
+--> max time FV process starts = 377.3 (0.0% of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True.
+--> Simulation time reset from T=1142857.1 to T=178.3.
+Generating trajectories for each particle until END OF SIMULATION (T=178.3)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> Number of observations for P(T>t) estimation from FV simulation: 3200 (N=3200)
+execution time: 2330.4 sec, 38.8 min
+		P(K) estimated by FV (E(T)=13.6): 0.000775%
+		True P(K): 0.000394%
+-- FAIRNESS --
+FV simulation:
+- time = 732980.4
+- #events = 2362993
+
+---> Execution time MC + FV: 2333.7 sec, 38.9 min
+
+		### Replication 6 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1363)...
+Total number of activation states: 36 (0.122486% <= p(S) <= 25.412%) (Nmin to expect at 1 case in state with smallest p: Nmin=816)
+Range of particle indices to simulate with start state #1 out of 36: [0, 6] (n=7, n/N=0.0021875, p=0.003119, diff=-0.3%, state=[7, 0, 0])
+Range of particle indices to simulate with start state #2 out of 36: [7, 23] (n=17, n/N=0.0053125, p=0.005848, diff=-0.1%, state=[6, 1, 0])
+Range of particle indices to simulate with start state #3 out of 36: [24, 29] (n=6, n/N=0.001875, p=0.002729, diff=-0.3%, state=[6, 0, 1])
+Range of particle indices to simulate with start state #4 out of 36: [30, 52] (n=23, n/N=0.0071875, p=0.010966, diff=-0.3%, state=[5, 2, 0])
+Range of particle indices to simulate with start state #5 out of 36: [53, 64] (n=12, n/N=0.00375, p=0.005117, diff=-0.3%, state=[5, 1, 1])
+Range of particle indices to simulate with start state #6 out of 36: [65, 79] (n=15, n/N=0.0046875, p=0.002388, diff=1.0%, state=[5, 0, 2])
+Range of particle indices to simulate with start state #7 out of 36: [80, 150] (n=71, n/N=0.0221875, p=0.020560, diff=0.1%, state=[4, 3, 0])
+Range of particle indices to simulate with start state #8 out of 36: [151, 180] (n=30, n/N=0.009375, p=0.009595, diff=-0.0%, state=[4, 2, 1])
+Range of particle indices to simulate with start state #9 out of 36: [181, 193] (n=13, n/N=0.0040625, p=0.004478, diff=-0.1%, state=[4, 1, 2])
+Range of particle indices to simulate with start state #10 out of 36: [194, 199] (n=6, n/N=0.001875, p=0.002090, diff=-0.1%, state=[4, 0, 3])
+Range of particle indices to simulate with start state #11 out of 36: [200, 312] (n=113, n/N=0.0353125, p=0.038551, diff=-0.1%, state=[3, 4, 0])
+Range of particle indices to simulate with start state #12 out of 36: [313, 367] (n=55, n/N=0.0171875, p=0.017990, diff=-0.0%, state=[3, 3, 1])
+Range of particle indices to simulate with start state #13 out of 36: [368, 390] (n=23, n/N=0.0071875, p=0.008396, diff=-0.1%, state=[3, 2, 2])
+Range of particle indices to simulate with start state #14 out of 36: [391, 399] (n=9, n/N=0.0028125, p=0.003918, diff=-0.3%, state=[3, 1, 3])
+Range of particle indices to simulate with start state #15 out of 36: [400, 408] (n=9, n/N=0.0028125, p=0.001828, diff=0.5%, state=[3, 0, 4])
+Range of particle indices to simulate with start state #16 out of 36: [409, 631] (n=223, n/N=0.0696875, p=0.072283, diff=-0.0%, state=[2, 5, 0])
+Range of particle indices to simulate with start state #17 out of 36: [632, 743] (n=112, n/N=0.035, p=0.033732, diff=0.0%, state=[2, 4, 1])
+Range of particle indices to simulate with start state #18 out of 36: [744, 799] (n=56, n/N=0.0175, p=0.015742, diff=0.1%, state=[2, 3, 2])
+Range of particle indices to simulate with start state #19 out of 36: [800, 821] (n=22, n/N=0.006875, p=0.007346, diff=-0.1%, state=[2, 2, 3])
+Range of particle indices to simulate with start state #20 out of 36: [822, 834] (n=13, n/N=0.0040625, p=0.003428, diff=0.2%, state=[2, 1, 4])
+Range of particle indices to simulate with start state #21 out of 36: [835, 837] (n=3, n/N=0.0009375, p=0.001600, diff=-0.4%, state=[2, 0, 5])
+Range of particle indices to simulate with start state #22 out of 36: [838, 1282] (n=445, n/N=0.1390625, p=0.135530, diff=0.0%, state=[1, 6, 0])
+Range of particle indices to simulate with start state #23 out of 36: [1283, 1497] (n=215, n/N=0.0671875, p=0.063247, diff=0.1%, state=[1, 5, 1])
+Range of particle indices to simulate with start state #24 out of 36: [1498, 1594] (n=97, n/N=0.0303125, p=0.029515, diff=0.0%, state=[1, 4, 2])
+Range of particle indices to simulate with start state #25 out of 36: [1595, 1638] (n=44, n/N=0.01375, p=0.013774, diff=-0.0%, state=[1, 3, 3])
+Range of particle indices to simulate with start state #26 out of 36: [1639, 1659] (n=21, n/N=0.0065625, p=0.006428, diff=0.0%, state=[1, 2, 4])
+Range of particle indices to simulate with start state #27 out of 36: [1660, 1666] (n=7, n/N=0.0021875, p=0.003000, diff=-0.3%, state=[1, 1, 5])
+Range of particle indices to simulate with start state #28 out of 36: [1667, 1673] (n=7, n/N=0.0021875, p=0.001400, diff=0.6%, state=[1, 0, 6])
+Range of particle indices to simulate with start state #29 out of 36: [1674, 2500] (n=827, n/N=0.2584375, p=0.254119, diff=0.0%, state=[0, 7, 0])
+Range of particle indices to simulate with start state #30 out of 36: [2501, 2878] (n=378, n/N=0.118125, p=0.118589, diff=-0.0%, state=[0, 6, 1])
+Range of particle indices to simulate with start state #31 out of 36: [2879, 3053] (n=175, n/N=0.0546875, p=0.055342, diff=-0.0%, state=[0, 5, 2])
+Range of particle indices to simulate with start state #32 out of 36: [3054, 3129] (n=76, n/N=0.02375, p=0.025826, diff=-0.1%, state=[0, 4, 3])
+Range of particle indices to simulate with start state #33 out of 36: [3130, 3175] (n=46, n/N=0.014375, p=0.012052, diff=0.2%, state=[0, 3, 4])
+Range of particle indices to simulate with start state #34 out of 36: [3176, 3186] (n=11, n/N=0.0034375, p=0.005624, diff=-0.4%, state=[0, 2, 5])
+Range of particle indices to simulate with start state #35 out of 36: [3187, 3194] (n=8, n/N=0.0025, p=0.002625, diff=-0.0%, state=[0, 1, 6])
+Range of particle indices to simulate with start state #36 out of 36: [3195, 3199] (n=5, n/N=0.0015625, p=0.001225, diff=0.3%, state=[0, 0, 7])
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV procedure.
+--> max time FV process starts = 324.6 (0.0% of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True.
+--> Simulation time reset from T=1142857.1 to T=154.1.
+Generating trajectories for each particle until END OF SIMULATION (T=154.1)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> Number of observations for P(T>t) estimation from FV simulation: 3200 (N=3200)
+execution time: 1904.5 sec, 31.7 min
+		P(K) estimated by FV (E(T)=12.6): 0.000336%
+		True P(K): 0.000394%
+-- FAIRNESS --
+FV simulation:
+- time = 646706.2
+- #events = 2084473
+
+---> Execution time MC + FV: 1906.0 sec, 31.8 min
+
+		### Replication 7 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1373)...
+Total number of activation states: 36 (0.122486% <= p(S) <= 25.412%) (Nmin to expect at 1 case in state with smallest p: Nmin=816)
+Range of particle indices to simulate with start state #1 out of 36: [0, 11] (n=12, n/N=0.00375, p=0.003119, diff=0.2%, state=[7, 0, 0])
+Range of particle indices to simulate with start state #2 out of 36: [12, 31] (n=20, n/N=0.00625, p=0.005848, diff=0.1%, state=[6, 1, 0])
+Range of particle indices to simulate with start state #3 out of 36: [32, 37] (n=6, n/N=0.001875, p=0.002729, diff=-0.3%, state=[6, 0, 1])
+Range of particle indices to simulate with start state #4 out of 36: [38, 73] (n=36, n/N=0.01125, p=0.010966, diff=0.0%, state=[5, 2, 0])
+Range of particle indices to simulate with start state #5 out of 36: [74, 92] (n=19, n/N=0.0059375, p=0.005117, diff=0.2%, state=[5, 1, 1])
+Range of particle indices to simulate with start state #6 out of 36: [93, 99] (n=7, n/N=0.0021875, p=0.002388, diff=-0.1%, state=[5, 0, 2])
+Range of particle indices to simulate with start state #7 out of 36: [100, 165] (n=66, n/N=0.020625, p=0.020560, diff=0.0%, state=[4, 3, 0])
+Range of particle indices to simulate with start state #8 out of 36: [166, 204] (n=39, n/N=0.0121875, p=0.009595, diff=0.3%, state=[4, 2, 1])
+Range of particle indices to simulate with start state #9 out of 36: [205, 223] (n=19, n/N=0.0059375, p=0.004478, diff=0.3%, state=[4, 1, 2])
+Range of particle indices to simulate with start state #10 out of 36: [224, 230] (n=7, n/N=0.0021875, p=0.002090, diff=0.0%, state=[4, 0, 3])
+Range of particle indices to simulate with start state #11 out of 36: [231, 358] (n=128, n/N=0.04, p=0.038551, diff=0.0%, state=[3, 4, 0])
+Range of particle indices to simulate with start state #12 out of 36: [359, 421] (n=63, n/N=0.0196875, p=0.017990, diff=0.1%, state=[3, 3, 1])
+Range of particle indices to simulate with start state #13 out of 36: [422, 450] (n=29, n/N=0.0090625, p=0.008396, diff=0.1%, state=[3, 2, 2])
+Range of particle indices to simulate with start state #14 out of 36: [451, 460] (n=10, n/N=0.003125, p=0.003918, diff=-0.2%, state=[3, 1, 3])
+Range of particle indices to simulate with start state #15 out of 36: [461, 466] (n=6, n/N=0.001875, p=0.001828, diff=0.0%, state=[3, 0, 4])
+Range of particle indices to simulate with start state #16 out of 36: [467, 678] (n=212, n/N=0.06625, p=0.072283, diff=-0.1%, state=[2, 5, 0])
+Range of particle indices to simulate with start state #17 out of 36: [679, 797] (n=119, n/N=0.0371875, p=0.033732, diff=0.1%, state=[2, 4, 1])
+Range of particle indices to simulate with start state #18 out of 36: [798, 839] (n=42, n/N=0.013125, p=0.015742, diff=-0.2%, state=[2, 3, 2])
+Range of particle indices to simulate with start state #19 out of 36: [840, 864] (n=25, n/N=0.0078125, p=0.007346, diff=0.1%, state=[2, 2, 3])
+Range of particle indices to simulate with start state #20 out of 36: [865, 872] (n=8, n/N=0.0025, p=0.003428, diff=-0.3%, state=[2, 1, 4])
+Range of particle indices to simulate with start state #21 out of 36: [873, 885] (n=13, n/N=0.0040625, p=0.001600, diff=1.5%, state=[2, 0, 5])
+Range of particle indices to simulate with start state #22 out of 36: [886, 1296] (n=411, n/N=0.1284375, p=0.135530, diff=-0.1%, state=[1, 6, 0])
+Range of particle indices to simulate with start state #23 out of 36: [1297, 1474] (n=178, n/N=0.055625, p=0.063247, diff=-0.1%, state=[1, 5, 1])
+Range of particle indices to simulate with start state #24 out of 36: [1475, 1546] (n=72, n/N=0.0225, p=0.029515, diff=-0.2%, state=[1, 4, 2])
+Range of particle indices to simulate with start state #25 out of 36: [1547, 1605] (n=59, n/N=0.0184375, p=0.013774, diff=0.3%, state=[1, 3, 3])
+Range of particle indices to simulate with start state #26 out of 36: [1606, 1627] (n=22, n/N=0.006875, p=0.006428, diff=0.1%, state=[1, 2, 4])
+Range of particle indices to simulate with start state #27 out of 36: [1628, 1634] (n=7, n/N=0.0021875, p=0.003000, diff=-0.3%, state=[1, 1, 5])
+Range of particle indices to simulate with start state #28 out of 36: [1635, 1636] (n=2, n/N=0.000625, p=0.001400, diff=-0.6%, state=[1, 0, 6])
+Range of particle indices to simulate with start state #29 out of 36: [1637, 2438] (n=802, n/N=0.250625, p=0.254119, diff=-0.0%, state=[0, 7, 0])
+Range of particle indices to simulate with start state #30 out of 36: [2439, 2849] (n=411, n/N=0.1284375, p=0.118589, diff=0.1%, state=[0, 6, 1])
+Range of particle indices to simulate with start state #31 out of 36: [2850, 3025] (n=176, n/N=0.055, p=0.055342, diff=-0.0%, state=[0, 5, 2])
+Range of particle indices to simulate with start state #32 out of 36: [3026, 3126] (n=101, n/N=0.0315625, p=0.025826, diff=0.2%, state=[0, 4, 3])
+Range of particle indices to simulate with start state #33 out of 36: [3127, 3162] (n=36, n/N=0.01125, p=0.012052, diff=-0.1%, state=[0, 3, 4])
+Range of particle indices to simulate with start state #34 out of 36: [3163, 3185] (n=23, n/N=0.0071875, p=0.005624, diff=0.3%, state=[0, 2, 5])
+Range of particle indices to simulate with start state #35 out of 36: [3186, 3197] (n=12, n/N=0.00375, p=0.002625, diff=0.4%, state=[0, 1, 6])
+Range of particle indices to simulate with start state #36 out of 36: [3198, 3199] (n=2, n/N=0.000625, p=0.001225, diff=-0.5%, state=[0, 0, 7])
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV procedure.
+--> max time FV process starts = 374.5 (0.0% of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True.
+--> Simulation time reset from T=1142857.1 to T=146.7.
+Generating trajectories for each particle until END OF SIMULATION (T=146.7)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> Number of observations for P(T>t) estimation from FV simulation: 3200 (N=3200)
+execution time: 2230.2 sec, 37.2 min
+		P(K) estimated by FV (E(T)=13.3): 0.000267%
+		True P(K): 0.000394%
+-- FAIRNESS --
+FV simulation:
+- time = 629326.7
+- #events = 2027489
+
+---> Execution time MC + FV: 2231.6 sec, 37.2 min
+
+		### Replication 8 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1383)...
+Total number of activation states: 36 (0.122486% <= p(S) <= 25.412%) (Nmin to expect at 1 case in state with smallest p: Nmin=816)
+Range of particle indices to simulate with start state #1 out of 36: [0, 11] (n=12, n/N=0.00375, p=0.003119, diff=0.2%, state=[7, 0, 0])
+Range of particle indices to simulate with start state #2 out of 36: [12, 29] (n=18, n/N=0.005625, p=0.005848, diff=-0.0%, state=[6, 1, 0])
+Range of particle indices to simulate with start state #3 out of 36: [30, 37] (n=8, n/N=0.0025, p=0.002729, diff=-0.1%, state=[6, 0, 1])
+Range of particle indices to simulate with start state #4 out of 36: [38, 83] (n=46, n/N=0.014375, p=0.010966, diff=0.3%, state=[5, 2, 0])
+Range of particle indices to simulate with start state #5 out of 36: [84, 101] (n=18, n/N=0.005625, p=0.005117, diff=0.1%, state=[5, 1, 1])
+Range of particle indices to simulate with start state #6 out of 36: [102, 118] (n=17, n/N=0.0053125, p=0.002388, diff=1.2%, state=[5, 0, 2])
+Range of particle indices to simulate with start state #7 out of 36: [119, 198] (n=80, n/N=0.025, p=0.020560, diff=0.2%, state=[4, 3, 0])
+Range of particle indices to simulate with start state #8 out of 36: [199, 217] (n=19, n/N=0.0059375, p=0.009595, diff=-0.4%, state=[4, 2, 1])
+Range of particle indices to simulate with start state #9 out of 36: [218, 230] (n=13, n/N=0.0040625, p=0.004478, diff=-0.1%, state=[4, 1, 2])
+Range of particle indices to simulate with start state #10 out of 36: [231, 243] (n=13, n/N=0.0040625, p=0.002090, diff=0.9%, state=[4, 0, 3])
+Range of particle indices to simulate with start state #11 out of 36: [244, 381] (n=138, n/N=0.043125, p=0.038551, diff=0.1%, state=[3, 4, 0])
+Range of particle indices to simulate with start state #12 out of 36: [382, 446] (n=65, n/N=0.0203125, p=0.017990, diff=0.1%, state=[3, 3, 1])
+Range of particle indices to simulate with start state #13 out of 36: [447, 483] (n=37, n/N=0.0115625, p=0.008396, diff=0.4%, state=[3, 2, 2])
+Range of particle indices to simulate with start state #14 out of 36: [484, 501] (n=18, n/N=0.005625, p=0.003918, diff=0.4%, state=[3, 1, 3])
+Range of particle indices to simulate with start state #15 out of 36: [502, 504] (n=3, n/N=0.0009375, p=0.001828, diff=-0.5%, state=[3, 0, 4])
+Range of particle indices to simulate with start state #16 out of 36: [505, 725] (n=221, n/N=0.0690625, p=0.072283, diff=-0.0%, state=[2, 5, 0])
+Range of particle indices to simulate with start state #17 out of 36: [726, 839] (n=114, n/N=0.035625, p=0.033732, diff=0.1%, state=[2, 4, 1])
+Range of particle indices to simulate with start state #18 out of 36: [840, 895] (n=56, n/N=0.0175, p=0.015742, diff=0.1%, state=[2, 3, 2])
+Range of particle indices to simulate with start state #19 out of 36: [896, 919] (n=24, n/N=0.0075, p=0.007346, diff=0.0%, state=[2, 2, 3])
+Range of particle indices to simulate with start state #20 out of 36: [920, 926] (n=7, n/N=0.0021875, p=0.003428, diff=-0.4%, state=[2, 1, 4])
+Range of particle indices to simulate with start state #21 out of 36: [927, 934] (n=8, n/N=0.0025, p=0.001600, diff=0.6%, state=[2, 0, 5])
+Range of particle indices to simulate with start state #22 out of 36: [935, 1344] (n=410, n/N=0.128125, p=0.135530, diff=-0.1%, state=[1, 6, 0])
+Range of particle indices to simulate with start state #23 out of 36: [1345, 1544] (n=200, n/N=0.0625, p=0.063247, diff=-0.0%, state=[1, 5, 1])
+Range of particle indices to simulate with start state #24 out of 36: [1545, 1638] (n=94, n/N=0.029375, p=0.029515, diff=-0.0%, state=[1, 4, 2])
+Range of particle indices to simulate with start state #25 out of 36: [1639, 1683] (n=45, n/N=0.0140625, p=0.013774, diff=0.0%, state=[1, 3, 3])
+Range of particle indices to simulate with start state #26 out of 36: [1684, 1698] (n=15, n/N=0.0046875, p=0.006428, diff=-0.3%, state=[1, 2, 4])
+Range of particle indices to simulate with start state #27 out of 36: [1699, 1708] (n=10, n/N=0.003125, p=0.003000, diff=0.0%, state=[1, 1, 5])
+Range of particle indices to simulate with start state #28 out of 36: [1709, 1712] (n=4, n/N=0.00125, p=0.001400, diff=-0.1%, state=[1, 0, 6])
+Range of particle indices to simulate with start state #29 out of 36: [1713, 2494] (n=782, n/N=0.244375, p=0.254119, diff=-0.0%, state=[0, 7, 0])
+Range of particle indices to simulate with start state #30 out of 36: [2495, 2862] (n=368, n/N=0.115, p=0.118589, diff=-0.0%, state=[0, 6, 1])
+Range of particle indices to simulate with start state #31 out of 36: [2863, 3042] (n=180, n/N=0.05625, p=0.055342, diff=0.0%, state=[0, 5, 2])
+Range of particle indices to simulate with start state #32 out of 36: [3043, 3126] (n=84, n/N=0.02625, p=0.025826, diff=0.0%, state=[0, 4, 3])
+Range of particle indices to simulate with start state #33 out of 36: [3127, 3163] (n=37, n/N=0.0115625, p=0.012052, diff=-0.0%, state=[0, 3, 4])
+Range of particle indices to simulate with start state #34 out of 36: [3164, 3180] (n=17, n/N=0.0053125, p=0.005624, diff=-0.1%, state=[0, 2, 5])
+Range of particle indices to simulate with start state #35 out of 36: [3181, 3191] (n=11, n/N=0.0034375, p=0.002625, diff=0.3%, state=[0, 1, 6])
+Range of particle indices to simulate with start state #36 out of 36: [3192, 3199] (n=8, n/N=0.0025, p=0.001225, diff=1.0%, state=[0, 0, 7])
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV procedure.
+--> max time FV process starts = 565.0 (0.0% of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True.
+--> Simulation time reset from T=1142857.1 to T=136.3.
+Generating trajectories for each particle until END OF SIMULATION (T=136.3)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> Number of observations for P(T>t) estimation from FV simulation: 3200 (N=3200)
+execution time: 1762.2 sec, 29.4 min
+		P(K) estimated by FV (E(T)=12.7): 0.000326%
+		True P(K): 0.000394%
+-- FAIRNESS --
+FV simulation:
+- time = 601585.5
+- #events = 1932628
+
+---> Execution time MC + FV: 1763.4 sec, 29.4 min
+
+	---> NEW BUFFER SIZE (BSA=16, BIC=3)
+******************!!!!!!! Simulation 2 of 2 !!!!!!*****************
+	K=40, nparticles=3200, nmeantimes=800000.0, buffer_size_activation=16, #burn-in absorption cycles=3
+
+		### Replication 1 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1313)...
+Total number of activation states: 136 (0.000270% <= p(S) <= 24.893%) (Nmin to expect at 1 case in state with smallest p: Nmin=370528)
+Range of particle indices to simulate with start state #7 out of 136: [0, 0] (n=1, n/N=0.0003125, p=0.000132, diff=1.4%, state=[12, 3, 0])
+Range of particle indices to simulate with start state #13 out of 136: [1, 1] (n=1, n/N=0.0003125, p=0.000054, diff=4.8%, state=[11, 2, 2])
+Range of particle indices to simulate with start state #22 out of 136: [2, 7] (n=6, n/N=0.001875, p=0.000869, diff=1.2%, state=[9, 6, 0])
+Range of particle indices to simulate with start state #23 out of 136: [8, 8] (n=1, n/N=0.0003125, p=0.000406, diff=-0.2%, state=[9, 5, 1])
+Range of particle indices to simulate with start state #29 out of 136: [9, 12] (n=4, n/N=0.00125, p=0.001630, diff=-0.2%, state=[8, 7, 0])
+Range of particle indices to simulate with start state #30 out of 136: [13, 15] (n=3, n/N=0.0009375, p=0.000760, diff=0.2%, state=[8, 6, 1])
+Range of particle indices to simulate with start state #31 out of 136: [16, 17] (n=2, n/N=0.000625, p=0.000355, diff=0.8%, state=[8, 5, 2])
+Range of particle indices to simulate with start state #32 out of 136: [18, 19] (n=2, n/N=0.000625, p=0.000166, diff=2.8%, state=[8, 4, 3])
+Range of particle indices to simulate with start state #33 out of 136: [20, 20] (n=1, n/N=0.0003125, p=0.000077, diff=3.0%, state=[8, 3, 4])
+Range of particle indices to simulate with start state #37 out of 136: [21, 32] (n=12, n/N=0.00375, p=0.003055, diff=0.2%, state=[7, 8, 0])
+Range of particle indices to simulate with start state #38 out of 136: [33, 38] (n=6, n/N=0.001875, p=0.001426, diff=0.3%, state=[7, 7, 1])
+Range of particle indices to simulate with start state #39 out of 136: [39, 39] (n=1, n/N=0.0003125, p=0.000665, diff=-0.5%, state=[7, 6, 2])
+Range of particle indices to simulate with start state #40 out of 136: [40, 41] (n=2, n/N=0.000625, p=0.000311, diff=1.0%, state=[7, 5, 3])
+Range of particle indices to simulate with start state #46 out of 136: [42, 59] (n=18, n/N=0.005625, p=0.005729, diff=-0.0%, state=[6, 9, 0])
+Range of particle indices to simulate with start state #47 out of 136: [60, 70] (n=11, n/N=0.0034375, p=0.002673, diff=0.3%, state=[6, 8, 1])
+Range of particle indices to simulate with start state #48 out of 136: [71, 72] (n=2, n/N=0.000625, p=0.001248, diff=-0.5%, state=[6, 7, 2])
+Range of particle indices to simulate with start state #49 out of 136: [73, 73] (n=1, n/N=0.0003125, p=0.000582, diff=-0.5%, state=[6, 6, 3])
+Range of particle indices to simulate with start state #51 out of 136: [74, 74] (n=1, n/N=0.0003125, p=0.000127, diff=1.5%, state=[6, 4, 5])
+Range of particle indices to simulate with start state #56 out of 136: [75, 102] (n=28, n/N=0.00875, p=0.010742, diff=-0.2%, state=[5, 10, 0])
+Range of particle indices to simulate with start state #57 out of 136: [103, 120] (n=18, n/N=0.005625, p=0.005013, diff=0.1%, state=[5, 9, 1])
+Range of particle indices to simulate with start state #58 out of 136: [121, 124] (n=4, n/N=0.00125, p=0.002339, diff=-0.5%, state=[5, 8, 2])
+Range of particle indices to simulate with start state #59 out of 136: [125, 126] (n=2, n/N=0.000625, p=0.001092, diff=-0.4%, state=[5, 7, 3])
+Range of particle indices to simulate with start state #60 out of 136: [127, 129] (n=3, n/N=0.0009375, p=0.000509, diff=0.8%, state=[5, 6, 4])
+Range of particle indices to simulate with start state #61 out of 136: [130, 130] (n=1, n/N=0.0003125, p=0.000238, diff=0.3%, state=[5, 5, 5])
+Range of particle indices to simulate with start state #67 out of 136: [131, 187] (n=57, n/N=0.0178125, p=0.020141, diff=-0.1%, state=[4, 11, 0])
+Range of particle indices to simulate with start state #68 out of 136: [188, 218] (n=31, n/N=0.0096875, p=0.009399, diff=0.0%, state=[4, 10, 1])
+Range of particle indices to simulate with start state #69 out of 136: [219, 232] (n=14, n/N=0.004375, p=0.004386, diff=-0.0%, state=[4, 9, 2])
+Range of particle indices to simulate with start state #70 out of 136: [233, 237] (n=5, n/N=0.0015625, p=0.002047, diff=-0.2%, state=[4, 8, 3])
+Range of particle indices to simulate with start state #71 out of 136: [238, 243] (n=6, n/N=0.001875, p=0.000955, diff=1.0%, state=[4, 7, 4])
+Range of particle indices to simulate with start state #72 out of 136: [244, 247] (n=4, n/N=0.00125, p=0.000446, diff=1.8%, state=[4, 6, 5])
+Range of particle indices to simulate with start state #79 out of 136: [248, 377] (n=130, n/N=0.040625, p=0.037764, diff=0.1%, state=[3, 12, 0])
+Range of particle indices to simulate with start state #80 out of 136: [378, 436] (n=59, n/N=0.0184375, p=0.017623, diff=0.0%, state=[3, 11, 1])
+Range of particle indices to simulate with start state #81 out of 136: [437, 456] (n=20, n/N=0.00625, p=0.008224, diff=-0.2%, state=[3, 10, 2])
+Range of particle indices to simulate with start state #82 out of 136: [457, 467] (n=11, n/N=0.0034375, p=0.003838, diff=-0.1%, state=[3, 9, 3])
+Range of particle indices to simulate with start state #83 out of 136: [468, 473] (n=6, n/N=0.001875, p=0.001791, diff=0.0%, state=[3, 8, 4])
+Range of particle indices to simulate with start state #84 out of 136: [474, 478] (n=5, n/N=0.0015625, p=0.000836, diff=0.9%, state=[3, 7, 5])
+Range of particle indices to simulate with start state #85 out of 136: [479, 481] (n=3, n/N=0.0009375, p=0.000390, diff=1.4%, state=[3, 6, 6])
+Range of particle indices to simulate with start state #92 out of 136: [482, 677] (n=196, n/N=0.06125, p=0.070807, diff=-0.1%, state=[2, 13, 0])
+Range of particle indices to simulate with start state #93 out of 136: [678, 781] (n=104, n/N=0.0325, p=0.033043, diff=-0.0%, state=[2, 12, 1])
+Range of particle indices to simulate with start state #94 out of 136: [782, 821] (n=40, n/N=0.0125, p=0.015420, diff=-0.2%, state=[2, 11, 2])
+Range of particle indices to simulate with start state #95 out of 136: [822, 850] (n=29, n/N=0.0090625, p=0.007196, diff=0.3%, state=[2, 10, 3])
+Range of particle indices to simulate with start state #96 out of 136: [851, 861] (n=11, n/N=0.0034375, p=0.003358, diff=0.0%, state=[2, 9, 4])
+Range of particle indices to simulate with start state #97 out of 136: [862, 865] (n=4, n/N=0.00125, p=0.001567, diff=-0.2%, state=[2, 8, 5])
+Range of particle indices to simulate with start state #98 out of 136: [866, 868] (n=3, n/N=0.0009375, p=0.000731, diff=0.3%, state=[2, 7, 6])
+Range of particle indices to simulate with start state #99 out of 136: [869, 870] (n=2, n/N=0.000625, p=0.000341, diff=0.8%, state=[2, 6, 7])
+Range of particle indices to simulate with start state #106 out of 136: [871, 1336] (n=466, n/N=0.145625, p=0.132763, diff=0.1%, state=[1, 14, 0])
+Range of particle indices to simulate with start state #107 out of 136: [1337, 1551] (n=215, n/N=0.0671875, p=0.061956, diff=0.1%, state=[1, 13, 1])
+Range of particle indices to simulate with start state #108 out of 136: [1552, 1638] (n=87, n/N=0.0271875, p=0.028913, diff=-0.1%, state=[1, 12, 2])
+Range of particle indices to simulate with start state #109 out of 136: [1639, 1678] (n=40, n/N=0.0125, p=0.013493, diff=-0.1%, state=[1, 11, 3])
+Range of particle indices to simulate with start state #110 out of 136: [1679, 1696] (n=18, n/N=0.005625, p=0.006297, diff=-0.1%, state=[1, 10, 4])
+Range of particle indices to simulate with start state #111 out of 136: [1697, 1699] (n=3, n/N=0.0009375, p=0.002938, diff=-0.7%, state=[1, 9, 5])
+Range of particle indices to simulate with start state #112 out of 136: [1700, 1704] (n=5, n/N=0.0015625, p=0.001371, diff=0.1%, state=[1, 8, 6])
+Range of particle indices to simulate with start state #113 out of 136: [1705, 1708] (n=4, n/N=0.00125, p=0.000640, diff=1.0%, state=[1, 7, 7])
+Range of particle indices to simulate with start state #114 out of 136: [1709, 1709] (n=1, n/N=0.0003125, p=0.000299, diff=0.0%, state=[1, 6, 8])
+Range of particle indices to simulate with start state #116 out of 136: [1710, 1710] (n=1, n/N=0.0003125, p=0.000065, diff=3.8%, state=[1, 4, 10])
+Range of particle indices to simulate with start state #121 out of 136: [1711, 2497] (n=787, n/N=0.2459375, p=0.248930, diff=-0.0%, state=[0, 15, 0])
+Range of particle indices to simulate with start state #122 out of 136: [2498, 2864] (n=367, n/N=0.1146875, p=0.116167, diff=-0.0%, state=[0, 14, 1])
+Range of particle indices to simulate with start state #123 out of 136: [2865, 3044] (n=180, n/N=0.05625, p=0.054211, diff=0.0%, state=[0, 13, 2])
+Range of particle indices to simulate with start state #124 out of 136: [3045, 3122] (n=78, n/N=0.024375, p=0.025299, diff=-0.0%, state=[0, 12, 3])
+Range of particle indices to simulate with start state #125 out of 136: [3123, 3164] (n=42, n/N=0.013125, p=0.011806, diff=0.1%, state=[0, 11, 4])
+Range of particle indices to simulate with start state #126 out of 136: [3165, 3179] (n=15, n/N=0.0046875, p=0.005509, diff=-0.1%, state=[0, 10, 5])
+Range of particle indices to simulate with start state #127 out of 136: [3180, 3188] (n=9, n/N=0.0028125, p=0.002571, diff=0.1%, state=[0, 9, 6])
+Range of particle indices to simulate with start state #128 out of 136: [3189, 3192] (n=4, n/N=0.00125, p=0.001200, diff=0.0%, state=[0, 8, 7])
+Range of particle indices to simulate with start state #129 out of 136: [3193, 3197] (n=5, n/N=0.0015625, p=0.000560, diff=1.8%, state=[0, 7, 8])
+Range of particle indices to simulate with start state #130 out of 136: [3198, 3198] (n=1, n/N=0.0003125, p=0.000261, diff=0.2%, state=[0, 6, 9])
+Range of particle indices to simulate with start state #131 out of 136: [3199, 3199] (n=1, n/N=0.0003125, p=0.000122, diff=1.6%, state=[0, 5, 10])
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV procedure.
+--> max time FV process starts = 5751.2 (0.5% of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True.
+--> Simulation time reset from T=1142857.1 to T=147.3.
+Generating trajectories for each particle until END OF SIMULATION (T=147.3)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> Number of observations for P(T>t) estimation from FV simulation: 3200 (N=3200)
+execution time: 5316.9 sec, 88.6 min
+		P(K) estimated by FV (E(T)=125.8): 0.000376%
+		True P(K): 0.000394%
+-- FAIRNESS --
+FV simulation:
+- time = 2112901.0
+- #events = 6468248
+
+---> Execution time MC + FV: 5318.0 sec, 88.6 min
+
+		### Replication 2 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1323)...
+Total number of activation states: 136 (0.000270% <= p(S) <= 24.893%) (Nmin to expect at 1 case in state with smallest p: Nmin=370528)
+Range of particle indices to simulate with start state #7 out of 136: [0, 0] (n=1, n/N=0.0003125, p=0.000132, diff=1.4%, state=[12, 3, 0])
+Range of particle indices to simulate with start state #12 out of 136: [1, 1] (n=1, n/N=0.0003125, p=0.000115, diff=1.7%, state=[11, 3, 1])
+Range of particle indices to simulate with start state #13 out of 136: [2, 2] (n=1, n/N=0.0003125, p=0.000054, diff=4.8%, state=[11, 2, 2])
+Range of particle indices to simulate with start state #16 out of 136: [3, 6] (n=4, n/N=0.00125, p=0.000464, diff=1.7%, state=[10, 5, 0])
+Range of particle indices to simulate with start state #18 out of 136: [7, 7] (n=1, n/N=0.0003125, p=0.000101, diff=2.1%, state=[10, 3, 2])
+Range of particle indices to simulate with start state #22 out of 136: [8, 11] (n=4, n/N=0.00125, p=0.000869, diff=0.4%, state=[9, 6, 0])
+Range of particle indices to simulate with start state #23 out of 136: [12, 15] (n=4, n/N=0.00125, p=0.000406, diff=2.1%, state=[9, 5, 1])
+Range of particle indices to simulate with start state #24 out of 136: [16, 16] (n=1, n/N=0.0003125, p=0.000189, diff=0.7%, state=[9, 4, 2])
+Range of particle indices to simulate with start state #29 out of 136: [17, 22] (n=6, n/N=0.001875, p=0.001630, diff=0.2%, state=[8, 7, 0])
+Range of particle indices to simulate with start state #30 out of 136: [23, 23] (n=1, n/N=0.0003125, p=0.000760, diff=-0.6%, state=[8, 6, 1])
+Range of particle indices to simulate with start state #31 out of 136: [24, 25] (n=2, n/N=0.000625, p=0.000355, diff=0.8%, state=[8, 5, 2])
+Range of particle indices to simulate with start state #32 out of 136: [26, 26] (n=1, n/N=0.0003125, p=0.000166, diff=0.9%, state=[8, 4, 3])
+Range of particle indices to simulate with start state #37 out of 136: [27, 34] (n=8, n/N=0.0025, p=0.003055, diff=-0.2%, state=[7, 8, 0])
+Range of particle indices to simulate with start state #38 out of 136: [35, 39] (n=5, n/N=0.0015625, p=0.001426, diff=0.1%, state=[7, 7, 1])
+Range of particle indices to simulate with start state #39 out of 136: [40, 40] (n=1, n/N=0.0003125, p=0.000665, diff=-0.5%, state=[7, 6, 2])
+Range of particle indices to simulate with start state #40 out of 136: [41, 42] (n=2, n/N=0.000625, p=0.000311, diff=1.0%, state=[7, 5, 3])
+Range of particle indices to simulate with start state #43 out of 136: [43, 43] (n=1, n/N=0.0003125, p=0.000032, diff=8.9%, state=[7, 2, 6])
+Range of particle indices to simulate with start state #46 out of 136: [44, 67] (n=24, n/N=0.0075, p=0.005729, diff=0.3%, state=[6, 9, 0])
+Range of particle indices to simulate with start state #47 out of 136: [68, 76] (n=9, n/N=0.0028125, p=0.002673, diff=0.1%, state=[6, 8, 1])
+Range of particle indices to simulate with start state #48 out of 136: [77, 81] (n=5, n/N=0.0015625, p=0.001248, diff=0.3%, state=[6, 7, 2])
+Range of particle indices to simulate with start state #49 out of 136: [82, 83] (n=2, n/N=0.000625, p=0.000582, diff=0.1%, state=[6, 6, 3])
+Range of particle indices to simulate with start state #50 out of 136: [84, 86] (n=3, n/N=0.0009375, p=0.000272, diff=2.5%, state=[6, 5, 4])
+Range of particle indices to simulate with start state #53 out of 136: [87, 87] (n=1, n/N=0.0003125, p=0.000028, diff=10.3%, state=[6, 2, 7])
+Range of particle indices to simulate with start state #56 out of 136: [88, 121] (n=34, n/N=0.010625, p=0.010742, diff=-0.0%, state=[5, 10, 0])
+Range of particle indices to simulate with start state #57 out of 136: [122, 138] (n=17, n/N=0.0053125, p=0.005013, diff=0.1%, state=[5, 9, 1])
+Range of particle indices to simulate with start state #58 out of 136: [139, 144] (n=6, n/N=0.001875, p=0.002339, diff=-0.2%, state=[5, 8, 2])
+Range of particle indices to simulate with start state #59 out of 136: [145, 145] (n=1, n/N=0.0003125, p=0.001092, diff=-0.7%, state=[5, 7, 3])
+Range of particle indices to simulate with start state #60 out of 136: [146, 147] (n=2, n/N=0.000625, p=0.000509, diff=0.2%, state=[5, 6, 4])
+Range of particle indices to simulate with start state #65 out of 136: [148, 148] (n=1, n/N=0.0003125, p=0.000011, diff=26.7%, state=[5, 1, 9])
+Range of particle indices to simulate with start state #67 out of 136: [149, 219] (n=71, n/N=0.0221875, p=0.020141, diff=0.1%, state=[4, 11, 0])
+Range of particle indices to simulate with start state #68 out of 136: [220, 247] (n=28, n/N=0.00875, p=0.009399, diff=-0.1%, state=[4, 10, 1])
+Range of particle indices to simulate with start state #69 out of 136: [248, 255] (n=8, n/N=0.0025, p=0.004386, diff=-0.4%, state=[4, 9, 2])
+Range of particle indices to simulate with start state #70 out of 136: [256, 260] (n=5, n/N=0.0015625, p=0.002047, diff=-0.2%, state=[4, 8, 3])
+Range of particle indices to simulate with start state #71 out of 136: [261, 261] (n=1, n/N=0.0003125, p=0.000955, diff=-0.7%, state=[4, 7, 4])
+Range of particle indices to simulate with start state #72 out of 136: [262, 263] (n=2, n/N=0.000625, p=0.000446, diff=0.4%, state=[4, 6, 5])
+Range of particle indices to simulate with start state #74 out of 136: [264, 264] (n=1, n/N=0.0003125, p=0.000097, diff=2.2%, state=[4, 4, 7])
+Range of particle indices to simulate with start state #79 out of 136: [265, 385] (n=121, n/N=0.0378125, p=0.037764, diff=0.0%, state=[3, 12, 0])
+Range of particle indices to simulate with start state #80 out of 136: [386, 440] (n=55, n/N=0.0171875, p=0.017623, diff=-0.0%, state=[3, 11, 1])
+Range of particle indices to simulate with start state #81 out of 136: [441, 467] (n=27, n/N=0.0084375, p=0.008224, diff=0.0%, state=[3, 10, 2])
+Range of particle indices to simulate with start state #82 out of 136: [468, 480] (n=13, n/N=0.0040625, p=0.003838, diff=0.1%, state=[3, 9, 3])
+Range of particle indices to simulate with start state #83 out of 136: [481, 482] (n=2, n/N=0.000625, p=0.001791, diff=-0.7%, state=[3, 8, 4])
+Range of particle indices to simulate with start state #84 out of 136: [483, 488] (n=6, n/N=0.001875, p=0.000836, diff=1.2%, state=[3, 7, 5])
+Range of particle indices to simulate with start state #85 out of 136: [489, 489] (n=1, n/N=0.0003125, p=0.000390, diff=-0.2%, state=[3, 6, 6])
+Range of particle indices to simulate with start state #86 out of 136: [490, 490] (n=1, n/N=0.0003125, p=0.000182, diff=0.7%, state=[3, 5, 7])
+Range of particle indices to simulate with start state #92 out of 136: [491, 728] (n=238, n/N=0.074375, p=0.070807, diff=0.1%, state=[2, 13, 0])
+Range of particle indices to simulate with start state #93 out of 136: [729, 843] (n=115, n/N=0.0359375, p=0.033043, diff=0.1%, state=[2, 12, 1])
+Range of particle indices to simulate with start state #94 out of 136: [844, 886] (n=43, n/N=0.0134375, p=0.015420, diff=-0.1%, state=[2, 11, 2])
+Range of particle indices to simulate with start state #95 out of 136: [887, 921] (n=35, n/N=0.0109375, p=0.007196, diff=0.5%, state=[2, 10, 3])
+Range of particle indices to simulate with start state #96 out of 136: [922, 933] (n=12, n/N=0.00375, p=0.003358, diff=0.1%, state=[2, 9, 4])
+Range of particle indices to simulate with start state #97 out of 136: [934, 944] (n=11, n/N=0.0034375, p=0.001567, diff=1.2%, state=[2, 8, 5])
+Range of particle indices to simulate with start state #98 out of 136: [945, 946] (n=2, n/N=0.000625, p=0.000731, diff=-0.1%, state=[2, 7, 6])
+Range of particle indices to simulate with start state #103 out of 136: [947, 947] (n=1, n/N=0.0003125, p=0.000016, diff=18.3%, state=[2, 2, 11])
+Range of particle indices to simulate with start state #106 out of 136: [948, 1370] (n=423, n/N=0.1321875, p=0.132763, diff=-0.0%, state=[1, 14, 0])
+Range of particle indices to simulate with start state #107 out of 136: [1371, 1563] (n=193, n/N=0.0603125, p=0.061956, diff=-0.0%, state=[1, 13, 1])
+Range of particle indices to simulate with start state #108 out of 136: [1564, 1643] (n=80, n/N=0.025, p=0.028913, diff=-0.1%, state=[1, 12, 2])
+Range of particle indices to simulate with start state #109 out of 136: [1644, 1691] (n=48, n/N=0.015, p=0.013493, diff=0.1%, state=[1, 11, 3])
+Range of particle indices to simulate with start state #110 out of 136: [1692, 1708] (n=17, n/N=0.0053125, p=0.006297, diff=-0.2%, state=[1, 10, 4])
+Range of particle indices to simulate with start state #111 out of 136: [1709, 1723] (n=15, n/N=0.0046875, p=0.002938, diff=0.6%, state=[1, 9, 5])
+Range of particle indices to simulate with start state #112 out of 136: [1724, 1726] (n=3, n/N=0.0009375, p=0.001371, diff=-0.3%, state=[1, 8, 6])
+Range of particle indices to simulate with start state #113 out of 136: [1727, 1729] (n=3, n/N=0.0009375, p=0.000640, diff=0.5%, state=[1, 7, 7])
+Range of particle indices to simulate with start state #115 out of 136: [1730, 1731] (n=2, n/N=0.000625, p=0.000139, diff=3.5%, state=[1, 5, 9])
+Range of particle indices to simulate with start state #118 out of 136: [1732, 1732] (n=1, n/N=0.0003125, p=0.000014, diff=21.1%, state=[1, 2, 12])
+Range of particle indices to simulate with start state #121 out of 136: [1733, 2500] (n=768, n/N=0.24, p=0.248930, diff=-0.0%, state=[0, 15, 0])
+Range of particle indices to simulate with start state #122 out of 136: [2501, 2860] (n=360, n/N=0.1125, p=0.116167, diff=-0.0%, state=[0, 14, 1])
+Range of particle indices to simulate with start state #123 out of 136: [2861, 3040] (n=180, n/N=0.05625, p=0.054211, diff=0.0%, state=[0, 13, 2])
+Range of particle indices to simulate with start state #124 out of 136: [3041, 3130] (n=90, n/N=0.028125, p=0.025299, diff=0.1%, state=[0, 12, 3])
+Range of particle indices to simulate with start state #125 out of 136: [3131, 3177] (n=47, n/N=0.0146875, p=0.011806, diff=0.2%, state=[0, 11, 4])
+Range of particle indices to simulate with start state #126 out of 136: [3178, 3185] (n=8, n/N=0.0025, p=0.005509, diff=-0.5%, state=[0, 10, 5])
+Range of particle indices to simulate with start state #127 out of 136: [3186, 3192] (n=7, n/N=0.0021875, p=0.002571, diff=-0.1%, state=[0, 9, 6])
+Range of particle indices to simulate with start state #128 out of 136: [3193, 3194] (n=2, n/N=0.000625, p=0.001200, diff=-0.5%, state=[0, 8, 7])
+Range of particle indices to simulate with start state #129 out of 136: [3195, 3196] (n=2, n/N=0.000625, p=0.000560, diff=0.1%, state=[0, 7, 8])
+Range of particle indices to simulate with start state #130 out of 136: [3197, 3199] (n=3, n/N=0.0009375, p=0.000261, diff=2.6%, state=[0, 6, 9])
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV procedure.
+--> max time FV process starts = 6346.5 (0.6% of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True.
+--> Simulation time reset from T=1142857.1 to T=236.1.
+Generating trajectories for each particle until END OF SIMULATION (T=236.1)...
