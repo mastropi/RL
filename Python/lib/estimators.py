@@ -12,10 +12,12 @@ import copy     # Used to generate different instances of the queue under analys
 import bisect
 
 import numpy as np
-from numpy import printoptions
 import pandas as pd
 from matplotlib import pyplot as plt, cm    # cm is for colormaps (e.g. cm.get_cmap())
 from timeit import default_timer as timer
+
+DEFAULT_NUMPY_PRECISION = np.get_printoptions().get('precision')
+DEFAULT_NUMPY_SUPPRESS = np.get_printoptions().get('suppress')
 
 if __name__ == "__main__":
     # Needed to run tests (see end of program)
@@ -1163,9 +1165,10 @@ class EstimatorQueueBlockingFlemingViot:
         if False:
             print("\n******** Info PARTICLES at completion of simulation STARTUP:")
             for P in range(self.N):
-                with printoptions(precision=3, suppress=True):
-                    print("Particle {}:".format(P))
-                    print(np.c_[np.array(self.info_particles[P]['t']), np.array(self.info_particles[P]['E']), np.array(self.info_particles[P]['S'])])
+                np.set_printoptions(precision=3, suppress=True)
+                print("Particle {}:".format(P))
+                print(np.c_[np.array(self.info_particles[P]['t']), np.array(self.info_particles[P]['E']), np.array(self.info_particles[P]['S'])])
+                np.set_printoptions(precision=DEFAULT_NUMPY_PRECISION, suppress=DEFAULT_NUMPY_SUPPRESS)
 
         if event_type_to_stop == EventType.ACTIVATION:
             nparticles_fv_ready = np.sum(self.is_fv_ready)
@@ -1254,8 +1257,8 @@ class EstimatorQueueBlockingFlemingViot:
         # and then assigns each new job to a server based on the assignment policy,
         # we need to ACTIVATE (i.e. uncomment) the two lines in _apply_next_event()
         # that are enclosed by the labels "DM-2021/05/10-START"-"DM-2021/05/10-END".
-        #self._generate_birth_times_from_equivalent_rates(P)
-        self._generate_birth_times(P)
+        self._generate_birth_times_from_equivalent_rates(P)
+        #self._generate_birth_times(P)
 
     def _generate_death_times(self, P):
         """
@@ -1570,8 +1573,8 @@ class EstimatorQueueBlockingFlemingViot:
             if DEBUG_TIME_GENERATION:
                 print("\n_apply_next_event: P={}, server={}: BIRTH - Job started at time t={:.3f}".format(P, server, relative_time_of_event))
             # DM-2021/05/10-START: Activate the following lines when assigning job classes to server using the assignment policy 
-            self.times_in_server_queues[P][server].pop(0)
-            self.jobclasses_in_server_queues[P][server].pop(0)
+            #self.times_in_server_queues[P][server].pop(0)
+            #self.jobclasses_in_server_queues[P][server].pop(0)
             # DM-2021/05/10-END
             self.times_next_birth_events[P][server] = np.nan
         elif type_of_event == Event.DEATH:
@@ -1864,11 +1867,12 @@ class EstimatorQueueBlockingFlemingViot:
                 assert self.dict_info_absorption_times['t'] == sorted(self.dict_info_absorption_times['t']), \
                     "The absorption times are sorted: {}".format(self.dict_info_absorption_times['t'])
             if False:
-                with printoptions(precision=3, suppress=True):
-                    print("\n******** REST OF SIMULATION STARTS (#absorption times left: {}, MAXTIME={}, MAX #EVENTS={}) **********".format(len(self.dict_info_absorption_times['t']), self.maxtime, self.getMaxNumberOfEvents()))
-                    print("Absorption times and particle numbers (from which the first element is selected):")
-                    print(self.dict_info_absorption_times['t'])
-                    print(self.dict_info_absorption_times['P'])
+                np.set_printoptions(precision=3, suppress=True)
+                print("\n******** REST OF SIMULATION STARTS (#absorption times left: {}, MAXTIME={}, MAX #EVENTS={}) **********".format(len(self.dict_info_absorption_times['t']), self.maxtime, self.getMaxNumberOfEvents()))
+                print("Absorption times and particle numbers (from which the first element is selected):")
+                print(self.dict_info_absorption_times['t'])
+                print(self.dict_info_absorption_times['P'])
+                np.set_printoptions(precision=DEFAULT_NUMPY_PRECISION, suppress=DEFAULT_NUMPY_SUPPRESS)
             # Remove the first element of the dictionary which corresponds to the particle
             # with the smallest absorption time
             # The fact that the selected particle is the one with the smallest absorption time
@@ -2013,11 +2017,12 @@ class EstimatorQueueBlockingFlemingViot:
         self.times_latest_arrived_jobs[P] = (t + self.particles[P].getOrigin()) * np.ones((len(self.job_rates),), dtype=float)
 
         if self.LOG: #True:
-            with printoptions(precision=3, suppress=True):
-                print("\nInfo PARTICLES for particle ID={}, after particle P={} reactivated to particle Q={} (ID q={}) at time t={}:".format(q, P, Q, q, t))
-                print("\ttimes: {}".format(self.info_particles[q]['t']))
-                print("\tevents: {}".format(self.info_particles[q]['E']))
-                #print(np.c_[np.array(self.info_particles[q]['t']), np.array(self.info_particles[q]['E'])])
+            np.set_printoptions(precision=3, suppress=True)
+            print("\nInfo PARTICLES for particle ID={}, after particle P={} reactivated to particle Q={} (ID q={}) at time t={}:".format(q, P, Q, q, t))
+            print("\ttimes: {}".format(self.info_particles[q]['t']))
+            print("\tevents: {}".format(self.info_particles[q]['E']))
+            #print(np.c_[np.array(self.info_particles[q]['t']), np.array(self.info_particles[q]['E'])])
+            np.set_printoptions(precision=DEFAULT_NUMPY_PRECISION, suppress=DEFAULT_NUMPY_SUPPRESS)
 
         return position_Q, position_Q - self.particles[P].getServerSizes()
 
@@ -2388,12 +2393,13 @@ class EstimatorQueueBlockingFlemingViot:
                 self._update_absorption_distribution(absorption_state)
 
         if DEBUG_SPECIAL_EVENTS:
-            with printoptions(precision=3, suppress=True):
-                print("\n>>>> Particle P={}: absorption @t={:.3f}".format(P, time_of_absorption))
-                print(">>>> Previous absorption time: {:.3f}".format(self.times0[P]))
-                print(">>>> Time to absorption: {:.3f}".format(self.ktimes[P]))
-                print(">>>> Total Survival times for ALL particles: {}".format(np.array(self.ktimes_sum)))
-                print(">>>> Total Survival units for ALL particles: {}".format(np.array(self.ktimes_n)))
+            np.set_printoptions(precision=3, suppress=True)
+            print("\n>>>> Particle P={}: absorption @t={:.3f}".format(P, time_of_absorption))
+            print(">>>> Previous absorption time: {:.3f}".format(self.times0[P]))
+            print(">>>> Time to absorption: {:.3f}".format(self.ktimes[P]))
+            print(">>>> Total Survival times for ALL particles: {}".format(np.array(self.ktimes_sum)))
+            print(">>>> Total Survival units for ALL particles: {}".format(np.array(self.ktimes_n)))
+            np.set_printoptions(precision=DEFAULT_NUMPY_PRECISION, suppress=DEFAULT_NUMPY_SUPPRESS)
 
         # Update the attribute that holds the latest time the particle was absorbed
         self.times0[P] = time_of_absorption
@@ -2423,10 +2429,11 @@ class EstimatorQueueBlockingFlemingViot:
         self.btimes_n[P] += 1
 
         if False:
-            with printoptions(precision=3, suppress=True):
-                print("\n>>>> Particle P={}: unblocking @t={:.3f}".format(P, time_of_unblocking))
-                print(">>>> Previous blocking times: {:.3f}".format(self.timesb[P]))
-                print(">>>> \tNew total blocking time (btimes_sum): {:.3f}".format(self.btimes_sum[P]))
+            np.set_printoptions(precision=3, suppress=True)
+            print("\n>>>> Particle P={}: unblocking @t={:.3f}".format(P, time_of_unblocking))
+            print(">>>> Previous blocking times: {:.3f}".format(self.timesb[P]))
+            print(">>>> \tNew total blocking time (btimes_sum): {:.3f}".format(self.btimes_sum[P]))
+            np.set_printoptions(precision=DEFAULT_NUMPY_PRECISION, suppress=DEFAULT_NUMPY_SUPPRESS)
 
     def _update_activation_distribution(self, activation_state):
         "Updates the activation distribution based on the observed given activation state"
@@ -2899,9 +2906,10 @@ class EstimatorQueueBlockingFlemingViot:
             assert self.counts_blocked[0] == 0, "The first element of the counts_blocked list is 0 ({})".format(self.counts_blocked[0])
 
         if self.LOG:
-            with printoptions(precision=3, suppress=True):
-                print("Relative absorption times and counts:\n{}".format(np.c_[np.array(self.sk), np.array(self.counts_alive)]))
-                print("Relative blocking times:\n{}".format(np.c_[np.array(self.sbu), np.array(self.counts_blocked)]))
+            np.set_printoptions(precision=3, suppress=True)
+            print("Relative absorption times and counts:\n{}".format(np.c_[np.array(self.sk), np.array(self.counts_alive)]))
+            print("Relative blocking times:\n{}".format(np.c_[np.array(self.sbu), np.array(self.counts_blocked)]))
+            np.set_printoptions(precision=DEFAULT_NUMPY_PRECISION, suppress=DEFAULT_NUMPY_SUPPRESS)
 
     def compute_counts_blocked_particles(self):
         "Computes the blocking time segments needed for the calculation of Phi(t) = P(BLOCK / T>t, s=1)"        
@@ -2979,9 +2987,10 @@ class EstimatorQueueBlockingFlemingViot:
             assert self.counts_blocked[0] == 0, "The first element of the counts_blocked list is 0 ({})".format(self.counts_blocked[0])
 
         if self.LOG:
-            with printoptions(precision=3, suppress=True):
-                print("Relative absorption times and counts:\n{}".format(np.c_[np.array(self.sk), np.array(self.counts_alive)]))
-                print("Relative blocking times:\n{}".format(np.c_[np.array(self.sbu), np.array(self.counts_blocked)]))
+            np.set_printoptions(precision=3, suppress=True)
+            print("Relative absorption times and counts:\n{}".format(np.c_[np.array(self.sk), np.array(self.counts_alive)]))
+            print("Relative blocking times:\n{}".format(np.c_[np.array(self.sbu), np.array(self.counts_blocked)]))
+            np.set_printoptions(precision=DEFAULT_NUMPY_PRECISION, suppress=DEFAULT_NUMPY_SUPPRESS)
 
     def insert_relative_time_from_activation_to_absorption(self, t :float, activation_times :list, event_types :list):
         """
@@ -3343,9 +3352,10 @@ class EstimatorQueueBlockingFlemingViot:
             #        .format(self.counts_blocked)
 
         if False:
-            with printoptions(precision=3, suppress=True):
-                print("SURVIVAL: times and counts_alive: \n{}".format(np.c_[self.sk, self.counts_alive, [c/self.counts_alive[0] for c in self.counts_alive] ]))
-                print("BLOCKING: times and counts_blocked:\n{}".format(np.c_[self.sbu, self.counts_blocked, [c/self.N for c in self.counts_blocked]]))
+            np.set_printoptions(precision=3, suppress=True)
+            print("SURVIVAL: times and counts_alive: \n{}".format(np.c_[self.sk, self.counts_alive, [c/self.counts_alive[0] for c in self.counts_alive] ]))
+            print("BLOCKING: times and counts_blocked:\n{}".format(np.c_[self.sbu, self.counts_blocked, [c/self.N for c in self.counts_blocked]]))
+            np.set_printoptions(precision=DEFAULT_NUMPY_PRECISION, suppress=DEFAULT_NUMPY_SUPPRESS)
 
         # Since we must compute this probability CONDITIONED to the event T > t,
         # we first need to merge the measurements of the block times and of the survival times
@@ -3785,10 +3795,11 @@ class EstimatorQueueBlockingFlemingViot:
             t = self.get_time_last_event(p)
             particles += [self.pat[idx] for idx in idx_activation_times_p]
             times_from_activation += [t - u for u in activation_times_p]
-            with printoptions(precision=3, suppress=True):
-                assert np.sum([t < u for u in activation_times_p]) == 0, \
-                        "All the activation times of particle {} ({}) are smaller than the time of the latest event ({:.3f})" \
-                        .format(p, np.array(activation_times_p), t)
+            np.set_printoptions(precision=3, suppress=True)
+            assert np.sum([t < u for u in activation_times_p]) == 0, \
+                "All the activation times of particle {} ({}) are smaller than the time of the latest event ({:.3f})" \
+                .format(p, np.array(activation_times_p), t)
+            np.set_printoptions(precision=DEFAULT_NUMPY_PRECISION, suppress=DEFAULT_NUMPY_SUPPRESS)
 
         order = self._compute_order(times_from_activation)
         return [particles[o] for o in order], [times_from_activation[o] for o in order]
@@ -5169,8 +5180,9 @@ if __name__ == "__main__":
         df_proba_block_all_reps['y_mean'] = np.mean(df_proba_block_all_reps[colnames], axis=1)
         df_proba_block_all_reps['y_se'] = np.std(df_proba_block_all_reps[colnames], axis=1) / np.sqrt(rep)
         if False:
-            with printoptions(precision=3, suppress=True):
-                print(df_proba_block_all_reps)
+            np.set_printoptions(precision=3, suppress=True)
+            print(df_proba_block_all_reps)
+            np.set_printoptions(precision=DEFAULT_NUMPY_PRECISION, suppress=DEFAULT_NUMPY_SUPPRESS)
 
         plt.figure()
         plot_curve_with_bands(df_proba_block_all_reps['t'], df_proba_block_all_reps['y_mean'], 2*df_proba_block_all_reps['y_se'], col='r-', color='red',

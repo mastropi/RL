@@ -40,6 +40,8 @@ from Python.lib.utils.computing import compute_blocking_probability_birth_death_
 
 #import test_utils
 
+DEFAULT_NUMPY_PRECISION = np.get_printoptions().get('precision')
+DEFAULT_NUMPY_SUPPRESS = np.get_printoptions().get('suppress')
 
 class Test_QB_Particles(unittest.TestCase):
 
@@ -267,8 +269,9 @@ class Test_QB_Particles(unittest.TestCase):
             # The list storing the times when particles became active is sorted increasingly
             particles, activation_times = est.get_all_activation_times()
             if self.log:
-                with np.printoptions(precision=3):
-                    print("activation times: {}".format(np.array(activation_times)))
+                np.set_printoptions(precision=3)
+                print("activation times: {}".format(np.array(activation_times)))
+                np.set_printoptions(precision=DEFAULT_NUMPY_PRECISION)
             assert sorted(activation_times) == activation_times, \
                     "The absolute times of activation are sorted: {}".format(np.array(activation_times))
             assert len(activation_times) >= N1, \
@@ -277,16 +280,18 @@ class Test_QB_Particles(unittest.TestCase):
 
             particles, absorption_times = est.get_all_absorption_times()
             if self.log:
-                with np.printoptions(precision=3):
-                    print("absorption times: {}".format(np.array(absorption_times)))
+                np.set_printoptions(precision=3)
+                print("absorption times: {}".format(np.array(absorption_times)))
+                np.set_printoptions(precision=DEFAULT_NUMPY_PRECISION)
             assert sorted(absorption_times) == absorption_times, \
                     "The (relative) absorption times are sorted: {}".format(np.array(absorption_times))            
 
             # The list storing the time segments where statistics are computed is sorted
             survival_time_segments = est.get_survival_time_segments()
             if self.log:
-                with np.printoptions(precision=3):
-                    print("time segments: {}".format(np.array(survival_time_segments)))
+                np.set_printoptions(precision=3)
+                print("time segments: {}".format(np.array(survival_time_segments)))
+                np.set_printoptions(precision=DEFAULT_NUMPY_PRECISION)
             assert sorted(survival_time_segments) == survival_time_segments, \
                     "The time segments are sorted: {}".format(np.array(survival_time_segments))
             assert survival_time_segments[0] == 0.0, \
@@ -334,8 +339,9 @@ class Test_QB_Particles(unittest.TestCase):
 
         survival_time_segments = est.get_survival_time_segments()
         if False:
-            with np.printoptions(precision=3, suppress=True):
-                print("Survival time segments: {}".format(np.array(survival_time_segments)))
+            np.set_printoptions(precision=3, suppress=True)
+            print("Survival time segments: {}".format(np.array(survival_time_segments)))
+            np.set_printoptions(precision=DEFAULT_NUMPY_PRECISION, suppress=DEFAULT_NUMPY_SUPPRESS)
         assert sorted(survival_time_segments) == survival_time_segments, \
                 "The survival time segments are sorted: {}".format(np.array(survival_time_segments))
         assert survival_time_segments[0] == 0.0, \
@@ -352,8 +358,9 @@ class Test_QB_Particles(unittest.TestCase):
 
         blocking_time_segments = est.get_blocking_time_segments()
         if False:
-            with np.printoptions(precision=3, suppress=True):
-                print("Blocking time segments: {}".format(np.array(blocking_time_segments)))
+            np.set_printoptions(precision=3, suppress=True)
+            print("Blocking time segments: {}".format(np.array(blocking_time_segments)))
+            np.set_printoptions(precision=DEFAULT_NUMPY_PRECISION, suppress=DEFAULT_NUMPY_SUPPRESS)
         assert sorted(blocking_time_segments) == blocking_time_segments, \
                 "The blocking time segments are sorted: {}".format(np.array(blocking_time_segments))
         assert blocking_time_segments[0] == 0.0, \
@@ -375,12 +382,12 @@ class Test_QB_Particles(unittest.TestCase):
         print("Range of latest event times in all {} particles in the system: [{:.3f}, {:.3f}]" \
               .format(est.N, np.min(times_last_event_by_particle), np.max(times_last_event_by_particle)))
         print("Latest particle positions: {}".format(est.positions))
-        with np.printoptions(precision=3, suppress=True):
-            print("Latest event times: {}".format(np.array(times_last_event_by_particle)))
-            particles, elapsed_times_since_activation = est.get_all_elapsed_times()
-            print("Latest elapsed times since activation: {}".format(np.array(elapsed_times_since_activation)))
-            print("Particles associated to these times  : {}".format(particles))
-
+        np.set_printoptions(precision=3, suppress=True)
+        print("Latest event times: {}".format(np.array(times_last_event_by_particle)))
+        particles, elapsed_times_since_activation = est.get_all_elapsed_times()
+        print("Latest elapsed times since activation: {}".format(np.array(elapsed_times_since_activation)))
+        print("Particles associated to these times  : {}".format(particles))
+        np.set_printoptions(precision=DEFAULT_NUMPY_PRECISION, suppress=DEFAULT_NUMPY_SUPPRESS)
 
         #print("\nESTIMATIONS *** METHOD 1 ***:")
         df_proba_survival_and_blocking_conditional_BF = est.estimate_proba_survival_and_blocking_conditional()
@@ -396,9 +403,10 @@ class Test_QB_Particles(unittest.TestCase):
         ##### IMPORTANT
 
         df_proba_survival_and_blocking_conditional = est.estimate_proba_survival_and_blocking_conditional()
-        with np.printoptions(precision=3, suppress=True):
-            print("Estimated probabilities by time:")
-            print(df_proba_survival_and_blocking_conditional)
+        np.set_printoptions(precision=3, suppress=True)
+        print("Estimated probabilities by time:")
+        print(df_proba_survival_and_blocking_conditional)
+        np.set_printoptions(precision=DEFAULT_NUMPY_PRECISION, suppress=DEFAULT_NUMPY_SUPPRESS)
 
         if False and est.finalize_type != FinalizeType.REMOVE_CENSORED:
             # Only compare probabilities when censored times are NOT removed
