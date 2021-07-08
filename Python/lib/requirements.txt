@@ -1,7 +1,8 @@
 # Python 3 standard library includes the packages listed here: https://docs.python.org/3/library/index.html
 
 # Required packages listed in alphabetical order
-numpy==1.18.3
+gym==0.12.1		# For TD(lambda) only
+numpy==1.18.3	# printoptions() is available since v1.15 (Ref: https://numpy.org/doc/1.14/reference/generated/numpy.printoptions.html gives Error 404)
 pandas==0.22.0
 
 # Suggested packages listed in alphabetical order

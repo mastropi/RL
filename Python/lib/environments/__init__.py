@@ -11,7 +11,6 @@ import warnings
 import numpy as np
 
 from gym.envs.toy_text import discrete
-from sympy.physics.mechanics.tests.test_system import states
 
 #__all__ = [ 'EnvironmentDiscrete' ]
 
