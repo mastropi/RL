@@ -5409,17 +5409,17 @@ if __name__ == "__main__":
         # Assertions when assigning arriving jobs directly to servers
         # (i.e. function self._generate_birth_times_from_equivalent_rates() is used
         # instead of function self._generate_birth_times())
-        #assert "{} (n={})".format(lambdas, nlambdas) == "[0.4931664  0.73173961 0.40976685] (n=[ 70 104  58])"
-        #assert "{} (n={})".format(mus, nmus) == "[0.80334525 0.90503059 1.20342909] (n=[63 84 53])"
-        #assert "{}".format([l/m for l, m in zip(lambdas, mus)]) == "[0.6138909721035272, 0.8085247225279031, 0.3404993700888088]"
-        #assert "{:.3f} (n={})".format(ET, nET) == "3.224 (n=43)"
+        assert "{} (n={})".format(lambdas, nlambdas) == "[0.40663652 0.71991334 0.35093256] (n=[463 821 401])"
+        assert "{} (n={})".format(mus, nmus) == "[0.97108061 0.93512831 1.09950909] (n=[401 721 356])"
+        assert "{}".format([l/m for l, m in zip(lambdas, mus)]) == "[0.41874640960555065, 0.7698551496249696, 0.3191720357461096]"
+        assert "{:.3f} (n={})".format(ET, nET) == "3.294 (n=345)"
         # Assertions when assigning arriving jobs using the assignment policy
         # (i.e. function self._generate_birth_times()
         # instead of function self._generate_birth_times_from_equivalent_rates())
-        assert "{} (n={})".format(lambdas, nlambdas) == "[0.37886116 0.72236367 0.33797772] (n=[432 818 386])"
-        assert "{} (n={})".format(mus, nmus) == "[0.97778312 0.97794841 1.00719833] (n=[384 730 345])"
-        assert "{}".format([l/m for l, m in zip(lambdas, mus)]) == "[0.38746952873057483, 0.7386521181943286, 0.3355622277630897]"
-        assert "{:.3f} (n={})".format(ET, nET) == "3.615 (n=314)"
+        #assert "{} (n={})".format(lambdas, nlambdas) == "[0.37886116 0.72236367 0.33797772] (n=[432 818 386])"
+        #assert "{} (n={})".format(mus, nmus) == "[0.97778312 0.97794841 1.00719833] (n=[384 730 345])"
+        #assert "{}".format([l/m for l, m in zip(lambdas, mus)]) == "[0.38746952873057483, 0.7386521181943286, 0.3355622277630897]"
+        #assert "{:.3f} (n={})".format(ET, nET) == "3.615 (n=314)"
 
         # b) Fleming-Viot
         print("\nRunning Fleming-Viot simulation on {} particles, K={}, T={}x...".format(nparticles, K, nmeantimes))
@@ -5472,16 +5472,15 @@ if __name__ == "__main__":
         # Assertions when assigning arriving jobs directly to servers
         # (i.e. function self._generate_birth_times_from_equivalent_rates() is used
         # instead of function self._generate_birth_times())
-        #assert "{:.6f}%".format(proba_blocking_mc*100) == "11.288100%" #11.487418%") #10.713005%")
-        #assert "{:.6f}%".format(proba_blocking_fv*100) == "7.182663%" #7.200364%") #"7.321676%")
-        #assert est_mc.nevents == 432
-        #assert est_fv.nevents == 495
+        assert "{:.6f}% (#events={})".format(proba_blocking_mc*100, est_mc.nevents) == "11.983398% (#events=3163)"
+        assert "{:.6f}% (#events={})".format(proba_blocking_fv*100, est_fv.nevents) == "3.359375% (#events=1037)"
+        assert "{:.1f} (n={})".format(expected_survival_time, n_expected_survival_time) == "3.3 (n=20)"
         # Assertions when assigning arriving jobs using the assignment policy
         # (i.e. function self._generate_birth_times()
         # instead of function self._generate_birth_times_from_equivalent_rates())
-        assert "{:.6f}% (#events={})".format(proba_blocking_mc*100, est_mc.nevents) == "10.716641% (#events=3095)"
-        assert "{:.6f}% (#events={})".format(proba_blocking_fv*100, est_fv.nevents) == "12.549741% (#events=1653)"
-        assert "{:.1f} (n={})".format(expected_survival_time, n_expected_survival_time) == "5.0 (n=20)"
+        #assert "{:.6f}% (#events={})".format(proba_blocking_mc*100, est_mc.nevents) == "10.716641% (#events=3095)"
+        #assert "{:.6f}% (#events={})".format(proba_blocking_fv*100, est_fv.nevents) == "12.549741% (#events=1653)"
+        #assert "{:.1f} (n={})".format(expected_survival_time, n_expected_survival_time) == "5.0 (n=20)"
 
     #--- Test #4.1: One server with acceptance policy
     if 4.1 in tests2run:
