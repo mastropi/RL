@@ -799,7 +799,7 @@ class Test_QB_Particles(unittest.TestCase):
                     df_new_estimates = pd.DataFrame.from_items([
                                                                 ('rhos', [len(self.rhos) == 1 and self.rhos or len(self.rhos) > 1 and format(self.rhos)]),
                                                                 ('K', [K]),
-                                                                ('nparticles', [nparticles]),
+                                                                ('N', [nparticles]),
                                                                 ('nmeantimes', [nmeantimes]),
                                                                 ('buffer_size_activation', [buffer_size_activation]),
                                                                 ('buffer_size_activation_value', [buffer_size_activation_value]),
@@ -873,8 +873,8 @@ class Test_QB_Particles(unittest.TestCase):
 
         # Aggregate results
         df_proba_blocking_estimates_agg = aggregation_bygroups(df_proba_blocking_estimates,
-                                                               ["K", "buffer_size_activation", "nparticles"],
-                                                               ["E(T)", "Pr(MC)", "Pr(FV)", "Pr(K)"])
+                                                               ['K', 'buffer_size_activation', 'N'],
+                                                               ['E(T)', 'Pr(MC)', 'Pr(FV)', 'Pr(K)'])
 
         df_proba_blocking_estimates.to_csv(resultsfile)
         print("Results of simulation saved to {}".format(os.path.abspath(resultsfile)))
@@ -1035,7 +1035,7 @@ class Test_QB_Particles(unittest.TestCase):
         df = results_convergence
         # Grouping variables
         grp_buffer = 'buffer_size_activation'
-        grp_part = 'nparticles'
+        grp_part = 'N'
         grp_time = 'nmeantimes'
         grp_K = 'K'
         # The grouping variables should be EXACTLY THREE, which define:
@@ -1107,7 +1107,7 @@ class Test_QB_Particles(unittest.TestCase):
 
         # Define the analysis data frame and the name of the variables involved in the plots
         df = results_convergence
-        grp_part = 'nparticles'
+        grp_part = 'N'
         grp_time = 'nmeantimes'
         grp_K = 'K'
         y_mc = 'Pr(MC)'
@@ -1348,7 +1348,7 @@ def plot_estimates1(df_results, x, y, subset=None,
 
     subset: expression
         An expression to filter the rows to plot.
-        Ex: df_results["nparticles"]==400
+        Ex: df_results['nparticles']==400
 
     Return: pandas DataFrame
         DataFrame containing the observations in the input data frame used for plotting.
@@ -1431,7 +1431,7 @@ def plot_estimates(df_results, x, subset=None,
 
     subset: expression
         An expression to filter the rows to plot.
-        Ex: df_results["nparticles"]==400
+        Ex: df_results['nparticles']==400
 
     Return: pandas DataFrame
         DataFrame containing the observations in the input data frame used for plotting.
@@ -1516,7 +1516,7 @@ def plot_errors(df_results, x, subset=None, widths=0.1,
 
     subset: expression
         An expression to filter the rows to plot.
-        Ex: df_results["nparticles"]==400
+        Ex: df_results['nparticles']==400
 
     widths: float
         `widths` parameter of the pyplot.violinplot() function that defines the width of each violin.
