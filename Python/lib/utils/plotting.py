@@ -409,8 +409,9 @@ def plot(plotting_func,
         legend_objects, legend_texts = plotting_func(ax, df, x, y, dict_options_k)
         if yref is not None:
             line_ref = ax.hlines(df.iloc[0][yref] * dict_options['multipliers']['y'],
-                                 np.min(df[x] * dict_options['multipliers']['x']),
-                                 np.max(df[x] * dict_options['multipliers']['x']),
+                                 ax.get_xlim()[0], ax.get_xlim()[1],
+                                 #np.min(df[x] * dict_options['multipliers']['x']),
+                                 #np.max(df[x] * dict_options['multipliers']['x']),
                                  color='gray', linestyles='dashed')
             legend_objects += [line_ref]
 
@@ -606,8 +607,12 @@ def plot_violins(ax, df, x, y, dict_options):
     parse_dict_params(dict_options, dict_options_default)
     #------- Parse input parameters
 
+    fraction_violin_widths = 0.1
     x_values = np.unique(df[x])
-    violin_widths = (x_values[-1] - x_values[0]) / 10 * dict_options['multipliers']['x']
+    if len(x_values) > 1:
+        violin_widths = fraction_violin_widths * (x_values[-1] - x_values[0]) * dict_options['multipliers']['x']
+    else:
+        violin_widths = fraction_violin_widths * x_values[0] * dict_options['multipliers']['x']
     col = dict_options['properties']['color']
     violinplot(ax,  [df[ df[x]==xvalue ][y] * dict_options['multipliers']['y'] for xvalue in x_values],
                     positions=x_values * dict_options['multipliers']['x'],
