@@ -661,18 +661,11 @@ class Test_QB_Particles(unittest.TestCase):
                             burnin_cycles_absorption_values=[5],
                             seed=1717,
                             run_mc=True,
-                            dict_params_out=dict(),
                             dict_params_info={'plot': True, 'log': False}):
         #--- Parse input parameters
         assert len(nparticles_values) == len(K_values), "The number of values in the nparticles parameter is the same as in K_values."
         assert len(nmeantimes_values) == len(K_values), "The number of values in the nmeantimes parameter is the same as in K_values."
         assert len(burnin_cycles_absorption_values) == len(buffer_size_activation_values), "The number of values in the burnin_cycles_absorption_values parameter is the same as in buffer_size_activation_values."
-
-        resultsfile = dict_params_out.get('resultsfile', "_results.csv")
-        resultsfile_agg = dict_params_out.get('resultsfile_agg', "_results_agg.csv")
-        savefig = dict_params_out.get('savefig', False)
-        if savefig:
-            figfile = re.sub("\.[a-z]*$", ".png", resultsfile)
         #--- Parse input parameters
 
         # Upper bound for the number of simulations to run
@@ -835,7 +828,7 @@ class Test_QB_Particles(unittest.TestCase):
                     nobs = df_new_functions.shape[0]
                     df_new_functions = pd.concat([  pd.DataFrame({'K': [K]*nobs,
                                                                  'J': [buffer_size_activation_value]*nobs,
-                                                                 'rep': [rep]*nobs}),
+                                                                 'rep': [rep+1]*nobs}),
                                                     df_new_functions ],
                                                     axis=1)
                     # Plot the blue and red curves contributing to the integral used in the FV estimation
@@ -900,25 +893,6 @@ class Test_QB_Particles(unittest.TestCase):
         df_proba_blocking_estimates_agg = aggregation_bygroups(df_proba_blocking_estimates,
                                                                ['K', 'buffer_size_activation', 'N'],
                                                                ['E(T)', 'Pr(MC)', 'Pr(FV)', 'Pr(K)'])
-
-        df_proba_blocking_estimates.to_csv(resultsfile)
-        print("Results of simulation saved to {}".format(os.path.abspath(resultsfile)))
-
-        df_proba_blocking_estimates_agg.to_csv(resultsfile_agg)
-        print("Aggregated results of simulation saved to {}".format(os.path.abspath(resultsfile_agg)))
-
-        if dict_params_info['plot'] and run_mc:
-            for K in K_values:
-                # Estimates themselves
-                plot_estimates(df_proba_blocking_estimates, "buffer_size_activation_value", xlabel="Size of absorption set A as fraction of K", subset=df_proba_blocking_estimates["K"]==K)
-                plot_estimates(df_proba_blocking_estimates, "buffer_size_activation", xlabel="Size of absorption set A as fraction of K", subset=df_proba_blocking_estimates["K"]==K, showtitle=False)
-                if savefig:
-                    plt.gcf().subplots_adjust(left=0.2, bottom=0.2)
-                    plt.savefig(figfile)
-                # Errors
-                df_proba_blocking_estimates_with_errors = compute_errors(df_proba_blocking_estimates)
-                plot_errors(df_proba_blocking_estimates_with_errors, "buffer_size_activation_value", xlabel="J: size of absorption set", widths=0.5, subset=df_proba_blocking_estimates["K"]==K)
-                plot_errors(df_proba_blocking_estimates_with_errors, "buffer_size_activation", xlabel="J: size of absorption set", widths=0.05, subset=df_proba_blocking_estimates["K"]==K)
 
         return df_proba_blocking_estimates, df_proba_blocking_estimates_agg, \
                     df_proba_survival_and_blocking_conditional, \
@@ -1601,42 +1575,57 @@ def plot_errors(df_results, x, subset=None, widths=0.1,
 
     return df2plot
 
-def plot_results_fv_mc(df_results, nparticles="N", ncycles="#Cycles(MC)_mean",
+def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None,
                                    prob_fv="Pr(FV)", prob_mc="Pr(MC)", prob_true="Pr(K)",
+                                   subset=None,
                                    plot_mc=True,
                                    figfile=None):
     "Plots the estimated blocking probability by number of particles (FV) and average #Cycles (MC)"
-    
-    # Parse input parameters
+
+    #--- Parse input parameters
+    # What to plot
     if plot_mc:
-        x = [nparticles, ncycles]
-        y = [prob_fv, prob_mc]
+        if x2 is None:
+            x2 = x
+        xvars = [x, x2]
+        yvars = [prob_fv, prob_mc]
         figsize = (8,4)
         subplots = (1,2)
         colors = ["green", "red"]
     else:
-        x = nparticles
-        y = prob_fv
+        xvars = x
+        yvars = prob_fv
         figsize = (4,4)
         subplots = (1,1)
         colors = "green"
 
+    # Axis labels
+    if xlabel is None:
+        xlabel = x
+    if xlabel2 is None:
+        xlabel2 = x2
+
+    # Rows to plot
+    if subset is not None:
+        df_results = df_results[subset]
+    #--- Parse input parameters
+
     # 1) Average P(K) + error bars
     plotting.plot(plotting.plot_errorbars,
-                  df_results, x, y,
+                  df_results, xvars, yvars,
                   yref=prob_true, yref_legend="True value",
                   figsize=figsize, subplots=subplots,
                   dict_options={'multipliers': {'x': 1, 'y': 100, 'error': 2},
-                                'labels': {'y': "Blocking probability (%)"},
+                                'labels': {'x': xlabel, 'y': "Blocking probability (%)", 'x2': xlabel2},
                                 'properties': {'color': colors, 'color_center': colors}})
     
     # 2) Violin plots
     axes = plotting.plot(plotting.plot_violins,
-                         df_results, x, y,
+                         df_results, xvars, yvars,
                          yref=prob_true, yref_legend="True value",
                          figsize=figsize, subplots=subplots,
                          dict_options={'multipliers': {'x': 1, 'y': 100},
-                                       'labels': {'y': "Blocking probability (%)"},
+                                       'labels': {'x': xlabel, 'y': "Blocking probability (%)", 'x2': xlabel2},
                                        'properties': {'color': colors, 'color_center': colors}})
     
     if figfile is not None:
@@ -1658,6 +1647,7 @@ def createLogFileHandleAndResultsFileNames(path="../../RL-002-QueueBlocking", pr
     logfile = "{}/logs/{}_{}.log".format(path, prefix, dt_suffix)
     resultsfile = "{}/results/{}_{}_results.csv".format(path, prefix, dt_suffix)
     resultsfile_agg = "{}/results/{}_{}_results_agg.csv".format(path, prefix, dt_suffix)
+    proba_functions_file = "{}/results/{}_{}_proba_functions.csv".format(path, prefix, dt_suffix)
     figfile = re.sub("\.[a-z]*$", ".png", resultsfile)
 
     fh_log = open(logfile, "w")
@@ -1668,7 +1658,7 @@ def createLogFileHandleAndResultsFileNames(path="../../RL-002-QueueBlocking", pr
 
     print("Started at: {}".format(dt_start))
 
-    return dt_start, stdout_sys, fh_log, logfile, resultsfile, resultsfile_agg, figfile
+    return dt_start, stdout_sys, fh_log, logfile, resultsfile, resultsfile_agg, proba_functions_file, figfile
 
 def closeLogFile(fh_log, stdout_sys, dt_start):
     dt_end = datetime.today().strftime("%Y-%m-%d %H:%M:%S")
@@ -1683,35 +1673,82 @@ def closeLogFile(fh_log, stdout_sys, dt_start):
     sys.stdout = stdout_sys
     print("Ended at: {}".format(dt_end))
     print("Execution time: {:.1f} min, {:.1f} hours".format(time_elapsed / 60, time_elapsed / 3600))
+
+def save_dataframes(list_of_dataframes):
+    i = -1
+    for df2save in list_of_dataframes:
+        i += 1
+        df = df2save['df']
+        if not isinstance(df, pd.DataFrame):
+            print("Skipping variable {} in the list because it is not a data frame".format(i))
+        else:
+            filename = df2save['file']
+            if filename is not None:
+                df.to_csv(filename)
+                print("Data frame saved to {}".format(os.path.abspath(filename)))
 #------------------- Functions --------------------
 
 
-# DM-2020/12/23: To change which portion of the below code to run, change the IF condition
-# to `== "__main__"` or to `!= "__main__"` accordingly, taking into account that when running
-# this file as a script (F5) __name__ is equal to "__main__".
-if __name__ != "__main__":
-    run_unit_tests = True
-    if run_unit_tests:
+if __name__ == "__main__":
+    # Default execution arguments when no arguments are given
+    print("User arguments: {}".format(sys.argv))
+    if len(sys.argv) == 1:    # Only the execution file name is contained in sys.argv
+        sys.argv += [1]       # Number of servers in the system to simulate
+        sys.argv += ["N"]     # Either "N" for number of particles or "J" for buffer size"
+        sys.argv += [3]       # Number of replications
+        sys.argv += [[1]]     # Test numbers to run (only one can be given from user input though)
+    if len(sys.argv) == 5:    # Only the 4 required arguments are given by the user
+        sys.argv += [1]       # Number of methods to run: 1 (only FV), 2 (FV & MC)
+        sys.argv += ["save"] # Either "log" or "nolog"
+    print("Parsed user arguments: {}".format(sys.argv))
+    print("")
+
+    #-- Parse user arguments
+    nservers = int(sys.argv[1])
+    var_analysis = sys.argv[2]
+    replications = int(sys.argv[3])
+    tests2run = [int(v) for v in sys.argv[4]]
+    run_mc = int(sys.argv[5]) == 2
+    save_results = sys.argv[6] != "nosave"
+    print("Execution parameters:")
+    print("nservers={}".format(nservers))
+    print("var_analysis={}".format(var_analysis))
+    print("replications={}".format(replications))
+    print("tests2run={}".format(tests2run))
+    print("run_mc={}".format(run_mc))
+    print("save_results={}".format(save_results))
+
+    if var_analysis not in ["N", "J"]:
+        raise ValueError("Valid values for the second parameter are 'N' or 'J'. Given: {}".format(var_analysis))
+    #-- Parse user arguments
+
+    if save_results:
+        dt_start, stdout_sys, fh_log, logfile, resultsfile, resultsfile_agg, proba_functions_file, figfile = createLogFileHandleAndResultsFileNames(prefix="test_fv_implementation")
+    else:
+        fh_log = None; resultsfile = None; resultsfile_agg = None; proba_functions_file = None; figfile = None
+
+    if var_analysis == "N":
+        # DM-2020/08/24: Instead of using unittest.main(), use what comes below to test the FV system
+        # because there is a very weird error generated by the fact that queue.size inside
+        # the EstimatorQueueBlockingFlemingViot class is interpreted of being of class
+        # unittest.runner.TextTestResult (or similar)!! instead of simply returning the size
+        # attribute of the `queue` object!!!
         #suite = unittest.TestSuite()
         #suite.addTest(Test_QB_Particles("test_fv_implementation"))
         #runner = unittest.TextTestRunner()
         #runner.run(suite)
-
-        run_mc = True
-        #dt_start, stdout_sys, fh_log, logfile, resultsfile, resultsfile_agg, figfile = createLogFileHandleAndResultsFileNames(prefix="test_fv_implementation")
-        fh_log = None; resultsfile = None; resultsfile_agg = None; figfile = None
-
+        
         #******************* ACTUAL EXECUTION ***************
         #-- Single-server
-        results, results_agg, est_fv, est_mc = Test_QB_Particles.test_fv_implementation(nservers=1, K=5, buffer_size_activation=0.5, replications=2, run_mc=run_mc)
-
+        results, results_agg, est_fv, est_mc = Test_QB_Particles.test_fv_implementation(nservers=nservers, K=5, buffer_size_activation=0.5, replications=replications, run_mc=run_mc)
+    
         #results, results_agg, est_fv, est_mc = Test_QB_Particles.test_fv_implementation(nservers=1, K=20, buffer_size_activation=0.25)
         #results, results_agg, est_fv, est_mc = Test_QB_Particles.test_fv_implementation(nservers=1, K=20, buffer_size_activation=0.5)
         #results, results_agg, est_fv, est_mc = Test_QB_Particles.test_fv_implementation(nservers=1, K=20, buffer_size_activation=0.75)
         #results, results_agg, est_fv, est_mc = Test_QB_Particles.test_fv_implementation(nservers=1, K=20, buffer_size_activation=0.9)
-
+    
         #results, results_agg, est_fv, est_mc = Test_QB_Particles.test_fv_implementation(nservers=1, K=40, buffer_size_activation=0.5)
-
+    
         #-- Multi-server
         #results, results_agg, est_fv, est_mc = Test_QB_Particles.test_fv_implementation(nservers=3, K=5, buffer_size_activation=0.5, burnin_cycles_absorption=3, run_mc=False)
         #results, results_agg, est_fv, est_mc = Test_QB_Particles.test_fv_implementation(nservers=3, K=10, buffer_size_activation=0.5)
@@ -1726,7 +1763,7 @@ if __name__ != "__main__":
         #                                             nmeantimes=500, replications=5,
         #                                             run_mc=run_mc, plotFlag=True)
         #results, results_agg, est_fv, est_mc = Test_QB_Particles.test_fv_implementation(nservers=3, K=30, buffer_size_activation=0.5)
-
+    
         #results, results_agg, est_fv, est_mc = Test_QB_Particles.test_fv_implementation(nservers=3, K=40, buffer_size_activation=0.25)
         #results, results_agg, est_fv, est_mc = Test_QB_Particles.test_fv_implementation(nservers=3, K=40, buffer_size_activation=0.3, burnin_cycles_absorption=1)
         #results, results_agg, est_fv, est_mc = \
@@ -1736,187 +1773,133 @@ if __name__ != "__main__":
         #                                             run_mc=run_mc, plotFlag=True)
         #results, results_agg, est_fv, est_mc = Test_QB_Particles.test_fv_implementation(nservers=3, K=40, buffer_size_activation=0.7)
         #******************* ACTUAL EXECUTION ***************
-
+    
         # Save results
-        results.to_csv(resultsfile)
-        print("Results of simulation saved to {}".format(os.path.abspath(resultsfile)))
-        results_agg.to_csv(resultsfile_agg)
-        print("Aggregated results of simulation saved to {}".format(os.path.abspath(resultsfile_agg)))
-
+        save_dataframes([{'df': results, 'file': resultsfile},
+                         {'df': results_agg, 'file': resultsfile_agg}])
+    
         # Plot results
-        axes = plot_results_fv_mc(results, plot_mc=run_mc)
-
+        axes = plot_results_fv_mc(results, x="N", x2="#cycles(MC)_mean", xlabel="# particles", xlabel2="# Cycles", plot_mc=run_mc)
+    
         if fh_log is not None:
             closeLogFile(fh_log, stdout_sys, dt_start)
-    else:
-        # DM-2020/08/24: Instead of using unittest.main(), use the following to test the FV system
-        # because there is a very weird error generated by the fact that queue.size inside
-        # the EstimatorQueueBlockingFlemingViot class is interpreted of being of class
-        # unittest.runner.TextTestResult (or similar)!! instead of simply returning the size
-        # attribute of the `queue` object!!!
-        test = Test_QB_Particles(nservers=3)
-        
-        time_start = timer()
-        buffer_size_activation = 1
-        #buffer_size_activation = int(test.capacity/2)
-        finalize_type = FinalizeType.ABSORB_CENSORED
-        nparticles = 20
-        nmeantimes = 50
-        seed = 1717
-        plotFlag = True
-        log = False
-        est_mc,     proba_blocking_mc, \
-                    total_blocking_time, \
-                    total_survival_time, \
-                    expected_survival_time, \
-                    params_mc = test.run_simulation(
-                                            buffer_size_activation=buffer_size_activation,
-                                            mean_lifetime=None,
-                                            proba_survival_given_activation=None,
-                                            reactivate=False,
-                                            finalize_type=FinalizeType.REMOVE_CENSORED,
-                                            nparticles=1,
-                                            nmeantimes=nparticles*nmeantimes,
-                                            seed=seed,
-                                            plotFlag=plotFlag,
-                                            log=log)
-        est_fv,     proba_blocking_integral_fv, \
-                    proba_blocking_laplacian_fv, \
-                    integral_fv, \
-                    gamma_fv, \
-                    params_fv = test.run_simulation(
-                                            buffer_size_activation=buffer_size_activation,
-                                            mean_lifetime=expected_survival_time,
-                                            proba_survival_given_activation=None,
-                                            reactivate=True,
-                                            finalize_type=finalize_type,
-                                            nparticles=nparticles,
-                                            nmeantimes=nmeantimes,
-                                            seed=seed,
-                                            plotFlag=plotFlag,
-                                            log=log)
+    elif var_analysis == "J":
+        test = Test_QB_Particles(nservers=nservers)
     
-        print("\n**** Summary of estimation ****")
-        assert est_mc.maxtime == nparticles*est_fv.maxtime, "The simulation times of the MC and the FV process are comparable"
-        #blocking_time = est_mc.get_all_total_blocking_time()
-        #survival_time = est_mc.get_all_total_survival_time()
-        #rate_blocking_time_mc = blocking_time / survival_time
-        #print("Blocking time (MC --slow method): {:.3f}%".format(rate_blocking_time_mc*100))
-        print("P(K) by MC: {:.3f}%".format(proba_blocking_mc*100))
-        print("P(K) estimated by FV1: {:.6f}%".format(proba_blocking_integral_fv*100))
-        print("P(K) estimated by FV2: {:.6f}%".format(proba_blocking_laplacian_fv*100))
-        proba_blocking_true = compute_blocking_probability_birth_death_process(test.rhos, test.capacity)
-        if proba_blocking_true is not None:
-            print("True P(K): {:.6f}%".format(proba_blocking_true*100))
+        # Info for plotting...
+        x = "buffer_size_activation"; xlabel = "J as fraction of K"
+        if 1 in tests2run:
+            K_values = [5, 5]   #[10, 20, 30, 40]
+            results, results_agg, proba_functions, est_fv, est_mc = test.analyze_estimates(
+                                            replications=replications,
+                                            K_values=K_values,
+                                            nparticles_values=[20, 40], #[200, 400, 800, 1600],
+                                            nmeantimes_values=[5000, 5000], #[50, 50, 50, 50],
+                                            buffer_size_activation_values=[0.25, 0.5], #[1, 0.2, 0.4, 0.6, 0.8],
+                                            burnin_cycles_absorption_values=[5, 3],
+                                            seed=1313,
+                                            run_mc=run_mc)
+            save_dataframes([{'df': results, 'file': resultsfile},
+                             {'df': results_agg, 'file': resultsfile_agg},
+                             {'df': proba_functions, 'file': proba_functions_file}])
+            for K in K_values:
+                axes = plot_results_fv_mc(results, x, xlabel=xlabel, subset=results['K']==K, plot_mc=run_mc)
+        if 2 in tests2run:
+            K_values = [10, 20]
+            results, results_agg, proba_functions, est_fv, est_mc = test.analyze_estimates(
+                                            replications=replications,
+                                            K_values=K_values,
+                                            nparticles_values=[200, 400],
+                                            nmeantimes_values=[50, 50],
+                                            buffer_size_activation_values=[1, 0.2, 0.4, 0.6, 0.8],
+                                            burnin_cycles_absorption_values=[5, 5],
+                                            seed=1313,
+                                            run_mc=run_mc)
+            save_dataframes([{'df': results, 'file': resultsfile},
+                             {'df': results_agg, 'file': resultsfile_agg},
+                             {'df': proba_functions, 'file': proba_functions_file}])
+            for K in K_values:
+                axes = plot_results_fv_mc(results, x, xlabel=xlabel, subset=results['K']==K, plot_mc=run_mc)
+        if 3 in tests2run:
+            K_values = [30, 40]
+            results, results_agg, proba_functions, est_fv, est_mc = test.analyze_estimates(
+                                            replications=replications,
+                                            K_values=K_values,
+                                            nparticles_values=[800, 1600],
+                                            nmeantimes_values=[50, 50],
+                                            buffer_size_activation_values=[1, 0.2, 0.4, 0.5, 0.7],
+                                            burnin_cycles_absorption_values=[5, 5],
+                                            seed=1313,
+                                            run_mc=run_mc)
+            save_dataframes([{'df': results, 'file': resultsfile},
+                             {'df': results_agg, 'file': resultsfile_agg},
+                             {'df': proba_functions, 'file': proba_functions_file}])
+            for K in K_values:
+                axes = plot_results_fv_mc(results, x, xlabel=xlabel, subset=results['K']==K, plot_mc=run_mc)
+        if 4 in tests2run:
+            K_values = [10]
+            results, results_agg, proba_functions, est_fv, est_mc = test.analyze_estimates(
+                                            replications=replications,
+                                            K_values=K_values,
+                                            nparticles_values=[400],
+                                            nmeantimes_values=[50],
+                                            buffer_size_activation_values=[0.1, 0.25, 0.5],
+                                            burnin_cycles_absorption_values=[5],
+                                            seed=1313,
+                                            run_mc=run_mc)
+            save_dataframes([{'df': results, 'file': resultsfile},
+                             {'df': results_agg, 'file': resultsfile_agg},
+                             {'df': proba_functions, 'file': proba_functions_file}])
+            for K in K_values:
+                axes = plot_results_fv_mc(results, x, xlabel=xlabel, subset=results['K']==K, plot_mc=run_mc)
+        if 5 in tests2run:
+            K_values = [20]
+            results, results_agg, proba_functions, est_fv, est_mc = test.analyze_estimates(
+                                            replications=replications,
+                                            K_values=K_values,
+                                            nparticles_values=[3200],
+                                            nmeantimes_values=[50],
+                                            buffer_size_activation_values=[0.2, 0.4, 0.5, 0.6, 0.8],
+                                            burnin_cycles_absorption_values=[5],
+                                            seed=1313,
+                                            run_mc=run_mc)
+            save_dataframes([{'df': results, 'file': resultsfile},
+                             {'df': results_agg, 'file': resultsfile_agg},
+                             {'df': proba_functions, 'file': proba_functions_file}])
+            for K in K_values:
+                axes = plot_results_fv_mc(results, x, xlabel=xlabel, subset=results['K']==K, plot_mc=run_mc)
+        if 6 in tests2run:
+            K_values = [30]
+            results, results_agg, proba_functions, est_fv, est_mc = test.analyze_estimates(
+                                            replications=replications,
+                                            K_values=K_values,
+                                            nparticles_values=[800],
+                                            nmeantimes_values=[50],
+                                            buffer_size_activation_values=[0.1, 0.25, 0.5],
+                                            burnin_cycles_absorption_values=[5],
+                                            seed=1313,
+                                            run_mc=run_mc)
+            save_dataframes([{'df': results, 'file': resultsfile},
+                             {'df': results_agg, 'file': resultsfile_agg},
+                             {'df': proba_functions, 'file': proba_functions_file}])
+            for K in K_values:
+                axes = plot_results_fv_mc(results, x, xlabel=xlabel, subset=results['K']==K, plot_mc=run_mc)
+        if 7 in tests2run:
+            K_values = [40]
+            results, results_agg, proba_functions, est_fv, est_mc = test.analyze_estimates(
+                                            replications=replications,
+                                            K_values=K_values,
+                                            nparticles_values=[3200],
+                                            nmeantimes_values=[8E5],
+                                            buffer_size_activation_values=[0.2, 0.4, 0.5, 0.6],
+                                            burnin_cycles_absorption_values=[3, 3, 2, 1],
+                                            seed=1313,
+                                            run_mc=run_mc)
+            save_dataframes([{'df': results, 'file': resultsfile},
+                             {'df': results_agg, 'file': resultsfile_agg},
+                             {'df': proba_functions, 'file': proba_functions_file}])
+            for K in K_values:
+                axes = plot_results_fv_mc(results, x, xlabel=xlabel, subset=results['K']==K, plot_mc=run_mc)
     
-        time_end = timer()
-        print("Execution time: {:.1f} min".format((time_end - time_start) / 60))
-else:    # Lines to execute "by hand" (i.e. at the Python prompt)
-    test = Test_QB_Particles(nservers=1)
-    #test = Test_QB_Particles(nservers=3)
-
-    run_mc = False
-    #dt_start, stdout_sys, fh_log, logfile, resultsfile, resultsfile_agg, figfile = createLogFileHandleAndResultsFileNames(prefix="analyze_estimates")
-    fh_log = None; resultsfile = None; resultsfile_agg = None
-
-    # NOTES on the below calls to simulation execution:
-    # - Use larger N values to improve the estimation of Phi(t)
-    # - When larger N values are used smaller T values (simulation time) can be used
-    # because the larger particle N already guarantees a large simulation time for
-    # the 1-particle system that estimates P(T>t).
-    tests2run = [1]
-    if 1 in tests2run:
-        results, results_agg, proba_functions, est_fv, est_mc = test.analyze_estimates(
-                                        replications=3,
-                                        K_values=[5, 5], #[10, 20, 30, 40],
-                                        nparticles_values=[20, 40], #[200, 400, 800, 1600],
-                                        nmeantimes_values=[5000, 5000], #[50, 50, 50, 50],
-                                        buffer_size_activation_values=[0.25, 0.5], #[1, 0.2, 0.4, 0.6, 0.8],
-                                        burnin_cycles_absorption_values=[5, 3],
-                                        seed=1313,
-                                        run_mc=run_mc,
-                                        dict_params_out={'logfilehandle': fh_log,
-                                                         'resultsfile': resultsfile,
-                                                         'resultsfile_agg': resultsfile_agg})
-    if 2 in tests2run:
-        results, results_agg, proba_functions, est_fv, est_mc = test.analyze_estimates(
-                                        replications=12,
-                                        K_values=[10, 20],
-                                        nparticles_values=[200, 400],
-                                        nmeantimes_values=[50, 50],
-                                        buffer_size_activation_values=[1, 0.2, 0.4, 0.6, 0.8],
-                                        burnin_cycles_absorption_values=[5, 5],
-                                        seed=1313,
-                                        run_mc=run_mc,
-                                        dict_params_out={'logfilehandle': fh_log,
-                                                         'resultsfile': resultsfile,
-                                                         'resultsfile_agg': resultsfile_agg})
-    if 3 in tests2run:
-        results, results_agg, proba_functions, est_fv, est_mc = test.analyze_estimates(
-                                        replications=12,
-                                        K_values=[30, 40],
-                                        nparticles_values=[800, 1600],
-                                        nmeantimes_values=[50, 50],
-                                        buffer_size_activation_values=[1, 0.2, 0.4, 0.5, 0.7],
-                                        burnin_cycles_absorption_values=[5, 5],
-                                        seed=1313,
-                                        run_mc=run_mc,
-                                        dict_params_out={'logfilehandle': fh_log,
-                                                         'resultsfile': resultsfile,
-                                                         'resultsfile_agg': resultsfile_agg})
-    if 4 in tests2run:
-        results, results_agg, proba_functions, est_fv, est_mc = test.analyze_estimates(
-                                        replications=12,
-                                        K_values=[10],
-                                        nparticles_values=[400],
-                                        nmeantimes_values=[50],
-                                        buffer_size_activation_values=[0.1, 0.25, 0.5],
-                                        burnin_cycles_absorption_values=[5],
-                                        seed=1313,
-                                        run_mc=run_mc,
-                                        dict_params_out={'logfilehandle': fh_log,
-                                                         'resultsfile': resultsfile,
-                                                         'resultsfile_agg': resultsfile_agg})
-    if 5 in tests2run:
-        results, results_agg, proba_functions, est_fv, est_mc = test.analyze_estimates(
-                                        replications=8,
-                                        K_values=[20],
-                                        nparticles_values=[3200],
-                                        nmeantimes_values=[50],
-                                        buffer_size_activation_values=[0.2, 0.4, 0.5, 0.6, 0.8],
-                                        burnin_cycles_absorption_values=[5],
-                                        seed=1313,
-                                        run_mc=run_mc,
-                                        dict_params_out={'logfilehandle': fh_log,
-                                                         'resultsfile': resultsfile,
-                                                         'resultsfile_agg': resultsfile_agg,
-                                                         'savefig': True})
-    if 6 in tests2run:
-        results, results_agg, proba_functions, est_fv, est_mc = test.analyze_estimates(
-                                        replications=12,
-                                        K_values=[30],
-                                        nparticles_values=[800],
-                                        nmeantimes_values=[50],
-                                        buffer_size_activation_values=[0.1, 0.25, 0.5],
-                                        burnin_cycles_absorption_values=[5],
-                                        seed=1313,
-                                        run_mc=run_mc,
-                                        dict_params_out={'logfilehandle': fh_log,
-                                                         'resultsfile': resultsfile,
-                                                         'resultsfile_agg': resultsfile_agg})
-    if 7 in tests2run:
-        results, results_agg, proba_functions, est_fv, est_mc = test.analyze_estimates(
-                                        replications=8,
-                                        K_values=[40],
-                                        nparticles_values=[3200],
-                                        nmeantimes_values=[8E5],
-                                        buffer_size_activation_values=[0.2, 0.4, 0.5, 0.6],
-                                        burnin_cycles_absorption_values=[3, 3, 2, 1],
-                                        seed=1313,
-                                        run_mc=run_mc,
-                                        dict_params_out={'logfilehandle': fh_log,
-                                                         'resultsfile': resultsfile,
-                                                         'resultsfile_agg': resultsfile_agg})
-
-    if fh_log is not None:
-        closeLogFile(fh_log, stdout_sys, dt_start)
+        if fh_log is not None:
+            closeLogFile(fh_log, stdout_sys, dt_start)
