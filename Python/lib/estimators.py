@@ -3374,8 +3374,8 @@ class EstimatorQueueBlockingFlemingViot:
 
         self.proba_block_by_t = self.compute_probability_from_counts(counts_blocked)
         # NOTE: (2021/04) We are no longer computing the FV estimator based on Approximation 2 because it is too unstable.
-        self.gamma = None #self.compute_killing_rate()
-        self.blocking_time_estimate = None #self.compute_blocking_time_estimate()
+        self.gamma = self.compute_killing_rate()
+        self.blocking_time_estimate = self.compute_blocking_time_estimate()
             ## Note: blocking time estimate = Pr(K) * Expected survival time
             ## This is the Approximation 2 proposed by Matt where we use an estimate
             ## of phi(t,K), the probability of blocking given survival to time t, at

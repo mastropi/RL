@@ -650,7 +650,7 @@ class Test_QB_Particles(unittest.TestCase):
             df_results = df_results.astype({'#Cycles(MC)_mean': np.int})
         df_results = df_results.astype({'#Events(FV)_mean': np.int})
             
-        return df_results, df_results_agg_by_N, est_mc, est_fv, est_abs, est_surv
+        return df_results, df_results_agg_by_N, est_fv, est_mc
 
     def analyze_estimates(  self,
                             replications=5,
@@ -829,32 +829,25 @@ class Test_QB_Particles(unittest.TestCase):
                                                                 ('ratio_mc_fv_time', [dict_stats_mc.get('time') is None and np.nan or dict_stats_mc.get('time') / dict_stats_fv['time']]),
                                                                 ('ratio_mc_fv_events', [dict_stats_mc.get('nevents') is None and np.nan or dict_stats_mc.get('nevents') / dict_stats_fv['nevents']]),
                                                             ]) #, orient='columns')
-                    df_new_estimates.set_index( pd.Index([(case-1)*replications + rep+1]), inplace=True )
-                    if case == 1 and rep == 0:
-                        # First loop iteration
-                        # => Create the output data frame
-                        df_proba_blocking_estimates = df_new_estimates
-                    else:
-                        df_proba_blocking_estimates = pd.concat([df_proba_blocking_estimates,
-                                                                 df_new_estimates],
-                                                                 axis=0)
 
-                    df_proba_survival_and_blocking_conditional = est_fv.estimate_proba_survival_and_blocking_conditional()
-
-                    time_end_rep = timer()
-                    exec_time = time_end_rep - time_start_rep
-                    print("\n---> Execution time MC + FV: {:.1f} sec, {:.1f} min".format(exec_time, exec_time/60))
-
+                    # Survival probability and Phi(t) functions
+                    df_new_functions = est_fv.estimate_proba_survival_and_blocking_conditional()
+                    nobs = df_new_functions.shape[0]
+                    df_new_functions = pd.concat([  pd.DataFrame({'K': [K]*nobs,
+                                                                 'J': [buffer_size_activation_value]*nobs,
+                                                                 'rep': [rep]*nobs}),
+                                                    df_new_functions ],
+                                                    axis=1)
                     # Plot the blue and red curves contributing to the integral used in the FV estimation
                     if rep < 0: #<= 2:
-                        plot_curve_estimates(df_proba_survival_and_blocking_conditional,
+                        plot_curve_estimates(df_new_functions,
                                              dict_params={
                                                 'birth_rates': est_fv.queue.getBirthRates(),
                                                 'death_rates': est_fv.queue.getDeathRates(),
                                                 'K': est_fv.queue.getCapacity(),
                                                 'nparticles': dict_params_simul['nparticles'],
                                                 'nmeantimes': dict_params_simul['nmeantimes'],
-                                                'maxtime_mc': est_mc is not None and est_mc.maxtime or None,
+                                                'maxtime_mc': est_mc is not None and est_mc.maxtime or 0.0,
                                                 'maxtime_fv': est_fv.maxtime,
                                                 'buffer_size_activation': buffer_size_activation_value,
                                                 'mean_lifetime': expected_survival_time,
@@ -862,14 +855,38 @@ class Test_QB_Particles(unittest.TestCase):
                                                 'n_survival_time_observations': n_survival_time_observations,
                                                 'proba_blocking_fv': proba_blocking_fv,
                                                 'finalize_type': est_fv.getFinalizeType(),
-                                                'seed': seed
+                                                'seed': seed_rep
                                                 })
+
+                    # Append results to output data frames
+                    if case == 1 and rep == 0:
+                        # First loop iteration
+                        # => Create the output data frames
+                        df_proba_blocking_estimates = df_new_estimates
+                        df_proba_survival_and_blocking_conditional = df_new_functions
+                    else:
+                        # Update the output data frames with new rows
+                        df_proba_blocking_estimates = pd.concat([df_proba_blocking_estimates,
+                                                                 df_new_estimates],
+                                                                 axis=0)
+                        df_proba_survival_and_blocking_conditional = pd.concat([df_proba_survival_and_blocking_conditional,
+                                                                                df_new_functions],
+                                                                                axis=0)
+
+                    time_end_rep = timer()
+                    exec_time = time_end_rep - time_start_rep
+                    print("\n---> Execution time MC + FV: {:.1f} sec, {:.1f} min".format(exec_time, exec_time/60))
+
                 buffer_size_activation_value_prev = buffer_size_activation_value
 
             # Show the results obtained for the current K
             print("Simulation results for #servers={}, rhos={}, K={}, N={}, T={} ({}x), max #events={}" \
                   .format(self.nservers, self.rhos, K, nparticles, est_fv.maxtime, nmeantimes, est_fv.getMaxNumberOfEvents()))
             print(df_proba_blocking_estimates)
+
+        # Correctly define the row indices from 0 to the number of records in each data frame
+        df_proba_blocking_estimates.set_index( pd.Index(range(df_proba_blocking_estimates.shape[0])), inplace=True )
+        df_proba_survival_and_blocking_conditional.set_index( pd.Index(range(df_proba_survival_and_blocking_conditional.shape[0])), inplace=True )
 
         time_end = timer()
         time_elapsed = time_end - time_start
@@ -904,7 +921,8 @@ class Test_QB_Particles(unittest.TestCase):
                 plot_errors(df_proba_blocking_estimates_with_errors, "buffer_size_activation", xlabel="J: size of absorption set", widths=0.05, subset=df_proba_blocking_estimates["K"]==K)
 
         return df_proba_blocking_estimates, df_proba_blocking_estimates_agg, \
-                est_mc, est_fv, est_abs, est_surv
+                    df_proba_survival_and_blocking_conditional, \
+                        est_fv, est_mc
 
     @classmethod
     def plot_aggregated_convergence_results(cls, results_convergence):
@@ -1685,38 +1703,38 @@ if __name__ != "__main__":
 
         #******************* ACTUAL EXECUTION ***************
         #-- Single-server
-        results, results_agg, est_mc, est_fv, est_abs, est_surv = Test_QB_Particles.test_fv_implementation(nservers=1, K=5, buffer_size_activation=0.5, replications=2, figfile=figfile, run_mc=run_mc)
+        results, results_agg, est_fv, est_mc = Test_QB_Particles.test_fv_implementation(nservers=1, K=5, buffer_size_activation=0.5, replications=2, run_mc=run_mc)
 
-        #results, results_agg, est_mc, est_fv, est_abs, est_surv, ax_mc, ax_fv = Test_QB_Particles.test_fv_implementation(nservers=1, K=20, buffer_size_activation=0.25)
-        #results, results_agg, est_mc, est_fv, est_abs, est_surv, ax_mc, ax_fv = Test_QB_Particles.test_fv_implementation(nservers=1, K=20, buffer_size_activation=0.5, figfile=figfile)
-        #results, results_agg, est_mc, est_fv, est_abs, est_surv, ax_mc, ax_fv = Test_QB_Particles.test_fv_implementation(nservers=1, K=20, buffer_size_activation=0.75)
-        #results, results_agg, est_mc, est_fv, est_abs, est_surv, ax_mc, ax_fv = Test_QB_Particles.test_fv_implementation(nservers=1, K=20, buffer_size_activation=0.9)
+        #results, results_agg, est_fv, est_mc = Test_QB_Particles.test_fv_implementation(nservers=1, K=20, buffer_size_activation=0.25)
+        #results, results_agg, est_fv, est_mc = Test_QB_Particles.test_fv_implementation(nservers=1, K=20, buffer_size_activation=0.5)
+        #results, results_agg, est_fv, est_mc = Test_QB_Particles.test_fv_implementation(nservers=1, K=20, buffer_size_activation=0.75)
+        #results, results_agg, est_fv, est_mc = Test_QB_Particles.test_fv_implementation(nservers=1, K=20, buffer_size_activation=0.9)
 
-        #results, results_agg, est_mc, est_fv, est_abs, est_surv, ax_mc, ax_fv = Test_QB_Particles.test_fv_implementation(nservers=1, K=40, buffer_size_activation=0.5, figfile=figfile)
+        #results, results_agg, est_fv, est_mc = Test_QB_Particles.test_fv_implementation(nservers=1, K=40, buffer_size_activation=0.5)
 
         #-- Multi-server
-        #results, results_agg, est_mc, est_fv, est_abs, est_surv, ax_mc, ax_fv = Test_QB_Particles.test_fv_implementation(nservers=3, K=5, buffer_size_activation=0.5, burnin_cycles_absorption=3, run_mc=False)
-        #results, results_agg, est_mc, est_fv, est_abs, est_surv, ax_mc, ax_fv = Test_QB_Particles.test_fv_implementation(nservers=3, K=10, buffer_size_activation=0.5)
-        #results, results_agg, est_mc, est_fv, est_abs, est_surv, ax_mc, ax_fv = \
+        #results, results_agg, est_fv, est_mc = Test_QB_Particles.test_fv_implementation(nservers=3, K=5, buffer_size_activation=0.5, burnin_cycles_absorption=3, run_mc=False)
+        #results, results_agg, est_fv, est_mc = Test_QB_Particles.test_fv_implementation(nservers=3, K=10, buffer_size_activation=0.5)
+        #results, results_agg, est_fv, est_mc = \
         #    Test_QB_Particles.test_fv_implementation(nservers=3, K=20, buffer_size_activation=0.5, burnin_cycles_absorption=4,
         #                                             nparticles_min=800, nparticles_max=1600, nparticles_step_prop=1,
         #                                             nmeantimes=1400, replications=5,
         #                                             run_mc=run_mc, plotFlag=True)
-        #results, results_agg, est_mc, est_fv, est_abs, est_surv, ax_mc, ax_fv = \
+        #results, results_agg, est_fv, est_mc = \
         #    Test_QB_Particles.test_fv_implementation(nservers=3, K=20, buffer_size_activation=0.2, burnin_cycles_absorption=1,
         #                                             nparticles_min=400, nparticles_max=1200, nparticles_step_prop=1,
         #                                             nmeantimes=500, replications=5,
         #                                             run_mc=run_mc, plotFlag=True)
-        #results, results_agg, est_mc, est_fv, est_abs, est_surv, ax_mc, ax_fv = Test_QB_Particles.test_fv_implementation(nservers=3, K=30, buffer_size_activation=0.5)
+        #results, results_agg, est_fv, est_mc = Test_QB_Particles.test_fv_implementation(nservers=3, K=30, buffer_size_activation=0.5)
 
-        #results, results_agg, est_mc, est_fv, est_abs, est_surv, ax_mc, ax_fv = Test_QB_Particles.test_fv_implementation(nservers=3, K=40, buffer_size_activation=0.25)
-        #results, results_agg, est_mc, est_fv, est_abs, est_surv, ax_mc, ax_fv = Test_QB_Particles.test_fv_implementation(nservers=3, K=40, buffer_size_activation=0.3, burnin_cycles_absorption=1)
-        #results, results_agg, est_mc, est_fv, est_abs, est_surv, ax_mc, ax_fv = \
+        #results, results_agg, est_fv, est_mc = Test_QB_Particles.test_fv_implementation(nservers=3, K=40, buffer_size_activation=0.25)
+        #results, results_agg, est_fv, est_mc = Test_QB_Particles.test_fv_implementation(nservers=3, K=40, buffer_size_activation=0.3, burnin_cycles_absorption=1)
+        #results, results_agg, est_fv, est_mc = \
         #    Test_QB_Particles.test_fv_implementation(nservers=3, K=40, buffer_size_activation=0.5, burnin_cycles_absorption=2,
         #                                             nparticles_min=400, nparticles_max=1600, nparticles_step_prop=1,
         #                                             nmeantimes=100000, replications=5,
         #                                             run_mc=run_mc, plotFlag=True)
-        #results, results_agg, est_mc, est_fv, est_abs, est_surv, ax_mc, ax_fv = Test_QB_Particles.test_fv_implementation(nservers=3, K=40, buffer_size_activation=0.7)
+        #results, results_agg, est_fv, est_mc = Test_QB_Particles.test_fv_implementation(nservers=3, K=40, buffer_size_activation=0.7)
         #******************* ACTUAL EXECUTION ***************
 
         # Save results
@@ -1798,17 +1816,17 @@ else:    # Lines to execute "by hand" (i.e. at the Python prompt)
     #test = Test_QB_Particles(nservers=3)
 
     run_mc = False
-    dt_start, stdout_sys, fh_log, logfile, resultsfile, resultsfile_agg, figfile = createLogFileHandleAndResultsFileNames(prefix="analyze_estimates")
-    #fh_log = None; resultsfile = None; resultsfile_agg = None
+    #dt_start, stdout_sys, fh_log, logfile, resultsfile, resultsfile_agg, figfile = createLogFileHandleAndResultsFileNames(prefix="analyze_estimates")
+    fh_log = None; resultsfile = None; resultsfile_agg = None
 
     # NOTES on the below calls to simulation execution:
     # - Use larger N values to improve the estimation of Phi(t)
     # - When larger N values are used smaller T values (simulation time) can be used
     # because the larger particle N already guarantees a large simulation time for
     # the 1-particle system that estimates P(T>t).
-    tests2run = [7]
+    tests2run = [1]
     if 1 in tests2run:
-        results, results_agg, est_mc, est_fv, est_abs, est_surv = test.analyze_estimates(
+        results, results_agg, proba_functions, est_fv, est_mc = test.analyze_estimates(
                                         replications=3,
                                         K_values=[5, 5], #[10, 20, 30, 40],
                                         nparticles_values=[20, 40], #[200, 400, 800, 1600],
@@ -1821,7 +1839,7 @@ else:    # Lines to execute "by hand" (i.e. at the Python prompt)
                                                          'resultsfile': resultsfile,
                                                          'resultsfile_agg': resultsfile_agg})
     if 2 in tests2run:
-        results, results_agg, est_mc, est_fv, est_abs, est_surv = test.analyze_estimates(
+        results, results_agg, proba_functions, est_fv, est_mc = test.analyze_estimates(
                                         replications=12,
                                         K_values=[10, 20],
                                         nparticles_values=[200, 400],
@@ -1834,7 +1852,7 @@ else:    # Lines to execute "by hand" (i.e. at the Python prompt)
                                                          'resultsfile': resultsfile,
                                                          'resultsfile_agg': resultsfile_agg})
     if 3 in tests2run:
-        results, results_agg, est_mc, est_fv, est_abs, est_surv = test.analyze_estimates(
+        results, results_agg, proba_functions, est_fv, est_mc = test.analyze_estimates(
                                         replications=12,
                                         K_values=[30, 40],
                                         nparticles_values=[800, 1600],
@@ -1847,7 +1865,7 @@ else:    # Lines to execute "by hand" (i.e. at the Python prompt)
                                                          'resultsfile': resultsfile,
                                                          'resultsfile_agg': resultsfile_agg})
     if 4 in tests2run:
-        results, results_agg, est_mc, est_fv, est_abs, est_surv = test.analyze_estimates(
+        results, results_agg, proba_functions, est_fv, est_mc = test.analyze_estimates(
                                         replications=12,
                                         K_values=[10],
                                         nparticles_values=[400],
@@ -1860,7 +1878,7 @@ else:    # Lines to execute "by hand" (i.e. at the Python prompt)
                                                          'resultsfile': resultsfile,
                                                          'resultsfile_agg': resultsfile_agg})
     if 5 in tests2run:
-        results, results_agg, est_mc, est_fv, est_abs, est_surv = test.analyze_estimates(
+        results, results_agg, proba_functions, est_fv, est_mc = test.analyze_estimates(
                                         replications=8,
                                         K_values=[20],
                                         nparticles_values=[3200],
@@ -1874,7 +1892,7 @@ else:    # Lines to execute "by hand" (i.e. at the Python prompt)
                                                          'resultsfile_agg': resultsfile_agg,
                                                          'savefig': True})
     if 6 in tests2run:
-        results, results_agg, est_mc, est_fv, est_abs, est_surv = test.analyze_estimates(
+        results, results_agg, proba_functions, est_fv, est_mc = test.analyze_estimates(
                                         replications=12,
                                         K_values=[30],
                                         nparticles_values=[800],
@@ -1887,7 +1905,7 @@ else:    # Lines to execute "by hand" (i.e. at the Python prompt)
                                                          'resultsfile': resultsfile,
                                                          'resultsfile_agg': resultsfile_agg})
     if 7 in tests2run:
-        results, results_agg, est_mc, est_fv, est_abs, est_surv = test.analyze_estimates(
+        results, results_agg, proba_functions, est_fv, est_mc = test.analyze_estimates(
                                         replications=8,
                                         K_values=[40],
                                         nparticles_values=[3200],
