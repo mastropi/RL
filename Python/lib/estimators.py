@@ -25,7 +25,7 @@ if __name__ == "__main__":
     runpy.run_path('../../setup.py')
 
     from datetime import datetime
-    from Python.lib.environments.queues import EnvQueueSingleBufferWithJobClasses
+    from Python.lib.environments.queues_nogym import EnvQueueSingleBufferWithJobClasses
     import Python.lib.agents as agents
     from agents.policies.parameterized import PolQueueRandomizedLinearStep
     import Python.lib.queues as queues  # The keyword `queues` is used in test code
@@ -33,8 +33,10 @@ if __name__ == "__main__":
     from Python.lib.utils.basic import array_of_objects, find, find_last, find_last_value_in_list, insort, list_contains_either, merge_values_in_time
     from Python.lib.utils.computing import compute_blocking_probability_birth_death_process, stationary_distribution_birth_death_process, stationary_distribution_birth_death_process_at_capacity_unnormalized
 else:
-    from .environments.queues import EnvQueueSingleBufferWithJobClasses
-    from .agents.policies.parameterized import PolQueueRandomizedLinearStep
+    from .environments.queues_nogym import EnvQueueSingleBufferWithJobClasses
+    # DM-2021/07/16-START: Comment out when gym is not installed
+    #from .agents.policies.parameterized import PolQueueRandomizedLinearStep
+    # DM-2021/07/16-END
     from .queues import Event, GenericQueue
     from .utils.basic import array_of_objects, find, find_last, find_last_value_in_list, insort, list_contains_either, merge_values_in_time
     from .utils.computing import compute_blocking_probability_birth_death_process, stationary_distribution_birth_death_process, stationary_distribution_birth_death_process_at_capacity_unnormalized
