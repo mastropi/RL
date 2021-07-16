@@ -14,10 +14,15 @@ if __name__ == "__main__":
     import runpy
     runpy.run_path('../../../setup.py')
 
+<<<<<<< HEAD
     from Python.lib.environments import EnvironmentDiscrete
     from Python.lib.queues import GenericQueue, QueueMM
 else:
     from . import EnvironmentDiscrete
+=======
+    from Python.lib.queues import GenericQueue, QueueMM
+else:
+>>>>>>> 5a75d974f6b44bd307fd63270d986a2ed0fc9143
     from ..queues import GenericQueue, QueueMM
 
 class EnvQueueSingleBufferWithJobClasses:
