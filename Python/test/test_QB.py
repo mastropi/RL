@@ -20,7 +20,6 @@ from warnings import warn
 from timeit import default_timer as timer
 from datetime import datetime
 import unittest
-from unittest_data_provider import data_provider
 import matplotlib
 from matplotlib import pyplot as plt, cm, ticker as mtick
 from Python.lib.utils.basic import aggregation_bygroups
@@ -30,7 +29,7 @@ import Python.lib.utils.plotting as plotting
 import Python.lib.queues as queues
 import Python.lib.estimators as estimators
 from Python.lib.queues import Event
-from Python.lib.environments.queues import EnvQueueSingleBufferWithJobClasses
+from Python.lib.environments.queues_nogym import EnvQueueSingleBufferWithJobClasses
 from Python.lib.estimators import EventType, FinalizeType, FinalizeCondition, plot_curve_estimates
 from Python.lib.utils.computing import compute_blocking_probability_birth_death_process
 
@@ -707,10 +706,10 @@ class Test_QB_Particles(unittest.TestCase):
                     buffer_size_activation_value = max(1, int( round( buffer_size_activation * K ) ))
                 else:
                     buffer_size_activation_value = buffer_size_activation
-                    # Convert the buffer size activatoin into a proportion so that it appears
+                    # Convert the buffer size activation into a proportion so that it appears
                     # in the right place in the PLOT w.r.t. the other buffer_size_activation proportions
                     # (and not e.g. to the RIGHT of all other proportion values,
-                    # which makes interpretatoin of the plot more difficult)
+                    # which makes interpretation of the plot more difficult)
                     buffer_size_activation = buffer_size_activation_value / K
                 # Do not repeat the previous buffer size activation value (which may happen when the parameter is given as a proportion)
                 if buffer_size_activation_value == buffer_size_activation_value_prev:
@@ -1699,7 +1698,7 @@ if __name__ == "__main__":
         sys.argv += [[1]]     # Test numbers to run (only one can be given from user input though)
     if len(sys.argv) == 5:    # Only the 4 required arguments are given by the user
         sys.argv += [1]       # Number of methods to run: 1 (only FV), 2 (FV & MC)
-        sys.argv += ["save"] # Either "log" or "nolog"
+        sys.argv += ["save"]  # Either "nosave" or anything else for saving the results and log
     print("Parsed user arguments: {}".format(sys.argv))
     print("")
 
@@ -1720,10 +1719,14 @@ if __name__ == "__main__":
 
     if var_analysis not in ["N", "J"]:
         raise ValueError("Valid values for the second parameter are 'N' or 'J'. Given: {}".format(var_analysis))
+    elif var_analysis == "N":
+        resultsfile_prefix = "estimates_vs_N"
+    else:
+        resultsfile_prefix = "estimates_vs_J"
     #-- Parse user arguments
 
     if save_results:
-        dt_start, stdout_sys, fh_log, logfile, resultsfile, resultsfile_agg, proba_functions_file, figfile = createLogFileHandleAndResultsFileNames(prefix="test_fv_implementation")
+        dt_start, stdout_sys, fh_log, logfile, resultsfile, resultsfile_agg, proba_functions_file, figfile = createLogFileHandleAndResultsFileNames(prefix=resultsfile_prefix)
     else:
         fh_log = None; resultsfile = None; resultsfile_agg = None; proba_functions_file = None; figfile = None
 
@@ -1900,6 +1903,6 @@ if __name__ == "__main__":
                              {'df': proba_functions, 'file': proba_functions_file}])
             for K in K_values:
                 axes = plot_results_fv_mc(results, x, xlabel=xlabel, subset=results['K']==K, plot_mc=run_mc)
-    
+
         if fh_log is not None:
             closeLogFile(fh_log, stdout_sys, dt_start)
