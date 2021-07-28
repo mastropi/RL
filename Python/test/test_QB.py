@@ -29,7 +29,7 @@ import Python.lib.utils.plotting as plotting
 import Python.lib.queues as queues
 import Python.lib.estimators as estimators
 from Python.lib.queues import Event
-from Python.lib.environments.queues_nogym import EnvQueueSingleBufferWithJobClasses
+from Python.lib.environments.queues import EnvQueueSingleBufferWithJobClasses
 from Python.lib.estimators import EventType, FinalizeType, FinalizeCondition, plot_curve_estimates
 from Python.lib.utils.computing import compute_blocking_probability_birth_death_process
 
