@@ -1899,8 +1899,25 @@ if __name__ == "__main__":
                                             K_values=K_values,
                                             nparticles_values=[3200],
                                             nmeantimes_values=[8E6],
-+                                           buffer_size_activation_values=[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
-+                                           burnin_cycles_absorption_values=[4, 3, 3, 3, 2, 1, 1, 1, 1],
+                                            buffer_size_activation_values=[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
+                                            burnin_cycles_absorption_values=[4, 3, 3, 3, 2, 1, 1, 1, 1],
+                                            seed=1313,
+                                            run_mc=run_mc)
+            save_dataframes([{'df': results, 'file': resultsfile},
+                             {'df': results_agg, 'file': resultsfile_agg},
+                             {'df': proba_functions, 'file': proba_functions_file}])
+            for K in K_values:
+                axes = plot_results_fv_mc(results, x, xlabel=xlabel, subset=results['K']==K, plot_mc=run_mc)
+        if 8 in tests2run:
+            # Same as 7 but for small J values (to see if the variance of the estimator increases first and then decreases)
+            K_values = [40]
+            results, results_agg, proba_functions, est_fv, est_mc = test.analyze_estimates(
+                                            replications=replications,
+                                            K_values=K_values,
+                                            nparticles_values=[3200],
+                                            nmeantimes_values=[8E6],
+                                            buffer_size_activation_values=[1, 2, 3, 4, 5, 6, 7, 8],
+                                            burnin_cycles_absorption_values=[4, 4, 4, 4, 4, 4, 4, 4, 4],
                                             seed=1313,
                                             run_mc=run_mc)
             save_dataframes([{'df': results, 'file': resultsfile},
