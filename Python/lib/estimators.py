@@ -25,7 +25,7 @@ if __name__ == "__main__":
     runpy.run_path('../../setup.py')
 
     from datetime import datetime
-    from Python.lib.environments.queues_nogym import EnvQueueSingleBufferWithJobClasses
+    from Python.lib.environments.queues import EnvQueueSingleBufferWithJobClasses
     import Python.lib.agents as agents
     from agents.policies.parameterized import PolQueueRandomizedLinearStep
     import Python.lib.queues as queues  # The keyword `queues` is used in test code
@@ -33,7 +33,7 @@ if __name__ == "__main__":
     from Python.lib.utils.basic import array_of_objects, find, find_last, find_last_value_in_list, insort, list_contains_either, merge_values_in_time
     from Python.lib.utils.computing import compute_blocking_probability_birth_death_process, stationary_distribution_birth_death_process, stationary_distribution_birth_death_process_at_capacity_unnormalized
 else:
-    from .environments.queues_nogym import EnvQueueSingleBufferWithJobClasses
+    from .environments.queues import EnvQueueSingleBufferWithJobClasses
     # DM-2021/07/16-START: Comment out when gym is not installed
     #from .agents.policies.parameterized import PolQueueRandomizedLinearStep
     # DM-2021/07/16-END
@@ -1004,7 +1004,12 @@ class EstimatorQueueBlockingFlemingViot:
             assert np.sum(self.is_particle_active) == 0, "No particles are active at startup when reactivate=True" 
             self.generate_trajectories_at_startup(event_type_to_stop=EventType.ACTIVATION)
             if True: #self.LOG:
-                print("--> max time FV process starts = {:.1f} ({:.1f}% of max simulation time)".format(self.get_max_start_time_fv(), self.get_max_start_time_fv() / self.maxtime * 100))
+                min_start_time_fv = self.get_min_start_time_fv()
+                mean_start_time_fv = self.get_mean_start_time_fv()
+                max_start_time_fv = self.get_max_start_time_fv()
+                print("--> (min, mean, max) times at which FV process started = ({:.1f}, {:.1f}, {:.1f}) (({:.1f}%, {:.1f}%, {:.1f}%) of max simulation time)" \
+                      .format(min_start_time_fv, mean_start_time_fv, max_start_time_fv,
+                              min_start_time_fv / self.maxtime * 100, mean_start_time_fv / self.maxtime * 100, max_start_time_fv / self.maxtime * 100))
         if True: #self.LOG:
             print("simulate: Generating trajectories for each particle until first absorption...", \
                   "\n--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True.")
@@ -1016,10 +1021,10 @@ class EstimatorQueueBlockingFlemingViot:
             # => Set the simulation time to a little more than the largest observed survival time
             # as no contribution to the blocking probability will come from times larger than this value.
             # We set it to "a little more" than the largest observed time to avoid an error in the assertion
-            # that checks that all recorde simulation times are smaller than maxtime.
+            # that checks that all recorded simulation times are smaller than maxtime.
             maxtime_prev = self.maxtime
             self.set_simulation_time(1.1*self.get_max_observed_survival_time())
-            print("--> Simulation time reset from T={:.1f} to T={:.1f}.".format(maxtime_prev, self.maxtime))
+            print("--> Simulation time reset from T={:.1f} to T={:.1f} (1.1 * maximum observed survival time for P(T>t) estimation).".format(maxtime_prev, self.maxtime))
         time1 = timer()
         # Check trajectories
         if not stop_at_first_absorption and (self.plotFlag or DEBUG_TRAJECTORIES):
@@ -3700,6 +3705,12 @@ class EstimatorQueueBlockingFlemingViot:
         else:
             return np.sum( self.times_latest_known_state )
 
+    def get_min_start_time_fv(self):
+        return np.min(self.times_start_fv)
+
+    def get_mean_start_time_fv(self):
+        return np.mean(self.times_start_fv)
+
     def get_max_start_time_fv(self):
         return np.max(self.times_start_fv)
 
@@ -4164,6 +4175,18 @@ class EstimatorQueueBlockingFlemingViot:
         the information on the most recent event when the next event times are generated
         for the steady state of the simulation (i.e. NOT for self.iterations[P] = 0,
         which is also the case when the particle has just been reactivated).
+        
+        This function essentially checks that the time of the most recent event applied to particle P
+        coincides with the time stored in the times_next_events2 2D array (of size #servers x 2)
+        for P at the server in which the event took place.
+        The times_next_events2 array, although called `times_NEXT_events2`,
+        in the context when this assertion is called, actually contains the #servers*2 time values
+        (i.e. the birth and death values for each server) among which the time of the most recent
+        event has been chosen from in _get_next_event().
+        
+        So, this function asserts something about the PAST of the process, and it is called just BEFORE
+        generating the next event taking place at particle P (in the spirit of checking that so far
+        things were done correctly).  
         """
         _, server_last_updated, type_of_last_event, time_of_last_event = self.particles[P].getMostRecentEventInfo()
         if self.iterations[P] > 0 and \
@@ -4172,11 +4195,14 @@ class EstimatorQueueBlockingFlemingViot:
             # of the server that is going to be updated now (in which case the current value
             # of the next event time for the type of the most recent event is NaN --which justifies the IF condition above)
             assert np.abs(time_of_last_event + self.particles[P].getOrigin() - self.times_next_events2[P][server_last_updated][type_of_last_event.value]) < 0.1*self.EPSILON_TIME, \
-                "The time of the most recent event --realigned by the particle's time origin-- ({:.3f}) of type {} ".format(time_of_last_event + self.particles[P].getOrigin(), type_of_last_event) + \
-                "coincides with the time of the next {} currently stored in the times_next_events2 for particle {} on server {} ({:.3f})" \
+                "The time of the most recent event --i.e. the absolute after increasing the observed event time with the particle's time origin ({:.3f})-- ({:.3f}) of type {} " \
+                .format(self.particles[P].getOrigin(), time_of_last_event + self.particles[P].getOrigin(), type_of_last_event) + \
+                "coincides with the time of the next {} currently stored in the times_next_events2 " \
+                "(i.e. currently = PRIOR to generating the next event times by _generate_next_events() and updating its content) " \
+                "for particle {} on server {} ({:.3f})" \
                 .format(type_of_last_event, P, server_last_updated, self.times_next_events2[P][server_last_updated][type_of_last_event.value]) + \
-                "\nTimes of next events of both types for server {}: {}".format(server_last_updated, self.times_next_events2[P][server_last_updated]) + \
-                "\nTimes of next events in server {}'s queue: {}".format(server_last_updated, self.times_in_server_queues[P][server_last_updated])
+                "\nTimes of next events of both types for ALL servers {}: {}".format(self.times_next_events2[P]) + \
+                "\nTimes of next events in the queue of ALL servers: {}".format(self.times_in_server_queues[P])
                 ## NOTE: The 0.1 factor multiplying self.EPSILON_TIME is taken from the generate_epsilon_random_time()
                 ## method and after multiplying by self.EPSILON_TIME gives the smallest epsilon value that can be
                 ## returned by that method.
