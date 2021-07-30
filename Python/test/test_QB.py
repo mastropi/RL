@@ -761,7 +761,7 @@ class Test_QB_Particles(unittest.TestCase):
                     # Show estimations
                     if run_mc:
                         print("\t\tP(K) by MC: {:.6f}%".format(proba_blocking_mc*100))
-                    print("\t\tP(K) estimated by FV (E(T)={:.1f}): {:.6f}%".format(expected_survival_time, proba_blocking_fv*100))
+                    print("\t\tP(K) estimated by FV (integral={:g} (n={}), E(T)={:.1f} (n={})): {:.6f}%".format(integral, n_survival_curve_observations, expected_survival_time, n_survival_time_observations, proba_blocking_fv*100))
                     print("\t\tTrue P(K): {:.6f}%".format(proba_blocking_true*100))
 
                     # Analyze the fairness of the comparison of results based on simulation time number of observed events
@@ -775,8 +775,8 @@ class Test_QB_Particles(unittest.TestCase):
                     #      .format(dict_stats_fv['nevents'], dict_stats_fv['nevents_surv'], dict_stats_fv['nevents_surv_prop']*100,
                     #                                        dict_stats_fv['nevents_abs'], dict_stats_fv['nevents_abs_prop']*100,
                     #                                        dict_stats_fv['nevents_fv'], dict_stats_fv['nevents_fv_prop']*100))
-                    print("- time = {:.1f}".format(dict_stats_fv['time']))
-                    print("- #events = {}".format(dict_stats_fv['nevents']))
+                    print("- time = {:.1f} (avg = {:.1f} per particle)".format(dict_stats_fv['time'], dict_stats_fv['time'] / nparticles))
+                    print("- #events = {} (avg = {:.0f} per particle)".format(dict_stats_fv['nevents'], dict_stats_fv['nevents'] / nparticles))
                     if run_mc:
                         print("MC simulation:\n- time = {:.1f}\n- #events = {}".format(dict_stats_mc['time'], dict_stats_mc['nevents']))
                         print("Ratio MC / FV: time={:.1f}, nevents={:.1f}".format(dict_stats_mc['time'] / dict_stats_fv['time'], dict_stats_mc['nevents'] / dict_stats_fv['nevents']))
@@ -1558,7 +1558,7 @@ def plot_errors(df_results, x, subset=None, widths=0.1,
         # We create a violin plot for each set of not NaN errors (MC & FV), one set per x value
         plotting.violinplot(ax1,  [df2plot[ind & (df2plot[x]==x_value)][error_mc].dropna()*100 for x_value in x_values],
                                     positions=x_values, showmeans=True, showmedians=False, linewidth=2, widths=widths,
-                                    color_body="red", color_lines="red", color_means="red")
+                                    color_body="red", color_lines="red", color_means="red") 
         plotting.violinplot(ax2,  [df2plot[ind & (df2plot[x]==x_value)][error_fv].dropna()*100 for x_value in x_values],
                                     positions=x_values, showmeans=True, showmedians=False, linewidth=2, widths=widths,
                                     color_body="green", color_lines="green", color_means="green")
@@ -1579,7 +1579,12 @@ def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None,
                                    subset=None,
                                    plot_mc=True,
                                    figfile=None):
-    "Plots the estimated blocking probability by number of particles (FV) and average #Cycles (MC)"
+    """
+    Plots the estimated blocking probability by number of particles (FV) and average #Cycles (MC)
+
+    Return: List of AxesSubplot objects of matplotlib.axes._subplots
+    List of objects containing the axes of the error bar plot and of the violin plot.
+    """
 
     #--- Parse input parameters
     # What to plot
@@ -1610,7 +1615,7 @@ def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None,
     #--- Parse input parameters
 
     # 1) Average P(K) + error bars
-    plotting.plot(plotting.plot_errorbars,
+    axes_error = plotting.plot(plotting.plot_errorbars,
                   df_results, xvars, yvars,
                   yref=prob_true, yref_legend="True value",
                   figsize=figsize, subplots=subplots,
@@ -1619,7 +1624,7 @@ def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None,
                                 'properties': {'color': colors, 'color_center': colors}})
     
     # 2) Violin plots
-    axes = plotting.plot(plotting.plot_violins,
+    axes_violin = plotting.plot(plotting.plot_violins,
                          df_results, xvars, yvars,
                          yref=prob_true, yref_legend="True value",
                          figsize=figsize, subplots=subplots,
@@ -1631,7 +1636,7 @@ def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None,
         plt.gcf().subplots_adjust(left=0.15, top=0.75)
         plt.savefig(figfile)
 
-    return axes
+    return axes_error[0], axes_violin[0]
 
 def createLogFileHandleAndResultsFileNames(path="../../RL-002-QueueBlocking", prefix="run"):
     """
@@ -1893,9 +1898,26 @@ if __name__ == "__main__":
                                             replications=replications,
                                             K_values=K_values,
                                             nparticles_values=[3200],
-                                            nmeantimes_values=[8E5],
-                                            buffer_size_activation_values=[0.2, 0.4, 0.5, 0.6],
-                                            burnin_cycles_absorption_values=[3, 3, 2, 1],
+                                            nmeantimes_values=[8E6],
+                                            buffer_size_activation_values=[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
+                                            burnin_cycles_absorption_values=[4, 3, 3, 3, 2, 1, 1, 1, 1],
+                                            seed=1313,
+                                            run_mc=run_mc)
+            save_dataframes([{'df': results, 'file': resultsfile},
+                             {'df': results_agg, 'file': resultsfile_agg},
+                             {'df': proba_functions, 'file': proba_functions_file}])
+            for K in K_values:
+                axes = plot_results_fv_mc(results, x, xlabel=xlabel, subset=results['K']==K, plot_mc=run_mc)
+        if 8 in tests2run:
+            # Same as 7 but for small J values (to see if the variance of the estimator increases first and then decreases)
+            K_values = [40]
+            results, results_agg, proba_functions, est_fv, est_mc = test.analyze_estimates(
+                                            replications=replications,
+                                            K_values=K_values,
+                                            nparticles_values=[3200],
+                                            nmeantimes_values=[8E6],
+                                            buffer_size_activation_values=[1, 2, 3, 4, 5, 6, 7, 8],
+                                            burnin_cycles_absorption_values=[4, 4, 4, 4, 4, 4, 4, 4, 4],
                                             seed=1313,
                                             run_mc=run_mc)
             save_dataframes([{'df': results, 'file': resultsfile},
