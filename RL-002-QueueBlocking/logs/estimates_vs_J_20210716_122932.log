@@ -1,0 +1,391 @@
+Started at: 2021-07-16 12:29:32
+System: # servers = 3, rhos = [0.4, 0.75, 0.35]
+
+
+---> NEW K (Queue's capacity = 5)
+---> (nparticles=20, nmeantimes=[5000, 5000])
+Computing TRUE blocking probability... --> 0.0 sec
+Pr(K)=11.987462%
+
+	---> NEW BUFFER SIZE (BSA=1, BIC=5)
+******************!!!!!!! Simulation 1 of 4 !!!!!!*****************
+	K=5, nparticles=20, nmeantimes=5000, buffer_size_activation=1, #burn-in absorption cycles=5
+
+		### Replication 1 of 3 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1313)...
+Total number of activation states: 1 (100.000000% <= p(S) <= 100.000%) (Nmin to expect at 1 case in state with smallest p: Nmin=1)
+Range of particle indices to simulate with start state #1 out of 1: [0, 19] (n=20, n/N=1.0, p=1.000000, diff=0.0%, state=[0, 0, 0])
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV procedure.
+--> max time FV process starts = 61.4 (0.9% of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True.
+--> Simulation time reset from T=7142.9 to T=21.6.
+Generating trajectories for each particle until END OF SIMULATION (T=21.6)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> Number of observations for P(T>t) estimation from FV simulation: 20 (N=20)
+execution time: 1.0 sec, 0.0 min
+		P(K) estimated by FV (E(T)=4.7): 11.398024%
+		True P(K): 11.987462%
+-- FAIRNESS --
+FV simulation:
+- time = 1040.5
+- #events = 3025
+
+---> Execution time MC + FV: 1.0 sec, 0.0 min
+
+		### Replication 2 of 3 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1323)...
+Total number of activation states: 1 (100.000000% <= p(S) <= 100.000%) (Nmin to expect at 1 case in state with smallest p: Nmin=1)
+Range of particle indices to simulate with start state #1 out of 1: [0, 19] (n=20, n/N=1.0, p=1.000000, diff=0.0%, state=[0, 0, 0])
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV procedure.
+--> max time FV process starts = 74.0 (1.0% of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True.
+--> Simulation time reset from T=7142.9 to T=26.2.
+Generating trajectories for each particle until END OF SIMULATION (T=26.2)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> Number of observations for P(T>t) estimation from FV simulation: 20 (N=20)
+execution time: 1.0 sec, 0.0 min
+		P(K) estimated by FV (E(T)=7.0): 16.274389%
+		True P(K): 11.987462%
+-- FAIRNESS --
+FV simulation:
+- time = 967.3
+- #events = 2859
+
+---> Execution time MC + FV: 1.0 sec, 0.0 min
+
+		### Replication 3 of 3 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1333)...
+Total number of activation states: 1 (100.000000% <= p(S) <= 100.000%) (Nmin to expect at 1 case in state with smallest p: Nmin=1)
+Range of particle indices to simulate with start state #1 out of 1: [0, 19] (n=20, n/N=1.0, p=1.000000, diff=0.0%, state=[0, 0, 0])
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV procedure.
+--> max time FV process starts = 60.0 (0.8% of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True.
+--> Simulation time reset from T=7142.9 to T=14.3.
+Generating trajectories for each particle until END OF SIMULATION (T=14.3)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> Number of observations for P(T>t) estimation from FV simulation: 20 (N=20)
+execution time: 0.8 sec, 0.0 min
+		P(K) estimated by FV (E(T)=4.4): 9.931336%
+		True P(K): 11.987462%
+-- FAIRNESS --
+FV simulation:
+- time = 822.0
+- #events = 2482
+
+---> Execution time MC + FV: 0.9 sec, 0.0 min
+
+	---> NEW BUFFER SIZE (BSA=2, BIC=3)
+******************!!!!!!! Simulation 2 of 4 !!!!!!*****************
+	K=5, nparticles=20, nmeantimes=5000, buffer_size_activation=2, #burn-in absorption cycles=3
+
+		### Replication 1 of 3 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1313)...
+Total number of activation states: 3 (23.333333% <= p(S) <= 50.000%) (Nmin to expect at 1 case in state with smallest p: Nmin=4)
+Range of particle indices to simulate with start state #1 out of 3: [0, 2] (n=3, n/N=0.15, p=0.266667, diff=-0.4%, state=[1, 0, 0])
+Range of particle indices to simulate with start state #2 out of 3: [3, 8] (n=6, n/N=0.3, p=0.500000, diff=-0.4%, state=[0, 1, 0])
+Range of particle indices to simulate with start state #3 out of 3: [9, 19] (n=11, n/N=0.55, p=0.233333, diff=1.4%, state=[0, 0, 1])
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV procedure.
+--> max time FV process starts = 35.3 (0.5% of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True.
+--> Simulation time reset from T=7142.9 to T=3.6.
+Generating trajectories for each particle until END OF SIMULATION (T=3.6)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> Number of observations for P(T>t) estimation from FV simulation: 20 (N=20)
+execution time: 0.4 sec, 0.0 min
+		P(K) estimated by FV (E(T)=1.8): 3.750082%
+		True P(K): 11.987462%
+-- FAIRNESS --
+FV simulation:
+- time = 282.7
+- #events = 787
+
+---> Execution time MC + FV: 0.4 sec, 0.0 min
+
+		### Replication 2 of 3 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1323)...
+Total number of activation states: 3 (23.333333% <= p(S) <= 50.000%) (Nmin to expect at 1 case in state with smallest p: Nmin=4)
+Range of particle indices to simulate with start state #1 out of 3: [0, 9] (n=10, n/N=0.5, p=0.266667, diff=0.9%, state=[1, 0, 0])
+Range of particle indices to simulate with start state #2 out of 3: [10, 18] (n=9, n/N=0.45, p=0.500000, diff=-0.1%, state=[0, 1, 0])
+Range of particle indices to simulate with start state #3 out of 3: [19, 19] (n=1, n/N=0.05, p=0.233333, diff=-0.8%, state=[0, 0, 1])
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV procedure.
+--> max time FV process starts = 36.4 (0.5% of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True.
+--> Simulation time reset from T=7142.9 to T=12.3.
+Generating trajectories for each particle until END OF SIMULATION (T=12.3)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> Number of observations for P(T>t) estimation from FV simulation: 20 (N=20)
+execution time: 0.6 sec, 0.0 min
+		P(K) estimated by FV (E(T)=2.9): 9.094785%
+		True P(K): 11.987462%
+-- FAIRNESS --
+FV simulation:
+- time = 495.7
+- #events = 1493
+
+---> Execution time MC + FV: 0.6 sec, 0.0 min
+
+		### Replication 3 of 3 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1333)...
+Total number of activation states: 3 (23.333333% <= p(S) <= 50.000%) (Nmin to expect at 1 case in state with smallest p: Nmin=4)
+Range of particle indices to simulate with start state #1 out of 3: [0, 3] (n=4, n/N=0.2, p=0.266667, diff=-0.2%, state=[1, 0, 0])
+Range of particle indices to simulate with start state #2 out of 3: [4, 12] (n=9, n/N=0.45, p=0.500000, diff=-0.1%, state=[0, 1, 0])
+Range of particle indices to simulate with start state #3 out of 3: [13, 19] (n=7, n/N=0.35, p=0.233333, diff=0.5%, state=[0, 0, 1])
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV procedure.
+--> max time FV process starts = 23.1 (0.3% of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True.
+--> Simulation time reset from T=7142.9 to T=10.2.
+Generating trajectories for each particle until END OF SIMULATION (T=10.2)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> Number of observations for P(T>t) estimation from FV simulation: 20 (N=20)
+execution time: 0.5 sec, 0.0 min
+		P(K) estimated by FV (E(T)=2.8): 7.115733%
+		True P(K): 11.987462%
+-- FAIRNESS --
+FV simulation:
+- time = 415.7
+- #events = 1294
+
+---> Execution time MC + FV: 0.5 sec, 0.0 min
+Simulation results for #servers=3, rhos=[0.4, 0.75, 0.35], K=5, N=20, T=10.152942895777793 (5000x), max #events=inf
+                rhos  K   N  ...     Pr(K)  ratio_mc_fv_time  ratio_mc_fv_events
+0  [0.4, 0.75, 0.35]  5  20  ...  0.119875               NaN                 NaN
+0  [0.4, 0.75, 0.35]  5  20  ...  0.119875               NaN                 NaN
+0  [0.4, 0.75, 0.35]  5  20  ...  0.119875               NaN                 NaN
+0  [0.4, 0.75, 0.35]  5  20  ...  0.119875               NaN                 NaN
+0  [0.4, 0.75, 0.35]  5  20  ...  0.119875               NaN                 NaN
+0  [0.4, 0.75, 0.35]  5  20  ...  0.119875               NaN                 NaN
+
+[6 rows x 23 columns]
+
+
+---> NEW K (Queue's capacity = 5)
+---> (nparticles=40, nmeantimes=[5000, 5000])
+Computing TRUE blocking probability... --> 0.0 sec
+Pr(K)=11.987462%
+
+	---> NEW BUFFER SIZE (BSA=1, BIC=5)
+******************!!!!!!! Simulation 3 of 4 !!!!!!*****************
+	K=5, nparticles=40, nmeantimes=5000, buffer_size_activation=1, #burn-in absorption cycles=5
+
+		### Replication 1 of 3 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1313)...
+Total number of activation states: 1 (100.000000% <= p(S) <= 100.000%) (Nmin to expect at 1 case in state with smallest p: Nmin=1)
+Range of particle indices to simulate with start state #1 out of 1: [0, 39] (n=40, n/N=1.0, p=1.000000, diff=0.0%, state=[0, 0, 0])
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV procedure.
+--> max time FV process starts = 61.4 (0.9% of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True.
+--> Simulation time reset from T=7142.9 to T=24.5.
+Generating trajectories for each particle until END OF SIMULATION (T=24.5)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> Number of observations for P(T>t) estimation from FV simulation: 40 (N=40)
+execution time: 1.9 sec, 0.0 min
+		P(K) estimated by FV (E(T)=3.9): 11.332577%
+		True P(K): 11.987462%
+-- FAIRNESS --
+FV simulation:
+- time = 2056.7
+- #events = 5936
+
+---> Execution time MC + FV: 1.9 sec, 0.0 min
+
+		### Replication 2 of 3 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1323)...
+Total number of activation states: 1 (100.000000% <= p(S) <= 100.000%) (Nmin to expect at 1 case in state with smallest p: Nmin=1)
+Range of particle indices to simulate with start state #1 out of 1: [0, 39] (n=40, n/N=1.0, p=1.000000, diff=0.0%, state=[0, 0, 0])
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV procedure.
+--> max time FV process starts = 74.0 (1.0% of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True.
+--> Simulation time reset from T=7142.9 to T=23.8.
+Generating trajectories for each particle until END OF SIMULATION (T=23.8)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> Number of observations for P(T>t) estimation from FV simulation: 40 (N=40)
+execution time: 1.9 sec, 0.0 min
+		P(K) estimated by FV (E(T)=4.7): 12.036069%
+		True P(K): 11.987462%
+-- FAIRNESS --
+FV simulation:
+- time = 1972.7
+- #events = 5764
+
+---> Execution time MC + FV: 1.9 sec, 0.0 min
+
+		### Replication 3 of 3 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1333)...
+Total number of activation states: 1 (100.000000% <= p(S) <= 100.000%) (Nmin to expect at 1 case in state with smallest p: Nmin=1)
+Range of particle indices to simulate with start state #1 out of 1: [0, 39] (n=40, n/N=1.0, p=1.000000, diff=0.0%, state=[0, 0, 0])
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV procedure.
+--> max time FV process starts = 62.0 (0.9% of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True.
+--> Simulation time reset from T=7142.9 to T=18.7.
+Generating trajectories for each particle until END OF SIMULATION (T=18.7)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> Number of observations for P(T>t) estimation from FV simulation: 40 (N=40)
+execution time: 1.7 sec, 0.0 min
+		P(K) estimated by FV (E(T)=4.4): 11.118825%
+		True P(K): 11.987462%
+-- FAIRNESS --
+FV simulation:
+- time = 1799.3
+- #events = 5418
+
+---> Execution time MC + FV: 1.7 sec, 0.0 min
+
+	---> NEW BUFFER SIZE (BSA=2, BIC=3)
+******************!!!!!!! Simulation 4 of 4 !!!!!!*****************
+	K=5, nparticles=40, nmeantimes=5000, buffer_size_activation=2, #burn-in absorption cycles=3
+
+		### Replication 1 of 3 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1313)...
+Total number of activation states: 3 (23.333333% <= p(S) <= 50.000%) (Nmin to expect at 1 case in state with smallest p: Nmin=4)
+Range of particle indices to simulate with start state #1 out of 3: [0, 7] (n=8, n/N=0.2, p=0.266667, diff=-0.2%, state=[1, 0, 0])
+Range of particle indices to simulate with start state #2 out of 3: [8, 22] (n=15, n/N=0.375, p=0.500000, diff=-0.2%, state=[0, 1, 0])
+Range of particle indices to simulate with start state #3 out of 3: [23, 39] (n=17, n/N=0.425, p=0.233333, diff=0.8%, state=[0, 0, 1])
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV procedure.
+--> max time FV process starts = 34.5 (0.5% of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True.
+--> Simulation time reset from T=7142.9 to T=26.2.
+Generating trajectories for each particle until END OF SIMULATION (T=26.2)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> Number of observations for P(T>t) estimation from FV simulation: 40 (N=40)
+execution time: 1.6 sec, 0.0 min
+		P(K) estimated by FV (E(T)=3.6): 11.465838%
+		True P(K): 11.987462%
+-- FAIRNESS --
+FV simulation:
+- time = 1516.4
+- #events = 4543
+
+---> Execution time MC + FV: 1.6 sec, 0.0 min
+
+		### Replication 2 of 3 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1323)...
+Total number of activation states: 3 (23.333333% <= p(S) <= 50.000%) (Nmin to expect at 1 case in state with smallest p: Nmin=4)
+Range of particle indices to simulate with start state #1 out of 3: [0, 14] (n=15, n/N=0.375, p=0.266667, diff=0.4%, state=[1, 0, 0])
+Range of particle indices to simulate with start state #2 out of 3: [15, 35] (n=21, n/N=0.525, p=0.500000, diff=0.1%, state=[0, 1, 0])
+Range of particle indices to simulate with start state #3 out of 3: [36, 39] (n=4, n/N=0.1, p=0.233333, diff=-0.6%, state=[0, 0, 1])
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV procedure.
+--> max time FV process starts = 36.4 (0.5% of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True.
+--> Simulation time reset from T=7142.9 to T=13.1.
+Generating trajectories for each particle until END OF SIMULATION (T=13.1)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> Number of observations for P(T>t) estimation from FV simulation: 40 (N=40)
+execution time: 1.0 sec, 0.0 min
+		P(K) estimated by FV (E(T)=3.1): 10.843782%
+		True P(K): 11.987462%
+-- FAIRNESS --
+FV simulation:
+- time = 955.8
+- #events = 2873
+
+---> Execution time MC + FV: 1.0 sec, 0.0 min
+
+		### Replication 3 of 3 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1333)...
+Total number of activation states: 3 (23.333333% <= p(S) <= 50.000%) (Nmin to expect at 1 case in state with smallest p: Nmin=4)
+Range of particle indices to simulate with start state #1 out of 3: [0, 9] (n=10, n/N=0.25, p=0.266667, diff=-0.1%, state=[1, 0, 0])
+Range of particle indices to simulate with start state #2 out of 3: [10, 27] (n=18, n/N=0.45, p=0.500000, diff=-0.1%, state=[0, 1, 0])
+Range of particle indices to simulate with start state #3 out of 3: [28, 39] (n=12, n/N=0.3, p=0.233333, diff=0.3%, state=[0, 0, 1])
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV procedure.
+--> max time FV process starts = 23.1 (0.3% of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True.
+--> Simulation time reset from T=7142.9 to T=15.8.
+Generating trajectories for each particle until END OF SIMULATION (T=15.8)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> Number of observations for P(T>t) estimation from FV simulation: 40 (N=40)
+execution time: 1.1 sec, 0.0 min
+		P(K) estimated by FV (E(T)=3.5): 12.237967%
+		True P(K): 11.987462%
+-- FAIRNESS --
+FV simulation:
+- time = 1000.7
+- #events = 3014
+
+---> Execution time MC + FV: 1.1 sec, 0.0 min
+Simulation results for #servers=3, rhos=[0.4, 0.75, 0.35], K=5, N=40, T=15.77575833194915 (5000x), max #events=inf
+                rhos  K   N  ...     Pr(K)  ratio_mc_fv_time  ratio_mc_fv_events
+0  [0.4, 0.75, 0.35]  5  20  ...  0.119875               NaN                 NaN
+0  [0.4, 0.75, 0.35]  5  20  ...  0.119875               NaN                 NaN
+0  [0.4, 0.75, 0.35]  5  20  ...  0.119875               NaN                 NaN
+0  [0.4, 0.75, 0.35]  5  20  ...  0.119875               NaN                 NaN
+0  [0.4, 0.75, 0.35]  5  20  ...  0.119875               NaN                 NaN
+0  [0.4, 0.75, 0.35]  5  20  ...  0.119875               NaN                 NaN
+0  [0.4, 0.75, 0.35]  5  40  ...  0.119875               NaN                 NaN
+0  [0.4, 0.75, 0.35]  5  40  ...  0.119875               NaN                 NaN
+0  [0.4, 0.75, 0.35]  5  40  ...  0.119875               NaN                 NaN
+0  [0.4, 0.75, 0.35]  5  40  ...  0.119875               NaN                 NaN
+0  [0.4, 0.75, 0.35]  5  40  ...  0.119875               NaN                 NaN
+0  [0.4, 0.75, 0.35]  5  40  ...  0.119875               NaN                 NaN
+
+[12 rows x 23 columns]
+Execution time: 13.6 sec, 0.2 min, 0.0 hours
+Top and bottom 5 records in the results data frame:
+                rhos  K   N  ...     Pr(K)  ratio_mc_fv_time  ratio_mc_fv_events
+0  [0.4, 0.75, 0.35]  5  20  ...  0.119875               NaN                 NaN
+1  [0.4, 0.75, 0.35]  5  20  ...  0.119875               NaN                 NaN
+2  [0.4, 0.75, 0.35]  5  20  ...  0.119875               NaN                 NaN
+3  [0.4, 0.75, 0.35]  5  20  ...  0.119875               NaN                 NaN
+4  [0.4, 0.75, 0.35]  5  20  ...  0.119875               NaN                 NaN
+
+[5 rows x 23 columns]
+                 rhos  K   N  ...     Pr(K)  ratio_mc_fv_time  ratio_mc_fv_events
+7   [0.4, 0.75, 0.35]  5  40  ...  0.119875               NaN                 NaN
+8   [0.4, 0.75, 0.35]  5  40  ...  0.119875               NaN                 NaN
+9   [0.4, 0.75, 0.35]  5  40  ...  0.119875               NaN                 NaN
+10  [0.4, 0.75, 0.35]  5  40  ...  0.119875               NaN                 NaN
+11  [0.4, 0.75, 0.35]  5  40  ...  0.119875               NaN                 NaN
+
+[5 rows x 23 columns]
+Data frame saved to /home/dmastrop/projects/RL-002-QueueBlocking/results/estimates_vs_J_20210716_122932_results.csv
+Data frame saved to /home/dmastrop/projects/RL-002-QueueBlocking/results/estimates_vs_J_20210716_122932_results_agg.csv
+Data frame saved to /home/dmastrop/projects/RL-002-QueueBlocking/results/estimates_vs_J_20210716_122932_proba_functions.csv
+Ended at: 2021-07-16 12:29:46
+Execution time: 0.2 min, 0.0 hours

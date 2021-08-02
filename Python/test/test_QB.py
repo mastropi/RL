@@ -1917,7 +1917,7 @@ if __name__ == "__main__":
                                             nparticles_values=[3200],
                                             nmeantimes_values=[8E6],
                                             buffer_size_activation_values=[1, 2, 3, 4, 5, 6, 7, 8],
-                                            burnin_cycles_absorption_values=[4, 4, 4, 4, 4, 4, 4, 4, 4],
+                                            burnin_cycles_absorption_values=[4, 4, 4, 4, 4, 4, 4, 4],
                                             seed=1313,
                                             run_mc=run_mc)
             save_dataframes([{'df': results, 'file': resultsfile},

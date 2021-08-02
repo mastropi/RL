@@ -1,0 +1,37 @@
+Fri Jul 16 12:36:39 CEST 2021
+/var/spool/slurmd/job00810/slurm_script: line 7: python: command not found
+Fri Jul 16 12:36:39 CEST 2021
+Fri Jul 16 12:36:39 CEST 2021
+/home/dmastrop/projects/Python/lib/estimators.py:3415: FutureWarning: from_items is deprecated. Please use DataFrame.from_dict(dict(items), ...) instead. DataFrame.from_dict(OrderedDict(items)) may be used to preserve the key order.
+  ('Blocking Time Estimate', self.blocking_time_estimate)])
+/home/dmastrop/projects/Python/lib/estimators.py:3301: FutureWarning: from_items is deprecated. Please use DataFrame.from_dict(dict(items), ...) instead. DataFrame.from_dict(OrderedDict(items)) may be used to preserve the key order.
+  return pd.DataFrame.from_items([('t', self.sk), ('P(T>t / s=1)', proba_surv_by_t)])
+test_QB.py:822: FutureWarning: from_items is deprecated. Please use DataFrame.from_dict(dict(items), ...) instead. DataFrame.from_dict(OrderedDict(items)) may be used to preserve the key order.
+  ('ratio_mc_fv_events', [dict_stats_mc.get('nevents') is None and np.nan or dict_stats_mc.get('nevents') / dict_stats_fv['nevents']]),
+/usr/lib64/python3.6/site-packages/matplotlib/pyplot.py:514: RuntimeWarning: More than 20 figures have been opened. Figures created through the pyplot interface (`matplotlib.pyplot.figure`) are retained until explicitly closed and may consume too much memory. (To control this warning, see the rcParam `figure.max_open_warning`).
+  max_open_warning, RuntimeWarning)
+Traceback (most recent call last):
+  File "test_QB.py", line 1900, in <module>
+    run_mc=run_mc)
+  File "test_QB.py", line 748, in analyze_estimates
+    est_fv, est_abs, est_surv, dict_stats_fv = estimators.estimate_blocking_fv(env_queue, dict_params_simul, dict_params_info=dict_params_info)
+  File "/home/dmastrop/projects/Python/lib/estimators.py", line 4706, in estimate_blocking_fv
+    proba_blocking_fv, integral, expected_survival_time, n_expected_survival_time = est_fv.simulate(EventType.ABSORPTION)
+  File "/home/dmastrop/projects/Python/lib/estimators.py", line 905, in simulate
+    time_start, time1, time2, time3 = self.run_simulation()
+  File "/home/dmastrop/projects/Python/lib/estimators.py", line 1005, in run_simulation
+    self.generate_trajectories_at_startup(event_type_to_stop=EventType.ACTIVATION)
+  File "/home/dmastrop/projects/Python/lib/estimators.py", line 1157, in generate_trajectories_at_startup
+    has_simulation_ended[P] = self._generate_trajectory_until_burnin_activation_or_end_of_simulation(P, end_of_simulation)
+  File "/home/dmastrop/projects/Python/lib/estimators.py", line 1743, in _generate_trajectory_until_burnin_activation_or_end_of_simulation
+    end_of_simulation = self.generate_one_iteration(P)
+  File "/home/dmastrop/projects/Python/lib/estimators.py", line 1212, in generate_one_iteration
+    self._generate_next_events(P)
+  File "/home/dmastrop/projects/Python/lib/estimators.py", line 1241, in _generate_next_events
+    self.assertTimeMostRecentEventAndTimesNextEvents(P)
+  File "/home/dmastrop/projects/Python/lib/estimators.py", line 4179, in assertTimeMostRecentEventAndTimesNextEvents
+    "\nTimes of next events in server {}'s queue: {}".format(server_last_updated, self.times_in_server_queues[P][server_last_updated])
+AssertionError: The time of the most recent event --realigned by the particle's time origin-- (253279.298) of type Event.DEATH coincides with the time of the next Event.DEATH currently stored in the times_next_events2 for particle 481 on server 0 (253280.849)
+Times of next events of both types for server 0: [253279.88059617 253280.84908705]
+Times of next events in server 0's queue: []
+Sun Jul 25 22:08:51 CEST 2021
