@@ -9,6 +9,27 @@ Created on Thu Jun 04 22:15:48 2020
 import numpy as np
 import copy
 
+def mad(x):
+    """
+    Computes the Median Absolute Deviation on a list or array of values.
+    
+    Missing values are ignored.
+
+    x: list or numpy array
+        Values on which the MAD is computed.
+
+    Return: float
+        median( |x(i) - median(x)| )
+    """
+    
+    # Convert to an array if x is given as list
+    x = np.array(x)
+    x_median = np.nanmedian(x)
+    x_dev = x - x_median
+    x_mad = np.median( np.abs( x_dev ) )
+    
+    return x_mad
+
 def comb(n,k):
     """
     Efficient calculation of the combinatorial number, which does NOT use the factorial.
