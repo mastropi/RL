@@ -1327,7 +1327,7 @@ def compute_errors(df_results,
 
     return df
 
-def plot_estimates1(df_results, x, y, subset=None,
+def deprecated_plot_estimates1(df_results, x, y, subset=None,
                    grp_K="K", y_true="Pr(K)", rep="rep",
                    violin_width_factor=0.2, color="green", xlabel=None,
                    markersize=7, fontsize=13, showtitle=False, figfile=None):
@@ -1410,7 +1410,7 @@ def plot_estimates1(df_results, x, y, subset=None,
 
     return df2plot
 
-def plot_estimates(df_results, x, subset=None,
+def deprecated_plot_estimates(df_results, x, subset=None,
                    grp_K="K", y_mc="Pr(MC)", y_fv="Pr(FV)", y_true="Pr(K)", rep="rep",
                    xlabel=None, markersize=7, fontsize=13, showtitle=False, figfile=None):
     """
@@ -1496,7 +1496,7 @@ def plot_estimates(df_results, x, subset=None,
 
     return df2plot
 
-def plot_errors(df_results, x, subset=None, widths=0.1,
+def deprecated_plot_errors(df_results, x, subset=None, widths=0.1,
                 grp_K="K", error_mc="error_rel_mc", error_fv="error_rel_fv", rep="rep",
                 xlabel=None, showtitle=True):
     """
