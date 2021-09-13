@@ -1925,6 +1925,24 @@ if __name__ == "__main__":
                              {'df': proba_functions, 'file': proba_functions_file}])
             for K in K_values:
                 axes = plot_results_fv_mc(results, x, xlabel=xlabel, subset=results['K']==K, plot_mc=run_mc)
+        if 9 in tests2run:
+            # Same as 7 but for small J values (to see if the variance of the estimator increases first and then decreases)
+            K_values = [60]
+            results, results_agg, proba_functions, est_fv, est_mc = test.analyze_estimates(
+                                            replications=replications,
+                                            K_values=K_values,
+                                            nparticles_values=[6400],
+                                            nmeantimes_values=[8E7],
+                                            buffer_size_activation_values=[1, 3, 5, 7, 9, 12, 15, 18, 21, 24],
+                                            burnin_cycles_absorption_values=[3, 3, 3, 3, 3, 2, 2, 2, 2, 2],
+                                            seed=1313,
+                                            run_mc=run_mc)
+            save_dataframes([{'df': results, 'file': resultsfile},
+                             {'df': results_agg, 'file': resultsfile_agg},
+                             {'df': proba_functions, 'file': proba_functions_file}])
+            for K in K_values:
+                axes = plot_results_fv_mc(results, x, xlabel=xlabel, subset=results['K']==K, plot_mc=run_mc)
+
 
         if fh_log is not None:
             closeLogFile(fh_log, stdout_sys, dt_start)
