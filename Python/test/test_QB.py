@@ -1327,7 +1327,7 @@ def compute_errors(df_results,
 
     return df
 
-def plot_estimates1(df_results, x, y, subset=None,
+def deprecated_plot_estimates1(df_results, x, y, subset=None,
                    grp_K="K", y_true="Pr(K)", rep="rep",
                    violin_width_factor=0.2, color="green", xlabel=None,
                    markersize=7, fontsize=13, showtitle=False, figfile=None):
@@ -1410,7 +1410,7 @@ def plot_estimates1(df_results, x, y, subset=None,
 
     return df2plot
 
-def plot_estimates(df_results, x, subset=None,
+def deprecated_plot_estimates(df_results, x, subset=None,
                    grp_K="K", y_mc="Pr(MC)", y_fv="Pr(FV)", y_true="Pr(K)", rep="rep",
                    xlabel=None, markersize=7, fontsize=13, showtitle=False, figfile=None):
     """
@@ -1496,7 +1496,7 @@ def plot_estimates(df_results, x, subset=None,
 
     return df2plot
 
-def plot_errors(df_results, x, subset=None, widths=0.1,
+def deprecated_plot_errors(df_results, x, subset=None, widths=0.1,
                 grp_K="K", error_mc="error_rel_mc", error_fv="error_rel_fv", rep="rep",
                 xlabel=None, showtitle=True):
     """
@@ -1574,8 +1574,11 @@ def plot_errors(df_results, x, subset=None, widths=0.1,
 
     return df2plot
 
-def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None,
+def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None, y2=None, ylabel2=None,
                                    prob_fv="Pr(FV)", prob_mc="Pr(MC)", prob_true="Pr(K)",
+                                   use_weights_splines=False,
+                                   smooth_params={'bias': None, 'variability': None, 'mse': None},
+                                   xmin=None, xmax=None, ymin=None, ymax=None,
                                    subset=None,
                                    plot_mc=True,
                                    figfile=None):
@@ -1584,6 +1587,26 @@ def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None,
 
     Return: List of AxesSubplot objects of matplotlib.axes._subplots
     List of objects containing the axes of the error bar plot and of the violin plot.
+
+    Arguments:
+    df_results:
+        
+    x:
+        
+    x2: str
+        Name of the variable for the X-axis of the second plot (MC case).
+
+    y2: str
+        Name of the variable for the secondary axis of the last variability plots.
+
+    Example:
+    [AUg-2021]
+    results['log(n(FV))'] = np.log10(results['n(FV)'])
+    plot_results_fv_mc(results, "buffer_size_activation", xlabel="J as fraction of K",
+                       y2="log(n(FV))", ylabel2="Avg. #events (log)",
+                       plot_mc=False,
+                       smooth_params={'bias': [1E2], 'variability': 1E3, 'mse': 1E-22},
+                       xmin=0, xmax=1, ymin=0)
     """
 
     #--- Parse input parameters
@@ -1595,19 +1618,44 @@ def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None,
         yvars = [prob_fv, prob_mc]
         figsize = (8,4)
         subplots = (1,2)
+        nsubplots = 2
         colors = ["green", "red"]
     else:
-        xvars = x
-        yvars = prob_fv
+        xvars = [x]
+        yvars = [prob_fv]
         figsize = (4,4)
         subplots = (1,1)
+        nsubplots = 1
         colors = "green"
+
+    # Variables to plot
+    if y2 == "":
+        y2 = None
+
+    # Axis limits
+    axis_properties = {'limits': {}}
+    if xmin is not None:
+        axis_properties['limits']['xmin'] = xmin
+    if xmax is not None:
+        axis_properties['limits']['xmax'] = xmax
+    if ymin is not None:
+        axis_properties['limits']['ymin'] = ymin
+    if ymax is not None:
+        axis_properties['limits']['ymax'] = ymax
 
     # Axis labels
     if xlabel is None:
         xlabel = x
     if xlabel2 is None:
         xlabel2 = x2
+    if ylabel2 is None:
+        ylabel2 = y2
+
+    # Smoothing parameters for each of the 3 spline plots below
+    assert isinstance(smooth_params, dict)
+    for k in smooth_params.keys():
+        if not isinstance(smooth_params[k], list):
+            smooth_params[k] = [ smooth_params[k] ] * nsubplots
 
     # Rows to plot
     if subset is not None:
@@ -1619,24 +1667,160 @@ def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None,
                   df_results, xvars, yvars,
                   yref=prob_true, yref_legend="True value",
                   figsize=figsize, subplots=subplots,
-                  dict_options={'multipliers': {'x': 1, 'y': 100, 'error': 2},
+                  dict_options={'axis': axis_properties,
+                                'multipliers': {'x': 1, 'y': 100, 'error': 2},
                                 'labels': {'x': xlabel, 'y': "Blocking probability (%)", 'x2': xlabel2},
-                                'properties': {'color': colors, 'color_center': colors}})
+                                'properties': {'color': "black", 'color_center': colors}})
     
     # 2) Violin plots
     axes_violin = plotting.plot(plotting.plot_violins,
                          df_results, xvars, yvars,
                          yref=prob_true, yref_legend="True value",
                          figsize=figsize, subplots=subplots,
-                         dict_options={'multipliers': {'x': 1, 'y': 100},
+                         dict_options={'axis': axis_properties,
+                                       'multipliers': {'x': 1, 'y': 100},
                                        'labels': {'x': xlabel, 'y': "Blocking probability (%)", 'x2': xlabel2},
                                        'properties': {'color': colors, 'color_center': colors}})
     
+    #-- Compute variability and bias
+    df2plot = pd.DataFrame()
+    nvars = []
+    weightvars = []
+    biasvars = []
+    bias2vars = []
+    variancevars = []
+    msevars = []
+    madvars = []
+    cvbiasvars = []
+    cvmadvars = []
+    vars2plot_bias = []
+    vars2plot_variability = []
+    vars2plot_mse = []
+    for idx, (x, y) in enumerate( zip(xvars, yvars) ):
+        # Variability and bias
+        if y2 is not None:
+            yvars2agg = [y, y2]
+        else:
+            yvars2agg = [y]
+        summary_stats = aggregation_bygroups(df_results, [x], yvars2agg, stats=["count", "mean", "median", "mad", "std", "var"])
+        
+        # Store the results in the data frame for plotting
+        nvar = "n({})".format(y)
+        weightvar = "w({})".format(y)
+        biasvar = "b({})".format(y)
+        bias2var = "b2({})".format(y)
+        variancevar = "Var({})".format(y)
+        msevar = "MSE({})".format(y)
+        madvar = "MAD({})".format(y)
+        cvbiasvar = "CVBIAS({})".format(y)
+        cvmadvar = "CVMAD({})".format(y)
+        if y2 is not None:
+            y2meanvar = "mean({})".format(y2)
+        df2plot[x] = summary_stats.index
+        df2plot.set_index(summary_stats.index, inplace=True)
+        df2plot[nvar] = summary_stats[y]["count"]
+        df2plot[weightvar] = df2plot[nvar] / np.sum(df2plot[nvar])
+        df2plot[biasvar] = summary_stats[y]["mean"] - df_results.iloc[0][prob_true]
+        df2plot[bias2var] = df2plot[biasvar]**2
+        df2plot[variancevar] = summary_stats[y]["var"]
+        df2plot[msevar] = df2plot[biasvar]**2 + df2plot[variancevar]
+        df2plot[madvar] = summary_stats[y]["mad"]
+        df2plot[cvbiasvar] = np.abs( df2plot[biasvar] ) / df_results.iloc[0][prob_true] * 100
+        df2plot[cvmadvar] = df2plot[madvar] / df_results.iloc[0][prob_true] * 100
+        if y2 is not None:
+            df2plot[y2meanvar] = summary_stats[y2]["mean"]
+
+        var2plot_bias = cvbiasvar  # bias2var 
+        var2plot_variability = cvmadvar # variancevar 
+        var2plot_mse = msevar
+
+        # Weighted squared sum of Y values --> used when choosing a good smoothing parameter
+        # The calculation is based on the documentation for parameter 's' in help(scipy.interpolate.slprep)
+        if use_weights_splines:
+            # Normalized weights
+            weights = df2plot[weightvar]
+            weightvars += [ weightvar ]
+        else:
+            weights = 1
+            weightvars += [ None ]
+        if smooth_params['bias'][idx] is None:
+            smooth_params['bias'][idx] = np.mean( np.abs( df2plot[var2plot_bias] ) ) * np.sum( (weights * df2plot[var2plot_bias]) **2)
+        if smooth_params['variability'][idx] is None:
+            smooth_params['variability'][idx] = np.mean( np.abs( df2plot[var2plot_variability] ) ) * np.sum( (weights * df2plot[var2plot_variability]) **2) #/ \
+                                                 #np.sum( df2plot[nvar]**2 ) * np.var( df2plot[var2plot_variability] )
+        if smooth_params['mse'][idx] is None:
+            smooth_params['mse'][idx] = np.mean( np.abs( df2plot[var2plot_mse] ) ) * np.sum( (weights * df2plot[var2plot_mse]) **2)
+        print("Smoothing parameter for bias, variability, MSE for subplot {}:\n{}".format(idx+1, smooth_params))
+        nvars += [ nvar ]
+        biasvars += [ biasvar ]
+        bias2vars += [ bias2var ]
+        variancevars += [ variancevar ]
+        msevars += [ msevar ]
+        madvars += [ madvar ]
+        cvbiasvars += [ cvbiasvar ]
+        cvmadvars += [ cvmadvar ]
+        vars2plot_bias += [ var2plot_bias ]
+        vars2plot_variability += [ var2plot_variability ]
+        vars2plot_mse += [ var2plot_mse ]
+    
+    # 3) Variability plot
+    axes_variability = plotting.plot(plotting.plot_splines,
+                                     df2plot, xvars, vars2plot_variability,
+                                     dict_params={'pointlabels': nvars, 'splines': {'weights': weightvars, 'smooth_par': smooth_params['variability']}},
+                                     dict_options={'axis': axis_properties,
+                                                   'multipliers': {'x': 1, 'y': 1},
+                                                   'labels': {'x': xlabel, 'y': "CV w.r.t. true Pr(K) (%)", 'x2': xlabel2},
+                                                   'properties': {'color': "black", 'color_line': colors},
+                                                   'texts': {'title': "Relative variability of {}".format(y)}
+                                                   })
+
+    # 4) Bias plot
+    axes_bias = plotting.plot(plotting.plot_splines,
+                              df2plot, xvars, vars2plot_bias,
+                              dict_params={'pointlabels': nvars, 'splines': {'weights': weightvars, 'smooth_par': smooth_params['bias']}},
+                              dict_options={'axis': axis_properties,
+                                            'multipliers': {'x': 1, 'y': 1},
+                                            'labels': {'x': xlabel, 'y': "CV w.r.t. true Pr(K) (%)", 'x2': xlabel2},
+                                            'properties': {'color': "black", 'color_line': colors},
+                                            'texts': {'title': "Relative bias of {}".format(y)}
+                                           })
+
+    # 5) MSE = Variance + Bias^2
+    axes_mse = plotting.plot(plotting.plot_splines,
+                              df2plot, xvars, vars2plot_mse,
+                              dict_params={'pointlabels': nvars, 'splines': {'weights': weightvars, 'smooth_par': smooth_params['mse']}},
+                              dict_options={'axis': axis_properties,
+                                            'multipliers': {'x': 1, 'y': 1},
+                                            'labels': {'x': xlabel, 'y': "MSE", 'x2': xlabel2},
+                                            'properties': {'color': "black", 'color_line': colors},
+                                            'texts': {'title': "Mean Squared Error of {}".format(y)}
+                                           })
+
+    # 6) Variability with the plot of a secondary axis (e.g. showing the "complexity" of the algorithm)
+    if y2 is not None:
+        axes = plt.figure().subplots(subplots[0], subplots[1])
+        if not isinstance(axes, list):
+            axes = [axes]
+        for (ax, x, y, var2plot, w, s, color) in zip(axes, xvars, yvars, vars2plot_variability, weightvars, smooth_params['variability'], colors):
+            legend_obj, legend_txt = plotting.plot_splines(ax, df2plot, x, var2plot, w=w, s=s,
+                                                           dict_options={'properties': {'color': "black", 'color_line': color}})
+            ax.set_title("Relative variability of {}".format(y))
+            ax.set_xlim([xmin, xmax])
+            ax.set_ylim([ymin, ymax])
+            ax.set_xlabel(xlabel)
+            ax.set_ylabel("CV w.r.t. true Pr(K) (%)")
+            ax2 = ax.twinx()
+            sizes = ax2.plot(df2plot[x], df2plot[y2meanvar], 'r.-')
+            ax2.set_ylabel(ylabel2)
+            legend_obj += sizes
+            legend_txt += [ylabel2]
+            ax.legend(legend_obj, legend_txt)
+
     if figfile is not None:
         plt.gcf().subplots_adjust(left=0.15, top=0.75)
         plt.savefig(figfile)
 
-    return axes_error[0], axes_violin[0]
+    return axes_error[0], axes_violin[0], axes_variability[0], axes_bias[0], axes_mse[0]
 
 def createLogFileHandleAndResultsFileNames(path="../../RL-002-QueueBlocking", prefix="run"):
     """
@@ -1700,7 +1884,7 @@ if __name__ == "__main__":
         sys.argv += [1]       # Number of servers in the system to simulate
         sys.argv += ["N"]     # Either "N" for number of particles or "J" for buffer size"
         sys.argv += [3]       # Number of replications
-        sys.argv += [[1]]     # Test numbers to run (only one can be given from user input though)
+        sys.argv += [[]]     # Test numbers to run given as a list (only one can be given from user input though)
     if len(sys.argv) == 5:    # Only the 4 required arguments are given by the user
         sys.argv += [1]       # Number of methods to run: 1 (only FV), 2 (FV & MC)
         sys.argv += ["save"]  # Either "nosave" or anything else for saving the results and log
@@ -1714,6 +1898,11 @@ if __name__ == "__main__":
     tests2run = [int(v) for v in sys.argv[4]]
     run_mc = int(sys.argv[5]) == 2
     save_results = sys.argv[6] != "nosave"
+    
+    if len(tests2run) == 0:
+        print("No tests have been specified to run. Please specify the test number as argument 4.")
+        sys.exit()
+
     print("Execution parameters:")
     print("nservers={}".format(nservers))
     print("var_analysis={}".format(var_analysis))

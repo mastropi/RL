@@ -103,7 +103,7 @@ BEGIN{firstcase=1}
 
 /estimated by FV/ {
 	repnum++
-
+	
 	# Remove everything that is not part of a number
 	gsub(/[^0-9\.%]/," ",$0)
 
@@ -112,7 +112,7 @@ BEGIN{firstcase=1}
 	PrFV = $2/100	# Blocking probability (shown as percentage)
 }
 
-/FV simulation:/ {
+/^FV simulation:/ {	# NOTE: We need to check for the line BEGINNING with "FV" because there is ANOTHER line that also has the string "FV simulation"
 	getline simulation_time_line
 	match(simulation_time_line, /- time = ([0-9\.]+)/, matches)
 	simulation_time = matches[1]
