@@ -592,18 +592,19 @@ def plot_splines(ax, df, x, y, w=None, s=None, dict_options=dict()):
     #------- Parse input parameters
     assert isinstance(x, str)
     assert isinstance(y, str)
+    dict_options_default = default_plot_options()
+    parse_dict_params(dict_options, dict_options_default)
     if w is not None:
         assert isinstance(w, str)
         w = df[w]
     if s is not None:
         assert isinstance(s, float) or isinstance(s, int)
-    dict_options_default = default_plot_options()
-    parse_dict_params(dict_options, dict_options_default)
+        s = s*dict_options['multipliers']['y']**2
     #------- Parse input parameters
 
     # Fit a smoothing spline to the data
     # The returned object is a tuple (t, c, k): knots, B-spline coefficients, degree of spline 
-    splinefit = splrep(df[x]*dict_options['multipliers']['x'], df[y]*dict_options['multipliers']['y'], w=w, s=s*dict_options['multipliers']['y']**2)
+    splinefit = splrep(df[x]*dict_options['multipliers']['x'], df[y]*dict_options['multipliers']['y'], w=w, s=s)
     # Get the fitted values from the spline
     y_smooth = splev(df[x], splinefit)
 

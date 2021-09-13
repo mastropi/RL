@@ -1574,7 +1574,7 @@ def deprecated_plot_errors(df_results, x, subset=None, widths=0.1,
 
     return df2plot
 
-def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None,
+def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None, y2=None, ylabel2=None,
                                    prob_fv="Pr(FV)", prob_mc="Pr(MC)", prob_true="Pr(K)",
                                    use_weights_splines=False,
                                    smooth_params={'bias': None, 'variability': None, 'mse': None},
@@ -1587,6 +1587,26 @@ def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None,
 
     Return: List of AxesSubplot objects of matplotlib.axes._subplots
     List of objects containing the axes of the error bar plot and of the violin plot.
+
+    Arguments:
+    df_results:
+        
+    x:
+        
+    x2: str
+        Name of the variable for the X-axis of the second plot (MC case).
+
+    y2: str
+        Name of the variable for the secondary axis of the last variability plots.
+
+    Example:
+    [AUg-2021]
+    results['log(n(FV))'] = np.log10(results['n(FV)'])
+    plot_results_fv_mc(results, "buffer_size_activation", xlabel="J as fraction of K",
+                       y2="log(n(FV))", ylabel2="Avg. #events (log)",
+                       plot_mc=False,
+                       smooth_params={'bias': [1E2], 'variability': 1E3, 'mse': 1E-22},
+                       xmin=0, xmax=1, ymin=0)
     """
 
     #--- Parse input parameters
@@ -1608,6 +1628,10 @@ def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None,
         nsubplots = 1
         colors = "green"
 
+    # Variables to plot
+    if y2 == "":
+        y2 = None
+
     # Axis limits
     axis_properties = {'limits': {}}
     if xmin is not None:
@@ -1624,6 +1648,8 @@ def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None,
         xlabel = x
     if xlabel2 is None:
         xlabel2 = x2
+    if ylabel2 is None:
+        ylabel2 = y2
 
     # Smoothing parameters for each of the 3 spline plots below
     assert isinstance(smooth_params, dict)
@@ -1672,7 +1698,11 @@ def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None,
     vars2plot_mse = []
     for idx, (x, y) in enumerate( zip(xvars, yvars) ):
         # Variability and bias
-        summary_stats = aggregation_bygroups(df_results, [x], [y], stats=["count", "mean", "median", "mad", "std", "var"])
+        if y2 is not None:
+            yvars2agg = [y, y2]
+        else:
+            yvars2agg = [y]
+        summary_stats = aggregation_bygroups(df_results, [x], yvars2agg, stats=["count", "mean", "median", "mad", "std", "var"])
         
         # Store the results in the data frame for plotting
         nvar = "n({})".format(y)
@@ -1684,6 +1714,8 @@ def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None,
         madvar = "MAD({})".format(y)
         cvbiasvar = "CVBIAS({})".format(y)
         cvmadvar = "CVMAD({})".format(y)
+        if y2 is not None:
+            y2meanvar = "mean({})".format(y2)
         df2plot[x] = summary_stats.index
         df2plot.set_index(summary_stats.index, inplace=True)
         df2plot[nvar] = summary_stats[y]["count"]
@@ -1695,7 +1727,9 @@ def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None,
         df2plot[madvar] = summary_stats[y]["mad"]
         df2plot[cvbiasvar] = np.abs( df2plot[biasvar] ) / df_results.iloc[0][prob_true] * 100
         df2plot[cvmadvar] = df2plot[madvar] / df_results.iloc[0][prob_true] * 100
-        
+        if y2 is not None:
+            df2plot[y2meanvar] = summary_stats[y2]["mean"]
+
         var2plot_bias = cvbiasvar  # bias2var 
         var2plot_variability = cvmadvar # variancevar 
         var2plot_mse = msevar
@@ -1735,7 +1769,7 @@ def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None,
                                      dict_params={'pointlabels': nvars, 'splines': {'weights': weightvars, 'smooth_par': smooth_params['variability']}},
                                      dict_options={'axis': axis_properties,
                                                    'multipliers': {'x': 1, 'y': 1},
-                                                   'labels': {'x': xlabel, 'y': "CV w.r.t. true Pr(K) (%)".format(y), 'x2': xlabel2},
+                                                   'labels': {'x': xlabel, 'y': "CV w.r.t. true Pr(K) (%)", 'x2': xlabel2},
                                                    'properties': {'color': "black", 'color_line': colors},
                                                    'texts': {'title': "Relative variability of {}".format(y)}
                                                    })
@@ -1746,7 +1780,7 @@ def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None,
                               dict_params={'pointlabels': nvars, 'splines': {'weights': weightvars, 'smooth_par': smooth_params['bias']}},
                               dict_options={'axis': axis_properties,
                                             'multipliers': {'x': 1, 'y': 1},
-                                            'labels': {'x': xlabel, 'y': "CV w.r.t. true Pr(K) (%)".format(y), 'x2': xlabel2},
+                                            'labels': {'x': xlabel, 'y': "CV w.r.t. true Pr(K) (%)", 'x2': xlabel2},
                                             'properties': {'color': "black", 'color_line': colors},
                                             'texts': {'title': "Relative bias of {}".format(y)}
                                            })
@@ -1757,10 +1791,30 @@ def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None,
                               dict_params={'pointlabels': nvars, 'splines': {'weights': weightvars, 'smooth_par': smooth_params['mse']}},
                               dict_options={'axis': axis_properties,
                                             'multipliers': {'x': 1, 'y': 1},
-                                            'labels': {'x': xlabel, 'y': "MSE".format(y), 'x2': xlabel2},
+                                            'labels': {'x': xlabel, 'y': "MSE", 'x2': xlabel2},
                                             'properties': {'color': "black", 'color_line': colors},
                                             'texts': {'title': "Mean Squared Error of {}".format(y)}
                                            })
+
+    # 6) Variability with the plot of a secondary axis (e.g. showing the "complexity" of the algorithm)
+    if y2 is not None:
+        axes = plt.figure().subplots(subplots[0], subplots[1])
+        if not isinstance(axes, list):
+            axes = [axes]
+        for (ax, x, y, var2plot, w, s, color) in zip(axes, xvars, yvars, vars2plot_variability, weightvars, smooth_params['variability'], colors):
+            legend_obj, legend_txt = plotting.plot_splines(ax, df2plot, x, var2plot, w=w, s=s,
+                                                           dict_options={'properties': {'color': "black", 'color_line': color}})
+            ax.set_title("Relative variability of {}".format(y))
+            ax.set_xlim([xmin, xmax])
+            ax.set_ylim([ymin, ymax])
+            ax.set_xlabel(xlabel)
+            ax.set_ylabel("CV w.r.t. true Pr(K) (%)")
+            ax2 = ax.twinx()
+            sizes = ax2.plot(df2plot[x], df2plot[y2meanvar], 'r.-')
+            ax2.set_ylabel(ylabel2)
+            legend_obj += sizes
+            legend_txt += [ylabel2]
+            ax.legend(legend_obj, legend_txt)
 
     if figfile is not None:
         plt.gcf().subplots_adjust(left=0.15, top=0.75)
@@ -1830,7 +1884,7 @@ if __name__ == "__main__":
         sys.argv += [1]       # Number of servers in the system to simulate
         sys.argv += ["N"]     # Either "N" for number of particles or "J" for buffer size"
         sys.argv += [3]       # Number of replications
-        sys.argv += [[1]]     # Test numbers to run (only one can be given from user input though)
+        sys.argv += [[]]     # Test numbers to run given as a list (only one can be given from user input though)
     if len(sys.argv) == 5:    # Only the 4 required arguments are given by the user
         sys.argv += [1]       # Number of methods to run: 1 (only FV), 2 (FV & MC)
         sys.argv += ["save"]  # Either "nosave" or anything else for saving the results and log
@@ -1844,6 +1898,11 @@ if __name__ == "__main__":
     tests2run = [int(v) for v in sys.argv[4]]
     run_mc = int(sys.argv[5]) == 2
     save_results = sys.argv[6] != "nosave"
+    
+    if len(tests2run) == 0:
+        print("No tests have been specified to run. Please specify the test number as argument 4.")
+        sys.exit()
+
     print("Execution parameters:")
     print("nservers={}".format(nservers))
     print("var_analysis={}".format(var_analysis))
