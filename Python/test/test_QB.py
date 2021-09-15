@@ -1600,7 +1600,7 @@ def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None, y2=Non
         Name of the variable for the secondary axis of the last variability plots.
 
     Example:
-    [AUg-2021]
+    [Aug-2021]
     results['log(n(FV))'] = np.log10(results['n(FV)'])
     plot_results_fv_mc(results, "buffer_size_activation", xlabel="J as fraction of K",
                        y2="log(n(FV))", ylabel2="Avg. #events (log)",
@@ -1879,12 +1879,14 @@ def save_dataframes(list_of_dataframes):
 
 if __name__ == "__main__":
     # Default execution arguments when no arguments are given
+    # Example of execution from the command line:
+    # python test_QB.py 3 J 5 10
     print("User arguments: {}".format(sys.argv))
     if len(sys.argv) == 1:    # Only the execution file name is contained in sys.argv
-        sys.argv += [1]       # Number of servers in the system to simulate
-        sys.argv += ["N"]     # Either "N" for number of particles or "J" for buffer size"
+        sys.argv += [3]       # Number of servers in the system to simulate
+        sys.argv += ["J"]     # Either "N" for number of particles or "J" for buffer size"
         sys.argv += [3]       # Number of replications
-        sys.argv += [[]]     # Test numbers to run given as a list (only one can be given from user input though)
+        sys.argv += [10]      # Number of the test to run: only one is accepted
     if len(sys.argv) == 5:    # Only the 4 required arguments are given by the user
         sys.argv += [1]       # Number of methods to run: 1 (only FV), 2 (FV & MC)
         sys.argv += ["save"]  # Either "nosave" or anything else for saving the results and log
@@ -1895,7 +1897,7 @@ if __name__ == "__main__":
     nservers = int(sys.argv[1])
     var_analysis = sys.argv[2]
     replications = int(sys.argv[3])
-    tests2run = [int(v) for v in sys.argv[4]]
+    tests2run = [int(v) for v in [sys.argv[4]]] # NOTE: It's important to enclose sys.argv[4] in brackets because o.w., from the command line, a number with more than one digit is interpreted as a multi-element list!! (e.g. 10 is interpreted as a list with elements [1, 0])
     run_mc = int(sys.argv[5]) == 2
     save_results = sys.argv[6] != "nosave"
     
@@ -2115,7 +2117,7 @@ if __name__ == "__main__":
             for K in K_values:
                 axes = plot_results_fv_mc(results, x, xlabel=xlabel, subset=results['K']==K, plot_mc=run_mc)
         if 9 in tests2run:
-            # Same as 7 but for small J values (to see if the variance of the estimator increases first and then decreases)
+            # Larger K value for multi-server, where MC is expected to fail
             K_values = [60]
             results, results_agg, proba_functions, est_fv, est_mc = test.analyze_estimates(
                                             replications=replications,
@@ -2131,7 +2133,26 @@ if __name__ == "__main__":
                              {'df': proba_functions, 'file': proba_functions_file}])
             for K in K_values:
                 axes = plot_results_fv_mc(results, x, xlabel=xlabel, subset=results['K']==K, plot_mc=run_mc)
-
+        if 10 in tests2run:
+            # Large K value for multi-server, with limited simulation time before 
+            K_values = [40]
+            results, results_agg, proba_functions, est_fv, est_mc = test.analyze_estimates(
+                                            replications=replications,
+                                            K_values=K_values,
+                                            nparticles_values=[100], #[1000],   #[5]
+                                            nmeantimes_values=[1000], # [1000],   #[100]
+                                            buffer_size_activation_values=[0.5],#[0.1, 0.2, 0.3, 0.4, 0.5, 0.6], #[0.1, 0.3, 0.4, 0.5, 0.6, 0.8],
+                                            burnin_cycles_absorption_values=[1],#[3, 3, 2, 2, 1, 1], #[3, 3, 3, 2, 2, 1],
+                                            seed=1313,
+                                            run_mc=run_mc)
+            save_dataframes([{'df': results, 'file': resultsfile},
+                             {'df': results_agg, 'file': resultsfile_agg},
+                             {'df': proba_functions, 'file': proba_functions_file}])
+            for K in K_values:
+                axes = plot_results_fv_mc(results, "buffer_size_activation", xlabel="J as fraction of K",
+                                          subset=results['K']==K,
+                                          plot_mc=run_mc,
+                                          smooth_params={'bias': [1E2], 'variability': 1E3, 'mse': 1E-22})
 
         if fh_log is not None:
             closeLogFile(fh_log, stdout_sys, dt_start)
