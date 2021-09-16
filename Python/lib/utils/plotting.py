@@ -262,6 +262,9 @@ def deprecated_errorbars_standalone(df, x, y, yref=None,
 
 def pointsplot(ax, df, x, y, dict_options):
     "Produces a basic points plot"
+    # Parse options
+    dict_options_default = default_plot_options()
+    parse_dict_params(dict_options, dict_options_default)
     return ax.plot( df[x] * dict_options['multipliers']['x'],
                     df[y] * dict_options['multipliers']['y'],
                     color=dict_options['properties']['color'],
@@ -381,10 +384,13 @@ def plot(plotting_func,
     # Parse options
     dict_options_default = default_plot_options()
     parse_dict_params(dict_options, dict_options_default)
+    dict_options_local = copy.deepcopy(dict_options)
+        ## We make a copy of the options dictionary because we are changing it below
+        ## and we don't want to change any options in the input dictionary!
 
     (nrows, ncols) = (subplots[0], subplots[1])
     n_subplots = nrows * ncols
-    setup_properties(dict_options['properties'], n_subplots)
+    setup_properties(dict_options_local['properties'], n_subplots)
 
     # Convert any variable that is a string to a LIST that states that the same variable name is used for all plots
     if not isinstance(xvars, list):
@@ -403,20 +409,20 @@ def plot(plotting_func,
 
     #-- dict_options
     # Convert to lists parameters that are given as a single value 
-    if not isinstance(dict_options['labels']['x'], list):
-        dict_options['labels']['x'] = [ dict_options['labels']['x'] ] * n_subplots 
-    if not isinstance(dict_options['labels']['y'], list):
-        dict_options['labels']['y'] = [ dict_options['labels']['y'] ] * n_subplots
-    if not isinstance(dict_options['labels']['x2'], list):
-        dict_options['labels']['x2'] = [ dict_options['labels']['x2'] ] * n_subplots 
-    if not isinstance(dict_options['labels']['y2'], list):
-        dict_options['labels']['y2'] = [ dict_options['labels']['y2'] ] * n_subplots
-    if not isinstance(dict_options['axis']['tickmarks']['x2'], list):
-        dict_options['axis']['tickmarks']['x2'] = [ dict_options['axis']['tickmarks']['x2'] ] * n_subplots
-    if not isinstance(dict_options['axis']['tickmarks']['y2'], list):
-        dict_options['axis']['tickmarks']['y2'] = [ dict_options['axis']['tickmarks']['y2'] ] * n_subplots
+    if not isinstance(dict_options_local['labels']['x'], list):
+        dict_options_local['labels']['x'] = [ dict_options_local['labels']['x'] ] * n_subplots 
+    if not isinstance(dict_options_local['labels']['y'], list):
+        dict_options_local['labels']['y'] = [ dict_options_local['labels']['y'] ] * n_subplots
+    if not isinstance(dict_options_local['labels']['x2'], list):
+        dict_options_local['labels']['x2'] = [ dict_options_local['labels']['x2'] ] * n_subplots 
+    if not isinstance(dict_options_local['labels']['y2'], list):
+        dict_options_local['labels']['y2'] = [ dict_options_local['labels']['y2'] ] * n_subplots
+    if not isinstance(dict_options_local['axis']['tickmarks']['x2'], list):
+        dict_options_local['axis']['tickmarks']['x2'] = [ dict_options_local['axis']['tickmarks']['x2'] ] * n_subplots
+    if not isinstance(dict_options_local['axis']['tickmarks']['y2'], list):
+        dict_options_local['axis']['tickmarks']['y2'] = [ dict_options_local['axis']['tickmarks']['y2'] ] * n_subplots
 
-    if n_subplots > 1 and dict_options['axis']['remove_yaxis'] and not dict_options['axis']['limits']['allequal']:
+    if n_subplots > 1 and dict_options_local['axis']['remove_yaxis'] and not dict_options_local['axis']['limits']['allequal']:
         warn("The non-leftmost Y-axis will be removed from the plots but the Y-axis may be different!", \
              "\nSet dict_options['axis']['limits']['allequal']=True if you want to remove Y-axis from non-leftmost plots.")
 
@@ -447,10 +453,10 @@ def plot(plotting_func,
         x = xvars[k]
         y = yvars[k]
         labelvar = dict_params['pointlabels'][k]
-        dict_options_k = copy.deepcopy(dict_options)
-        for prop in dict_options['properties']:
+        dict_options_k = copy.deepcopy(dict_options_local)
+        for prop in dict_options_local['properties']:
             # Set the properties for the current plot from the k-th entry of 'properties' in the input dictionary
-            dict_options_k['properties'][prop] = dict_options['properties'][prop][k]
+            dict_options_k['properties'][prop] = dict_options_local['properties'][prop][k]
         if re.search("plot_splines", plotting_func.__name__):
             # Scater + splines plot
             w = dict_params['splines']['weights'][k]
@@ -461,13 +467,13 @@ def plot(plotting_func,
             legend_objects, legend_texts = plotting_func(ax, df, x, y, dict_options=dict_options_k)
         if labelvar is not None and labelvar != "":
             # CAUTION: plt.text() receives scalars as parameters, NOT series!!
-            for xx, yy, label in zip(df[x] * dict_options['multipliers']['x'], df[y] * dict_options['multipliers']['y'], df[labelvar]):
+            for xx, yy, label in zip(df[x] * dict_options_local['multipliers']['x'], df[y] * dict_options_local['multipliers']['y'], df[labelvar]):
                 ax.text(xx, yy, label)
         if yref is not None:
-            line_ref = ax.hlines(df.iloc[0][yref] * dict_options['multipliers']['y'],
+            line_ref = ax.hlines(df.iloc[0][yref] * dict_options_local['multipliers']['y'],
                                  ax.get_xlim()[0], ax.get_xlim()[1],
-                                 #np.min(df[x] * dict_options['multipliers']['x']),
-                                 #np.max(df[x] * dict_options['multipliers']['x']),
+                                 #np.min(df[x] * dict_options_local['multipliers']['x']),
+                                 #np.max(df[x] * dict_options_local['multipliers']['x']),
                                  color='gray', linestyles='dashed')
             legend_objects += [line_ref]
 
@@ -477,7 +483,7 @@ def plot(plotting_func,
         ax.legend(legend_objects, legend_texts)#, fontsize='x-small')
 
     #-- Axis limits
-    if dict_options['axis']['limits']['allequal']:
+    if dict_options_local['axis']['limits']['allequal']:
         #xmin = np.Inf
         #xmax = -np.Inf
         ymin = np.Inf
@@ -495,10 +501,10 @@ def plot(plotting_func,
     for k, ax in enumerate(axes1D):
         x = xvars[k]
         y = yvars[k]
-        xmin = dict_options['axis']['limits'].get('xmin')
-        xmax = dict_options['axis']['limits'].get('xmax')
-        ymin = dict_options['axis']['limits'].get('ymin', ymin)
-        ymax = dict_options['axis']['limits'].get('ymax', ymax)
+        xmin = dict_options_local['axis']['limits'].get('xmin')
+        xmax = dict_options_local['axis']['limits'].get('xmax')
+        ymin = dict_options_local['axis']['limits'].get('ymin', ymin)
+        ymax = dict_options_local['axis']['limits'].get('ymax', ymax)
         if xmin is None:
             xmin = ax.get_xlim()[0]
         if xmax is None:
@@ -511,37 +517,37 @@ def plot(plotting_func,
         ax.set_ylim([ymin, ymax])
 
         # Axis labels
-        if dict_options['labels']['x'][k] is None:
+        if dict_options_local['labels']['x'][k] is None:
             xlabel = x
         else:
-            xlabel = dict_options['labels']['x'][k]
-        if dict_options['labels']['y'][k] is None:
+            xlabel = dict_options_local['labels']['x'][k]
+        if dict_options_local['labels']['y'][k] is None:
             ylabel = y
         else:
-            ylabel = dict_options['labels']['y'][k]
-        ax.set_xlabel(xlabel, fontsize=dict_options['axis']['fontsize'])
-        if k == 0 or not dict_options['axis']['remove_yaxis']:
-            ax.set_ylabel(ylabel, fontsize=dict_options['axis']['fontsize'])
+            ylabel = dict_options_local['labels']['y'][k]
+        ax.set_xlabel(xlabel, fontsize=dict_options_local['axis']['fontsize'])
+        if k == 0 or not dict_options_local['axis']['remove_yaxis']:
+            ax.set_ylabel(ylabel, fontsize=dict_options_local['axis']['fontsize'])
 
         # Secondary X-axis tickmarks?
-        if dict_options['axis']['tickmarks']['x2'][k] is not None:
-            x2 = dict_options['axis']['tickmarks']['x2'][k]
-            x_values = np.unique(df[x] * dict_options['multipliers']['x'])
+        if dict_options_local['axis']['tickmarks']['x2'][k] is not None:
+            x2 = dict_options_local['axis']['tickmarks']['x2'][k]
+            x_values = np.unique(df[x] * dict_options_local['multipliers']['x'])
             x2_values = np.unique(df[x2])
             ax2 = ax.twiny()
             ax2.set_xlim(ax.get_xlim()) # Set the same X-lims as the primary X-axis so that the tickmark values are aligned with the original X-values
             ax2.set_xticks(x_values)
             ax2.set_xticklabels(["{:,.0f}".format(x2) for x2 in x2_values], rotation=90)
-            ax2.set_xlabel(dict_options['labels'].get('x2', "")[k])
+            ax2.set_xlabel(dict_options_local['labels'].get('x2', "")[k])
 
         # Remove ticks and labels from the right plot as the axis is the same as on the left plot
-        if dict_options['axis']['remove_yaxis']:
+        if dict_options_local['axis']['remove_yaxis']:
             if np.mod(k, ncols) > 0:
                 # This is not the leftmost y axis, so remove it         
                 ax.yaxis.set_ticks([]); ax.yaxis.set_ticklabels([])
 
-    if dict_options['showtitle'] and dict_options['texts']['title'] is not None:
-        plt.suptitle(dict_options['texts']['title'])
+    if dict_options_local['showtitle'] and dict_options_local['texts']['title'] is not None:
+        plt.suptitle(dict_options_local['texts']['title'])
 
     return axes
 
