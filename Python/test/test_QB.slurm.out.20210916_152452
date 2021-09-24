@@ -1,0 +1,39 @@
+Thu Sep 16 15:24:51 CEST 2021
+/home/dmastrop/projects/Python/lib/estimators.py:3420: FutureWarning: from_items is deprecated. Please use DataFrame.from_dict(dict(items), ...) instead. DataFrame.from_dict(OrderedDict(items)) may be used to preserve the key order.
+  ('Blocking Time Estimate', self.blocking_time_estimate)])
+/home/dmastrop/projects/Python/lib/estimators.py:3306: FutureWarning: from_items is deprecated. Please use DataFrame.from_dict(dict(items), ...) instead. DataFrame.from_dict(OrderedDict(items)) may be used to preserve the key order.
+  return pd.DataFrame.from_items([('t', self.sk), ('P(T>t / s=1)', proba_surv_by_t)])
+test_QB.py:822: FutureWarning: from_items is deprecated. Please use DataFrame.from_dict(dict(items), ...) instead. DataFrame.from_dict(OrderedDict(items)) may be used to preserve the key order.
+  ('ratio_mc_fv_events', [dict_stats_mc.get('nevents') is None and np.nan or dict_stats_mc.get('nevents') / dict_stats_fv['nevents']]),
+/usr/lib64/python3.6/site-packages/matplotlib/pyplot.py:514: RuntimeWarning: More than 20 figures have been opened. Figures created through the pyplot interface (`matplotlib.pyplot.figure`) are retained until explicitly closed and may consume too much memory. (To control this warning, see the rcParam `figure.max_open_warning`).
+  max_open_warning, RuntimeWarning)
+Traceback (most recent call last):
+  File "test_QB.py", line 2099, in <module>
+    axes = plot_results_fv_mc(results, x, xlabel=xlabel, subset=results['K']==K, plot_mc=run_mc)
+  File "test_QB.py", line 1774, in plot_results_fv_mc
+    'texts': {'title': "Relative variability of {}".format(y)}
+  File "/home/dmastrop/projects/Python/lib/utils/plotting.py", line 458, in plot
+    legend_objects, legend_texts = plotting_func(ax, df, x, y, w=w, s=s, dict_options=dict_options_k)
+  File "/home/dmastrop/projects/Python/lib/utils/plotting.py", line 607, in plot_splines
+    splinefit = splrep(df[x]*dict_options['multipliers']['x'], df[y]*dict_options['multipliers']['y'], w=w, s=s)
+  File "/usr/lib64/python3.6/site-packages/scipy/interpolate/fitpack.py", line 289, in splrep
+    res = _impl.splrep(x, y, w, xb, xe, k, task, s, t, full_output, per, quiet)
+  File "/usr/lib64/python3.6/site-packages/scipy/interpolate/_fitpack_impl.py", line 463, in splrep
+    raise TypeError('m > k must hold')
+TypeError: m > k must hold
+Directory:
+/home/dmastrop/projects
+has been prepended to the module search path.
+User arguments: ['test_QB.py', '3', 'J', '8', '7']
+Parsed user arguments: ['test_QB.py', '3', 'J', '8', '7', 1, 'save']
+
+Execution parameters:
+nservers=3
+var_analysis=J
+replications=8
+tests2run=[7]
+run_mc=False
+save_results=True
+Log file '../../RL-002-QueueBlocking/logs/estimates_vs_J_20210916_152452.log' has been open for output.
+Started at: 2021-09-16 15:24:52
+Thu Sep 16 16:44:22 CEST 2021

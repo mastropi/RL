@@ -1,0 +1,1808 @@
+Started at: 2021-09-16 19:20:28
+System: # servers = 3, rhos = [0.4, 0.75, 0.35]
+
+
+---> NEW K (Queue's capacity = 60)
+---> (nparticles=6400, nmeantimes=[1000])
+Computing TRUE blocking probability... --> 0.3 sec
+Pr(K)=0.000001%
+
+	---> NEW BUFFER SIZE (BSA=1, BIC=3)
+******************!!!!!!! Simulation 1 of 8 !!!!!!*****************
+	K=60, nparticles=6400, nmeantimes=1000, buffer_size_activation=1, #burn-in absorption cycles=3
+
+		### Replication 1 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1313)...
+Total number of activation states: 1 (100.000000% <= p(S) <= 100.000%) (Nmin to expect at 1 case in state with smallest p: Nmin=1)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=6400 particles: (1.0, 21.3, 315.2) ((0.1%, 1.5%, 22.1%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=233.1 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=233.1)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 6.8, 212.1)
+	--> Number of observations for P(T>t) estimation from FV simulation: 6400 (N=6400)
+execution time: 3879.7 sec, 64.7 min
+		P(K) estimated by FV (integral=0 (n=6400), E(T)=6.8 (n=6400)): 0.000000%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 1626310.1 (avg = 254.1 per particle)
+- #events = 5236825 (avg = 818 per particle)
+
+---> Execution time MC + FV: 3879.8 sec, 64.7 min
+
+		### Replication 2 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1323)...
+Total number of activation states: 1 (100.000000% <= p(S) <= 100.000%) (Nmin to expect at 1 case in state with smallest p: Nmin=1)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=6400 particles: (0.9, 21.0, 552.2) ((0.1%, 1.5%, 38.7%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=345.9 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=345.9)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 6.8, 314.7)
+	--> Number of observations for P(T>t) estimation from FV simulation: 6400 (N=6400)
+execution time: 5721.4 sec, 95.4 min
+		P(K) estimated by FV (integral=0 (n=6400), E(T)=6.8 (n=6400)): 0.000000%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 2346142.2 (avg = 366.6 per particle)
+- #events = 7583112 (avg = 1185 per particle)
+
+---> Execution time MC + FV: 5724.1 sec, 95.4 min
+
+		### Replication 3 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1333)...
+Total number of activation states: 1 (100.000000% <= p(S) <= 100.000%) (Nmin to expect at 1 case in state with smallest p: Nmin=1)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=6400 particles: (1.1, 21.2, 230.1) ((0.1%, 1.5%, 16.1%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=270.7 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=270.7)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 7.2, 248.6)
+	--> Number of observations for P(T>t) estimation from FV simulation: 6400 (N=6400)
+execution time: 4530.9 sec, 75.5 min
+		P(K) estimated by FV (integral=0 (n=6400), E(T)=7.2 (n=6400)): 0.000000%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 1866323.9 (avg = 291.6 per particle)
+- #events = 6026872 (avg = 942 per particle)
+
+---> Execution time MC + FV: 4533.7 sec, 75.6 min
+
+		### Replication 4 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1343)...
+Total number of activation states: 1 (100.000000% <= p(S) <= 100.000%) (Nmin to expect at 1 case in state with smallest p: Nmin=1)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=6400 particles: (0.7, 21.0, 298.1) ((0.0%, 1.5%, 20.9%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=270.4 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=270.4)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 6.9, 246.3)
+	--> Number of observations for P(T>t) estimation from FV simulation: 6400 (N=6400)
+execution time: 4513.9 sec, 75.2 min
+		P(K) estimated by FV (integral=0 (n=6400), E(T)=6.9 (n=6400)): 0.000000%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 1862664.0 (avg = 291.0 per particle)
+- #events = 6009762 (avg = 939 per particle)
+
+---> Execution time MC + FV: 4516.4 sec, 75.3 min
+
+		### Replication 5 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1353)...
+Total number of activation states: 1 (100.000000% <= p(S) <= 100.000%) (Nmin to expect at 1 case in state with smallest p: Nmin=1)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=6400 particles: (0.8, 21.2, 376.3) ((0.1%, 1.5%, 26.3%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=240.4 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=240.4)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 6.8, 218.7)
+	--> Number of observations for P(T>t) estimation from FV simulation: 6400 (N=6400)
+execution time: 4055.4 sec, 67.6 min
+		P(K) estimated by FV (integral=0 (n=6400), E(T)=6.8 (n=6400)): 0.000000%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 1672494.5 (avg = 261.3 per particle)
+- #events = 5396376 (avg = 843 per particle)
+
+---> Execution time MC + FV: 4057.9 sec, 67.6 min
+
+		### Replication 6 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1363)...
+Total number of activation states: 1 (100.000000% <= p(S) <= 100.000%) (Nmin to expect at 1 case in state with smallest p: Nmin=1)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=6400 particles: (0.9, 21.3, 327.3) ((0.1%, 1.5%, 22.9%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=273.2 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=273.2)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 6.7, 248.4)
+	--> Number of observations for P(T>t) estimation from FV simulation: 6400 (N=6400)
+execution time: 4560.4 sec, 76.0 min
+		P(K) estimated by FV (integral=0 (n=6400), E(T)=6.7 (n=6400)): 0.000000%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 1882546.3 (avg = 294.1 per particle)
+- #events = 6076485 (avg = 949 per particle)
+
+---> Execution time MC + FV: 4562.4 sec, 76.0 min
+
+		### Replication 7 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1373)...
+Total number of activation states: 1 (100.000000% <= p(S) <= 100.000%) (Nmin to expect at 1 case in state with smallest p: Nmin=1)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=6400 particles: (0.9, 20.7, 281.7) ((0.1%, 1.5%, 19.7%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=283.0 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=283.0)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 6.6, 258.1)
+	--> Number of observations for P(T>t) estimation from FV simulation: 6400 (N=6400)
+execution time: 4716.5 sec, 78.6 min
+		P(K) estimated by FV (integral=0 (n=6400), E(T)=6.6 (n=6400)): 0.000000%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 1942043.4 (avg = 303.4 per particle)
+- #events = 6272764 (avg = 980 per particle)
+
+---> Execution time MC + FV: 4719.1 sec, 78.7 min
+
+		### Replication 8 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1383)...
+Total number of activation states: 1 (100.000000% <= p(S) <= 100.000%) (Nmin to expect at 1 case in state with smallest p: Nmin=1)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=6400 particles: (0.9, 21.1, 268.8) ((0.1%, 1.5%, 18.8%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=323.7 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=323.7)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 6.7, 294.4)
+	--> Number of observations for P(T>t) estimation from FV simulation: 6400 (N=6400)
+execution time: 5366.6 sec, 89.4 min
+		P(K) estimated by FV (integral=0 (n=6400), E(T)=6.7 (n=6400)): 0.000000%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 2204736.8 (avg = 344.5 per particle)
+- #events = 7120967 (avg = 1113 per particle)
+
+---> Execution time MC + FV: 5368.9 sec, 89.5 min
+
+	---> NEW BUFFER SIZE (BSA=3, BIC=3)
+******************!!!!!!! Simulation 2 of 8 !!!!!!*****************
+	K=60, nparticles=6400, nmeantimes=1000, buffer_size_activation=3, #burn-in absorption cycles=3
+
+		### Replication 1 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1313)...
+Total number of activation states: 6 (7.915994% <= p(S) <= 36.349%) (Nmin to expect at 1 case in state with smallest p: Nmin=13)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=6400 particles: (0.6, 15.1, 268.9) ((0.0%, 1.1%, 18.8%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=205.4 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=205.4)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 4.4, 187.0)
+	--> Number of observations for P(T>t) estimation from FV simulation: 6400 (N=6400)
+execution time: 3480.2 sec, 58.0 min
+		P(K) estimated by FV (integral=0 (n=6400), E(T)=4.4 (n=6400)): 0.000000%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 1409265.0 (avg = 220.2 per particle)
+- #events = 4591645 (avg = 717 per particle)
+
+---> Execution time MC + FV: 3483.2 sec, 58.1 min
+
+		### Replication 2 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1323)...
+Total number of activation states: 6 (7.915994% <= p(S) <= 36.349%) (Nmin to expect at 1 case in state with smallest p: Nmin=13)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=6400 particles: (0.7, 15.5, 303.1) ((0.1%, 1.1%, 21.2%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=351.5 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=351.5)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 4.6, 320.0)
+	--> Number of observations for P(T>t) estimation from FV simulation: 6400 (N=6400)
+execution time: 5747.9 sec, 95.8 min
+		P(K) estimated by FV (integral=8.52065e-07 (n=6400), E(T)=4.6 (n=6400)): 0.000019%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 2347178.0 (avg = 366.7 per particle)
+- #events = 7657124 (avg = 1196 per particle)
+
+---> Execution time MC + FV: 5750.1 sec, 95.8 min
+
+		### Replication 3 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1333)...
+Total number of activation states: 6 (7.915994% <= p(S) <= 36.349%) (Nmin to expect at 1 case in state with smallest p: Nmin=13)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=6400 particles: (0.7, 15.0, 238.7) ((0.0%, 1.1%, 16.7%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=226.0 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=226.0)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 4.4, 207.9)
+	--> Number of observations for P(T>t) estimation from FV simulation: 6400 (N=6400)
+execution time: 3790.1 sec, 63.2 min
+		P(K) estimated by FV (integral=0 (n=6400), E(T)=4.4 (n=6400)): 0.000000%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 1540441.3 (avg = 240.7 per particle)
+- #events = 5023365 (avg = 785 per particle)
+
+---> Execution time MC + FV: 3793.3 sec, 63.2 min
+
+		### Replication 4 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1343)...
+Total number of activation states: 6 (7.915994% <= p(S) <= 36.349%) (Nmin to expect at 1 case in state with smallest p: Nmin=13)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=6400 particles: (0.7, 15.0, 230.0) ((0.0%, 1.0%, 16.1%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=145.5 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=145.5)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 4.3, 132.7)
+	--> Number of observations for P(T>t) estimation from FV simulation: 6400 (N=6400)
+execution time: 2546.1 sec, 42.4 min
+		P(K) estimated by FV (integral=0 (n=6400), E(T)=4.3 (n=6400)): 0.000000%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 1025092.1 (avg = 160.2 per particle)
+- #events = 3341289 (avg = 522 per particle)
+
+---> Execution time MC + FV: 2548.4 sec, 42.5 min
+
+		### Replication 5 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1353)...
+Total number of activation states: 6 (7.915994% <= p(S) <= 36.349%) (Nmin to expect at 1 case in state with smallest p: Nmin=13)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=6400 particles: (0.4, 15.0, 227.2) ((0.0%, 1.1%, 15.9%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=254.9 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=254.9)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 4.5, 233.5)
+	--> Number of observations for P(T>t) estimation from FV simulation: 6400 (N=6400)
+execution time: 4262.6 sec, 71.0 min
+		P(K) estimated by FV (integral=2.73301e-07 (n=6400), E(T)=4.5 (n=6400)): 0.000006%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 1725486.1 (avg = 269.6 per particle)
+- #events = 5626850 (avg = 879 per particle)
+
+---> Execution time MC + FV: 4264.1 sec, 71.1 min
+
+		### Replication 6 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1363)...
+Total number of activation states: 6 (7.915994% <= p(S) <= 36.349%) (Nmin to expect at 1 case in state with smallest p: Nmin=13)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=6400 particles: (0.5, 15.1, 215.7) ((0.0%, 1.1%, 15.1%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=188.1 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=188.1)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 4.3, 171.3)
+	--> Number of observations for P(T>t) estimation from FV simulation: 6400 (N=6400)
+execution time: 3212.1 sec, 53.5 min
+		P(K) estimated by FV (integral=0 (n=6400), E(T)=4.3 (n=6400)): 0.000000%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 1298360.4 (avg = 202.9 per particle)
+- #events = 4234699 (avg = 662 per particle)
+
+---> Execution time MC + FV: 3214.4 sec, 53.6 min
+
+		### Replication 7 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1373)...
+Total number of activation states: 6 (7.915994% <= p(S) <= 36.349%) (Nmin to expect at 1 case in state with smallest p: Nmin=13)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=6400 particles: (0.5, 15.0, 282.6) ((0.0%, 1.1%, 19.8%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=184.1 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=184.1)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 4.4, 167.4)
+	--> Number of observations for P(T>t) estimation from FV simulation: 6400 (N=6400)
+execution time: 3153.1 sec, 52.6 min
+		P(K) estimated by FV (integral=0 (n=6400), E(T)=4.4 (n=6400)): 0.000000%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 1272647.5 (avg = 198.9 per particle)
+- #events = 4147266 (avg = 648 per particle)
+
+---> Execution time MC + FV: 3154.9 sec, 52.6 min
+
+		### Replication 8 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1383)...
+Total number of activation states: 6 (7.915994% <= p(S) <= 36.349%) (Nmin to expect at 1 case in state with smallest p: Nmin=13)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=6400 particles: (0.8, 15.0, 199.7) ((0.1%, 1.0%, 14.0%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=211.5 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=211.5)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 4.4, 195.4)
+	--> Number of observations for P(T>t) estimation from FV simulation: 6400 (N=6400)
+execution time: 3576.2 sec, 59.6 min
+		P(K) estimated by FV (integral=0 (n=6400), E(T)=4.4 (n=6400)): 0.000000%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 1447030.1 (avg = 226.1 per particle)
+- #events = 4719719 (avg = 737 per particle)
+
+---> Execution time MC + FV: 3578.1 sec, 59.6 min
+
+	---> NEW BUFFER SIZE (BSA=5, BIC=3)
+******************!!!!!!! Simulation 3 of 8 !!!!!!*****************
+	K=60, nparticles=6400, nmeantimes=1000, buffer_size_activation=5, #burn-in absorption cycles=3
+
+		### Replication 1 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1313)...
+Total number of activation states: 15 (1.329008% <= p(S) <= 28.022%) (Nmin to expect at 1 case in state with smallest p: Nmin=75)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=6400 particles: (0.7, 21.8, 338.2) ((0.0%, 1.5%, 23.7%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=191.8 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=191.8)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 6.1, 174.6)
+	--> Number of observations for P(T>t) estimation from FV simulation: 6400 (N=6400)
+execution time: 3374.8 sec, 56.2 min
+		P(K) estimated by FV (integral=2.46651e-08 (n=6400), E(T)=6.1 (n=6400)): 0.000000%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 1365047.3 (avg = 213.3 per particle)
+- #events = 4442371 (avg = 694 per particle)
+
+---> Execution time MC + FV: 3376.7 sec, 56.3 min
+
+		### Replication 2 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1323)...
+Total number of activation states: 15 (1.329008% <= p(S) <= 28.022%) (Nmin to expect at 1 case in state with smallest p: Nmin=75)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=6400 particles: (0.8, 22.0, 180.6) ((0.1%, 1.5%, 12.6%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=207.6 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=207.6)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 6.0, 193.6)
+	--> Number of observations for P(T>t) estimation from FV simulation: 6400 (N=6400)
+execution time: 3624.3 sec, 60.4 min
+		P(K) estimated by FV (integral=0 (n=6400), E(T)=6.0 (n=6400)): 0.000000%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 1467694.1 (avg = 229.3 per particle)
+- #events = 4781420 (avg = 747 per particle)
+
+---> Execution time MC + FV: 3626.1 sec, 60.4 min
+
+		### Replication 3 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1333)...
+Total number of activation states: 15 (1.329008% <= p(S) <= 28.022%) (Nmin to expect at 1 case in state with smallest p: Nmin=75)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=6400 particles: (0.8, 22.4, 307.5) ((0.1%, 1.6%, 21.5%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=176.7 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=176.7)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 6.2, 184.4)
+	--> Number of observations for P(T>t) estimation from FV simulation: 6400 (N=6400)
+execution time: 3143.5 sec, 52.4 min
+		P(K) estimated by FV (integral=0 (n=6400), E(T)=6.2 (n=6400)): 0.000000%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 1272472.0 (avg = 198.8 per particle)
+- #events = 4140646 (avg = 647 per particle)
+
+---> Execution time MC + FV: 3145.5 sec, 52.4 min
+
+		### Replication 4 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1343)...
+Total number of activation states: 15 (1.329008% <= p(S) <= 28.022%) (Nmin to expect at 1 case in state with smallest p: Nmin=75)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=6400 particles: (0.4, 21.9, 206.6) ((0.0%, 1.5%, 14.5%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=220.0 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=220.0)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 5.9, 201.7)
+	--> Number of observations for P(T>t) estimation from FV simulation: 6400 (N=6400)
+execution time: 3820.7 sec, 63.7 min
+		P(K) estimated by FV (integral=1.1065e-07 (n=6400), E(T)=5.9 (n=6400)): 0.000002%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 1546058.4 (avg = 241.6 per particle)
+- #events = 5031514 (avg = 786 per particle)
+
+---> Execution time MC + FV: 3822.5 sec, 63.7 min
+
+		### Replication 5 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1353)...
+Total number of activation states: 15 (1.329008% <= p(S) <= 28.022%) (Nmin to expect at 1 case in state with smallest p: Nmin=75)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=6400 particles: (0.8, 21.9, 245.0) ((0.1%, 1.5%, 17.1%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=314.8 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=314.8)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 5.8, 286.5)
+	--> Number of observations for P(T>t) estimation from FV simulation: 6400 (N=6400)
+execution time: 5271.4 sec, 87.9 min
+		P(K) estimated by FV (integral=2.40554e-07 (n=6400), E(T)=5.8 (n=6400)): 0.000004%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 2153409.7 (avg = 336.5 per particle)
+- #events = 7019482 (avg = 1097 per particle)
+
+---> Execution time MC + FV: 5273.2 sec, 87.9 min
+
+		### Replication 6 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1363)...
+Total number of activation states: 15 (1.329008% <= p(S) <= 28.022%) (Nmin to expect at 1 case in state with smallest p: Nmin=75)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=6400 particles: (0.6, 22.1, 302.2) ((0.0%, 1.5%, 21.2%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=142.8 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=142.8)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 6.0, 133.4)
+	--> Number of observations for P(T>t) estimation from FV simulation: 6400 (N=6400)
+execution time: 2620.1 sec, 43.7 min
+		P(K) estimated by FV (integral=0 (n=6400), E(T)=6.0 (n=6400)): 0.000000%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 1052943.1 (avg = 164.5 per particle)
+- #events = 3427307 (avg = 536 per particle)
+
+---> Execution time MC + FV: 2623.0 sec, 43.7 min
+
+		### Replication 7 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1373)...
+Total number of activation states: 15 (1.329008% <= p(S) <= 28.022%) (Nmin to expect at 1 case in state with smallest p: Nmin=75)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=6400 particles: (0.8, 21.7, 203.5) ((0.1%, 1.5%, 14.2%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=318.7 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=318.7)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 6.1, 289.9)
+	--> Number of observations for P(T>t) estimation from FV simulation: 6400 (N=6400)
+execution time: 5360.9 sec, 89.3 min
+		P(K) estimated by FV (integral=2.19335e-06 (n=6400), E(T)=6.1 (n=6400)): 0.000036%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 2176094.5 (avg = 340.0 per particle)
+- #events = 7100498 (avg = 1109 per particle)
+
+---> Execution time MC + FV: 5362.2 sec, 89.4 min
+
+		### Replication 8 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1383)...
+Total number of activation states: 15 (1.329008% <= p(S) <= 28.022%) (Nmin to expect at 1 case in state with smallest p: Nmin=75)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=6400 particles: (0.8, 21.9, 186.2) ((0.1%, 1.5%, 13.0%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=217.1 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=217.1)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 6.1, 212.8)
+	--> Number of observations for P(T>t) estimation from FV simulation: 6400 (N=6400)
+execution time: 3755.0 sec, 62.6 min
+		P(K) estimated by FV (integral=3.69848e-08 (n=6400), E(T)=6.1 (n=6400)): 0.000001%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 1527568.9 (avg = 238.7 per particle)
+- #events = 4973416 (avg = 777 per particle)
+
+---> Execution time MC + FV: 3757.6 sec, 62.6 min
+
+	---> NEW BUFFER SIZE (BSA=7, BIC=3)
+******************!!!!!!! Simulation 4 of 8 !!!!!!*****************
+	K=60, nparticles=6400, nmeantimes=1000, buffer_size_activation=7, #burn-in absorption cycles=3
+
+		### Replication 1 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1313)...
+Total number of activation states: 28 (0.266840% <= p(S) <= 25.835%) (Nmin to expect at 1 case in state with smallest p: Nmin=375)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=6400 particles: (1.0, 38.4, 325.8) ((0.1%, 2.7%, 22.8%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=95.6 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=95.6)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 9.8, 197.2)
+	--> Number of observations for P(T>t) estimation from FV simulation: 6400 (N=6400)
+execution time: 2106.6 sec, 35.1 min
+		P(K) estimated by FV (integral=0 (n=6400), E(T)=9.8 (n=6400)): 0.000000%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 855821.2 (avg = 133.7 per particle)
+- #events = 2754351 (avg = 430 per particle)
+
+---> Execution time MC + FV: 2108.4 sec, 35.1 min
+
+		### Replication 2 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1323)...
+Total number of activation states: 28 (0.266840% <= p(S) <= 25.835%) (Nmin to expect at 1 case in state with smallest p: Nmin=375)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=6400 particles: (0.8, 37.8, 290.4) ((0.1%, 2.6%, 20.3%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=188.4 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=188.4)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 10.0, 171.6)
+	--> Number of observations for P(T>t) estimation from FV simulation: 6400 (N=6400)
+execution time: 3564.7 sec, 59.4 min
+		P(K) estimated by FV (integral=0 (n=6400), E(T)=10.0 (n=6400)): 0.000000%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 1445349.4 (avg = 225.8 per particle)
+- #events = 4682994 (avg = 732 per particle)
+
+---> Execution time MC + FV: 3565.7 sec, 59.4 min
+
+		### Replication 3 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1333)...
+Total number of activation states: 28 (0.266840% <= p(S) <= 25.835%) (Nmin to expect at 1 case in state with smallest p: Nmin=375)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=6400 particles: (0.6, 37.1, 262.0) ((0.0%, 2.6%, 18.3%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=161.0 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=161.0)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 9.8, 209.6)
+	--> Number of observations for P(T>t) estimation from FV simulation: 6400 (N=6400)
+execution time: 3116.2 sec, 51.9 min
+		P(K) estimated by FV (integral=0 (n=6400), E(T)=9.8 (n=6400)): 0.000000%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 1265545.0 (avg = 197.7 per particle)
+- #events = 4094662 (avg = 640 per particle)
+
+---> Execution time MC + FV: 3118.2 sec, 52.0 min
+
+		### Replication 4 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1343)...
+Total number of activation states: 28 (0.266840% <= p(S) <= 25.835%) (Nmin to expect at 1 case in state with smallest p: Nmin=375)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=6400 particles: (0.2, 37.6, 414.4) ((0.0%, 2.6%, 29.0%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=137.3 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=137.3)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 10.1, 218.8)
+	--> Number of observations for P(T>t) estimation from FV simulation: 6400 (N=6400)
+execution time: 2748.6 sec, 45.8 min
+		P(K) estimated by FV (integral=0 (n=6400), E(T)=10.1 (n=6400)): 0.000000%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 1117055.5 (avg = 174.5 per particle)
+- #events = 3608577 (avg = 564 per particle)
+
+---> Execution time MC + FV: 2750.3 sec, 45.8 min
+
+		### Replication 5 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1353)...
+Total number of activation states: 28 (0.266840% <= p(S) <= 25.835%) (Nmin to expect at 1 case in state with smallest p: Nmin=375)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=6400 particles: (0.6, 37.3, 281.5) ((0.0%, 2.6%, 19.7%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=192.2 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=192.2)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 10.0, 174.9)
+	--> Number of observations for P(T>t) estimation from FV simulation: 6400 (N=6400)
+execution time: 3619.7 sec, 60.3 min
+		P(K) estimated by FV (integral=0 (n=6400), E(T)=10.0 (n=6400)): 0.000000%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 1467165.5 (avg = 229.2 per particle)
+- #events = 4754520 (avg = 743 per particle)
+
+---> Execution time MC + FV: 3621.1 sec, 60.4 min
+
+		### Replication 6 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1363)...
+Total number of activation states: 28 (0.266840% <= p(S) <= 25.835%) (Nmin to expect at 1 case in state with smallest p: Nmin=375)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=6400 particles: (0.4, 38.1, 330.4) ((0.0%, 2.7%, 23.1%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=122.1 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=122.1)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 9.9, 172.5)
+	--> Number of observations for P(T>t) estimation from FV simulation: 6400 (N=6400)
+execution time: 2522.2 sec, 42.0 min
+		P(K) estimated by FV (integral=0 (n=6400), E(T)=9.9 (n=6400)): 0.000000%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 1022890.8 (avg = 159.8 per particle)
+- #events = 3300821 (avg = 516 per particle)
+
+---> Execution time MC + FV: 2524.2 sec, 42.1 min
+
+		### Replication 7 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1373)...
+Total number of activation states: 28 (0.266840% <= p(S) <= 25.835%) (Nmin to expect at 1 case in state with smallest p: Nmin=375)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=6400 particles: (0.8, 37.8, 365.9) ((0.1%, 2.6%, 25.6%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=198.1 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=198.1)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 9.9, 219.5)
+	--> Number of observations for P(T>t) estimation from FV simulation: 6400 (N=6400)
+execution time: 3714.5 sec, 61.9 min
+		P(K) estimated by FV (integral=0 (n=6400), E(T)=9.9 (n=6400)): 0.000000%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 1507971.3 (avg = 235.6 per particle)
+- #events = 4888766 (avg = 764 per particle)
+
+---> Execution time MC + FV: 3715.6 sec, 61.9 min
+
+		### Replication 8 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1383)...
+Total number of activation states: 28 (0.266840% <= p(S) <= 25.835%) (Nmin to expect at 1 case in state with smallest p: Nmin=375)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=6400 particles: (0.7, 37.2, 262.2) ((0.0%, 2.6%, 18.4%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=118.4 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=118.4)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 9.8, 169.4)
+	--> Number of observations for P(T>t) estimation from FV simulation: 6400 (N=6400)
+execution time: 2445.8 sec, 40.8 min
+		P(K) estimated by FV (integral=0 (n=6400), E(T)=9.8 (n=6400)): 0.000000%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 993887.8 (avg = 155.3 per particle)
+- #events = 3208866 (avg = 501 per particle)
+
+---> Execution time MC + FV: 2447.4 sec, 40.8 min
+
+	---> NEW BUFFER SIZE (BSA=12, BIC=2)
+******************!!!!!!! Simulation 5 of 8 !!!!!!*****************
+	K=60, nparticles=6400, nmeantimes=1000, buffer_size_activation=12, #burn-in absorption cycles=2
+
+		### Replication 1 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1313)...
+Total number of activation states: 78 (0.005700% <= p(S) <= 24.937%) (Nmin to expect at 1 case in state with smallest p: Nmin=17542)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=6395 particles: (0.1, 121.3, 1419.2) ((0.0%, 8.5%, 99.3%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=183.5 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=183.5)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 42.1, 1426.7)
+	--> Number of observations for P(T>t) estimation from FV simulation: 6395 (N=6400)
+execution time: 4592.3 sec, 76.5 min
+		P(K) estimated by FV (integral=2.20508e-07 (n=6395), E(T)=42.1 (n=6395)): 0.000001%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 1953779.1 (avg = 305.3 per particle)
+- #events = 6192893 (avg = 968 per particle)
+
+---> Execution time MC + FV: 4593.5 sec, 76.6 min
+
+		### Replication 2 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1323)...
+Total number of activation states: 78 (0.005700% <= p(S) <= 24.937%) (Nmin to expect at 1 case in state with smallest p: Nmin=17542)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=6398 particles: (0.3, 115.0, 1382.7) ((0.0%, 8.0%, 96.8%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=168.8 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=168.8)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 37.6, 1428.6)
+	--> Number of observations for P(T>t) estimation from FV simulation: 6398 (N=6400)
+execution time: 4306.9 sec, 71.8 min
+		P(K) estimated by FV (integral=0 (n=6398), E(T)=37.6 (n=6398)): 0.000000%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 1816033.6 (avg = 283.8 per particle)
+- #events = 5765244 (avg = 901 per particle)
+
+---> Execution time MC + FV: 4308.7 sec, 71.8 min
+
+		### Replication 3 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1333)...
+Total number of activation states: 78 (0.005700% <= p(S) <= 24.937%) (Nmin to expect at 1 case in state with smallest p: Nmin=17542)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=6398 particles: (0.3, 119.2, 1397.3) ((0.0%, 8.3%, 97.8%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=287.7 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=287.7)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 41.6, 992.7)
+	--> Number of observations for P(T>t) estimation from FV simulation: 6398 (N=6400)
+execution time: 6201.7 sec, 103.4 min
+		P(K) estimated by FV (integral=6.88126e-07 (n=6398), E(T)=41.6 (n=6398)): 0.000002%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 2604041.5 (avg = 406.9 per particle)
+- #events = 8327382 (avg = 1301 per particle)
+
+---> Execution time MC + FV: 6203.0 sec, 103.4 min
+
+		### Replication 4 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1343)...
+Total number of activation states: 78 (0.005700% <= p(S) <= 24.937%) (Nmin to expect at 1 case in state with smallest p: Nmin=17542)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=6397 particles: (0.3, 117.8, 1424.0) ((0.0%, 8.2%, 99.7%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=197.2 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=197.2)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 39.5, 1428.6)
+	--> Number of observations for P(T>t) estimation from FV simulation: 6397 (N=6400)
+execution time: 4785.3 sec, 79.8 min
+		P(K) estimated by FV (integral=0 (n=6397), E(T)=39.5 (n=6397)): 0.000000%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 2016887.5 (avg = 315.1 per particle)
+- #events = 6413686 (avg = 1002 per particle)
+
+---> Execution time MC + FV: 4787.9 sec, 79.8 min
+
+		### Replication 5 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1353)...
+Total number of activation states: 78 (0.005700% <= p(S) <= 24.937%) (Nmin to expect at 1 case in state with smallest p: Nmin=17542)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=6396 particles: (0.2, 118.1, 1408.0) ((0.0%, 8.3%, 98.6%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=156.9 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=156.9)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 40.7, 1428.6)
+	--> Number of observations for P(T>t) estimation from FV simulation: 6396 (N=6400)
+execution time: 4128.0 sec, 68.8 min
+		P(K) estimated by FV (integral=2.46027e-07 (n=6396), E(T)=40.7 (n=6396)): 0.000001%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 1762575.2 (avg = 275.4 per particle)
+- #events = 5580525 (avg = 872 per particle)
+
+---> Execution time MC + FV: 4129.9 sec, 68.8 min
+
+		### Replication 6 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1363)...
+Total number of activation states: 78 (0.005700% <= p(S) <= 24.937%) (Nmin to expect at 1 case in state with smallest p: Nmin=17542)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=6400 particles: (0.3, 114.6, 1262.2) ((0.0%, 8.0%, 88.4%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=252.9 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=252.9)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 40.8, 1126.2)
+	--> Number of observations for P(T>t) estimation from FV simulation: 6400 (N=6400)
+execution time: 5600.8 sec, 93.3 min
+		P(K) estimated by FV (integral=4.56938e-06 (n=6400), E(T)=40.8 (n=6400)): 0.000011%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 2349681.0 (avg = 367.1 per particle)
+- #events = 7510370 (avg = 1173 per particle)
+
+---> Execution time MC + FV: 5602.4 sec, 93.4 min
+
+		### Replication 7 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1373)...
+Total number of activation states: 78 (0.005700% <= p(S) <= 24.937%) (Nmin to expect at 1 case in state with smallest p: Nmin=17542)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=6398 particles: (0.3, 117.8, 1379.5) ((0.0%, 8.2%, 96.6%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=137.9 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=137.9)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 40.8, 1186.6)
+	--> Number of observations for P(T>t) estimation from FV simulation: 6398 (N=6400)
+execution time: 3865.7 sec, 64.4 min
+		P(K) estimated by FV (integral=0 (n=6398), E(T)=40.8 (n=6398)): 0.000000%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 1636547.1 (avg = 255.7 per particle)
+- #events = 5172682 (avg = 808 per particle)
+
+---> Execution time MC + FV: 3868.3 sec, 64.5 min
+
+		### Replication 8 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1383)...
+Total number of activation states: 78 (0.005700% <= p(S) <= 24.937%) (Nmin to expect at 1 case in state with smallest p: Nmin=17542)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=6397 particles: (0.3, 122.5, 1370.8) ((0.0%, 8.6%, 96.0%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=148.8 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=148.8)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 43.3, 1427.5)
+	--> Number of observations for P(T>t) estimation from FV simulation: 6397 (N=6400)
+execution time: 4085.7 sec, 68.1 min
+		P(K) estimated by FV (integral=0 (n=6397), E(T)=43.3 (n=6397)): 0.000000%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 1737792.8 (avg = 271.5 per particle)
+- #events = 5491261 (avg = 858 per particle)
+
+---> Execution time MC + FV: 4087.1 sec, 68.1 min
+
+	---> NEW BUFFER SIZE (BSA=15, BIC=2)
+******************!!!!!!! Simulation 6 of 8 !!!!!!*****************
+	K=60, nparticles=6400, nmeantimes=1000, buffer_size_activation=15, #burn-in absorption cycles=2
+
+		### Replication 1 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1313)...
+Total number of activation states: 120 (0.000578% <= p(S) <= 24.897%) (Nmin to expect at 1 case in state with smallest p: Nmin=172888)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=6154 particles: (0.3, 213.6, 1422.9) ((0.0%, 15.0%, 99.6%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=184.2 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=184.2)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 107.0, 1428.6)
+	--> Number of observations for P(T>t) estimation from FV simulation: 6154 (N=6400)
+execution time: 6359.6 sec, 106.0 min
+		P(K) estimated by FV (integral=5.35402e-07 (n=6154), E(T)=107.0 (n=6154)): 0.000001%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 2797644.0 (avg = 437.1 per particle)
+- #events = 8717213 (avg = 1362 per particle)
+
+---> Execution time MC + FV: 6361.2 sec, 106.0 min
+
+		### Replication 2 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1323)...
+Total number of activation states: 120 (0.000578% <= p(S) <= 24.897%) (Nmin to expect at 1 case in state with smallest p: Nmin=172888)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=6160 particles: (0.2, 211.1, 1428.3) ((0.0%, 14.8%, 100.0%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=145.0 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=145.0)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 109.7, 1428.6)
+	--> Number of observations for P(T>t) estimation from FV simulation: 6160 (N=6400)
+execution time: 5769.0 sec, 96.1 min
+		P(K) estimated by FV (integral=1.23703e-09 (n=6160), E(T)=109.7 (n=6160)): 0.000000%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 2534126.5 (avg = 396.0 per particle)
+- #events = 7866403 (avg = 1229 per particle)
+
+---> Execution time MC + FV: 5770.5 sec, 96.2 min
+
+		### Replication 3 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1333)...
+Total number of activation states: 120 (0.000578% <= p(S) <= 24.897%) (Nmin to expect at 1 case in state with smallest p: Nmin=172888)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=6165 particles: (0.3, 216.4, 1428.4) ((0.0%, 15.1%, 100.0%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=395.4 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=395.4)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 110.3, 1428.6)
+	--> Number of observations for P(T>t) estimation from FV simulation: 6165 (N=6400)
+execution time: 9494.5 sec, 158.2 min
+		P(K) estimated by FV (integral=4.76062e-06 (n=6165), E(T)=110.3 (n=6165)): 0.000004%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 4105746.9 (avg = 641.5 per particle)
+- #events = 12997418 (avg = 2031 per particle)
+
+---> Execution time MC + FV: 9496.0 sec, 158.3 min
+
+		### Replication 4 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1343)...
+Total number of activation states: 120 (0.000578% <= p(S) <= 24.897%) (Nmin to expect at 1 case in state with smallest p: Nmin=172888)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=6151 particles: (0.3, 219.1, 1425.9) ((0.0%, 15.3%, 99.8%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=179.2 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=179.2)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 111.1, 1428.6)
+	--> Number of observations for P(T>t) estimation from FV simulation: 6151 (N=6400)
+execution time: 6431.3 sec, 107.2 min
+		P(K) estimated by FV (integral=9.52068e-09 (n=6151), E(T)=111.1 (n=6151)): 0.000000%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 2803088.2 (avg = 438.0 per particle)
+- #events = 8730962 (avg = 1364 per particle)
+
+---> Execution time MC + FV: 6434.6 sec, 107.2 min
+
+		### Replication 5 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1353)...
+Total number of activation states: 120 (0.000578% <= p(S) <= 24.897%) (Nmin to expect at 1 case in state with smallest p: Nmin=172888)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=6127 particles: (0.3, 213.4, 1425.0) ((0.0%, 14.9%, 99.8%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=148.9 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=148.9)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 114.3, 1428.6)
+	--> Number of observations for P(T>t) estimation from FV simulation: 6127 (N=6400)
+execution time: 5892.8 sec, 98.2 min
+		P(K) estimated by FV (integral=2.091e-07 (n=6127), E(T)=114.3 (n=6127)): 0.000000%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 2607701.1 (avg = 407.5 per particle)
+- #events = 8090495 (avg = 1264 per particle)
+
+---> Execution time MC + FV: 5894.6 sec, 98.2 min
+
+		### Replication 6 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1363)...
+Total number of activation states: 120 (0.000578% <= p(S) <= 24.897%) (Nmin to expect at 1 case in state with smallest p: Nmin=172888)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=6135 particles: (0.3, 209.7, 1428.3) ((0.0%, 14.7%, 100.0%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=209.1 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=209.1)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 108.0, 1428.6)
+	--> Number of observations for P(T>t) estimation from FV simulation: 6135 (N=6400)
+execution time: 6692.5 sec, 111.5 min
+		P(K) estimated by FV (integral=2.70762e-06 (n=6135), E(T)=108.0 (n=6135)): 0.000003%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 2945920.0 (avg = 460.3 per particle)
+- #events = 9201765 (avg = 1438 per particle)
+
+---> Execution time MC + FV: 6694.1 sec, 111.6 min
+
+		### Replication 7 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1373)...
+Total number of activation states: 120 (0.000578% <= p(S) <= 24.897%) (Nmin to expect at 1 case in state with smallest p: Nmin=172888)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=6118 particles: (0.2, 218.2, 1427.5) ((0.0%, 15.3%, 99.9%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=274.4 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=274.4)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 116.2, 1428.6)
+	--> Number of observations for P(T>t) estimation from FV simulation: 6118 (N=6400)
+execution time: 7764.7 sec, 129.4 min
+		P(K) estimated by FV (integral=1.86502e-06 (n=6118), E(T)=116.2 (n=6118)): 0.000002%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 3413987.0 (avg = 533.4 per particle)
+- #events = 10718393 (avg = 1675 per particle)
+
+---> Execution time MC + FV: 7766.1 sec, 129.4 min
+
+		### Replication 8 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1383)...
+Total number of activation states: 120 (0.000578% <= p(S) <= 24.897%) (Nmin to expect at 1 case in state with smallest p: Nmin=172888)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=6149 particles: (0.4, 213.0, 1426.4) ((0.0%, 14.9%, 99.8%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=147.9 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=147.9)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 107.4, 1428.6)
+	--> Number of observations for P(T>t) estimation from FV simulation: 6149 (N=6400)
+execution time: 5812.7 sec, 96.9 min
+		P(K) estimated by FV (integral=4.33645e-07 (n=6149), E(T)=107.4 (n=6149)): 0.000000%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 2575582.0 (avg = 402.4 per particle)
+- #events = 7992985 (avg = 1249 per particle)
+
+---> Execution time MC + FV: 5814.9 sec, 96.9 min
+
+	---> NEW BUFFER SIZE (BSA=21, BIC=2)
+******************!!!!!!! Simulation 7 of 8 !!!!!!*****************
+	K=60, nparticles=6400, nmeantimes=1000, buffer_size_activation=21, #burn-in absorption cycles=2
+
+		### Replication 1 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1313)...
+Total number of activation states: 231 (0.000006% <= p(S) <= 24.889%) (Nmin to expect at 1 case in state with smallest p: Nmin=16743861)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=4484 particles: (0.3, 150.5, 1428.0) ((0.0%, 10.5%, 100.0%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=237.7 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=237.7)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 442.7, 1428.6)
+	--> Number of observations for P(T>t) estimation from FV simulation: 4484 (N=6400)
+execution time: 9567.7 sec, 159.5 min
+		P(K) estimated by FV (integral=1.32632e-05 (n=4484), E(T)=442.7 (n=4484)): 0.000003%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 4475721.4 (avg = 699.3 per particle)
+- #events = 13753135 (avg = 2149 per particle)
+
+---> Execution time MC + FV: 9568.8 sec, 159.5 min
+
+		### Replication 2 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1323)...
+Total number of activation states: 231 (0.000006% <= p(S) <= 24.889%) (Nmin to expect at 1 case in state with smallest p: Nmin=16743861)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=4454 particles: (0.4, 139.0, 1428.4) ((0.0%, 9.7%, 100.0%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=319.2 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=319.2)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 438.7, 1435.9)
+	--> Number of observations for P(T>t) estimation from FV simulation: 4454 (N=6400)
+execution time: 10246.4 sec, 170.8 min
+		P(K) estimated by FV (integral=3.28906e-05 (n=4454), E(T)=438.7 (n=4454)): 0.000007%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 4818793.1 (avg = 752.9 per particle)
+- #events = 14887400 (avg = 2326 per particle)
+
+---> Execution time MC + FV: 10247.9 sec, 170.8 min
+
+		### Replication 3 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1333)...
+Total number of activation states: 231 (0.000006% <= p(S) <= 24.889%) (Nmin to expect at 1 case in state with smallest p: Nmin=16743861)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=4424 particles: (0.3, 152.9, 1424.5) ((0.0%, 10.7%, 99.7%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=120.5 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=120.5)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 454.1, 1428.6)
+	--> Number of observations for P(T>t) estimation from FV simulation: 4424 (N=6400)
+execution time: 8700.8 sec, 145.0 min
+		P(K) estimated by FV (integral=1.9165e-07 (n=4424), E(T)=454.1 (n=4424)): 0.000000%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 4030297.7 (avg = 629.7 per particle)
+- #events = 12274276 (avg = 1918 per particle)
+
+---> Execution time MC + FV: 8702.6 sec, 145.0 min
+
+		### Replication 4 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1343)...
+Total number of activation states: 231 (0.000006% <= p(S) <= 24.889%) (Nmin to expect at 1 case in state with smallest p: Nmin=16743861)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=4451 particles: (0.2, 142.4, 1425.8) ((0.0%, 10.0%, 99.8%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=134.3 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=134.3)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 440.9, 1428.6)
+	--> Number of observations for P(T>t) estimation from FV simulation: 4451 (N=6400)
+execution time: 8653.2 sec, 144.2 min
+		P(K) estimated by FV (integral=7.89415e-06 (n=4451), E(T)=440.9 (n=4451)): 0.000002%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 4013687.5 (avg = 627.1 per particle)
+- #events = 12260407 (avg = 1916 per particle)
+
+---> Execution time MC + FV: 8653.9 sec, 144.2 min
+
+		### Replication 5 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1353)...
+Total number of activation states: 231 (0.000006% <= p(S) <= 24.889%) (Nmin to expect at 1 case in state with smallest p: Nmin=16743861)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=4400 particles: (0.5, 148.9, 1427.2) ((0.0%, 10.4%, 99.9%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=168.8 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=168.8)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 453.1, 1428.6)
+	--> Number of observations for P(T>t) estimation from FV simulation: 4400 (N=6400)
+execution time: 9156.5 sec, 152.6 min
+		P(K) estimated by FV (integral=7.94717e-07 (n=4400), E(T)=453.1 (n=4400)): 0.000000%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 4252925.6 (avg = 664.5 per particle)
+- #events = 13004260 (avg = 2032 per particle)
+
+---> Execution time MC + FV: 9157.7 sec, 152.6 min
+
+		### Replication 6 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1363)...
+Total number of activation states: 231 (0.000006% <= p(S) <= 24.889%) (Nmin to expect at 1 case in state with smallest p: Nmin=16743861)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=4484 particles: (0.1, 157.1, 1426.3) ((0.0%, 11.0%, 99.8%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=136.7 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=136.7)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 444.3, 1428.6)
+	--> Number of observations for P(T>t) estimation from FV simulation: 4484 (N=6400)
+execution time: 8700.8 sec, 145.0 min
+		P(K) estimated by FV (integral=4.06732e-06 (n=4484), E(T)=444.3 (n=4484)): 0.000001%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 4052270.7 (avg = 633.2 per particle)
+- #events = 12371881 (avg = 1933 per particle)
+
+---> Execution time MC + FV: 8701.7 sec, 145.0 min
+
+		### Replication 7 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1373)...
+Total number of activation states: 231 (0.000006% <= p(S) <= 24.889%) (Nmin to expect at 1 case in state with smallest p: Nmin=16743861)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=4509 particles: (0.3, 154.0, 1425.5) ((0.0%, 10.8%, 99.8%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=115.1 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=115.1)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 433.8, 1428.6)
+	--> Number of observations for P(T>t) estimation from FV simulation: 4509 (N=6400)
+execution time: 8492.7 sec, 141.5 min
+		P(K) estimated by FV (integral=8.10253e-09 (n=4509), E(T)=433.8 (n=4509)): 0.000000%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 3912646.6 (avg = 611.4 per particle)
+- #events = 11932287 (avg = 1864 per particle)
+
+---> Execution time MC + FV: 8493.5 sec, 141.6 min
+
+		### Replication 8 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1383)...
+Total number of activation states: 231 (0.000006% <= p(S) <= 24.889%) (Nmin to expect at 1 case in state with smallest p: Nmin=16743861)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=4457 particles: (0.3, 152.9, 1426.8) ((0.0%, 10.7%, 99.9%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=191.6 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=191.6)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 444.5, 1428.6)
+	--> Number of observations for P(T>t) estimation from FV simulation: 4457 (N=6400)
+execution time: 9213.5 sec, 153.6 min
+		P(K) estimated by FV (integral=3.65767e-06 (n=4457), E(T)=444.5 (n=4457)): 0.000001%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 4309246.7 (avg = 673.3 per particle)
+- #events = 13195834 (avg = 2062 per particle)
+
+---> Execution time MC + FV: 9214.2 sec, 153.6 min
+
+	---> NEW BUFFER SIZE (BSA=24, BIC=2)
+******************!!!!!!! Simulation 8 of 8 !!!!!!*****************
+	K=60, nparticles=6400, nmeantimes=1000, buffer_size_activation=24, #burn-in absorption cycles=2
+
+		### Replication 1 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1313)...
+Total number of activation states: 300 (0.000001% <= p(S) <= 24.889%) (Nmin to expect at 1 case in state with smallest p: Nmin=164754781)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=4038 particles: (0.1, 85.7, 1414.3) ((0.0%, 6.0%, 99.0%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=221.0 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=221.0)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 530.3, 1428.6)
+	--> Number of observations for P(T>t) estimation from FV simulation: 4038 (N=6400)
+execution time: 9741.4 sec, 162.4 min
+		P(K) estimated by FV (integral=1.52584e-05 (n=4038), E(T)=530.3 (n=4038)): 0.000003%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 4610537.9 (avg = 720.4 per particle)
+- #events = 14121578 (avg = 2206 per particle)
+
+---> Execution time MC + FV: 9742.7 sec, 162.4 min
+
+		### Replication 2 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1323)...
+Total number of activation states: 300 (0.000001% <= p(S) <= 24.889%) (Nmin to expect at 1 case in state with smallest p: Nmin=164754781)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=3985 particles: (0.3, 86.3, 1428.5) ((0.0%, 6.0%, 100.0%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=203.3 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=203.3)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 544.0, 1428.6)
+	--> Number of observations for P(T>t) estimation from FV simulation: 3985 (N=6400)
+execution time: 9822.4 sec, 163.7 min
+		P(K) estimated by FV (integral=2.99773e-05 (n=3985), E(T)=544.0 (n=3985)): 0.000006%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 4601802.6 (avg = 719.0 per particle)
+- #events = 14089242 (avg = 2201 per particle)
+
+---> Execution time MC + FV: 9823.6 sec, 163.7 min
+
+		### Replication 3 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1333)...
+Total number of activation states: 300 (0.000001% <= p(S) <= 24.889%) (Nmin to expect at 1 case in state with smallest p: Nmin=164754781)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=3976 particles: (0.3, 90.3, 1426.8) ((0.0%, 6.3%, 99.9%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=262.8 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=262.8)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 547.9, 1428.6)
+	--> Number of observations for P(T>t) estimation from FV simulation: 3976 (N=6400)
+execution time: 10244.9 sec, 170.7 min
+		P(K) estimated by FV (integral=4.97811e-05 (n=3976), E(T)=547.9 (n=3976)): 0.000009%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 4864428.6 (avg = 760.1 per particle)
+- #events = 14927455 (avg = 2332 per particle)
+
+---> Execution time MC + FV: 10246.0 sec, 170.8 min
+
+		### Replication 4 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1343)...
+Total number of activation states: 300 (0.000001% <= p(S) <= 24.889%) (Nmin to expect at 1 case in state with smallest p: Nmin=164754781)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=3961 particles: (0.3, 84.3, 1427.8) ((0.0%, 5.9%, 99.9%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=124.8 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=124.8)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 548.9, 1428.6)
+	--> Number of observations for P(T>t) estimation from FV simulation: 3961 (N=6400)
+execution time: 9250.7 sec, 154.2 min
+		P(K) estimated by FV (integral=2.78908e-06 (n=3961), E(T)=548.9 (n=3961)): 0.000001%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 4310451.1 (avg = 673.5 per particle)
+- #events = 13119740 (avg = 2050 per particle)
+
+---> Execution time MC + FV: 9252.0 sec, 154.2 min
+
+		### Replication 5 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1353)...
+Total number of activation states: 300 (0.000001% <= p(S) <= 24.889%) (Nmin to expect at 1 case in state with smallest p: Nmin=164754781)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=3987 particles: (0.2, 82.9, 1421.8) ((0.0%, 5.8%, 99.5%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=109.6 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=109.6)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 545.7, 1428.6)
+	--> Number of observations for P(T>t) estimation from FV simulation: 3987 (N=6400)
+execution time: 8937.7 sec, 149.0 min
+		P(K) estimated by FV (integral=3.80295e-06 (n=3987), E(T)=545.7 (n=3987)): 0.000001%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 4212264.7 (avg = 658.2 per particle)
+- #events = 12814153 (avg = 2002 per particle)
+
+---> Execution time MC + FV: 8938.4 sec, 149.0 min
+
+		### Replication 6 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1363)...
+Total number of activation states: 300 (0.000001% <= p(S) <= 24.889%) (Nmin to expect at 1 case in state with smallest p: Nmin=164754781)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=3982 particles: (0.2, 80.7, 1424.4) ((0.0%, 5.7%, 99.7%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=197.8 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=197.8)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 545.3, 1428.6)
+	--> Number of observations for P(T>t) estimation from FV simulation: 3982 (N=6400)
+execution time: 9703.4 sec, 161.7 min
+		P(K) estimated by FV (integral=2.53442e-05 (n=3982), E(T)=545.3 (n=3982)): 0.000005%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 4561109.1 (avg = 712.7 per particle)
+- #events = 13954510 (avg = 2180 per particle)
+
+---> Execution time MC + FV: 9704.2 sec, 161.7 min
+
+		### Replication 7 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1373)...
+Total number of activation states: 300 (0.000001% <= p(S) <= 24.889%) (Nmin to expect at 1 case in state with smallest p: Nmin=164754781)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=4057 particles: (0.2, 80.5, 1422.5) ((0.0%, 5.6%, 99.6%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=134.7 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=134.7)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 525.9, 1428.6)
+	--> Number of observations for P(T>t) estimation from FV simulation: 4057 (N=6400)
+execution time: 8953.4 sec, 149.2 min
+		P(K) estimated by FV (integral=2.80272e-06 (n=4057), E(T)=525.9 (n=4057)): 0.000001%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 4218339.0 (avg = 659.1 per particle)
+- #events = 12866117 (avg = 2010 per particle)
+
+---> Execution time MC + FV: 8954.4 sec, 149.2 min
+
+		### Replication 8 of 8 ###
+		*** FLEMING-VIOT ESTIMATION ***
+	Running Fleming-Viot simulation using an ABSORPTION start state to estimate blocking probability (seed=1383)...
+Total number of activation states: 300 (0.000001% <= p(S) <= 24.889%) (Nmin to expect at 1 case in state with smallest p: Nmin=164754781)
+simulate: [reactivate=True] Generating trajectories for each particle until the first ACTIVATION after the burn-in period takes place... 
+--> so that we can start the FV process.
+--> (min, mean, max) times at which FV process started on n=3928 particles: (0.3, 87.8, 1428.0) ((0.0%, 6.1%, 100.0%) of max simulation time)
+simulate: Generating trajectories for each particle until first absorption... 
+--> so that we can sort ALL the first absorption times of particles and start reactivating when reactivate=True 
+    which requires that the reactivation process starts with the particle with smallest absorption time 
+    so that the reactivated particle can be chosen among the N-1 particles not yet absorbed at that time.
+--> Simulation time reset from T=1428.6 to T=184.9 (1.1 * maximum observed survival time for P(T>t) estimation).
+Generating trajectories for each particle until END OF SIMULATION (T=184.9)...
+Finalizing and identifying measurement times...
+Estimating blocking probability with Fleming-Viot...
+	--> E(T) estimation: (n, min, mean, max) = (6400 out of N=6400, 0.0, 558.3, 1428.6)
+	--> Number of observations for P(T>t) estimation from FV simulation: 3928 (N=6400)
+execution time: 9887.5 sec, 164.8 min
+		P(K) estimated by FV (integral=4.96325e-06 (n=3928), E(T)=558.3 (n=3928)): 0.000001%
+		True P(K): 0.000001%
+-- FAIRNESS --
+FV simulation:
+- time = 4600340.4 (avg = 718.8 per particle)
+- #events = 14058182 (avg = 2197 per particle)
+
+---> Execution time MC + FV: 9888.0 sec, 164.8 min
+Simulation results for #servers=3, rhos=[0.4, 0.75, 0.35], K=60, N=6400, T=184.86986436676168 (1000x), max #events=inf
+                 rhos   K  ...  ratio_mc_fv_time  ratio_mc_fv_events
+0   [0.4, 0.75, 0.35]  60  ...               NaN                 NaN
+0   [0.4, 0.75, 0.35]  60  ...               NaN                 NaN
+0   [0.4, 0.75, 0.35]  60  ...               NaN                 NaN
+0   [0.4, 0.75, 0.35]  60  ...               NaN                 NaN
+0   [0.4, 0.75, 0.35]  60  ...               NaN                 NaN
+..                ...  ..  ...               ...                 ...
+0   [0.4, 0.75, 0.35]  60  ...               NaN                 NaN
+0   [0.4, 0.75, 0.35]  60  ...               NaN                 NaN
+0   [0.4, 0.75, 0.35]  60  ...               NaN                 NaN
+0   [0.4, 0.75, 0.35]  60  ...               NaN                 NaN
+0   [0.4, 0.75, 0.35]  60  ...               NaN                 NaN
+
+[64 rows x 23 columns]
+Execution time: 363088.9 sec, 6051.5 min, 100.9 hours
+Top and bottom 5 records in the results data frame:
+                rhos   K  ...  ratio_mc_fv_time  ratio_mc_fv_events
+0  [0.4, 0.75, 0.35]  60  ...               NaN                 NaN
+1  [0.4, 0.75, 0.35]  60  ...               NaN                 NaN
+2  [0.4, 0.75, 0.35]  60  ...               NaN                 NaN
+3  [0.4, 0.75, 0.35]  60  ...               NaN                 NaN
+4  [0.4, 0.75, 0.35]  60  ...               NaN                 NaN
+
+[5 rows x 23 columns]
+                 rhos   K  ...  ratio_mc_fv_time  ratio_mc_fv_events
+59  [0.4, 0.75, 0.35]  60  ...               NaN                 NaN
+60  [0.4, 0.75, 0.35]  60  ...               NaN                 NaN
+61  [0.4, 0.75, 0.35]  60  ...               NaN                 NaN
+62  [0.4, 0.75, 0.35]  60  ...               NaN                 NaN
+63  [0.4, 0.75, 0.35]  60  ...               NaN                 NaN
+
+[5 rows x 23 columns]
+Data frame saved to /home/dmastrop/projects/RL-002-QueueBlocking/results/estimates_vs_J_20210916_192028_results.csv
+Data frame saved to /home/dmastrop/projects/RL-002-QueueBlocking/results/estimates_vs_J_20210916_192028_results_agg.csv
+Data frame saved to /home/dmastrop/projects/RL-002-QueueBlocking/results/estimates_vs_J_20210916_192028_proba_functions.csv
+Smoothing parameter for bias, variability, MSE for subplot 1:
+{'bias': [19985581.7364161], 'variability': [446318386.840734], 'mse': [565592656.2015115]}
+Ended at: 2021-09-21 00:12:01
+Execution time: 6051.6 min, 100.9 hours

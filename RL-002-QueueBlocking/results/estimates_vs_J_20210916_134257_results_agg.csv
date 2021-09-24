@@ -1,0 +1,4 @@
+,,,E(T),E(T),E(T),E(T),E(T),E(T),Pr(MC),Pr(MC),Pr(MC),Pr(MC),Pr(MC),Pr(MC),Pr(FV),Pr(FV),Pr(FV),Pr(FV),Pr(FV),Pr(FV),Pr(K),Pr(K),Pr(K),Pr(K),Pr(K),Pr(K)
+,,,count,mean,std,min,max,SE,count,mean,std,min,max,SE,count,mean,std,min,max,SE,count,mean,std,min,max,SE
+K,buffer_size_activation,N,,,,,,,,,,,,,,,,,,,,,,,,
+40,0.2,1000,8,12.8149076906131,0.5284572670975967,12.144105142436253,13.684846349113217,0.18683785856601057,0,,,,,,8,8.938535135019838e-06,8.713273232171281e-06,0.0,2.242213223825074e-05,3.0806072943997697e-06,8,3.939624007386781e-06,0.0,3.939624007386781e-06,3.939624007386781e-06,0.0
