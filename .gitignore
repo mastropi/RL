@@ -4,6 +4,7 @@
 __pycache__/
 Python/lib/GitHub/
 .Rproj.user
+*Archive/
 *.aux
 *.pdf
 *.xlsx
