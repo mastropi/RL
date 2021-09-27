@@ -5800,15 +5800,15 @@ if __name__ == "__main__":
         nET, ET, ET_expected = plot_event_times_dist(est_mc, EventType.ABSORPTION)
 
         print("\n[test_QB] Computing observed lambda and mu...")
-        print("Observed lambda={:.3f} (n={})".format(lmbda, nlambda))
-        print("Expected lambda={:.3f}".format(est_mc.queue.getBirthRates()[0]))
-        print("Observed mu={:.3f} (n={})".format(mu, nmu))
-        print("Expected mu={:.3f}".format(est_mc.queue.getDeathRates()[0]))
-        print("Observed rho={:.3f}".format(lmbda/ mu))
-        print("Expected rho={}".format(est_mc.rhos[0]))
-        print("Estimated expected absorption cycle time={:.3f}".format(expected_absorption_time))
-        print("Observed E(T)={:.3f} (n={}) (should be the same as 'estimatd expected absorption cycle time')".format(ET, nET))
-        print("Expected E(T)={:.3f}".format(ET_expected))
+        print("[test_QB] Observed lambda={:.3f} (n={})".format(lmbda, nlambda))
+        print("[test_QB] Expected lambda={:.3f}".format(est_mc.queue.getBirthRates()[0]))
+        print("[test_QB] Observed mu={:.3f} (n={})".format(mu, nmu))
+        print("[test_QB] Expected mu={:.3f}".format(est_mc.queue.getDeathRates()[0]))
+        print("[test_QB] Observed rho={:.3f}".format(lmbda/ mu))
+        print("[test_QB] Expected rho={}".format(est_mc.rhos[0]))
+        print("[test_QB] Estimated expected absorption cycle time={:.3f}".format(expected_absorption_time))
+        print("[test_QB] Observed E(T)={:.3f} (n={}) (should be the same as 'estimatd expected absorption cycle time')".format(ET, nET))
+        print("[test_QB] Expected E(T)={:.3f}".format(ET_expected))
         assert "{:.3f} (n={})".format(lmbda, nlambda) == "0.474 (n=568)"
         assert "{:.3f} (n={})".format(mu, nmu) == "0.972 (n=563)"
         assert "{:.3f}".format(lmbda/ mu) == "0.488"
@@ -5822,7 +5822,7 @@ if __name__ == "__main__":
                                                    buffer_size_activation=1,
                                                    nmeantimes=nmeantimes,
                                                    burnin_cycles_absorption=3,
-                                                   burnin_cycles_complete_all_particles=True,
+                                                   burnin_cycles_complete_all_particles=False,
                                                    reactivate=True,
                                                    finalize_info={'type': finalize_type, 'condition': FinalizeCondition.ACTIVE},
                                                    plotFlag=plotFlag,
@@ -5851,22 +5851,18 @@ if __name__ == "__main__":
                             })
 
         time_end = timer()
-        print("Execution time: {:.1f} min".format((time_end - time_start) / 60))
+        print("[test_QB] Execution time: {:.1f} min".format((time_end - time_start) / 60))
 
         # c) Assertions
-        print("P(K) true: {:.6f}%".format(proba_blocking_K*100))    # K=5: 1.587302%
-        print("P(K) by MC: {:.6f}%".format(proba_blocking_mc*100))
-        print("P(K) estimated by FV: {:.6f}%".format(proba_blocking_fv*100))
-        print("E(T) estimated by FV: {:.1f} (n={})".format(expected_absorption_time, n_expected_absorption_time))
-        
-        print("Max observed survival time: {:.1f}".format(est_fv.sk[-1]))
-        print("Max FV time: {:.1f}".format(est_fv.maxtime))
-        
-        assert "{:.6f}%".format(proba_blocking_mc*100) == "1.065424%"
-        assert "{:.6f}%".format(proba_blocking_fv*100) == "0.376388%"
+        print("[test_QB] P(K) true: {:.6f}%".format(proba_blocking_K*100))    # K=5: 1.587302%
+        print("[test_QB] P(K) by MC: {:.6f}% (#events={})".format(proba_blocking_mc*100, est_mc.nevents))
+        print("[test_QB] P(K) estimated by FV: {:.6f}% (#events={})".format(proba_blocking_fv*100, est_fv.nevents))
+        print("[test_QB] E(T) estimated by FV: {:.1f} (n={})".format(expected_absorption_time, n_expected_absorption_time))
+        assert "{:.6f}% (#events={})".format(proba_blocking_mc*100, est_mc.nevents) == "1.065424% (#events=1131)"
+        assert "{:.6f}% (#events={})".format(proba_blocking_fv*100, est_fv.nevents) == "0.320571% (#events=484)"
         assert "{:.1f} (n={})".format(expected_absorption_time, n_expected_absorption_time) == "3.2 (n=20)"
 
-    #--- Test #2.2: Single server with full process already taken care of
+    #--- Test #2.2: Single server with the whole estimation process being taken care of by the calling function below
     if 2.2 in tests2run:
         print("\nTest #2.2: Single server system")
         nservers = 1
@@ -5896,16 +5892,16 @@ if __name__ == "__main__":
         # Run!
         print("[test_QB] Running Fleming-Viot estimation procedure: K={}, BSA={}, N={}, T={}x...".format(K, dict_params_simul['buffer_size_activation'], dict_params_simul['nparticles'], dict_params_simul['nmeantimes']))
         time_start = timer()
-        proba_blocking_fv, _, expected_absorption_time, _, n_expected_absorption_time, _, _, _, _ = estimate_blocking_fv(env_queue, dict_params_simul, dict_params_info=dict_params_info)
+        proba_blocking_fv, _, expected_absorption_time, _, n_expected_absorption_time, _, _, _, dict_stats = estimate_blocking_fv(env_queue, dict_params_simul, dict_params_info=dict_params_info)
         time_end = timer()
         dt_end = datetime.today().strftime("%Y-%m-%d %H:%M:%S")
-        print("Ended at: {}".format(dt_end))
-        print("Execution time: {:.1f} min, {:.1f} hours".format((time_end - time_start) / 60, (time_end - time_start) / 3600))
+        print("[test_QB] Ended at: {}".format(dt_end))
+        print("[test_QB] Execution time: {:.1f} min, {:.1f} hours".format((time_end - time_start) / 60, (time_end - time_start) / 3600))
 
-        print("\nTrue blocking probability: Pr(K)={:.6f}%".format(proba_blocking_K*100))    # K=5: 1.587302%
-        print("Estimated blocking probability: Pr(FV)={:.6f}%".format(proba_blocking_fv*100))
-        print("E(T) estimated by FV: {:.1f} (n={})".format(expected_absorption_time, n_expected_absorption_time))
-        assert "{:.6f}%".format(proba_blocking_fv*100) == "3.115719%"
+        print("\n[test_QB] True blocking probability: Pr(K)={:.6f}%".format(proba_blocking_K*100))    # K=5: 1.587302%
+        print("[test_QB] Estimated blocking probability: Pr(FV)={:.6f}% (#events={})".format(proba_blocking_fv*100, dict_stats['nevents']))
+        print("[test_QB] E(T) estimated by FV: {:.1f} (n={})".format(expected_absorption_time, n_expected_absorption_time))
+        assert "{:.6f}% (#events={})".format(proba_blocking_fv*100, dict_stats['nevents']) == "1.758346% (#events=1168)"
         assert "{:.1f} (n={})".format(expected_absorption_time, n_expected_absorption_time) == "7.7 (n=20)"
 
     #--- Test #3.1: Multi-server
@@ -5967,14 +5963,14 @@ if __name__ == "__main__":
             print("Computing observed lambda and mu for server {}...".format(server))
             df[server] = pd.DataFrame({'t': est_mc.all_times_by_server[0][server], 'x': est_mc.all_positions_by_server[0][server]})
             lambdas[server], nlambdas[server], mus[server], nmus[server] = compute_observed_rates(df[server])
-        print("\nComputing observed lambda and mu...")
-        print("Observed lambdas={} (n={})".format(lambdas, nlambdas))
-        print("Expected lambda={}".format(est_mc.queue.getBirthRates()))
-        print("Observed mu={} (n={})".format(mus, nmus))
-        print("Expected mu={}".format(est_mc.queue.getDeathRates()))
-        print("Observed rhos={}".format([l/m for l, m in zip(lambdas, mus)]))
-        print("Expected rhos={}".format(est_mc.rhos))
-        print("Observed E(T)={:.3f} (n={})".format(ET, nET))    # Note: Expected E(T) is None
+        print("\n[test_QB] Computing observed lambda and mu...")
+        print("[test_QB] Observed lambdas={} (n={})".format(lambdas, nlambdas))
+        print("[test_QB] Expected lambda={}".format(est_mc.queue.getBirthRates()))
+        print("[test_QB] Observed mu={} (n={})".format(mus, nmus))
+        print("[test_QB] Expected mu={}".format(est_mc.queue.getDeathRates()))
+        print("[test_QB] Observed rhos={}".format([l/m for l, m in zip(lambdas, mus)]))
+        print("[test_QB] Expected rhos={}".format(est_mc.rhos))
+        print("[test_QB] Observed E(T)={:.3f} (n={})".format(ET, nET))    # Note: Expected E(T) is None
         # Assertions when assigning arriving jobs directly to servers
         # (i.e. function self._generate_birth_times_from_equivalent_rates() is used
         # instead of function self._generate_birth_times())
@@ -5991,13 +5987,13 @@ if __name__ == "__main__":
         #assert "{:.3f} (n={})".format(ET, nET) == "3.615 (n=314)"
 
         # b) Fleming-Viot
-        print("\nRunning Fleming-Viot simulation on {} particles, K={}, T={}x...".format(nparticles, K, nmeantimes))
+        print("\n[test_QB] Running Fleming-Viot simulation on {} particles, K={}, T={}x...".format(nparticles, K, nmeantimes))
         est_fv = EstimatorQueueBlockingFlemingViot(nparticles, queue, job_rates,
                                                    service_rates=env_queue.getServiceRates(),
                                                    buffer_size_activation=buffer_size_activation,
                                                    nmeantimes=nmeantimes,
                                                    burnin_cycles_absorption=3,
-                                                   burnin_cycles_complete_all_particles=True,
+                                                   burnin_cycles_complete_all_particles=False,
                                                    policy_assign=env_queue.getAssignPolicy(),
                                                    reactivate=True,
                                                    finalize_info={'type': finalize_type, 'condition': FinalizeCondition.ACTIVE},
@@ -6031,19 +6027,19 @@ if __name__ == "__main__":
         assert est_fv.nevents >= est_fv.get_number_events_from_latest_reset(), "nevents={}, get_number={}".format(est_fv.nevents, est_fv.get_number_events_from_latest_reset())
 
         time_end = timer()
-        print("Execution time: {:.1f} min".format((time_end - time_start) / 60))
+        print("[test_QB] Execution time: {:.1f} min".format((time_end - time_start) / 60))
 
         # c) Assertions
-        print("P(K) true: {:.6f}%".format(proba_blocking_K*100))    # K=5: 11.98%
-        print("P(K) by MC: {:.6f}% (#events={})".format(proba_blocking_mc*100, est_mc.nevents))
-        print("P(K) estimated by FV: {:.6f}% (#events={})".format(proba_blocking_fv*100, est_fv.nevents))
-        print("E(T) estimated by FV: {:.1f} (n={})".format(expected_absorption_time, n_expected_absorption_time))
+        print("[test_QB] P(K) true: {:.6f}%".format(proba_blocking_K*100))    # K=5: 11.98%
+        print("[test_QB] P(K) by MC: {:.6f}% (#events={})".format(proba_blocking_mc*100, est_mc.nevents))
+        print("[test_QB] P(K) estimated by FV: {:.6f}% (#events={})".format(proba_blocking_fv*100, est_fv.nevents))
+        print("[test_QB] E(T) estimated by FV: {:.1f} (n={})".format(expected_absorption_time, n_expected_absorption_time))
         # Assertions for seed=1717, nservers=3, K=5, BSA=3 (both MC and FV), N=20, nmeantimes=5
         # Assertions when assigning arriving jobs directly to servers
         # (i.e. function self._generate_birth_times_from_equivalent_rates() is used
         # instead of function self._generate_birth_times())
         assert "{:.6f}% (#events={})".format(proba_blocking_mc*100, est_mc.nevents) == "11.983398% (#events=3163)"
-        assert "{:.6f}% (#events={})".format(proba_blocking_fv*100, est_fv.nevents) == "3.359375% (#events=1037)"
+        assert "{:.6f}% (#events={})".format(proba_blocking_fv*100, est_fv.nevents) == "4.085827% (#events=1039)"
         assert "{:.1f} (n={})".format(expected_absorption_time, n_expected_absorption_time) == "3.3 (n=20)"
         # Assertions when assigning arriving jobs using the assignment policy
         # (i.e. function self._generate_birth_times()
