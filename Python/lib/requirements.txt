@@ -1,7 +1,7 @@
 # Python 3 standard library includes the packages listed here: https://docs.python.org/3/library/index.html
 
 # Required packages listed in alphabetical order
-gym==0.12.1		# For TD(lambda) only
+gym==0.12.1		# For installation we HAVE TO use `pip install gym==0.12.1`, i.e. installation via pip but NOT via `conda install` because PyPI is NOT compatible with conda!! Ref: https://stackoverflow.com/questions/48138836/conda-cant-find-packages-at-pypi-org-simple 
 numpy==1.18.3	# printoptions() is available since v1.15 (Ref: https://numpy.org/doc/1.14/reference/generated/numpy.printoptions.html gives Error 404)
 pandas==0.22.0
 

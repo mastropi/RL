@@ -5505,21 +5505,35 @@ if __name__ == "__main__":
 
         return 1/np.mean(btimes), len(btimes), 1/np.mean(dtimes), len(dtimes)
 
-    def compute_true_expected_absorption_time(est):
-        "Computes the true expected absorption cycle time"
-        if est.buffer_size_activation == 1:
-            # The absorption set is 0
-            # => we can compute the true expected absorption cycle time
-            x, dist = stationary_distribution_birth_death_process(est.nservers, est.queue.K, est.rhos)
-            ET_expected = 1/dist[0] + 1/np.sum(est.queue.getBirthRates())
-        else:
-            ET_expected = None
+    def compute_true_expected_return_time(est, s):
+        """
+        Computes the true expected return time to the specified state s as 1/q(s)/Pr(s)
+        for the server.
+        
+        where:
+        q(s) is the exponential rate of the sojourn time in i. In our single server case is lambda.
+        Pr(s) is the stationary probability of the state.
+        
+        Arguments
+        est: EstimatorQueueBlockingFlemingViot
+            The object used to run the simulation that estimates the blocking probability.
+            It is expected to contain the following attributes:
+            - nservers: number of servers in the system
+            - queue.K: the capacity of the queue
+            - rhos: the load of each server in the system
+
+        s: int
+            State on which the expected return time is wished.
+        """
+        x, dist = stationary_distribution_birth_death_process(est.nservers, est.queue.K, est.rhos)
+        ET_expected = 1/dist[s]/np.sum(est.queue.getBirthRates())
 
         return ET_expected
 
     def plot_event_times_dist(est, event_type :EventType):
         """
-        Plots the distribution of observed times of the given events and returns their average
+        Plots the distribution of observed times of the specified event (e.g. ABSORPTION)
+        and returns their average, as well as their expected value for comparison.
 
         Arguments:
         est: EstimatorQueueBlockingFlemingViot
@@ -5534,8 +5548,12 @@ if __name__ == "__main__":
         - true expected event time (E(T)) when the event type is ABSORPTION and the absorption set is 0,
         or None otherwise.
         """
-        if event_type == EventType.ABSORPTION:
-            ET_expected = compute_true_expected_absorption_time(est)
+        if event_type == EventType.ABSORPTION and est.buffer_size_activation:
+            # We are interested in the expected absorption time and the absorption set is s=0
+            # In this case, it is directly computable as the expected return time to s=0
+            # (as the queue can only reach s=0 from above (i.e. via an absorption),
+            # as opposed to from below, which would be the other way of returning to the state)
+            ET_expected = compute_true_expected_return_time(est, s=0)
         else:
             ET_expected = None
 
