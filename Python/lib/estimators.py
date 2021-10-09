@@ -28,7 +28,7 @@ if __name__ == "__main__":
     from datetime import datetime
     from Python.lib.environments.queues import EnvQueueSingleBufferWithJobClasses
     import Python.lib.agents as agents
-    from agents.policies.parameterized import PolQueueRandomizedLinearStep
+    from agents.policies.parameterized import PolQueueTwoActionsLinearStepOnJobClasses
     import Python.lib.queues as queues  # The keyword `queues` is used in test code
     from Python.lib.queues import Event, GenericQueue
     from Python.lib.utils.basic import array_of_objects, find, find_last, find_last_value_in_list, insort, list_contains_either, merge_values_in_time
@@ -5057,7 +5057,7 @@ def estimate_blocking_fv_separately(env_queue :EnvQueueSingleBufferWithJobClasse
                                                reactivate=False,
                                                finalize_info={'type': FinalizeType.REMOVE_CENSORED,
                                                               'condition': FinalizeCondition.NOT_ABSORBED_STATES_BOUNDARY},
-                                               seed=seed,
+                                               seed=dict_params_simul['seed'],
                                                plotFlag=False, #dict_params_info['plot'],
                                                log=dict_params_info['log'])
     print("\tStep 1 of 2: Running simulation on one particle to estimate E(T) and P(T>t): the start state is picked at random at the boundary of the set of absorbed states (seed={})...".format(est_surv.seed))
@@ -6083,7 +6083,7 @@ if __name__ == "__main__":
         # - Any job with class smaller or equal than the threshold
         # for the buffer size at the moment of the job arrival is accepted by the policy 
         acceptance_thresholds = [2]*(K+1) 
-        policy_accept = PolQueueRandomizedLinearStep(env_queue, acceptance_thresholds)
+        policy_accept = PolQueueTwoActionsLinearStepOnJobClasses(env_queue, acceptance_thresholds)
         queue = queues.QueueMM(rate_birth, rate_death, 1, K)
 
         # Simulation

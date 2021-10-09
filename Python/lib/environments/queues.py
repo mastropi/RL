@@ -187,7 +187,13 @@ class deprecated2_EnvQueueSingleBufferWithJobClasses(gym.Env):
         return range(self.action_space.n)
 
     def getState(self):
-        return (self.buffer_size, self.job_class)
+        return (self.getBufferSize(), self.getJobClass())
+
+    def getBufferSize(self):
+        return self.buffer_size
+
+    def getJobClass(self):
+        return self.job_class
 
     #------ SETTERS ------#
     def setBufferSize(self, buffer_size :int):
@@ -332,7 +338,13 @@ class EnvQueueSingleBufferWithJobClasses(gym.Env):
         return range(self.action_space.n)
 
     def getState(self):
-        return (self.buffer_size, self.job_class)
+        return (self.getBufferSize(), self.getJobClass())
+
+    def getBufferSize(self):
+        return self.buffer_size
+
+    def getJobClass(self):
+        return self.job_class
 
     #------ SETTERS ------#
     def setBufferSize(self, buffer_size :int):
