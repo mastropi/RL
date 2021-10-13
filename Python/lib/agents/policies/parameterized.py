@@ -9,8 +9,7 @@ Created on 22 Mar 2021
 import numpy as np
 
 import Python.lib.queues as queues
-from Python.lib.environments.queues import EnvQueueSingleBufferWithJobClasses, \
-    deprecated2_EnvQueueSingleBufferWithJobClasses, rewardOnJobClassAcceptance
+from Python.lib.environments.queues import EnvQueueSingleBufferWithJobClasses, rewardOnJobClassAcceptance
 from agents.policies import GenericParameterizedPolicyTwoActions
 
 
@@ -52,6 +51,9 @@ class PolQueueTwoActionsLinearStep(GenericParameterizedPolicyTwoActions):
         # we just need to know the buffer size falling in between the two different deterministic selections of an action.
         K = env.getCapacity()
         assert K == np.Inf, "The queue has infinite (fixed) capacity, since parameter theta defining its capacity can take ANY real value."
+
+    def getThetaParameter(self):
+        return self.theta
 
     def getGradient(self, action):
         "Returns the policy gradient at the given action and current state of the environment"
@@ -169,13 +171,14 @@ class PolQueueTwoActionsLinearStepOnJobClasses(GenericParameterizedPolicyTwoActi
 if __name__ == "__main__":
     #------------------------- Unit tests -----------------------------#
     #--- Test #1: Stepwise linear policy on buffer size on a single server system
+    print("\n***********\nTest #1: Tests on Stepwise-linear policy on a single server with single threshold parameter theta")
     job_class_rates = [0.7]
-    job_rates = job_class_rates     # Since this is a single server system on a SINGLE class, the job arriving rate to the server is the same as the job class rate
+    job_rates_by_server = job_class_rates     # Since this is a single server system on a SINGLE class, the job arriving rate to the server is the same as the job class rate
     service_rates = [1]
     nservers = 1
     capacity = np.Inf
     rewards_accept_by_job_class = [0]
-    queue = queues.QueueMM(job_rates, service_rates, nservers, capacity)
+    queue = queues.QueueMM(job_rates_by_server, service_rates, nservers, capacity)
     env = EnvQueueSingleBufferWithJobClasses(queue, job_class_rates, rewardOnJobClassAcceptance, rewards_accept_by_job_class)
 
     #-- Thresholds
@@ -236,11 +239,17 @@ if __name__ == "__main__":
     assert np.isclose(policy.getPolicyForAction(1), 0.3)
     assert policy.getPolicyForAction(0) == 1 - policy.getPolicyForAction(1)
 
-    #--- Test #2: Stepwise linear policy on multi-class job (on deprecated queue environment)
+    #--- Test #2: Stepwise linear policy on multi-class job
+    print("\n***********\nTest #2: Tests on Stepwise-linear policy on a single server with one threshold parameter theta for each job class")
+    job_class_rates = [0.7, 0.3, 0.4, 0.9]  # Note: This rates are currently NOT used in the test. The list just defines the number of possible job classes
+    job_rates_by_server = [0.7]             # This value is not used at all, it's just needed to create the queue system below
+    service_rates = [1]                     # This value is not used in the test but needed to create the queue system below
+    nservers = 1
     capacity = 6
-    num_job_classes = 4
     rewards_accept_by_job_class = [1, 0.8, 0.3, 0.2]
-    env = deprecated2_EnvQueueSingleBufferWithJobClasses(capacity, num_job_classes, rewards_accept_by_job_class)
+    queue = queues.QueueMM(job_rates_by_server, service_rates, nservers, capacity)
+    env = EnvQueueSingleBufferWithJobClasses(queue, job_class_rates, rewardOnJobClassAcceptance, rewards_accept_by_job_class)
+
     # Thresholds as a function of the buffer size (length = capacity+1)
     # (the threshold values are given from top (higher buffer size) to bottom (lower buffer size) and then reversed)
     # Note the following extreme cases for testing purposes:
@@ -269,6 +278,6 @@ if __name__ == "__main__":
     assert np.abs(policy.getPolicyForAction(1) - 0.30) < 1E-6
 
     # 1.3: Any job is rejected when the buffer is full
-    env.setBufferSize(env.capacity)
+    env.setBufferSize(env.queue.getCapacity())
     env.setJobClass(0)
     assert policy.getPolicyForAction(1) == 0.0
