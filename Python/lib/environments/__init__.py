@@ -58,6 +58,7 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
     def getNumActions(self):
         # This nA attribute is in the super class, but using
         # super().nA
+        # or
         # super(EnvGridworld2D, self).nA
         # do NOT work... with the error "super() does not have attribute nA"... WHY???@?!?!@?#!@?#!?
         return self.nA

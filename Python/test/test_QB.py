@@ -29,7 +29,7 @@ import Python.lib.utils.plotting as plotting
 import Python.lib.queues as queues
 import Python.lib.estimators as estimators
 from Python.lib.queues import Event
-from Python.lib.environments.queues import EnvQueueSingleBufferWithJobClasses
+from Python.lib.environments.queues import EnvQueueSingleBufferWithJobClasses, rewardOnJobClassAcceptance
 from Python.lib.estimators import EventType, FinalizeType, FinalizeCondition, plot_curve_estimates
 from Python.lib.utils.computing import compute_blocking_probability_birth_death_process
 
@@ -487,14 +487,14 @@ class Test_QB_Particles(unittest.TestCase):
             policy = [[1]]
             queue = queues.QueueMM(rate_birth, rate_death, nservers, K)
             # Queue environment (to pass to the simulation functions)
-            env_queue = EnvQueueSingleBufferWithJobClasses(queue, job_rates=job_rates, rewards=[1], policy_assign=policy)
+            env_queue = EnvQueueSingleBufferWithJobClasses(queue, job_class_rates=job_rates, reward_func=rewardOnJobClassAcceptance, rewards_accept_by_job_class=[1], policy_assign=policy)
         elif nservers == 3:
             job_rates = [0.8, 0.7]
             rate_death = [1, 1, 1]
             policy = [[0.5, 0.5, 0.0], [0.0, 0.5, 0.5]]
             queue = queues.QueueMM(rate_birth, rate_death, nservers, K)
             # Queue environment (to pass to the simulation functions)
-            env_queue = EnvQueueSingleBufferWithJobClasses(queue, job_rates=job_rates, rewards=[1, 1], policy_assign=policy)
+            env_queue = EnvQueueSingleBufferWithJobClasses(queue, job_class_rates=job_rates, reward_func=rewardOnJobClassAcceptance, rewards_accept_by_job_class=[1, 1], policy_assign=policy)
         else:
             raise ValueError("Given Number of servers ({}) is invalid. Valid values are: 1, 3".format(nservers))
             
@@ -696,8 +696,8 @@ class Test_QB_Particles(unittest.TestCase):
             print("Pr(K)={:.6f}%".format(proba_blocking_true*100))
 
             # Create the queue environment that is simulated below
-            env_queue = EnvQueueSingleBufferWithJobClasses(queue, job_rates=self.job_rates, rewards=[1]*len(self.job_rates), policy_assign=self.policy)
-                ## The rewards are not used at this point, so I just set them to 1 for all job classes.
+            env_queue = EnvQueueSingleBufferWithJobClasses(queue, job_class_rates=self.job_rates, reward_func=rewardOnJobClassAcceptance, rewards_accept_by_job_class=[1] * len(self.job_rates), policy_assign=self.policy)
+                ## The rewards_accept_by_job_class are not used at this point, so I just set them to 1 for all job classes.
 
             buffer_size_activation_value_prev = None
             for idx_bsa, buffer_size_activation in enumerate(buffer_size_activation_values):
@@ -1144,14 +1144,14 @@ def test_mc_implementation(nservers, K, paramsfile, nmeantimes=None, repmax=None
         policy = [[1]]
         queue = queues.QueueMM(rate_birth, rate_death, nservers, K)
         # Queue environment (to pass to the simulation functions)
-        env_queue = EnvQueueSingleBufferWithJobClasses(queue, job_rates=job_rates, rewards=[1], policy_assign=policy)
+        env_queue = EnvQueueSingleBufferWithJobClasses(queue, job_class_rates=job_rates, reward_func=rewardOnJobClassAcceptance, rewards_accept_by_job_class=[1], policy_assign=policy)
     elif nservers == 3:
         job_rates = [0.8, 0.7]
         rate_death = [1, 1, 1]
         policy = [[0.5, 0.5, 0.0], [0.0, 0.5, 0.5]]
         queue = queues.QueueMM(rate_birth, rate_death, nservers, K)
         # Queue environment (to pass to the simulation functions)
-        env_queue = EnvQueueSingleBufferWithJobClasses(queue, job_rates=job_rates, rewards=[1, 1], policy_assign=policy)
+        env_queue = EnvQueueSingleBufferWithJobClasses(queue, job_class_rates=job_rates, reward_func=rewardOnJobClassAcceptance, rewards_accept_by_job_class=[1, 1], policy_assign=policy)
     else:
         raise ValueError("Given Number of servers ({}) is invalid. Valid values are: 1, 3".format(nservers))
     rhos = [b/d for b, d in zip(queue.getBirthRates(), queue.getDeathRates())]

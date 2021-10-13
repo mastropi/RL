@@ -27,11 +27,11 @@ class EnvQueueSingleBufferWithJobClasses:
     queue: QueueMM
         The queue object that governs the dynamics of the environment through the definition of a server system.
 
-    job_rates: list
+    job_class_rates: list
         A list containing the arriving job rates for each valid job class.
 
     rewards: list
-        List of rewards for each job class whose rate is given in job_rates.
+        List of rewards for each job class whose rate is given in job_class_rates.
 
     policy_assign: (opt) list of lists
         Assignment policy defined as a list of assignment probabilities for each job class

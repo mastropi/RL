@@ -8,13 +8,15 @@ Created on 09 Oct 2021
 
 import numpy as np
 
+from utils.basic import is_scalar
+
 
 class GenericParameterizedPolicyTwoActions:
     """
     Class that holds the generic attributes and methods of a parameterized policy with two possible actions
 
     It is assumed that subclasses define the following methods:
-    - getPolicy(a): returns the probability of taking action `a`.
+    - getPolicyForAction(a): returns the probability of taking action `a`.
     - getGradient(a): returns the gradient of the policy at action `a`.
 
     Arguments:
@@ -22,13 +24,21 @@ class GenericParameterizedPolicyTwoActions:
         The object must have the following methods defined:
         - np_random() which generates a random value between 0 and 1.
 
-    theta: list
-        List of the parameters of the parameterized policy.
+    theta: float or list or array
+        Value or array of parameters of the parameterized policy.
+        The parameter is converted ALWAYS to an numpy array (i.e. instance of numpy.ndarray)
     """
 
-    def __init__(self, env, theta: list):
+    def __init__(self, env, theta: float or list or np.ndarray):
         self.env = env
-        self.theta = theta
+
+        # Convert theta to a numpy array
+        if is_scalar(theta):
+            self.theta = np.array([theta])
+        else:
+            if not isinstance(theta, (list, np.ndarray)):
+                raise ValueError("Parameter theta must be a scalar, list, or numpy array ({})".format(type(theta)))
+            self.theta = np.array(theta)
 
     def choose_action(self):
         """

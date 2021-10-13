@@ -26,7 +26,7 @@ if __name__ == "__main__":
     runpy.run_path('../../setup.py')
 
     from datetime import datetime
-    from Python.lib.environments.queues import EnvQueueSingleBufferWithJobClasses
+    from Python.lib.environments.queues import EnvQueueSingleBufferWithJobClasses, rewardOnJobClassAcceptance
     import Python.lib.agents as agents
     from agents.policies.parameterized import PolQueueTwoActionsLinearStepOnJobClasses
     import Python.lib.queues as queues  # The keyword `queues` is used in test code
@@ -34,7 +34,7 @@ if __name__ == "__main__":
     from Python.lib.utils.basic import array_of_objects, find, find_last, find_last_value_in_list, insort, list_contains_either, merge_values_in_time
     from Python.lib.utils.computing import compute_blocking_probability_birth_death_process, stationary_distribution_birth_death_process, stationary_distribution_birth_death_process_at_capacity_unnormalized
 else:
-    from .environments.queues import EnvQueueSingleBufferWithJobClasses
+    from .environments.queues import EnvQueueSingleBufferWithJobClasses, rewardOnJobClassAcceptance
     # DM-2021/07/16-START: Comment out when gym is not installed
     #from .agents.policies.parameterized import PolQueueRandomizedLinearStep
     # DM-2021/07/16-END
@@ -129,7 +129,7 @@ class EstimatorQueueBlockingFlemingViot:
         - setDeathRates()
         - resize()
 
-    job_rates: list
+    job_class_rates: list
         List of arrival rate for every possible job class. The job class values are the indices of the given list. 
 
     service_rates: (opt) list
@@ -193,7 +193,7 @@ class EstimatorQueueBlockingFlemingViot:
         default: None (which means that all jobs are accepted)
 
     policy_assign: (opt) list of lists
-        List of probabilities of assigning each job class associated to each job rate given in `job_rates`
+        List of probabilities of assigning each job class associated to each job rate given in `job_class_rates`
         to a server in the queue.
         Ex: In a scenario with 2 job classes and 3 servers, the following policy assigns job class 0
         to server 0 or 1 with equal probability and job class 1 to server 1 or 2 with equal probability:
@@ -274,7 +274,7 @@ class EstimatorQueueBlockingFlemingViot:
         Whether to show messages of what is happening with the particles.
         default: False
     """
-    def __init__(self, nparticles :int, queue, job_rates :list,
+    def __init__(self, nparticles :int, queue, job_class_rates :list,
                  service_rates=None,
                  buffer_size_activation=1, positions_observe :list=[],
                  nmeantimes=None,
@@ -294,7 +294,7 @@ class EstimatorQueueBlockingFlemingViot:
             sys.exit(-1)
         self.N = int( nparticles )          # Make sure the number of particles is of int type
         self.queue = copy.deepcopy(queue)   # We copy the queue so that we do NOT change the `queue` object calling this function
-        self.job_rates = job_rates          # This should be a list of arrival rates for each job class (which are the indices of this list)
+        self.job_class_rates = job_class_rates          # This should be a list of arrival rates for each job class (which are the indices of this list)
         self.buffer_size_activation = buffer_size_activation        # Buffer size defining the ACTIVATION set of server sizes (n1, n2, ..., nR)
 
         if not isinstance(positions_observe, list):
@@ -315,7 +315,7 @@ class EstimatorQueueBlockingFlemingViot:
         self.policy_accept = policy_accept          # Policy for acceptance of new arriving job of a given class
         if policy_assign is None:                   # Assignment policy of a job to a server. It should be a mapping from job class to server.
             # When no assignment probability is given, it is defined as uniform over the servers for each job class
-            policy_assign = [ [1.0 / self.queue.getNServers()] * self.queue.getNServers() ] * len(self.job_rates) 
+            policy_assign = [ [1.0 / self.queue.getNServers()] * self.queue.getNServers() ] * len(self.job_class_rates)
         self.policy_assign = policy_assign
 
         # Update the birth and death rates of the given queue
@@ -338,7 +338,7 @@ class EstimatorQueueBlockingFlemingViot:
             # - the max simulation time explicitly given by the user via the 'maxtime' attribute of the finalize_info array
             # - a multiple (given by the user) of the maximum inter-arrival time (i.e. of the arrival time
             # of the less frequently arriving job class).
-            self.maxtime = np.min( (finalize_info['maxtime'], self.nmeantimes * np.max( 1/np.array(self.job_rates)) ) )
+            self.maxtime = np.min( (finalize_info['maxtime'], self.nmeantimes * np.max( 1/np.array(self.job_class_rates)) ) )
         elif finalize_info['maxtime'] != np.Inf:
             self.maxtime = finalize_info['maxtime']
         else:
@@ -374,10 +374,10 @@ class EstimatorQueueBlockingFlemingViot:
             # So, we want to avoid this extreme situation.
             raise ValueError("The buffer size for activation ({}) must be smaller than the queue's capacity-1 ({})".format(self.buffer_size_activation, self.queue.getCapacity()-1))
 
-        if self.policy_accept is not None and self.policy_accept.env.getNumJobClasses() != len(self.job_rates):
+        if self.policy_accept is not None and self.policy_accept.env.getNumJobClasses() != len(self.job_class_rates):
             raise ValueError("The number of job classes defined in the queue environment ({}) " \
                              "must be the same as the number of job rates given as argument to the constructor ({})" \
-                             .format(self.policy_accept.env.getNumJobClasses(), len(self.job_rates)))
+                             .format(self.policy_accept.env.getNumJobClasses(), len(self.job_class_rates)))
 
         if reactivate and burnin_cycles_absorption == 0 and mean_lifetime is None:
             raise ValueError("Parameter `mean_lifetime` must be provided by the user when reactivate=True and burnin_cycles_absorption=0." + \
@@ -595,7 +595,7 @@ class EstimatorQueueBlockingFlemingViot:
         # should be generated and thus make the process more efficient (as opposed to generating new arriving job times
         # at every iteration (i.e. at every call to generate_one_iteration()) which may quickly fill
         # up the server queues with times that will never be used, significantly slowing down the simulation process)        
-        self.times_latest_arrived_jobs = np.zeros((self.N, len(self.job_rates)), dtype=float)
+        self.times_latest_arrived_jobs = np.zeros((self.N, len(self.job_class_rates)), dtype=float)
         #--------------------------- Times of the latest arrived jobs -------------------------
 
 
@@ -925,11 +925,11 @@ class EstimatorQueueBlockingFlemingViot:
         as is the case here, based on arrival rates and assignment probabilities
         """
         R = self.queue.getNServers()
-        J = len(self.job_rates) # Number of job classes
+        J = len(self.job_class_rates)
         equivalent_birth_rates = [0]*R
         for r in range(R):
             for c in range(J):
-                equivalent_birth_rates[r] += self.policy_assign[c][r] * self.job_rates[c]
+                equivalent_birth_rates[r] += self.policy_assign[c][r] * self.job_class_rates[c]
 
         return equivalent_birth_rates
 
@@ -1505,20 +1505,20 @@ class EstimatorQueueBlockingFlemingViot:
         def generate_next_times_jobclasses(P):
             "It updates self.times_latest_arrived_jobs[P] with the ABSOLUTE next arrival times for each job class"
             # Generate the next arriving job class times
-            birth_times_relative_for_jobs = np.random.exponential( 1/np.array(self.job_rates) )
+            birth_times_relative_for_jobs = np.random.exponential( 1/np.array(self.job_class_rates) )
             # Make a copy of the absolute times of the latest jobs (one value per job class),
             # prior to updating their values. This is done just for INFORMATIONAL purposes.
             times_latest_arrived_jobs_prev_P = copy.deepcopy(self.times_latest_arrived_jobs[P])
             # Update the absolute times of the latest jobs (one value per job class)
             self.times_latest_arrived_jobs[P] += birth_times_relative_for_jobs
             if DEBUG_TIME_GENERATION:
-                for job_class in range( len(self.job_rates) ):
+                for job_class in range( len(self.job_class_rates) ):
                     print("job class {}: Current time={:.3f}, Previous arrived job time={:.3f}, Exponential BIRTH time={:.3f}, ABSOLUTE time={:.3f}" \
                           .format(job_class, self.times_latest_known_state[P], times_latest_arrived_jobs_prev_P[job_class], birth_times_relative_for_jobs[job_class], self.times_latest_arrived_jobs[P][job_class]))
 
         def accept_jobs(P):
             "Decides which jobs to accept based on the job acceptance policy"
-            job_classes = range( len(self.job_rates) )
+            job_classes = range( len(self.job_class_rates) )
             if self.policy_accept is not None:
                 # Use the acceptance policy to decide whether we accept each job IN THE ORDER THEY ARRIVE 
                 times_latest_arrived_jobs_P = copy.deepcopy(self.times_latest_arrived_jobs[P])
@@ -2221,7 +2221,7 @@ class EstimatorQueueBlockingFlemingViot:
         # since this is how birth times are measured and stored in the object.
         self.times_in_server_queues[P] = array_of_objects((self.nservers,), dtype=list, value=[])
         self.jobclasses_in_server_queues[P] = array_of_objects((self.nservers,), dtype=list, value=[]) 
-        self.times_latest_arrived_jobs[P] = (t + self.particles[P].getOrigin()) * np.ones((len(self.job_rates),), dtype=float)
+        self.times_latest_arrived_jobs[P] = (t + self.particles[P].getOrigin()) * np.ones((len(self.job_class_rates),), dtype=float)
 
         if self.LOG: #True:
             np.set_printoptions(precision=3, suppress=True)
@@ -4481,7 +4481,7 @@ class EstimatorQueueBlockingFlemingViot:
                     "\nseed = {}" \
                     "\n***********************" \
                     .format(self.queue.getCapacity(),
-                            self.job_rates, self.queue.getDeathRates(),
+                            self.job_class_rates, self.queue.getDeathRates(),
                             self.N, self.nservers,
                             self.burnin_cycles_absorption, self.burnin_cycles_complete_all_particles,
                             self.buffer_size_activation, self.mean_lifetime,
@@ -5596,7 +5596,7 @@ if __name__ == "__main__":
         print("Test #1.1: simulate_survival() method")
         K = 20
         rate_birth = 0.5
-        job_rates = [rate_birth]
+        job_class_rates = [rate_birth]
         rate_death = [1]
         queue = queues.QueueMM(rate_birth, rate_death, 1, K)
     
@@ -5611,7 +5611,7 @@ if __name__ == "__main__":
             nparticles = nparticles0 #* buffer_size_activation
             nmeantimes = nmeantimes0 #* buffer_size_activation
             print("\nRunning Monte-Carlo simulation on single-server system to estimate survival probability curve for buffer_size_activation={} on N={} particles and simulation time T={}x...".format(buffer_size_activation, nparticles, nmeantimes))
-            est_surv = EstimatorQueueBlockingFlemingViot(nparticles, queue, job_rates,
+            est_surv = EstimatorQueueBlockingFlemingViot(nparticles, queue, job_class_rates,
                                                        service_rates=None,
                                                        buffer_size_activation=buffer_size_activation,
                                                        nmeantimes=nparticles*nmeantimes,
@@ -5624,7 +5624,7 @@ if __name__ == "__main__":
             df_proba_survival = est_surv.estimate_proba_survival_given_activation()
 
             # Estimate the survival probability starting at 0 to see if there is any difference in the estimation w.r.t. to the above (correct) method
-            est_mc = EstimatorQueueBlockingFlemingViot(1, queue, job_rates,
+            est_mc = EstimatorQueueBlockingFlemingViot(1, queue, job_class_rates,
                                                        service_rates=None,
                                                        buffer_size_activation=1,
                                                        nmeantimes=nparticles*nmeantimes,
@@ -5647,7 +5647,7 @@ if __name__ == "__main__":
         ## CONCLUSION:
         K = 20
         rate_birth = 0.5
-        job_rates = [rate_birth]
+        job_class_rates = [rate_birth]
         rate_death = [1]
         queue = queues.QueueMM(rate_birth, rate_death, 1, K)
     
@@ -5665,7 +5665,7 @@ if __name__ == "__main__":
             nparticles = nparticles0 #* buffer_size_activation
             nmeantimes = nmeantimes0 #* buffer_size_activation
             print("\nRunning Monte-Carlo simulation on single-server system to estimate survival probability curve for buffer_size_activation={} on N={} particles and simulation time T={}x...".format(buffer_size_activation, nparticles, nmeantimes))
-            est_surv = EstimatorQueueBlockingFlemingViot(nparticles, queue, job_rates,
+            est_surv = EstimatorQueueBlockingFlemingViot(nparticles, queue, job_class_rates,
                                                        service_rates=None,
                                                        buffer_size_activation=buffer_size_activation,
                                                        nmeantimes=nparticles*nmeantimes,
@@ -5687,7 +5687,7 @@ if __name__ == "__main__":
         ## CONCLUSION: The curve has a large variability...
         K = 20
         rate_birth = 0.5
-        job_rates = [rate_birth]
+        job_class_rates = [rate_birth]
         rate_death = [1]
         queue = queues.QueueMM(rate_birth, rate_death, 1, K)
 
@@ -5706,7 +5706,7 @@ if __name__ == "__main__":
         colormap = cm.get_cmap("jet")
         for rep in range(replications):
             print("\nRep {} of {}: Running Monte-Carlo simulation on single-server system to estimate the conditional blocking probability curve for buffer_size_activation={} on N={} particles and simulation time T={}x...".format(rep+1, replications, buffer_size_activation, nparticles, nmeantimes))
-            est_block = EstimatorQueueBlockingFlemingViot(nparticles, queue, job_rates,
+            est_block = EstimatorQueueBlockingFlemingViot(nparticles, queue, job_class_rates,
                                                        service_rates=None,
                                                        buffer_size_activation=buffer_size_activation,
                                                        nmeantimes=nmeantimes,
@@ -5783,7 +5783,7 @@ if __name__ == "__main__":
         print("\nTest #2.1: Single server system")
         K = 5
         rate_birth = 0.5
-        job_rates = [rate_birth]
+        job_class_rates = [rate_birth]
         rate_death = [1]
         queue = queues.QueueMM(rate_birth, rate_death, 1, K)
     
@@ -5798,7 +5798,7 @@ if __name__ == "__main__":
 
         # a) Monte-Carlo (to estimate expected absorption cycle time)
         print("[test_QB] Running Monte-Carlo simulation on 1 particle and T={}x...".format(nparticles*nmeantimes))
-        est_mc = EstimatorQueueBlockingFlemingViot(1, queue, job_rates,
+        est_mc = EstimatorQueueBlockingFlemingViot(1, queue, job_class_rates,
                                                    service_rates=None,
                                                    buffer_size_activation=1,
                                                    positions_observe=0,
@@ -5835,7 +5835,7 @@ if __name__ == "__main__":
 
         # b) Fleming-Viot
         print("\n[test_QB] Running Fleming-Viot simulation on {} particles and T={}x...".format(nparticles, nmeantimes))
-        est_fv = EstimatorQueueBlockingFlemingViot(nparticles, queue, job_rates,
+        est_fv = EstimatorQueueBlockingFlemingViot(nparticles, queue, job_class_rates,
                                                    service_rates=None,
                                                    buffer_size_activation=1,
                                                    nmeantimes=nmeantimes,
@@ -5886,11 +5886,11 @@ if __name__ == "__main__":
         nservers = 1
         K = 5
         rate_birth = 0.5
-        job_rates = [rate_birth]
+        job_class_rates = [rate_birth]
         rate_death = [1]
         queue = queues.QueueMM(rate_birth, rate_death, 1, K)
 
-        env_queue = EnvQueueSingleBufferWithJobClasses(queue, job_rates=job_rates, rewards=[1])
+        env_queue = EnvQueueSingleBufferWithJobClasses(queue, job_class_rates=job_class_rates, reward_func=rewardOnJobClassAcceptance, rewards_accept_by_job_class=[1])
 
         # Simulation parameters
         dict_params_simul = {
@@ -5928,12 +5928,12 @@ if __name__ == "__main__":
         nservers = 3
         K = 5
         rate_birth = 0.5 # This value is not really used but it's needed to construct the `queue` object
-        job_rates = [0.8, 0.7] #[0.7, 0.7] #[0.8, 0.7]
+        job_class_rates = [0.8, 0.7] #[0.7, 0.7] #[0.8, 0.7]
         rate_death = [1, 1, 1]
         policy_assign = [[0.5, 0.5, 0.0], [0.0, 0.5, 0.5]]#[[1/3, 1/3, 1/3], [1/3, 1/3, 1/3]] #[[0.5, 0.5, 0.0], [0.0, 0.5, 0.5]]
         queue = queues.QueueMM(rate_birth, rate_death, nservers, K)
         # Queue environment (to pass to the simulation functions)
-        env_queue = EnvQueueSingleBufferWithJobClasses(queue, job_rates=job_rates, rewards=[1]*len(job_rates), policy_assign=policy_assign)
+        env_queue = EnvQueueSingleBufferWithJobClasses(queue, job_class_rates=job_class_rates, reward_func=rewardOnJobClassAcceptance, rewards_accept_by_job_class=[1] * len(job_class_rates), policy_assign=policy_assign)
 
         # Theoretical expected values for E(T):
         # K=5, rhos=[0.4, 0.75, 0.35]: E(T) = 8.1
@@ -5950,7 +5950,7 @@ if __name__ == "__main__":
 
         # a) Monte-Carlo (to estimate expected absorption cycle time)
         print("[test_QB] Running Monte-Carlo simulation on 1 particle, K={}, T={}x...".format(K, nparticles*nmeantimes))
-        est_mc = EstimatorQueueBlockingFlemingViot(1, queue, job_rates,
+        est_mc = EstimatorQueueBlockingFlemingViot(1, queue, job_class_rates,
                                                    service_rates=env_queue.getServiceRates(),
                                                    buffer_size_activation=3,
                                                    positions_observe=3,
@@ -6006,7 +6006,7 @@ if __name__ == "__main__":
 
         # b) Fleming-Viot
         print("\n[test_QB] Running Fleming-Viot simulation on {} particles, K={}, T={}x...".format(nparticles, K, nmeantimes))
-        est_fv = EstimatorQueueBlockingFlemingViot(nparticles, queue, job_rates,
+        est_fv = EstimatorQueueBlockingFlemingViot(nparticles, queue, job_class_rates,
                                                    service_rates=env_queue.getServiceRates(),
                                                    buffer_size_activation=buffer_size_activation,
                                                    nmeantimes=nmeantimes,
@@ -6071,12 +6071,12 @@ if __name__ == "__main__":
         print("\nTest #4.1: Single server system with ACCEPTANCE policy on different JOB CLASSES")
         K = 10
         rate_birth = 0.5
-        job_rates = [0.3, 0.8, 0.7, 0.9]
+        job_class_rates = [0.3, 0.8, 0.7, 0.9]
         rate_death = [1]
         acceptance_rewards = [1, 0.8, 0.3, 0.2]     # One acceptance reward for each job class
         nservers = len(rate_death)
         queue = GenericQueue(K, nservers)
-        env_queue = EnvQueueSingleBufferWithJobClasses(queue, job_rates, acceptance_rewards)
+        env_queue = EnvQueueSingleBufferWithJobClasses(queue, job_class_rates, acceptance_rewards)
         # Acceptance thresholds
         # - There is one threshold defined for each buffer size
         # - Their values are in the range of the job classes (0, ..., #job classes)
@@ -6093,7 +6093,7 @@ if __name__ == "__main__":
 
         # a) Monte-Carlo (to estimate expected absorption cycle time)
         print("Running Monte-Carlo simulation on 1 particle and T={}x...".format(nparticles*nmeantimes))
-        est_mc = EstimatorQueueBlockingFlemingViot(1, queue, job_rates,
+        est_mc = EstimatorQueueBlockingFlemingViot(1, queue, job_class_rates,
                                                    service_rates=None,
                                                    buffer_size_activation=1,
                                                    nmeantimes=nparticles*nmeantimes,
@@ -6109,7 +6109,7 @@ if __name__ == "__main__":
         """
         # b) Fleming-Viot
         print("Running Fleming-Viot simulation on {} particles and T={}x...".format(nparticles, nmeantimes))
-        est_fv = EstimatorQueueBlockingFlemingViot(nparticles, queue, job_rates,
+        est_fv = EstimatorQueueBlockingFlemingViot(nparticles, queue, job_class_rates,
                                                    service_rates=None,
                                                    buffer_size_activation=1,
                                                    nmeantimes=nmeantimes,

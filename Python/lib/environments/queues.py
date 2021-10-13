@@ -15,6 +15,7 @@ from gym import spaces
 if __name__ == "__main__":
     # Needed to run tests (see end of program)
     import runpy
+
     runpy.run_path('../../../setup.py')
 
     from Python.lib.environments import EnvironmentDiscrete
@@ -22,6 +23,19 @@ if __name__ == "__main__":
 else:
     from . import EnvironmentDiscrete
     from ..queues import GenericQueue, QueueMM
+
+#---------------------------- Reward functions that can be used in different environments -----------------------------#
+# Each reward function should depend on 4 inputs:
+# - env: the environment  where the reward is generated
+# - S(t) the state at which an action is applied
+# - A(t) the action applied at state S(t)
+# - S(t+1) the next state where the system is at after applying action A(t) on state S(t)
+def rewardOnJobClassAcceptance(env, state, action, next_state):
+    # The state is assumed to be a tuple (k, i) where k is the buffer size and i is the class of the arriving job
+    job_class = state[1]
+    return env.getRewardForJobClassAcceptance(job_class)
+#---------------------------- Reward functions that can be used in different environments -----------------------------#
+
 
 class deprecated_EnvQueueSingleBufferWithJobClasses(EnvironmentDiscrete):
     """
@@ -34,18 +48,20 @@ class deprecated_EnvQueueSingleBufferWithJobClasses(EnvironmentDiscrete):
     num_job_classes: positive int
         Number of different job classes that can arrive to the queue.
 
-    rewards: list
-        List of rewards for each job class.
+    rewards_accept_by_job_class: list
+        List of rewards when accepting the different job classes.
         Its length must be equal to the number of job classes.
     """
 
-    def __init__(self, capacity :int, num_job_classes :int, rewards :list):
-        if len(rewards) != num_job_classes:
-            raise ValueError("The number of rewards ({}) must be the same as the number of job classes ({})".format(len(rewards), num_job_classes))
+    def __init__(self, capacity: int, num_job_classes: int, rewards_accept: list):
+        if len(rewards_accept) != num_job_classes:
+            raise ValueError(
+                "The number of acceptance rewards ({}) must be the same as the number of job classes ({})".format(len(rewards_accept),
+                                                                                                       num_job_classes))
 
         self.capacity = capacity
         self.num_job_classes = num_job_classes
-        self.rewards = rewards
+        self.rewards_accept = rewards_accept
 
         # Create temporary variables that are shorter to reference and still easy to understand
         K = self.capacity
@@ -104,10 +120,10 @@ class deprecated_EnvQueueSingleBufferWithJobClasses(EnvironmentDiscrete):
     def getNumJobClasses(self):
         return self.num_job_classes
 
-    def getRewards(self):
-        return self.rewards
-    
-    
+    def getRewardsForJobClassAcceptance(self):
+        return self.rewards_accept
+
+
 class deprecated2_EnvQueueSingleBufferWithJobClasses(gym.Env):
     """
     Queue environment with a single buffer receiving jobs of different classes.
@@ -119,18 +135,20 @@ class deprecated2_EnvQueueSingleBufferWithJobClasses(gym.Env):
     num_job_classes: positive int
         Number of different job classes that can arrive to the queue.
 
-    rewards: list
-        List of rewards for each job class.
+    rewards_accept_by_job_class: list
+        List of rewards for the acceptance of the different job classes.
         Its length must be equal to the number of job classes.
     """
 
-    def __init__(self, capacity :int, num_job_classes :int, rewards :list, seed=None):
-        if len(rewards) != num_job_classes:
-            raise ValueError("The number of rewards ({}) must be the same as the number of job classes ({})".format(len(rewards), num_job_classes))
+    def __init__(self, capacity: int, num_job_classes: int, rewards_accept: list, seed=None):
+        if len(rewards_accept) != num_job_classes:
+            raise ValueError(
+                "The number of acceptance rewards ({}) must be the same as the number of job classes ({})".format(len(rewards_accept),
+                                                                                                       num_job_classes))
 
         self.capacity = capacity
         self.num_job_classes = num_job_classes
-        self.rewards = rewards
+        self.rewards_accept = rewards_accept
         self.seed = seed
 
         # Create temporary variables that are shorter to reference and still easy to understand
@@ -139,13 +157,13 @@ class deprecated2_EnvQueueSingleBufferWithJobClasses(gym.Env):
 
         # Action and observation spaces
         self.action_space = spaces.Discrete(2)  # Either Reject (0) or Accept (1) an arriving job class
-        self.observation_space = spaces.Tuple( (spaces.Discrete(K+1), spaces.Discrete(J)) )
+        self.observation_space = spaces.Tuple((spaces.Discrete(K + 1), spaces.Discrete(J)))
 
         self.reset()
 
     def reset(self):
         self.buffer_size = 0
-        self.job_class = None   # np.random.choice( self.action_space.n )
+        self.job_class = None  # np.random.choice( self.action_space.n )
         # Reset the seed
         np.random.seed(self.seed)
 
@@ -156,32 +174,34 @@ class deprecated2_EnvQueueSingleBufferWithJobClasses(gym.Env):
         assert self.job_class is not None, "The job class of the arrived job is defined"
 
         if not self.action_space.contains(action):
-            raise ValueError("Invalid action: {}\nValid actions are: 0, 1, ..., {}".format(action, self.action_space.n-1))
+            raise ValueError(
+                "Invalid action: {}\nValid actions are: 0, 1, ..., {}".format(action, self.action_space.n - 1))
 
         reward = 0
         if action == 1:
             if self.buffer_size == self.capacity:
                 warn("Action '{}' not taken because the buffer is at full capacity ({})!".format(action, self.capacity))
             else:
-                reward = self.rewards[ self.job_class ]
+                reward = self.rewards_accept[self.job_class]
                 # Change the state of the system
                 # (the job class is set to None because no new job has yet arrived)
                 self.buffer_size += 1
-        
+
         # Reset the job class to None because it was just considered for the given action
         self.job_class = None
 
-        return self.getState(), reward, False, {}        
+        return self.getState(), reward, False, {}
 
-    #------ GETTERS ------#
+        # ------ GETTERS ------#
+
     def getCapacity(self):
         return self.capacity
 
     def getNumJobClasses(self):
         return self.num_job_classes
 
-    def getRewards(self):
-        return self.rewards
+    def getRewardsForJobClassAcceptance(self):
+        return self.rewards_accept
 
     def getActions(self):
         return range(self.action_space.n)
@@ -195,34 +215,52 @@ class deprecated2_EnvQueueSingleBufferWithJobClasses(gym.Env):
     def getJobClass(self):
         return self.job_class
 
-    #------ SETTERS ------#
-    def setBufferSize(self, buffer_size :int):
+    # ------ SETTERS ------#
+    def setBufferSize(self, buffer_size: int):
         "Sets the buffer size of the queue"
         if int(buffer_size) != buffer_size or buffer_size < 0 or buffer_size > self.capacity:
-            raise ValueError("The buffer size value is invalid ({}). It must be an integer between {} and {}".format(buffer_size, 0, self.capacity))
+            raise ValueError(
+                "The buffer size value is invalid ({}). It must be an integer between {} and {}".format(buffer_size, 0,
+                                                                                                        self.capacity))
         self.buffer_size = buffer_size
 
     def setJobClass(self, job_class):
         "Sets the job class of a new arriving job"
         if int(job_class) != job_class or job_class < 0 or job_class >= self.num_job_classes:
-            raise ValueError("The job class is invalid ({}). It must be an integer between {} and {}".format(job_class, 0, self.num_job_classes-1))
+            raise ValueError(
+                "The job class is invalid ({}). It must be an integer between {} and {}".format(job_class, 0,
+                                                                                                self.num_job_classes - 1))
         self.job_class = job_class
 
 
 class EnvQueueSingleBufferWithJobClasses(gym.Env):
     """
     Queue environment with a single buffer receiving jobs of different classes
-    being served by a one or multiple servers.
+    being served by one or multiple servers.
+
+    The possible actions for an agent interacting with the queue are:
+    - Accept or reject an incoming job of a given class
+    - Choose the server to which the accepted incoming job is assigned
 
     Arguments:
     queue: QueueMM
         The queue object that governs the dynamics of the environment through the definition of a server system.
 
-    job_rates: list
+    job_class_rates: list
         A list containing the arriving job rates for each valid job class.
 
-    rewards: list
-        List of rewards for each job class whose rate is given in job_rates.
+    reward_func: function
+        Function returning the reward received after taking action A(t) at state S(t) and making the environment
+        go to state S(t+1).
+
+    rewards_accept_by_job_class: list
+        List of rewards for the acceptance of the different job class whose rate is given in job_class_rates.
+
+    policy_accept: Policy
+        Policy object that defines the acceptance policy.
+        Note that the policy is used by the agent when interacting with the environment, and it's stored here as part
+        of the information that we store about the environment, because not every policy is compatible with an
+        environment.
 
     policy_assign: (opt) list of lists
         Assignment policy defined as a list of assignment probabilities for each job class
@@ -233,57 +271,73 @@ class EnvQueueSingleBufferWithJobClasses(gym.Env):
         default: None (in which case the assignment probability is uniform over the servers)
     """
 
-    def __init__(self, queue :QueueMM, job_rates :list, rewards :list, policy_assign :list=None):
-        if len(rewards) != len(job_rates):
-            raise ValueError("The number of rewards ({}) must be the same as the number of job rates ({})".format(len(rewards), len(job_rates)))
-
+    def __init__(self, queue: QueueMM, job_class_rates: list, reward_func, rewards_accept_by_job_class: list, policy_accept=None, policy_assign: list = None):
+        #-- Environment
         self.queue = queue
-        self.job_rates = job_rates
-        self.rewards = rewards
+        self.job_class_rates = job_class_rates
 
+        #-- Rewards
+        self.reward_func = reward_func
+        self.rewards_accept_by_job_class = rewards_accept_by_job_class
+
+        #-- Policies
+        # TODO-2021/10/12: We should receive an Agent object instead of just the Policy... The Agent would include the Policy AND the Learner
+        self.policy_accept = policy_accept
         # Job-class to server assignment policy
         if policy_assign is None:
             # When no assignment probability is given, it is defined to be uniform over the servers for each job class
-            policy_assign = [ [1.0 / self.queue.getNServers()] * self.queue.getNServers() ] * len(self.job_rates) 
+            policy_assign = [[1.0 / self.queue.getNServers()] * self.queue.getNServers()] * len(self.job_class_rates)
         self.policy_assign = policy_assign
 
-        # Job-rates by server (assuming they are pre-assigned)
+        # Job-rates by server (assuming jobs are pre-assigned to servers)
         self.job_rates_by_server = self.compute_arrival_rates_by_server()
 
         # Create temporary variables that are shorter to reference and still easy to understand
         K = self.queue.getCapacity()
-        J = len(self.job_rates)
+        J = len(self.job_class_rates)
 
         # Action and observation spaces
         self.action_space = spaces.Discrete(2)  # Either Reject (0) or Accept (1) an arriving job class
-        self.observation_space = spaces.Tuple( (spaces.Discrete(K+1), spaces.Discrete(J)) )
+        self.observation_space = spaces.Tuple((spaces.Discrete(K+1), spaces.Discrete(J)))
 
         self.reset()
 
     def reset(self):
-        self.buffer_size = 0
-        self.job_class = None
+        self.setState(0, None)
 
     def step(self, action):
-        assert self.job_class is not None, "The job class of the arrived job is defined"
+        assert self.getJobClass() is not None, "The job class of the arrived job is defined"
 
         if not self.action_space.contains(action):
-            raise ValueError("Invalid action: {}\nValid actions are: 0, 1, ..., {}".format(action, self.action_space.n-1))
+            raise ValueError(
+                "Invalid action: {}\nValid actions are: 0, 1, ..., {}".format(action, self.action_space.n - 1))
 
-        reward = 0
-        if action == 1:
-            if self.buffer_size == self.queue.getCapacity():
-                warn("Action '{}' not taken because the buffer is at full capacity ({})!".format(action, self.getCapacity()))
+        if action == 0:
+            # Reject the incoming job
+            # Set the job class to None because no new job has yet arrived at the moment of taking the action
+            self.setState(self.getBufferSize(), None)
+            next_state = self.getState()
+            reward = 0.0
+        elif action == 1:
+            # Accept the incoming job, if the queue has capacity
+            if self.getBufferSize() == self.queue.getCapacity():
+                # Set the job class to None because no new job has yet arrived at the moment of taking the action
+                self.setState(self.getBufferSize(), None)
+                next_state = self.getState()
+                reward = 0.0
+
+                #warn("Action '{}' not taken because the buffer is at full capacity ({})!".format(action,
+                #                                                                                 self.getCapacity()))
             else:
-                reward = self.rewards[ self.job_class ]
+                # Current state of the system
+                state = self.getState()
                 # Change the state of the system
-                # (the job class is set to None because no new job has yet arrived)
-                self.buffer_size += 1
-        
-        # Reset the job class to None because it was just considered for the given action
-        self.job_class = None
+                self.setState(self.getBufferSize()+1, None)
+                next_state = self.getState()
+                # Reward observed by going from S(t) to S(t+1) via action A(t)
+                reward = self.reward_func(self, state, action, next_state)
 
-        return self.getState(), reward, False, {}        
+        return next_state, reward, False, {}
 
     def compute_arrival_rates_by_server(self):
         """
@@ -298,20 +352,20 @@ class EnvQueueSingleBufferWithJobClasses(gym.Env):
             job_arrival_rate[r] = sum_{c over job classes} { job_rate[c] * Pr(assign job c to server r) }            
         """
         R = self.queue.getNServers()
-        J = len(self.job_rates)         # Number of job classes
+        J = len(self.job_class_rates)  # Number of job classes
         job_arrival_rates = [0]*R
         for r in range(R):
             for c in range(J):
-                job_arrival_rates[r] += self.policy_assign[c][r] * self.job_rates[c]
+                job_arrival_rates[r] += self.policy_assign[c][r] * self.job_class_rates[c]
 
         return job_arrival_rates
 
-    #------ GETTERS ------#
+    # ------ GETTERS ------#
     def getCapacity(self):
         return self.queue.getCapacity()
 
     def getJobRates(self):
-        return self.job_rates
+        return self.job_class_rates
 
     def getJobRatesByServer(self):
         return self.job_rates_by_server
@@ -323,19 +377,13 @@ class EnvQueueSingleBufferWithJobClasses(gym.Env):
         return [b/d for b, d in zip(self.getJobRatesByServer(), self.getServiceRates())]
 
     def getAssignPolicy(self):
-        return self.policy_assign 
+        return self.policy_assign
 
     def getNumJobClasses(self):
-        return len(self.job_rates)
+        return len(self.job_class_rates)
 
     def getNumServers(self):
         return self.queue.getNServers()
-
-    def getRewards(self):
-        return self.rewards
-
-    def getActions(self):
-        return range(self.action_space.n)
 
     def getState(self):
         return (self.getBufferSize(), self.getJobClass())
@@ -346,31 +394,52 @@ class EnvQueueSingleBufferWithJobClasses(gym.Env):
     def getJobClass(self):
         return self.job_class
 
-    #------ SETTERS ------#
-    def setBufferSize(self, buffer_size :int):
+    def getActions(self):
+        return range(self.action_space.n)
+
+    def getRewardsForJobClassAcceptance(self):
+        return self.rewards_accept_by_job_class
+
+    def getRewardForJobClassAcceptance(self, job_class: int):
+        return self.rewards_accept_by_job_class[job_class]
+
+    # ------ SETTERS ------#
+    def setBufferSize(self, buffer_size: int):
         "Sets the buffer size of the queue"
         if int(buffer_size) != buffer_size or buffer_size < 0 or buffer_size > self.getCapacity():
-            raise ValueError("The buffer size value is invalid ({}). It must be an integer between {} and {}".format(buffer_size, 0, self.getCapacity()))
+            raise ValueError(
+                "The buffer size value is invalid ({}). It must be an integer between {} and {}".format(buffer_size, 0,
+                                                                                                        self.getCapacity()))
         self.buffer_size = buffer_size
 
-    def setJobClass(self, job_class):
-        "Sets the job class of a new arriving job"
-        if int(job_class) != job_class or job_class < 0 or job_class >= self.getNumJobClasses():
-            raise ValueError("The job class is invalid ({}). It must be an integer between {} and {}".format(job_class, 0, self.getNumJobClasses()-1))
+    def setJobClass(self, job_class: int or None):
+        "Sets the job class of a new arriving job. The job class can be None."
+        if  not (
+                job_class is None or \
+                int(job_class) == job_class and 0 <= job_class <= self.getNumJobClasses()
+                ):
+            raise ValueError(
+                "The job class is invalid ({}). It must be an integer between {} and {}".format(job_class, 0,
+                                                                                                self.getNumJobClasses() - 1))
+        self.job_class = job_class
+
+    def setState(self, buffer_size: int, job_class: int):
+        "Sets the state (k, i) where k is the buffer size and i is the arriving job class"
+        self.buffer_size = buffer_size
         self.job_class = job_class
 
 
 if __name__ == "__main__":
-    #------------------------- Unit tests -----------------------------#
-    #--- Test #1: Create a queue environment in DEPRECATED class
+    # ------------------------- Unit tests -----------------------------#
+    # --- Test #1: Create a queue environment in DEPRECATED class
     if False:
         print("Running test #1: Deprecated queue environment inheriting from toy_text.discrete.DiscreteEnv...")
         env = deprecated_EnvQueueSingleBufferWithJobClasses(6, 4, [1, 0.8, 0.3, 0.2])
         K = env.getCapacity()
         J = env.getNumJobClasses()
-        R = env.getRewards()
+        R = env.getRewardsForJobClassAcceptance()
         nS = env.getNumStates()
-    
+
         print("Initial state distribution:")
         s = -1
         for k in range(K):
@@ -381,7 +450,7 @@ if __name__ == "__main__":
                 print("{}{}".format(sep, env.isd[s]), end="")
                 sep = ", "
             print("]")
-    
+
         print("Transition probabilities:")
         s = -1
         for k in range(K):
@@ -389,21 +458,21 @@ if __name__ == "__main__":
                 s += 1
                 print("s=({}, {}):".format(k, j))
                 for a in sorted(env.P[s].keys()):
-                    print("a={}:".format(a), end= "\n")
+                    print("a={}:".format(a), end="\n")
                     for transition_info in env.P[s][a]:
                         print("\tnext state: {} (p={})".format(transition_info[1], transition_info[0]))
                 print("")
 
-    #--- Test #2: Create a queue environment
+    # --- Test #2: Create a queue environment
     if False:
         print("\nRunning test #2: Queue environment inheriting from gym.Env...")
         env = deprecated2_EnvQueueSingleBufferWithJobClasses(6, 4, [1, 0.8, 0.3, 0.2])
         K = env.getCapacity()
         J = env.getNumJobClasses()
-        R = env.getRewards()
+        R = env.getRewardsForJobClassAcceptance()
         nS = len(env.getActions())
-    
-        #-- Arriving job on buffer not full
+
+        # -- Arriving job on buffer not full
         buffer_size_orig = 0
         job_class = 1
         env.setJobClass(job_class)
@@ -417,9 +486,9 @@ if __name__ == "__main__":
         env.setJobClass(job_class)
         next_state, reward, done, info = env.step(1)
         assert next_state == (buffer_size_orig + 1, None)
-        assert reward == env.getRewards()[job_class]
-    
-        #-- Arriving job on full buffer
+        assert reward == env.getRewardForJobClassAcceptance(job_class)
+
+        # -- Arriving job on full buffer
         env.setBufferSize(env.capacity)
         job_class = 1
         env.setJobClass(job_class)
@@ -435,22 +504,24 @@ if __name__ == "__main__":
         assert next_state == (env.capacity, None)
         assert reward == 0
 
-    #--- Test #3: Create a queue environment
+    # --- Test #3: Create a queue environment
     if True:
         print("\nRunning test #3: Queue environment with a GenericQueue as parameter...")
-        queue = GenericQueue(6, 1)
-        env = EnvQueueSingleBufferWithJobClasses(queue, [0.3, 0.8, 0.7, 0.9], [1, 0.8, 0.3, 0.2])
+        capacity = 6
+        nservers = 1
+        queue = GenericQueue(capacity, nservers)
+        env = EnvQueueSingleBufferWithJobClasses(queue, [0.3, 0.8, 0.7, 0.9], rewardOnJobClassAcceptance, [1, 0.8, 0.3, 0.2])
         K = env.getCapacity()
         J = env.getNumJobClasses()
-        R = env.getRewards()
+        R = env.getRewardsForJobClassAcceptance()
         nS = len(env.getActions())
-    
-        #-- Equivalent job arrival rates (by server)
-        print("Job arrival rates: {}".format(env.job_rates))
+
+        # -- Equivalent job arrival rates (by server)
+        print("Job arrival rates: {}".format(env.job_class_rates))
         print("Equivalent arrival rates by server: {}".format(env.job_rates_by_server))
-        assert env.job_rates_by_server == [ np.sum(env.job_rates) ]
-    
-        #-- Arriving job on buffer not full
+        assert env.job_rates_by_server == [np.sum(env.job_class_rates)]
+
+        # -- Arriving job on buffer not full
         buffer_size_orig = 0
         job_class = 1
         env.setJobClass(job_class)
@@ -464,9 +535,9 @@ if __name__ == "__main__":
         env.setJobClass(job_class)
         next_state, reward, done, info = env.step(1)
         assert next_state == (buffer_size_orig + 1, None)
-        assert reward == env.getRewards()[job_class]
-    
-        #-- Arriving job on full buffer
+        assert reward == env.getRewardForJobClassAcceptance(job_class)
+
+        # -- Arriving job on full buffer
         env.setBufferSize(env.getCapacity())
         job_class = 1
         env.setJobClass(job_class)

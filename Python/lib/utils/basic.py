@@ -11,6 +11,9 @@ import copy
 import numpy as np
 import pandas as pd
 
+def is_scalar(x):
+    "Returns whether the input parameter is a scalar (i.e. either int, np.int32, np.int64, float, np.float32, np.float64)"
+    return isinstance(x, (int, np.int32, np.int64, float, np.float32, np.float64))
 
 def parse_dict_params(dict_params, dict_params_default):
     """
