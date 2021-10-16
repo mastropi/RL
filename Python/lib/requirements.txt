@@ -3,8 +3,9 @@
 # Required packages listed in alphabetical order
 gym==0.12.1		# For installation we HAVE TO use `pip install gym==0.12.1`, i.e. installation via pip but NOT via `conda install` because PyPI is NOT compatible with conda!! Ref: https://stackoverflow.com/questions/48138836/conda-cant-find-packages-at-pypi-org-simple 
 numpy==1.18.3	# printoptions() is available since v1.15 (Ref: https://numpy.org/doc/1.14/reference/generated/numpy.printoptions.html gives Error 404)
+                # Use version 1.14 if we need to run the process at IRIT's cluster, since this is what they have installed there.
 pandas==0.22.0
 
 # Suggested packages listed in alphabetical order
 pytest==3.3.2
-unittest_data_provider==1.0.1
+unittest_data_provider==1.0.1   # Installed with `pip install`

@@ -12,6 +12,9 @@ import pandas as pd
 from . import Learner, AlphaUpdateType
 from .value_functions import ValueFunctionApprox
 
+DEFAULT_NUMPY_PRECISION = np.get_printoptions().get('precision')
+DEFAULT_NUMPY_SUPPRESS = np.get_printoptions().get('suppress')
+
 
 class LeaMCLambda(Learner):
     """
@@ -29,13 +32,13 @@ class LeaMCLambda(Learner):
         super().__init__(env, alpha, adjust_alpha, alpha_update_type, adjust_alpha_by_episode, alpha_min)
         self.debug = debug
 
-        # Attributes that MUST be presented for all TD methods
+        # Attributes that MUST be presented for all MC methods
         self.V = ValueFunctionApprox(self.env.getNumStates())
         self.Q = None
         self.alpha = alpha
         self.gamma = gamma
         
-        # Attributes specific to the current TD method
+        # Attributes specific to the current MC method
         self.lmbda = lmbda
 
     def _reset_at_start_of_episode(self):
@@ -136,15 +139,20 @@ class LeaMCLambda(Learner):
 
             # This means t+1 is the terminal time T
             # (recall we WERE in time t and we STEPPED INTO time t+1, so T = t+1)
-            self.learn_mc(t)
+            T = t + 1
+            self.learn_mc(T)
 
-            self.final_report(t)
+            self.final_report(T)
 
-    def learn_mc(self, t):
-        "Updates the value function based on the new observed episode using first-visit Monte Carlo"
-        # Terminal time
-        T = t + 1
+    def learn_mc(self, T):
+        """
+        Updates the value function based on a new observed EPISODE using first-visit Monte Carlo.
+        That is, this function is expected to be called when the episode ends.
 
+        Arguments:
+        T: int
+            Length of the episode, i.e. the time step at which the episode ends.
+        """
         #-- Compute the observed return for each state in the trajectory for EVERY visit to it
         # NOTE: we start at the LATEST state (as opposed to the first) so that we don'tt
         # need to have a data structure that stores the already visited states in the episode;
@@ -177,9 +185,10 @@ class LeaMCLambda(Learner):
 
             # This means t+1 is the terminal time T
             # (recall we WERE in time t and we STEPPED INTO time t+1, so T = t+1)
-            self.learn(t)
+            T = t + 1
+            self.learn(T)
 
-            self.final_report(t)
+            self.final_report(T)
 
     def _updateG(self, t, state, next_state, reward, done):
         times_reversed = np.arange(t, -1, -1)  # This is t, t-1, ..., 0
@@ -249,14 +258,19 @@ class LeaMCLambda(Learner):
                 check = [R + self.gamma * ( (1 - self.lmbda)*Vns + self.lmbda*G )
                          for (R, Vns, G) in zip(self._rewards[1:-1], self._values_next_state[1:-1], self._Glambda_list[1:])] + [np.nan]
                 diff = [c - G for (c, G) in zip(check, self._Glambda_list)]
-                with np.printoptions(precision=3, suppress=True):
-                    print(np.c_[np.arange(t+1), self._rewards[1:], self._values_next_state[1:], self._Glambda_list, check, diff])  
+                np.set_printoptions(precision=3, suppress=True)
+                print(np.c_[np.arange(t+1), self._rewards[1:], self._values_next_state[1:], self._Glambda_list, check, diff])
+                np.set_printoptions(precision=DEFAULT_NUMPY_PRECISION, suppress=DEFAULT_NUMPY_SUPPRESS)
 
-    def learn(self, t):
-        "Updates the value function based on the new observed episode"
-        # Terminal time
-        T = t + 1
-        
+    def learn(self, T):
+        """
+        Updates the value function based on a new observed EPISODE using first-visit Monte Carlo.
+        That is, this function is expected to be called when the episode ends.
+
+        Arguments:
+        T: int
+            Length of the episode, i.e. the time step at which the episode ends.
+        """
         # Store the list of G(t,lambda) values into an array 
         Glambda = np.array(self._Glambda_list)
 
@@ -335,11 +349,12 @@ class LeaMCLambdaAdaptive(LeaMCLambda):
                                 ('lambda', self.state_lambdas[ visited_states ])])
             print("\n\nSummary of lambda adaptation (Episode {}):".format(self.episode))
             print(LambdaAdapt)
-            input("Press Enter to continue...")
+            #input("Press Enter to continue...")
 
             # This means t+1 is the terminal time T
             # (recall we WERE in time t and we STEPPED INTO time t+1, so T = t+1)
-            self.learn(t)
+            T = t + 1
+            self.learn(T)
 
     def _computeStateRewards(self, terminal_state):
         # Length of the episode
