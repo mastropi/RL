@@ -29,20 +29,20 @@ from matplotlib import pyplot as plt, cm    # cm is for colormaps (e.g. cm.get_c
 if __name__ == "__main__":
     from environments import EnvironmentDiscrete
     from agents import GenericAgent
-    from agents.learners.td import LeaTDLambdaAdaptive
-    from utils.computing import rmse
+    from agents.learners.episodic.discrete.td import LeaTDLambdaAdaptive
+    from utils.computing import rmse, compute_job_rates_by_server
 else:
     # These relative imports are only accepted when we compile the file as a module
     from .environments import EnvironmentDiscrete
     from .agents import GenericAgent
-    from .agents.learners.td import LeaTDLambdaAdaptive
+    from agents.learners.episodic.discrete.td import LeaTDLambdaAdaptive
     from .utils.computing import rmse
 
-# TODO: (2020/05) Rename this class to SimulatorDiscrete as it simulates on a discrete environment
+
+# TODO: (2020/05) Rename this class to SimulatorDiscreteEpisodic as it simulates on a discrete (in what sense?) environment running on episodes
 class Simulator:
     """
-    Simulator class that runs a Reinforcement Learning simulation on a given environment `env`
-    and an `agent`.
+    Simulator class that runs a Reinforcement Learning simulation on a given environment `env` and an `agent`
     """
 
     def __init__(self, env, agent, seed=None, debug=False):
@@ -91,7 +91,7 @@ class Simulator:
             Length of the experiment: number of episodes to run.
 
         start: None or int, optional
-            Index corresponding to the starting state.
+            Index in the set of states defined by the environment corresponding to the starting state.
 
         seed: None or float, optional
             Seed to use for the random number generator for the simulation.
@@ -129,7 +129,7 @@ class Simulator:
         Returns: tuple
             Tuple containing the following elements:
                 - state value function estimate for each state at the end of the last episode (`nepisodes`).
-                - number of visits to each state at the end of the lastt episode.
+                - number of visits to each state at the end of the last episode.
                 - RMSE (when `compute_rmse` is not None), an array of length `nepisodes` containing the
                 Root Mean Square Error after each episode, of the estimated value function averaged
                 over all states. Otherwise, None.
@@ -461,8 +461,7 @@ if __name__ == "__main__":
     #from Python.lib import environments, agents
     from environments import gridworlds
     from Python.lib.agents.policies import random_walks
-    from Python.lib.agents.learners import mc
-    from Python.lib.agents.learners import td
+    from agents.learners.episodic.discrete import mc, td
 
     # Plotting setup
     colormap = cm.get_cmap("jet")

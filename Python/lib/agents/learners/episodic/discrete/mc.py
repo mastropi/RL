@@ -9,7 +9,7 @@ Created on Fri Apr 10 10:36:13 2020
 import numpy as np
 import pandas as pd
 
-from . import Learner, AlphaUpdateType
+from agents.learners.episodic.discrete import Learner, AlphaUpdateType
 from .value_functions import ValueFunctionApprox
 
 DEFAULT_NUMPY_PRECISION = np.get_printoptions().get('precision')
@@ -19,7 +19,7 @@ DEFAULT_NUMPY_SUPPRESS = np.get_printoptions().get('suppress')
 class LeaMCLambda(Learner):
     """
     Monte Carlo learning algorithm using step size `alpha`, discount `gamma`, and decay parameter `lmbda`  
-    applied to a discrete environment defined with the DiscreteEnv class of openAI's gym module.
+    applied to a discrete-state environment defined with the DiscreteEnv class of openAI's gym module.
 
     Args:
         env (gym.envs.toy_text.discrete.DiscreteEnv): the environment where the learning takes place.

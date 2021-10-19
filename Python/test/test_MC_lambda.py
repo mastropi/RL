@@ -13,26 +13,20 @@ import numpy as np
 import unittest
 from unittest_data_provider import data_provider
 #from gym.utils import seeding
-import matplotlib.pyplot as plt
 
 from Python.lib.environments import gridworlds
 from Python.lib.agents.policies import random_walks
 import Python.lib.agents as agents
-from Python.lib.agents.learners import mc
-from Python.lib.agents.learners import AlphaUpdateType
+from agents.learners.episodic.discrete import mc
+from agents.learners.episodic.discrete import AlphaUpdateType
 import Python.lib.simulators as simulators
 
 import test_utils
 
-from importlib import reload
-import Python.lib.agents.learners.mc
-#reload(Python.lib.agents.learners.mc)
-from Python.lib.agents.learners.mc import LeaMCLambda
-#reload(Python.lib.agents.learners)
-from Python.lib.agents.learners import Learner
+#reload(Python.lib.agents.learners.episodic.discrete.mc)
+#reload(Python.lib.agents.learners.episodic.discrete)
 
-import Python.lib.agents.learners.value_functions
-from Python.lib.agents.learners.value_functions import ValueFunctionApprox
+import agents.learners.episodic.discrete.value_functions
 
 
 class Test_MC_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
@@ -99,11 +93,11 @@ class Test_MC_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
         # All tests are run using seed = 1717, nepisodes = 20, start_state = 10
         print("\n*** Testing {0}, case number {1} ***".format(self.id(), casenum))
         learner_mclambda = mc.LeaMCLambda(self.env, alpha=params_alpha_gamma_lambda[0],
-                                                    gamma=params_alpha_gamma_lambda[1],
-                                                    lmbda=params_alpha_gamma_lambda[2],
-                                                    adjust_alpha=adjust_alpha, adjust_alpha_by_episode=adjust_alpha_by_episode,
-                                                    alpha_min=alpha_min,
-                                                    debug=False)
+                                          gamma=params_alpha_gamma_lambda[1],
+                                          lmbda=params_alpha_gamma_lambda[2],
+                                          adjust_alpha=adjust_alpha, adjust_alpha_by_episode=adjust_alpha_by_episode,
+                                          alpha_min=alpha_min,
+                                          debug=False)
         agent_rw_mc = agents.GenericAgent(self.policy_rw, learner_mclambda)
         sim = simulators.Simulator(self.env, agent_rw_mc, debug=False)
         _, _, RMSE_by_episode, state_info = \

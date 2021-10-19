@@ -17,11 +17,8 @@ import pickle
 from Python.lib.environments import gridworlds
 from Python.lib.agents import GenericAgent
 from Python.lib.agents.policies import random_walks
-from Python.lib.agents.learners import mc
-from Python.lib.agents.learners import td
-from Python.lib.agents.learners.mc import LeaMCLambda
-from Python.lib.agents.learners.td import LeaTDLambda
-from Python.lib.agents.learners import Learner, AlphaUpdateType
+from agents.learners.episodic.discrete import mc, td
+from agents.learners.episodic.discrete import AlphaUpdateType
 import Python.lib.simulators as simulators
 
 from test_utils import plot_rmse_by_episode
