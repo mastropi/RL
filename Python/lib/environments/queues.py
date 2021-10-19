@@ -2,8 +2,17 @@
 """
 Created on 22 Mar 2021
 
-@author: Daniel Mastropetro
-@description: Definition of environments on queues
+@author: Daniel Mastropietro
+@description: Definition of queue environments.
+                An environment should define the state space, the action space, and the rewards received for each
+                action taken on a given state.
+
+                In the particular case of queue environments, it should ALSO define the queue system that is responsible
+                of generating the time and type of the next event.
+                This allows for the simulation of an SMDP, i.e. a Semi-Markov Decision Process, where the times at which
+                the MDP iterates are random (in this case, defined by the queue system behind).
+
+                Note that it should NOT define any agents acting on the environment, as this is done separately.
 """
 
 from warnings import warn
@@ -42,6 +51,7 @@ class EnvQueueSingleBufferWithJobClasses(gym.Env):
     Queue environment with a single buffer receiving jobs of different classes
     being served by one or multiple servers.
 
+    [TBI] (To Be Implemented)
     The possible actions for an agent interacting with the queue are:
     - Accept or reject an incoming job of a given class
     - Choose the server to which the accepted incoming job is assigned
@@ -59,23 +69,9 @@ class EnvQueueSingleBufferWithJobClasses(gym.Env):
 
     rewards_accept_by_job_class: list
         List of rewards for the acceptance of the different job class whose rate is given in job_class_rates.
-
-    policy_accept: Policy
-        Policy object that defines the acceptance policy.
-        Note that the policy is used by the agent when interacting with the environment, and it's stored here as part
-        of the information that we store about the environment, because not every policy is compatible with an
-        environment.
-
-    policy_assign: (opt) list of lists
-        Assignment policy defined as a list of assignment probabilities for each job class
-        (associated to job rates) to a server in the queue.
-        Ex: In a scenario with 2 job classes and 3 servers, the following policy assigns job class 0
-        to server 0 or 1 with equal probability and job class 1 to server 1 or 2 with equal probability:
-        [[0.5, 0.5, 0.0], [0.0, 0.5, 0.5]]
-        default: None (in which case the assignment probability is uniform over the servers)
     """
 
-    def __init__(self, queue: QueueMM, job_class_rates: list, reward_func, rewards_accept_by_job_class: list, policy_accept=None, policy_assign: list = None):
+    def __init__(self, queue: QueueMM, job_class_rates: list, reward_func, rewards_accept_by_job_class: list):
         #-- Environment
         self.queue = queue
         self.job_class_rates = job_class_rates
@@ -83,18 +79,6 @@ class EnvQueueSingleBufferWithJobClasses(gym.Env):
         #-- Rewards
         self.reward_func = reward_func
         self.rewards_accept_by_job_class = rewards_accept_by_job_class
-
-        #-- Policies
-        # TODO-2021/10/12: We should receive an Agent object instead of just the Policy... The Agent would include the Policy AND the Learner
-        self.policy_accept = policy_accept
-        # Job-class to server assignment policy
-        if policy_assign is None:
-            # When no assignment probability is given, it is defined to be uniform over the servers for each job class
-            policy_assign = [[1.0 / self.queue.getNServers()] * self.queue.getNServers()] * len(self.job_class_rates)
-        self.policy_assign = policy_assign
-
-        # Job-rates by server (assuming jobs are pre-assigned to servers)
-        self.job_rates_by_server = self.compute_arrival_rates_by_server()
 
         # Create temporary variables that are shorter to reference and still easy to understand
         K = self.queue.getCapacity()
@@ -110,6 +94,20 @@ class EnvQueueSingleBufferWithJobClasses(gym.Env):
         self.setState(0, None)
 
     def step(self, action):
+        """
+        The environment takes a step when receiving the given action
+
+        Arguments:
+        action: int
+            Action taken by the agent interacting with the environment.
+
+        Returns: tuple
+        Tuple containing the following elements:
+        - the next state where the environment went to
+        - the reward received by taking the given action and transitioning from the current state to the next state
+        - whether the episode is done (if working with episodes)
+        - additional information in the form of a dictionary
+        """
         assert self.getJobClass() is not None, "The job class of the arrived job is defined"
 
         if not self.action_space.contains(action):
@@ -143,45 +141,18 @@ class EnvQueueSingleBufferWithJobClasses(gym.Env):
 
         return next_state, reward, False, {}
 
-    def compute_arrival_rates_by_server(self):
-        """
-        Computes the equivalent job arrival rates for each server from the job arrival rates (to the single buffer)
-        and the assignment policy.
+    #------ GETTERS ------#
+    def getQueue(self):
+        return self.queue
 
-        This can be used when the job is pre-assigned to a server at the moment of arrival (as opposed to being
-        assigned when a server queue is freed.
-
-        Return: list
-            The equivalent job arrival rates for each server r, computed as:
-            job_arrival_rate[r] = sum_{c over job classes} { job_rate[c] * Pr(assign job c to server r) }            
-        """
-        R = self.queue.getNServers()
-        J = len(self.job_class_rates)  # Number of job classes
-        job_rates_by_server = [0]*R
-        for r in range(R):
-            for c in range(J):
-                job_rates_by_server[r] += self.policy_assign[c][r] * self.job_class_rates[c]
-
-        return job_rates_by_server
-
-    # ------ GETTERS ------#
     def getCapacity(self):
         return self.queue.getCapacity()
 
-    def getJobRates(self):
+    def getJobClassRates(self):
         return self.job_class_rates
-
-    def getJobRatesByServer(self):
-        return self.job_rates_by_server
 
     def getServiceRates(self):
         return self.queue.getDeathRates()
-
-    def getIntensities(self):
-        return [b/d for b, d in zip(self.getJobRatesByServer(), self.getServiceRates())]
-
-    def getAssignPolicy(self):
-        return self.policy_assign
 
     def getNumJobClasses(self):
         return len(self.job_class_rates)
@@ -207,7 +178,7 @@ class EnvQueueSingleBufferWithJobClasses(gym.Env):
     def getRewardForJobClassAcceptance(self, job_class: int):
         return self.rewards_accept_by_job_class[job_class]
 
-    # ------ SETTERS ------#
+    #------ SETTERS ------#
     def setBufferSize(self, buffer_size: int):
         "Sets the buffer size of the queue"
         if int(buffer_size) != buffer_size or buffer_size < 0 or buffer_size > self.getCapacity():

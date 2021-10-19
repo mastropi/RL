@@ -52,6 +52,57 @@ def comb(n,k):
         
     return int( num / den )
 
+def get_server_loads(job_rates, service_rates):
+    """
+    Returns the server loads (rhos) for a queue system from the job arrival rates and the service rates"
+
+    Arguments:
+    job_rates: list or array
+        Arrival rates of the jobs by server.
+
+    service_rates: list or array
+        Server service rates.
+
+    Return: list
+    List of server loads, rhos computed as lambda / mu, where lambda is the job arrival rate and mu is the service rate
+    of each server.
+    """
+    return [b/d for b, d in zip(job_rates, service_rates)]
+
+def compute_job_rates_by_server(job_class_rates, nservers, policy_assign):
+    """
+    Computes the equivalent job arrival rates for each server from the job arrival rates (to the single buffer)
+    and the job assignment policy of the agent.
+
+    This can be used when the job is pre-assigned to a server at the moment of arrival (as opposed to being
+    assigned when a server queue is freed).
+
+    Arguments:
+    job_class_rates: list or array
+        Arrival rate of each job class to the queue buffer.
+
+    nservers: int
+        Number of servers in the queue system.
+
+    policy_assign: assignment policy given by a list of lists
+        List of probabilities of assigning each job class to a server in the queue system.
+        Ex: In a scenario with 2 job classes and 3 servers, the following policy assigns job class 0
+        to server 0 or 1 with equal probability and job class 1 to server 1 or 2 with equal probability:
+        [[0.5, 0.5, 0.0], [0.0, 0.5, 0.5]]
+
+    Return: list
+    The equivalent job arrival rates for each server r, computed as:
+    job_arrival_rate[r] = sum_{c over job classes} { job_rate[c] * Pr(assign job c to server r) }
+    """
+    R = nservers
+    J = len(job_class_rates)
+    job_rates_by_server = [0]*R
+    for r in range(R):
+        for c in range(J):
+            job_rates_by_server[r] += policy_assign[c][r] * job_class_rates[c]
+
+    return job_rates_by_server
+
 def compute_blocking_probability_birth_death_process(rhos :list, capacity :int):
     """
     Computes the true blocking probability of a birth-death process with R servers and total capacity C.

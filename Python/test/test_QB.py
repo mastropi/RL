@@ -26,12 +26,15 @@ from Python.lib.utils.basic import aggregation_bygroups
 
 import Python.lib.utils.plotting as plotting
 
+from Python.lib.agents import queues
+from Python.lib.agents.queues import AgeQueue, PolicyTypes as QueuePolicyTypes
+from Python.lib.agents.policies.job_assignment import PolJobAssignmentProbabilistic
 import Python.lib.queues as queues
 import Python.lib.estimators as estimators
 from Python.lib.queues import Event
 from Python.lib.environments.queues import EnvQueueSingleBufferWithJobClasses, rewardOnJobClassAcceptance
 from Python.lib.estimators import EventType, FinalizeType, FinalizeCondition, plot_curve_estimates
-from Python.lib.utils.computing import compute_blocking_probability_birth_death_process
+from Python.lib.utils.computing import get_server_loads, compute_job_rates_by_server, compute_blocking_probability_birth_death_process
 
 #from importlib import reload
 #reload(estimators)
@@ -53,35 +56,23 @@ class Test_QB_Particles(unittest.TestCase):
 
         if self.nservers == 1:
             # One server
-            self.job_rates = [self.rate_birth]
+            self.job_class_rates = [self.rate_birth]
             self.rate_death = [1]
-            self.policy = [[1]]
+            self.policy_assign = PolJobAssignmentProbabilistic([[1]])
         elif self.nservers == 3:
             # Multiple servers
-            self.job_rates = [0.8, 0.7]
+            self.job_class_rates = [0.8, 0.7]
             self.rate_death = [1, 1, 1]
-            self.policy = [[0.5, 0.5, 0.0], [0.0, 0.5, 0.5]]
+            self.policy_assign = PolJobAssignmentProbabilistic([[0.5, 0.5, 0.0], [0.0, 0.5, 0.5]])
         else:
             raise ValueError("Given Number of servers ({}) is invalid. Valid values are: 1, 3".format(nservers))
         # rho rates for each server based on arrival rates and assignment probabilities
-        self.rate_birth, self.rhos = self.compute_rhos()
+        self.rate_birth = compute_job_rates_by_server(self.job_class_rates, self.nservers, self.policy_assign.getProbabilisticMap())
+        self.rhos = get_server_loads(self.rate_birth, self.rate_death)
 
         self.queue = queues.QueueMM(self.rate_birth, self.rate_death, self.nservers, self.capacity)
 
         self.plotFlag = True
-
-    def compute_rhos(self):
-        "Computes the rho rates for each server based on arrival rates, service rates, and assignment probabilities"
-        R = self.nservers
-        J = len(self.job_rates) # Number of job classes
-        lambdas = [0]*self.nservers
-        rhos = [0]*self.nservers
-        for r in range(R):
-            for c in range(J):
-                lambdas[r] += self.policy[c][r] * self.job_rates[c]
-            rhos[r] = lambdas[r] / self.rate_death[r]
-
-        return lambdas, rhos
 
     def tests_on_one_queue(self):
         print("\nRunning test " + self.id())
@@ -482,22 +473,29 @@ class Test_QB_Particles(unittest.TestCase):
         #--- System setup
         rate_birth = 0.7
         if nservers == 1:
-            job_rates = [rate_birth]
+            job_class_rates = [rate_birth]
             rate_death = [1]
-            policy = [[1]]
-            queue = queues.QueueMM(rate_birth, rate_death, nservers, K)
-            # Queue environment (to pass to the simulation functions)
-            env_queue = EnvQueueSingleBufferWithJobClasses(queue, job_class_rates=job_rates, reward_func=rewardOnJobClassAcceptance, rewards_accept_by_job_class=[1], policy_assign=policy)
+            policy_assign = PolJobAssignmentProbabilistic([[1]])
+            rewards_accept_by_job_class = [1]
         elif nservers == 3:
-            job_rates = [0.8, 0.7]
+            job_class_rates = [0.8, 0.7]
             rate_death = [1, 1, 1]
-            policy = [[0.5, 0.5, 0.0], [0.0, 0.5, 0.5]]
-            queue = queues.QueueMM(rate_birth, rate_death, nservers, K)
-            # Queue environment (to pass to the simulation functions)
-            env_queue = EnvQueueSingleBufferWithJobClasses(queue, job_class_rates=job_rates, reward_func=rewardOnJobClassAcceptance, rewards_accept_by_job_class=[1, 1], policy_assign=policy)
+            policy_assign = PolJobAssignmentProbabilistic([[0.5, 0.5, 0.0], [0.0, 0.5, 0.5]])
+            rewards_accept_by_job_class = [1, 1]
         else:
             raise ValueError("Given Number of servers ({}) is invalid. Valid values are: 1, 3".format(nservers))
-            
+
+        # Create the queue, the queue environment, and the agent acting on it
+        queue = queues.QueueMM(rate_birth, rate_death, nservers, K)
+        env_queue = EnvQueueSingleBufferWithJobClasses(queue, job_class_rates=job_class_rates,
+                                                       reward_func=rewardOnJobClassAcceptance,
+                                                       rewards_accept_by_job_class=rewards_accept_by_job_class)
+        # Define the agent acting on the queue environment
+        policies = dict({QueuePolicyTypes.ACCEPT: None, QueuePolicyTypes.ASSIGN: policy_assign})
+        learners = None
+        agent = AgeQueue(queue, policies, learners)
+        job_rates_by_server = compute_job_rates_by_server(job_class_rates, nservers, policy_assign.getProbabilisticMap())
+
         # The test of the Fleming-Viot implementation is carried out as follows:
         # - Set K to a small value (e.g. K=5)
         # - Increase the number of particles N
@@ -538,7 +536,9 @@ class Test_QB_Particles(unittest.TestCase):
                                            'exec_time'])
         case = 0
         ncases = int( np.log(nparticles_max / nparticles_min) / np.log(1 + nparticles_step_prop)) + 1
-        print("System: # servers={}, K={}, rhos={}, buffer_size_activation={}, #burn-in absorption cycles={}".format(nservers, K, env_queue.getIntensities(), buffer_size_activation_value, burnin_cycles_absorption))
+
+        print("System: # servers={}, K={}, rhos={}, buffer_size_activation={}, #burn-in absorption cycles={}" \
+              .format(nservers, K, get_server_loads(job_rates_by_server, rate_death), buffer_size_activation_value, burnin_cycles_absorption))
         time_start_all = timer()
         while nparticles <= nparticles_max:
             case += 1 
@@ -566,7 +566,9 @@ class Test_QB_Particles(unittest.TestCase):
                 dict_params_simul['seed'] = seed_rep
                 proba_blocking_fv, integral, expected_survival_time, \
                     n_survival_curve_observations, n_survival_time_observations, \
-                        est_fv, est_abs, est_surv, dict_stats_fv = estimators.estimate_blocking_fv(env_queue, dict_params_simul, dict_params_info=dict_params_info)
+                        est_fv, est_abs, est_surv, dict_stats_fv = estimators.estimate_blocking_fv(env_queue, agent,
+                                                                                                   dict_params_simul,
+                                                                                                   dict_params_info=dict_params_info)
 
                 if run_mc:
                     print("\t--> Running Monte-Carlo estimation...")
@@ -575,7 +577,7 @@ class Test_QB_Particles(unittest.TestCase):
                     proba_blocking_mc, \
                         expected_return_time_mc, \
                             n_return_observations, \
-                                est_mc, dict_stats_mc = estimators.estimate_blocking_mc(env_queue, dict_params_simul, dict_params_info=dict_params_info)
+                                est_mc, dict_stats_mc = estimators.estimate_blocking_mc(env_queue, agent, dict_params_simul, dict_params_info=dict_params_info)
 
                     # Check comparability in terms of # events in each simulation (MC vs. FV)
                     if dict_stats_mc['nevents'] != dict_stats_fv['nevents']:
@@ -696,8 +698,12 @@ class Test_QB_Particles(unittest.TestCase):
             print("Pr(K)={:.6f}%".format(proba_blocking_true*100))
 
             # Create the queue environment that is simulated below
-            env_queue = EnvQueueSingleBufferWithJobClasses(queue, job_class_rates=self.job_rates, reward_func=rewardOnJobClassAcceptance, rewards_accept_by_job_class=[1] * len(self.job_rates), policy_assign=self.policy)
+            env_queue = EnvQueueSingleBufferWithJobClasses(queue, job_class_rates=self.job_class_rates, reward_func=rewardOnJobClassAcceptance, rewards_accept_by_job_class=[1] * len(self.job_class_rates))
                 ## The rewards_accept_by_job_class are not used at this point, so I just set them to 1 for all job classes.
+            # Define the agent acting on the queue environment
+            policies = dict({QueuePolicyTypes.ACCEPT: None, QueuePolicyTypes.ASSIGN: self.policy_assign})
+            learners = None
+            agent = AgeQueue(queue, policies, learners)
 
             buffer_size_activation_value_prev = None
             for idx_bsa, buffer_size_activation in enumerate(buffer_size_activation_values):
@@ -745,7 +751,9 @@ class Test_QB_Particles(unittest.TestCase):
                     dict_params_simul['maxevents'] = np.Inf
                     proba_blocking_fv, integral, expected_survival_time, \
                         n_survival_curve_observations, n_survival_time_observations, \
-                            est_fv, est_abs, est_surv, dict_stats_fv = estimators.estimate_blocking_fv(env_queue, dict_params_simul, dict_params_info=dict_params_info)
+                            est_fv, est_abs, est_surv, dict_stats_fv = estimators.estimate_blocking_fv(env_queue, agent,
+                                                                                                       dict_params_simul,
+                                                                                                       dict_params_info=dict_params_info)
 
                     if run_mc:
                         print("\t\t*** MONTE-CARLO ESTIMATION ***")
@@ -754,7 +762,7 @@ class Test_QB_Particles(unittest.TestCase):
                         proba_blocking_mc, \
                             expected_return_time_mc, \
                                 n_return_observations, \
-                                    est_mc, dict_stats_mc = estimators.estimate_blocking_mc(env_queue, dict_params_simul, dict_params_info=dict_params_info)
+                                    est_mc, dict_stats_mc = estimators.estimate_blocking_mc(env_queue, agent, dict_params_simul, dict_params_info=dict_params_info)
                     else:
                         proba_blocking_mc, expected_return_time_mc, n_return_observations, est_mc, dict_stats_mc = np.nan, None, None, None, {}
 
@@ -1139,22 +1147,29 @@ def test_mc_implementation(nservers, K, paramsfile, nmeantimes=None, repmax=None
     #--- Test one server
     rate_birth = 0.7
     if nservers == 1:
-        job_rates = [rate_birth]
+        job_class_rates = [rate_birth]
         rate_death = [1]
-        policy = [[1]]
-        queue = queues.QueueMM(rate_birth, rate_death, nservers, K)
-        # Queue environment (to pass to the simulation functions)
-        env_queue = EnvQueueSingleBufferWithJobClasses(queue, job_class_rates=job_rates, reward_func=rewardOnJobClassAcceptance, rewards_accept_by_job_class=[1], policy_assign=policy)
+        policy_assign = PolJobAssignmentProbabilistic([[1]])
+        rewards_accept_by_job_class = [1]
     elif nservers == 3:
-        job_rates = [0.8, 0.7]
+        job_class_rates = [0.8, 0.7]
         rate_death = [1, 1, 1]
-        policy = [[0.5, 0.5, 0.0], [0.0, 0.5, 0.5]]
-        queue = queues.QueueMM(rate_birth, rate_death, nservers, K)
-        # Queue environment (to pass to the simulation functions)
-        env_queue = EnvQueueSingleBufferWithJobClasses(queue, job_class_rates=job_rates, reward_func=rewardOnJobClassAcceptance, rewards_accept_by_job_class=[1, 1], policy_assign=policy)
+        policy_assign = PolJobAssignmentProbabilistic([[0.5, 0.5, 0.0], [0.0, 0.5, 0.5]])
+        rewards_accept_by_job_class = [1, 1]
     else:
         raise ValueError("Given Number of servers ({}) is invalid. Valid values are: 1, 3".format(nservers))
-    rhos = [b/d for b, d in zip(queue.getBirthRates(), queue.getDeathRates())]
+
+    # Create the queue, the queue environment, and the agent acting on it
+    queue = queues.QueueMM(rate_birth, rate_death, nservers, K)
+    env_queue = EnvQueueSingleBufferWithJobClasses(queue, job_class_rates=job_class_rates,
+                                                   reward_func=rewardOnJobClassAcceptance,
+                                                   rewards_accept_by_job_class=rewards_accept_by_job_class)
+    # Define the agent acting on the queue environment
+    policies = dict({QueuePolicyTypes.ACCEPT: None, QueuePolicyTypes.ASSIGN: policy_assign})
+    learners = None
+    agent = AgeQueue(queue, policies, learners)
+
+    rhos = get_server_loads(queue.getBirthRates(), queue.getDeathRates())
 
     # Info parameters 
     dict_params_info = {'plot': True, 'log': False}
@@ -1210,7 +1225,7 @@ def test_mc_implementation(nservers, K, paramsfile, nmeantimes=None, repmax=None
                 proba_blocking_mc, \
                     expected_return_time_mc, \
                         n_return_observations, \
-                            est_mc, dict_stats_mc = estimators.estimate_blocking_mc(env_queue, dict_params_simul, dict_params_info=dict_params_info)
+                            est_mc, dict_stats_mc = estimators.estimate_blocking_mc(env_queue, agent, dict_params_simul, dict_params_info=dict_params_info)
 
                 time_end = timer()
                 exec_time = time_end - time_start
@@ -1922,7 +1937,7 @@ if __name__ == "__main__":
         sys.argv += [3]       # Number of servers in the system to simulate
         sys.argv += ["J"]     # Either "N" for number of particles or "J" for buffer size"
         sys.argv += [8]       # Number of replications
-        sys.argv += [10]      # Number of the test to run: only one is accepted
+        sys.argv += [1]       # Number of the test to run: only one is accepted
     if len(sys.argv) == 5:    # Only the 4 required arguments are given by the user
         sys.argv += [1]       # Number of methods to run: 1 (only FV), 2 (FV & MC)
         sys.argv += ["save"]  # Either "nosave" or anything else for saving the results and log
@@ -2037,8 +2052,8 @@ if __name__ == "__main__":
             save_dataframes([{'df': results, 'file': resultsfile},
                              {'df': results_agg, 'file': resultsfile_agg},
                              {'df': proba_functions, 'file': proba_functions_file}])
-            for K in K_values:
-                axes = plot_results_fv_mc(results, x, xlabel=xlabel, subset=results['K']==K, plot_mc=run_mc)
+            #for K in K_values:
+            #    axes = plot_results_fv_mc(results, x, xlabel=xlabel, subset=results['K']==K, plot_mc=run_mc)
         if 2 in tests2run:
             K_values = [10, 20]
             results, results_agg, proba_functions, est_fv, est_mc = test.analyze_estimates(
