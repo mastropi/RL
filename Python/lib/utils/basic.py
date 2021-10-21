@@ -15,6 +15,17 @@ def is_scalar(x):
     "Returns whether the input parameter is a scalar (i.e. either int, np.int32, np.int64, float, np.float32, np.float64)"
     return isinstance(x, (int, np.int32, np.int64, float, np.float32, np.float64))
 
+def as_array(x):
+    "Converts a scalar or list of values to a numpy array"
+    if is_scalar(x):
+        x = np.array([x])
+    else:
+        if not isinstance(x, (list, np.ndarray)):
+            raise ValueError("Parameter x must be a scalar, list, or numpy array ({})".format(type(x)))
+        x = np.array(x)
+
+    return x
+
 def parse_dict_params(dict_params, dict_params_default):
     """
     Parses a set of user parameters given as a dictionary by

@@ -14,8 +14,9 @@ Created on 22 Mar 2021
 
                 Note that it should NOT define any agents acting on the environment, as this is done separately.
 """
+import copy
+from enum import Enum, unique
 
-from warnings import warn
 import numpy as np
 
 import gym
@@ -27,11 +28,25 @@ if __name__ == "__main__":
 
     runpy.run_path('../../../setup.py')
 
-    from Python.lib.environments import EnvironmentDiscrete
     from Python.lib.queues import GenericQueue, QueueMM
 else:
-    from . import EnvironmentDiscrete
-    from ..queues import GenericQueue, QueueMM
+    from Python.lib.queues import GenericQueue, QueueMM
+
+@unique
+class ActionTypes(Enum):
+    ACCEPT_REJECT = 1
+    ASSIGN = 2
+
+@unique
+class Actions(Enum):
+    REJECT = 0
+    ACCEPT = 1
+    OTHER = 99
+
+# Reference buffer size used in the definition of the exponential cost when blocking an incoming job
+# This value is relevant for the definition of the minimum expected cost that is searched for by the learning process.
+COST_EXP_BUFFER_SIZE_REF = 3
+
 
 #---------------------------- Reward functions that can be used in different environments -----------------------------#
 # Each reward function should depend on 4 inputs:
@@ -39,10 +54,36 @@ else:
 # - S(t) the state at which an action is applied
 # - A(t) the action applied at state S(t)
 # - S(t+1) the next state where the system is at after applying action A(t) on state S(t)
+
 def rewardOnJobClassAcceptance(env, state, action, next_state):
     # The state is assumed to be a tuple (k, i) where k is the buffer size and i is the class of the arriving job
-    job_class = state[1]
-    return env.getRewardForJobClassAcceptance(job_class)
+    if action == Actions.ACCEPT:
+        job_class = state[1]
+        return env.getRewardForJobClassAcceptance(job_class)
+    else:
+        return 0.0
+
+def rewardOnJobRejection_ExponentialCost(env, state, action, next_state):
+    "Negative reward received when an incoming job is rejected as a function of the queue's buffer size"
+    if next_state == state:
+        # Blocking occurred
+        # => There is a negative reward or cost
+        return -costBlockingExponential(env.getBufferSize(), COST_EXP_BUFFER_SIZE_REF)
+    else:
+        # No blocking
+        # => No reward
+        return 0.0
+
+def costBlockingExponential(buffer_size: int, buffer_size_ref :int):
+    """
+    Cost of blocking a job from entering a queue, modelled as exponentially increasing on the queue's buffer size
+    with respect to a minimum buffer size, below which the cost is constant.
+    """
+    # C(s, a=block)
+    B = 1       # Blocking associated just to the fact the queue is blocked
+    b = 3.0     # Base of the exponential function
+    cost = B if buffer_size < buffer_size_ref else B * b**(buffer_size - buffer_size_ref)
+    return cost
 #---------------------------- Reward functions that can be used in different environments -----------------------------#
 
 
@@ -51,10 +92,9 @@ class EnvQueueSingleBufferWithJobClasses(gym.Env):
     Queue environment with a single buffer receiving jobs of different classes
     being served by one or multiple servers.
 
-    [TBI] (To Be Implemented)
     The possible actions for an agent interacting with the queue are:
-    - Accept or reject an incoming job of a given class
-    - Choose the server to which the accepted incoming job is assigned
+    - Accept or reject an incoming job of a given class --> action_type = ActionTypes.ACCEPT_REJECT
+    - Choose the server to which the accepted incoming job is assigned --> action_type = ActionTypes.ASSIGN
 
     Arguments:
     queue: QueueMM
@@ -74,6 +114,7 @@ class EnvQueueSingleBufferWithJobClasses(gym.Env):
     def __init__(self, queue: QueueMM, job_class_rates: list, reward_func, rewards_accept_by_job_class: list):
         #-- Environment
         self.queue = queue
+        self.job_class = None
         self.job_class_rates = job_class_rates
 
         #-- Rewards
@@ -88,58 +129,86 @@ class EnvQueueSingleBufferWithJobClasses(gym.Env):
         self.action_space = spaces.Discrete(2)  # Either Reject (0) or Accept (1) an arriving job class
         self.observation_space = spaces.Tuple((spaces.Discrete(K+1), spaces.Discrete(J)))
 
-        self.reset()
+        # Last action taken by the agent interacting with the environment
+        # (this piece of information is needed e.g. when learning the policy of the agent interacting
+        # with the environment. See e.g. LeaPolicyGradient.learn())
+        self.action = None
 
-    def reset(self):
-        self.setState(0, None)
+        self.reset([0]*self.queue.getNServers(), self.job_class)
 
-    def step(self, action):
+    def reset(self, sizes, job_class=None):
+        self.setState(sizes, job_class)
+        self.action = None
+
+    def step(self, action :int or Actions, action_type :ActionTypes):
         """
-        The environment takes a step when receiving the given action
+        The environment takes a step when receiving the given accept/reject action with the given assignment policy
+        to assign the possibly accepted incoming job to a server in the queue system.
 
         Arguments:
-        action: int
+        action: int or Actions
             Action taken by the agent interacting with the environment.
+            If action_type == ActionTypes.ACCEPT_REJECT, the value should be of type Actions.
+            If action_type == ActionTypes.ASSIGN, the value should be an integer, as it should indicate the server
+            to which an incoming job is assigned.
+
+        action_type: ActionTypes
+            Type of the action taken (e.g. ActionTypes.ACCEPT_REJECT, ActionTypes.ASSIGN).
 
         Returns: tuple
         Tuple containing the following elements:
         - the next state where the environment went to
         - the reward received by taking the given action and transitioning from the current state to the next state
-        - whether the episode is done (if working with episodes)
-        - additional information in the form of a dictionary
+        - additional relevant information in the form of a dictionary
         """
-        assert self.getJobClass() is not None, "The job class of the arrived job is defined"
+        state = self.getState()
+        if action_type == ActionTypes.ACCEPT_REJECT:
+            assert self.getJobClass() is not None, "The job class of the arrived job is defined"
 
-        if not self.action_space.contains(action):
-            raise ValueError(
-                "Invalid action: {}\nValid actions are: 0, 1, ..., {}".format(action, self.action_space.n - 1))
+            # Convert the action to an ActionTypes class if given as integer
+            if isinstance(action, int) or isinstance(action, np.int32) or isinstance(action, np.int64):
+                # Convert the action to an ActionTypes value
+                action = ActionTypes(action)
 
-        if action == 0:
-            # Reject the incoming job
-            # Set the job class to None because no new job has yet arrived at the moment of taking the action
-            self.setState(self.getBufferSize(), None)
-            next_state = self.getState()
-            reward = 0.0
-        elif action == 1:
-            # Accept the incoming job, if the queue has capacity
-            if self.getBufferSize() == self.queue.getCapacity():
+            if action not in [Actions.ACCEPT, Actions.REJECT]:
+                raise ValueError(
+                    "Invalid action: {}\nValid actions are: {}".format(action, Actions))
+
+            if action == Actions.REJECT:
+                # Reject the incoming job
                 # Set the job class to None because no new job has yet arrived at the moment of taking the action
-                self.setState(self.getBufferSize(), None)
-                next_state = self.getState()
-                reward = 0.0
+                self.setState(self.queue.getServerSizes(), None)
+            elif action == Actions.ACCEPT:
+                # Accept the incoming job unless the queue's buffer is at full capacity
+                if self.getBufferSize() == self.queue.getCapacity():
+                    # Set the job class to None because no new job has yet arrived at the moment of taking the action
+                    self.setState(self.queue.getServerSizes(), None)
+                    # Set the action to REJECT because the job was actually rejected because the buffer was full!
+                    action = Actions.REJECT
+        elif action_type == ActionTypes.ASSIGN:
+            # Current state of the queue system
+            queue_state = self.getQueueState()
+            # Define the next state of the queue system based on the action
+            # (which represents the server to which an incoming job is assigned)
+            queue_next_state = copy.deepcopy(queue_state)
+            queue_next_state[action] += 1
 
-                #warn("Action '{}' not taken because the buffer is at full capacity ({})!".format(action,
-                #                                                                                 self.getCapacity()))
-            else:
-                # Current state of the system
-                state = self.getState()
-                # Change the state of the system
-                self.setState(self.getBufferSize()+1, None)
-                next_state = self.getState()
-                # Reward observed by going from S(t) to S(t+1) via action A(t)
-                reward = self.reward_func(self, state, action, next_state)
+            # Change the state of the system
+            self.setState(queue_next_state, None)
 
-        return next_state, reward, False, {}
+        # Define the next state and the reward of going to that next state
+        # (This is a common task for ALL action types)
+        next_state = self.getState()
+        # Reward observed by going from S(t) to S(t+1) via action A(t)
+        if self.reward_func is not None:
+            reward = self.reward_func(self, state, action, next_state)
+        else:
+            reward = 0.0
+
+        # Update the last action stored in the object
+        self.setLastAction(action)
+
+        return next_state, reward, {}
 
     #------ GETTERS ------#
     def getQueue(self):
@@ -160,14 +229,20 @@ class EnvQueueSingleBufferWithJobClasses(gym.Env):
     def getNumServers(self):
         return self.queue.getNServers()
 
+    def getQueueState(self):
+        return self.queue.getServerSizes()
+
     def getState(self):
         return (self.getBufferSize(), self.getJobClass())
 
     def getBufferSize(self):
-        return self.buffer_size
+        return self.queue.getBufferSize()
 
     def getJobClass(self):
         return self.job_class
+
+    def getLastAction(self):
+        return self.action
 
     def getActions(self):
         return range(self.action_space.n)
@@ -179,13 +254,9 @@ class EnvQueueSingleBufferWithJobClasses(gym.Env):
         return self.rewards_accept_by_job_class[job_class]
 
     #------ SETTERS ------#
-    def setBufferSize(self, buffer_size: int):
-        "Sets the buffer size of the queue"
-        if int(buffer_size) != buffer_size or buffer_size < 0 or buffer_size > self.getCapacity():
-            raise ValueError(
-                "The buffer size value is invalid ({}). It must be an integer between {} and {}".format(buffer_size, 0,
-                                                                                                        self.getCapacity()))
-        self.buffer_size = buffer_size
+    def _setServerSizes(self, sizes : int or list or np.array):
+        "Sets the size of the servers in the queue"
+        self.queue.setServerSizes(sizes)
 
     def setJobClass(self, job_class: int or None):
         "Sets the job class of a new arriving job. The job class can be None."
@@ -198,11 +269,17 @@ class EnvQueueSingleBufferWithJobClasses(gym.Env):
                                                                                                 self.getNumJobClasses() - 1))
         self.job_class = job_class
 
-    def setState(self, buffer_size: int, job_class: int):
-        "Sets the state (k, i) where k is the buffer size and i is the arriving job class"
-        self.buffer_size = buffer_size
+    def setState(self, sizes :int or list or np.array, job_class :int):
+        """
+        Sets the state (k, i) of the queue environment from the server sizes and the arriving job class.
+        - k is the buffer size
+        - i is the arriving job class
+        """
+        self.queue.setServerSizes(sizes)
         self.job_class = job_class
 
+    def setLastAction(self, action):
+        self.action = action
 
 if __name__ == "__main__":
     # ------------------------- Unit tests -----------------------------#
@@ -215,12 +292,9 @@ if __name__ == "__main__":
     K = env.getCapacity()
     J = env.getNumJobClasses()
     R = env.getRewardsForJobClassAcceptance()
-    nS = len(env.getActions())
 
     # -- Equivalent job arrival rates (by server)
     print("Job arrival rates: {}".format(env.job_class_rates))
-    print("Equivalent arrival rates by server: {}".format(env.job_rates_by_server))
-    assert env.job_rates_by_server == [np.sum(env.job_class_rates)]
 
     # -- Arriving job on buffer not full
     buffer_size_orig = 0
@@ -229,27 +303,30 @@ if __name__ == "__main__":
     state = env.getState()
     assert state == (0, job_class)
     # Action = reject
-    next_state, reward, done, info = env.step(0)
+    next_state, reward, info = env.step(Actions.REJECT, ActionTypes.ACCEPT_REJECT)
     assert next_state == (0, None)
     assert reward == 0
     # Action = accept
     env.setJobClass(job_class)
-    next_state, reward, done, info = env.step(1)
-    assert next_state == (buffer_size_orig + 1, None)
+    next_state, reward, info = env.step(Actions.ACCEPT, ActionTypes.ACCEPT_REJECT)
+    assert next_state == (buffer_size_orig, job_class)
     assert reward == env.getRewardForJobClassAcceptance(job_class)
+    # Now we assign the job to the server
+    next_state, reward, info = env.step(0, ActionTypes.ASSIGN)
+    assert next_state == (buffer_size_orig + 1, None)
+    assert reward == 0
 
     # -- Arriving job on full buffer
-    env.setBufferSize(env.getCapacity())
     job_class = 1
-    env.setJobClass(job_class)
+    env.setState(env.getCapacity(), job_class)
     state = env.getState()
     assert state == (env.getCapacity(), job_class)
     # Action = reject
-    next_state, reward, done, info = env.step(0)
+    next_state, reward, info = env.step(Actions.REJECT, ActionTypes.ACCEPT_REJECT)
     assert next_state == (env.getCapacity(), None)
     assert reward == 0
     # Action = accept (not taken because buffer is full)
     env.setJobClass(job_class)
-    next_state, reward, done, info = env.step(1)
+    next_state, reward, info = env.step(Actions.ACCEPT, ActionTypes.ACCEPT_REJECT)
     assert next_state == (env.getCapacity(), None)
     assert reward == 0

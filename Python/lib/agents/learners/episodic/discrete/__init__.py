@@ -50,8 +50,8 @@ class Learner:
     Otherwise, the simulation process will most likely fail (because variables that are
     defined in the reset method to track the simulation process will not be defined).
     In addition, the *specific* Learner constructor should NOT call the reset() method
-    because the reset method would then be called twice: one when the learner is constructed
-    and one prior to the first simulation, making e.g. the episode method be equal to 2 at
+    because the reset method would then be called twice: once when the learner is constructed
+    and once prior to the first simulation, making e.g. the episode method be equal to 2 at
     the first simulation as opposed to the correct value 1.
     """
 
@@ -61,9 +61,9 @@ class Learner:
         """
         Parameters:
         env: EnvironmentDiscrete
-            Environment where the agent learns.
+            Environment where learning takes place.
 
-        alpha: float
+        alpha: positive float
             Learning rate.
 
         learner_type: LearnerType *** NOT YET IMPLEMENTED BUT COULD BE A GOOD IDEA TO AVOID DEFINING THE AlphaUpdateType...? ***

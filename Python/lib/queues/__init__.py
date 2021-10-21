@@ -48,6 +48,7 @@ class GenericQueue:
 
     size: (opt) non-negative int, list or array
         Size of the queue of each server.
+        Internally, the queue size is always stored as a numpy array, even when the number of servers is 1.
         default: 0
 
     origin: (opt) float
@@ -63,7 +64,7 @@ class GenericQueue:
         default: False
     """
 
-    def __init__(self, capacity: int or np.Inf, nservers: int=1, size: int=0, origin: float=0.0, log: bool=False):
+    def __init__(self, capacity: int or np.Inf, nservers :int=1, size :int=0, origin :float=0.0, log :bool=False):
         self.K = capacity           # Capacity of the buffer that receives the jobs before assigning them to a server
         self.c = nservers
 
@@ -304,7 +305,7 @@ class QueueMM(GenericQueue):
         # Boolean indices defining the self.rates that can be used to pick the next event
         is_valid_rate = np.c_[
                                 [True]*self.getNServers() if self.getBufferSize() < self.getCapacity() else [False]*self.getNServers(),
-                                [True if self.getServerSize(s) > 0 else False for s, d in enumerate(self.getDeathRates())]
+                                [True if self.getServerSize(s) > 0 else False for s in range(self.getNServers())]
                                 ]
         # Set the invalid rates to NaN so that they are not picked by the algorithm as valid events
         valid_rates = copy.deepcopy(self.rates)

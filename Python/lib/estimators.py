@@ -1551,7 +1551,7 @@ class EstimatorQueueBlockingFlemingViot:
                     # There is really no assignment to be done, as only one possibility exists
                     assigned_server = 0
                 else:
-                    assigned_server = np.random.choice(servers, p=self.policy_assign.getProbabilisticMapForJobClass(job_class))
+                    assigned_server = self.policy_assign.choose_action(job_class, servers)
                 assert assigned_server < self.nservers, \
                         "The assigned server ({}) is one of the possible servers [0, {}]".format(assigned_server, self.nservers-1)
     

@@ -36,7 +36,7 @@ class PolQueueTwoActionsLinearStep(GenericParameterizedPolicyTwoActions):
         Environment representing a queue system.
 
     theta: float
-        Threshold parameter.
+        Initial value for the threshold parameter of the policy.
     """
 
     def __init__(self, env: EnvQueueSingleBufferWithJobClasses, theta: float):
@@ -44,13 +44,7 @@ class PolQueueTwoActionsLinearStep(GenericParameterizedPolicyTwoActions):
             raise ValueError("The theta parameter must be a float number ({})".format(theta))
         super().__init__(env, theta)
 
-        # We now define the linear step policy
-        # NOTE: if retrieving the policy becomes somehow inefficient for choosing the action
-        # (because we are storing the policy for ALL the states)
-        # we may want to AVOID the definition of the policy, as, to determine the action to take,
-        # we just need to know the buffer size falling in between the two different deterministic selections of an action.
-        K = env.getCapacity()
-        assert K == np.Inf, "The queue has infinite (fixed) capacity, since parameter theta defining its capacity can take ANY real value."
+        assert self.env.getCapacity() == np.Inf, "The queue has infinite (fixed) capacity, since parameter theta defining its capacity can take ANY real value."
 
     def getThetaParameter(self):
         return self.theta
@@ -59,7 +53,7 @@ class PolQueueTwoActionsLinearStep(GenericParameterizedPolicyTwoActions):
         "Returns the policy gradient at the given action and current state of the environment"
         buffer_size = self.env.getBufferSize()
 
-        is_buffer_size_in_linear_piece = self.theta < buffer_size < self.theta + 1
+        is_buffer_size_in_linear_piece = float( self.theta < buffer_size < self.theta + 1 )
         if action == 1:
             return is_buffer_size_in_linear_piece
         else:
@@ -113,7 +107,7 @@ class PolQueueTwoActionsLinearStepOnJobClasses(GenericParameterizedPolicyTwoActi
 
     def __init__(self, env :EnvQueueSingleBufferWithJobClasses, theta: list):
         super().__init__(env, theta)
-        if len(theta) != env.getCapacity() + 1:
+        if len(self.getThetaParameter()) != self.env.getCapacity() + 1:
             raise ValueError("The number of theta parameters given ({}) must be equal to the capacity of the queue plus 1 ({})".format(len(theta), env.getCapacity() + 1))
 
         # We now define the linear step policy
@@ -121,8 +115,8 @@ class PolQueueTwoActionsLinearStepOnJobClasses(GenericParameterizedPolicyTwoActi
         # (because we are storing the policy for ALL the states)
         # we may want to AVOID the definition of the policy, as, to determine the action to take,
         # we just need to know the job class falling in between the two different deterministic selections of an action.
-        K = env.getCapacity()
-        J = env.getNumJobClasses()
+        K = self.env.getCapacity()
+        J = self.env.getNumJobClasses()
 
         # Initialize acceptance policy to 0.0 which applies to job classes j >= theta[k] + 1
         self.policy_accept = np.zeros((K + 1, J), dtype=float)
@@ -170,7 +164,7 @@ class PolQueueTwoActionsLinearStepOnJobClasses(GenericParameterizedPolicyTwoActi
 
 if __name__ == "__main__":
     #------------------------- Unit tests -----------------------------#
-    #--- Test #1: Stepwise linear policy on buffer size on a single server system
+    #--- Test #1: Single-server, single-class job: stepwise linear policy on buffer size
     print("\n***********\nTest #1: Tests on Stepwise-linear policy on a single server with single threshold parameter theta")
     job_class_rates = [0.7]
     job_rates_by_server = job_class_rates     # Since this is a single server system on a SINGLE class, the job arriving rate to the server is the same as the job class rate
@@ -189,13 +183,13 @@ if __name__ == "__main__":
     policy = PolQueueTwoActionsLinearStep(env, theta)
 
     buffer_size = 0
-    env.setBufferSize(buffer_size)
+    env._setServerSizes(buffer_size)
     print("\tTesting buffer_size = {}... Policy Accept = {}".format(buffer_size, policy.getPolicyForAction(1)))
     assert policy.getPolicyForAction(1) == 0.7
     assert policy.getPolicyForAction(0) == 1 - policy.getPolicyForAction(1)
 
     buffer_size = 1
-    env.setBufferSize(buffer_size)
+    env._setServerSizes(buffer_size)
     print("\tTesting buffer_size = {}... Policy Accept = {}".format(buffer_size, policy.getPolicyForAction(1)))
     assert policy.getPolicyForAction(1) == 0.0
     assert policy.getPolicyForAction(0) == 1 - policy.getPolicyForAction(1)
@@ -205,7 +199,7 @@ if __name__ == "__main__":
     print("\ntheta: {}".format(theta))
     policy = PolQueueTwoActionsLinearStep(env, theta)
     for buffer_size in range(3):
-        env.setBufferSize(buffer_size)
+        env._setServerSizes(buffer_size)
         print("\tTesting buffer_size = {}... Policy Accept = {}".format(buffer_size, policy.getPolicyForAction(1)))
         assert policy.getPolicyForAction(1) == 0.0
         assert policy.getPolicyForAction(0) == 1 - policy.getPolicyForAction(1)
@@ -216,30 +210,30 @@ if __name__ == "__main__":
     policy = PolQueueTwoActionsLinearStep(env, theta)
 
     buffer_size_small = 3
-    env.setBufferSize(buffer_size_small)
+    env._setServerSizes(buffer_size_small)
     print("\tTesting buffer_size smaller than theta: {}... Policy Accept = {}".format(buffer_size_small, policy.getPolicyForAction(1)))
     assert policy.getPolicyForAction(1) == 1.0
     assert policy.getPolicyForAction(0) == 1 - policy.getPolicyForAction(1)
 
     buffer_size_large = 8
-    env.setBufferSize(buffer_size_large)
+    env._setServerSizes(buffer_size_large)
     print("\tTesting buffer_size = {}, MUCH larger than theta... Policy Accept = {}".format(buffer_size_large, policy.getPolicyForAction(1)))
     assert policy.getPolicyForAction(1) == 0.0
     assert policy.getPolicyForAction(0) == 1 - policy.getPolicyForAction(1)
 
     buffer_size_border_blocked = int(theta+2)
-    env.setBufferSize(buffer_size_border_blocked)
+    env._setServerSizes(buffer_size_border_blocked)
     print("\tTesting buffer_size = {}, near theta with sure blocking... Policy Accept = {}".format(buffer_size_border_blocked, policy.getPolicyForAction(1)))
     assert policy.getPolicyForAction(1) == 0.0
     assert policy.getPolicyForAction(0) == 1 - policy.getPolicyForAction(1)
 
     buffer_size_border_random = int(theta+1)
-    env.setBufferSize(buffer_size_border_random)
+    env._setServerSizes(buffer_size_border_random)
     print("\tTesting buffer_size = {}, near theta with randomized blocking... Policy Accept = {}".format(buffer_size_border_random, policy.getPolicyForAction(1)))
     assert np.isclose(policy.getPolicyForAction(1), 0.3)
     assert policy.getPolicyForAction(0) == 1 - policy.getPolicyForAction(1)
 
-    #--- Test #2: Stepwise linear policy on multi-class job
+    #--- Test #2: Single-server, multi-class job: stepwise linear policy
     print("\n***********\nTest #2: Tests on Stepwise-linear policy on a single server with one threshold parameter theta for each job class")
     job_class_rates = [0.7, 0.3, 0.4, 0.9]  # Note: This rates are currently NOT used in the test. The list just defines the number of possible job classes
     job_rates_by_server = [0.7]             # This value is not used at all, it's just needed to create the queue system below
@@ -269,8 +263,7 @@ if __name__ == "__main__":
     # 1.2: In this setup, jobs with lowest priority are accepted with non-zero probability lower than 1
     # regardless of the buffer size
     job_class = 2
-    env.setJobClass(job_class)
-    env.setBufferSize(3)
+    env.setState(3, job_class)
     print("Prob(action=1/s={},theta={:.1f}) for a job class {} (falling between theta and theta+1): {}" \
           .format(env.getJobClass(), env.getBufferSize(), policy.theta[job_class], policy.getPolicyForAction(1)))
     assert 0 < policy.getPolicyForAction(1) and policy.getPolicyForAction(1) < 1.0
@@ -278,6 +271,5 @@ if __name__ == "__main__":
     assert np.abs(policy.getPolicyForAction(1) - 0.30) < 1E-6
 
     # 1.3: Any job is rejected when the buffer is full
-    env.setBufferSize(env.queue.getCapacity())
-    env.setJobClass(0)
+    env.setState(env.queue.getCapacity(), 0)
     assert policy.getPolicyForAction(1) == 0.0

@@ -6,8 +6,13 @@ Created on Thu Jun 04 22:15:48 2020
 @description: Functions used to perform computations
 """
 
+import warnings
+
 import numpy as np
 import copy
+
+from utils.basic import as_array
+
 
 def mad(x):
     """
@@ -51,6 +56,48 @@ def comb(n,k):
         den *= i + 1
         
     return int( num / den )
+
+def generate_min_exponential_time(rates):
+    """
+    Generates a realization of the minimum of exponential times at the given rates
+
+    Arguments:
+    rates: positive float or list of positive floats or numpy array of positive floats
+        Rates of the exponentials on which the minimum time is generated.
+        Some (but not all) of the rates may be NaN as only the non-NaN values are considered for the possible
+        exponential distributions.
+
+    Return: tuple
+    Tuple with the following elements:
+    - time: realization of the minimum time among the exponential distributions of the given rates
+    - idx: index indicating which exponential rate the generated time should be associated with
+    """
+    # Check the rates
+    rates = as_array(rates)
+    if any(rates[~np.isnan(rates)] < 0):
+        warnings.warn("Some of the rates are negative... they will be ignored from the generation of the min exponential time ({}".format(rates))
+
+    # Find the valid rates
+    valid_rates = copy.deepcopy(rates)
+    is_valid_rate = np.array([True if r > 0 else False for r in rates])
+    valid_rates[~is_valid_rate] = np.nan
+
+    # Rate of occurrence of ANY event among the input rates
+    event_rate = np.nansum(valid_rates)
+    if event_rate <= 0:   # NOTE that, in case all valid_rates are NaN, the of all NaNs is 0.0! (so we are in business)
+        raise ValueError("The event rate computed from the given rates ({}) must be positive ({})".format(rates, event_rate))
+
+    # Generate the event time
+    event_time = np.random.exponential(1/event_rate)
+
+    # Probability of selection of each possible event with a valid rate
+    probs = valid_rates[is_valid_rate] / event_rate
+    indices_to_choose_from = [idx for idx, rate in enumerate(valid_rates) if not np.isnan(rate)]
+
+    # Define the index on which the generated event time should be associated with
+    idx_event = np.random.choice(indices_to_choose_from, size=1, p=probs)[0]    # Need `[0]` because the value returned by random.choice() is an array
+
+    return event_time, idx_event
 
 def get_server_loads(job_rates, service_rates):
     """
@@ -329,6 +376,46 @@ def all_combos_with_sum(R, C):
 
 # Tests
 if __name__ == "__main__":
+    #---------- generate_min_exponential_time ---------------#
+    print("Testing generate_min_exponential_time(rates):")
+    #-- Normal scenario
+    np.random.seed(1717)
+    rates = [0.2, 0.5, 0.7]
+    t, idx = generate_min_exponential_time(rates)
+    print("Observed minimum time {} at index {}".format(t, idx))
+    t_expected, idx_expected = 0.3137434, 1
+    assert np.allclose(t, t_expected)
+    assert idx == idx_expected
+    # Repeat the realization to check that the returned index is always 0 (because that's the only valid rate!)
+    nevents_by_rate = np.zeros(len(rates))
+    N = 10
+    # Expected proportion of events for each exponential
+    p = rates / np.nansum(rates)
+    for i in range(N):
+        t, idx = generate_min_exponential_time(rates)
+        nevents_by_rate[idx] += 1
+    # Observed proportions of events by server and type of event
+    phat = 1.0 * nevents_by_rate / N
+    se_phat = np.sqrt(p * (1 - p) / N)
+    print("EXPECTED proportions of events by rate:\n{}".format(p))
+    print("Observed proportions of events by rate on N={} generated events:\n{}".format(N, phat))
+    print("Standard Errors on N={} generated events:\n{}".format(N, se_phat))
+    assert np.allclose(phat, p, atol=3*se_phat)   # true probabilities should be contained in +/- 3 SE(phat) from phat
+
+    #-- Case with some NaN and negative rate values
+    np.random.seed(1717)
+    t, idx = generate_min_exponential_time([0.2, np.nan, -0.7])
+    t_expected, idx_expected = 2.1962040, 0
+    print("Observed minimum time {} at index {}".format(t, idx))
+    assert np.allclose(t, t_expected)
+    assert idx == idx_expected
+    # Repeat the realization to check that the returned index is always 0 (because that's the only valid rate!)
+    for i in range(10):
+        t, idx = generate_min_exponential_time([0.2, np.nan, -0.7])
+        assert idx == idx_expected
+    #---------- generate_min_exponential_time ---------------#
+
+
     #------------------- comb(n,k) -------------------------#
     print("Testing comb(n,k):")
     count = 0
