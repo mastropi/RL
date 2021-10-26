@@ -1525,7 +1525,7 @@ class EstimatorQueueBlockingFlemingViot:
                     #print("job_class: {}".format(job_class))
                     #print("state: {}".format(self.policy_accept.env.getState()))
                     self.policy_accept.env.setJobClass(job_class)
-                    action = self.policy_accept.choose_action()
+                    action = self.policy_accept.choose_action(queue.getServerSizes())
                     if action == 1:
                         #print("ENTRO")
                         assert self.particles[P].getBufferSize() < self.particles[P].getCapacity(), \

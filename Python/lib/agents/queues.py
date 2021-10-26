@@ -85,13 +85,14 @@ class AgeQueue(GenericAgent):
         if policy_type == PolicyTypes.ACCEPT:
             # Choose the action to take and store it in the agent object
             action_type = ActionTypes.ACCEPT_REJECT
-            action = self.getPolicy()[PolicyTypes.ACCEPT].choose_action()
+            action = self.getPolicy()[PolicyTypes.ACCEPT].choose_action(self.env.getState())
             self.setLastAction(action)
         elif policy_type == PolicyTypes.ASSIGN:
             # Choose the action to take and store it in the agent object
             action_type = ActionTypes.ASSIGN
             job_class = self.env.getJobClass()
             servers = range(self.env.getNumServers())
+            # TODO: (2021/10/21) Homogenize the signature of choose_action() among policies so that they all receive one parameter: the current state
             action = self.getPolicy()[PolicyTypes.ASSIGN].choose_action(job_class, servers)
             self.setLastAction(action)
 

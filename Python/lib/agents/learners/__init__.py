@@ -11,7 +11,7 @@ This class stores the following attributes as part of the object:
 - alpha: the learning rate
 
 Classes inheriting from this class should define the following methods:
-- reset_state_counts()
+- reset_supporting_attributes()
 - reset_value_functions()
 """
 
@@ -65,6 +65,10 @@ class Learner:
         self.alpha_update_type = alpha_update_type
         self.alpha_min = alpha_min  # Used when adjust_alpha=True
 
+        # Observed state and reward at the latest learning time
+        self.state = None           # State where the environment transitions to AFTER receiving the `reward`
+        self.reward = None
+
         # Information of the states and rewards on which learning takes place
         # (so that it can be retrieved by the user if needed as a piece of information)
         self.states = []
@@ -85,9 +89,49 @@ class Learner:
         self.alpha_mean = []
         self._alphas_used = []
 
+        # Reset the latest learning state and reward
+        self.state = None
+        self.reward = None
+
         # Reset the attributes that keep track of visited states
-        self.reset_state_counts()
+        self.reset_supporting_attributes()
+        self.reset_return()
 
         if reset_value_functions:
             # Only reset the initial estimates of the value functions when requested
             self.reset_value_functions()
+
+    def reset_supporting_attributes(self):
+        # Method to be overridden by subclasses
+        pass
+
+    def reset_return(self):
+        # Method to be overridden by subclasses
+        pass
+
+    def reset_value_functions(self):
+        # Method to be overridden by subclasses
+        pass
+
+    def record_learning(self, state, reward):
+        "Records the current visited state and observed reward, and updates the history of their observed values"
+        self.state = state
+        self.reward = reward
+        self._record_learning_history()
+
+    def _record_learning_history(self):
+        "Updates the history of the visited states and observed rewards during the simulation"
+        self.states += [self.state]
+        self.rewards += [self.reward]
+
+    def getAverageLearningRates(self):
+        return self.alpha_mean
+
+    def getLearningRates(self):
+        return self._alphas_used
+
+    def getStates(self):
+        return self.states
+
+    def getRewards(self):
+        return self.rewards

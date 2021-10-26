@@ -97,7 +97,7 @@ class Simulator:
         start: None or int, optional
             Index in the set of states defined by the environment corresponding to the starting state.
 
-        seed: None or float, optional
+        seed: (opt) None or float
             Seed to use for the random number generator for the simulation.
             If None, the seed is NOT set.
             If 0, the seed stored in the object is used.
@@ -497,12 +497,18 @@ class SimulatorQueue(Simulator):
         self.learnerV = self.agent.getLearnerV()
         self.learnerP = self.agent.getLearnerP()
 
-    def reset(self):
+    def reset(self, reset_value_functions=False):
         "Resets the simulator"
-        # Reset the learners
-        self.agent.getLearnerV().reset(reset_value_functions=True)
+        # Reset the learner of the value function
+        self.agent.getLearnerV().reset(reset_value_functions)
+        if not reset_value_functions:
+            # Set the start value of the value functions to their current estimate
+            # Goal: we can use the current estimated values in the next learning step,
+            # e.g. use it as a baseline when computing the time difference delta(t).
+            self.agent.getLearnerV().setVStart(self.agent.getLearnerV().getV())
+            self.agent.getLearnerV().setQStart(self.agent.getLearnerV().getQ())
 
-    def run(self, start, seed=None, compute_rmse=False, state_observe=None,
+    def run(self, start_state, seed=None, compute_rmse=False, state_observe=None,
             verbose=False, verbose_period=1,
             plot=False, colormap="seismic", pause=0):
         """Runs a Reinforcement Learning experiment on a queue environment for the given number of time steps.
@@ -510,8 +516,8 @@ class SimulatorQueue(Simulator):
         It is assumed that this reset, when needed, is done by the calling function.
 
         Parameters:
-        start: int
-            Buffer size at which the queue environment starts.
+        start_state: int or list or numpy array
+            State at which the queue environment starts.
 
         seed: None or float, optional
             Seed to use for the random number generator for the simulation.
@@ -548,13 +554,11 @@ class SimulatorQueue(Simulator):
 
         Returns: tuple
         Tuple containing the following elements:
-            - state value function estimate for each state at the end of the simulation.
-            - number of visits to each state at the end of the simulation.
-            - RMSE (when `compute_rmse` is not False) Root Mean Square Error of the estimated value function averaged
-            over all states, at the end of the simulation. Otherwise, None.
-            - a dictionary containing additional relevant information, as follows:
             [TBD]: See the Simulator class for ideas, but it would essentially contain the learning parameters of
             the different learners (e.g. state value function, action-state value function, policy)
+            - the learner object at the end of the learning process
+            - the policy object at the end of the learning process
+            - [TODO] number of visits to each state at the end of the simulation.
         """
         # --- Parse input parameters
         if plot:
@@ -562,31 +566,33 @@ class SimulatorQueue(Simulator):
             pass
 
         # Simulation seed
-        if seed:
+        if seed is not None:
             if seed != 0:
-                self.env.seed(seed)
+                self.env.set_seed(seed)
             else:
-                self.env.seed(self.seed)
+                self.env.set_seed(self.seed)
 
         if verbose:
-            print("Value function at start of experiment: {}".format(learner.getV()))
-        # Simulation time and learning time (both INTEGERS! i.e. they represent:
-        # - t_sim: the number of queue state changes (a.k.a. number of queue iterations)
+            print("Value function at start of experiment: {}".format(self.learnerV.getV()))
+        # There are two simulation time scales (both integers and starting at 0):
+        # - t: the number of queue state changes (a.k.a. number of queue iterations)
         # - t_learn: the number of learning steps (of the value functions and policies)
-        t_learn = 0
+        t_learn = -1
         while t_learn < self.dict_nsteps['learn']:
+            t_learn += 1
             # Reset the environment and the learners
             # (i.e. start the environment at the same state and prepare it for a fresh new learning step
             # with all learning memory erased)
-            self.env.reset(start, job_class=None)
-            self.reset()
+            job_class = None
+            self.env.reset((start_state, job_class))
+            self.reset(reset_value_functions=False)
 
             done = False
             if verbose and np.mod(t_learn, verbose_period) == 0:
-                print("Learning step {} of {} running...".format(t_learn + 1, self.dict_nsteps['learn']), end=" ")
-            if self.debug:
+                print("\n***** Learning step {} of {} running...".format(t_learn + 1, self.dict_nsteps['learn']), end=" ")
                 print("\nQueue environment starts at state {}".format(self.env.getState()))
-                print("\tState value function at start of new learning step:\n\t{}".format(self.learnerV.getV()))
+                print("\tState value function:\n\t{}".format(self.learnerV.getV()))
+                print("\tTheta parameter of policy: {}".format(self.learnerP.getPolicy().getThetaParameter()))
 
             # Time step in the queue trajectory (the first time step is t = 0)
             t = -1
@@ -601,14 +607,19 @@ class SimulatorQueue(Simulator):
                 time, event, job_class_or_server = self.generate_event()
                 if event == Event.BIRTH:
                     # The event is an incoming job class
-                    # => Set the arriving job class in the queue environment, assign it to a server, and apply the acceptance policy
+                    # => Set the arriving job class in the queue environment and apply the acceptance policy
                     job_class = job_class_or_server
                     self.env.setJobClass(job_class)
-                    servers = range(self.env.getNumServers())
-                    self.agent.getAssignmentPolicy().choose_action(job_class, servers)
 
                     # Perform a step on the environment by applying the acceptance policy
                     action_accept_reject, next_state, reward_accept_reject, _ = self.step(t, PolicyTypes.ACCEPT)
+
+                    # Store the gradient of hte policy evaluated on the action A(t) taken given the state S(t)
+                    # Goal: be able to compute e.g. the average policy gradient when learning at the end of the simulation
+                    gradient_for_action = self.learnerP.getPolicy().getGradient(action_accept_reject, state)
+                    self.learnerP.record_gradient(state, action_accept_reject, gradient_for_action)
+
+                    # Assign the job to a server if accepted
                     if action_accept_reject == Actions.ACCEPT:
                         # Assign the job just accepted to a server and update the next_state value
                         # (because the next_state from the ACCEPT action has not been updated above
@@ -628,8 +639,12 @@ class SimulatorQueue(Simulator):
                     assert queue_state[server] > 0, "The server where the completed service occurs has at least one job"
                     next_queue_state = copy.deepcopy(queue_state)
                     next_queue_state[server] -= 1
-                    self.env.setState(next_queue_state, None)
+                    self.env.setState((next_queue_state, None))
                     next_state = self.env.getState()
+
+                    assert self.env.getBufferSizeFromState(next_state) == self.env.getBufferSizeFromState(state) - 1, \
+                        "The buffer size after a DEATH decreased by 1: S(t) = {}, S(t+1) = {}" \
+                        .format(self.env.getBufferSizeFromState(state), self.env.getBufferSizeFromState(next_state))
 
                     # We set the action to None because there is no action by the agent when a service is completed
                     action = None
@@ -637,38 +652,43 @@ class SimulatorQueue(Simulator):
                     reward = 0.0
                     info = {}
 
-                done = self.check_done(t)
+                done = self.check_done(t, state, action, reward, gradient_for_action)
 
                 if self.debug:
-                    print("| t={}: event={}, action={} -> state={}".format(t, state, event, action, next_state), end="\n")
-
-                if self.debug and done:
-                    print("--> Done [{} iterations] at state {} with reward {}".
-                          format(t + 1, self.env.getState(), reward))
-                    print("\tUpdating the value function at the end of the episode...")
-
-                if self.debug:
-                    print("-> {}".format(self.env.getState()), end=" ")
+                    print("{} | t={}: event={}, action={} -> state={}, reward={}".format(state, t, event, action, next_state, reward), end="\n")
 
                 # Update the average return with the new observation
-                self.learnerV.updateAverageG(t, reward)
+                self.learnerV.updateG(t, reward)
 
             if verbose and np.mod(t_learn, verbose_period) == 0:
-                print("==> agent ENDS at state: {})".format(self.env.getState()))
+                print("==> agent ENDS at state {} from state = {}, action = {}, reward = {}, gradient = {})".format(self.env.getState(), state, action, reward, gradient_for_action))
 
             # Learn the value function and the policy
-            self.learn(t)
+            # Note that the parameters are t, A(t), S(t), specially note that S(t) is the state
+            # PRIOR to taking action A(t).
+            # This is important because the policy gradient should be evaluated at A(t), S(t), as opposed to at
+            # A(t), S(t+1), where S(t+1) is the CURRENT state of the environment (given the process above, where the
+            # state of the environment HAS ALREADY BEEN SET to S(t+1).
+            # TODO: (2021/10/25) Update self.learn() so that we go through EVERY TIME STEP in the simulation and update theta at every time step (as done in the Trunk Reservation paper)
+            self.learn(t, state, action, reward)
+            if verbose and np.mod(t_learn, verbose_period) == 0:
+                print("\tUpdated value function at the end of queue simulation: V(s) = {}".format(self.learnerV.getV()))
+                print("\tBaseline for Delta: baseline = {}".format(self.learnerP.getBaseline()))
+                print("\tDelta value at the end of queue simulation (G - baseline): delta(T) = {}".format(self.learnerP.getDelta()))
+                print("\tLog policy gradient at the end of queue simulation: log(Pi(a(T)/s(T))) = {}".format(self.learnerP.getLogGradients()[-1]))
+                print("\tUpdated theta parameter of policy: theta = {}".format(self.learnerP.getPolicy().getThetaParameter()))
 
         if plot:
             # TODO
             pass
 
-        return self.agent.getLearnerV().getV(), learner.getStateCounts(), \
-               {  # Value of alpha for each state at the end of the LAST t_learn run
-                   'alphas_at_episode_end': learner._alphas,
+        return self.learnerV, self.learnerP.getPolicy()
+               #, self.learnerV.getStateCounts(), \
+               #{  # Value of alpha for each state at the end of the LAST t_learn run
+               #    'average alpha': self.learnerV.getAverageLearningRates(),
                    # (Average) alpha by t_learn (averaged over visited states in the t_learn)
-                   'alphas_by_episode': learner.alpha_mean_by_episode
-               }
+               #    'alphas used': self.learnerV.getLearningRates()
+               #}
 
     def generate_event(self):
         """
@@ -731,18 +751,50 @@ class SimulatorQueue(Simulator):
 
         return action, observation, reward, info
 
-    def learn(self, t):
-        self.learnerV.learn(t)
-        self.learnerP.learn(t)
+    def learn(self, t, state, action, reward):
+        """
+        Learns the value function at time t, and the policy at time t for the given action A(t)
+        and the given state S(t)
 
-    def check_done(self, t):
+        Arguments:
+        t: int
+            Time (iteration) at which the learning takes place.
+
+        state: Environment state
+            S(t): state of the environment at time t, i.e. PRIOR to taking the given action A(t).
+
+        action: Actions
+            A(t): action taken at time t.
+
+        reward: float
+            R(t+1): reward received after taking action A(t) (and going to state S(t+1), which is not passed).
+        """
+        self.learnerV.learn(t, state, reward)
+        self.learnerP.learn(t, state, action)
+
+    def check_done(self, t, state, action, reward, gradient):
         """
         Checks whether the simulation is done
+
+        t: int
+            Current queue simulation time.
+
+        state: Environment dependent
+            S(t): state of the environment at time t, BEFORE the action is taken.
+
+        action: Environment dependent
+            A(t): action received by the environment at time t.
+
+        reward: float
+            R(t+1): reward yielded by the environment after taking action A(t) at state S(t).
+
+        gradient: float
+            Gradient of the policy at time t, i.e. the value of the policy  gradient for A(t) given S(t).
 
         Return: bool
             Whether the queue simulation is done because the maximum number of iterations has been reached.
         """
-        if t < self.dict_nsteps['queue']:
+        if t < self.dict_nsteps['queue']: #and gradient == 0.0:
             done = False
         else:
             done = True
@@ -924,10 +976,9 @@ if __name__ == "__main__":
 
     if True:
         # --- Test the SimulatorQueue class ---#
-        from Python.lib import environments, agents
         from agents.queues import AgeQueue, PolicyTypes, LearnerTypes
         from environments.queues import EnvQueueSingleBufferWithJobClasses
-        from agents.policies.parameterized import PolQueueTwoActionsLinearStep
+        from agents.policies.parameterized import PolQueueTwoActionsLinearStep, PolQueueTwoActionsLogit
         from agents.learners.continuing.mc import LeaMC
         from agents.learners.policies import LeaPolicyGradient
 
@@ -939,21 +990,30 @@ if __name__ == "__main__":
         env_queue_mm = EnvQueueSingleBufferWithJobClasses(queue, job_class_rates, rewardOnJobRejection_ExponentialCost, None)
 
         # Acceptance policy definition
-        theta_start = 1.0
+        theta_start = 1.3 # 1.3, 11.3  # IMPORTANT: This value should NOT be integer, o.w. the policy gradient will always be 0 regardless of the state at which blocking occurs
         policies = dict({PolicyTypes.ACCEPT: PolQueueTwoActionsLinearStep(env_queue_mm, theta_start), PolicyTypes.ASSIGN: None})
+        #policies = dict({PolicyTypes.ACCEPT: PolQueueTwoActionsLogit(env_queue_mm, theta_start, beta=2.0), PolicyTypes.ASSIGN: None})
 
         # Learners definition
-        alpha_start = 1.0
+        alpha_start = 0.1
         gamma = 1.0
-        learnerV = LeaMC(env_queue_mm, alpha_start, gamma)
+        learnerV = LeaMC(env_queue_mm, gamma=gamma)
         learners = dict({LearnerTypes.V: learnerV,
                          LearnerTypes.Q: None,
-                         LearnerTypes.P: LeaPolicyGradient(env_queue_mm, policies[PolicyTypes.ACCEPT], learnerV)})
+                         LearnerTypes.P: LeaPolicyGradient(env_queue_mm, policies[PolicyTypes.ACCEPT], learnerV, alpha=alpha_start)})
         agent_gradient_mc = AgeQueue(env_queue_mm, policies, learners)
 
         # Simulator on a given number of iterations for the queue simulation and a given number of iterations to learn
-        dict_nsteps = dict({'queue': 100, 'learn': 20})
-        start_state = 0
-        simul = SimulatorQueue(env_queue_mm, agent_gradient_mc, dict_nsteps, seed=1717, debug=True)
-        simul.run(start_state)
+        dict_nsteps = dict({'queue': 10, 'learn': 2000})
+        start_state = [0]
+        simul = SimulatorQueue(env_queue_mm, agent_gradient_mc, dict_nsteps, debug=False)
+        learner, policy = simul.run(start_state, seed=1717, verbose=True)
 
+        # Plot evolution of theta
+        plt.figure()
+        plt.plot(policy.getThetas(), 'b-')
+        plt.plot(learner.getStates(), 'g.')
+        ax = plt.gca()
+        ax2 = ax.twinx()
+        ax2.plot(learner.getRewards(), 'r-')
+        plt.title("Theta start = {}".format(theta_start))

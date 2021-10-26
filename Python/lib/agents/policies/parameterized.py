@@ -9,8 +9,94 @@ Created on 22 Mar 2021
 import numpy as np
 
 import Python.lib.queues as queues
-from Python.lib.environments.queues import EnvQueueSingleBufferWithJobClasses, rewardOnJobClassAcceptance
+from Python.lib.environments.queues import Actions, EnvQueueSingleBufferWithJobClasses, rewardOnJobClassAcceptance
 from agents.policies import GenericParameterizedPolicyTwoActions
+
+
+class PolQueueTwoActionsLogit(GenericParameterizedPolicyTwoActions):
+    """
+    Randomized policy on a queue with two possible actions: accept or reject an incoming job.
+    The policy is defined as a logit function around parameter theta where the probability of any of the action
+    is 0.5.
+
+    Specifically, the probability of acceptance is defined as 1 / (1 + exp( beta*(s - theta) ))
+    where beta is a parameter passed to the constructor that controls how steep the transition from probability 1
+    to 0 is.
+
+    Arguments:
+    env: environment
+        Environment representing a queue system.
+
+    theta: float
+        Initial value for the reference parameter where the policy is equal to 0.5.
+
+    beta: positive float
+        Parameter of the logit that defines the steepness of the transition from probability 1 to 0.
+    """
+
+    def __init__(self, env: EnvQueueSingleBufferWithJobClasses, theta: float, beta :float):
+        if not isinstance(theta, float):
+            raise ValueError("The theta parameter must be a float number ({})".format(theta))
+        super().__init__(env, theta)
+
+        assert self.env.getCapacity() == np.Inf, "The queue has infinite (fixed) capacity, since parameter theta defining its capacity can take ANY real value."
+
+        self.beta = beta
+
+    def getThetaParameter(self):
+        return self.theta
+
+    def getBeta(self):
+        return self.beta
+
+    def getGradient(self, action, state):
+        """
+        Returns the policy gradient at the given action when the environment is at the given state
+
+        action: Actions
+            Accept or Reject action at which the policy gradient is evaluated.
+
+        state: Environment dependent
+            State of the environment at which the policy gradient is evaluated.
+            The queue's buffer size is computed from the state using the getBufferSizeFromState() method
+            defined in the environment object.
+
+        Return: float
+        Gradient of the policy for the given action given the environment's state.
+        """
+        buffer_size = self.env.getBufferSizeFromState(state)
+
+        sign = (action.value - 0.5) * 2
+
+        return sign * self.beta * (1 - self.getPolicyForAction(action, state))
+
+    def getPolicyForAction(self, action, state):
+        """
+        Returns the value of the policy for the given action when the environment is at the given state
+
+        action: Actions
+            Accept or Reject action at which the policy is evaluated.
+
+        state: Environment dependent
+            State of the environment at which the policy is evaluated.
+            The queue's buffer size is computed from the state using the getBufferSizeFromState() method
+            defined in the environment object.
+
+        Return: float
+        Value of the policy for the given action given the environment's state.
+        """
+        buffer_size = self.env.getBufferSizeFromState(state)
+
+        policy_accept = 1 / (1 + np.exp( self.beta * (buffer_size - self.theta) ))
+
+        if action == Actions.ACCEPT:
+            policy_value_for_action = policy_accept
+        elif action == Actions.REJECT:
+            policy_value_for_action = 1 - policy_accept
+        else:
+            raise ValueError(str(__class__) + ": An invalid action was given: {}".format(action))
+
+        return policy_value_for_action
 
 
 class PolQueueTwoActionsLinearStep(GenericParameterizedPolicyTwoActions):
@@ -49,19 +135,49 @@ class PolQueueTwoActionsLinearStep(GenericParameterizedPolicyTwoActions):
     def getThetaParameter(self):
         return self.theta
 
-    def getGradient(self, action):
-        "Returns the policy gradient at the given action and current state of the environment"
-        buffer_size = self.env.getBufferSize()
+    def getGradient(self, action, state):
+        """
+        Returns the policy gradient at the given action when the environment is at the given state
+
+        action: Actions
+            Accept or Reject action at which the policy gradient is evaluated.
+
+        state: Environment dependent
+            State of the environment at which the policy gradient is evaluated.
+            The queue's buffer size is computed from the state using the getBufferSizeFromState() method
+            defined in the environment object.
+
+        Return: float
+        Gradient of the policy for the given action given the environment's state.
+        """
+        buffer_size = self.env.getBufferSizeFromState(state)
 
         is_buffer_size_in_linear_piece = float( self.theta < buffer_size < self.theta + 1 )
-        if action == 1:
-            return is_buffer_size_in_linear_piece
+        if action == Actions.ACCEPT:
+            slope = is_buffer_size_in_linear_piece
+        elif action == Actions.REJECT:
+            slope = -is_buffer_size_in_linear_piece
         else:
-            return -is_buffer_size_in_linear_piece
+            raise ValueError(__class__ + ": An invalid action was given: {}".format(action))
 
-    def getPolicyForAction(self, action):
-        "Returns the value of the policy for the given action at the current state of the environment"
-        buffer_size = self.env.getBufferSize()
+        return slope
+
+    def getPolicyForAction(self, action, state):
+        """
+        Returns the value of the policy for the given action when the environment is at the given state
+
+        action: Actions
+            Accept or Reject action at which the policy is evaluated.
+
+        state: Environment dependent
+            State of the environment at which the policy is evaluated.
+            The queue's buffer size is computed from the state using the getBufferSizeFromState() method
+            defined in the environment object.
+
+        Return: float
+        Value of the policy for the given action given the environment's state.
+        """
+        buffer_size = self.env.getBufferSizeFromState(state)
 
         if buffer_size <= self.theta[0]:
             policy_accept = 1.0
@@ -72,10 +188,14 @@ class PolQueueTwoActionsLinearStep(GenericParameterizedPolicyTwoActions):
             # => The acceptance policy is linear in s
             policy_accept = self.theta[0] - buffer_size + 1
 
-        if action == 1:
-            return policy_accept
+        if action == Actions.ACCEPT:
+            policy_value_for_action = policy_accept
+        elif action == Actions.REJECT:
+            policy_value_for_action = 1 - policy_accept
         else:
-            return 1 - policy_accept
+            raise ValueError(str(__class__) + ": An invalid action was given: {}".format(action))
+
+        return policy_value_for_action
 
 
 class PolQueueTwoActionsLinearStepOnJobClasses(GenericParameterizedPolicyTwoActions):
@@ -139,26 +259,58 @@ class PolQueueTwoActionsLinearStepOnJobClasses(GenericParameterizedPolicyTwoActi
                 self.policy_accept[k, j] = theta[k] - j + 1
             print("Acceptance policy as a function of the job class for buffer size k = {} (theta[k]={:.1f}): {}".format(k, theta[k], self.policy_accept[k]))
 
-    def getGradient(self, action):
-        "Returns the policy gradient at the given action and current state of the environment"
-        buffer_size, job_class = self.env.getState()
+    def getGradient(self, action, state):
+        """
+        Returns the policy gradient at the given action when the environment is at the given state
+
+        action: Actions
+            Accept or Reject action at which the policy gradient is evaluated.
+
+        state: tuple
+            State of the environment at which the policy gradient is evaluated.
+            It should be a duple containing the queue's buffer size and the job class of the latest arriving job.
+
+        Return: float
+        Gradient of the policy for the given action given the environment's state.
+        """
+        buffer_size, job_class = state
 
         is_job_class_in_linear_piece = self.theta[buffer_size] < job_class < self.theta[buffer_size] + 1
-        if action == 1:
-            return is_job_class_in_linear_piece
+        if action == Actions.ACCEPT:
+            slope = is_job_class_in_linear_piece
+        elif action == Actions.REJECT:
+            slope = -is_job_class_in_linear_piece
         else:
-            return -is_job_class_in_linear_piece
+            raise ValueError(str(__class__) + ": An invalid action was given: {}".format(action))
 
-    def getPolicyForAction(self, action):
-        "Returns the value of the policy for the given action at the current state of the environment"
-        buffer_size, job_class = self.env.getState()
+        return slope
 
-        if action == 1:
-            return self.policy_accept[buffer_size, job_class]
+    def getPolicyForAction(self, action, state):
+        """
+        Returns the value of the policy for the given action when the environment is at the given state
+
+        action: Actions
+            Accept or Reject action at which the policy is evaluated.
+
+        state: tuple
+            State of the environment at which the policy is evaluated.
+            It should be a duple containing the queue's buffer size and the job class of the latest arriving job.
+
+        Return: float
+        Gradient of the policy for the given action given the environment's state.
+        """
+        buffer_size, job_class = state
+
+        if action == Actions.ACCEPT:
+            policy_value_for_action = self.policy_accept[buffer_size, job_class]
+        elif action == Actions.REJECT:
+            policy_value_for_action = 1 - self.policy_accept[buffer_size, job_class]
         else:
-            return 1 - self.policy_accept[buffer_size, job_class]
+            raise ValueError(str(__class__) + ": An invalid action was given: {}".format(action))
 
-    def getAcceptPolicy(self):
+        return policy_value_for_action
+
+    def getAcceptancePolicy(self):
         return self.policy_accept
 
 
@@ -184,15 +336,17 @@ if __name__ == "__main__":
 
     buffer_size = 0
     env._setServerSizes(buffer_size)
-    print("\tTesting buffer_size = {}... Policy Accept = {}".format(buffer_size, policy.getPolicyForAction(1)))
-    assert policy.getPolicyForAction(1) == 0.7
-    assert policy.getPolicyForAction(0) == 1 - policy.getPolicyForAction(1)
+    state = env.getState()
+    print("\tTesting buffer_size = {}... Policy Accept = {}".format(buffer_size, policy.getPolicyForAction(Actions.ACCEPT, state)))
+    assert policy.getPolicyForAction(Actions.ACCEPT, state) == 0.7
+    assert policy.getPolicyForAction(Actions.REJECT, state) == 1 - policy.getPolicyForAction(Actions.ACCEPT, state)
 
     buffer_size = 1
     env._setServerSizes(buffer_size)
-    print("\tTesting buffer_size = {}... Policy Accept = {}".format(buffer_size, policy.getPolicyForAction(1)))
-    assert policy.getPolicyForAction(1) == 0.0
-    assert policy.getPolicyForAction(0) == 1 - policy.getPolicyForAction(1)
+    state = env.getState()
+    print("\tTesting buffer_size = {}... Policy Accept = {}".format(buffer_size, policy.getPolicyForAction(Actions.ACCEPT, state)))
+    assert policy.getPolicyForAction(Actions.ACCEPT, state) == 0.0
+    assert policy.getPolicyForAction(Actions.REJECT, state) == 1 - policy.getPolicyForAction(Actions.ACCEPT, state)
 
     # theta a little farther away than 0
     theta = -1.3
@@ -200,9 +354,10 @@ if __name__ == "__main__":
     policy = PolQueueTwoActionsLinearStep(env, theta)
     for buffer_size in range(3):
         env._setServerSizes(buffer_size)
-        print("\tTesting buffer_size = {}... Policy Accept = {}".format(buffer_size, policy.getPolicyForAction(1)))
-        assert policy.getPolicyForAction(1) == 0.0
-        assert policy.getPolicyForAction(0) == 1 - policy.getPolicyForAction(1)
+        state = env.getState()
+        print("\tTesting buffer_size = {}... Policy Accept = {}".format(buffer_size, policy.getPolicyForAction(Actions.ACCEPT, state)))
+        assert policy.getPolicyForAction(Actions.ACCEPT, state) == 0.0
+        assert policy.getPolicyForAction(Actions.REJECT, state) == 1 - policy.getPolicyForAction(Actions.ACCEPT, state)
 
     # theta > 0, non-integral
     theta = 5.3
@@ -211,27 +366,31 @@ if __name__ == "__main__":
 
     buffer_size_small = 3
     env._setServerSizes(buffer_size_small)
-    print("\tTesting buffer_size smaller than theta: {}... Policy Accept = {}".format(buffer_size_small, policy.getPolicyForAction(1)))
-    assert policy.getPolicyForAction(1) == 1.0
-    assert policy.getPolicyForAction(0) == 1 - policy.getPolicyForAction(1)
+    state = env.getState()
+    print("\tTesting buffer_size smaller than theta: {}... Policy Accept = {}".format(buffer_size_small, policy.getPolicyForAction(Actions.ACCEPT, state)))
+    assert policy.getPolicyForAction(Actions.ACCEPT, state) == 1.0
+    assert policy.getPolicyForAction(Actions.REJECT, state) == 1 - policy.getPolicyForAction(Actions.ACCEPT, state)
 
     buffer_size_large = 8
     env._setServerSizes(buffer_size_large)
-    print("\tTesting buffer_size = {}, MUCH larger than theta... Policy Accept = {}".format(buffer_size_large, policy.getPolicyForAction(1)))
-    assert policy.getPolicyForAction(1) == 0.0
-    assert policy.getPolicyForAction(0) == 1 - policy.getPolicyForAction(1)
+    state = env.getState()
+    print("\tTesting buffer_size = {}, MUCH larger than theta... Policy Accept = {}".format(buffer_size_large, policy.getPolicyForAction(Actions.ACCEPT, state)))
+    assert policy.getPolicyForAction(Actions.ACCEPT, state) == 0.0
+    assert policy.getPolicyForAction(Actions.REJECT, state) == 1 - policy.getPolicyForAction(Actions.ACCEPT, state)
 
     buffer_size_border_blocked = int(theta+2)
     env._setServerSizes(buffer_size_border_blocked)
-    print("\tTesting buffer_size = {}, near theta with sure blocking... Policy Accept = {}".format(buffer_size_border_blocked, policy.getPolicyForAction(1)))
-    assert policy.getPolicyForAction(1) == 0.0
-    assert policy.getPolicyForAction(0) == 1 - policy.getPolicyForAction(1)
+    state = env.getState()
+    print("\tTesting buffer_size = {}, near theta with sure blocking... Policy Accept = {}".format(buffer_size_border_blocked, policy.getPolicyForAction(Actions.ACCEPT, state)))
+    assert policy.getPolicyForAction(Actions.ACCEPT, state) == 0.0
+    assert policy.getPolicyForAction(Actions.REJECT, state) == 1 - policy.getPolicyForAction(Actions.ACCEPT, state)
 
     buffer_size_border_random = int(theta+1)
     env._setServerSizes(buffer_size_border_random)
-    print("\tTesting buffer_size = {}, near theta with randomized blocking... Policy Accept = {}".format(buffer_size_border_random, policy.getPolicyForAction(1)))
-    assert np.isclose(policy.getPolicyForAction(1), 0.3)
-    assert policy.getPolicyForAction(0) == 1 - policy.getPolicyForAction(1)
+    state = env.getState()
+    print("\tTesting buffer_size = {}, near theta with randomized blocking... Policy Accept = {}".format(buffer_size_border_random, policy.getPolicyForAction(Actions.ACCEPT, state)))
+    assert np.isclose(policy.getPolicyForAction(Actions.ACCEPT, state), 0.3)
+    assert policy.getPolicyForAction(Actions.REJECT, state) == 1 - policy.getPolicyForAction(Actions.ACCEPT, state)
 
     #--- Test #2: Single-server, multi-class job: stepwise linear policy
     print("\n***********\nTest #2: Tests on Stepwise-linear policy on a single server with one threshold parameter theta for each job class")
@@ -256,20 +415,23 @@ if __name__ == "__main__":
     # 1.1: Highest priority job is always accepted
     # regardless of the buffer size (unless the buffer is full)
     job_class = 0
-    env.setJobClass(job_class)
-    assert policy.getPolicyForAction(1) == 1.0
-    assert policy.getPolicyForAction(0) == 1 - policy.getPolicyForAction(1)
+    env.setState((buffer_size, job_class))
+    state = env.getState()
+    assert policy.getPolicyForAction(Actions.ACCEPT, state) == 1.0
+    assert policy.getPolicyForAction(Actions.REJECT, state) == 1 - policy.getPolicyForAction(Actions.ACCEPT, state)
 
     # 1.2: In this setup, jobs with lowest priority are accepted with non-zero probability lower than 1
     # regardless of the buffer size
     job_class = 2
-    env.setState(3, job_class)
+    env.setState((3, job_class))
+    state = env.getState()
     print("Prob(action=1/s={},theta={:.1f}) for a job class {} (falling between theta and theta+1): {}" \
-          .format(env.getJobClass(), env.getBufferSize(), policy.theta[job_class], policy.getPolicyForAction(1)))
-    assert 0 < policy.getPolicyForAction(1) and policy.getPolicyForAction(1) < 1.0
-    assert policy.getPolicyForAction(0) == 1 - policy.getPolicyForAction(1)
-    assert np.abs(policy.getPolicyForAction(1) - 0.30) < 1E-6
+          .format(env.getJobClass(), env.getBufferSize(), policy.theta[job_class], policy.getPolicyForAction(Actions.ACCEPT, state)))
+    assert 0 < policy.getPolicyForAction(Actions.ACCEPT, state) and policy.getPolicyForAction(Actions.ACCEPT, state) < 1.0
+    assert policy.getPolicyForAction(Actions.REJECT, state) == 1 - policy.getPolicyForAction(Actions.ACCEPT, state)
+    assert np.abs(policy.getPolicyForAction(Actions.ACCEPT, state) - 0.30) < 1E-6
 
     # 1.3: Any job is rejected when the buffer is full
-    env.setState(env.queue.getCapacity(), 0)
-    assert policy.getPolicyForAction(1) == 0.0
+    env.setState((env.queue.getCapacity(), 0))
+    state = env.getState()
+    assert policy.getPolicyForAction(Actions.ACCEPT, state) == 0.0
