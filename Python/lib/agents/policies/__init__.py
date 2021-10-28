@@ -75,10 +75,11 @@ class GenericParameterizedPolicyTwoActions:
             State of the environment defined in the object on which the computation
             of the policy gradient's log is requested.
         """
+        gradient = self.getGradient(action, state)
         policy_value = self.getPolicyForAction(action, state)
         if policy_value > 0:
-            return self.getGradient(action, state) / policy_value
-        elif self.getGradient(action, state) == 0.0:
+            return gradient / policy_value
+        elif gradient == 0.0:
             return 0.0
         else:
             # Division by 0 would have occurred!

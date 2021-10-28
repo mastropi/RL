@@ -5,7 +5,7 @@ Created on Thu Oct 19 18:34:27 2021
 @author: Daniel Mastropietro
 @description: Monte-Carlo learners on continuing tasks
 """
-
+import copy
 from enum import unique, Enum
 
 import numpy as np
@@ -43,9 +43,10 @@ class LeaMC(Learner):
         # Value functions and related quantities
         self.V_start = V_start
         self.Q_start = Q_start
-        self.V = self.V_start
+        self.V = self.V_start   # Average reward over the simulation time
         self.Q = self.Q_start
-        self.G = 0.0    # Average reward during the queue evolution until max simulation time
+        self.G = None           # Baseline-corrected cumulative reward for every time step (Trunk Reservation paper, pag. 4)
+        self.averageReward = 0.0     # Average return (used as baseline to correct the reward in G)
 
         # Historic values of the value functions
         self.V_hist = []
@@ -61,7 +62,8 @@ class LeaMC(Learner):
     # Overrides superclass method
     def reset_return(self):
         "Resets the observed return during the simulation period"
-        self.G = 0.0
+        self.G = None
+        self.averageReward = 0.0
 
     # Overrides superclass method
     def reset_value_functions(self):
@@ -73,20 +75,38 @@ class LeaMC(Learner):
         self.V_hist = []
         self.Q_hist = []
 
-    def update_state_counts(self, state):
-        "Updates the number of times the given state has been visited during the learning process"
-        # Create a string version of the state, so that we can store lists as dictionary keys
-        # which are actually not accepted as dictionary keys (with the error message "list type is unhashable").
-        # e.g. [3, 1, 5] becomes '[3, 1, 5]'
-        state_str = str(state)
-        if state_str in self.dict_state_counts.keys():
-            self.dict_state_counts[state_str] += 1
-        else:
-            self.dict_state_counts[state_str] = 1
-
-    def updateG(self, t, reward):
+    def learn(self, T):
         """
-        Updates the average return G with the observed reward
+        Computes the return G(t) for every simulation time t as the sum of the difference of each reward at t and the
+        baseline value (which is normally the average reward observed over the whole simulation period).
+
+        Arguments:
+        T: int
+            Time corresponding to the end of the simulation at which Monte-Carlo learning occurs.
+        """
+        rewards_history = copy.deepcopy(self.getRewards())
+        print("Rewards history: {}".format(rewards_history))
+        rewards_history.reverse()
+        print("Rewards history reversed: {}".format(rewards_history))
+        delta_rewards_history = np.array(rewards_history) - self.averageReward
+        print("Delta rewards history reversed: {}".format(delta_rewards_history))
+        self.G = np.cumsum(delta_rewards_history)
+        # Reverse the G just computed because we want to have t indexing the values of G from left to right of the array
+        self.G = self.G[::-1]
+
+        # The value function is set as the average reward over the whole simulation time (constant for all states)
+        self.V = self.averageReward
+        print("Baseline-corrected return: {}".format(self.G))
+        print("Value function (average reward in simulation): {}".format(self.V))
+
+        # Assert that G(0) is "0". Note that we compare with the maximum G(t) value because the "0" value is relative to this value
+        # (o.w. the assertion may fail... e.g. when G(0) ~ 1E-8... but in that case Gmax ~ 1E7... so G(0) is really "0"!
+        Gmax = np.max( np.abs(self.G) )
+        assert np.isclose(self.G[0] / (Gmax + 1), 0.0), "G(0) is almost 0 ({})".format(self.G[0])
+
+    def updateAverageReward(self, t, reward):
+        """
+        Updates the average reward observed until t
 
         Arguments:
         t: int
@@ -96,25 +116,19 @@ class LeaMC(Learner):
         reward: float
             R(t+1): reward received by the agent when transition to state S(t+1).
         """
-        self.G = (t * self.G + reward) / (t + 1)
-
-    def learn(self, t, state, reward):
-        """
-        Updates the value function with the observed average return G
-
-        Arguments:
-        t: float
-            Discrete time at which learning takes place.
-        """
-        self.V = self.G
-        self.record_learning(state, reward)
-        self._record_history()
+        self.averageReward = (t * self.averageReward + reward) / (t + 1)
 
     def _record_history(self):
         self.V_hist += [self.V]
         #self.Q_hist += [self.Q]
 
     #----- GETTERS -----#
+    def getAverageReward(self):
+        return self.averageReward
+
+    def getReturn(self):
+        return self.G
+
     def getV(self):
         return self.V
 
@@ -139,4 +153,3 @@ class LeaMC(Learner):
 
     def setQStart(self, Q):
         self.Q_start = Q
-

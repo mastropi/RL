@@ -16,10 +16,10 @@ import copy
 import warnings
 
 import numpy as np
-from matplotlib import pyplot as plt, cm    # cm is for colormaps (e.g. cm.get_cmap())
+from matplotlib import pyplot as plt, cm  # cm is for colormaps (e.g. cm.get_cmap())
 
 from agents.learners.episodic.discrete.td import LeaTDLambdaAdaptive
-from environments.queues import rewardOnJobRejection_ExponentialCost, Actions
+from environments.queues import rewardOnJobRejection_ExponentialCost, Actions, COST_EXP_BUFFER_SIZE_REF
 
 if __name__ == "__main__":
     from utils.computing import rmse, compute_job_rates_by_server, generate_min_exponential_time
@@ -85,11 +85,11 @@ class Simulator:
              verbose=False, verbose_period=1,
              plot=False, colormap="seismic", pause=0):
         # TODO: (2020/04/11) Convert the plotting parameters to a dictionary named plot_options or similar.
-        # The goal is to group OPTIONAL parameters by their function/concept.  
+        # The goal is to group OPTIONAL parameters by their function/concept.
         """Runs an episodic Reinforcement Learning experiment.
         No reset of the learning history is done at the onset of the first episode to run.
         It is assumed that this reset, when needed, is done by the calling function.
-        
+
         Parameters:
         nepisodes: int
             Length of the experiment: number of episodes to run.
@@ -104,7 +104,7 @@ class Simulator:
             This is useful if this method is part of a set of experiments run and we want to keep
             the seed setting that had been done at the offset of the set of experiments. Otherwise,
             if we set the seed again now, the experiments would have always the same outcome.
-    
+
         compute_rmse: bool, optional
             Whether to compute the RMSE over states (weighted by their number of visits)
             after each episode. Useful to analyze rate of convergence of the estimates.
@@ -114,7 +114,7 @@ class Simulator:
 
         verbose: bool, optional
             Whether to show the experiment that is being run and the episodes for each experiment.
-            
+
         verbose_period: int, optional
             Every how many episodes per experiment should be displayed.
 
@@ -211,7 +211,7 @@ class Simulator:
             t = -1
             while not done:
                 t += 1
-                
+
                 # Current state and action on that state leading to the next state
                 state = self.env.getState()
                 action = policy.choose_action()
@@ -273,15 +273,15 @@ class Simulator:
 
                     if state_observe is not None:
                         plt.figure(fig_RMSE_state.number)
-                        
+
                         # Compute quantities to plot
                         RMSE_state_observe = rmse(np.array(self.env.getV()[state_observe]), np.array(learner.getV().getValue(state_observe)))
                         se95 = 2*np.sqrt( 0.5*(1-0.5) / (episode+1))
                         # Only count falling inside the CI starting at episode 100 so that
-                        # the normal approximation of the SE is more correct. 
+                        # the normal approximation of the SE is more correct.
                         if episode + 1 >= 100:
                             ntimes_inside_ci95 += (RMSE_state_observe <= se95)
-    
+
                         # Plot of the estimated value of the state
                         plt.plot(episode+1, learner.getV().getValue(state_observe), 'r*-', markersize=3)
                         #plt.plot(episode, np.mean(np.array(V)), 'r.-')
@@ -291,7 +291,7 @@ class Simulator:
                         plt.plot(episode+1, -se95, color="gray", marker=".", markersize=2)
                         # Plot of learning rate
                         #plt.plot(episode+1, learner._alphas[state_observe], 'g.-')
-    
+
                         # Finalize plot
                         ax = plt.gca()
                         ax.set_ylim((-1, 1))
@@ -315,13 +315,13 @@ class Simulator:
             learner.reset(reset_episode=False, reset_value_functions=False)
 
         # Comment this out to NOT show the plot right away
-        # in case the calling function adds a new plot to the graph generated here 
+        # in case the calling function adds a new plot to the graph generated here
         if plot:
             if self.env.getDimension() == 2:
                 # Plot the state counts in a separate image
                 fig_C = plt.figure()
                 plt.figure(fig_C.number)
-                
+
                 state_counts_min = np.min( learner.getStateCounts() )
                 state_counts_mean = np.mean( learner.getStateCounts() )
                 state_counts_max = np.max( learner.getStateCounts() )
@@ -333,7 +333,7 @@ class Simulator:
                 plt.imshow(state_counts, cmap=colors_count, norm=colornorm)
                 # Font size factor
                 fontsize = 14
-                factor_fs = np.min((5/shape[0], 5/shape[1])) 
+                factor_fs = np.min((5/shape[0], 5/shape[1]))
                 for x in range(shape[0]):
                     for y in range(shape[1]):
                         # Recall the x axis corresponds to the columns of the matrix shown in the image
@@ -380,11 +380,11 @@ class Simulator:
     def simulate(self, nexperiments, nepisodes, start=None, verbose=False, verbose_period=1):
         """Simulates the agent interacting with the environment for a number of experiments and number
         of episodes per experiment.
-        
+
         Parameters:
         nexperiments: int
             Number of experiments to run.
-            
+
         nepisodes: int
             Number of episodes to run per experiment.
 
@@ -395,13 +395,13 @@ class Simulator:
 
         verbose: bool, optional
             Whether to show the experiment that is being run and the episodes for each experiment.
-            
+
         verbose_period: int, optional
             Every how many episodes per experiment should be displayed.
 
         Returns: tuple
             Tuple containing the following elements:
-                - Avg(N): The average number of visits to each state over all experiments  
+                - Avg(N): The average number of visits to each state over all experiments
                 - Avg(RMSE): Root Mean Square Error averaged over all experiments
                 - SE(RMSE): Standard Error of the average RMSE
                 - Episodic RMSE: array containing the Root Mean Square Error by episode averaged
@@ -426,7 +426,7 @@ class Simulator:
 
         # IMPORTANT: We should use the seed of the environment and NOT another seed setting mechanism
         # (such as np.random.seed()) because the EnvironmentDiscrete class used to simulate the process
-        # (defined in the gym package) sets its seed to None when constructed.  
+        # (defined in the gym package) sets its seed to None when constructed.
         # This seed is then used for the environment evolution realized with the reset() and step() methods.
         [seed] = self.env.seed(self.seed)
         for exp in np.arange(nexperiments):
@@ -434,8 +434,8 @@ class Simulator:
                 print("Running experiment {} of {} (#episodes = {})..." \
                       .format(exp+1, nexperiments, nepisodes), end=" ")
             V, N_i, RMSE_by_episodes_i, learning_info = self.run(nepisodes=nepisodes, start=start, seed=None,
-                                                                  compute_rmse=True, plot=False,
-                                                                  verbose=verbose, verbose_period=verbose_period)
+                                                                 compute_rmse=True, plot=False,
+                                                                 verbose=verbose, verbose_period=verbose_period)
             N += N_i
             # RMSE at the end of the last episode
             RMSE_i = RMSE_by_episodes_i[-1]
@@ -484,6 +484,7 @@ class SimulatorQueue(Simulator):
         - 'queue': number of iterations that the queue should undergo
         - 'learn': number of learning steps (of the value functions and policies)
     """
+
     def __init__(self, env, agent, dict_nsteps, seed=None, debug=False):
         super().__init__(env, agent, seed, debug)
         self.dict_nsteps = dict_nsteps
@@ -497,10 +498,16 @@ class SimulatorQueue(Simulator):
         self.learnerV = self.agent.getLearnerV()
         self.learnerP = self.agent.getLearnerP()
 
-    def reset(self, reset_value_functions=False):
+    def reset(self, reset_value_functions=False, reset_counts=False):
         "Resets the simulator"
         # Reset the learner of the value function
-        self.agent.getLearnerV().reset(reset_value_functions)
+        # This is expected to be called after each learning step, i.e. before a new queue simulation is run
+        self.agent.getLearnerV().reset(reset_value_functions=reset_value_functions, reset_trajectory=True, reset_counts=reset_counts)
+        # Reset the auxiliary attributes of the policy learner (e.g. trajectory, etc.)
+        # but NOT the history of theta nor the counts of visited states or actions because
+        # these are used to adjust the policy learning rate as necessary, which follows the learning time scale
+        # and NOT the simulation time scale.
+        self.agent.getLearnerP().reset(reset_value_functions=reset_value_functions, reset_trajectory=False, reset_counts=reset_counts)
         if not reset_value_functions:
             # Set the start value of the value functions to their current estimate
             # Goal: we can use the current estimated values in the next learning step,
@@ -556,8 +563,9 @@ class SimulatorQueue(Simulator):
         Tuple containing the following elements:
             [TBD]: See the Simulator class for ideas, but it would essentially contain the learning parameters of
             the different learners (e.g. state value function, action-state value function, policy)
-            - the learner object at the end of the learning process
-            - the policy object at the end of the learning process
+            - learnerV: the learner of the value function at the end of the learning process
+            - learnerP: the learner of the policy at the end of the learning process.
+                The policy can be retrieved from this object by calling learnerP.getPolicy().
             - [TODO] number of visits to each state at the end of the simulation.
         """
         # --- Parse input parameters
@@ -578,14 +586,14 @@ class SimulatorQueue(Simulator):
         # - t: the number of queue state changes (a.k.a. number of queue iterations)
         # - t_learn: the number of learning steps (of the value functions and policies)
         t_learn = -1
-        while t_learn < self.dict_nsteps['learn']:
+        while t_learn < self.dict_nsteps['learn'] - 1:  # -1 because t_learn starts at -1 (think what would happen when dict_nsteps['learn'] = 1 (if we don't put -1, we would run 2 iterations, instead of the requested 1 iteration)
             t_learn += 1
             # Reset the environment and the learners
             # (i.e. start the environment at the same state and prepare it for a fresh new learning step
             # with all learning memory erased)
             job_class = None
             self.env.reset((start_state, job_class))
-            self.reset(reset_value_functions=False)
+            self.reset(reset_value_functions=False, reset_counts=False)
 
             done = False
             if verbose and np.mod(t_learn, verbose_period) == 0:
@@ -601,7 +609,6 @@ class SimulatorQueue(Simulator):
 
                 # Current state
                 state = self.env.getState()
-                self.learnerV.update_state_counts(state)
 
                 # Next state
                 time, event, job_class_or_server = self.generate_event()
@@ -644,7 +651,7 @@ class SimulatorQueue(Simulator):
 
                     assert self.env.getBufferSizeFromState(next_state) == self.env.getBufferSizeFromState(state) - 1, \
                         "The buffer size after a DEATH decreased by 1: S(t) = {}, S(t+1) = {}" \
-                        .format(self.env.getBufferSizeFromState(state), self.env.getBufferSizeFromState(next_state))
+                            .format(self.env.getBufferSizeFromState(state), self.env.getBufferSizeFromState(next_state))
 
                     # We set the action to None because there is no action by the agent when a service is completed
                     action = None
@@ -655,40 +662,36 @@ class SimulatorQueue(Simulator):
                 done = self.check_done(t, state, action, reward, gradient_for_action)
 
                 if self.debug:
-                    print("{} | t={}: event={}, action={} -> state={}, reward={}".format(state, t, event, action, next_state, reward), end="\n")
+                    print("{} | t={}: event={}, action={} -> state={}, reward={}".format(state, t, event, action,
+                                                                                         next_state, reward), end="\n")
 
-                # Update the average return with the new observation
-                self.learnerV.updateG(t, reward)
+                # Update the trajectory for the learning process
+                self.update_trajectory(state, action, reward)
+                # Update the average reward (just for informational purposes)
+                self.learnerV.updateAverageReward(t, reward)
 
             if verbose and np.mod(t_learn, verbose_period) == 0:
-                print("==> agent ENDS at state {} from state = {}, action = {}, reward = {}, gradient = {})".format(self.env.getState(), state, action, reward, gradient_for_action))
+                print("==> agent ENDS at state {} from state = {}, action = {}, reward = {}, gradient = {})".format(
+                    self.env.getState(), state, action, reward, gradient_for_action))
 
             # Learn the value function and the policy
-            # Note that the parameters are t, A(t), S(t), specially note that S(t) is the state
-            # PRIOR to taking action A(t).
-            # This is important because the policy gradient should be evaluated at A(t), S(t), as opposed to at
-            # A(t), S(t+1), where S(t+1) is the CURRENT state of the environment (given the process above, where the
-            # state of the environment HAS ALREADY BEEN SET to S(t+1).
-            # TODO: (2021/10/25) Update self.learn() so that we go through EVERY TIME STEP in the simulation and update theta at every time step (as done in the Trunk Reservation paper)
-            self.learn(t, state, action, reward)
+            self.learn(t)
             if verbose and np.mod(t_learn, verbose_period) == 0:
-                print("\tUpdated value function at the end of queue simulation: V(s) = {}".format(self.learnerV.getV()))
-                print("\tBaseline for Delta: baseline = {}".format(self.learnerP.getBaseline()))
-                print("\tDelta value at the end of queue simulation (G - baseline): delta(T) = {}".format(self.learnerP.getDelta()))
-                print("\tLog policy gradient at the end of queue simulation: log(Pi(a(T)/s(T))) = {}".format(self.learnerP.getLogGradients()[-1]))
-                print("\tUpdated theta parameter of policy: theta = {}".format(self.learnerP.getPolicy().getThetaParameter()))
+                print("\tUpdated value function at the end of the queue simulation: V(s) = {}".format(self.learnerV.getV()))
+                print("\tBaseline used in G(t): average(G) = {}".format(self.learnerV.getAverageReward()))
+                print("\tUpdated theta parameter of policy after learning: theta = {}".format(self.learnerP.getPolicy().getThetaParameter()))
 
         if plot:
             # TODO
             pass
 
-        return self.learnerV, self.learnerP.getPolicy()
-               #, self.learnerV.getStateCounts(), \
-               #{  # Value of alpha for each state at the end of the LAST t_learn run
-               #    'average alpha': self.learnerV.getAverageLearningRates(),
-                   # (Average) alpha by t_learn (averaged over visited states in the t_learn)
-               #    'alphas used': self.learnerV.getLearningRates()
-               #}
+        return self.learnerV, self.learnerP
+        # , self.learnerV.getStateCounts(), \
+        # {  # Value of alpha for each state at the end of the LAST t_learn run
+        #    'average alpha': self.learnerV.getAverageLearningRates(),
+        # (Average) alpha by t_learn (averaged over visited states in the t_learn)
+        #    'alphas used': self.learnerV.getLearningRates()
+        # }
 
     def generate_event(self):
         """
@@ -751,26 +754,27 @@ class SimulatorQueue(Simulator):
 
         return action, observation, reward, info
 
-    def learn(self, t, state, action, reward):
+    def update_trajectory(self, state, action, reward):
+        # TODO: (2021/10/26) Try to solve the redundant storage of the trajectory...
+        # The problem is that both learnerV and learnerP inherit from Learner, which is the one implementing the
+        # update_trajectory() method... but learnerV and learnerP are different objects and I am not sure how
+        # they could be collapsed into one single object containing the trajectory information.
+        self.learnerV.update_trajectory(state, action, reward)
+        self.learnerP.update_trajectory(state, action, reward)
+
+    def learn(self, t):
         """
         Learns the value function at time t, and the policy at time t for the given action A(t)
         and the given state S(t)
 
         Arguments:
         t: int
-            Time (iteration) at which the learning takes place.
-
-        state: Environment state
-            S(t): state of the environment at time t, i.e. PRIOR to taking the given action A(t).
-
-        action: Actions
-            A(t): action taken at time t.
-
-        reward: float
-            R(t+1): reward received after taking action A(t) (and going to state S(t+1), which is not passed).
+            Time (iteration) in the queue simulation time scale at which learning takes place.
         """
-        self.learnerV.learn(t, state, reward)
-        self.learnerP.learn(t, state, action)
+        self.learnerV.learn(t)
+        self.learnerP.learn(t)
+            ## IMPORTANT: Using t_learn*t_sim + t_sim as learning time assumes that the states, actions and rewards
+            ## are NOT reset at the start of each new simulation of the queue!
 
     def check_done(self, t, state, action, reward, gradient):
         """
@@ -794,20 +798,21 @@ class SimulatorQueue(Simulator):
         Return: bool
             Whether the queue simulation is done because the maximum number of iterations has been reached.
         """
-        if t < self.dict_nsteps['queue']: #and gradient == 0.0:
+        if t < self.dict_nsteps['queue']:  # and gradient == 0.0:
             done = False
         else:
             done = True
 
         return done
 
-    #------ GETTERS ------#
+    # ------ GETTERS ------#
     def getJobRatesByServer(self):
         return self.job_rates_by_server
 
 
 if __name__ == "__main__":
     import runpy
+
     runpy.run_path("../../setup.py")
 
     if False:
@@ -990,30 +995,32 @@ if __name__ == "__main__":
         env_queue_mm = EnvQueueSingleBufferWithJobClasses(queue, job_class_rates, rewardOnJobRejection_ExponentialCost, None)
 
         # Acceptance policy definition
-        theta_start = 1.3 # 1.3, 11.3  # IMPORTANT: This value should NOT be integer, o.w. the policy gradient will always be 0 regardless of the state at which blocking occurs
-        policies = dict({PolicyTypes.ACCEPT: PolQueueTwoActionsLinearStep(env_queue_mm, theta_start), PolicyTypes.ASSIGN: None})
-        #policies = dict({PolicyTypes.ACCEPT: PolQueueTwoActionsLogit(env_queue_mm, theta_start, beta=2.0), PolicyTypes.ASSIGN: None})
+        theta_start = 1.3  # 1.3, 11.3  # IMPORTANT: This value should NOT be integer, o.w. the policy gradient will always be 0 regardless of the state at which blocking occurs
+        #policies = dict({PolicyTypes.ACCEPT: PolQueueTwoActionsLinearStep(env_queue_mm, theta_start), PolicyTypes.ASSIGN: None})
+        policies = dict({PolicyTypes.ACCEPT: PolQueueTwoActionsLogit(env_queue_mm, theta_start, beta=1.0), PolicyTypes.ASSIGN: None})
 
         # Learners definition
-        alpha_start = 0.1
+        alpha_start = 1.0
         gamma = 1.0
         learnerV = LeaMC(env_queue_mm, gamma=gamma)
         learners = dict({LearnerTypes.V: learnerV,
                          LearnerTypes.Q: None,
-                         LearnerTypes.P: LeaPolicyGradient(env_queue_mm, policies[PolicyTypes.ACCEPT], learnerV, alpha=alpha_start)})
+                         LearnerTypes.P: LeaPolicyGradient(env_queue_mm, policies[PolicyTypes.ACCEPT], learnerV, alpha=alpha_start, adjust_alpha=True, alpha_min=0.01)})
         agent_gradient_mc = AgeQueue(env_queue_mm, policies, learners)
 
         # Simulator on a given number of iterations for the queue simulation and a given number of iterations to learn
-        dict_nsteps = dict({'queue': 10, 'learn': 2000})
+        dict_nsteps = dict({'queue': 1000, 'learn': 2000})
         start_state = [0]
         simul = SimulatorQueue(env_queue_mm, agent_gradient_mc, dict_nsteps, debug=False)
-        learner, policy = simul.run(start_state, seed=1717, verbose=True)
+        learnerV, learnerP = simul.run(start_state, seed=1717, verbose=True)
 
         # Plot evolution of theta
         plt.figure()
-        plt.plot(policy.getThetas(), 'b-')
-        plt.plot(learner.getStates(), 'g.')
+        plt.plot(learnerP.getPolicy().getThetas(), 'b.-')
+        # DM-2021/10/26: Commented out the secondary plots below because the states and rewards are only kept for each queue simulation
+        # which is a different time scale (fast time scale) than the learning time scale.
+        plt.plot(learnerP.getStates(), 'g.')
         ax = plt.gca()
         ax2 = ax.twinx()
-        ax2.plot(learner.getRewards(), 'r-')
-        plt.title("Theta start = {}".format(theta_start))
+        ax2.plot(learnerP.getRewards(), 'r-')
+        plt.title("Optimum Theta = {}, Theta start = {}".format(COST_EXP_BUFFER_SIZE_REF, theta_start))

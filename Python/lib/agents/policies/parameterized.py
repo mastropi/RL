@@ -64,11 +64,17 @@ class PolQueueTwoActionsLogit(GenericParameterizedPolicyTwoActions):
         Return: float
         Gradient of the policy for the given action given the environment's state.
         """
-        buffer_size = self.env.getBufferSizeFromState(state)
-
         sign = (action.value - 0.5) * 2
 
-        return sign * self.beta * (1 - self.getPolicyForAction(action, state))
+        if self.getPolicyForAction(action, state) != 0.0:
+            # The following expression is only well defined when the probability for the action is not 0.0
+            # But if it is 0.0, the gradient is actually 0.0 because the value of the policy does not change
+            # when theta increases infinitesimally.
+            gradient = sign * self.beta * (1 - self.getPolicyForAction(action, state))
+        else:
+            gradient = 0.0
+
+        return gradient
 
     def getPolicyForAction(self, action, state):
         """
@@ -137,7 +143,8 @@ class PolQueueTwoActionsLinearStep(GenericParameterizedPolicyTwoActions):
 
     def getGradient(self, action, state):
         """
-        Returns the policy gradient at the given action when the environment is at the given state
+        Returns the policy gradient (with respect to the theta parameter)
+        at the given action when the environment is at the given state
 
         action: Actions
             Accept or Reject action at which the policy gradient is evaluated.
@@ -153,6 +160,9 @@ class PolQueueTwoActionsLinearStep(GenericParameterizedPolicyTwoActions):
         buffer_size = self.env.getBufferSizeFromState(state)
 
         is_buffer_size_in_linear_piece = float( self.theta < buffer_size < self.theta + 1 )
+        # Recall that the gradient is w.r.t. theta, NOT w.r.t. to the buffer size
+        # which is how we normally plot the policy and against which the derivative has the opposite sign
+        # compared to the sign of the derivative w.r.t. theta.
         if action == Actions.ACCEPT:
             slope = is_buffer_size_in_linear_piece
         elif action == Actions.REJECT:

@@ -403,7 +403,7 @@ if __name__ == "__main__":
 
     # -- Arriving job on full buffer
     job_class = 1
-    env.setState(env.getCapacity(), job_class)
+    env.setState((env.getCapacity(), job_class))
     state = env.getState()
     assert state == (env.getCapacity(), job_class)
     # Action = reject

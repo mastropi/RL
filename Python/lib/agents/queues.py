@@ -21,7 +21,7 @@ class PolicyTypes(Enum):
 @unique
 class LearnerTypes(Enum):
     V = 'state_value'
-    Q = 'action_state_value'
+    Q = 'state_action_value'
     P = 'policy'
 
 

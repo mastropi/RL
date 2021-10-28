@@ -5,9 +5,11 @@ Created on Thu Oct 14 13:13:36 2021
 @author: Daniel Mastropietro
 @description: Policy Learners
 """
+import copy
+
 import numpy as np
 
-from . import Learner
+from . import Learner, AlphaUpdateType
 
 
 class LeaPolicyGradient(Learner):
@@ -29,33 +31,24 @@ class LeaPolicyGradient(Learner):
     """
 
     def __init__(self, env, policy, learnerV, alpha=0.1,
-                 adjust_alpha=False,
+                 adjust_alpha=False, alpha_update_type=AlphaUpdateType.FIRST_STATE_VISIT,
                  alpha_min=0.,
                  debug=False):
-        super().__init__(env, alpha, adjust_alpha, alpha_min)
+        super().__init__(env, alpha, adjust_alpha, alpha_update_type, alpha_min)
         self.debug = debug
 
         self.policy = policy
         self.learnerV = learnerV
-
-        self.baseline = 0.0                 # Baseline used in Delta(t) used in the theta update
-        self.delta = 0.0                    # Delta(t) = G(t)
+        self.averageRewardUnderPolicy = 0.0
 
         # Attributes that store the history of the learning process
-        self.actions = []
-        self.states = []
         self.gradients = []
         self.log_gradients = []
-
-        self.dict_state_counts = dict()
 
     def reset_supporting_attributes(self):
         "Resets the counts of the states visited during the learning process"
-        self.baseline = 0.0
-        self.delta = 0.0
         self.gradients = []
         self.log_gradients = []
-        self.dict_state_counts = dict()
 
     def reset_value_functions(self):
         self.policy.reset()
@@ -68,53 +61,102 @@ class LeaPolicyGradient(Learner):
         log_gradient = gradient / policy_value if policy_value != 0.0 else 0.0 if gradient == 0.0 else np.nan
         self.log_gradients += [log_gradient]
 
-    def learn(self, t, state, action):
+    def estimateAverageRewardUnderPolicy(self):
+        """
+        Estimates the average reward received by the agent under the policy *throughout the queue simulation*
+        (i.e. the states, actions and rewards are only those seen in the last queue simulation, NOT in the whole
+        policy learning steps, because we need to consider only the CURRENT policy, which is parameterized by the
+        CURRENT theta).
+        This is the `rho` baseline value used in the Trunk Reservation paper, pag. 4.
+        """
+        T = len([a for a in self.getActions() if a is not None])
+        self.averageRewardUnderPolicy = 1.0 / T * np.sum( [r * self.policy.getPolicyForAction(a, s)
+                                                        for s, a, r in zip(self.learnerV.getStates(), self.learnerV.getActions(), self.learnerV.getRewards())
+                                                        if a is not None] )
+
+    def computeCorrectedReturn(self, baseline):
+        "Computes the estimated "
+        rewards_history = copy.deepcopy(self.learnerV.getRewards())
+        actions_history = copy.deepcopy(self.learnerV.getActions())
+        rewards_history.reverse()
+        actions_history.reverse()
+        delta_rewards_history = [r - baseline if a is not None else 0.0 for a, r in zip(actions_history, rewards_history)]
+        G = np.cumsum(delta_rewards_history)
+        # Reverse the G just computed because we want to have t indexing the values of G from left to right of the array
+        return G[::-1]
+
+    def learn(self, T):
         """
         Learns the policy by updating the theta parameter based on the state and the action taken on that state
 
         Arguments:
-        t: float
-            Discrete time at which learning takes place.
-
-        state: Environment dependent
-            State of the environment.
-            This is the state at which the policy gradient is to be evaluated when learning.
-
-        action: Environment dependent
-            Last action taken by the agent on the environment among all possible actions defined in the environment's
-            action space.
-            This is the action at which the policy gradient for the learning step is to be evaluated when learning.
+        T: int
+            Time corresponding to the end of simulation at which learning takes place.
         """
         theta = self.policy.getThetaParameter()
 
-        # Observed return for every t
-        # This should be the return already adjusted by the baseline
-        G = self.learnerV.getV()
+        # Compute the baseline-corrected return where the baseline is the estimation of the average reward under the policy
+        self.estimateAverageRewardUnderPolicy()
 
-        # Usual definition of delta: estimated state value V with the new observed reward - previous estimated state value
-        #self.delta = self.learnerV.getVEstimated().getValue(state) - self.learnerV.getV().getValue(state)
-        # Delta is just equal to the return (which may already be affected by the baseline --see Trunk Reservation paper page 4)
-        #self.delta = G
-        # Delta as the return minus a baseline chosen as the state value estimated in the previous learning step
-        # (which is assumed to have been used as STARTING value of V when resetting the learner)
-        #baseline = self.learnerV.getVStart()
-        self.baseline = np.mean( self.learnerV.getVHist() )
-        self.delta = G - self.baseline
+        # Observed return for every t: this should be the return already adjusted by the baseline
+        G = self.computeCorrectedReturn(self.getAverageRewardUnderPolicy())
+        deltas = G
 
-        if action is not None:
-            ## Note: the action may be None if for instance the environment experienced a completed service
-            ## in which case there is no action to take... (in terms of Accept or Reject)
+        # Trajectory used to compute the gradient of the policy used in the update of theta
+        states = self.learnerV.getStates()
+        actions = self.learnerV.getActions()
+        rewards = self.learnerV.getRewards()
+        print("\n--- POLICY LEARNING ---")
+        print("theta = {}".format(self.policy.getThetaParameter()))
+        print("Average reward = {}".format(self.learnerV.getAverageReward()))
+        print("Average reward under policy (baseline for G(t)) = {}".format(self.getAverageRewardUnderPolicy()))
+        print("TRAJECTORY (t, state, action, reward, reward - rho, delta = G)")
+        print(np.c_[range(T+1), states, actions, rewards, [r - self.getAverageRewardUnderPolicy() for r in rewards], deltas])
 
-            # When using the latest log-gradient observed in the queue simulation
-            # Note that we bound the delta theta to (-2, 2) to avoid large changes!
-            #theta += self.alpha * delta * self.policy.getGradientLog(action, state)
-            theta += np.max([ np.min([2.0, self.alpha * self.delta * self.policy.getGradientLog(action, state)]), -2.0 ])
+        # Learning rates for the policy
+        for t in range(T+1):
+            state = states[t]
+            action = actions[t]
+            reward = rewards[t]
+            delta = deltas[t]
 
-            # When using the average log-gradient observed in the queue simulation
-            #average_log_gradient = np.mean( self.getLogGradients() )
-            #theta += self.alpha * G * average_log_gradient
+            if delta != 0.0 and action is not None:
+                ## Note: the action may be None if for instance the environment experienced a completed service
+                ## in which case there is no action to take... (in terms of Accept or Reject)
+
+                if self.policy.getGradientLog(action, state) != 0.0:
+                    print("Learning at simulation time t={}, state={}, action={}, reward={}...".format(t, state, action, reward))
+                    print("\tt={}: Delta(t) = G(t) = {:.3f}".format(t, delta))
+                    print("\tt={}: Log policy gradient for Pol(A(t)={}/S(t)={} ) = {}" \
+                          .format(t, action, state, self.policy.getGradientLog(action, state)))
+
+                    # Update alpha based on the action-state visit count
+                    alpha = self.update_alpha(state, action)
+
+                    print("\tt={}: alpha(state={}, action={} (n={})) = {}".format(t, state, action, self.getCount(state, action), alpha))
+
+                    # Note that we bound the delta theta to avoid too large changes!
+                    #theta += self.alpha * delta * self.policy.getGradientLog(action, state)
+                    bound_delta_theta_upper = +0.5
+                    bound_delta_theta_lower = -0.5
+                    delta_theta = np.max([np.min([bound_delta_theta_upper, alpha * delta * self.policy.getGradientLog(action, state)]), bound_delta_theta_lower])
+                    print("\tt={}: delta(theta) = {}".format(t, delta_theta))
+
+                    # Only update the visit count of the state and action when delta(theta) != 0.0 because this means that
+                    # the state and action have actually been used to learn the policy.
+                    if delta_theta != 0.0:
+                        self.update_counts(state, action)
+                    theta_lower = 0.1       # Do NOT use an integer value as lower bound of theta because the gradient is never non-zero at integer-valued thetas
+                    theta = np.max([theta_lower, theta + delta_theta])
+
+            # Update the historic theta values generated during the learning process
+            # (even if theta was not changed at this iteration t, as this guarantees that the length
+            # of the historic theta values is the same as the length of the historic states, actions and rewards)
+            self.policy.update_thetas(theta)
+
+        # Update the policy on the new theta only at the END of the simulation time
+        # (this is what the Trunk Reservation paper does: "The new policy is generated at the end of the episode")
         self.policy.setThetaParameter(theta)
-        self.policy.update_thetas(theta)
 
     #----- GETTERS -----#
     def getPolicy(self):
@@ -126,11 +168,8 @@ class LeaPolicyGradient(Learner):
     def getGradients(self):
         return self.gradients
 
-    def getLogGradients(self):
+    def getGradientsLog(self):
         return self.log_gradients
 
-    def getBaseline(self):
-        return self.baseline
-
-    def getDelta(self):
-        return self.delta
+    def getAverageRewardUnderPolicy(self):
+        return self.averageRewardUnderPolicy
