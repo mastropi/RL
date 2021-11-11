@@ -47,7 +47,7 @@ class Actions(IntEnum):
 
 # Reference buffer size used in the definition of the exponential cost when blocking an incoming job
 # This value is the minimum expected cost that is searched for by the learning process when only hard (i.e. deterministic) blocking is used)
-COST_EXP_BUFFER_SIZE_REF = 3
+COST_EXP_BUFFER_SIZE_REF = 15
 
 
 #---------------------------- Reward functions that can be used in different environments -----------------------------#
@@ -101,6 +101,8 @@ def costBlockingExponential(buffer_size: int, buffer_size_ref :int):
     B = 1       # Blocking associated just to the fact the queue is blocked
     b = 3.0     # Base of the exponential function
     cost = B if buffer_size <= buffer_size_ref else B * b**(buffer_size - buffer_size_ref)
+    if False and cost != B:
+        print("The cost is in the exponential part (increasing with `buffer size - REF buffer size`): buffer={}, ref={}".format(buffer_size, buffer_size_ref))
     return cost
 #---------------------------- Reward functions that can be used in different environments -----------------------------#
 

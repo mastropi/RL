@@ -85,8 +85,8 @@ class GenericParameterizedPolicyTwoActions:
             # Division by 0 would have occurred!
             return np.nan
 
-    def update_thetas(self, theta):
-        # TODO: (2021/10/24) Rename this method to `store_theta()` or `record_theta()` and use the same standardization in `discrete.Learner._update_alphas()`
+    def store_theta(self, theta):
+        # TODO: (2021/11/04) Having renamed this method from `update_thetas` to `store_theta()`, make the same standardization change in `discrete.Learner._update_alphas()`
         self.thetas += [theta]
 
     #----- GETTERS -----#

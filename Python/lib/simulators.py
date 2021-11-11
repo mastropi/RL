@@ -16,19 +16,15 @@ import copy
 import warnings
 
 import numpy as np
+import pandas as pd
 from matplotlib import pyplot as plt, cm  # cm is for colormaps (e.g. cm.get_cmap())
 
 from agents.learners.episodic.discrete.td import LeaTDLambdaAdaptive
 from environments.queues import rewardOnJobRejection_ExponentialCost, Actions, COST_EXP_BUFFER_SIZE_REF
 
-if __name__ == "__main__":
-    from utils.computing import rmse, compute_job_rates_by_server, generate_min_exponential_time
-    from queues import QueueMM, Event
-else:
-    # These relative imports are only accepted when we compile the file as a module
-    from .utils.computing import rmse
-    from .queues import QueueMM, Event
-
+from utils.computing import rmse, compute_job_rates_by_server, generate_min_exponential_time, stationary_distribution_birth_death_process
+import utils.plotting as plotting
+from queues import QueueMM, Event
 
 # TODO: (2020/05) Rename this class to SimulatorDiscreteEpisodic as it simulates on a discrete (in what sense?) environment running on episodes
 class Simulator:
@@ -204,8 +200,8 @@ class Simulator:
                 print("Episode {} of {} running...".format(episode+1, nepisodes), end=" ")
                 print("(agent starts at state: {}".format(self.env.getState()), end=" ")
             if self.debug:
-                print("\nStarts at state {}".format(self.env.getState()))
-                print("\tState value function at start of episode:\n\t{}".format(learner.getV().getValues()))
+                print("\n[DEBUG] Starts at state {}".format(self.env.getState()))
+                print("\t[DEBUG] State value function at start of episode:\n\t{}".format(learner.getV().getValues()))
 
             # Time step in the episode (the first time step is t = 0
             t = -1
@@ -220,9 +216,9 @@ class Simulator:
                 #    print("| t: {} ({}) -> {}".format(t, action, next_state), end=" ")
 
                 if self.debug and done:
-                    print("--> Done [{} iterations] at state {} with reward {}".
+                    print("--> [DEBUG] Done [{} iterations] at state {} with reward {}".
                           format(t+1, self.env.getState(), reward))
-                    print("\tUpdating the value function at the end of the episode...")
+                    print("\t[DEBUG] Updating the value function at the end of the episode...")
 
                 # Learn: i.e. update the value function (stored in the learner) with the new observation
                 learner.learn_pred_V(t, state, action, next_state, reward, done, info)
@@ -231,7 +227,7 @@ class Simulator:
                     V += [learner.getV().getValue(state_observe)]
 
                 if self.debug:
-                    print("-> {}".format(self.env.getState()), end=" ")
+                    print("-> [DEBUG] {}".format(self.env.getState()), end=" ")
 
             if verbose and np.mod(episode, verbose_period) == 0:
                 print(", agent ENDS at state: {})".format(self.env.getState()))
@@ -498,6 +494,12 @@ class SimulatorQueue(Simulator):
         self.learnerV = self.agent.getLearnerV()
         self.learnerP = self.agent.getLearnerP()
 
+        # Storage of learning history
+        self.thetas = []            # Theta before the update by the policy learning step
+        self.thetas_updated = []    # Theta AFTER the update by the policy learning step.
+        self.V = []                 # Value function at the theta before the update, i.e. the average reward observed in each queue simulation episode for a fixed policy before the update of theta takes place
+        self.gradV = []             # Gradient of the value function (grad(J) in Sutton) for the theta before the update, that is responsible for the theta update
+
     def reset(self, reset_value_functions=False, reset_counts=False):
         "Resets the simulator"
         # Reset the learner of the value function
@@ -566,6 +568,8 @@ class SimulatorQueue(Simulator):
             - learnerV: the learner of the value function at the end of the learning process
             - learnerP: the learner of the policy at the end of the learning process.
                 The policy can be retrieved from this object by calling learnerP.getPolicy().
+            - df_learning: pandas data frame containing two columns: 'theta', 'gradV' containing the history
+            of the observed thetas and gradients of the value function responsible for its update.
             - [TODO] number of visits to each state at the end of the simulation.
         """
         # --- Parse input parameters
@@ -621,7 +625,7 @@ class SimulatorQueue(Simulator):
                     # Perform a step on the environment by applying the acceptance policy
                     action_accept_reject, next_state, reward_accept_reject, _ = self.step(t, PolicyTypes.ACCEPT)
 
-                    # Store the gradient of hte policy evaluated on the action A(t) taken given the state S(t)
+                    # Store the gradient of the policy evaluated on the taken action A(t) given the state S(t)
                     # Goal: be able to compute e.g. the average policy gradient when learning at the end of the simulation
                     gradient_for_action = self.learnerP.getPolicy().getGradient(action_accept_reject, state)
                     self.learnerP.record_gradient(state, action_accept_reject, gradient_for_action)
@@ -631,7 +635,7 @@ class SimulatorQueue(Simulator):
                         # Assign the job just accepted to a server and update the next_state value
                         # (because the next_state from the ACCEPT action has not been updated above
                         # as we need to know to which server the accepted job is assigned in order
-                        # to know the next state of the queue environment.
+                        # to know the next state of the queue environment)
                         _, next_state, reward_assign, _ = self.step(t, PolicyTypes.ASSIGN)
                     else:
                         reward_assign = 0.0
@@ -665,9 +669,9 @@ class SimulatorQueue(Simulator):
                     print("{} | t={}: event={}, action={} -> state={}, reward={}".format(state, t, event, action,
                                                                                          next_state, reward), end="\n")
 
-                # Update the trajectory for the learning process
+                # Update the trajectory used in the learning process
                 self.update_trajectory(state, action, reward)
-                # Update the average reward (just for informational purposes)
+                # Update the average reward (just for information purposes)
                 self.learnerV.updateAverageReward(t, reward)
 
             if verbose and np.mod(t_learn, verbose_period) == 0:
@@ -675,17 +679,20 @@ class SimulatorQueue(Simulator):
                     self.env.getState(), state, action, reward, gradient_for_action))
 
             # Learn the value function and the policy
+            theta_prev = self.learnerP.getPolicy().getThetaParameter()
             self.learn(t)
             if verbose and np.mod(t_learn, verbose_period) == 0:
                 print("\tUpdated value function at the end of the queue simulation: V(s) = {}".format(self.learnerV.getV()))
-                print("\tBaseline used in G(t): average(G) = {}".format(self.learnerV.getAverageReward()))
-                print("\tUpdated theta parameter of policy after learning: theta = {}".format(self.learnerP.getPolicy().getThetaParameter()))
+                print("\tObserved average reward = {}".format(self.learnerP.getAverageRewardUnderPolicy()))
+                print("\tUpdated theta parameter of policy after learning: theta = {} -> {}".format(theta_prev, self.learnerP.getPolicy().getThetaParameter()))
 
         if plot:
             # TODO
             pass
 
-        return self.learnerV, self.learnerP
+        df_learning = pd.DataFrame({'theta': self.thetas, 'theta_next': self.thetas_updated, 'V': self.V, 'gradV': self.gradV})
+
+        return self.learnerV, self.learnerP, df_learning
         # , self.learnerV.getStateCounts(), \
         # {  # Value of alpha for each state at the end of the LAST t_learn run
         #    'average alpha': self.learnerV.getAverageLearningRates(),
@@ -755,26 +762,39 @@ class SimulatorQueue(Simulator):
         return action, observation, reward, info
 
     def update_trajectory(self, state, action, reward):
-        # TODO: (2021/10/26) Try to solve the redundant storage of the trajectory...
-        # The problem is that both learnerV and learnerP inherit from Learner, which is the one implementing the
-        # update_trajectory() method... but learnerV and learnerP are different objects and I am not sure how
-        # they could be collapsed into one single object containing the trajectory information.
         self.learnerV.update_trajectory(state, action, reward)
-        self.learnerP.update_trajectory(state, action, reward)
+        if True: #action is not None:
+            # The agent has interacted with the environment by taking an action
+            # => Record this action as part of the policy learning process
+            self.learnerP.update_trajectory(state, action, reward)
 
     def learn(self, t):
         """
-        Learns the value function at time t, and the policy at time t for the given action A(t)
-        and the given state S(t)
+        Learns the value function and policy at time t
 
         Arguments:
         t: int
             Time (iteration) in the queue simulation time scale at which learning takes place.
+            In Monte-Carlo learning, this time would be the end of the queue simulation.
         """
-        self.learnerV.learn(t)
-        self.learnerP.learn(t)
-            ## IMPORTANT: Using t_learn*t_sim + t_sim as learning time assumes that the states, actions and rewards
-            ## are NOT reset at the start of each new simulation of the queue!
+        # TODO: (2021/11/03) Think if we can separate the learning of the value function and return G(t) from the learning of the policy (theta)
+        # Goal: avoid computing G(t) twice, one at learnerV.learn() and one at learnerP.learn()
+        # Note HOWEVER that the G(t) learned in learnerV is NOT the same as the G(t) learned in leanerP, because the latter
+        # uses a corrected computation of G(t), i.e. sum_{s>=t}{ r(s) - rho }, where rho is the average reward
+        # observed under a policy... well, the calculation of rho could be embedded in learnerV as well, as in learnerV
+        # we assume that the policy is fixed.
+        # For now I am commenting out learnerV.learn() because we don't actually use the value of G(t) computed there
+        # when updating the policy in learnerP.learn().
+        #self.learnerV.learn(t)
+        theta_prev, theta, V, gradV = self.learnerP.learn(t)
+        self.thetas += [theta_prev]
+        self.thetas_updated += [theta]
+        self.V += [V]
+        self.gradV += [gradV]
+
+        self.learnerP.update_learning_time()
+        print("*** Learning-time updated: time = {} ***".format(self.learnerP.getLearningTime()))
+        self.learnerP.update_alpha_by_learning_episode()
 
     def check_done(self, t, state, action, reward, gradient):
         """
@@ -995,32 +1015,118 @@ if __name__ == "__main__":
         env_queue_mm = EnvQueueSingleBufferWithJobClasses(queue, job_class_rates, rewardOnJobRejection_ExponentialCost, None)
 
         # Acceptance policy definition
-        theta_start = 1.3  # 1.3, 11.3  # IMPORTANT: This value should NOT be integer, o.w. the policy gradient will always be 0 regardless of the state at which blocking occurs
-        #policies = dict({PolicyTypes.ACCEPT: PolQueueTwoActionsLinearStep(env_queue_mm, theta_start), PolicyTypes.ASSIGN: None})
-        policies = dict({PolicyTypes.ACCEPT: PolQueueTwoActionsLogit(env_queue_mm, theta_start, beta=1.0), PolicyTypes.ASSIGN: None})
+        theta_start = 10.3  # 1.3, 11.3  # IMPORTANT: This value should NOT be integer, o.w. the policy gradient will always be 0 regardless of the state at which blocking occurs
+        policies = dict({PolicyTypes.ACCEPT: PolQueueTwoActionsLinearStep(env_queue_mm, theta_start), PolicyTypes.ASSIGN: None})
+        #policies = dict({PolicyTypes.ACCEPT: PolQueueTwoActionsLogit(env_queue_mm, theta_start, beta=1.0), PolicyTypes.ASSIGN: None})
 
         # Learners definition
         alpha_start = 1.0
+        min_time_to_update_alpha = 40
+        alpha_min = 0.001
         gamma = 1.0
         learnerV = LeaMC(env_queue_mm, gamma=gamma)
         learners = dict({LearnerTypes.V: learnerV,
                          LearnerTypes.Q: None,
-                         LearnerTypes.P: LeaPolicyGradient(env_queue_mm, policies[PolicyTypes.ACCEPT], learnerV, alpha=alpha_start, adjust_alpha=True, alpha_min=0.01)})
+                         LearnerTypes.P: LeaPolicyGradient(env_queue_mm, policies[PolicyTypes.ACCEPT], learnerV,
+                                                           alpha=alpha_start, adjust_alpha=True,
+                                                           min_time_to_update_alpha=min_time_to_update_alpha,
+                                                           alpha_min=alpha_min)})
         agent_gradient_mc = AgeQueue(env_queue_mm, policies, learners)
 
         # Simulator on a given number of iterations for the queue simulation and a given number of iterations to learn
-        dict_nsteps = dict({'queue': 1000, 'learn': 2000})
+        t_sim = 5000 #10
+        t_learn = 200 #1
+        dict_nsteps = dict({'queue': t_sim, 'learn': t_learn})
         start_state = [0]
         simul = SimulatorQueue(env_queue_mm, agent_gradient_mc, dict_nsteps, debug=False)
-        learnerV, learnerP = simul.run(start_state, seed=1717, verbose=True)
+        learnerV, learnerP, df_learning = simul.run(start_state, seed=1717, verbose=True)
+
+        #-- Plot theta and the gradient of the value function
+        # Estimated value function
+        ax, line_est = plotting.plot_colormap(df_learning['theta'], -df_learning['V'], cmap_name="Blues")
+
+        # True value function
+        # Block size for each theta, defined by the fact that K-1 is between theta and theta+1 => K = ceiling(theta+1)
+        Ks = [np.int(np.ceil(np.squeeze(t)+1)) for t in df_learning['theta']]
+        rho = job_class_rates[0] / service_rates[0]
+        # Blocking probability = Pr(K)
+        p_stationary = [stationary_distribution_birth_death_process(1, K, [rho])[1] for K in Ks]
+        pblock_K = np.array([p[-1] for p in p_stationary])
+        pblock_Km1 = np.array([p[-2] for p in p_stationary])
+        pblock_K_adj = np.squeeze([pK * (1 - (K-1-theta)) for K, theta, pK in zip(Ks, df_learning['theta'], pblock_K)])
+        pblock_Km1_adj = pblock_Km1 #np.squeeze([pKm1 + pK - pK_adj for pKm1, pK, pK_adj in zip(pblock_Km1, pblock_K, pblock_K_adj)])
+        #assert np.allclose(pblock_K + pblock_Km1, pblock_K_adj + pblock_Km1_adj)
+        # True value function: expected cost at K which is the buffer size where blocking most likely occurs...
+        # (in fact, if theta is say 3.1, the probability of blocking at 4 (= K-1) is small and most blocking
+        # will occur at K; if theta is 3.9, the probability of blocking at 4 (= K-1)
+        # i.e. we compute at K-1 and NOT at K because we want to compare the true value function
+        # with the *estimated* value function when the policy starts blocking at buffer size = theta
+        #Vtrue = np.array([rewardOnJobRejection_ExponentialCost(env_queue_mm, (K, None), Actions.REJECT, (K, None)) * pK for K, pK in zip(Ks, pblock_K)])
+
+        # ACTUAL true value function, which takes into account the probability of blocking at K-1 as well, where the policy is non-deterministic (for non-integer theta)
+        # The problem with this approach is that the stationary distribution of the chain is NOT the same as with chain
+        # where rejection ONLY occurs at s=K... in fact, the transition probabilities to s=K and to s=K-1 when the
+        # initial state is s=K-1 are affected by the non-deterministic probability of blocking when s=K-1...
+        # Qualitatively, the stationary probability of K would be reduced and the stationary probability of K-1 would be
+        # increased by the same amount.
+        Vtrue = np.array([rewardOnJobRejection_ExponentialCost(env_queue_mm, (K, None), Actions.REJECT, (K, None)) * pK +
+                          rewardOnJobRejection_ExponentialCost(env_queue_mm, (K-1, None), Actions.REJECT, (K-1, None)) * (K - 1 - theta) * pKm1
+                            for K, theta, pK, pKm1 in zip(Ks, df_learning['theta'], pblock_K_adj, pblock_Km1_adj)])
+
+        # True grad(V)
+        # Ref: my hand-written notes in Letter-size block of paper with my notes on the general environment - agent setup
+        gradVtrue = [-rewardOnJobRejection_ExponentialCost(env_queue_mm, (K-1, None), Actions.REJECT, (K-1, None)) * pKm1 for K, pKm1 in zip(Ks, pblock_Km1)]
+
+        ord = np.argsort(Ks)
+        # NOTE that we plot the true value function at K-1 (not at K) because K-1 is the value that is closest to theta
+        # and we are plotting the *estimated* value function vs. theta (NOT vs. K).
+        #line_true, = ax.plot([Ks[o]-1 for o in ord], [-Vtrue[o] for o in ord], 'g.-', linewidth=5, markersize=20)
+        line_true, = ax.plot(df_learning['theta'], -Vtrue, 'gx-')  # Use when computing the ACTUAL true Value function V, which also depends on theta!
+        ax.set_yscale('log')
+        #ax.set_ylim((0, 10))
+        ax.set_xlabel('theta (for estimated functions) / K-1 for true value function')
+        ax.set_ylabel('Value function V (cost)')
+        ax.legend([line_est, line_true], ['Estimated V', 'True V'], loc='upper left')
+        ax2 = ax.twinx()
+        ax2, line_grad = plotting.plot_colormap(df_learning['theta'], -df_learning['gradV'], cmap_name="Reds", ax=ax2)
+        line_gradtrue, = ax2.plot([Ks[o]-1 for o in ord], [-gradVtrue[o] for o in ord], 'k.-', linewidth=3, markersize=12)
+        ax2.axhline(0, color="lightgray")
+        ax2.set_ylabel('grad(V)')
+        ax2.set_ylim((-5,5))        # Note: grad(V) is expected to be -1 or +1...
+        ax2.legend([line_grad, line_gradtrue], ['grad(V)', 'True grad(V)'], loc='upper right')
+        plt.title("Value function and its gradient as a function of theta and K. " +
+                    "Optimum K = {}, Theta start = {}, t_sim = {:.0f}".format(COST_EXP_BUFFER_SIZE_REF, theta_start, t_sim))
+
+        # grad(V) vs. V
+        plt.figure()
+        plt.plot(-df_learning['V'], -df_learning['gradV'], 'k.')
+        ax = plt.gca()
+        ax.axhline(0, color="lightgray")
+        ax.axvline(0, color="lightgray")
+        ax.set_xscale('log')
+        #ax.set_xlim((-1, 1))
+        ax.set_ylim((-1, 1))
+        ax.set_xlabel('Value function V (cost)')
+        ax.set_ylabel('grad(V)')
 
         # Plot evolution of theta
         plt.figure()
         plt.plot(learnerP.getPolicy().getThetas(), 'b.-')
-        # DM-2021/10/26: Commented out the secondary plots below because the states and rewards are only kept for each queue simulation
-        # which is a different time scale (fast time scale) than the learning time scale.
-        plt.plot(learnerP.getStates(), 'g.')
         ax = plt.gca()
+        # Add vertical lines signalling the BEGINNING of each queue simulation
+        times_sim_starts = range(0, t_learn*(t_sim+1), t_sim+1)
+        for t in times_sim_starts:
+            ax.axvline(t, color='lightgray', linestyle='dashed')
+
+        # Buffer sizes
+        buffer_sizes = [env_queue_mm.getBufferSizeFromState(s) for s in learnerP.getStates()]
+        ax.plot(buffer_sizes, 'g.', markersize=3)
+        # Mark the start of each queue simulation
+        ax.plot(times_sim_starts, [buffer_sizes[t] for t in times_sim_starts], 'gx')
+
+        # Secondary plot showing the rewards received
         ax2 = ax.twinx()
-        ax2.plot(learnerP.getRewards(), 'r-')
-        plt.title("Optimum Theta = {}, Theta start = {}".format(COST_EXP_BUFFER_SIZE_REF, theta_start))
+        ax2.plot(learnerP.getRewards(), 'r-', alpha=0.3)
+        # Highlight with points the non-zero rewards
+        ax2.plot([r if r != 0.0 else None for r in learnerP.getRewards()], 'r.')
+        plt.title("Optimum Theta = {}, Theta start = {}, t_sim = {:.0f}".format(COST_EXP_BUFFER_SIZE_REF, theta_start, t_sim))

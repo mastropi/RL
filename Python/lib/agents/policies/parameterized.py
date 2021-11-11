@@ -43,9 +43,6 @@ class PolQueueTwoActionsLogit(GenericParameterizedPolicyTwoActions):
 
         self.beta = beta
 
-    def getThetaParameter(self):
-        return self.theta
-
     def getBeta(self):
         return self.beta
 
@@ -138,9 +135,6 @@ class PolQueueTwoActionsLinearStep(GenericParameterizedPolicyTwoActions):
 
         assert self.env.getCapacity() == np.Inf, "The queue has infinite (fixed) capacity, since parameter theta defining its capacity can take ANY real value."
 
-    def getThetaParameter(self):
-        return self.theta
-
     def getGradient(self, action, state):
         """
         Returns the policy gradient (with respect to the theta parameter)
@@ -168,7 +162,7 @@ class PolQueueTwoActionsLinearStep(GenericParameterizedPolicyTwoActions):
         elif action == Actions.REJECT:
             slope = -is_buffer_size_in_linear_piece
         else:
-            raise ValueError(__class__ + ": An invalid action was given: {}".format(action))
+            raise ValueError(str(__class__) + ": An invalid action was given: {}".format(action))
 
         return slope
 

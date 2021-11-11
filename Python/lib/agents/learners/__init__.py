@@ -40,8 +40,9 @@ class Learner:
     and once prior to the first simulation.
     """
 
-    def __init__(self, env, alpha,
-                 adjust_alpha=False, alpha_update_type=AlphaUpdateType.FIRST_STATE_VISIT,
+    def __init__(self, env, alpha :float,
+                 adjust_alpha=False,
+                 min_count_to_update_alpha=0, min_time_to_update_alpha=0,
                  alpha_min=0.):
         """
         Parameters:
@@ -51,18 +52,19 @@ class Learner:
             a pre-defined number of states (as is the case in the EnvironmentDiscrete environment of gym).
 
         alpha: positive float
-            Learning rate.
+            Initial learning rate.
 
-        alpha_update_type: AlphaUpdateType
-            How alpha is updated, e.g. AlphaUpdateType.FIRST_STATE_VISIT, AlphaUpdateType.EVERY_STATE_VISIT
-            This value defines the denominator when updating alpha for each state as alpha/n, where alpha
-            is the initial learning rate (passed as parameter alpha) and n is the number of FIRST or EVERY visit
-            to the state, depending on the value of the alpha_update_type parameter.
+        min_count_to_update_alpha: int
+            Minimum count of a state-action pair at which alpha starts to be updated by the update_alpha(s,a) method.
+
+        min_time_to_update_alpha: int
+            Minimum learning time step at which alpha starts to be updated by the update_alpha_by_learning_episode() method.
         """
         self.env = env
-        self.alpha = alpha                          # Starting and maximum learning rate
+        self.alpha = alpha          # Initial and maximum learning rate
         self.adjust_alpha = adjust_alpha
-        self.alpha_update_type = alpha_update_type
+        self.min_count_to_update_alpha = min_count_to_update_alpha
+        self.min_time_to_update_alpha = min_time_to_update_alpha
         self.alpha_min = alpha_min  # Used when adjust_alpha=True
 
         # Observed state, action, and reward at the latest learning time
@@ -77,6 +79,10 @@ class Learner:
         self.rewards = []
 
         self.dict_state_action_counts = dict()
+
+        # Learning time and learning rate at that time
+        self._time = 0              # Int: this value is expected to be updated by the user, whenever learning took place
+        self._alpha = self.alpha    # Float: current learning rate (at the learning time `self._time`)
 
         # Information about the historical learning rates
         self.alpha_mean = []    # Average alpha
@@ -132,9 +138,21 @@ class Learner:
         # Method to be overridden by subclasses
         pass
 
+    def update_learning_time(self):
+        """
+        Increments the count of learning time by one.
+
+        This method is expected to be called by the user whenever they want to register that learning took place.
+        It can be used to update the learning rate alpha by the number of learning episodes
+        (see update_alpha_by_learning_episode()).
+        """
+        self._time += 1
+
     def update_alpha(self, state, action):
         """
-        Updates the learning rate given the visited count of the given state and action
+        Updates the learning rate at the current learning time, given the visit count of the given state and action
+
+        The update is done ONLY when the attribute self.adjust_alpha is True.
 
         Arguments:
         state: Environment dependent
@@ -144,21 +162,48 @@ class Learner:
             Action received by the environment used to retrieve the visited count to update alpha.
 
         Return: float
-            The updated value of alpha based on the visited count of the state and action.
+        The updated value of alpha based on the visited count of the state and action.
         """
         #with np.printoptions(precision=4):
         #    print("Before updating alpha: state {}: state_action_count={:.0f}, alpha>={}: alpha={}\n{}" \
         #          .format(state, self.dict_state_action_count[str(state)], self.alpha_min, self.alphas[str(state)]))
         if self.adjust_alpha:
             state_action_count = self.getCount(state, action)
-            time_divisor = np.max([1, state_action_count])
+            time_divisor = np.max([1, state_action_count - self.min_count_to_update_alpha])
+                ## Note: We don't sum anything to the difference count - min_count because we want to have the same
+                ## time_divisor value when min_count = 0, in which case the first update occurs when count = 2
+                ## (yielding time_divisor = 2), as when min_count > 0 (e.g. if min_count = 5, then we would have the
+                ## first update at count = 7, with time_divisor = 2 as well (= 7 - 5)).
             print("\tUpdating alpha... state={}, action={}: time divisor = {}".format(state, action, time_divisor))
-            alpha = np.max( [self.alpha_min, self.alpha / time_divisor] )
-            print("\t\tstate {}: alpha: {}".format(state, alpha))
+            alpha_prev = self._alpha
+            self._alpha = np.max( [self.alpha_min, self.alpha / time_divisor] )
+            print("\t\tstate {}: alpha: {} -> {}".format(state, alpha_prev, self._alpha))
         else:
-            alpha = self.alpha
+            self._alpha = self.alpha
 
-        return alpha
+        return self._alpha
+
+    def update_alpha_by_learning_episode(self):
+        """
+        Updates the learning rate at the current learning time by the number of times learning took place already,
+        independently of the visit count of each state and action.
+
+        The update is done ONLY when the attribute self.adjust_alpha is True.
+
+        Return: float
+        The updated value of alpha.
+        """
+        if self.adjust_alpha:
+            time_divisor = np.max([1, self._time - self.min_time_to_update_alpha])
+                ## See comment in method update_alpha() about not adding any constant to the difference time - min_time
+            print("\tUpdating alpha by learning episode: time divisor = {}".format(time_divisor))
+            alpha_prev = self._alpha
+            self._alpha = np.max( [self.alpha_min, self.alpha / time_divisor] )
+            print("\t\talpha: {} -> {}".format(alpha_prev, self._alpha))
+        else:
+            self._alpha = self.alpha
+
+        return self._alpha
 
     def update_trajectory(self, state, action, reward):
         """
@@ -192,6 +237,13 @@ class Learner:
 
     def getLearningRates(self):
         return self.alphas
+
+    def getLearningRate(self):
+        return self._alpha
+
+    def getLearningTime(self):
+        "Returns the number of times learning took place according to the learning time attribute"
+        return self._time
 
     def getCount(self, state, action):
         "Returns the number of times the given state and action has been visited during the learning process"
