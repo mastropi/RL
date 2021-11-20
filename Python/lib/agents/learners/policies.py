@@ -10,7 +10,7 @@ import copy
 import numpy as np
 import pandas as pd
 
-from . import Learner, AlphaUpdateType
+from Python.lib.agents.learners import Learner
 
 
 class LeaPolicyGradient(Learner):
@@ -27,8 +27,14 @@ class LeaPolicyGradient(Learner):
     learnerV: Learner
         Learner of the state value function.
 
-    alpha: float
-        Learning rate.
+    alpha: (opt) float
+        Learning rate. This is the initial learning rate when the value of alpha is adjusted as simulation progresses.
+        default: 0.1
+
+    fixed_window: (opt) bool
+        Whether to use a fixed window to estimate the return G(t) for the update of parameter theta.
+        In that case G(t) is estimated for t=0, 1, ..., int(T/2) (or similar).
+        default: False
     """
 
     def __init__(self, env, policy, learnerV, alpha=0.1,
@@ -36,9 +42,12 @@ class LeaPolicyGradient(Learner):
                  min_count_to_update_alpha=0,
                  min_time_to_update_alpha=0,
                  alpha_min=0.,
+                 fixed_window=False,
                  debug=False):
         super().__init__(env, alpha, adjust_alpha, min_count_to_update_alpha, min_time_to_update_alpha, alpha_min)
         self.debug = debug
+
+        self.fixed_window = fixed_window
 
         self.policy = policy
         self.learnerV = learnerV
@@ -89,10 +98,37 @@ class LeaPolicyGradient(Learner):
         baseline: float
             Baseline used to correct each reward in the computation of G(t) as sum_{s>=t}{ reward(s) - rho }
 
+        window_fixed: (opt) bool
+            Whether to compute G(t) on a fixed time window, which is appropriate when G(t) is an estimate of the
+            state value function defined for non-discounted non-episodic environments, where the value function
+            is defined w.r.t. the average reward observed on the simulation process.
+            default: False
+
         Return: numpy array
-        Array containing the value of the return G(t) at each time step t in the history of actions taken by the agent
-        (i.e. when the action is not None).
+        Array containing the value of the return G(t) at each time step t in the simulation history, either whether
+        an action is taken by the agent or not. However, only rewards associated to actions are taken into consideration.
         """
+        def comment_VersionUsingExplicitIterationOnTimeProvedToGiveTheSameResultAsTheOtherImplementationWithCumsum():
+            rewards_history = self.learnerV.getRewards()
+            actions_history = self.learnerV.getActions()
+            T = len(rewards_history)
+            assert T > 0
+
+            # Initialize the output array
+            G = np.zeros(T)
+            if actions_history[T-1] is not None:
+                G[T-1] = rewards_history[T-1] - baseline
+            for t in range(T-2, -1, -1):  # This is T-2, T-3, ..., 0
+                reward = rewards_history[t]
+                action = actions_history[t]
+                if action is not None:
+                    delta_reward = reward - baseline
+                    G[t] = delta_reward + G[t+1]
+                else:
+                    G[t] = G[t+1]
+
+            return G
+
         rewards_history = copy.deepcopy(self.learnerV.getRewards())
         actions_history = copy.deepcopy(self.learnerV.getActions())
         rewards_history.reverse()
@@ -102,10 +138,53 @@ class LeaPolicyGradient(Learner):
         # Reverse the G just computed because we want to have t indexing the values of G from left to right of the array
         return G[::-1]
 
+    def computeCorrectedReturnOnFixedWindow(self, baseline, W):
+        """
+        Computes the return G(t) where rewards are corrected by the given baseline, rho, on a fixed window W.
+        Only the time steps where the agent interacts with the environment are taken into consideration.
+
+        Arguments:
+        baseline: float
+            Baseline used to correct each reward in the computation of G(t) as sum_{s=t}^{s=t+T-1}{ reward(s) - rho }.
+
+        W: int
+            Size of the window on which each value of G(t) is computed.
+
+        Return: numpy array
+        Array containing the value of the return G(t) at each time step t in the simulation history from 0 to T-W+1.
+        """
+        if not (W > 0 and W < len(self.learnerV.getRewards())):
+            raise ValueError("The window size W ({}) must be between 1 and the length of the episode on which the return is computed ({})." \
+                             .format(W, len(self.learnerV.getRewards())))
+        # Make sure W is integer
+        W = int(W)
+
+        rewards_history = self.learnerV.getRewards()
+        actions_history = self.learnerV.getActions()
+        T = len(rewards_history)
+        assert T > 0
+
+        # Initialize the output array
+        G = np.zeros(T - W + 1)
+        G[0] = np.sum( np.array([r - baseline for a, r in zip(actions_history[:W], rewards_history[:W]) if a is not None]) )
+        for t in range(1, T - W + 1):
+            # Update G(t) by removing the first corrected reward value at t and summing the new corrected reward value at t+W-1
+            # (as long as the agent did an action at those times)
+            G[t] = G[t-1] - (actions_history[t-1] is not None and rewards_history[t-1] - baseline or 0.0) \
+                          + (actions_history[t+W-1] is not None and rewards_history[t+W-1] - baseline or 0.0)
+            #print("t={}, G(t-1)={:.1f}, G(t)={:.1f}".format(t, G[t-1], G[t]))
+        assert t == T - W
+
+        return G
+
     def learn(self, T):
         """
         Learns the policy by updating the theta parameter using gradient ascent and estimating the gradient as the
         average of G(t) * grad( log(Pol(A(t)/S(t),theta) ).
+
+        When the fixed_window attribute is True, a fixed window is used to compute G(t) for each t.
+        In that case, the size of the window is T/2 and G(t) is estimated for t = 0, 1, ..., int(T/2).
+        Otherwise, G(t) is estimated for t = 0, 1, ..., T with a window that shrinks with t.
 
         Arguments:
         T: int
@@ -115,7 +194,7 @@ class LeaPolicyGradient(Learner):
         Tuple with the following elements:
         - theta: theta value before its update
         - theta_next: theta value after its update
-        - V: the average reward observed for the theta before its update
+        - V: the average reward observed in the episodic simulation using the theta value before its update
         - gradV: gradient of the value function that generated the update on theta
         """
         theta = self.policy.getThetaParameter()
@@ -129,8 +208,11 @@ class LeaPolicyGradient(Learner):
         # negative Delta(theta) when there are a few large negative rewards making theta shrink to a smaller value
         # (as the reward is so negative because the theta is too large and the cost of blocking increases
         # exponentially with theta for large theta values...)
-        G = self.computeCorrectedReturn(self.getAverageRewardUnderPolicy())
-        deltas = G
+        if self.fixed_window:
+            G = self.computeCorrectedReturnOnFixedWindow(self.getAverageRewardUnderPolicy(), int((T+1)/2))
+        else:
+            G = self.computeCorrectedReturn(self.getAverageRewardUnderPolicy())
+        deltas = np.r_[G, np.nan*np.ones(T+1-len(G))]
 
         # Trajectory used to compute the gradient of the policy used in the update of theta
         states = self.learnerV.getStates()
@@ -141,9 +223,12 @@ class LeaPolicyGradient(Learner):
         print("Average reward (from V learner) = {}".format(self.learnerV.getAverageReward()))
         print("Average reward under policy (baseline for G(t)) rho = {}".format(self.getAverageRewardUnderPolicy()))
         print("TRAJECTORY (t, state, action, reward, reward - rho, delta = G, gradient(log(Pol)))")
-        df_trajectory = pd.DataFrame( np.c_[range(T+1), [self.env.getBufferSizeFromState(s) for s in states], actions, rewards, [r - self.getAverageRewardUnderPolicy() for r in rewards], deltas, [self.policy.getGradientLog(a, s) if a is not None else None for a, s in zip(actions, states)]] )
-        df_trajectory.columns = ['t', 'state', 'action', 'reward', 'reward - rho', 'G(t)', 'grad']
-        print(df_trajectory[ [grad != 0.0 and grad is not None or r != 0.0 for r, grad in zip(df_trajectory['reward'], df_trajectory['grad']) ]])
+        df_trajectory = pd.DataFrame( np.c_[range(T+1), [self.env.getBufferSizeFromState(s) for s in states], actions,
+                                            rewards, [r - self.getAverageRewardUnderPolicy() for r in rewards], deltas,
+                                            [self.policy.getGradientLog(a, s) if a is not None else None for a, s in zip(actions, states)],
+                                            [delta * self.policy.getGradientLog(a, s) if a is not None else None for a, s, delta in zip(actions, states, deltas)]] )
+        df_trajectory.columns = ['t', 'state', 'action', 'reward', 'reward - rho', 'G(t)', 'grad(log(Pol))', 'grad(V)']
+        print(df_trajectory[ [grad != 0.0 and grad is not None or r != 0.0 for r, grad in zip(df_trajectory['reward'], df_trajectory['grad(log(Pol))']) ]])
         #print(df_trajectory)
 
         # Estimate the gradient of the value function V(theta), called J(theta) in Sutton, pag. 327
@@ -155,7 +240,7 @@ class LeaPolicyGradient(Learner):
             reward = rewards[t]
             delta = deltas[t]
 
-            if action is not None:
+            if not np.isnan(delta) and action is not None:
                 # Increase the count of actions taken by the agent, which is the denominator used when estimating grad(V)
                 # Note: the action may be None if for instance the environment experienced a completed service
                 # in which case there is no action to take... (in terms of Accept or Reject)
@@ -182,10 +267,10 @@ class LeaPolicyGradient(Learner):
         # Note that we bound the delta theta to avoid too large changes!
         # We use "strange" numbers to avoid having theta fall always on the same distance from an integer (e.g. 4.1, 5.1, etc.)
         # The lower and upper bounds are asymmetric (larger lower bound) so that a large negative reward can lead to a large reduction of theta.
-        bound_delta_theta_upper = +1.131
-        bound_delta_theta_lower = -1.131 #-5.312314 #-1.0
+        bound_delta_theta_upper = +np.Inf   #+1.131
+        bound_delta_theta_lower = -np.Inf   #-1.131 #-5.312314 #-1.0
         delta_theta = np.max([ bound_delta_theta_lower, np.min([self.alpha * gradV, bound_delta_theta_upper]) ])
-        print("Estimated grad(J(theta)) = {}".format(gradV))
+        print("Estimated grad(V(theta)) = {}".format(gradV))
         print("Delta(theta) = alpha * grad(V) = {}".format(delta_theta))
 
         theta_lower = 0.1       # Do NOT use an integer value as lower bound of theta because the gradient is never non-zero at integer-valued thetas
@@ -202,19 +287,35 @@ class LeaPolicyGradient(Learner):
         at every time step of each simulated trajectory but WITHOUT updating the policy until the last time step
         has been reached.
 
+        When the fixed_window attribute is True, a fixed window is used to compute G(t) for each t.
+        In that case, the size of the window is T/2 and G(t) is estimated for t = 0, 1, ..., int(T/2).
+        Otherwise, G(t) is estimated for t = 0, 1, ..., T with a window that shrinks with t.
+
         Arguments:
         T: int
             Time corresponding to the end of simulation at which learning takes place.
+            The simulation is assumed to start at time = 0, meaning there are T+1 simulation steps.
+
+        Return: tuple
+        Tuple with the following elements:
+        - theta: theta value before its final update
+        - theta_next: theta value after its final update
+        - V: the average reward observed in the episodic simulation using the theta value before its update
+        - gradV: the average of the observed gradients of the value function throughout the episode
         """
         theta = self.policy.getThetaParameter()
+        theta_prev = copy.deepcopy(theta)
 
         # Compute the baseline-corrected return where the baseline is the estimation of the average reward under the policy
         self.estimateAverageRewardUnderPolicy()
 
         # Observed return for every t: this should be the return already adjusted by the baseline
-        G = self.computeCorrectedReturn(self.getAverageRewardUnderPolicy())
-        #G = self.computeCorrectedReturn(0.0)
-        deltas = G
+        if self.fixed_window:
+            G = self.computeCorrectedReturnOnFixedWindow(self.getAverageRewardUnderPolicy(), int((T+1)/2))
+        else:
+            G = self.computeCorrectedReturn(self.getAverageRewardUnderPolicy())
+        # Complete delta with NaN values at the end after the last calculated value of G
+        deltas = np.r_[G, np.nan*np.ones(T+1-len(G))]
 
         # Trajectory used to compute the gradient of the policy used in the update of theta
         states = self.learnerV.getStates()
@@ -225,16 +326,25 @@ class LeaPolicyGradient(Learner):
         print("Average reward (from V learner) = {}".format(self.learnerV.getAverageReward()))
         print("Average reward under policy (baseline for G(t)) = {}".format(self.getAverageRewardUnderPolicy()))
         print("TRAJECTORY (t, state, action, reward, reward - rho, delta = G)")
-        print(np.c_[range(T+1), states, actions, rewards, [r - self.getAverageRewardUnderPolicy() for r in rewards], deltas])
+        df_trajectory = pd.DataFrame( np.c_[range(T+1), [self.env.getBufferSizeFromState(s) for s in states], actions,
+                                            rewards, [r - self.getAverageRewardUnderPolicy() for r in rewards],
+                                            deltas,
+                                            [self.policy.getGradientLog(a, s) if a is not None else None for a, s in zip(actions, states)],
+                                            [delta * self.policy.getGradientLog(a, s) if a is not None else None for a, s, delta in zip(actions, states, deltas)]] )
+        df_trajectory.columns = ['t', 'state', 'action', 'reward', 'reward - rho', 'G(t)', 'grad(log(Pol))', 'grad(V)']
+        print(df_trajectory[ [grad != 0.0 and grad is not None or r != 0.0 for r, grad in zip(df_trajectory['reward'], df_trajectory['grad(log(Pol))']) ]])
+        #print(df_trajectory)
 
         # Go over every time step of the trajectory
+        gradV_mean = 0.0
+        n_theta_updates = 0
         for t in range(T+1):
             state = states[t]
             action = actions[t]
             reward = rewards[t]
             delta = deltas[t]
 
-            if delta != 0.0 and action is not None:
+            if delta != 0.0 and not np.isnan(delta) and action is not None:
                 ## Note: the action may be None if for instance the environment experienced a completed service
                 ## in which case there is no action to take... (in terms of Accept or Reject)
 
@@ -244,6 +354,10 @@ class LeaPolicyGradient(Learner):
                     print("\tt={}: Log-policy gradient for Pol(A(t)={}/S(t)={} ) = {}" \
                           .format(t, action, state, self.policy.getGradientLog(action, state)))
 
+                    # Store the gradient (for analysis purposes)
+                    gradV = delta * self.policy.getGradientLog(action, state)
+                    gradV_mean += gradV
+
                     # Update alpha based on the action-state visit count
                     alpha = self.update_alpha(state, action)
 
@@ -251,9 +365,9 @@ class LeaPolicyGradient(Learner):
 
                     # Note that we bound the delta theta to avoid too large changes!
                     #theta += self.alpha * delta * self.policy.getGradientLog(action, state)
-                    bound_delta_theta_upper = +0.5
-                    bound_delta_theta_lower = -0.5
-                    delta_theta = np.max([ bound_delta_theta_lower, np.min([alpha * delta * self.policy.getGradientLog(action, state), bound_delta_theta_upper]) ])
+                    bound_delta_theta_upper = +np.Inf   #+1.131
+                    bound_delta_theta_lower = -np.Inf   #-1.131
+                    delta_theta = np.max([ bound_delta_theta_lower, np.min([alpha * gradV, bound_delta_theta_upper]) ])
                     print("\tt={}: delta(theta) = {}".format(t, delta_theta))
 
                     # Only update the visit count of the state and action when delta(theta) != 0.0 because this means that
@@ -263,6 +377,8 @@ class LeaPolicyGradient(Learner):
                     theta_lower = 0.1       # Do NOT use an integer value as lower bound of theta because the gradient is never non-zero at integer-valued thetas
                     theta = np.max([theta_lower, theta + delta_theta])
 
+                    n_theta_updates += 1
+
             # Update the historic theta values generated during the learning process
             # (even if theta was not changed at this iteration t, as this guarantees that the length
             # of the historic theta values is the same as the length of the historic states, actions and rewards)
@@ -271,6 +387,14 @@ class LeaPolicyGradient(Learner):
         # Update the policy on the new theta only at the END of the simulation time
         # (this is what the Trunk Reservation paper does: "The new policy is generated at the end of the episode")
         self.policy.setThetaParameter(theta)
+
+        # Compute the average grad(V) observed in the episodic simulation
+        if n_theta_updates > 0:
+            gradV_mean /= n_theta_updates
+        else:
+            gradV_mean = None
+
+        return theta_prev, theta, self.getAverageRewardUnderPolicy(), gradV_mean
 
     #----- GETTERS -----#
     def getPolicy(self):
@@ -287,3 +411,58 @@ class LeaPolicyGradient(Learner):
 
     def getAverageRewardUnderPolicy(self):
         return self.averageRewardUnderPolicy
+
+
+if __name__ == "__main__":
+    from environments.queues import EnvQueueSingleBufferWithJobClasses, rewardOnJobRejection_ExponentialCost
+    from agents.learners.continuing.mc import LeaMC
+    from agents.learners.policies import LeaPolicyGradient
+    from agents.policies.parameterized import PolQueueTwoActionsLinearStep
+    from agents.queues import AgeQueue, PolicyTypes, LearnerTypes
+    from queues import QueueMM
+    from simulators import SimulatorQueue
+
+    #------------------ Test of computeCorrectedReturn() -------------------#
+    capacity = np.Inf
+    nservers = 1
+    job_class_rates = [0.7]
+    service_rates = [1.0]
+    queue = QueueMM(job_class_rates, service_rates, nservers, capacity)
+    env_queue_mm = EnvQueueSingleBufferWithJobClasses(queue, job_class_rates, rewardOnJobRejection_ExponentialCost, None)
+
+    # Acceptance/Reject Policy
+    theta = 3.9
+    policies = dict({PolicyTypes.ACCEPT: PolQueueTwoActionsLinearStep(env_queue_mm, theta), PolicyTypes.ASSIGN: None})
+    policy = policies[PolicyTypes.ACCEPT]
+
+    # Policy learner
+    alpha = 1.0
+    gamma = 1.0
+    learnerV = LeaMC(env_queue_mm, gamma=gamma)
+    learner = LeaPolicyGradient(env_queue_mm, policy, learnerV)
+    learners = dict({LearnerTypes.V: learnerV,
+                     LearnerTypes.Q: None,
+                     LearnerTypes.P: LeaPolicyGradient(env_queue_mm, policies[PolicyTypes.ACCEPT], learnerV, alpha=alpha)})
+    agent_gradient_mc = AgeQueue(env_queue_mm, policies, learners)
+
+    # Simulate the queue one time
+    t_sim = 20
+    dict_nsteps = dict({'queue': t_sim, 'learn': 1})
+    start_state = [ np.ceil(theta) ]
+    simul = SimulatorQueue(env_queue_mm, agent_gradient_mc, dict_nsteps, debug=False)
+    simul.run(start_state, seed=1717, verbose=False)
+
+    learner.estimateAverageRewardUnderPolicy()
+    G = learner.computeCorrectedReturn(learner.getAverageRewardUnderPolicy())
+    G_expected = np.array([  0.0, -0.2,  0.6, 0.6,
+                             0.6,  0.6,  0.4, 0.2,
+                             0.0,  0.0, -0.2, 0.6,
+                             0.6,  0.6,  0.6, 0.6,
+                             0.4,  0.4,  0.2, 0.0, 0.0])
+    assert np.allclose(G, G_expected)
+
+    W = 3
+    G = learner.computeCorrectedReturnOnFixedWindow(learner.getAverageRewardUnderPolicy(), W)
+    G_expected = np.array([-0.6, -0.8,  0.,   0.2,  0.4,  0.6,  0.4,  0.4, -0.6, -0.6, -0.8,  0.,   0.,   0.2, 0.2,  0.4,  0.4,  0.4,  0.2])
+    assert len(G) == (t_sim + 1) - W + 1    # t_sim+1 because the simulation starts at t=0, therefore there are t_sim+1 simulation steps
+    assert np.allclose(G, G_expected)

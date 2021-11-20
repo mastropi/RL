@@ -47,7 +47,7 @@ class Actions(IntEnum):
 
 # Reference buffer size used in the definition of the exponential cost when blocking an incoming job
 # This value is the minimum expected cost that is searched for by the learning process when only hard (i.e. deterministic) blocking is used)
-COST_EXP_BUFFER_SIZE_REF = 15
+COST_EXP_BUFFER_SIZE_REF = 5
 
 
 #---------------------------- Reward functions that can be used in different environments -----------------------------#

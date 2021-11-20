@@ -20,6 +20,7 @@ import pandas as pd
 from matplotlib import pyplot as plt, cm  # cm is for colormaps (e.g. cm.get_cmap())
 
 from agents.learners.episodic.discrete.td import LeaTDLambdaAdaptive
+from agents.queues import PolicyTypes
 from environments.queues import rewardOnJobRejection_ExponentialCost, Actions, COST_EXP_BUFFER_SIZE_REF
 
 from utils.computing import rmse, compute_job_rates_by_server, generate_min_exponential_time, stationary_distribution_birth_death_process
@@ -787,6 +788,7 @@ class SimulatorQueue(Simulator):
         # when updating the policy in learnerP.learn().
         #self.learnerV.learn(t)
         theta_prev, theta, V, gradV = self.learnerP.learn(t)
+        #theta_prev, theta, V, gradV = self.learnerP.learn_TR(t)
         self.thetas += [theta_prev]
         self.thetas_updated += [theta]
         self.V += [V]
@@ -1001,7 +1003,7 @@ if __name__ == "__main__":
 
     if True:
         # --- Test the SimulatorQueue class ---#
-        from agents.queues import AgeQueue, PolicyTypes, LearnerTypes
+        from agents.queues import AgeQueue, LearnerTypes
         from environments.queues import EnvQueueSingleBufferWithJobClasses
         from agents.policies.parameterized import PolQueueTwoActionsLinearStep, PolQueueTwoActionsLogit
         from agents.learners.continuing.mc import LeaMC
@@ -1019,8 +1021,14 @@ if __name__ == "__main__":
         policies = dict({PolicyTypes.ACCEPT: PolQueueTwoActionsLinearStep(env_queue_mm, theta_start), PolicyTypes.ASSIGN: None})
         #policies = dict({PolicyTypes.ACCEPT: PolQueueTwoActionsLogit(env_queue_mm, theta_start, beta=1.0), PolicyTypes.ASSIGN: None})
 
+        # Simulator on a given number of iterations for the queue simulation and a given number of iterations to learn
+        t_sim = 5000 * 2 #10
+        t_learn = 100 #1
+
         # Learners definition
-        alpha_start = 1.0
+        fixed_window = True
+        alpha_start = 1.0 #/ t_sim  # Use `/ t_sim` when using update of theta at each simulation step (i.e. LeaPolicyGradient.learn_TR() is called instead of LeaPolicyGradient.learn())
+        adjust_alpha = False
         min_time_to_update_alpha = 40
         alpha_min = 0.001
         gamma = 1.0
@@ -1028,20 +1036,19 @@ if __name__ == "__main__":
         learners = dict({LearnerTypes.V: learnerV,
                          LearnerTypes.Q: None,
                          LearnerTypes.P: LeaPolicyGradient(env_queue_mm, policies[PolicyTypes.ACCEPT], learnerV,
-                                                           alpha=alpha_start, adjust_alpha=True,
+                                                           alpha=alpha_start, adjust_alpha=adjust_alpha,
                                                            min_time_to_update_alpha=min_time_to_update_alpha,
-                                                           alpha_min=alpha_min)})
+                                                           alpha_min=alpha_min, fixed_window=fixed_window)})
         agent_gradient_mc = AgeQueue(env_queue_mm, policies, learners)
 
-        # Simulator on a given number of iterations for the queue simulation and a given number of iterations to learn
-        t_sim = 5000 #10
-        t_learn = 200 #1
         dict_nsteps = dict({'queue': t_sim, 'learn': t_learn})
         start_state = [0]
         simul = SimulatorQueue(env_queue_mm, agent_gradient_mc, dict_nsteps, debug=False)
         learnerV, learnerP, df_learning = simul.run(start_state, seed=1717, verbose=True)
 
         #-- Plot theta and the gradient of the value function
+        SET_YLIM = True
+
         # Estimated value function
         ax, line_est = plotting.plot_colormap(df_learning['theta'], -df_learning['V'], cmap_name="Blues")
 
@@ -1053,6 +1060,7 @@ if __name__ == "__main__":
         p_stationary = [stationary_distribution_birth_death_process(1, K, [rho])[1] for K in Ks]
         pblock_K = np.array([p[-1] for p in p_stationary])
         pblock_Km1 = np.array([p[-2] for p in p_stationary])
+        # Blocking probability adjusted for different jump rates between K-1 and K (affected by the non-deterministic probability of blocking at K-1)
         pblock_K_adj = np.squeeze([pK * (1 - (K-1-theta)) for K, theta, pK in zip(Ks, df_learning['theta'], pblock_K)])
         pblock_Km1_adj = pblock_Km1 #np.squeeze([pKm1 + pK - pK_adj for pKm1, pK, pK_adj in zip(pblock_Km1, pblock_K, pblock_K_adj)])
         #assert np.allclose(pblock_K + pblock_Km1, pblock_K_adj + pblock_Km1_adj)
@@ -1092,7 +1100,8 @@ if __name__ == "__main__":
         line_gradtrue, = ax2.plot([Ks[o]-1 for o in ord], [-gradVtrue[o] for o in ord], 'k.-', linewidth=3, markersize=12)
         ax2.axhline(0, color="lightgray")
         ax2.set_ylabel('grad(V)')
-        ax2.set_ylim((-5,5))        # Note: grad(V) is expected to be -1 or +1...
+        if SET_YLIM:
+            ax2.set_ylim((-5,5))        # Note: grad(V) is expected to be -1 or +1...
         ax2.legend([line_grad, line_gradtrue], ['grad(V)', 'True grad(V)'], loc='upper right')
         plt.title("Value function and its gradient as a function of theta and K. " +
                     "Optimum K = {}, Theta start = {}, t_sim = {:.0f}".format(COST_EXP_BUFFER_SIZE_REF, theta_start, t_sim))
@@ -1105,7 +1114,8 @@ if __name__ == "__main__":
         ax.axvline(0, color="lightgray")
         ax.set_xscale('log')
         #ax.set_xlim((-1, 1))
-        ax.set_ylim((-1, 1))
+        if SET_YLIM:
+            ax.set_ylim((-1, 1))
         ax.set_xlabel('Value function V (cost)')
         ax.set_ylabel('grad(V)')
 
@@ -1123,10 +1133,14 @@ if __name__ == "__main__":
         ax.plot(buffer_sizes, 'g.', markersize=3)
         # Mark the start of each queue simulation
         ax.plot(times_sim_starts, [buffer_sizes[t] for t in times_sim_starts], 'gx')
+        ax.set_xlabel("time step")
+        ax.set_ylabel("theta")
 
         # Secondary plot showing the rewards received
         ax2 = ax.twinx()
-        ax2.plot(learnerP.getRewards(), 'r-', alpha=0.3)
+        ax2.plot(-np.array(learnerP.getRewards()), 'r-', alpha=0.3)
         # Highlight with points the non-zero rewards
-        ax2.plot([r if r != 0.0 else None for r in learnerP.getRewards()], 'r.')
-        plt.title("Optimum Theta = {}, Theta start = {}, t_sim = {:.0f}".format(COST_EXP_BUFFER_SIZE_REF, theta_start, t_sim))
+        ax2.plot([-r if r != 0.0 else None for r in learnerP.getRewards()], 'r.')
+        ax2.set_ylabel("Reward")
+        ax2.set_yscale('log')
+        plt.title("Optimum Theta = {}, Theta start = {}, t_sim = {:.0f}, fixed_window={}".format(COST_EXP_BUFFER_SIZE_REF, theta_start, t_sim, fixed_window))
