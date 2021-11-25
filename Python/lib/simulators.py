@@ -498,8 +498,9 @@ class SimulatorQueue(Simulator):
         # Storage of learning history
         self.thetas = []            # Theta before the update by the policy learning step
         self.thetas_updated = []    # Theta AFTER the update by the policy learning step.
-        self.V = []                 # Value function at the theta before the update, i.e. the average reward observed in each queue simulation episode for a fixed policy before the update of theta takes place
-        self.gradV = []             # Gradient of the value function (grad(J) in Sutton) for the theta before the update, that is responsible for the theta update
+        self.V = []                 # Value function at the theta before the update, i.e. the average reward observed in each queue simulation episode for a fixed policy before the update of theta takes place.
+        self.gradV = []             # Gradient of the value function (grad(J) in Sutton) for the theta before the update, that is responsible for the theta update.
+        self.G = None               # G(t) for each simulation time step t as estimated by self.learn().
 
     def reset(self, reset_value_functions=False, reset_counts=False):
         "Resets the simulator"
@@ -787,12 +788,13 @@ class SimulatorQueue(Simulator):
         # For now I am commenting out learnerV.learn() because we don't actually use the value of G(t) computed there
         # when updating the policy in learnerP.learn().
         #self.learnerV.learn(t)
-        theta_prev, theta, V, gradV = self.learnerP.learn(t)
-        #theta_prev, theta, V, gradV = self.learnerP.learn_TR(t)
+        theta_prev, theta, V, gradV, G = self.learnerP.learn(t)
+        #theta_prev, theta, V, gradV, G = self.learnerP.learn_TR(t)
         self.thetas += [theta_prev]
         self.thetas_updated += [theta]
         self.V += [V]
         self.gradV += [gradV]
+        self.G = G
 
         self.learnerP.update_learning_time()
         print("*** Learning-time updated: time = {} ***".format(self.learnerP.getLearningTime()))
@@ -1017,16 +1019,16 @@ if __name__ == "__main__":
         env_queue_mm = EnvQueueSingleBufferWithJobClasses(queue, job_class_rates, rewardOnJobRejection_ExponentialCost, None)
 
         # Acceptance policy definition
-        theta_start = 10.3  # 1.3, 11.3  # IMPORTANT: This value should NOT be integer, o.w. the policy gradient will always be 0 regardless of the state at which blocking occurs
+        theta_start = 1.3  # 1.3, 11.3  # IMPORTANT: This value should NOT be integer, o.w. the policy gradient will always be 0 regardless of the state at which blocking occurs
         policies = dict({PolicyTypes.ACCEPT: PolQueueTwoActionsLinearStep(env_queue_mm, theta_start), PolicyTypes.ASSIGN: None})
         #policies = dict({PolicyTypes.ACCEPT: PolQueueTwoActionsLogit(env_queue_mm, theta_start, beta=1.0), PolicyTypes.ASSIGN: None})
 
         # Simulator on a given number of iterations for the queue simulation and a given number of iterations to learn
-        t_sim = 5000 * 2 #10
+        t_sim = 5000 #10
         t_learn = 100 #1
 
         # Learners definition
-        fixed_window = True
+        fixed_window = False
         alpha_start = 1.0 #/ t_sim  # Use `/ t_sim` when using update of theta at each simulation step (i.e. LeaPolicyGradient.learn_TR() is called instead of LeaPolicyGradient.learn())
         adjust_alpha = False
         min_time_to_update_alpha = 40
@@ -1045,6 +1047,10 @@ if __name__ == "__main__":
         start_state = [0]
         simul = SimulatorQueue(env_queue_mm, agent_gradient_mc, dict_nsteps, debug=False)
         learnerV, learnerP, df_learning = simul.run(start_state, seed=1717, verbose=True)
+
+        # Save the estimation of G(t) for the last learning step to a file
+        file_results_G = "G.csv"
+        pd.DataFrame({'G': simul.G}).to_csv(file_results_G)
 
         #-- Plot theta and the gradient of the value function
         SET_YLIM = True

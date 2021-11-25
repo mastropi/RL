@@ -196,6 +196,9 @@ class LeaPolicyGradient(Learner):
         - theta_next: theta value after its update
         - V: the average reward observed in the episodic simulation using the theta value before its update
         - gradV: gradient of the value function that generated the update on theta
+        - deltas: array with the delta innovation values for each simulation time step which is obtained by bootstrapping.
+            This is normally equal to G(t). For the case when attribute fixed_window = True, this array is equal to NaN
+            for int((T+1)/2) < t <= T+1
         """
         theta = self.policy.getThetaParameter()
         theta_prev = copy.deepcopy(theta)
@@ -206,12 +209,17 @@ class LeaPolicyGradient(Learner):
         # Observed return for every t: this should be the return already adjusted by the baseline
         # NOTE: (2021/11/04) This baseline adjustment is essential to the convergence of theta, i.e. to observing
         # negative Delta(theta) when there are a few large negative rewards making theta shrink to a smaller value
-        # (as the reward is so negative because the theta is too large and the cost of blocking increases
+        # (as the reward is so negative because theta is too large and in our model the cost of blocking increases
         # exponentially with theta for large theta values...)
         if self.fixed_window:
             G = self.computeCorrectedReturnOnFixedWindow(self.getAverageRewardUnderPolicy(), int((T+1)/2))
         else:
             G = self.computeCorrectedReturn(self.getAverageRewardUnderPolicy())
+        # Construct the array of delta values that provide the innovation information
+        # (in general from bootstrapping, but in this case delta(t) is simply G(t))
+        # as the values of G(t) for as long as G(t) is defined... then complete with NaN.
+        # Note that no NaN completion is necessary when we are NOT computing G(t) on a fixed window
+        # because in that case t goes from 0 to T+1, which is also len(G).
         deltas = np.r_[G, np.nan*np.ones(T+1-len(G))]
 
         # Trajectory used to compute the gradient of the policy used in the update of theta
@@ -244,6 +252,8 @@ class LeaPolicyGradient(Learner):
                 # Increase the count of actions taken by the agent, which is the denominator used when estimating grad(V)
                 # Note: the action may be None if for instance the environment experienced a completed service
                 # in which case there is no action to take... (in terms of Accept or Reject)
+                # Note also that we check that delta is not NaN because NaN indicate that the current simulation time step
+                # is NOT part of the calculation of deltas (which happens when attribute fixed_window = True)
                 nactions += 1
 
                 gradLogPol = self.policy.getGradientLog(action, state)
@@ -279,7 +289,7 @@ class LeaPolicyGradient(Learner):
         # Update the policy on the new theta and record it into the history of its updates
         self.policy.setThetaParameter(theta)
 
-        return theta_prev, theta, self.getAverageRewardUnderPolicy(), gradV
+        return theta_prev, theta, self.getAverageRewardUnderPolicy(), gradV, deltas
 
     def learn_TR(self, T):
         """
@@ -302,6 +312,9 @@ class LeaPolicyGradient(Learner):
         - theta_next: theta value after its final update
         - V: the average reward observed in the episodic simulation using the theta value before its update
         - gradV: the average of the observed gradients of the value function throughout the episode
+        - deltas: array with the delta innovation values for each simulation time step which is obtained by bootstrapping.
+            This is normally equal to G(t). For the case when attribute fixed_window = True, this array is equal to NaN
+            for int((T+1)/2) < t <= T+1
         """
         theta = self.policy.getThetaParameter()
         theta_prev = copy.deepcopy(theta)
@@ -345,8 +358,10 @@ class LeaPolicyGradient(Learner):
             delta = deltas[t]
 
             if delta != 0.0 and not np.isnan(delta) and action is not None:
-                ## Note: the action may be None if for instance the environment experienced a completed service
-                ## in which case there is no action to take... (in terms of Accept or Reject)
+                # Note: the action may be None if for instance the environment experienced a completed service
+                # in which case there is no action to take... (in terms of Accept or Reject)
+                # Note also that we check that delta is not NaN because NaN indicate that the current simulation time step
+                # is NOT part of the calculation of deltas (which happens when attribute fixed_window = True)
 
                 if self.policy.getGradientLog(action, state) != 0.0:
                     print("Learning at simulation time t={}, state={}, action={}, reward={}...".format(t, state, action, reward))
@@ -394,7 +409,7 @@ class LeaPolicyGradient(Learner):
         else:
             gradV_mean = None
 
-        return theta_prev, theta, self.getAverageRewardUnderPolicy(), gradV_mean
+        return theta_prev, theta, self.getAverageRewardUnderPolicy(), gradV_mean, deltas
 
     #----- GETTERS -----#
     def getPolicy(self):
@@ -461,7 +476,7 @@ if __name__ == "__main__":
                              0.4,  0.4,  0.2, 0.0, 0.0])
     assert np.allclose(G, G_expected)
 
-    W = 3
+    W = 3       # The window size can be up to t_sim + 1
     G = learner.computeCorrectedReturnOnFixedWindow(learner.getAverageRewardUnderPolicy(), W)
     G_expected = np.array([-0.6, -0.8,  0.,   0.2,  0.4,  0.6,  0.4,  0.4, -0.6, -0.6, -0.8,  0.,   0.,   0.2, 0.2,  0.4,  0.4,  0.4,  0.2])
     assert len(G) == (t_sim + 1) - W + 1    # t_sim+1 because the simulation starts at t=0, therefore there are t_sim+1 simulation steps
