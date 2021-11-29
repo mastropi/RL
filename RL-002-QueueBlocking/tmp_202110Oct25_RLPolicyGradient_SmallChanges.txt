@@ -1,0 +1,59 @@
+Velo Toulouse: Ref. paiement #6277288892
+
+
+
+W25-Oct-2021: FV-RL
+*** A few bugs discovered in the implementation:
+policies.learn()
+- was mixing G(t+1) with S(t), A(t) in the update of theta at each time step t, while I should use G(t), S(t) and A(t) in the update. (I was confused because of the usual notation in RL that is S(t), A(t), R(t+1))
+- was doing the update of theta from t=T downto t=0 instead of doing it from t=0 up to t=T. This should have a very small effect in the learning process but was messing up the plots at the end of the simulation of the evolution of theta, the states and the rewards.
+
+mc.learn()
+- was reversing the values of the historic rewards stored in the object because of the statement `rewards_history = self.getRewards()` which is a SHALLOW copy of the list attribute in the LeaMC object containing the historic rewards! However, this does NOT have any effect in the learning of theta as the rewards are NOT explicitly used there (they are used via the already computed return G(t)).
+
+
+
+SHOULD I ONLY CONSIDER A REWARD WHEN THERE IS AN ACTION BY THE AGENT?? E.g. when a job is completed, there is NO action by the agent, but we are still making that non-zero reward contribute to G(t)... IS THIS CORRECT??
+
+The answer is YES, because I realized that the rho value indicated in the Trunk Reservation paper is NOT the average reward but the estimation of the average reward UNDER THE GIVEN POLICY. And this implies that ONLY the time steps where the agent actually TOOK an action should be considered for that computation (because those are the only times when the policy can be computed!)
+
+After doing this change (on how rho is computed), the results changed completely! Now, when there is a negative reward caused by blocking, the change in theta is in the RIGHT DIRECTION, e.g. in decreasing theta when blocking occurred at a very 
+
+
+
+
+M25-Oct-2021: FV-RL
+*** Changes performed on the process of learning the best parameterized policy using Monte-Carlo learning on single-server with blocking cost that increases exponentially with the blocking buffer size K:
+0) Benchmark: theta is updated ONLY when the last step implies a non-zero gradient of the policy.
+This shows oscilations with positive and negative delta theta, although the trend is that theta increases in the long term and does NOT converge to the supposed minimum which is 3.0.
+
+1) Tried using average of log(gradient) at the end of the simulation
+	--> Did not work because theta keeps decreasing towards 0 because the average gradient is a mixture of the gradient of the policy for action=1 and of the gradient of the policy for action=0... These two gradients should actually NOT be mixed (as is done here by computing their average)...
+
+2) Tried stopping the simulation when the reward is non-zero
+	--> Did not work (theta keeps increasing) because a non-zero reward happens when the last action is REJECT, and this implies that the gradient is negative.
+		Since the value function V is also negative, the delta affecting the theta update is always positive.
+
+3) Tried stopping the simulation when the gradient is non-zero
+	--> Did not work (theta keeps increasing) because, even if the gradient could be not zero when ACCEPTING the job, the estimated value function V at that moment is MOST OF THE TIME = 0.0 (making the update of theta 0) because the only way V would not be zero is that the job is accepted at the borderline of the policy then rejected when the state is beyond theta + 1 (where the gradient is 0.0, so the simulation does not stop), then having the queue's buffer size reduced and again the job being accepted at the border line... I think this sequence of events has low probability.
+
+4) Tried (3) + keeping the estimated value function from the previous learning step as starting value for V, which is used as baseline for the delta(t) calculation that participates in the update of theta.
+
+5) Tried (4) but without stopping the simulation when the gradient is non-zero (i.e. keeping it running until the max simulation time).
+	--> Still theta explodes (especially when starting at theta > optimum)
+
+6) Tried (4) but using the average historical V as baseline, NOT just the previous V value... in fact the latter may be too noisy... we should have a robust estimate of the baseline...
+	--> Still theta explodes when starting at theta > optimum because the experienced delta theta is too large due to a very large negative reward observed when blocking occurs.
+
+7) Tried (6) + limiting the delta(theta) between -2 and 2.
+	--> Still theta explodes
+	--> This improves quite a lot when eliminating the condition "stop at gradient != 0.0"! It seems to converge to the optimum K=3 but then, after 3000 iterations, it goes back to increase again... although not too much, it reaches K=6 only.
+However, when we start at a buffer size > optimum, the value of theta diverges...
+
+
+MY CONCLUSIONS: I am not so convinced about the form of the parameterized policy... basically the fact that the gradient is non-zero ONLY at ONE value of s, namely the buffer size between theta and theta + 1. I think this could be largely improved if we allow a logit-like dependency of the policy with theta...
+
+8) [T26-Oct-2021] Tried following the learning method outlined in the Trunk Reservation paper, pag. 4 where they state that the theta parameter is updated at every step of the queue simulation... In my case, I do this update AFTER the simulation is over, i.e. where the simulation has been generated on a FIXED value of the theta parameter.
+In addition, I made alpha decreasing with the number of visits of the (state, action) until a pre-defined minimum of 0.01.
+	--> When the policy is updated ONLY at T (after all the updates theta has gone through from t = 1, ..., T), theta seems to tend to 0.
+	--> When the policy is updated at every t when theta is updated, the theta presents large oscilations away from 0 but does not converge.
