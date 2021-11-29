@@ -129,11 +129,16 @@ class LeaPolicyGradient(Learner):
 
             return G
 
-        rewards_history = copy.deepcopy(self.learnerV.getRewards())
-        actions_history = copy.deepcopy(self.learnerV.getActions())
+        rewards_history = [r for r in self.learnerV.getRewards() if not np.isnan(r)]
+        actions_history = [a for a in self.learnerV.getActions() if a is not None]
         rewards_history.reverse()
         actions_history.reverse()
-        delta_rewards_history = [r - baseline if a is not None else 0.0 for a, r in zip(actions_history, rewards_history)]
+        delta_rewards_history = np.array(rewards_history) - baseline
+            ## 2021/11/28: We must consider only the historical records where there is an action.
+            ## Note that as of today we are also storing in the history the first DEATH following a BIRTH
+            ## (for which the action is None) with the purpose of plotting the transition of the latest BIRTH
+            ## and avoid any suspicion that the implementation is correct just because in the trajectory plot
+            ## we observe that the buffer size does not change between two consecutive time steps.
         G = np.cumsum(delta_rewards_history)
         # Reverse the G just computed because we want to have t indexing the values of G from left to right of the array
         return G[::-1]
@@ -159,19 +164,24 @@ class LeaPolicyGradient(Learner):
         # Make sure W is integer
         W = int(W)
 
-        rewards_history = self.learnerV.getRewards()
-        actions_history = self.learnerV.getActions()
-        T = len(rewards_history)
+        rewards_history = [r for r in self.learnerV.getRewards() if not np.isnan(r)]
+        actions_history = [a for a in self.learnerV.getActions() if a is not None]
+            ## 2021/11/28: We must consider only the historical records where there is an action and consequently a non-NaN reward.
+            ## Note that as of today we are also storing in the history the first DEATH following a BIRTH
+            ## (for which the action is None) with the purpose of plotting the transition of the latest BIRTH
+            ## and avoid any suspicion that the implementation is correct just because in the trajectory plot
+            ## we observe that the buffer size does not change between two consecutive time steps.
+        assert len(rewards_history) == len(actions_history)
+        T = len(actions_history)
         assert T > 0
 
         # Initialize the output array
         G = np.zeros(T - W + 1)
-        G[0] = np.sum( np.array([r - baseline for a, r in zip(actions_history[:W], rewards_history[:W]) if a is not None]) )
+        G[0] = np.sum(np.array(rewards_history[:W]) - baseline)
         for t in range(1, T - W + 1):
             # Update G(t) by removing the first corrected reward value at t and summing the new corrected reward value at t+W-1
             # (as long as the agent did an action at those times)
-            G[t] = G[t-1] - (actions_history[t-1] is not None and rewards_history[t-1] - baseline or 0.0) \
-                          + (actions_history[t+W-1] is not None and rewards_history[t+W-1] - baseline or 0.0)
+            G[t] = G[t-1] - (rewards_history[t-1] - baseline) + (rewards_history[t+W-1] - baseline)
             #print("t={}, G(t-1)={:.1f}, G(t)={:.1f}".format(t, G[t-1], G[t]))
         assert t == T - W
 
@@ -223,9 +233,9 @@ class LeaPolicyGradient(Learner):
         deltas = np.r_[G, np.nan*np.ones(T+1-len(G))]
 
         # Trajectory used to compute the gradient of the policy used in the update of theta
-        states = self.learnerV.getStates()
-        actions = self.learnerV.getActions()
-        rewards = self.learnerV.getRewards()
+        states = [s for s, a in zip(self.learnerV.getStates(), self.learnerV.getActions()) if a is not None]
+        actions = [a for a in self.learnerV.getActions() if a is not None]
+        rewards = [s for s, a in zip(self.learnerV.getRewards(), self.learnerV.getActions()) if a is not None]
         print("\n--- POLICY LEARNING ---")
         print("theta = {}".format(self.policy.getThetaParameter()))
         print("Average reward (from V learner) = {}".format(self.learnerV.getAverageReward()))
@@ -233,8 +243,8 @@ class LeaPolicyGradient(Learner):
         print("TRAJECTORY (t, state, action, reward, reward - rho, delta = G, gradient(log(Pol)))")
         df_trajectory = pd.DataFrame( np.c_[range(T+1), [self.env.getBufferSizeFromState(s) for s in states], actions,
                                             rewards, [r - self.getAverageRewardUnderPolicy() for r in rewards], deltas,
-                                            [self.policy.getGradientLog(a, s) if a is not None else None for a, s in zip(actions, states)],
-                                            [delta * self.policy.getGradientLog(a, s) if a is not None else None for a, s, delta in zip(actions, states, deltas)]] )
+                                            [self.policy.getGradientLog(a, s) for a, s in zip(actions, states)],
+                                            [delta * self.policy.getGradientLog(a, s) for a, s, delta in zip(actions, states, deltas)]] )
         df_trajectory.columns = ['t', 'state', 'action', 'reward', 'reward - rho', 'G(t)', 'grad(log(Pol))', 'grad(V)']
         print(df_trajectory[ [grad != 0.0 and grad is not None or r != 0.0 for r, grad in zip(df_trajectory['reward'], df_trajectory['grad(log(Pol))']) ]])
         #print(df_trajectory)
@@ -243,6 +253,16 @@ class LeaPolicyGradient(Learner):
         gradV = 0.0
         nactions = 0                # Number of actions taken by the agent during the trajectory (used to estimate gradV)
         for t in range(T+1):
+            # Store the current theta value
+            # NOTES:
+            # a) Theta is stored BEFORE ITS UPDATE (if any), so that when we plot the historic theta values
+            # together with the historic states and rewards, we compare the theta value BEFORE any possible
+            # update of theta coming from the action and reward plotted for the corresponding same time step.
+            # b) Theta is stored as part of the history even if it has not been updated in the previous iteration,
+            # so that its values are aligned with the history of rewards received and actions taken which make it
+            # possible to have an informative plot.
+            self.policy.store_theta(theta)
+
             state = states[t]
             action = actions[t]
             reward = rewards[t]
@@ -266,10 +286,6 @@ class LeaPolicyGradient(Learner):
                     print("\t#actions taken by the agent so far = {}".format(nactions))
                     gradV += delta * gradLogPol
                     #gradV += (reward - self.getAverageRewardUnderPolicy()) * gradLogPol    # This computation of the gradient is NOT useful for the learning process
-
-            # Update the history of thetas (even if theta has not been updated) so that it is aligned with the
-            # history of rewards received and actions taken which make it possible to have an informative plot.
-            self.policy.store_theta(theta)
 
         # Estimated grad(V) as the average of G(t) * grad(log(Pol(t)))
         gradV /= nactions
@@ -331,9 +347,9 @@ class LeaPolicyGradient(Learner):
         deltas = np.r_[G, np.nan*np.ones(T+1-len(G))]
 
         # Trajectory used to compute the gradient of the policy used in the update of theta
-        states = self.learnerV.getStates()
-        actions = self.learnerV.getActions()
-        rewards = self.learnerV.getRewards()
+        states = [s for s, a in zip(self.learnerV.getStates(), self.learnerV.getActions()) if a is not None]
+        actions = [a for a in self.learnerV.getActions() if a is not None]
+        rewards = [s for s, a in zip(self.learnerV.getRewards(), self.learnerV.getActions()) if a is not None]
         print("\n--- POLICY LEARNING ---")
         print("theta = {}".format(self.policy.getThetaParameter()))
         print("Average reward (from V learner) = {}".format(self.learnerV.getAverageReward()))
@@ -342,8 +358,8 @@ class LeaPolicyGradient(Learner):
         df_trajectory = pd.DataFrame( np.c_[range(T+1), [self.env.getBufferSizeFromState(s) for s in states], actions,
                                             rewards, [r - self.getAverageRewardUnderPolicy() for r in rewards],
                                             deltas,
-                                            [self.policy.getGradientLog(a, s) if a is not None else None for a, s in zip(actions, states)],
-                                            [delta * self.policy.getGradientLog(a, s) if a is not None else None for a, s, delta in zip(actions, states, deltas)]] )
+                                            [self.policy.getGradientLog(a, s) for a, s in zip(actions, states)],
+                                            [delta * self.policy.getGradientLog(a, s) for a, s, delta in zip(actions, states, deltas)]] )
         df_trajectory.columns = ['t', 'state', 'action', 'reward', 'reward - rho', 'G(t)', 'grad(log(Pol))', 'grad(V)']
         print(df_trajectory[ [grad != 0.0 and grad is not None or r != 0.0 for r, grad in zip(df_trajectory['reward'], df_trajectory['grad(log(Pol))']) ]])
         #print(df_trajectory)
@@ -352,6 +368,16 @@ class LeaPolicyGradient(Learner):
         gradV_mean = 0.0
         n_theta_updates = 0
         for t in range(T+1):
+            # Store the current theta value
+            # NOTES:
+            # a) Theta is stored BEFORE ITS UPDATE (if any), so that when we plot the historic theta values
+            # together with the historic states and rewards, we compare the theta value BEFORE any possible
+            # update of theta coming from the action and reward plotted for the corresponding same time step.
+            # b) Theta is stored as part of the history even if it has not been updated in the previous iteration,
+            # so that its values are aligned with the history of rewards received and actions taken which make it
+            # possible to have an informative plot.
+            self.policy.store_theta(theta)
+
             state = states[t]
             action = actions[t]
             reward = rewards[t]
@@ -364,9 +390,11 @@ class LeaPolicyGradient(Learner):
                 # is NOT part of the calculation of deltas (which happens when attribute fixed_window = True)
 
                 if self.policy.getGradientLog(action, state) != 0.0:
-                    print("Learning at simulation time t={}, state={}, action={}, reward={}...".format(t, state, action, reward))
+                    # [DONE-2021/11/28] DM-2021/11/25: STOP AT LEARNING STEP 24 (starting at theta = 11.3) FOR METHOD 2 TO INVESTIGATE WHY A REJECTION OCCURS WHEN STATE = 2 AND THETA = 4...
+                    # R: The reason is that the accept/reject policy is updated ONLY AT THE END of the episode!! which means that the value of theta is not always related to the occurrence of rejections.
+                    print("Learning at simulation time t={}, theta={}, state={}, action={}, reward={}...".format(t, theta, state, action, reward))
                     print("\tt={}: Delta(t) = G(t) = {:.3f}".format(t, delta))
-                    print("\tt={}: Log-policy gradient for Pol(A(t)={}/S(t)={} ) = {}" \
+                    print("\tt={}: Log-policy gradient for Pol(A(t)={}/S(t)={} ) = {:.6f}" \
                           .format(t, action, state, self.policy.getGradientLog(action, state)))
 
                     # Store the gradient (for analysis purposes)
@@ -393,11 +421,6 @@ class LeaPolicyGradient(Learner):
                     theta = np.max([theta_lower, theta + delta_theta])
 
                     n_theta_updates += 1
-
-            # Update the historic theta values generated during the learning process
-            # (even if theta was not changed at this iteration t, as this guarantees that the length
-            # of the historic theta values is the same as the length of the historic states, actions and rewards)
-            self.policy.store_theta(theta)
 
         # Update the policy on the new theta only at the END of the simulation time
         # (this is what the Trunk Reservation paper does: "The new policy is generated at the end of the episode")
@@ -461,6 +484,7 @@ if __name__ == "__main__":
     agent_gradient_mc = AgeQueue(env_queue_mm, policies, learners)
 
     # Simulate the queue one time
+    print("Test #1: LeaPolicyGradient.computeCorrectedReturn()")
     t_sim = 20
     dict_nsteps = dict({'queue': t_sim, 'learn': 1})
     start_state = [ np.ceil(theta) ]
@@ -469,15 +493,36 @@ if __name__ == "__main__":
 
     learner.estimateAverageRewardUnderPolicy()
     G = learner.computeCorrectedReturn(learner.getAverageRewardUnderPolicy())
-    G_expected = np.array([  0.0, -0.2,  0.6, 0.6,
-                             0.6,  0.6,  0.4, 0.2,
-                             0.0,  0.0, -0.2, 0.6,
-                             0.6,  0.6,  0.6, 0.6,
-                             0.4,  0.4,  0.2, 0.0, 0.0])
+    G_expected = np.array([ 0.0,           -9.52380952e-02, 8.09523810e-01, 7.14285714e-01,
+                            6.19047619e-01, 5.23809524e-01, 4.28571429e-01, 1.33333333e+00,
+                            1.23809524e+00, 1.14285714e+00, 1.04761905e+00, 9.52380952e-01,
+                            8.57142857e-01, 7.61904762e-01, 6.66666667e-01, 5.71428571e-01,
+                            4.76190476e-01, 3.80952381e-01, 2.85714286e-01, 1.90476190e-01,
+                            9.52380952e-02])
+    # 2021/11/25: Previous version, before fixing the transition times of the discrete-time embedded (skeleton) Markov Chain
+    # We observe that the value of G(t) stays constants for some time steps and this is because at those time steps
+    # jobs were served, so no action was taken, therefore no contribution to G(t) is considered.
+    #G_expected = np.array([  0.0, -0.2,  0.6, 0.6,
+    #                         0.6,  0.6,  0.4, 0.2,
+    #                         0.0,  0.0, -0.2, 0.6,
+    #                         0.6,  0.6,  0.6, 0.6,
+    #                         0.4,  0.4,  0.2, 0.0, 0.0])
+    print("Observed G:")
+    print(G)
     assert np.allclose(G, G_expected)
 
     W = 3       # The window size can be up to t_sim + 1
+    print("Test #2: LeaPolicyGradient.computeCorrectedReturnOnFixedWindow(W={})".format(W))
     G = learner.computeCorrectedReturnOnFixedWindow(learner.getAverageRewardUnderPolicy(), W)
-    G_expected = np.array([-0.6, -0.8,  0.,   0.2,  0.4,  0.6,  0.4,  0.4, -0.6, -0.6, -0.8,  0.,   0.,   0.2, 0.2,  0.4,  0.4,  0.4,  0.2])
+    G_expected = np.array([ -0.71428571, -0.71428571, 0.28571429, 0.28571429, -0.71428571, -0.71428571,
+                            -0.71428571, 0.28571429, 0.28571429, 0.28571429, 0.28571429, 0.28571429,
+                            0.28571429, 0.28571429, 0.28571429, 0.28571429, 0.28571429, 0.28571429,
+                            0.28571429])
+    # 2021/11/25: Previous version, before fixing the transition times of the discrete-time embedded (skeleton) Markov Chain
+    # We observe that the value of G(t) stays constants for some time steps and this is because at those time steps
+    # jobs were served, so no action was taken, therefore no contribution to G(t) is considered.
+    #G_expected = np,array([-0.6, -0.8,  0.,   0.2,  0.4,  0.6,  0.4,  0.4, -0.6, -0.6, -0.8,  0.,   0.,   0.2, 0.2,  0.4,  0.4,  0.4,  0.2])
+    print("Observed G:")
+    print(G)
     assert len(G) == (t_sim + 1) - W + 1    # t_sim+1 because the simulation starts at t=0, therefore there are t_sim+1 simulation steps
     assert np.allclose(G, G_expected)

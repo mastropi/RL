@@ -72,8 +72,9 @@ class Learner:
         self.action = None          # A(t): action taken at state S(t)
         self.reward = None          # R(t+1): reward received by the agent when taking action A(t) on state S(t)
 
-        # Trajectory history: information of the states, actions, and rewards on which learning takes place
-        # (so that it can be retrieved by the user if needed as a piece of information)
+        # Trajectory history: information of the times, states, actions, and rewards stored as part of the learning process
+        # (so that we can be retrieve it for e.g. analysis or plotting)
+        self.times = []
         self.states = []
         self.actions = []
         self.rewards = []
@@ -81,7 +82,7 @@ class Learner:
         self.dict_state_action_counts = dict()
 
         # Learning time and learning rate at that time
-        self._time = 0              # Int: this value is expected to be updated by the user, whenever learning took place
+        self._time = 0              # Int: this value is expected to be updated by the user, whenever learning takes place
         self._alpha = self.alpha    # Float: current learning rate (at the learning time `self._time`)
 
         # Information about the historical learning rates
@@ -122,6 +123,7 @@ class Learner:
             self.dict_state_action_counts = dict()
 
     def reset_trajectory(self):
+        self.times = []
         self.states = []
         self.actions = []
         self.rewards = []
@@ -205,18 +207,29 @@ class Learner:
 
         return self._alpha
 
-    def update_trajectory(self, state, action, reward):
+    def update_trajectory(self, t, state, action, reward):
         """
-        Records the state S(t) on which an action is taken, the taken action A(t), and the observed reward R(t+1),
-        and updates the history of this trajectory.
+        Records the state S(t) on which an action is taken, the taken action A(t), and the observed reward R(t)
+        for going to state S(t+1), and updates the history of this trajectory.
+
+        Arguments:
+        t: int
+            Time at which the given, state, action, and reward occur.
         """
         self.state = state
         self.action = action
         self.reward = reward
-        self._update_trajectory_history()
+        self._update_trajectory_history(t)
 
-    def _update_trajectory_history(self):
-        "Updates the history of the visited states and observed rewards during the simulation"
+    def _update_trajectory_history(self, t):
+        """
+        Updates the history of the visited states, actions taken, and observed rewards at the given simulation time
+
+        Arguments:
+        t: int
+            Time to which the stored state, action, and reward are associated.
+        """
+        self.times += [t]
         self.states += [self.state]
         self.actions += [self.action]
         self.rewards += [self.reward]
@@ -249,6 +262,9 @@ class Learner:
         "Returns the number of times the given state and action has been visited during the learning process"
         key = str( (state, action) )
         return self.dict_state_action_counts.get(key, 0)
+
+    def getTimes(self):
+        return self.times
 
     def getStates(self):
         return self.states

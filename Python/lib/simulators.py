@@ -592,7 +592,7 @@ class SimulatorQueue(Simulator):
         # - t: the number of queue state changes (a.k.a. number of queue iterations)
         # - t_learn: the number of learning steps (of the value functions and policies)
         t_learn = -1
-        while t_learn < self.dict_nsteps['learn'] - 1:  # -1 because t_learn starts at -1 (think what would happen when dict_nsteps['learn'] = 1 (if we don't put -1, we would run 2 iterations, instead of the requested 1 iteration)
+        while t_learn < self.dict_nsteps['learn'] - 1:  # -1 because t_learn starts at -1 (think what would happen when dict_nsteps['learn'] = 1: i.e. if we don't put -1, we would run 2 iterations, instead of the requested 1 iteration)
             t_learn += 1
             # Reset the environment and the learners
             # (i.e. start the environment at the same state and prepare it for a fresh new learning step
@@ -610,9 +610,8 @@ class SimulatorQueue(Simulator):
 
             # Time step in the queue trajectory (the first time step is t = 0)
             t = -1
+            event_prev = None
             while not done:
-                t += 1
-
                 # Current state
                 state = self.env.getState()
 
@@ -620,7 +619,12 @@ class SimulatorQueue(Simulator):
                 time, event, job_class_or_server = self.generate_event()
                 if event == Event.BIRTH:
                     # The event is an incoming job class
-                    # => Set the arriving job class in the queue environment and apply the acceptance policy
+                    # => Increment the discrete time step, set the arriving job class in the queue environment, and apply the acceptance policy
+                    # NOTE: Only BIRTH events mark a new discrete time
+                    # (this guarantees that the stationary distribution of the discrete-time process coincides with that of the continuous-time process)
+                    t += 1
+
+                    # Store the class of the arriving job
                     job_class = job_class_or_server
                     self.env.setJobClass(job_class)
 
@@ -644,9 +648,24 @@ class SimulatorQueue(Simulator):
 
                     action = action_accept_reject
                     reward = reward_accept_reject + reward_assign
+                    if action == Actions.ACCEPT and reward != 0.0:
+                        print("--> action = {}, REWARD ASSIGN: {}, REWARD = {}".format(action_accept_reject, reward_assign, reward))
+                        raise ValueError("A non-zero reward is not possible when the action is ACCEPT.")
+
+                    # Update the trajectory used in the learning process, where we store:
+                    # S(t): state BEFORE an action is taken
+                    # A(t): action taken given the state S(t)
+                    # R(t): reward received by taking action A(t) and transition to S(t+1)
+                    self.update_trajectory(t_learn*(self.dict_nsteps['queue']+1) + t, t, state, action, reward)
+                    # Update the average reward (just for information purposes)
+                    self.learnerV.updateAverageReward(t, reward)
+
+                    done = self.check_done(t, state, action, reward, gradient_for_action)
+                    if done:
+                        print("Done at ")
                 elif event == Event.DEATH:
                     # The event is a completed service
-                    # => Update the state of the queue
+                    # => Update the state of the queue but do NOT update the discrete-time step
                     server = job_class_or_server
                     queue_state = self.env.getQueueState()
                     assert queue_state[server] > 0, "The server where the completed service occurs has at least one job"
@@ -661,24 +680,29 @@ class SimulatorQueue(Simulator):
 
                     # We set the action to None because there is no action by the agent when a service is completed
                     action = None
-                    # There is no reward for completing a service
-                    reward = 0.0
-                    info = {}
-
-                done = self.check_done(t, state, action, reward, gradient_for_action)
+                    # We set the reward to NaN because a reward may happen ONLY when a new job arrives.
+                    # If there are rewards due to serviced jobs, we would impact those rewards into the reward
+                    # received when a new job arrives (which is not the case at this moment (28-Nov-2021),
+                    # i.e. the reward when a job is serviced is 0.
+                    reward = np.nan
+                    if event_prev == Event.BIRTH or event_prev is None:
+                        # Add the state PRIOR to the FIRST DEATH after a BIRTH (or the very first DEATH event
+                        # if that is the first event that occurs in the simulation), so that we record the state
+                        # to which the system went just after the latest BIRTH (so that the plot that is generated
+                        # at the end showing the states of the system at each time step does not raise suspicion
+                        # because the buffer size doesn't change between two consecutive time steps --which would be
+                        # inconsistent with the fact that a new time step is defined when a new job arrives).
+                        self.update_trajectory(t_learn*(self.dict_nsteps['queue']+1) + t, t, state, action, reward)
 
                 if self.debug:
                     print("{} | t={}: event={}, action={} -> state={}, reward={}".format(state, t, event, action,
                                                                                          next_state, reward), end="\n")
 
-                # Update the trajectory used in the learning process
-                self.update_trajectory(state, action, reward)
-                # Update the average reward (just for information purposes)
-                self.learnerV.updateAverageReward(t, reward)
+                event_prev = event
 
             if verbose and np.mod(t_learn, verbose_period) == 0:
-                print("==> agent ENDS at state {} from state = {}, action = {}, reward = {}, gradient = {})".format(
-                    self.env.getState(), state, action, reward, gradient_for_action))
+                print("==> agent ENDS at time t={} at state {} coming from state = {}, action = {}, reward = {}, gradient = {})" \
+                    .format(t, self.env.getState(), state, action, reward, gradient_for_action))
 
             # Learn the value function and the policy
             theta_prev = self.learnerP.getPolicy().getThetaParameter()
@@ -763,16 +787,29 @@ class SimulatorQueue(Simulator):
 
         return action, observation, reward, info
 
-    def update_trajectory(self, state, action, reward):
-        self.learnerV.update_trajectory(state, action, reward)
-        if True: #action is not None:
-            # The agent has interacted with the environment by taking an action
-            # => Record this action as part of the policy learning process
-            self.learnerP.update_trajectory(state, action, reward)
+    def update_trajectory(self, t_total, t_sim, state, action, reward):
+        """
+
+        Arguments:
+        t_total: int
+            Total time, used to store the trajectory for the policy learning.
+            Normally this would be the total simulation time computed from the learning steps.
+
+        t_sim: int
+            Simulation time, used to store the trajectory for the value function learning.
+        """
+        self.learnerV.update_trajectory(t_sim, state, action, reward)
+        # DM-2021/11/28: This assertion is no longer true because we are now storing in the trajectory ALSO the states
+        # occurring just before the FIRST DEATH event happening after a BIRTH event (so that we can show it in the
+        # trajectory plot we show at the end of the simulation and thus avoid the suspicion that something is wrong
+        # when we observe no change in the buffer size from one time step to the next --given that a new time step
+        # is created ONLY when a new job arrives (i.e. a BIRTH event occurs)
+        #assert action is not None, "The action is not None when learning the policy"
+        self.learnerP.update_trajectory(t_total, state, action, reward)
 
     def learn(self, t):
         """
-        Learns the value function and policy at time t
+        Learns the value functions and the policy at time t
 
         Arguments:
         t: int
@@ -787,9 +824,9 @@ class SimulatorQueue(Simulator):
         # we assume that the policy is fixed.
         # For now I am commenting out learnerV.learn() because we don't actually use the value of G(t) computed there
         # when updating the policy in learnerP.learn().
-        #self.learnerV.learn(t)
-        theta_prev, theta, V, gradV, G = self.learnerP.learn(t)
-        #theta_prev, theta, V, gradV, G = self.learnerP.learn_TR(t)
+        self.learnerV.learn(t)  # UNCOMMENTED ON SAT, 27-NOV-2021
+        #theta_prev, theta, V, gradV, G = self.learnerP.learn(t)
+        theta_prev, theta, V, gradV, G = self.learnerP.learn_TR(t)
         self.thetas += [theta_prev]
         self.thetas_updated += [theta]
         self.V += [V]
@@ -817,7 +854,10 @@ class SimulatorQueue(Simulator):
             R(t+1): reward yielded by the environment after taking action A(t) at state S(t).
 
         gradient: float
-            Gradient of the policy at time t, i.e. the value of the policy  gradient for A(t) given S(t).
+            Gradient of the policy at time t, i.e. the value of the policy gradient for A(t) given S(t).
+            This value COULD be used to determine whether the simulation is done, i.e. if the gradient is not zero
+            then we may assume that the simulation is done because we would have a step that allows us to learn
+            theta at that time.
 
         Return: bool
             Whether the queue simulation is done because the maximum number of iterations has been reached.
@@ -1025,11 +1065,11 @@ if __name__ == "__main__":
 
         # Simulator on a given number of iterations for the queue simulation and a given number of iterations to learn
         t_sim = 5000 #10
-        t_learn = 100 #1
+        t_learn = 50 #1
 
         # Learners definition
         fixed_window = False
-        alpha_start = 1.0 #/ t_sim  # Use `/ t_sim` when using update of theta at each simulation step (i.e. LeaPolicyGradient.learn_TR() is called instead of LeaPolicyGradient.learn())
+        alpha_start = 1.0 / t_sim  # Use `/ t_sim` when using update of theta at each simulation step (i.e. LeaPolicyGradient.learn_TR() is called instead of LeaPolicyGradient.learn())
         adjust_alpha = False
         min_time_to_update_alpha = 40
         alpha_min = 0.001
@@ -1049,8 +1089,8 @@ if __name__ == "__main__":
         learnerV, learnerP, df_learning = simul.run(start_state, seed=1717, verbose=True)
 
         # Save the estimation of G(t) for the last learning step to a file
-        file_results_G = "G.csv"
-        pd.DataFrame({'G': simul.G}).to_csv(file_results_G)
+        #file_results_G = "G.csv"
+        #pd.DataFrame({'G': simul.G}).to_csv(file_results_G)
 
         #-- Plot theta and the gradient of the value function
         SET_YLIM = True
@@ -1126,8 +1166,13 @@ if __name__ == "__main__":
         ax.set_ylabel('grad(V)')
 
         # Plot evolution of theta
+        # NOTE: (2021/11/27) I verified that the values of learnerP.getRewards() for the last learning step are the same to those for learnerV.getRewards() (which only stores the values for the LAST learning step)
         plt.figure()
-        plt.plot(learnerP.getPolicy().getThetas(), 'b.-')
+        # Times at which the trajectory of states is recorded
+        times = learnerP.getTimes()
+        times_unique = np.unique(times)
+        assert len(times_unique) == len(learnerP.getPolicy().getThetas())
+        plt.plot(times_unique, learnerP.getPolicy().getThetas(), 'b.-')
         ax = plt.gca()
         # Add vertical lines signalling the BEGINNING of each queue simulation
         times_sim_starts = range(0, t_learn*(t_sim+1), t_sim+1)
@@ -1136,17 +1181,18 @@ if __name__ == "__main__":
 
         # Buffer sizes
         buffer_sizes = [env_queue_mm.getBufferSizeFromState(s) for s in learnerP.getStates()]
-        ax.plot(buffer_sizes, 'g.', markersize=3)
+        ax.plot(times, buffer_sizes, 'g.', markersize=3)
         # Mark the start of each queue simulation
-        ax.plot(times_sim_starts, [buffer_sizes[t] for t in times_sim_starts], 'gx')
+        # DM-2021/11/28: No longer feasible (or easy to do) because the states are recorded twice for the same time step (namely at the first DEATH after a BIRTH event)
+        #ax.plot(times_sim_starts, [buffer_sizes[t] for t in times_sim_starts], 'gx')
         ax.set_xlabel("time step")
         ax.set_ylabel("theta")
 
         # Secondary plot showing the rewards received
         ax2 = ax.twinx()
-        ax2.plot(-np.array(learnerP.getRewards()), 'r-', alpha=0.3)
+        ax2.plot(times, -np.array(learnerP.getRewards()), 'r-', alpha=0.3)
         # Highlight with points the non-zero rewards
-        ax2.plot([-r if r != 0.0 else None for r in learnerP.getRewards()], 'r.')
+        ax2.plot(times, [-r if r != 0.0 else None for r in learnerP.getRewards()], 'r.')
         ax2.set_ylabel("Reward")
         ax2.set_yscale('log')
         plt.title("Optimum Theta = {}, Theta start = {}, t_sim = {:.0f}, fixed_window={}".format(COST_EXP_BUFFER_SIZE_REF, theta_start, t_sim, fixed_window))

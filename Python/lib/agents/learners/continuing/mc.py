@@ -77,27 +77,28 @@ class LeaMC(Learner):
 
     def learn(self, T):
         """
-        Computes the return G(t) for every simulation time t as the sum of the difference of each reward at t and the
-        baseline value (which is normally the average reward observed over the whole simulation period).
+        Computes the average reward V and the return G(t) for every simulation time t as the sum of the difference of\
+        each reward at t and the baseline value, chosen as the average reward V, observed over the whole simulation period.
 
         Arguments:
         T: int
             Time corresponding to the end of the simulation at which Monte-Carlo learning occurs.
         """
+        # The value function is set as the average reward over the whole simulation time (constant for all states)
+        self.V = self.averageReward
+
         rewards_history = copy.deepcopy(self.getRewards())
-        print("Rewards history: {}".format(rewards_history))
+        #print("Rewards history: {}".format(rewards_history))
         rewards_history.reverse()
-        print("Rewards history reversed: {}".format(rewards_history))
-        delta_rewards_history = np.array(rewards_history) - self.averageReward
-        print("Delta rewards history reversed: {}".format(delta_rewards_history))
-        self.G = np.cumsum(delta_rewards_history)
+        #print("Rewards history reversed: {}".format(rewards_history))
+        delta_rewards_history = np.array(rewards_history) - self.V
+        #print("Delta rewards history reversed: {}".format(delta_rewards_history))
+        self.G = np.nancumsum(delta_rewards_history)
         # Reverse the G just computed because we want to have t indexing the values of G from left to right of the array
         self.G = self.G[::-1]
 
-        # The value function is set as the average reward over the whole simulation time (constant for all states)
-        self.V = self.averageReward
-        print("Baseline-corrected return: {}".format(self.G))
-        print("Value function (average reward in simulation): {}".format(self.V))
+        #print("Value function (average reward in simulation): {}".format(self.V))
+        #print("Baseline-corrected return: {}".format(self.G))
 
         # Assert that G(0) is "0". Note that we compare with the maximum G(t) value because the "0" value is relative to this value
         # (o.w. the assertion may fail... e.g. when G(0) ~ 1E-8... but in that case Gmax ~ 1E7... so G(0) is really "0"!
@@ -106,7 +107,7 @@ class LeaMC(Learner):
 
     def updateAverageReward(self, t, reward):
         """
-        Updates the average reward observed until t
+        Updates the average reward observed until t, as long as the reward is not NaN
 
         Arguments:
         t: int
@@ -114,9 +115,13 @@ class LeaMC(Learner):
             It is assumed that the time for the first iteration is 0.
 
         reward: float
-            R(t+1): reward received by the agent when transition to state S(t+1).
+            R(t): reward received by the agent when transition to state S(t+1).
+            If the reward is NaN, the average reward is not updated.
+            This is equivalent to considering that the reward in that case is the same to the average reward observed
+            so far.
         """
-        self.averageReward = (t * self.averageReward + reward) / (t + 1)
+        if not np.isnan(reward):
+            self.averageReward = (t * self.averageReward + reward) / (t + 1)
 
     def _record_history(self):
         self.V_hist += [self.V]
