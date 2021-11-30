@@ -12,6 +12,10 @@ The environments are assumed to have the following methods defined:
 
 The environments of class gym.toy_text.Env satisfy the above conditions.
 """
+
+import runpy
+runpy.run_path('../../setup.py')
+
 import copy
 import warnings
 
