@@ -295,7 +295,7 @@ class LeaPolicyGradient(Learner):
         # The lower and upper bounds are asymmetric (larger lower bound) so that a large negative reward can lead to a large reduction of theta.
         bound_delta_theta_upper = +np.Inf   #+1.131
         bound_delta_theta_lower = -np.Inf   #-1.131 #-5.312314 #-1.0
-        delta_theta = np.max([ bound_delta_theta_lower, np.min([self.alpha * gradV, bound_delta_theta_upper]) ])
+        delta_theta = np.max([ bound_delta_theta_lower, np.min([self.getLearningRate() * gradV, bound_delta_theta_upper]) ])
         print("Estimated grad(V(theta)) = {}".format(gradV))
         print("Delta(theta) = alpha * grad(V) = {}".format(delta_theta))
 
@@ -407,7 +407,7 @@ class LeaPolicyGradient(Learner):
                     print("\tt={}: alpha(state={}, action={} (n={})) = {}".format(t, state, action, self.getCount(state, action), alpha))
 
                     # Note that we bound the delta theta to avoid too large changes!
-                    #theta += self.alpha * delta * self.policy.getGradientLog(action, state)
+                    #theta += self.getLearningRate() * delta * self.policy.getGradientLog(action, state)
                     bound_delta_theta_upper = +np.Inf   #+1.131
                     bound_delta_theta_lower = -np.Inf   #-1.131
                     delta_theta = np.max([ bound_delta_theta_lower, np.min([alpha * gradV, bound_delta_theta_upper]) ])

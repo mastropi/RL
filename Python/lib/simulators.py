@@ -829,8 +829,8 @@ class SimulatorQueue(Simulator):
         # For now I am commenting out learnerV.learn() because we don't actually use the value of G(t) computed there
         # when updating the policy in learnerP.learn().
         self.learnerV.learn(t)  # UNCOMMENTED ON SAT, 27-NOV-2021
-        #theta_prev, theta, V, gradV, G = self.learnerP.learn(t)
-        theta_prev, theta, V, gradV, G = self.learnerP.learn_TR(t)
+        theta_prev, theta, V, gradV, G = self.learnerP.learn(t)
+        #theta_prev, theta, V, gradV, G = self.learnerP.learn_TR(t)
         self.thetas += [theta_prev]
         self.thetas_updated += [theta]
         self.V += [V]
@@ -1069,12 +1069,12 @@ if __name__ == "__main__":
 
         # Simulator on a given number of iterations for the queue simulation and a given number of iterations to learn
         t_sim = 5000 #10
-        t_learn = 50 #1
+        t_learn = 100 #1
 
         # Learners definition
-        fixed_window = False
-        alpha_start = 1.0 / t_sim  # Use `/ t_sim` when using update of theta at each simulation step (i.e. LeaPolicyGradient.learn_TR() is called instead of LeaPolicyGradient.learn())
         adjust_alpha = False
+        alpha_start = 1.0 #/ t_sim  # Use `/ t_sim` when using update of theta at each simulation step (i.e. LeaPolicyGradient.learn_TR() is called instead of LeaPolicyGradient.learn())
+        adjust_alpha = True
         min_time_to_update_alpha = 40
         alpha_min = 0.001
         gamma = 1.0
