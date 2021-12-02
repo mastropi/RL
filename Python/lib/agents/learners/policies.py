@@ -434,6 +434,73 @@ class LeaPolicyGradient(Learner):
 
         return theta_prev, theta, self.getAverageRewardUnderPolicy(), gradV_mean, deltas
 
+    def learn_linear_theoretical(self, T):
+        """
+        Learns the policy by updating the theta parameter using gradient ascent and estimating the gradient
+        from the theoretical expression of the gradient in the linear step policy (only applies here!), namely:
+        
+        grad(V) = Pr(K-1) * ( Q(K-1,1) - Q(K-1,0) )
+
+        where Pr(K-1) is the stationary distribution for the buffer size K-1.
+
+        Pr(K-1) is estimated by the observed distribution of buffer size K-1.
+        Q(K-1,a) are estimated respectively by G(t1) and G(t0), where t1 and t0 are the times at which
+        the FIRST state-action = (K-1,a) is observed (so that we get more history to the future for their estimation. 
+
+        Arguments:
+        T: int (currently NOT used)
+            Time corresponding to the end of simulation at which learning takes place.
+
+        Return: tuple
+        Tuple with the following elements:
+        - theta: theta value before its update
+        - theta_next: theta value after its update
+        - V: the average reward observed in the episodic simulation using the theta value before its update
+        - gradV: gradient of the value function that generated the update on theta
+        - deltas: this is set to None
+        """
+        theta = self.policy.getThetaParameter()
+        theta_prev = copy.deepcopy(theta)
+
+        # Estimate the stationary probability of K-1 
+        states = [s for s, a in zip(self.learnerV.getStates(), self.learnerV.getActions()) if a is not None]
+        actions = [a for a in self.learnerV.getActions() if a is not None]
+        K = np.ceil(theta + 1)
+        p_Km1 = np.sum([1 for s in states if s == K - 1]) / len(states)
+
+        # Extract the return of interest G(K-1,a) 
+        G = self.learnerV.getReturn()
+        idx0 = find_first(zip(states, actions), (K-1,0))
+        idx1 = find_first(zip(states, actions), (K-1,1))
+        if idx0 >= 0:
+            G0 = G[idx0]
+        else:
+            G0 = np.nan
+        if idx1 >= 0:
+            G1 = G[idx1]
+        else:
+            G1 = np.nan
+        
+        # Estimated grad(V)
+        gradV = p_Km1 * (G1 - G0)
+
+        # Note that we bound the delta theta to avoid too large changes!
+        # We use "strange" numbers to avoid having theta fall always on the same distance from an integer (e.g. 4.1, 5.1, etc.)
+        # The lower and upper bounds are asymmetric (larger lower bound) so that a large negative reward can lead to a large reduction of theta.
+        bound_delta_theta_upper = +np.Inf   #+1.131
+        bound_delta_theta_lower = -np.Inf   #-1.131 #-5.312314 #-1.0
+        delta_theta = np.max([ bound_delta_theta_lower, np.min([self.getLearningRate() * gradV, bound_delta_theta_upper]) ])
+        print("Estimated grad(V(theta)) = {}".format(gradV))
+        print("Delta(theta) = alpha * grad(V) = {}".format(delta_theta))
+
+        theta_lower = 0.1       # Do NOT use an integer value as lower bound of theta because the gradient is never non-zero at integer-valued thetas
+        theta = np.max([theta_lower, theta + delta_theta])
+
+        # Update the policy on the new theta and record it into the history of its updates
+        self.policy.setThetaParameter(theta)
+
+        return theta_prev, theta, self.getAverageRewardUnderPolicy(), gradV, None
+
     #----- GETTERS -----#
     def getPolicy(self):
         return self.policy
