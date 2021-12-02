@@ -830,8 +830,9 @@ class SimulatorQueue(Simulator):
         # For now I am commenting out learnerV.learn() because we don't actually use the value of G(t) computed there
         # when updating the policy in learnerP.learn().
         self.learnerV.learn(t)  # UNCOMMENTED ON SAT, 27-NOV-2021
-        theta_prev, theta, V, gradV, G = self.learnerP.learn(t)
+        #theta_prev, theta, V, gradV, G = self.learnerP.learn(t)
         #theta_prev, theta, V, gradV, G = self.learnerP.learn_TR(t)
+        theta_prev, theta, V, gradV, G = self.learnerP.learn_linear_theoretical(t)
         self.thetas += [theta_prev]
         self.thetas_updated += [theta]
         self.V += [V]
@@ -1064,7 +1065,7 @@ if __name__ == "__main__":
         env_queue_mm = EnvQueueSingleBufferWithJobClasses(queue, job_class_rates, rewardOnJobRejection_ExponentialCost, None)
 
         # Acceptance policy definition
-        theta_start = 1.3  # 1.3, 11.3  # IMPORTANT: This value should NOT be integer, o.w. the policy gradient will always be 0 regardless of the state at which blocking occurs
+        theta_start = 11.3  # 1.3, 11.3  # IMPORTANT: This value should NOT be integer, o.w. the policy gradient will always be 0 regardless of the state at which blocking occurs
         policies = dict({PolicyTypes.ACCEPT: PolQueueTwoActionsLinearStep(env_queue_mm, theta_start), PolicyTypes.ASSIGN: None})
         #policies = dict({PolicyTypes.ACCEPT: PolQueueTwoActionsLogit(env_queue_mm, theta_start, beta=1.0), PolicyTypes.ASSIGN: None})
 

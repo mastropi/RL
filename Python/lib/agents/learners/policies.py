@@ -10,8 +10,8 @@ import copy
 import numpy as np
 import pandas as pd
 
-from Python.lib.agents.learners import Learner
-
+from agents.learners import Learner
+from utils.basic import find_first
 
 class LeaPolicyGradient(Learner):
     """
@@ -463,38 +463,49 @@ class LeaPolicyGradient(Learner):
         - theta_next: theta value after its update
         - V: the average reward observed in the episodic simulation using the theta value before its update
         - gradV: gradient of the value function that generated the update on theta
-        - deltas: this is set to None
+        - Gdiff: the return difference between the accept action and the reject action
         """
         theta = self.policy.getThetaParameter()
         theta_prev = copy.deepcopy(theta)
 
+        # Store the value of theta (BEFORE its update) --> for plotting purposes
+        for t in range(T+1):
+            self.policy.store_theta(theta)
+
         # Estimate the stationary probability of K-1 
         states = [s for s, a in zip(self.learnerV.getStates(), self.learnerV.getActions()) if a is not None]
         actions = [a for a in self.learnerV.getActions() if a is not None]
+        buffer_sizes = [self.env.getBufferSizeFromState(s) for s in states]
         K = np.ceil(theta + 1)
-        p_Km1 = np.sum([1 for s in states if s == K - 1]) / len(states)
+        print("K={}".format(K))
+        print("buffer sizes, actions = {}".format(np.c_[buffer_sizes, actions]))
+        p_Km1 = np.sum([1 for bs in buffer_sizes if bs == K - 1]) / len(buffer_sizes)
 
         # Extract the return of interest G(K-1,a) 
         G = self.learnerV.getReturn()
-        idx0 = find_first(zip(states, actions), (K-1,0))
-        idx1 = find_first(zip(states, actions), (K-1,1))
-        if idx0 >= 0:
-            G0 = G[idx0]
-        else:
-            G0 = np.nan
+        idx0 = find_first(zip(buffer_sizes, actions), (K-1,0))
+        idx1 = find_first(zip(buffer_sizes, actions), (K-1,1))
         if idx1 >= 0:
             G1 = G[idx1]
+            print("Estimated return G(K-1,a=1) computed on {} time steps: {}".format(T - idx1, G1))
         else:
-            G1 = np.nan
-        
+            G1 = 0.0    # We say that the deviation from the average reward is 0
+            print("WARNING: The state-action = (K-1,a=1) has not been observed during the simulation on {} time steps!".format(T))
+        if idx0 >= 0:
+            G0 = G[idx0]
+            print("Estimated return G(K-1,a=0) computed on {} time steps: {}".format(T - idx0, G0))
+        else:
+            G0 = 0.0    # We say that the deviation from the average reward is 0
+            print("WARNING: The state-action = (K-1,a=0) has not been observed during the simulation on {} time steps!".format(T))
+
         # Estimated grad(V)
         gradV = p_Km1 * (G1 - G0)
 
         # Note that we bound the delta theta to avoid too large changes!
         # We use "strange" numbers to avoid having theta fall always on the same distance from an integer (e.g. 4.1, 5.1, etc.)
         # The lower and upper bounds are asymmetric (larger lower bound) so that a large negative reward can lead to a large reduction of theta.
-        bound_delta_theta_upper = +np.Inf   #+1.131
-        bound_delta_theta_lower = -np.Inf   #-1.131 #-5.312314 #-1.0
+        bound_delta_theta_upper = +1.131
+        bound_delta_theta_lower = -1.131 #-5.312314 #-1.0
         delta_theta = np.max([ bound_delta_theta_lower, np.min([self.getLearningRate() * gradV, bound_delta_theta_upper]) ])
         print("Estimated grad(V(theta)) = {}".format(gradV))
         print("Delta(theta) = alpha * grad(V) = {}".format(delta_theta))
@@ -505,7 +516,7 @@ class LeaPolicyGradient(Learner):
         # Update the policy on the new theta and record it into the history of its updates
         self.policy.setThetaParameter(theta)
 
-        return theta_prev, theta, self.getAverageRewardUnderPolicy(), gradV, None
+        return theta_prev, theta, self.getAverageRewardUnderPolicy(), gradV, G1 - G0
 
     #----- GETTERS -----#
     def getPolicy(self):
