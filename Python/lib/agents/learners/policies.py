@@ -129,19 +129,25 @@ class LeaPolicyGradient(Learner):
 
             return G
 
-        rewards_history = [r for r in self.learnerV.getRewards() if not np.isnan(r)]
-        actions_history = [a for a in self.learnerV.getActions() if a is not None]
-        rewards_history.reverse()
-        actions_history.reverse()
-        delta_rewards_history = np.array(rewards_history) - baseline
-            ## 2021/11/28: We must consider only the historical records where there is an action.
-            ## Note that as of today we are also storing in the history the first DEATH following a BIRTH
-            ## (for which the action is None) with the purpose of plotting the transition of the latest BIRTH
-            ## and avoid any suspicion that the implementation is correct just because in the trajectory plot
-            ## we observe that the buffer size does not change between two consecutive time steps.
-        G = np.cumsum(delta_rewards_history)
-        # Reverse the G just computed because we want to have t indexing the values of G from left to right of the array
-        return G[::-1]
+        def not_needed_because_G_is_already_computed_in_learnerV():
+            rewards_history = [r for r in self.learnerV.getRewards() if not np.isnan(r)]
+            actions_history = [a for a in self.learnerV.getActions() if a is not None]
+            rewards_history.reverse()
+            actions_history.reverse()
+            delta_rewards_history = np.array(rewards_history) - baseline
+                ## 2021/11/28: We must consider only the historical records where there is an action.
+                ## Note that as of today we are also storing in the history the first DEATH following a BIRTH
+                ## (for which the action is None) with the purpose of plotting the transition of the latest BIRTH
+                ## and avoid any suspicion that the implementation is correct just because in the trajectory plot
+                ## we observe that the buffer size does not change between two consecutive time steps.
+            G = np.cumsum(delta_rewards_history)
+
+            # Reverse the G just computed because we want to have t indexing the values of G from left to right of the array
+            return G[::-1]
+
+        # Get the return from the learner of the value functions
+        G = [g for g, a in zip(self.learnerV.getReturn(), self.learnerV.getActions()) if a is not None]
+        return G
 
     def computeCorrectedReturnOnFixedWindow(self, baseline, W):
         """

@@ -13,8 +13,9 @@ The environments are assumed to have the following methods defined:
 The environments of class gym.toy_text.Env satisfy the above conditions.
 """
 
-import runpy
-runpy.run_path('../../setup.py')
+if __name__ == "__main__":
+    import runpy
+    runpy.run_path('../../setup.py')
 
 import copy
 import warnings
@@ -1072,7 +1073,7 @@ if __name__ == "__main__":
         t_learn = 100 #1
 
         # Learners definition
-        adjust_alpha = False
+        fixed_window = False
         alpha_start = 1.0 #/ t_sim  # Use `/ t_sim` when using update of theta at each simulation step (i.e. LeaPolicyGradient.learn_TR() is called instead of LeaPolicyGradient.learn())
         adjust_alpha = True
         min_time_to_update_alpha = 40
@@ -1175,7 +1176,7 @@ if __name__ == "__main__":
         # Times at which the trajectory of states is recorded
         times = learnerP.getTimes()
         times_unique = np.unique(times)
-        assert len(times_unique) == len(learnerP.getPolicy().getThetas())
+        assert len(times_unique) == len(learnerP.getPolicy().getThetas()), "The number of unique learning times ({}) is equal to the number of theta updates ({})".format(len(times_unique), len(learnerP.getPolicy().getThetas()))
         plt.plot(times_unique, learnerP.getPolicy().getThetas(), 'b.-')
         ax = plt.gca()
         # Add vertical lines signalling the BEGINNING of each queue simulation
