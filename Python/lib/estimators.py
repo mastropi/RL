@@ -297,6 +297,8 @@ class EstimatorQueueBlockingFlemingViot:
                  reactivate=True,
                  finalize_info={'maxevents': np.Inf, 'maxtime': np.Inf, 'type': FinalizeType.ABSORB_CENSORED, 'condition': FinalizeCondition.ACTIVE},
                  seed=None, plotFlag=False, log=False):
+        # TODO: (2021/12/06) Make sure the policy_accept attribute accepts a parameterized policy of the type used in the policy gradient algorithm that learns the optimum theta threshold for the single-server RL problem
+        # See the accept_jobs() method which would probably need to be updated.
 
         #--------------------------------- Parse input parameters -----------------------------
         if reactivate and nparticles < 2:
@@ -959,6 +961,18 @@ class EstimatorQueueBlockingFlemingViot:
         - the total absorption cycle time over all particles
         - the number of measured absorption cycles
         """
+
+        # TODO: (2021/12/06) Extend the simulation results to estimating the stationary probability of more than one buffer size of interest, NOT only the blocking buffer size:
+        # Estimate the stationary probability of MORE THAN ONE STATE (we need P(K-1) and P(K) for the single-server system with gradient policy learning)
+        # MAIN IDEA: Extend the counts_blocked list to a 2D list with as many values in the first dimension as
+        # the number of buffer sizes whose stationary probability is of interest (in our case: 2 values, K-1 and K,
+        # where K is determined from the value of theta of the parameterized policy used in the policy gradient
+        # learning algorithm, from where this method would be called)
+        # --> NOTE that this implies:
+        #       - updating the _update_counts_blocked() method since this considers that counts_blocked is a 1D list!
+        #       - renaming the counts_blocked attribute to something else, since FV doesn't really apply to blocking only,
+        #           we can use it to estimate the stationary probability of ANY buffer size.
+
         self.reset()
         self.reset_positions(start_event_type)
 

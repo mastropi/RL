@@ -713,8 +713,8 @@ class SimulatorQueue(Simulator):
             theta_prev = self.learnerP.getPolicy().getThetaParameter()
             self.learn(t)
             if verbose and np.mod(t_learn, verbose_period) == 0:
-                print("\tUpdated value function at the end of the queue simulation: V(s) = {}".format(self.learnerV.getV()))
-                print("\tObserved average reward = {}".format(self.learnerP.getAverageRewardUnderPolicy()))
+                print("\tUpdated value function at the end of the queue simulation: average reward V = {}".format(self.learnerV.getV()))
+                print("\tSame observed average reward (computed from Policy learner) = {}".format(self.learnerP.getAverageRewardUnderPolicy()))
                 print("\tUpdated theta parameter of policy after learning: theta = {} -> {}".format(theta_prev, self.learnerP.getPolicy().getThetaParameter()))
 
         if plot:
@@ -1076,7 +1076,7 @@ if __name__ == "__main__":
         # Learners definition
         fixed_window = False
         alpha_start = 1.0 #/ t_sim  # Use `/ t_sim` when using update of theta at each simulation step (i.e. LeaPolicyGradient.learn_TR() is called instead of LeaPolicyGradient.learn())
-        adjust_alpha = True
+        adjust_alpha = False
         min_time_to_update_alpha = 40
         alpha_min = 0.001
         gamma = 1.0
@@ -1099,7 +1099,7 @@ if __name__ == "__main__":
         #pd.DataFrame({'G': simul.G}).to_csv(file_results_G)
 
         #-- Plot theta and the gradient of the value function
-        SET_YLIM = True
+        SET_YLIM = False
 
         # Estimated value function
         ax, line_est = plotting.plot_colormap(df_learning['theta'], -df_learning['V'], cmap_name="Blues")

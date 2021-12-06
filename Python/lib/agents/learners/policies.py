@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 
 from agents.learners import Learner
-from utils.basic import find_first
+from utils.basic import find
 
 class LeaPolicyGradient(Learner):
     """
@@ -476,27 +476,36 @@ class LeaPolicyGradient(Learner):
         states = [s for s, a in zip(self.learnerV.getStates(), self.learnerV.getActions()) if a is not None]
         actions = [a for a in self.learnerV.getActions() if a is not None]
         buffer_sizes = [self.env.getBufferSizeFromState(s) for s in states]
-        K = np.ceil(theta + 1)
+        K = int( np.ceil(theta + 1) )
         print("K={}".format(K))
-        print("buffer sizes, actions = {}".format(np.c_[buffer_sizes, actions]))
+        #print("buffer sizes, actions = {}".format(np.c_[buffer_sizes, actions]))
         p_Km1 = np.sum([1 for bs in buffer_sizes if bs == K - 1]) / len(buffer_sizes)
+        print("Estimated stationary distribution of K-1 on {} samples: {}".format(len(buffer_sizes), p_Km1))
 
         # Extract the return of interest G(K-1,a) 
         G = self.learnerV.getReturn()
-        idx0 = find_first(zip(buffer_sizes, actions), (K-1,0))
-        idx1 = find_first(zip(buffer_sizes, actions), (K-1,1))
-        if idx1 >= 0:
-            G1 = G[idx1]
-            print("Estimated return G(K-1,a=1) computed on {} time steps: {}".format(T - idx1, G1))
-        else:
-            G1 = 0.0    # We say that the deviation from the average reward is 0
-            print("WARNING: The state-action = (K-1,a=1) has not been observed during the simulation on {} time steps!".format(T))
-        if idx0 >= 0:
-            G0 = G[idx0]
-            print("Estimated return G(K-1,a=0) computed on {} time steps: {}".format(T - idx0, G0))
-        else:
-            G0 = 0.0    # We say that the deviation from the average reward is 0
-            print("WARNING: The state-action = (K-1,a=0) has not been observed during the simulation on {} time steps!".format(T))
+        all_idx_action_0 = find(zip(buffer_sizes, actions), (K-1,0))
+        all_idx_action_1 = find(zip(buffer_sizes, actions), (K-1,1))
+        G1 = 0.0
+        G0 = 0.0
+        n1 = 0
+        n0 = 0
+        for idx in all_idx_action_1:
+            #G1 += G[idx]
+            #n1 += 1
+            G1 += (T - idx) * G[idx]
+            n1 += (T - idx)
+        for idx in all_idx_action_0:
+            #G0 += G[idx]
+            #n0 += 1
+            G0 += (T - idx) * G[idx]
+            n0 += (T - idx)
+        # G(K-1,a) is estimated by a WEIGHTED average on the sample sizes used to compute each G(K-1,a) contributing to the estimator
+        # We use np.max([1, ...]) to include the case when no cases are observed to estimate G(K-1,a)
+        G1 /= np.max([1, n1])
+        G0 /= np.max([1, n0])
+        print("Estimated return G(K-1,a=1) computed on {} time steps: {}".format(len(all_idx_action_1), G1))
+        print("Estimated return G(K-1,a=0) computed on {} time steps: {}".format(len(all_idx_action_0), G0))
 
         # Estimated grad(V)
         gradV = p_Km1 * (G1 - G0)
@@ -504,8 +513,8 @@ class LeaPolicyGradient(Learner):
         # Note that we bound the delta theta to avoid too large changes!
         # We use "strange" numbers to avoid having theta fall always on the same distance from an integer (e.g. 4.1, 5.1, etc.)
         # The lower and upper bounds are asymmetric (larger lower bound) so that a large negative reward can lead to a large reduction of theta.
-        bound_delta_theta_upper = +1.131
-        bound_delta_theta_lower = -1.131 #-5.312314 #-1.0
+        bound_delta_theta_upper = +2.131 #+1.131
+        bound_delta_theta_lower = -5.3123 #-1.131 #-5.312314 #-1.0
         delta_theta = np.max([ bound_delta_theta_lower, np.min([self.getLearningRate() * gradV, bound_delta_theta_upper]) ])
         print("Estimated grad(V(theta)) = {}".format(gradV))
         print("Delta(theta) = alpha * grad(V) = {}".format(delta_theta))
@@ -516,7 +525,7 @@ class LeaPolicyGradient(Learner):
         # Update the policy on the new theta and record it into the history of its updates
         self.policy.setThetaParameter(theta)
 
-        return theta_prev, theta, self.getAverageRewardUnderPolicy(), gradV, G1 - G0
+        return theta_prev, theta, self.learnerV.getV(), gradV, G1 - G0
 
     #----- GETTERS -----#
     def getPolicy(self):
