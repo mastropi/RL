@@ -63,7 +63,7 @@ def generate_min_exponential_time(rates):
 
     Arguments:
     rates: positive float or list of positive floats or numpy array of positive floats
-        Rates of the exponentials on which the minimum time is generated.
+        Rates of the exponential distributions on which the minimum time is generated.
         Some (but not all) of the rates may be NaN as only the non-NaN values are considered for the possible
         exponential distributions.
 
@@ -75,7 +75,7 @@ def generate_min_exponential_time(rates):
     # Check the rates
     rates = as_array(rates)
     if any(rates[~np.isnan(rates)] < 0):
-        warnings.warn("Some of the rates are negative... they will be ignored from the generation of the min exponential time ({}".format(rates))
+        warnings.warn("Some of the rates are negative... they will be ignored for the generation of the min exponential time ({}".format(rates))
 
     # Find the valid rates
     valid_rates = copy.deepcopy(rates)
@@ -84,7 +84,7 @@ def generate_min_exponential_time(rates):
 
     # Rate of occurrence of ANY event among the input rates
     event_rate = np.nansum(valid_rates)
-    if event_rate <= 0:   # NOTE that, in case all valid_rates are NaN, the of all NaNs is 0.0! (so we are in business)
+    if event_rate <= 0:   # NOTE that, in case all valid_rates are NaN, the nansum() of all NaNs is 0.0! (so this condition still takes care of the all-NaN-rates case)
         raise ValueError("The event rate computed from the given rates ({}) must be positive ({})".format(rates, event_rate))
 
     # Generate the event time
@@ -376,7 +376,7 @@ def all_combos_with_sum(R, C):
 
 # Tests
 if __name__ == "__main__":
-    #---------- generate_min_exponential_time ---------------#
+    #---------- generate_min_exponential_time() -------------#
     print("Testing generate_min_exponential_time(rates):")
     #-- Normal scenario
     np.random.seed(1717)
@@ -413,7 +413,7 @@ if __name__ == "__main__":
     for i in range(10):
         t, idx = generate_min_exponential_time([0.2, np.nan, -0.7])
         assert idx == idx_expected
-    #---------- generate_min_exponential_time ---------------#
+    #---------- generate_min_exponential_time() -------------#
 
 
     #------------------- comb(n,k) -------------------------#

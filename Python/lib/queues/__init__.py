@@ -19,8 +19,10 @@ if __name__ == "__main__":
     runpy.run_path('../../../setup.py')
 
     from Python.lib.utils.basic import is_scalar
+    from Python.lib.utils.computing import generate_min_exponential_time
 else:
     from utils.basic import is_scalar
+    from utils.computing import generate_min_exponential_time
 
 
 @unique
@@ -297,7 +299,6 @@ class QueueMM(GenericQueue):
         - the type of the generated event (of Enum class Event)
         - the server at which the generated event takes place (int)
         """
-
         #-- Generate the next event time
         # Note that we only consider the event rates of the events that are possible
         # i.e. birth if buffer size < K and death if the server has at least one job in its queue
@@ -310,18 +311,9 @@ class QueueMM(GenericQueue):
         # Set the invalid rates to NaN so that they are not picked by the algorithm as valid events
         valid_rates = copy.deepcopy(self.rates)
         valid_rates[~is_valid_rate] = np.nan
-        valid_rates_flat = valid_rates.flatten()
 
-        event_rate = np.nansum(valid_rates)
-        event_time = self._generate_event_times_at_rate(event_rate, size=1)
+        event_time, idx_event = generate_min_exponential_time(valid_rates.flatten())
 
-        #-- Probability of selection of each valid event in each server and indices of the flatten self.rates to choose from
-        probs = valid_rates[is_valid_rate].flatten() / event_rate
-        indices_to_choose_from = [idx for idx, r in enumerate(valid_rates_flat) if not np.isnan(r)]
-
-        #-- Assign the event type and server on which the event takes place as described in the method's documentation
-        # Linear index indicating server and event type (recall that dim1 in self.rates is server, dim2 is event type)
-        idx_event = np.random.choice(indices_to_choose_from, size=1, p=probs)  # Note: np.flatten() covers every row first (i.e. C style by default)
         # Extract the server and event type from the linear index just chosen
         # Below, `2` is the number of possible event types: birth and death
         event_server = int( idx_event / 2 )
@@ -501,6 +493,7 @@ class QueueMM(GenericQueue):
 
 if __name__ == "__main__":
     # ------------------------- Unit tests -----------------------------#
+    # --------------------- generate_next_event() ----------------------#
     # --- Test #1: Generate events using the Markovian approach
     capacity = 6
     nservers = 3
@@ -583,3 +576,5 @@ if __name__ == "__main__":
     print("Observed proportions of events by server and type on N={} generated events (server x event-types):\n{}".format(N, phat))
     print("Standard Errors on N={} generated events (server x event-types):\n{}".format(N, se_phat))
     assert np.allclose(phat, p, atol=3*se_phat)   # true probabilities should be contained in +/- 3 SE(phat) from phat
+    # --------------------- generate_next_event() ----------------------#
+    # ------------------------- Unit tests -----------------------------#
