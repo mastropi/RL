@@ -468,11 +468,14 @@ class LeaPolicyGradient(Learner):
         theta = self.policy.getThetaParameter()
         theta_prev = copy.deepcopy(theta)
 
+        # Compute the average reward under the policy (for informational purposes only, as this has already been computed by the value function learner, learnerV)
+        self.estimateAverageRewardUnderPolicy()
+
         # Store the value of theta (BEFORE its update) --> for plotting purposes
         for t in range(T+1):
             self.policy.store_theta(theta)
 
-        # Estimate the stationary probability of K-1 
+        # Estimate the stationary probability of K-1
         states = [s for s, a in zip(self.learnerV.getStates(), self.learnerV.getActions()) if a is not None]
         actions = [a for a in self.learnerV.getActions() if a is not None]
         buffer_sizes = [self.env.getBufferSizeFromState(s) for s in states]
@@ -484,8 +487,8 @@ class LeaPolicyGradient(Learner):
 
         # Extract the return of interest G(K-1,a) 
         G = self.learnerV.getReturn()
-        all_idx_action_0 = find(zip(buffer_sizes, actions), (K-1,0))
-        all_idx_action_1 = find(zip(buffer_sizes, actions), (K-1,1))
+        all_idx_action_0 = find(zip(buffer_sizes, actions), (K-1, 0))
+        all_idx_action_1 = find(zip(buffer_sizes, actions), (K-1, 1))
         G1 = 0.0
         G0 = 0.0
         n1 = 0
@@ -526,6 +529,70 @@ class LeaPolicyGradient(Learner):
         self.policy.setThetaParameter(theta)
 
         return theta_prev, theta, self.learnerV.getV(), gradV, G1 - G0
+
+    def learn_linear_theoretical_from_estimated_values(self, T, proba_stationary, Q_values):
+        """
+        Learns the policy by updating the theta parameter using gradient ascent and estimating the gradient
+        from the theoretical expression of the gradient in the linear step policy (only applies here!), namely:
+
+        grad(V) = Pr(K-1) * ( Q(K-1,1) - Q(K-1,0) )
+
+        where Pr(K-1) is the stationary distribution for the buffer size K-1.
+
+        Arguments:
+        proba_stationary: float between 0 and 1
+            Estimated stationary probability of buffer size = K-1.
+
+        Q_values: list or numpy array
+            Estimated state-action values for (K-1, a=1) and (K-1, a=0)
+
+        Return: tuple
+        Tuple with the following elements:
+        - theta: theta value before its update
+        - theta_next: theta value after its update
+        - V: the average of the two state-action values (just to return something as it is not really meaningful)
+        - gradV: gradient of the value function that generated the update on theta
+        - Q_diff: the difference in the state-action values between the accept action and the reject action
+        """
+        # -- Parse input parameters
+        if not (0.0 <= proba_stationary <= 1.0):
+            raise ValueError("The stationary probability estimate must be between 0 and 1 ({})".format(proba_stationary))
+        if not isinstance(Q_values, (list, np.ndarray)) or len(Q_values) != 2:
+            raise ValueError("Parameter Q_values must be a list or numpy array of length 2 ({})".format(Q_values))
+        # -- Parse input parameters
+
+        theta = self.policy.getThetaParameter()
+        theta_prev = copy.deepcopy(theta)
+
+        # Store the value of theta (BEFORE its update) --> for plotting purposes
+        # Note that we store just ONE theta, as opposed to repeating theta as many times as simulation steps
+        # have been used in each queue simulation episode, because this methodology can be used in either
+        # Monte-Carlo mode (where we can follow the trajectory of the single particle being used in the estimation) or
+        # Fleming-Viot mode (where there is no one single trajectory to plot that is responsible for learning theta).
+        self.policy.store_theta(theta)
+
+        # Estimated grad(V)
+        Q_mean = 0.5 * (Q_values[1] + Q_values[0])
+        Q_diff = Q_values[1] - Q_values[0]
+        gradV = proba_stationary * Q_diff
+
+        # Note that we bound the delta theta to avoid too large changes!
+        # We use "strange" numbers to avoid having theta fall always on the same distance from an integer (e.g. 4.1, 5.1, etc.)
+        # The lower and upper bounds are asymmetric (larger lower bound) so that a large negative reward can lead to a large reduction of theta.
+        bound_delta_theta_upper = +np.Inf #+2.1310  # +1.131
+        bound_delta_theta_lower = -np.Inf #-5.3123  # -1.131 #-5.312314 #-1.0
+        delta_theta = np.max(
+            [bound_delta_theta_lower, np.min([self.getLearningRate() * gradV, bound_delta_theta_upper])])
+        print("Estimated grad(V(theta)) = {}".format(gradV))
+        print("Delta(theta) = alpha * grad(V) = {}".format(delta_theta))
+
+        theta_lower = 0.1  # Do NOT use an integer value as lower bound of theta because the gradient is never non-zero at integer-valued thetas
+        theta = np.max([theta_lower, theta + delta_theta])
+
+        # Update the policy on the new theta and record it into the history of its updates
+        self.policy.setThetaParameter(theta)
+
+        return theta_prev, theta, Q_mean, gradV, Q_diff
 
     #----- GETTERS -----#
     def getPolicy(self):

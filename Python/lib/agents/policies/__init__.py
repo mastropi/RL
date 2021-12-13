@@ -33,16 +33,18 @@ class GenericParameterizedPolicyTwoActions:
     def __init__(self, env, theta: float or list or np.ndarray):
         self.env = env
 
-        self.setThetaParameter(theta)
-        # We store the start value of theta so that we can reset it when resetting the policy
-        self.theta_start = self.theta
+        # Store the given theta as start theta value so that we can reset it to that value when resetting the policy
+        self.theta_start = theta
 
-        # Attribute that keep track of the theta parameter estimation
-        self.thetas = []
+        # Store the start theta in the object
+        self.setThetaParameter(self.theta_start)
+
+        # Attribute that keep track of all the theta parameter values taken during the learning process
+        self.thetas = [self.theta_start]
 
     def reset(self):
         self.setThetaParameter(self.theta_start)
-        self.thetas = []
+        self.thetas = [self.theta_start]
 
     def choose_action(self, state):
         """

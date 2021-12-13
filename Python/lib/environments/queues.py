@@ -34,6 +34,15 @@ else:
 
 # NOTE: We use IntEnum instead of Enum because of the problem of comparison described here!!
 # https://stackoverflow.com/questions/28125055/enum-in-python-doesnt-work-as-expected
+# The problem of using Enum has to do with the fact that the comparison between two Enum values
+# (as in action = Actions.REJECT) is done via id, i.e. by their memory address --because Enum does NOT have
+# the equal operator implemented, so it checks equality via their memory addresses.
+# The memory address of each Enum value WILL be different from the memory address of that same Enum value
+# if the same Enum has been imported differently... e.g. by using absolute paths vs. using relative paths...
+# (as apparently Python doesn't recognize that the same Enum has been imported when importing it again using
+# a relative path if the previous import was done with an absolute path --my guess here).
+# This is explained in the answer by Austin Basye in the above link.
+# BOTTOM LINE: Do not mix relative with absolute imports!! --> I SHOULD FIX THIS IN MY CODE! (2021/12/10)
 @unique
 class ActionTypes(IntEnum):
     ACCEPT_REJECT = 1
@@ -202,7 +211,7 @@ class EnvQueueSingleBufferWithJobClasses(gym.Env):
         """
         return np.random.random()
 
-    def step(self, action :int or Actions, action_type :ActionTypes):
+    def step(self, action: int or Actions, action_type: ActionTypes):
         """
         The environment takes a step when receiving the given accept/reject action with the given assignment policy
         to assign the possibly accepted incoming job to a server in the queue system.
@@ -285,6 +294,11 @@ class EnvQueueSingleBufferWithJobClasses(gym.Env):
         return next_state, reward, {}
 
     #------ GETTERS ------#
+    def get_seed(self):
+        return self.getSeed()
+    def getSeed(self):
+        return self.seed
+
     def getQueue(self):
         return self.queue
 
@@ -331,6 +345,9 @@ class EnvQueueSingleBufferWithJobClasses(gym.Env):
     def getRewardForJobClassAcceptance(self, job_class: int):
         return self.rewards_accept_by_job_class[job_class]
 
+    def getRewardFunction(self):
+        return self.reward_func
+
     #------ SETTERS ------#
     def _setServerSizes(self, sizes : int or list or np.array):
         "Sets the size of the servers in the queue"
@@ -338,13 +355,12 @@ class EnvQueueSingleBufferWithJobClasses(gym.Env):
 
     def setJobClass(self, job_class: int or None):
         "Sets the job class of a new arriving job. The job class can be None."
-        if  not (
+        if not (
                 job_class is None or \
                 int(job_class) == job_class and 0 <= job_class <= self.getNumJobClasses()
                 ):
             raise ValueError(
-                "The job class is invalid ({}). It must be an integer between {} and {}".format(job_class, 0,
-                                                                                                self.getNumJobClasses() - 1))
+                "The job class is invalid ({}). It must be an integer between {} and {}".format(job_class, 0, self.getNumJobClasses() - 1))
         self.job_class = job_class
 
     def setState(self, state):

@@ -201,6 +201,10 @@ class PolQueueTwoActionsLinearStep(GenericParameterizedPolicyTwoActions):
 
         return policy_value_for_action
 
+    def getBufferSizeForDeterministicBlocking(self):
+        "Returns K, the first integer greater than theta + 1"
+        return int( np.ceil( self.getThetaParameter()[0] + 1 ) )
+
 
 class PolQueueTwoActionsLinearStepOnJobClasses(GenericParameterizedPolicyTwoActions):
     """

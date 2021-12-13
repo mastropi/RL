@@ -30,9 +30,6 @@ class AgeQueue(GenericAgent):
     Agent that acts on a queue environment
 
     Arguments:
-    env: Queue environment (normally defined in environments/queues.py)
-        The environment where the agent acts.
-
     policies: dict
         Dictionary of policies followed by the agent, with the following elements:
         - PolicyTypes.ACCEPT: Policy object defining the acceptance policy of an incoming job.
@@ -50,22 +47,22 @@ class AgeQueue(GenericAgent):
         super().__init__(policies, learners)
         self.debug = debug
 
-        # Environment on which the agent acts
-        self.env = env
-
         # Define the default job-type-to-server assignment policy in case it is None
         if self.getAssignmentPolicy() is None:
             # No assignment policy is given
             # # => Define it as a policy with uniform probability over servers for each job class
             self.setAssignmentPolicy( PolJobAssignmentProbabilistic(
-                [[1.0 / self.env.getNumServers()] * self.env.getNumServers()] * len(self.env.getJobClassRates()) ) )
+                [[1.0 / env.getNumServers()] * env.getNumServers()] * len(env.getJobClassRates()) ) )
 
-    def act(self, policy_type):
+    def act(self, env, policy_type):
         """
         The agent performs an action that is chosen by the policy of the given type.
         The action performed is stored in the object and can be retrieved with the getLastAction() method.
 
         Arguments:
+        env: Queue environment (normally defined in environments/queues.py)
+            The queue environment where the agent performs its action.
+
         policy_type: PolicyTypes
             Type of policy on which the agent acts on the queue, one of:
             - PolicyType.ACCEPT which is used to decide whether an incoming job is accepted to the queue
@@ -85,19 +82,19 @@ class AgeQueue(GenericAgent):
         if policy_type == PolicyTypes.ACCEPT:
             # Choose the action to take and store it in the agent object
             action_type = ActionTypes.ACCEPT_REJECT
-            action = self.getPolicy()[PolicyTypes.ACCEPT].choose_action(self.env.getState())
+            action = self.getPolicy()[PolicyTypes.ACCEPT].choose_action(env.getState())
             self.setLastAction(action)
         elif policy_type == PolicyTypes.ASSIGN:
             # Choose the action to take and store it in the agent object
             action_type = ActionTypes.ASSIGN
-            job_class = self.env.getJobClass()
-            servers = range(self.env.getNumServers())
+            job_class = env.getJobClass()
+            servers = range(env.getNumServers())
             # TODO: (2021/10/21) Homogenize the signature of choose_action() among policies so that they all receive one parameter: the current state
             action = self.getPolicy()[PolicyTypes.ASSIGN].choose_action(job_class, servers)
             self.setLastAction(action)
 
         # Take the action, observe the next state, and get the reward received when transitioning to that state
-        observation, reward, info = self.env.step(action, action_type)
+        observation, reward, info = env.step(action, action_type)
 
         return action, observation, reward, info
 

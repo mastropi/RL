@@ -10,12 +10,7 @@ from enum import unique, Enum
 
 import numpy as np
 
-from .. import Learner
-
-@unique  # Unique enumeration values (i.e. on the RHS of the equal sign)
-class AlphaUpdateType(Enum):
-    FIRST_STATE_VISIT = 1
-    EVERY_STATE_VISIT = 2
+from .. import Learner, AlphaUpdateType
 
 
 class LeaMC(Learner):
@@ -67,7 +62,7 @@ class LeaMC(Learner):
 
     # Overrides superclass method
     def reset_value_functions(self):
-        print("MC Learner of value functions: Resetting value functions...")
+        #print("MC Learner of value functions: Resetting value functions...")
         # Value functions
         self.V = self.V_start
         self.Q = self.Q_start
@@ -103,7 +98,10 @@ class LeaMC(Learner):
         # Assert that G(0) is "0". Note that we compare with the maximum G(t) value because the "0" value is relative to this value
         # (o.w. the assertion may fail... e.g. when G(0) ~ 1E-8... but in that case Gmax ~ 1E7... so G(0) is really "0"!
         Gmax = np.max( np.abs(self.G) )
-        assert np.isclose(self.G[0] / (Gmax + 1), 0.0), "G(0) is almost 0 ({})".format(self.G[0])
+        if self.__class__ == LeaMC.__class__:   # Note: isinstance(self, LeaMC) gives also True when the type is LeaFV!! (I guess it's because LeaFV inherits from LeaMC)
+            assert np.isclose(self.G[0] / (Gmax + 1), 0.0), "G(0) is almost 0 ({})".format(self.G[0])
+        else:
+            print("The value of G(0) is {}".format(self.G[0]))
 
     def updateAverageReward(self, t, reward):
         """

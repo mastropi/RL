@@ -10,6 +10,34 @@ import bisect   # To insert elements in order in a list (bisect.insort(list, ele
 import copy
 import numpy as np
 import pandas as pd
+from timeit import default_timer as timer
+
+
+# Decorator to measure execution time
+# (Inspired from uugot.it project -> utils.measure_exec_time())
+def measure_exec_time(func):
+    """
+    Decorator that measures the execution time of the decorated function
+    and prints it as long as it is larger than 0.0 seconds (when printed with one-decimal precision).
+
+    Note: for redirection of output to a logger object, see the aforementioned function in uugot.it project.
+
+    Ex:
+    @measure_exec_time
+    def fun(*args)
+        ...
+        return results
+    results = fun() # This will print the execution time of the function in the standard output.
+    """
+    def func_decorated(*args, **kwargs):
+        start = timer()
+        results = func(*args, **kwargs)
+        end = timer()
+        exec_time = end - start
+        if "{:.1f}".format(exec_time) != "0.0":
+            print("+++ Execution time: {:.1f} sec".format(exec_time))
+        return results
+    return func_decorated
 
 def is_scalar(x):
     "Returns whether the input parameter is a scalar (i.e. either int, np.int32, np.int64, float, np.float32, np.float64)"
@@ -62,6 +90,83 @@ def parse_dict_params(dict_params, dict_params_default):
         else:
             # Get the key from the user parameters and if not given, assign its default value 
             dict_params[key] = dict_params.get(key, dict_params_default[key])
+
+def index_linear2multi(idx, shape, order='C'):
+    """
+    Converts a linear index into a 2D index based on the given shape and order of access as defined in numpy.reshape()"
+
+    Arguments:
+    idx: int
+        Linear index to convert.
+
+    shape: tuple
+        Duple with the 2D dimensions of the array where the converted index will be used.
+
+    order: (opt) char
+        The order in which the 2D shape is swept to obtain the linear index.
+        Either 'C' for C-like order, i.e. by rows (where the LAST axis index changes fastest back to the FIRST index
+        which changes slowest), or 'F' for Fortran-like order, i.e. by columns (where the FIRST axis index changes
+        fastest up to the LAST index which changes slowest)
+        default: 'C'
+
+    Return: int
+    Linear index to access the element of the 2D shape using the given order.
+    """
+    # TODO: (2021/12/11) Extend this function to multi-index shapes
+    if len(shape) != 2:
+        raise ValueError("The `shape` parameter must be a numpy array of length 2 to indicate a 2D shape ({})".format(shape))
+
+    # Size of each dimension
+    n1, n2 = shape
+
+    if order == 'F':
+        # Fortran-like order: by columns
+        x1, x2 = idx % n1, int( idx / n1 )
+    else:
+        # C-like order: by rows
+        x1, x2 = int( idx / n2 ), idx % n2
+
+    return x1, x2
+
+def index_multi2linear(idx_2d, shape, order='C'):
+    """
+    Converts a 2D index into a linear index based on the given shape and order of access as defined in numpy.reshape()"
+
+    Arguments:
+    idx: tuple
+        2D index to convert.
+
+    shape: tuple
+        Duple with the 2D dimensions of the array that can be accessed with the given 2D index.
+
+    order: (opt) char
+        The order in which the 2D shape is swept by the linear index.
+        Either 'C' for C-like order, i.e. by rows (where the LAST axis index changes fastest back to the FIRST index
+        which changes slowest), or 'F' for Fortran-like order, i.e. by columns (where the FIRST axis index changes
+        fastest up to the LAST index which changes slowest)
+        default: 'C'
+
+    Return: tuple
+    Duple with the 2D indices to access the element given by the linear index using the given order.
+    """
+    # TODO: (2021/12/11) Extend this function to multi-index shapes
+    if len(shape) != 2:
+        raise ValueError("The `shape` parameter must be a numpy array of length 2 to indicate a 2D shape ({})".format(shape))
+
+    # Size of each dimension
+    n1, n2 = shape
+
+    # Positions of all the dimensions
+    x1, x2 = idx_2d
+
+    if order == 'F':
+        # Fortran-like order: by columns
+        idx = x2 * n1 + x1
+    else:
+        # C-like order: by rows
+        idx = x1 * n2 + x2
+
+    return idx
 
 def array_of_objects(size, value=None, dtype=list):
     """
@@ -299,6 +404,7 @@ def merge_values_in_time(t1, y1, t2, y2, unique=False):
     if sorted(t1) != t1 or sorted(t2) != t2:
         raise ValueError("At least one of the time lists is not sorted increasingly.\nt1={}\nt2={}".format(t1, t2))
 
+    # Note: t1_merged, t2_merged, y1_merged, y2_merged will be updated below when doing the actual merge
     if unique:
         # Remove duplicates from each input time list to merge
         # For each measurement series y, the y value for the FIRST occurrence of the repeated time value is kept 
@@ -483,7 +589,20 @@ if __name__ == "__main__":
                       't_new': -13, 't_new_dict': {'a': 2, 'b': {'c': 5, 'd': None}}}
     #---------------------- parse_dict_params -------------------------#
 
-    
+
+    #-------- index_multi2linear / index_linear2multi -----------------#
+    # 2D matrix with linear indices as its values
+    M = np.arange(12).reshape([4, 3])
+    assert index_multi2linear([2, 1], M.shape) == 7
+    assert index_linear2multi(7, M.shape) == (2, 1)
+    assert index_linear2multi(6, M.shape) == (2, 0)
+
+    assert index_multi2linear([2, 1], M.shape, order='F') == 6
+    assert index_linear2multi(6, M.shape, order='F') == (2, 1)
+    assert index_linear2multi(7, M.shape, order='F') == (3, 1)
+    #-------- index_multi2linear / index_linear2multi -----------------#
+
+
     #----------------- find_first/last_value_in_list ------------------#
     print("\n--- find_first/last_value_in_list(): Test #1")
     ll = [[1, 3], ['A', 'B'], [3]]
