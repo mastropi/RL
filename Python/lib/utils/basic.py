@@ -18,7 +18,7 @@ from timeit import default_timer as timer
 def measure_exec_time(func):
     """
     Decorator that measures the execution time of the decorated function
-    and prints it as long as it is larger than 0.0 seconds (when printed with one-decimal precision).
+    and prints it as long as it is larger than 1 second.
 
     Note: for redirection of output to a logger object, see the aforementioned function in uugot.it project.
 
@@ -34,7 +34,8 @@ def measure_exec_time(func):
         results = func(*args, **kwargs)
         end = timer()
         exec_time = end - start
-        if "{:.1f}".format(exec_time) != "0.0":
+        #if "{:.1f}".format(exec_time) != "0.0":
+        if exec_time > 1:
             print("+++ Execution time: {:.1f} sec".format(exec_time))
         return results
     return func_decorated
