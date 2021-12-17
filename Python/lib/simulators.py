@@ -718,6 +718,7 @@ class SimulatorQueue(Simulator):
             print("\nEstimating the difference of the state-action values...")
             N = 100; t_sim_max = 250
             K, Q0, Q1, n, max_t = self.estimate_Q_values_until_mixing(t_learn, t_sim_max=t_sim_max, N=N, verbose=verbose, verbose_period=verbose_period)
+            #K, Q0, Q1, n, max_t = self.estimate_Q_values_until_stationarity(t_learn, t_sim_max=50, N=N, verbose=verbose, verbose_period=verbose_period)
             print("--> Estimated stationary probability: Pr(K-1) = {}".format(probas_stationary[K - 1]))
             print("--> Estimated state-action values on n={} realizations out of {} with max simulation time = {:.1f} out of {:.1f}:\nQ(K-1={}, a=1) = {}\nQ(K-1={}, a=0) = {}\nQ_diff = Q(K-1,1) - Q(K-1,0) = {}" \
                   .format(n, N, max_t, t_sim_max, K - 1, Q1, K - 1, Q0, Q1 - Q0))
@@ -1271,7 +1272,7 @@ class SimulatorQueue(Simulator):
         return t, event_times, phi, probas_stationary, average_reward
 
     @measure_exec_time
-    def estimate_Q_values_until_stationarity(self, t_learn, N=100, verbose=False, verbose_period=1):
+    def estimate_Q_values_until_stationarity(self, t_learn, t_sim_max=50, N=100, verbose=False, verbose_period=1):
         """
         Estimates the state-action values for the case of a parameterized policy defined as a linear function of theta
         with only one buffer size with non-zero derivative.
@@ -1281,6 +1282,10 @@ class SimulatorQueue(Simulator):
         Arguments:
         t_learn: int
             Learning time step.
+
+        t_sim_max: (opt) int
+            Maximum discrete time for the simulation, after which stationary is assumed to have been reached.
+            default: 50
 
         N: (opt) int
             Number of samples used to estimate the state-action values.
@@ -1306,7 +1311,6 @@ class SimulatorQueue(Simulator):
                              .format(type(PolQueueTwoActionsLinearStep), type(self.learner.getPolicy())))
 
         K = self.learnerP.getPolicy().getBufferSizeForDeterministicBlocking()
-        t_sim_max = np.min([50, self.dict_nsteps['queue']])
 
         # 1) Starting at (K-1, a=1) is like starting at s=K (because the reward of the first action is 0)
         if verbose and np.mod(t_learn, verbose_period) == 0:
@@ -1454,16 +1458,19 @@ class SimulatorQueue(Simulator):
 
             Return: tuple
             Tuple with the following elements:
+            - t': the new time after the event is applied. This increases only for BIRTH events, i.e. for arrival
+            of new jobs.
             - state: S(t), the state at which the environment is prior to applying the action.
             - action: A(t), the action taken by the agent at state S(t).
-            - next_state: S(t+1), the next state at which the environment is in after taking action A(t).
+            - next_state: S(t'), the next state at which the environment is in after taking action A(t).
             - reward: the reward received by the agent for taking action A(t).
             """
             # Get the current state of the selected particle because that's the one whose state we are going to possibly change
             state = env.getState()
             if event == Event.BIRTH:
                 # The event is an incoming job class
-                # => Set the arriving job class in the queue environment and apply the acceptance policy
+                # => Increase the discrete time step and set the arriving job class in the queue environment and apply the acceptance policy
+                t += 1
 
                 # Store the class of the arriving job
                 job_class = job_class_or_server
@@ -1490,7 +1497,7 @@ class SimulatorQueue(Simulator):
             else:
                 assert event == Event.DEATH
                 # The event is a completed service
-                # => Update the state of the queue
+                # => Update the state of the queue but do not increase t
                 server = job_class_or_server
                 queue_state = env.getQueueState()
                 assert queue_state[server] > 0, "The server where the completed service occurs has at least one job"
@@ -1507,10 +1514,10 @@ class SimulatorQueue(Simulator):
 
                 # We set the action to None because there is no action by the agent when a service is completed
                 action = None
-                # We set the reward to 0.0 so that we can simply sum rewards to compute the state-action value, Q.
-                reward = 0.0
+                # No reward when no action taken
+                reward = np.nan
 
-            return state, action, next_state, reward
+            return t, state, action, next_state, reward
 
         mixing = lambda s0, a0, s1, a1: s0 == s1 and a0 is not None and a1 is not None and a0 == a1
         # ------------------------------ Auxiliary functions ----------------------------------#
@@ -1534,32 +1541,34 @@ class SimulatorQueue(Simulator):
         rewards = [[self.compute_reward_for_buffer_size(K-1)],
                    [0.0]]
 
-        # Set the new state of the environments once the above actions are taken on the respective states
-        envs[0].setState((K-1, None))
-        envs[1].setState((K, None))
+        # Set the NEW state of the environments once the above actions have been taken on the respective states
+        envs[0].setState((K-1, None))   # Environment that starts at REJECTION
+        envs[1].setState((K, None))     # Environment that starts at ACCEPTANCE
 
         # Time step in the queue trajectory (the first time step is t = 0)
         done = False
         t = 0                   # We start at 0 because we have already stored the state for t=0 above
+        t0 = 0; t1 = 0;         # We keep track of the time step of each queue which only changes
+                                # when there is an incoming job, and thus we can compare their state at the same
+                                # discrete time value.
         maxtime = t_sim_max     # Max discrete time, in case there is no mixing of trajectories
         # Initialize the state-action values with the first observed reward (at t=0)
         Q0 = rewards[0][0]
         Q1 = rewards[1][0]
         while not done:
-            # NOTE: we increment the discrete time regardless of the observed event, because we need to
-            # compare the state-actions pairs at the same moment for both queues, and we are currently NOT
-            # interested in estimating any stationary distribution (which is when we need to define the discrete time
-            # more carefully --i.e. as the time that changes only when the event is an incoming job)
-            t += 1
-
-            # Generate an event for each queue environment so that we can compare their state-action
-            # at each time step and find the mixing time.
-            # Note: this function takes care of NOT generating a service event when a server is empty.
-            time0, event0, job_class_or_server0, _ = self.generate_event([envs[0]])
-            time1, event1, job_class_or_server1, _ = self.generate_event([envs[1]])
-
-            state0, action0, next_state0, reward0 = apply_event(envs[0], t, event0, job_class_or_server0)
-            state1, action1, next_state1, reward1 = apply_event(envs[1], t, event1, job_class_or_server1)
+            # Generate events for each queue environment until the discrete time changes,
+            # so that we can compare their state-action at the same discrete time value and find the mixing time.
+            # Note: the generate_events() function takes care of NOT generating a service event when a server is empty.
+            while t0 == t:
+                time0, event0, job_class_or_server0, _ = self.generate_event([envs[0]])
+                t0, state0, action0, next_state0, reward0 = apply_event(envs[0], t, event0, job_class_or_server0)
+            while t1 == t:
+                time1, event1, job_class_or_server1, _ = self.generate_event([envs[1]])
+                t1, state1, action1, next_state1, reward1 = apply_event(envs[1], t, event1, job_class_or_server1)
+            assert t0 == t1 and t0 == t + 1, \
+                "The discrete time step is the same in both queues and has increased by one w.r.t. the global time step t (t={:}, t0={:}, t1={:})" \
+                .format(t, t0, t1)
+            t = t0
 
             # Update the history
             times[0] += [time0]; times[1] += [time1]
@@ -1568,6 +1577,7 @@ class SimulatorQueue(Simulator):
             rewards[0] += [reward0]; rewards[1] += [reward1]
 
             # Update the state-action values
+            assert not np.isnan(reward0) and not np.isnan(reward1), "The reward given by each queue are not NaN (r0={}, r1={})".format(reward0, reward1)
             Q0 += reward0
             Q1 += reward1
 
@@ -1578,8 +1588,8 @@ class SimulatorQueue(Simulator):
                 done = True
 
             if self.debug:
-                print("[{}, {}] | t={}: events={} actions={} -> states={} rewards={}" \
-                      .format(states[-2][0], states[-2][1], t, [event0, event1], [action0, action1], [state0, state1], [reward0, reward1]), end="\n")
+                print("t={}: states = [{}, {}] events={} actions={} -> states={} rewards={}" \
+                      .format(t, states[-2][0], states[-2][1], [event0, event1], [action0, action1], [state0, state1], [reward0, reward1]), end="\n")
 
         # DONE
         if verbose and np.mod(t_learn, verbose_period) == 0:
@@ -2066,7 +2076,7 @@ if __name__ == "__main__":
         env_queue_mm = EnvQueueSingleBufferWithJobClasses(queue, job_class_rates, rewardOnJobRejection_ExponentialCost, None)
 
         # Acceptance policy definition
-        theta_start = 11.3  # 1.3, 11.3  # IMPORTANT: This value should NOT be integer, o.w. the policy gradient will always be 0 regardless of the state at which blocking occurs
+        theta_start = 1.3  # 1.3, 11.3  # IMPORTANT: This value should NOT be integer, o.w. the policy gradient will always be 0 regardless of the state at which blocking occurs
         policies = dict({PolicyTypes.ACCEPT: PolQueueTwoActionsLinearStep(env_queue_mm, theta_start), PolicyTypes.ASSIGN: None})
         #policies = dict({PolicyTypes.ACCEPT: PolQueueTwoActionsLogit(env_queue_mm, theta_start, beta=1.0), PolicyTypes.ASSIGN: None})
 
