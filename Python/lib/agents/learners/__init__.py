@@ -28,7 +28,7 @@ class AlphaUpdateType(Enum):
     EVERY_STATE_VISIT = 2
 
 
-class Learner:
+class GenericLearner:
     """
     Class defining methods that are generic to ALL learners.
 
@@ -55,10 +55,10 @@ class Learner:
             Initial learning rate.
 
         min_count_to_update_alpha: int
-            Minimum count of a state-action pair at which alpha starts to be updated by the update_alpha(s,a) method.
+            Minimum count of a state-action pair at which alpha starts to be updated by the update_learning_rate(s,a) method.
 
         min_time_to_update_alpha: int
-            Minimum learning time step at which alpha starts to be updated by the update_alpha_by_learning_episode() method.
+            Minimum learning time step at which alpha starts to be updated by the update_learning_rate_by_episode() method.
         """
         self.env = env
         self.alpha = alpha          # Initial and maximum learning rate
@@ -74,7 +74,7 @@ class Learner:
 
         # Trajectory history: information of the times, states, actions, and rewards stored as part of the learning process
         # (so that we can be retrieve it for e.g. analysis or plotting)
-        self.times = []
+        self.times = []         # This time is expected to be a *discrete* time, indexing the respective states, actions and rewards
         self.states = []
         self.actions = []
         self.rewards = []
@@ -87,7 +87,7 @@ class Learner:
 
         # Information about the historical learning rates
         self.alpha_mean = []    # Average alpha
-        self.alphas = []        # List of alphas used during the learning process (for now it's one alpha per state, but these may vary in the future)
+        self.alphas = []        # List of alphas used during the learning process.
 
     def reset(self, reset_value_functions=False, reset_trajectory=False, reset_counts=False):
         """
@@ -140,17 +140,30 @@ class Learner:
         # Method to be overridden by subclasses
         pass
 
+    def store_learning_rate(self):
+        """
+        Stores the current learning rate alpha that is supposedly used for learning when this method is called
+
+        Note that the values of the self.alphas list may be indexed by many different things...
+        For instance, if learning takes place at every visited state-action, then there will probably be an alpha
+        for each visited state-action. But if learning happens at the end of an episode, the stored alphas
+        will probably be indexed by episode number.
+        It is however difficult to store the index together with the alpha, because the index structure may change
+        from one situation to the other, as just described.
+        """
+        self.alphas += [self._alpha]
+
     def update_learning_time(self):
         """
         Increments the count of learning time by one.
 
-        This method is expected to be called by the user whenever they want to register that learning took place.
+        This method is expected to be called by the user whenever they want to record that learning took place.
         It can be used to update the learning rate alpha by the number of learning episodes
-        (see update_alpha_by_learning_episode()).
+        (see update_learning_rate_by_episode()).
         """
         self._time += 1
 
-    def update_alpha(self, state, action):
+    def update_learning_rate(self, state, action):
         """
         Updates the learning rate at the current learning time, given the visit count of the given state and action
 
@@ -185,7 +198,7 @@ class Learner:
 
         return self._alpha
 
-    def update_alpha_by_learning_episode(self):
+    def update_learning_rate_by_episode(self):
         """
         Updates the learning rate at the current learning time by the number of times learning took place already,
         independently of the visit count of each state and action.
@@ -197,7 +210,7 @@ class Learner:
         """
         if self.adjust_alpha:
             time_divisor = np.max([1, self._time - self.min_time_to_update_alpha])
-                ## See comment in method update_alpha() about not adding any constant to the difference time - min_time
+                ## See comment in method update_learning_rate() about not adding any constant to the difference time - min_time
             print("\tUpdating alpha by learning episode: time divisor = {}".format(time_divisor))
             alpha_prev = self._alpha
             self._alpha = np.max( [self.alpha_min, self.alpha / time_divisor] )

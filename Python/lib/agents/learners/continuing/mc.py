@@ -10,10 +10,10 @@ from enum import unique, Enum
 
 import numpy as np
 
-from .. import Learner, AlphaUpdateType
+from .. import GenericLearner, AlphaUpdateType
 
 
-class LeaMC(Learner):
+class LeaMC(GenericLearner):
     """
     Monte Carlo learning algorithm using step size `alpha` and discount `gamma`
     applied to a generic environment defined in the gym.Env class of openAI.

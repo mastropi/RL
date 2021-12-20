@@ -10,10 +10,10 @@ import copy
 import numpy as np
 import pandas as pd
 
-from agents.learners import Learner
+from agents.learners import GenericLearner
 from utils.basic import find
 
-class LeaPolicyGradient(Learner):
+class LeaPolicyGradient(GenericLearner):
     """
     Policy gradient learner using step size `alpha` and `learnerV` as learner of the state value function
 
@@ -24,7 +24,7 @@ class LeaPolicyGradient(Learner):
     policy: Parameterized policy
         Parameterized policy that is used to learn the parameter theta of the policy.
 
-    learnerV: Learner
+    learnerV: GenericLearner
         Learner of the state value function.
 
     alpha: (opt) float
@@ -408,7 +408,15 @@ class LeaPolicyGradient(Learner):
                     gradV_mean += gradV
 
                     # Update alpha based on the action-state visit count
-                    alpha = self.update_alpha(state, action)
+                    # Normally the update ONLY happens when the adjust_alpha attribute of the learner is True,
+                    # and in that case, it is computed as the initial alpha defined in the learner divided by
+                    # the number of visits to the state-action.
+                    # This is why we need to update it BEFORE learning, because the
+                    # alpha currently stored in the learner may be an alpha for a completely different state-action
+                    # to the one on which we are learning now.
+                    alpha = self.update_learning_rate(state, action)
+                    # Store the alpha that is going to be used for learning next
+                    self.store_learning_rate()
 
                     print("\tt={}: alpha(state={}, action={} (n={})) = {}".format(t, state, action, self.getCount(state, action), alpha))
 
@@ -581,12 +589,15 @@ class LeaPolicyGradient(Learner):
         # The lower and upper bounds are asymmetric (larger lower bound) so that a large negative reward can lead to a large reduction of theta.
         bound_delta_theta_upper = +np.Inf #+2.1310  # +1.131
         bound_delta_theta_lower = -np.Inf #-5.3123  # -1.131 #-5.312314 #-1.0
-        delta_theta = np.max(
-            [bound_delta_theta_lower, np.min([self.getLearningRate() * gradV, bound_delta_theta_upper])])
+        delta_theta = np.max([bound_delta_theta_lower, np.min([self.getLearningRate() * gradV, bound_delta_theta_upper])])
         print("Estimated grad(V(theta)) = {}".format(gradV))
         print("Delta(theta) = alpha * grad(V) = {}".format(delta_theta))
 
-        theta_lower = 0.1  # Do NOT use an integer value as lower bound of theta because the gradient is never non-zero at integer-valued thetas
+        theta_lower = 0.1   # In principle, try to avoid a non integer value as lower bound of theta because
+                            # the estimated gradient of V may be zero at integer values of theta (depending on the
+                            # method used to compute it --does not happen when we estimate the theoretical expression
+                            # for grad(V) because that expression assumes that theta is non-integer, and is still used
+                            # even when theta is integer.
         theta = np.max([theta_lower, theta + delta_theta])
 
         # Update the policy on the new theta and record it into the history of its updates

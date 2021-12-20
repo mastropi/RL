@@ -54,6 +54,7 @@ class Learner:
     and once prior to the first simulation, making e.g. the episode method be equal to 2 at
     the first simulation as opposed to the correct value 1.
     """
+    # TODO: (2021/12/20) Try to make this class Learner inherit from the GenericLearner which has methods defined for ANY learner, not only learners for a discrete episodic task which is the case here.
 
     def __init__(self, env, alpha,
                  adjust_alpha=False, alpha_update_type=AlphaUpdateType.FIRST_STATE_VISIT, adjust_alpha_by_episode=False,
