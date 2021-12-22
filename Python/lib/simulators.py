@@ -715,20 +715,28 @@ class SimulatorQueue(Simulator):
             else:
                 # Monte-Carlo learning is the default
                 assert self.N == 1, "The simulation system has only one particle in Monte-Carlo mode ({})".format(self.N)
-                start_state = self.choose_state_for_buffer_size(self.env, K)
+                # Smart selection of the start state as one having buffer size = K-1 so that we can better estimate Pr(K-1)
+                #start_state = self.choose_state_for_buffer_size(self.env, K)
+                # Selection of the start state as one having buffer size = J, in order to have a fair(?) comparison with the FV method
+                start_state = self.choose_state_for_buffer_size(self.env, dict_params_simul['buffer_size_activation'])
                 t = self.run_simulation_mc(t_learn, start_state, verbose=verbose, verbose_period=verbose_period)
                 probas_stationary = self.estimate_stationary_probability_mc()
 
-            # When the parameterized policy is a linear step linear function with only one buffer size where its
-            # derivative is non-zero, only the DIFFERENCE of two state-action values impacts the gradient, namely:
-            # Q(K-1, a=1) - Q(K-1, a=0)
-            print("\nEstimating the difference of the state-action values...")
-            N = 100; t_sim_max = 250
-            K, Q0, Q1, n, max_t = self.estimate_Q_values_until_mixing(t_learn, t_sim_max=t_sim_max, N=N, verbose=verbose, verbose_period=verbose_period)
-            #K, Q0, Q1, n, max_t = self.estimate_Q_values_until_stationarity(t_learn, t_sim_max=50, N=N, verbose=verbose, verbose_period=verbose_period)
+            if probas_stationary[K-1] > 0.0:
+                # When the parameterized policy is a linear step linear function with only one buffer size where its
+                # derivative is non-zero, only the DIFFERENCE of two state-action values impacts the gradient, namely:
+                # Q(K-1, a=1) - Q(K-1, a=0)
+                print("\nEstimating the difference of the state-action values...")
+                N = 100; t_sim_max = 250
+                K, Q0, Q1, n, max_t = self.estimate_Q_values_until_mixing(t_learn, t_sim_max=t_sim_max, N=N, verbose=verbose, verbose_period=verbose_period)
+                #K, Q0, Q1, n, max_t = self.estimate_Q_values_until_stationarity(t_learn, t_sim_max=50, N=N, verbose=verbose, verbose_period=verbose_period)
+                print("--> Estimated state-action values on n={} realizations out of {} with max simulation time = {:.1f} out of {:.1f}:\nQ(K-1={}, a=1) = {}\nQ(K-1={}, a=0) = {}\nQ_diff = Q(K-1,1) - Q(K-1,0) = {}" \
+                      .format(n, N, max_t, t_sim_max, K - 1, Q1, K - 1, Q0, Q1 - Q0))
+            else:
+                Q0 = 0.0
+                Q1 = 0.0
+                print("Estimation of Q_diff skipped because the estimated stationary probability Pr(K-1) = 0.")
             print("--> Estimated stationary probability: Pr(K-1={}) = {}".format(K-1, probas_stationary[K - 1]))
-            print("--> Estimated state-action values on n={} realizations out of {} with max simulation time = {:.1f} out of {:.1f}:\nQ(K-1={}, a=1) = {}\nQ(K-1={}, a=0) = {}\nQ_diff = Q(K-1,1) - Q(K-1,0) = {}" \
-                  .format(n, N, max_t, t_sim_max, K - 1, Q1, K - 1, Q0, Q1 - Q0))
 
             # Learn the value function and the policy
             theta_prev = self.learnerP.getPolicy().getThetaParameter()
@@ -910,6 +918,8 @@ class SimulatorQueue(Simulator):
         Dictionary with the estimated stationary probability for buffer size K-1, where K is the first integer
         larger than theta + 1 --being theta the parameter of the acceptance linear step policy.
         """
+        # TODO: Estimate the stationary probability in MC using the continuous-time Markov Chain (so that every touch of the state whose probability is of interest is used in the estimation!
+        # (not only those discrete time steps where the action is not None as is done now... which may make the stationary probability be estimated as 0.0 even when the continuous-time process touched the state of interest!)
         states = [s for s, a in zip(self.learnerV.getStates(), self.learnerV.getActions()) if a is not None]
         #actions = [a for a in self.learnerV.getActions() if a is not None]
         buffer_sizes = [self.env.getBufferSizeFromState(s) for s in states]
@@ -966,13 +976,23 @@ class SimulatorQueue(Simulator):
             Updates the conditional probability of each buffer size of interest, which are given by the keys
             of the dictionary of the input parameter phi, which is updated.
 
-            :param phi: dict
-                Dictionary containing the empirical distribution of each buffer size of interest, which are its keys,
-                at each time when a change happens.
+            Arguments:
+            phi: dict
+                Dictionary of lists, where the list for each entry (the buffer size of interest)
+                contains the empirical distribution at each time when a change happens.
                 This input parameter is updated by the function.
+
+            Return: bool
+            Whether any of the newly computed Phi values is non-zero. This can be used to decide whether we need to
+            compute the integral that gives rise to the Fleming-Viot estimate of the stationary probability, or we
+            already know that the integral is already 0 because all the Phi(t) values are 0.
             """
+            any_new_value_gt_0 = False
             for bs in phi.keys():
                 phi[bs] += [empirical_mean(bs)]
+                if phi[bs][-1] > 0.0:
+                    any_new_value_gt_0 = True
+            return any_new_value_gt_0
 
         def empirical_mean(buffer_size):
             "Compute the proportion of environments/particles at the given buffer size"
@@ -1198,6 +1218,7 @@ class SimulatorQueue(Simulator):
         maxtime = proba_surv['t'].iloc[-1]
             ## maxtime: it's useless to go with the FV simulation beyond the maximum observed survival time
             ## because the contribution to the integral used in the estimation of the average reward is 0.0 after that.
+        is_any_phi_value_gt_0 = False
         while not done:
             # Generate an event over all possible event types and particles
             # Note: this function takes care of NOT generating a service event when a server is empty.
@@ -1274,7 +1295,7 @@ class SimulatorQueue(Simulator):
             if self.debug:
                 print("{} | t={}: event={}, action={} -> state={}, reward={}".format(state, t, event, action, next_state, reward), end="\n")
 
-            update_phi(phi)
+            is_any_phi_value_gt_0 = max([is_any_phi_value_gt_0, update_phi(phi)])
 
         # DONE
         if verbose and np.mod(t_learn, verbose_period) == 0:
@@ -1285,11 +1306,18 @@ class SimulatorQueue(Simulator):
             assert len(event_times) == len(phi[bs]), "The length of the event times where phi is measured ({}) coincides with the length of phi ({})" \
                                                 .format(len(event_times), len(phi))
 
-        # Compute the stationary probability of each buffer size bs in Phi(t,bs) using Phi(t,bs), P(T>t) and E(T_A)
-        probas_stationary, integrals = estimate_stationary_probability(event_times, phi, proba_surv, expected_absorption_time)
+        if is_any_phi_value_gt_0:
+            # Compute the stationary probability of each buffer size bs in Phi(t,bs) using Phi(t,bs), P(T>t) and E(T_A)
+            probas_stationary, integrals = estimate_stationary_probability(event_times, phi, proba_surv, expected_absorption_time)
 
-        # Compute the average reward based on the stationary probability and the empirical distribution of each buffer size bs
-        average_reward = estimate_average_reward(phi, probas_stationary)
+            # Compute the average reward based on the stationary probability and the empirical distribution of each buffer size bs
+            average_reward = estimate_average_reward(phi, probas_stationary)
+        else:
+            probas_stationary = dict()
+            integrals = dict()
+            for bs in phi.keys():
+                probas_stationary[bs] = integrals[bs] = 0.0
+            average_reward = 0.0    # The average reward is non-zero only when the stationary probability of at least one buffer size of interest is non-zero
 
         return t, event_times, phi, probas_stationary, average_reward
 
@@ -2127,26 +2155,27 @@ if __name__ == "__main__":
         env_queue_mm = EnvQueueSingleBufferWithJobClasses(queue, job_class_rates, rewardOnJobRejection_ExponentialCost, None)
 
         # Acceptance policy definition
-        theta_start = 11.3  # 1.3, 11.3  # IMPORTANT: This value should NOT be integer, o.w. the policy gradient will always be 0 regardless of the state at which blocking occurs
+        theta_start = 39.3  # 1.3, 11.3  # IMPORTANT: This value should NOT be integer, o.w. the policy gradient will always be 0 regardless of the state at which blocking occurs
         policies = dict({PolicyTypes.ACCEPT: PolQueueTwoActionsLinearStep(env_queue_mm, theta_start), PolicyTypes.ASSIGN: None})
         #policies = dict({PolicyTypes.ACCEPT: PolQueueTwoActionsLogit(env_queue_mm, theta_start, beta=1.0), PolicyTypes.ASSIGN: None})
 
         # Learning method (MC or FV)
-        n_particles_fv = 100; t_sim = 500
+        n_particles_fv = 400; t_sim = 500
+        #n_particles_fv = 800; t_sim = 800
         #n_particles_fv = 800; t_sim = 1000
         learning_method = LearningMethod.MC; nparticles = 1; plot_trajectories = False; symbol = 'b.-'
         #learning_method = LearningMethod.FV; nparticles = n_particles_fv; plot_trajectories = False; symbol = 'g.-'
 
         # Simulator on a given number of iterations for the queue simulation and a given number of iterations to learn the policy
-        t_learn = 50 #1
+        t_learn = 200 #50
         nmeantimes = t_sim * job_class_rates[0] # Simulation time to use in the FV estimation when estimating P(T>t) and E(T_A)
 
         # Learners definition
         fixed_window = False
-        alpha_start = 1.0 #/ t_sim  # Use `/ t_sim` when using update of theta at each simulation step (i.e. LeaPolicyGradient.learn_TR() is called instead of LeaPolicyGradient.learn())
-        adjust_alpha = False
-        min_time_to_update_alpha = 40
-        alpha_min = 0.001
+        alpha_start = 100.0 #/ t_sim  # Use `/ t_sim` when using update of theta at each simulation step (i.e. LeaPolicyGradient.learn_TR() is called instead of LeaPolicyGradient.learn())
+        adjust_alpha = True
+        min_time_to_update_alpha = t_learn / 2.5
+        alpha_min = 0.1
         gamma = 1.0
         if learning_method == LearningMethod.FV:
             learnerV = LeaFV(env_queue_mm, gamma=gamma)

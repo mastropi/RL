@@ -587,8 +587,8 @@ class LeaPolicyGradient(GenericLearner):
         # Note that we bound the delta theta to avoid too large changes!
         # We use "strange" numbers to avoid having theta fall always on the same distance from an integer (e.g. 4.1, 5.1, etc.)
         # The lower and upper bounds are asymmetric (larger lower bound) so that a large negative reward can lead to a large reduction of theta.
-        bound_delta_theta_upper = +np.Inf #+2.1310  # +1.131
-        bound_delta_theta_lower = -np.Inf #-5.3123  # -1.131 #-5.312314 #-1.0
+        bound_delta_theta_upper = +1.1234 #+np.Inf #+2.1310  # +1.131
+        bound_delta_theta_lower = -1.1234 #-np.Inf #-5.3123  # -1.131 #-5.312314 #-1.0
         delta_theta = np.max([bound_delta_theta_lower, np.min([self.getLearningRate() * gradV, bound_delta_theta_upper])])
         print("Estimated grad(V(theta)) = {}".format(gradV))
         print("Delta(theta) = alpha * grad(V) = {}".format(delta_theta))
