@@ -10,6 +10,8 @@ import bisect   # To insert elements in order in a list (bisect.insort(list, ele
 import copy
 import numpy as np
 import pandas as pd
+
+from datetime import datetime
 from timeit import default_timer as timer
 
 
@@ -91,6 +93,31 @@ def parse_dict_params(dict_params, dict_params_default):
         else:
             # Get the key from the user parameters and if not given, assign its default value 
             dict_params[key] = dict_params.get(key, dict_params_default[key])
+
+def show_exec_params(dict_params):
+    "Shows the values of a set of parameters given in a dictionary, in alphabetical order of the keys"
+    print("**************** Execution parameters ***********************")
+    keys = dict_params.keys()
+    keys = sorted(keys)
+    for key in keys:
+        print("{}: {}".format(key, dict_params[key]))
+    print("**************** Execution parameters ***********************")
+
+def generate_datetime_string(format="%Y%m%d_%H%M%S", prefix="", suffix="", extension="", sep="_"):
+    """
+    Returns a string containing today's date time in the given format using the datetime.today().strftime(format)
+
+    If `prefix` or `suffix` is given, separator `sep` is used to separate them from the formatted datetime.
+    The `extension` extension is added without separator.
+    """
+    dt_str = datetime.today().strftime(format)
+    if prefix is not None and prefix != "":
+        dt_str = prefix + sep + dt_str
+    if suffix is not None and suffix != "":
+        dt_str = dt_str + sep + suffix
+    dt_str = dt_str + extension
+
+    return dt_str
 
 def index_linear2multi(idx, shape, order='C'):
     """

@@ -17,6 +17,7 @@ if __name__ == "__main__":
     import runpy
     runpy.run_path('../../setup.py')
 
+import os
 import copy
 import warnings
 from enum import Enum, unique
@@ -24,6 +25,7 @@ from enum import Enum, unique
 import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt, cm  # cm is for colormaps (e.g. cm.get_cmap())
+from datetime import datetime
 from timeit import default_timer as timer
 
 from agents.learners.episodic.discrete.td import LeaTDLambdaAdaptive
@@ -32,7 +34,7 @@ from agents.queues import PolicyTypes
 from environments.queues import rewardOnJobRejection_ExponentialCost, Actions, COST_EXP_BUFFER_SIZE_REF
 from estimators import estimate_blocking_fv_separately, estimate_proba_survival_and_expected_absorption_time_mc
 
-from utils.basic import merge_values_in_time, index_linear2multi, measure_exec_time
+from utils.basic import merge_values_in_time, index_linear2multi, measure_exec_time, show_exec_params, generate_datetime_string
 from utils.computing import rmse, compute_job_rates_by_server, generate_min_exponential_time, stationary_distribution_birth_death_process
 import utils.plotting as plotting
 from queues import QueueMM, Event
@@ -62,7 +64,7 @@ class Simulator:
         Agent object that is responsible of performing the actions on the environment and learning from them.
     """
 
-    def __init__(self, env, agent, seed=None, debug=False):
+    def __init__(self, env, agent, seed=None, save=False, resultsdir=None, debug=False):
 #        if not isinstance(env, EnvironmentDiscrete):
 #            raise TypeError("The environment must be of type {} from the {} module ({})" \
 #                            .format(EnvironmentDiscrete.__name__, EnvironmentDiscrete.__module__, env.__class__))
@@ -73,6 +75,18 @@ class Simulator:
 #                            .format(GenericAgent.__name__, GenericAgent.__module__, agent.__class__))
 
         self.debug = debug
+        self.save = save
+        if self.save:
+            if resultsdir is None:
+                resultsdir = os.getcwd()
+            resultsdir = os.path.abspath(resultsdir)
+            self.results_file = os.path.join(resultsdir, generate_datetime_string(prefix=self.__class__.__name__, extension=".csv"))
+            self.fh_results = open(self.results_file, "wb")
+            print("-----> File opened for output with simulation results:\n{}".format(self.results_file))
+            print("-----> If the process stops for some reason, finalize the file with simul.close().")
+        else:
+            self.results_file = None
+            self.fh_results = None
 
         self.env = env
         self.agent = agent
@@ -93,6 +107,12 @@ class Simulator:
 
         # Reset the learner to the first episode state
         self.agent.getLearner().reset(reset_episode=reset_episode, reset_value_functions=reset_value_functions)
+
+    def close(self):
+        if self.fh_results is not None:
+            self.fh_results.close()
+            print("\n------> Output file with simulation results created as:")
+            print("------> {}".format(self.results_file))
 
     def run(self, nepisodes, start=None, seed=None, compute_rmse=False, state_observe=None,
              verbose=False, verbose_period=1,
@@ -506,8 +526,8 @@ class SimulatorQueue(Simulator):
         default: 1
     """
 
-    def __init__(self, env, agent, dict_nsteps, N=1, seed=None, debug=False):
-        super().__init__(env, agent, seed, debug)
+    def __init__(self, env, agent, dict_nsteps, N=1, seed=None, save=False, resultsdir=None, debug=False):
+        super().__init__(env, agent, seed, save, resultsdir, debug)
         self.dict_nsteps = dict_nsteps
         # Attributes used during Fleming-Viot simulation (each env in envs is one of the N particles)
         self.N = N
@@ -653,8 +673,15 @@ class SimulatorQueue(Simulator):
                 self.env.set_seed(self.seed)
         # --- Parse input parameters
 
+        print("Simulation starts at: {}".format(datetime.today().strftime("%Y-%m-%d %H:%M:%S")))
+
         if verbose:
             print("Value function at start of experiment: {}".format(self.learnerV.getV()))
+
+        if self.save:
+            # Initialize the output file with the results with the column names
+            self.fh_results.write(b"theta,theta_next,Pr(K-1),Pr(K),Q_diff(K-1),Q_diff(K),alpha,V,gradV\n")
+
         # There are two simulation time scales (both integers and starting at 0):
         # - t: the number of queue state changes (a.k.a. number of queue iterations)
         # - t_learn: the number of learning steps (of the value functions and policies)
@@ -707,7 +734,7 @@ class SimulatorQueue(Simulator):
                                             proba_surv, expected_absorption_time,
                                             verbose=verbose, verbose_period=verbose_period)
                 print("\n*** RESULTS OF FLEMING-VIOT SIMULATION ***")
-                #print("Phi(t):\n{}".format(phi))  # 2021/12/10: phi is WRONG as it always increases with time!!
+                #print("Phi(t):\n{}".format(phi))
                 print("P(K-1), P(K): {}".format(probas_stationary))
                 print("rho = {}".format(average_reward))
                 self.learnerV.setAverageReward(average_reward)
@@ -721,22 +748,38 @@ class SimulatorQueue(Simulator):
                 start_state = self.choose_state_for_buffer_size(self.env, dict_params_simul['buffer_size_activation'])
                 t = self.run_simulation_mc(t_learn, start_state, verbose=verbose, verbose_period=verbose_period)
                 probas_stationary = self.estimate_stationary_probability_mc()
+                print("\n*** RESULTS OF MONTE-CARLO SIMULATION ***")
+                print("P(K-1), P(K): {}".format(probas_stationary))
 
             if probas_stationary[K-1] > 0.0:
                 # When the parameterized policy is a linear step linear function with only one buffer size where its
                 # derivative is non-zero, only the DIFFERENCE of two state-action values impacts the gradient, namely:
                 # Q(K-1, a=1) - Q(K-1, a=0)
-                print("\nEstimating the difference of the state-action values...")
+                print("\nEstimating the difference of the state-action values when the initial buffer size is K-1={}...".format(K-1))
                 N = 100; t_sim_max = 250
-                K, Q0, Q1, n, max_t = self.estimate_Q_values_until_mixing(t_learn, t_sim_max=t_sim_max, N=N, verbose=verbose, verbose_period=verbose_period)
-                #K, Q0, Q1, n, max_t = self.estimate_Q_values_until_stationarity(t_learn, t_sim_max=50, N=N, verbose=verbose, verbose_period=verbose_period)
+                K, Q0_Km1, Q1_Km1, n, max_t = self.estimate_Q_values_until_mixing(t_learn, K-1, t_sim_max=t_sim_max, N=N, verbose=verbose, verbose_period=verbose_period)
+                #K, Q0_Km1, Q1_Km1, n, max_t = self.estimate_Q_values_until_stationarity(t_learn, t_sim_max=50, N=N, verbose=verbose, verbose_period=verbose_period)
                 print("--> Estimated state-action values on n={} realizations out of {} with max simulation time = {:.1f} out of {:.1f}:\nQ(K-1={}, a=1) = {}\nQ(K-1={}, a=0) = {}\nQ_diff = Q(K-1,1) - Q(K-1,0) = {}" \
-                      .format(n, N, max_t, t_sim_max, K - 1, Q1, K - 1, Q0, Q1 - Q0))
+                      .format(n, N, max_t, t_sim_max, K-1, Q1_Km1, K-1, Q0_Km1, Q1_Km1 - Q0_Km1))
             else:
-                Q0 = 0.0
-                Q1 = 0.0
-                print("Estimation of Q_diff skipped because the estimated stationary probability Pr(K-1) = 0.")
+                Q0_Km1 = 0.0
+                Q1_Km1 = 0.0
+                print("Estimation of Q_diff(K-1) skipped because the estimated stationary probability Pr(K-1) = 0.")
             print("--> Estimated stationary probability: Pr(K-1={}) = {}".format(K-1, probas_stationary[K - 1]))
+
+            if probas_stationary[K] > 0.0:
+                # Same as above, but for buffer size = K
+                print("\nEstimating the difference of the state-action values when the initial buffer size is K={}...".format(K))
+                N = 100; t_sim_max = 250
+                K, Q0_K, Q1_K, n, max_t = self.estimate_Q_values_until_mixing(t_learn, K, t_sim_max=t_sim_max, N=N, verbose=verbose, verbose_period=verbose_period)
+                #K, Q0_K, Q1_K, n, max_t = self.estimate_Q_values_until_stationarity(t_learn, t_sim_max=50, N=N, verbose=verbose, verbose_period=verbose_period)
+                print("--> Estimated state-action values on n={} realizations out of {} with max simulation time = {:.1f} out of {:.1f}:\nQ(K={}, a=1) = {}\nQ(K={}, a=0) = {}\nQ_diff = Q(K,1) - Q(K,0) = {}" \
+                      .format(n, N, max_t, t_sim_max, K, Q1_K, K, Q0_K, Q1_K - Q0_K))
+            else:
+                Q0_K = 0.0
+                Q1_K = 0.0
+                print("Estimation of Q_diff(K) skipped because the estimated stationary probability Pr(K) = 0.")
+            print("--> Estimated stationary probability: Pr(K={}) = {}".format(K, probas_stationary[K]))
 
             # Learn the value function and the policy
             theta_prev = self.learnerP.getPolicy().getThetaParameter()
@@ -744,8 +787,7 @@ class SimulatorQueue(Simulator):
             # Use this when using REINFORCE to learn theta
             #self.learn(self.agent, t)
             # Use this when estimating the theoretical grad(V)
-            assert K-1 in probas_stationary.keys(), "The buffer size K-1={} is among the keys of the dictionary containing the stationary probabilities estimation ({})".format(K-1, probas_stationary)
-            self.learn(self.agent, t, proba_stationary=probas_stationary[K-1], Q_values=[Q0, Q1])
+            self.learn(self.agent, t, probas_stationary=probas_stationary, Q_values=dict({K-1: [Q0_Km1, Q1_Km1], K: [Q0_K, Q1_K]}))
 
             if verbose and np.mod(t_learn, verbose_period) == 0:
                 print("\tUpdated value function at the end of the queue simulation: average reward V = {}".format(self.learnerV.getV()))
@@ -758,12 +800,19 @@ class SimulatorQueue(Simulator):
 
         df_learning = pd.DataFrame.from_items([('theta', self.thetas),
                                                ('theta_next', self.thetas_updated),
-                                               ('Pr(K-1)', self.proba_stationary),
-                                               ('Q_diff', self.Q_diff),
+                                               ('Pr(K-1)', [p[0] for p in self.proba_stationary]),
+                                               ('Pr(K)', [p[1] for p in self.proba_stationary]),
+                                               ('Q_diff(K-1)', [q[0] for q in self.Q_diff]),
+                                               ('Q_diff(K)', [q[1] for q in self.Q_diff]),
                                                ('alpha', self.alphas),
                                                ('V', self.V),
                                                ('gradV', self.gradV)
                                                 ])
+
+        print("Simulation ends at: {}".format(datetime.today().strftime("%Y-%m-%d %H:%M:%S")))
+
+        # Closes the object (e.g. any result files are closed)
+        self.close()
 
         return self.learnerV, self.learnerP, df_learning
 
@@ -925,7 +974,8 @@ class SimulatorQueue(Simulator):
         buffer_sizes = [self.env.getBufferSizeFromState(s) for s in states]
         # print("buffer sizes, actions = {}".format(np.c_[buffer_sizes, actions]))
         K = self.learnerP.getPolicy().getBufferSizeForDeterministicBlocking()
-        probas_stationary = dict({K-1: np.sum([1 for bs in buffer_sizes if bs == K - 1]) / len(buffer_sizes)})
+        probas_stationary = dict({K-1:  np.sum([1 for bs in buffer_sizes if bs == K-1]) / len(buffer_sizes),
+                                  K:    np.sum([1 for bs in buffer_sizes if bs == K]) / len(buffer_sizes)})
 
         return probas_stationary
 
@@ -1395,7 +1445,7 @@ class SimulatorQueue(Simulator):
         return K, Q0, Q1, N, t_sim_max
 
     @measure_exec_time
-    def estimate_Q_values_until_mixing(self, t_learn, t_sim_max=250, N=100, verbose=False, verbose_period=1):
+    def estimate_Q_values_until_mixing(self, t_learn, buffer_size, t_sim_max=250, N=100, verbose=False, verbose_period=1):
         """
         Estimates the state-action values for the case of a parameterized policy defined as a linear function of theta
         with only one buffer size with non-zero derivative.
@@ -1405,6 +1455,9 @@ class SimulatorQueue(Simulator):
         Arguments:
         t_learn: int
             Learning time step.
+
+        buffer_size: int
+            Buffer size at which the system starts when estimating Q(buffer_size, action).
 
         t_sim_max: (opt) int
             Maximum discrete time for the simulation. If this is reached without mixing, the estimated state-action
@@ -1426,8 +1479,8 @@ class SimulatorQueue(Simulator):
         Return: tuple
         Triple with the following elements:
         - K: the buffer size at which an incoming job is always rejected by the policy (deterministic policy)
-        - The state-action value for (K-1, a=Reject)
-        - The state-action value for (K-1, a=Accept)
+        - The state-action value for (buffer_size, a=Reject)
+        - The state-action value for (buffer_size, a=Accept)
         - n: the number of realizations, where trajectories mix, that are used to compute the state-action values
         """
         if not isinstance(self.learnerP.getPolicy(), PolQueueTwoActionsLinearStep):
@@ -1441,7 +1494,7 @@ class SimulatorQueue(Simulator):
         n = 0           # Number of times Q0 and Q1 can be estimated from mixing trajectories (out of N)
         max_t_mix = 0.0
         for _ in range(N):
-            _, Q0_, Q1_, t_mix = self.run_simulation_2_until_mixing(t_learn, t_sim_max=t_sim_max, verbose=False, verbose_period=verbose_period)
+            _, Q0_, Q1_, t_mix = self.run_simulation_2_until_mixing(t_learn, buffer_size, t_sim_max, verbose=False, verbose_period=verbose_period)
             if not np.isnan(Q0_) and not np.isnan(Q1_):
                 Q0 += Q0_
                 Q1 += Q1_
@@ -1455,7 +1508,7 @@ class SimulatorQueue(Simulator):
 
         return K, Q0, Q1, n, max_t_mix
 
-    def run_simulation_2_until_mixing(self, t_learn, t_sim_max=None, verbose=False, verbose_period=1):
+    def run_simulation_2_until_mixing(self, t_learn, buffer_size, t_sim_max, verbose=False, verbose_period=1):
         """
         Runs the simulation using Monte-Carlo
 
@@ -1463,8 +1516,8 @@ class SimulatorQueue(Simulator):
         t_learn: int
             The learning time step to which the simulation will contribute.
 
-        agent: Agent
-            Agent object that is responsible of performing the actions on the environment and learning from them.
+        buffer_size: int
+            Buffer size at which the two simulations start.
 
         t_sim_max: int
             Maximum discrete simulation time allowed for the simulation. This is defined ONLY by job arrivals,
@@ -1481,8 +1534,8 @@ class SimulatorQueue(Simulator):
         Return: tuple
         Triple with the following elements:
         - t: the last time step of the simulation process.
-        - Q0: the sum of the rewards observed until mixing starting at state-action (K-1, a=Reject)
-        - Q1: the sum of the rewards observed until mixing starting at state-action (K-1, a=Accept)
+        - Q0: the sum of the rewards observed until mixing starting at state-action (buffer_size, a=Reject)
+        - Q1: the sum of the rewards observed until mixing starting at state-action (buffer_size, a=Accept)
         - mixing time: discrete time at which the two trajectories mix. This is np.nan if they don't mix.
         """
 
@@ -1576,7 +1629,7 @@ class SimulatorQueue(Simulator):
         envs = [copy.deepcopy(self.env), copy.deepcopy(self.env)]
 
         # Set the state of each environment AFTER taking the respective action at time t=0.
-        # This is K-1 when the first action is Reject and K when the first action is Accept.
+        # This is buffer_size when the first action is Reject and buffer_size+1 when the first action is Accept.
         K = self.learnerP.getPolicy().getBufferSizeForDeterministicBlocking()
 
         # History of states, actions and rewards of each environment (2 x <undef> list)
@@ -1584,16 +1637,16 @@ class SimulatorQueue(Simulator):
         # Q0 and Q1 on the fly.
         times = [[0],
                  [0]]
-        states = [[(K-1, None)],
-                  [(K-1, None)]]
+        states = [[(buffer_size, None)],
+                  [(buffer_size, None)]]
         actions = [[Actions.REJECT],
                    [Actions.ACCEPT]]
-        rewards = [[self.compute_reward_for_buffer_size(K-1)],
+        rewards = [[self.compute_reward_for_buffer_size(buffer_size)],
                    [0.0]]
 
         # Set the NEW state of the environments once the above actions have been taken on the respective states
-        envs[0].setState((K-1, None))   # Environment that starts at REJECTION
-        envs[1].setState((K, None))     # Environment that starts at ACCEPTANCE
+        envs[0].setState((buffer_size, None))       # Environment that starts at REJECTION
+        envs[1].setState((buffer_size+1, None))     # Environment that starts at ACCEPTANCE
 
         # Time step in the queue trajectory (the first time step is t = 0)
         done = False
@@ -1815,7 +1868,7 @@ class SimulatorQueue(Simulator):
         return reward
 
     @measure_exec_time
-    def learn(self, agent, t, proba_stationary=None, Q_values=None):
+    def learn(self, agent, t, probas_stationary: dict=None, Q_values: dict=None):
         """
         Learns the value functions and the policy at time t
 
@@ -1827,12 +1880,15 @@ class SimulatorQueue(Simulator):
             Time (iteration) in the queue simulation time scale at which learning takes place.
             In Monte-Carlo learning, this time would be the end of the queue simulation.
 
-        proba_stationary: (opt) float between 0 and 1 (used when estimating the theoretical grad(V))
-            Estimated stationary probability of buffer size = K-1.
+        probas_stationary: (opt) dict of floats between 0 and 1 (used when estimating the theoretical grad(V))
+            Dictionary with the estimated stationary probability for each buffer size defined in its keys.
+            The dictionary keys are expected to be K-1 and K.
             default: None
 
-        Q_values: (opt) list or numpy array (used when estimating the theoretical grad(V))
-            Estimated state-action values for (K-1, a=1) and (K-1, a=0)
+        Q_values: (opt) dict of lists or numpy arrays (used when estimating the theoretical grad(V))
+            Dictionary with the estimated state-action values for each buffer size defined in its keys.
+            Each element in the list is indexed by the initial action taken when estimating the corresponding Q value.
+            The dictionary keys are expected to be K-1 and K.
             default: None
         """
         # TODO: (2021/12/13) Refactor the signature of the method so that we pass a parameter that states whether we want to use the estimation of the theoretical grad(V) or go for the REINFORCE algorithm
@@ -1843,7 +1899,7 @@ class SimulatorQueue(Simulator):
         # Store the alpha used for the current learning step
         agent.getLearnerP().store_learning_rate()
 
-        if proba_stationary is None or Q_values is None:
+        if probas_stationary is None or Q_values is None:
             agent.getLearnerV().learn(t)  # UNCOMMENTED ON SAT, 27-NOV-2021
             theta_prev, theta, V, gradV, G = agent.getLearnerP().learn(t)
             #theta_prev, theta, V, gradV, G = agent.getLearnerP().learn_TR(t)
@@ -1854,12 +1910,24 @@ class SimulatorQueue(Simulator):
             # --used when learning with learn() or learn_TR() or learn_linear_theoretical()-- is NOT meaningful
             # because, either it is empty as the rewards are not recorded while running the Fleming-Viot process,
             # or it does not reflect the actual values of each state-value of the original system.
-            theta_prev, theta, V, gradV, G = agent.getLearnerP().learn_linear_theoretical_from_estimated_values(t, proba_stationary, Q_values)
+            K = agent.getLearnerP().getPolicy().getBufferSizeForDeterministicBlocking()
+            keys_probas = probas_stationary.keys()
+            keys_Q_values = Q_values.keys()
+            assert [K-1, K] == sorted(keys_probas) and [K-1, K] == sorted(keys_Q_values), \
+                "Keys K-1={} and K={} are present in the dictionaries containing the stationary probability estimations ({}) and the Q values ({})" \
+                .format(K-1, K, probas_stationary, Q_values)
+
+            # Regular gradient ascent based on grad(V)
+            #theta_prev, theta, V, gradV, G = agent.getLearnerP().learn_linear_theoretical_from_estimated_values(t, probas_stationary[K-1], Q_values[K-1])
+
+            # IGA: Integer Gradient Ascent
+            theta_prev, theta, V, gradV, G = agent.getLearnerP().learn_linear_theoretical_from_estimated_values_IGA(t, probas_stationary, Q_values)
+
         self.alphas += [agent.getLearnerP().getLearningRate()]
         self.thetas += [theta_prev]
         self.thetas_updated += [theta]
-        self.proba_stationary += [proba_stationary]
-        self.Q_diff += [Q_values[1] - Q_values[0]]
+        self.proba_stationary += [[probas_stationary[K-1], probas_stationary[K]]]
+        self.Q_diff += [[Q_values[K-1][1] - Q_values[K-1][0], Q_values[K][1] - Q_values[K][0]]]
         self.V += [V]               # NOTE: This is NOT always the average value, rho... for instance, NOT when linear_theoretical_from_estimated_values() is called above
         self.gradV += [gradV]
         self.G = G
@@ -1867,6 +1935,19 @@ class SimulatorQueue(Simulator):
         agent.getLearnerP().update_learning_time()
         print("*** Learning-time updated: time = {} ***".format(agent.getLearnerP().getLearningTime()))
         agent.getLearnerP().update_learning_rate_by_episode()
+
+        if self.save:
+            self.fh_results.write(bytes("{},{},{},{},{},{},{},{},{}\n" \
+                                    .format(self.thetas[-1][0],
+                                            self.thetas_updated[-1],
+                                            self.proba_stationary[-1][0],
+                                            self.proba_stationary[-1][1],
+                                            self.Q_diff[-1][0],
+                                            self.Q_diff[-1][1],
+                                            self.alphas[-1],
+                                            self.V[-1],
+                                            self.gradV[-1]
+                                            ), 'UTF-8'))
 
     def check_done(self, tmax, t, state, action, reward):
         """
@@ -2147,6 +2228,8 @@ if __name__ == "__main__":
         from agents.learners.continuing.mc import LeaMC
         from agents.learners.policies import LeaPolicyGradient
 
+        resultsdir = "../../RL-002-QueueBlocking/results/RL/single-server"
+
         capacity = np.Inf
         nservers = 1
         job_class_rates = [0.7]
@@ -2155,27 +2238,27 @@ if __name__ == "__main__":
         env_queue_mm = EnvQueueSingleBufferWithJobClasses(queue, job_class_rates, rewardOnJobRejection_ExponentialCost, None)
 
         # Acceptance policy definition
-        theta_start = 39.3  # 1.3, 11.3  # IMPORTANT: This value should NOT be integer, o.w. the policy gradient will always be 0 regardless of the state at which blocking occurs
+        theta_start = 36.0  # 1.3, 11.3  # IMPORTANT: This value should NOT be integer, o.w. the policy gradient will always be 0 regardless of the state at which blocking occurs
         policies = dict({PolicyTypes.ACCEPT: PolQueueTwoActionsLinearStep(env_queue_mm, theta_start), PolicyTypes.ASSIGN: None})
         #policies = dict({PolicyTypes.ACCEPT: PolQueueTwoActionsLogit(env_queue_mm, theta_start, beta=1.0), PolicyTypes.ASSIGN: None})
 
         # Learning method (MC or FV)
-        n_particles_fv = 400; t_sim = 500
-        #n_particles_fv = 800; t_sim = 800
+        #n_particles_fv = 400; t_sim = 200
+        n_particles_fv = 800; t_sim = 800
         #n_particles_fv = 800; t_sim = 1000
-        learning_method = LearningMethod.MC; nparticles = 1; plot_trajectories = False; symbol = 'b.-'
-        #learning_method = LearningMethod.FV; nparticles = n_particles_fv; plot_trajectories = False; symbol = 'g.-'
+        #learning_method = LearningMethod.MC; nparticles = 1; plot_trajectories = False; symbol = 'b.-'
+        learning_method = LearningMethod.FV; nparticles = n_particles_fv; plot_trajectories = False; symbol = 'g.-'
 
         # Simulator on a given number of iterations for the queue simulation and a given number of iterations to learn the policy
-        t_learn = 200 #50
+        t_learn = 198 #250 #50
         nmeantimes = t_sim * job_class_rates[0] # Simulation time to use in the FV estimation when estimating P(T>t) and E(T_A)
 
         # Learners definition
         fixed_window = False
-        alpha_start = 100.0 #/ t_sim  # Use `/ t_sim` when using update of theta at each simulation step (i.e. LeaPolicyGradient.learn_TR() is called instead of LeaPolicyGradient.learn())
+        alpha_start = 1.0 #/ t_sim  # Use `/ t_sim` when using update of theta at each simulation step (i.e. LeaPolicyGradient.learn_TR() is called instead of LeaPolicyGradient.learn())
         adjust_alpha = True
-        min_time_to_update_alpha = t_learn / 2.5
-        alpha_min = 0.1
+        min_time_to_update_alpha = int(t_learn / 2.5)
+        alpha_min = 0.0 # 0.1
         gamma = 1.0
         if learning_method == LearningMethod.FV:
             learnerV = LeaFV(env_queue_mm, gamma=gamma)
@@ -2192,7 +2275,7 @@ if __name__ == "__main__":
                                                            alpha_min=alpha_min, fixed_window=fixed_window)})
         agent_gradient = AgeQueue(env_queue_mm, policies, learners)
 
-        seed = 1717
+        seed = 1769 #1717
         dict_nsteps = dict({'queue': t_sim, 'learn': t_learn})
         dict_params_simul = dict({
             'nparticles': nparticles,
@@ -2201,7 +2284,25 @@ if __name__ == "__main__":
             'seed': np.nan
             })
         dict_params_info = dict({'plot': False, 'log': False})
-        simul = SimulatorQueue(env_queue_mm, agent_gradient, dict_nsteps, N=nparticles, debug=False)
+        simul = SimulatorQueue(env_queue_mm, agent_gradient, dict_nsteps, N=nparticles, save=True, resultsdir=resultsdir, debug=False)
+
+        params = dict({
+            '1(a)-System-#Servers': nservers,
+            '1(b)-System-JobClassRates': job_class_rates,
+            '1(c)-System-ServiceRates': service_rates,
+            '1(d)-System-TrueTheta': COST_EXP_BUFFER_SIZE_REF,
+            '2(a)-Learning-Method': learning_method.name,
+            '2(b)-Learning-Method#Particles': nparticles,
+            '2(c)-Learning-GradientEstimation': "Theoretical",
+            '2(d)-Learning-#Steps': t_learn,
+            '2(e)-Learning-SimulationTimePerLearningStep': t_sim,
+            '2(f)-Learning-AlphaStart': alpha_start,
+            '2(g)-Learning-AdjustAlpha?': adjust_alpha,
+            '2(h)-Learning-MinEpisodeToAdjustAlpha': min_time_to_update_alpha,
+            '2(i)-Learning-AlphaMin': alpha_min,
+        })
+        show_exec_params(params)
+
         learnerV, learnerP, df_learning = simul.run(dict_params_simul, dict_params_info=dict_params_info, seed=seed, verbose=True)
 
         # Save the estimation of G(t) for the last learning step to a file

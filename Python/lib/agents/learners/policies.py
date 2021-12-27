@@ -584,26 +584,118 @@ class LeaPolicyGradient(GenericLearner):
         Q_diff = Q_values[1] - Q_values[0]
         gradV = proba_stationary * Q_diff
 
-        # Note that we bound the delta theta to avoid too large changes!
-        # We use "strange" numbers to avoid having theta fall always on the same distance from an integer (e.g. 4.1, 5.1, etc.)
-        # The lower and upper bounds are asymmetric (larger lower bound) so that a large negative reward can lead to a large reduction of theta.
-        bound_delta_theta_upper = +1.1234 #+np.Inf #+2.1310  # +1.131
-        bound_delta_theta_lower = -1.1234 #-np.Inf #-5.3123  # -1.131 #-5.312314 #-1.0
-        delta_theta = np.max([bound_delta_theta_lower, np.min([self.getLearningRate() * gradV, bound_delta_theta_upper])])
-        print("Estimated grad(V(theta)) = {}".format(gradV))
-        print("Delta(theta) = alpha * grad(V) = {}".format(delta_theta))
+        if gradV != 0.0:
+            # Note that we bound the delta theta to avoid too large changes!
+            # We use "strange" numbers to avoid having theta fall always on the same distance from an integer (e.g. 4.1, 5.1, etc.)
+            # The lower and upper bounds are asymmetric (larger lower bound) so that a large negative reward can lead to a large reduction of theta.
+            bound_delta_theta_upper = +1.1234 #+np.Inf #+2.1310  # +1.131
+            bound_delta_theta_lower = -1.1234 #-np.Inf #-5.3123  # -1.131 #-5.312314 #-1.0
 
-        theta_lower = 0.1   # In principle, try to avoid a non integer value as lower bound of theta because
-                            # the estimated gradient of V may be zero at integer values of theta (depending on the
-                            # method used to compute it --does not happen when we estimate the theoretical expression
-                            # for grad(V) because that expression assumes that theta is non-integer, and is still used
-                            # even when theta is integer.
-        theta = np.max([theta_lower, theta + delta_theta])
+            #alpha = self.getLearningRate()
+            # DM-2021/12/24: An attempt to make alpha proportional to the INVERSE of the second derivative of V,
+            # which is a multiple of grad(V), making then grad(V) disappear from alpha*gradV below!
+            # In fact, this relationship makes sense when we see that the graph of the theoretical grad(V)
+            # And this would mean that we only need to know the SIGN of grad(V).
+            # This expression is taken from the computation of Laplacian(V) following the approach outlined in Sutton
+            # Chapter 13 (Policy Gradient), which gives:
+            #   Laplacian(V) = Pr(K-1) * sum_{x} { P(x | K-1, a=1) - P(x | K-1, a=0) } * grad(V)
+            # When we compute the sum over x (using the Poisson-like distribution used in the Trunk-Reservation paper
+            # (page 4) of going from K to K-u (for the first term in the sum) and
+            # from K-1 to K-1-u (for the second term in the sum), i.e. of serving u jobs between the current job arrival
+            # and the next job arrival, and then "trivially" upper bounding that sum.
+            # The problem with this approach is that
+            # Ref: handwritten notes written on 21-Dec-2021 thru 24-Dec-2021.
+            alpha = self.getLearningRate() / theta[0] / proba_stationary / np.abs(gradV)
+            delta_theta = np.max([bound_delta_theta_lower, np.min([alpha * gradV, bound_delta_theta_upper])])
+            print("Estimated grad(V(theta)) = {}".format(gradV))
+            print("Delta(theta) = alpha * grad(V) = {:.3f} * {:e} = {:.6f}".format(alpha, gradV, delta_theta))
 
-        # Update the policy on the new theta and record it into the history of its updates
-        self.policy.setThetaParameter(theta)
+            theta_lower = 0.1   # In principle, try to avoid a non integer value as lower bound of theta because
+                                # the estimated gradient of V may be zero at integer values of theta (depending on the
+                                # method used to compute it --does not happen when we estimate the theoretical expression
+                                # for grad(V) because that expression assumes that theta is non-integer, and is still used
+                                # even when theta is integer.
+            theta = np.max([theta_lower, theta + delta_theta])
+
+            # Update the policy on the new theta and record it into the history of its updates
+            self.policy.setThetaParameter(theta)
 
         return theta_prev, theta, Q_mean, gradV, Q_diff
+
+    def learn_linear_theoretical_from_estimated_values_IGA(self, T, probas_stationary: dict, Q_values: dict):
+        """
+        Learns the policy by updating an integer-valued theta parameter using Integer Gradient Ascent (IGA)
+
+        IGA estimates the left gradient and the right gradient w.r.t. theta from the theoretical expression of
+        the gradient in the linear step policy (only applies here!), namely:
+
+        grad_left(V) = Pr(K-1) * ( Q(K-1,1) - Q(K-1,0) )
+        grad_right(V) = Pr(K) * ( Q(K,1) - Q(K,0) )
+
+        where Pr(.) is the stationary distribution for the given buffer sizes.
+
+        Arguments:
+        probas_stationary: (opt) dict of floats between 0 and 1 (used when estimating the theoretical grad(V))
+            Dictionary with the estimated stationary probability for each buffer size defined in its keys.
+            The dictionary keys are expected to be K-1 and K.
+            default: None
+
+        Q_values: (opt) dict of lists or numpy arrays (used when estimating the theoretical grad(V))
+            Dictionary with the estimated state-action values for each buffer size defined in its keys.
+            Each element in the list is indexed by the initial action taken when estimating the corresponding Q value.
+            The dictionary keys are expected to be K-1 and K.
+            default: None
+
+        Return: tuple
+        Tuple with the following elements:
+        - theta: theta value before its update
+        - theta_next: theta value after its update
+        - V: the average of the two state-action values (just to return something as it is not really meaningful)
+        - gradV: gradient of the value function that generated the update on theta
+        - Q_diff: the difference in the state-action values between the accept action and the reject action
+        """
+        theta = self.policy.getThetaParameter()
+        theta_prev = copy.deepcopy(theta)
+
+        # Store the value of theta (BEFORE its update) --> for plotting purposes
+        # Note that we store just ONE theta, as opposed to repeating theta as many times as simulation steps
+        # have been used in each queue simulation episode, because this methodology can be used in either
+        # Monte-Carlo mode (where we can follow the trajectory of the single particle being used in the estimation) or
+        # Fleming-Viot mode (where there is no one single trajectory to plot that is responsible for learning theta).
+        self.policy.store_theta(theta)
+
+        # Estimated grad(V), left and right
+        K = self.policy.getBufferSizeForDeterministicBlocking()
+
+        # Check input parameters
+        keys_probas = probas_stationary.keys()
+        keys_Q_values = Q_values.keys()
+        assert [K - 1, K] == sorted(keys_probas) and [K - 1, K] == sorted(keys_Q_values), \
+            "Keys K-1={} and K={} are present in the dictionaries containing the stationary probability estimations ({}) and the Q values ({})" \
+                .format(K - 1, K, probas_stationary, Q_values)
+
+        # Left gradient
+        Q_mean_Km1 = 0.5 * (Q_values[K-1][1] + Q_values[K-1][0])
+        Q_diff_Km1 = Q_values[K-1][1] - Q_values[K-1][0]
+        gradV_left = probas_stationary[K-1] * Q_diff_Km1
+
+        # Right gradient
+        Q_mean_K = 0.5 * (Q_values[K][1] + Q_values[K][0])
+        Q_diff_K = Q_values[K][1] - Q_values[K][0]
+        gradV_right = probas_stationary[K] * Q_diff_K
+
+        print("Estimated grad(V(theta)) (left) = {}".format(gradV_left))
+        print("Estimated grad(V(theta)) (right) = {}".format(gradV_right))
+
+        if np.sign(gradV_left) == np.sign(gradV_right):
+            delta_theta = np.sign(gradV_right)
+            print("Delta(theta) = {}".format(delta_theta))
+            theta = np.max([1, theta + delta_theta])    # theta lower bounded by 1
+
+            # Update the policy on the new theta and record it into the history of its updates
+            self.policy.setThetaParameter(theta)
+
+        return theta_prev, theta, Q_mean_Km1, gradV_left, Q_diff_Km1
 
     #----- GETTERS -----#
     def getPolicy(self):
