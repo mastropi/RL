@@ -75,9 +75,9 @@ class GenericLearner:
         # Trajectory history: information of the times, states, actions, and rewards stored as part of the learning process
         # (so that we can be retrieve it for e.g. analysis or plotting)
         self.times = []         # This time is expected to be a *discrete* time, indexing the respective states, actions and rewards
-        self.states = []
-        self.actions = []
-        self.rewards = []
+        self.states = []        # Stores S(t), the state at each time t stored in `times`
+        self.actions = []       # Stores A(t), the action taken at state S(t)
+        self.rewards = []       # Stores R(t) = R(S(t), A(t)), the reward received after taking action A(t) on state S(t)
 
         self.dict_state_action_counts = dict()
 

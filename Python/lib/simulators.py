@@ -27,12 +27,13 @@ import pandas as pd
 from matplotlib import pyplot as plt, cm  # cm is for colormaps (e.g. cm.get_cmap())
 from datetime import datetime
 from timeit import default_timer as timer
+import tracemalloc
 
 from agents.learners.episodic.discrete.td import LeaTDLambdaAdaptive
 from agents.learners.continuing.fv import LeaFV
 from agents.queues import PolicyTypes
 from environments.queues import rewardOnJobRejection_ExponentialCost, Actions, COST_EXP_BUFFER_SIZE_REF
-from estimators import estimate_blocking_fv_separately, estimate_proba_survival_and_expected_absorption_time_mc
+from estimators import estimate_proba_survival_and_expected_absorption_time_mc
 
 from utils.basic import merge_values_in_time, index_linear2multi, measure_exec_time, show_exec_params, generate_datetime_string
 from utils.computing import rmse, compute_job_rates_by_server, generate_min_exponential_time, stationary_distribution_birth_death_process
@@ -733,6 +734,9 @@ class SimulatorQueue(Simulator):
                                             dict_params_simul['buffer_size_activation'] - 1,   # We pass the absorption size to this function
                                             proba_surv, expected_absorption_time,
                                             verbose=verbose, verbose_period=verbose_period)
+                assert t == len(event_times) - 1, "The last time step of the simulation ({}) coincides with the number of events observed ({})" \
+                                                .format(t, len(event_times))
+                    ## We subtract 1 to len(event_times) because the first event time is 0.0 which is NOT an event time
                 print("\n*** RESULTS OF FLEMING-VIOT SIMULATION ***")
                 #print("Phi(t):\n{}".format(phi))
                 print("P(K-1), P(K): {}".format(probas_stationary))
@@ -746,8 +750,8 @@ class SimulatorQueue(Simulator):
                 #start_state = self.choose_state_for_buffer_size(self.env, K)
                 # Selection of the start state as one having buffer size = J, in order to have a fair(?) comparison with the FV method
                 start_state = self.choose_state_for_buffer_size(self.env, dict_params_simul['buffer_size_activation'])
-                t = self.run_simulation_mc(t_learn, start_state, verbose=verbose, verbose_period=verbose_period)
-                probas_stationary = self.estimate_stationary_probability_mc()
+                t = self.run_simulation_mc_DT(t_learn, start_state, verbose=verbose, verbose_period=verbose_period)
+                probas_stationary = self.estimate_stationary_probability_mc_DT()
                 print("\n*** RESULTS OF MONTE-CARLO SIMULATION ***")
                 print("P(K-1), P(K): {}".format(probas_stationary))
 
@@ -757,13 +761,14 @@ class SimulatorQueue(Simulator):
                 # Q(K-1, a=1) - Q(K-1, a=0)
                 print("\nEstimating the difference of the state-action values when the initial buffer size is K-1={}...".format(K-1))
                 N = 100; t_sim_max = 250
-                K, Q0_Km1, Q1_Km1, n, max_t = self.estimate_Q_values_until_mixing(t_learn, K-1, t_sim_max=t_sim_max, N=N, verbose=verbose, verbose_period=verbose_period)
+                K, Q0_Km1, Q1_Km1, n_Km1, max_t_Km1 = self.estimate_Q_values_until_mixing(t_learn, K-1, t_sim_max=t_sim_max, N=N, verbose=verbose, verbose_period=verbose_period)
                 #K, Q0_Km1, Q1_Km1, n, max_t = self.estimate_Q_values_until_stationarity(t_learn, t_sim_max=50, N=N, verbose=verbose, verbose_period=verbose_period)
                 print("--> Estimated state-action values on n={} realizations out of {} with max simulation time = {:.1f} out of {:.1f}:\nQ(K-1={}, a=1) = {}\nQ(K-1={}, a=0) = {}\nQ_diff = Q(K-1,1) - Q(K-1,0) = {}" \
-                      .format(n, N, max_t, t_sim_max, K-1, Q1_Km1, K-1, Q0_Km1, Q1_Km1 - Q0_Km1))
+                      .format(n_Km1, N, max_t_Km1, t_sim_max, K-1, Q1_Km1, K-1, Q0_Km1, Q1_Km1 - Q0_Km1))
             else:
                 Q0_Km1 = 0.0
                 Q1_Km1 = 0.0
+                n_Km1 = 0
                 print("Estimation of Q_diff(K-1) skipped because the estimated stationary probability Pr(K-1) = 0.")
             print("--> Estimated stationary probability: Pr(K-1={}) = {}".format(K-1, probas_stationary[K - 1]))
 
@@ -771,13 +776,14 @@ class SimulatorQueue(Simulator):
                 # Same as above, but for buffer size = K
                 print("\nEstimating the difference of the state-action values when the initial buffer size is K={}...".format(K))
                 N = 100; t_sim_max = 250
-                K, Q0_K, Q1_K, n, max_t = self.estimate_Q_values_until_mixing(t_learn, K, t_sim_max=t_sim_max, N=N, verbose=verbose, verbose_period=verbose_period)
-                #K, Q0_K, Q1_K, n, max_t = self.estimate_Q_values_until_stationarity(t_learn, t_sim_max=50, N=N, verbose=verbose, verbose_period=verbose_period)
+                K, Q0_K, Q1_K, n_K, max_t_K = self.estimate_Q_values_until_mixing(t_learn, K, t_sim_max=t_sim_max, N=N, verbose=verbose, verbose_period=verbose_period)
+                #K, Q0_K, Q1_K, n_K, max_t_K = self.estimate_Q_values_until_stationarity(t_learn, t_sim_max=50, N=N, verbose=verbose, verbose_period=verbose_period)
                 print("--> Estimated state-action values on n={} realizations out of {} with max simulation time = {:.1f} out of {:.1f}:\nQ(K={}, a=1) = {}\nQ(K={}, a=0) = {}\nQ_diff = Q(K,1) - Q(K,0) = {}" \
-                      .format(n, N, max_t, t_sim_max, K, Q1_K, K, Q0_K, Q1_K - Q0_K))
+                      .format(n_K, N, max_t_K, t_sim_max, K, Q1_K, K, Q0_K, Q1_K - Q0_K))
             else:
                 Q0_K = 0.0
                 Q1_K = 0.0
+                n_K = 0
                 print("Estimation of Q_diff(K) skipped because the estimated stationary probability Pr(K) = 0.")
             print("--> Estimated stationary probability: Pr(K={}) = {}".format(K, probas_stationary[K]))
 
@@ -816,10 +822,118 @@ class SimulatorQueue(Simulator):
 
         return self.learnerV, self.learnerP, df_learning
 
+    def manage_job_arrival(self, t, t_learn, env, agent, state, job_class):
+        """
+        Manages a completed service event
+
+        Arguments:
+        t: int
+            Discrete time step at which the job arrival takes place.
+
+        t_learn: int
+            Leaning time step (learning of the policy).
+
+        env: Queue environment
+            Queue environment where the service takes place.
+
+        agent: Agent
+            Agent acting on the environment.
+
+        state: State of the queue environment
+            The state in which the queue environment is in.
+
+        job_class: int
+            Class of the arriving job.
+
+        Return: tuple
+        Triple with the following elements:
+        - action taken by the agent
+        - the next state of the queue
+        - the reward received
+        - gradient: the policy gradient for the action taken given the state
+        """
+        # Store the class of the arriving job
+        env.setJobClass(job_class)
+
+        # Perform a step on the environment by applying the acceptance policy
+        action_accept_reject, next_state, reward_accept_reject, _ = self.step(t, env, PolicyTypes.ACCEPT)
+
+        # Assign the job to a server if accepted
+        if action_accept_reject == Actions.ACCEPT:
+            # Assign the job just accepted to a server and update the next_state value
+            # (because the next_state from the ACCEPT action has not been updated above
+            # as we need to know to which server the accepted job is assigned in order
+            # to know the next state of the queue environment)
+            _, next_state, reward_assign, _ = self.step(t, env, PolicyTypes.ASSIGN)
+        else:
+            reward_assign = 0.0
+        action = action_accept_reject
+        reward = reward_accept_reject + reward_assign
+
+        if action == Actions.ACCEPT and reward != 0.0:
+            print("--> action = {}, REWARD ASSIGN: {}, REWARD = {}".format(action_accept_reject, reward_assign, reward))
+            raise ValueError("A non-zero reward is not possible when the action is ACCEPT.")
+
+        # Update the average reward (just for information purposes)
+        agent.getLearnerV().updateAverageReward(t, reward)
+
+        # Compute and store the gradient of the policy evaluated on the taken action A(t) given the state S(t)
+        # Goal: depending on the learning method, this value may be useful
+        gradient_for_action = agent.getLearnerP().getPolicy().getGradient(action_accept_reject, state)
+        agent.getLearnerP().record_gradient(state, action_accept_reject, gradient_for_action)
+
+        return action, next_state, reward, gradient_for_action
+
+    def manage_service(self, env, agent, state, server):
+        """
+        Manages a completed service event
+
+        Arguments:
+        env: Queue environment
+            Queue environment where the service takes place.
+
+        agent: Agent
+            Agent acting on the environment.
+
+        state: State of the queue environment
+            The state in which the queue environment is in (it's only used when storing the trajectory and for assertions)
+
+        server: int
+            Server index where the service takes place.
+
+        Return: tuple
+        Triple with the following elements:
+        - action taken: None (because no action is taken when a service is completed)
+        - the next state of the queue
+        - the reward received: NaN, as no reward is received when a service is completed.
+        """
+        queue_state = env.getQueueState()
+        assert queue_state[server] > 0, "The server where the completed service occurs has at least one job"
+
+        # Compute and set the next state of the affected server in the queue system
+        next_queue_state = copy.deepcopy(queue_state)
+        next_queue_state[server] -= 1
+
+        env.setState((next_queue_state, None))
+        next_state = env.getState()
+        assert env.getBufferSizeFromState(next_state) == env.getBufferSizeFromState(state) - 1, \
+            "The buffer size after a DEATH decreased by 1: S(t) = {}, S(t+1) = {}" \
+                .format(env.getBufferSizeFromState(state), env.getBufferSizeFromState(next_state))
+
+        # We set the action to None because there is no action by the agent when a service is completed
+        action = None
+        # We set the reward to NaN because a reward may happen ONLY when a new job arrives.
+        # If there are rewards due to serviced jobs, we would impact those rewards into the reward
+        # received when a new job arrives (which is not the case at this moment (28-Nov-2021),
+        # i.e. the reward when a job is serviced is 0).
+        reward = np.nan
+
+        return action, next_state, reward
+
     @measure_exec_time
     def run_simulation_mc(self, t_learn, start_state, agent=None, t_sim_max=None, verbose=False, verbose_period=1):
         """
-        Runs the simulation using Monte-Carlo
+        Runs the continuous-time simulation using Monte-Carlo
 
         Arguments:
         t_learn: int
@@ -863,7 +977,121 @@ class SimulatorQueue(Simulator):
 
         # Time step in the queue trajectory (the first time step is t = 0)
         done = False
-        t = -1
+        t = 0
+        event_prev = None
+        while not done:
+            t += 1
+
+            # Current state
+            state = self.env.getState()
+
+            # Generate next event
+            # Note: this function takes care of NOT generating a service event when a server is empty.
+            time, event, job_class_or_server, _ = self.generate_event([self.env])
+
+            # Analyze the event
+            if event == Event.BIRTH:
+                # The event is an incoming job class
+                # => Update the state of the queue, apply the acceptance policy, and finally the server assignment policy
+                action, next_state, reward, gradient_for_action = self.manage_job_arrival(t, t_learn, self.env, agent, state, job_class_or_server)
+            elif event == Event.DEATH:
+                # The event is a completed service
+                # => Update the state of the queue
+                action, next_state, reward = self.manage_service(self.env, agent, state, job_class_or_server)
+
+            # Update the trajectory used in the learning process, where we store:
+            # S(t): state BEFORE an action is taken
+            # A(t): action taken given the state S(t)
+            # R(t): reward received by taking action A(t) and transition to S(t+1)
+            self.update_trajectory(agent, t_learn * (self.dict_nsteps['queue'] + 1) + t, t, state, action, reward)
+
+            if self.debug:
+                print("{} | t={}: event={}, action={} -> state={}, reward={}".format(state, t, event, action, next_state, reward), end="\n")
+
+            done = self.check_done(tmax, t, state, action, reward)
+
+        # DONE
+        if verbose and np.mod(t_learn, verbose_period) == 0:
+            print("==> agent ENDS at time t={} at state {} coming from state = {}, action = {}, reward = {}, gradient = {})" \
+                    .format(t, self.env.getState(), state, action, reward, gradient_for_action))
+
+        return t
+
+    def estimate_stationary_probability_mc(self):
+        """
+        Monte-Carlo estimation of the stationary probability of buffer sizes K-1 and K based on the observed trajectory
+        in continuous-time.
+
+        The stationary probability is estimated as the fraction of time spent at each buffer size over the total
+        simulation time (sum of sojourn times).
+
+        Return: dict
+        Dictionary with the estimated stationary probability for buffer sizes K-1 and K, where K is the first integer
+        larger than or equal to theta + 1  --theta being the parameter of the linear step acceptance policy.
+        """
+        # Event times and sojourn times
+        times = self.learnerV.getTimes()
+        sojourn_times = [times[0]] + np.diff(times) # Each sojourn time is the time the Markov Chain sojourned at the state stored in `states`
+        total_sojourn_times = np.sum(sojourn_times)
+
+        # States and associated buffer sizes
+        states = self.learnerV.getStates()
+        buffer_sizes = [self.env.getBufferSizeFromState(s) for s in states]
+
+        K = self.learnerP.getPolicy().getBufferSizeForDeterministicBlocking()
+        probas_stationary = dict({K-1:  np.sum([st for bs, st in zip(buffer_sizes, sojourn_times) if bs == K-1]) / total_sojourn_times,
+                                  K:    np.sum([st for bs, st in zip(buffer_sizes, sojourn_times) if bs == K]) / total_sojourn_times})
+
+        return probas_stationary
+
+    @measure_exec_time
+    def run_simulation_mc_DT(self, t_learn, start_state, agent=None, t_sim_max=None, verbose=False, verbose_period=1):
+        """
+        Runs the discrete-time (DT) simulation using Monte-Carlo
+
+        Arguments:
+        t_learn: int
+            The learning time step to which the simulation will contribute.
+
+        start_state: int or list or numpy array
+            State at which the queue environment starts for the simulation.
+
+        agent: (opt) Agent
+            Agent object that is responsible of performing the actions on the environment and learning from them.
+            default: None, in which case the agent defined in the object is used
+
+        t_sim_max: (opt) int
+            Maximum discrete simulation time allowed for the simulation. This is defined ONLY by job arrivals,
+            NOT by service events.
+            default: None, in which case the number of steps defined in the self.dict_nsteps['queue'] entry is used
+
+        verbose: (opt) bool
+            Whether to be verbose in the simulation process.
+            default: False
+
+        verbose_period: (opt) int
+            The time step period to be verbose.
+            default: 1 => be verbose at every simulation step.
+
+        Return: int
+        The last time step of the simulation process.
+        """
+        #-- Parse input parameters
+        if agent is None:
+            agent = self.agent
+        if t_sim_max is None:
+            tmax = self.dict_nsteps['queue']
+        else:
+            tmax = t_sim_max
+
+        # Set the start state of the environment to the given start state
+        job_class = None
+        self.env.setState((start_state, job_class))
+        print("MC simulation: The queue environments starts at state {}".format(self.env.getState()))
+
+        # Time step in the queue trajectory (the first time step is t = 0)
+        done = False
+        t = 0
         event_prev = None
         while not done:
             # Current state
@@ -879,65 +1107,19 @@ class SimulatorQueue(Simulator):
                 # (this guarantees that the stationary distribution of the discrete-time process coincides with that of the continuous-time process)
                 t += 1
 
-                # Store the class of the arriving job
-                job_class = job_class_or_server
-                self.env.setJobClass(job_class)
-
-                # Perform a step on the environment by applying the acceptance policy
-                action_accept_reject, next_state, reward_accept_reject, _ = self.step(t, self.env, PolicyTypes.ACCEPT)
-
-                # Store the gradient of the policy evaluated on the taken action A(t) given the state S(t)
-                # Goal: be able to compute e.g. the average policy gradient when learning at the end of the simulation
-                gradient_for_action = agent.getLearnerP().getPolicy().getGradient(action_accept_reject, state)
-                agent.getLearnerP().record_gradient(state, action_accept_reject, gradient_for_action)
-
-                # Assign the job to a server if accepted
-                if action_accept_reject == Actions.ACCEPT:
-                    # Assign the job just accepted to a server and update the next_state value
-                    # (because the next_state from the ACCEPT action has not been updated above
-                    # as we need to know to which server the accepted job is assigned in order
-                    # to know the next state of the queue environment)
-                    _, next_state, reward_assign, _ = self.step(t, self.env, PolicyTypes.ASSIGN)
-                else:
-                    reward_assign = 0.0
-
-                action = action_accept_reject
-                reward = reward_accept_reject + reward_assign
-                if action == Actions.ACCEPT and reward != 0.0:
-                    print("--> action = {}, REWARD ASSIGN: {}, REWARD = {}".format(action_accept_reject, reward_assign, reward))
-                    raise ValueError("A non-zero reward is not possible when the action is ACCEPT.")
+                action, next_state, reward, gradient_for_action = self.manage_job_arrival(t, t_learn, self.env, agent, state, job_class_or_server)
 
                 # Update the trajectory used in the learning process, where we store:
                 # S(t): state BEFORE an action is taken
                 # A(t): action taken given the state S(t)
                 # R(t): reward received by taking action A(t) and transition to S(t+1)
                 self.update_trajectory(agent, t_learn * (self.dict_nsteps['queue'] + 1) + t, t, state, action, reward)
-                # Update the average reward (just for information purposes)
-                agent.getLearnerV().updateAverageReward(t, reward)
 
                 done = self.check_done(tmax, t, state, action, reward)
             elif event == Event.DEATH:
                 # The event is a completed service
                 # => Update the state of the queue but do NOT update the discrete-time step
-                server = job_class_or_server
-                queue_state = self.env.getQueueState()
-                assert queue_state[server] > 0, "The server where the completed service occurs has at least one job"
-                next_queue_state = copy.deepcopy(queue_state)
-                next_queue_state[server] -= 1
-                self.env.setState((next_queue_state, None))
-                next_state = self.env.getState()
-
-                assert self.env.getBufferSizeFromState(next_state) == self.env.getBufferSizeFromState(state) - 1, \
-                    "The buffer size after a DEATH decreased by 1: S(t) = {}, S(t+1) = {}" \
-                        .format(self.env.getBufferSizeFromState(state), self.env.getBufferSizeFromState(next_state))
-
-                # We set the action to None because there is no action by the agent when a service is completed
-                action = None
-                # We set the reward to NaN because a reward may happen ONLY when a new job arrives.
-                # If there are rewards due to serviced jobs, we would impact those rewards into the reward
-                # received when a new job arrives (which is not the case at this moment (28-Nov-2021),
-                # i.e. the reward when a job is serviced is 0).
-                reward = np.nan
+                action, next_state, reward = self.manage_service(self.env, agent, state, job_class_or_server)
                 if event_prev == Event.BIRTH or event_prev is None:
                     # Add the state PRIOR to the FIRST DEATH after a BIRTH (or the very first DEATH event
                     # if that is the first event that occurs in the simulation), so that we record the state
@@ -959,19 +1141,17 @@ class SimulatorQueue(Simulator):
 
         return t
 
-    def estimate_stationary_probability_mc(self):
+    def estimate_stationary_probability_mc_DT(self):
         """
-        Monte-Carlo estimation of the stationary probability of K-1 based on the observed trajectory"
+        Monte-Carlo estimation of the stationary probability of K-1 and K based on the observed trajectory
+        in discrete-time, i.e. where only incoming jobs trigger a time step.
 
         Return: dict
-        Dictionary with the estimated stationary probability for buffer size K-1, where K is the first integer
-        larger than theta + 1 --being theta the parameter of the acceptance linear step policy.
+        Dictionary with the estimated stationary probability for buffer sizes K-1 and K, where K is the first integer
+        larger than or equal to theta + 1  --theta being the parameter of the linear step acceptance policy.
         """
-        # TODO: Estimate the stationary probability in MC using the continuous-time Markov Chain (so that every touch of the state whose probability is of interest is used in the estimation!
-        # (not only those discrete time steps where the action is not None as is done now... which may make the stationary probability be estimated as 0.0 even when the continuous-time process touched the state of interest!)
-        states = [s for s, a in zip(self.learnerV.getStates(), self.learnerV.getActions()) if a is not None]
-        #actions = [a for a in self.learnerV.getActions() if a is not None]
-        buffer_sizes = [self.env.getBufferSizeFromState(s) for s in states]
+        states_with_actions = [s for s, a in zip(self.learnerV.getStates(), self.learnerV.getActions()) if a is not None]
+        buffer_sizes = [self.env.getBufferSizeFromState(s) for s in states_with_actions]
         # print("buffer sizes, actions = {}".format(np.c_[buffer_sizes, actions]))
         K = self.learnerP.getPolicy().getBufferSizeForDeterministicBlocking()
         probas_stationary = dict({K-1:  np.sum([1 for bs in buffer_sizes if bs == K-1]) / len(buffer_sizes),
@@ -981,9 +1161,10 @@ class SimulatorQueue(Simulator):
 
     @measure_exec_time
     def run_simulation_fv(self, t_learn, buffer_size_absorption, proba_surv, expected_absorption_time,
-                                verbose=False, verbose_period=1):
+                                agent=None, verbose=False, verbose_period=1):
         """
-        Runs the simulation using Monte-Carlo
+        Runs the Fleming-Viot simulation of the particle system and estimates the expected reward
+        (equivalent to the blocking probability when the blocking reward is always equal to 1)
 
         Arguments:
         t_learn: int
@@ -1003,6 +1184,10 @@ class SimulatorQueue(Simulator):
         expected_absorption_time: positive float
             Expected absorption cycle time E(T_A) used to estimate the blocking probability
             for each blocking buffer size.
+
+        agent: (opt) Agent
+            Agent object that is responsible of performing the actions on the environment and learning from them.
+            default: None, in which case the agent defined in the object is used
 
         verbose: (opt) bool
             Whether to be verbose in the simulation process.
@@ -1258,6 +1443,10 @@ class SimulatorQueue(Simulator):
                             "(when at least one particle has been absorbed) ({})".format(proba_surv['P(T>t)'].iloc[-1]))
         #---------------------------- Check input parameters ---------------------------------#
 
+        #-- Parse input parameters
+        if agent is None:
+            agent = self.agent
+
         # Set the start state of each environment/particle to an activation state, as this is a requirement
         # for the empirical distribution Phi(t).
         for i, env in enumerate(self.envs):
@@ -1283,12 +1472,14 @@ class SimulatorQueue(Simulator):
 
         # Time step in the queue trajectory (the first time step is t = 0)
         done = False
-        t = -1
+        t = 0
         maxtime = proba_surv['t'].iloc[-1]
             ## maxtime: it's useless to go with the FV simulation beyond the maximum observed survival time
             ## because the contribution to the integral used in the estimation of the average reward is 0.0 after that.
         is_any_phi_value_gt_0 = False
         while not done:
+            t += 1
+
             # Generate an event over all possible event types and particles
             # Note: this function takes care of NOT generating a service event when a server is empty.
             time, event, job_class_or_server, idx_particle = self.generate_event()
@@ -1300,51 +1491,17 @@ class SimulatorQueue(Simulator):
             state = self.envs[idx_particle].getState()
             if event == Event.BIRTH:
                 # The event is an incoming job class
-                # => Increment the discrete time step, set the arriving job class in the queue environment, and apply the acceptance policy
-                # NOTE: Only BIRTH events mark a new discrete time
-                # (this guarantees that the stationary distribution of the discrete-time process coincides with that of the continuous-time process)
-                t += 1
+                # => Update the state of the queue, apply the acceptance policy, and finally the server assignment policy
+                action, next_state, reward, gradient_for_action = \
+                    self.manage_job_arrival(t, t_learn, self.envs[idx_particle], agent, state, job_class_or_server)
 
-                # Store the class of the arriving job
-                job_class = job_class_or_server
-                self.envs[idx_particle].setJobClass(job_class)
-
-                # Perform a step on the environment by applying the acceptance policy
-                action_accept_reject, next_state, reward_accept_reject, _ = self.step(t, self.envs[idx_particle], PolicyTypes.ACCEPT)
-
-                # Assign the job to a server if accepted
-                if action_accept_reject == Actions.ACCEPT:
-                    # Assign the job just accepted to a server and update the next_state value
-                    # (because the next_state from the ACCEPT action has not been updated above
-                    # as we need to know to which server the accepted job is assigned in order
-                    # to know the next state of the queue environment)
-                    _, next_state, reward_assign, _ = self.step(t, self.envs[idx_particle], PolicyTypes.ASSIGN)
-                else:
-                    reward_assign = 0.0
-
-                action = action_accept_reject
-                reward = reward_accept_reject + reward_assign
-                if action == Actions.ACCEPT and reward != 0.0:
-                    print("--> action = {}, REWARD ASSIGN: {}, REWARD = {}".format(action_accept_reject, reward_assign, reward))
-                    raise ValueError("A non-zero reward is not possible when the action is ACCEPT.")
-
-                # Stop when we reached the maximum observed time when estimating P(T>t)
+                # Stop when we reached the maxtime, which is set above to the maximum observed survival time
                 # (since going beyond does not contribute to the integral used in the FV estimator)
                 done = event_times[-1] > maxtime
             elif event == Event.DEATH:
                 # The event is a completed service
                 # => Update the state of the queue but do NOT update the discrete-time step
-                server = job_class_or_server
-                queue_state = self.envs[idx_particle].getQueueState()
-                assert queue_state[server] > 0, "The server where the completed service occurs has at least one job"
-                next_queue_state = copy.deepcopy(queue_state)
-                next_queue_state[server] -= 1
-                self.envs[idx_particle].setState((next_queue_state, None))
-                next_state = self.envs[idx_particle].getState()
-
-                assert self.envs[idx_particle].getBufferSizeFromState(next_state) == self.envs[idx_particle].getBufferSizeFromState(state) - 1, \
-                    "The buffer size after a DEATH decreased by 1: S(t) = {}, S(t+1) = {}" \
-                        .format(self.envs[idx_particle].getBufferSizeFromState(state), self.envs[idx_particle].getBufferSizeFromState(next_state))
+                action, next_state, reward = self.manage_service(self.envs[idx_particle], agent, state, job_class_or_server)
 
                 # Check if the particle has been ABSORBED
                 if self.envs[idx_particle].getBufferSizeFromState(next_state) == buffer_size_absorption:
@@ -1352,14 +1509,6 @@ class SimulatorQueue(Simulator):
                     # => Reactivate it to any of the other particles
                     reactivate_particle(idx_particle)
                     next_state = self.envs[idx_particle].getState()
-
-                # We set the action to None because there is no action by the agent when a service is completed
-                action = None
-                # We set the reward to NaN because a reward may happen ONLY when a new job arrives.
-                # If there are rewards due to serviced jobs, we would impact those rewards into the reward
-                # received when a new job arrives (which is not the case at this moment (28-Nov-2021),
-                # i.e. the reward when a job is serviced is 0).
-                reward = np.nan
 
             if self.debug:
                 print("{} | t={}: event={}, action={} -> state={}, reward={}".format(state, t, event, action, next_state, reward), end="\n")
@@ -1440,7 +1589,7 @@ class SimulatorQueue(Simulator):
             agent_Q = copy.deepcopy(self.agent)
             agent_Q.getLearnerV().reset(reset_value_functions=True, reset_trajectory=True, reset_counts=True)
             agent_Q.getLearnerP().reset(reset_value_functions=True, reset_trajectory=True, reset_counts=True)
-            self.run_simulation_mc(t_learn, start_state, t_sim_max=t_sim_max, agent=agent_Q, verbose=False, verbose_period=verbose_period)
+            self.run_simulation_mc_DT(t_learn, start_state, t_sim_max=t_sim_max, agent=agent_Q, verbose=False, verbose_period=verbose_period)
             Q1 += np.nansum(agent_Q.getLearnerV().getRewards())  # Note: the rewards are not NaN only when an action was taken (i.e. at job arrivals)
             del agent_Q
         Q1 /= N
@@ -1456,7 +1605,7 @@ class SimulatorQueue(Simulator):
             agent_Q = copy.deepcopy(self.agent)
             agent_Q.getLearnerV().reset(reset_value_functions=True, reset_trajectory=True, reset_counts=True)
             agent_Q.getLearnerP().reset(reset_value_functions=True, reset_trajectory=True, reset_counts=True)
-            self.run_simulation_mc(t_learn, start_state, t_sim_max=t_sim_max, agent=agent_Q, verbose=False, verbose_period=verbose_period)
+            self.run_simulation_mc_DT(t_learn, start_state, t_sim_max=t_sim_max, agent=agent_Q, verbose=False, verbose_period=verbose_period)
             Q0 += np.nansum(agent_Q.getLearnerV().getRewards())  # Note: the rewards are not NaN only when an action was taken (i.e. at job arrivals)
             del agent_Q
         Q0 = Q0 / N + first_reward  # The first reward is the same for all queues because it only depends on the buffer size which is the same for all queues and equal to K-1
@@ -1501,6 +1650,7 @@ class SimulatorQueue(Simulator):
         - The state-action value for (buffer_size, a=Reject)
         - The state-action value for (buffer_size, a=Accept)
         - n: the number of realizations, where trajectories mix, that are used to compute the state-action values
+        - Maximum discrete time at which the pair of trajectories mix over the n pair of trajectories that mix
         """
         if not isinstance(self.learnerP.getPolicy(), PolQueueTwoActionsLinearStep):
             raise ValueError("The agent's policy must be of type {} ({})" \
@@ -1511,7 +1661,7 @@ class SimulatorQueue(Simulator):
         Q0 = 0.0
         Q1 = 0.0
         n = 0           # Number of times Q0 and Q1 can be estimated from mixing trajectories (out of N)
-        max_t_mix = 0.0
+        max_t_mix = 0.0 # Maximum discrete mixing time observed over the n pair of trajectories that mix
         for _ in range(N):
             _, Q0_, Q1_, t_mix = self.run_simulation_2_until_mixing(t_learn, buffer_size, t_sim_max, verbose=False, verbose_period=verbose_period)
             if not np.isnan(Q0_) and not np.isnan(Q1_):
@@ -1887,7 +2037,7 @@ class SimulatorQueue(Simulator):
         return reward
 
     @measure_exec_time
-    def learn(self, agent, t, probas_stationary: dict=None, Q_values: dict=None):
+    def learn(self, agent, t, n_Q=None, probas_stationary: dict=None, Q_values: dict=None):
         """
         Learns the value functions and the policy at time t
 
@@ -1898,6 +2048,10 @@ class SimulatorQueue(Simulator):
         t: int
             Time (iteration) in the queue simulation time scale at which learning takes place.
             In Monte-Carlo learning, this time would be the end of the queue simulation.
+
+        n_Q: (opt) float
+            Average number of trajectories used to estimate the Q_values.
+            default: None
 
         probas_stationary: (opt) dict of floats between 0 and 1 (used when estimating the theoretical grad(V))
             Dictionary with the estimated stationary probability for each buffer size defined in its keys.
@@ -1950,6 +2104,8 @@ class SimulatorQueue(Simulator):
         self.V += [V]               # NOTE: This is NOT always the average value, rho... for instance, NOT when linear_theoretical_from_estimated_values() is called above
         self.gradV += [gradV]
         self.G = G
+        self.nevents_proba += [t]
+        self.ntrajectories_Q += [n_Q is not None and n_Q or 0]
 
         agent.getLearnerP().update_learning_time()
         print("*** Learning-time updated: time = {} ***".format(agent.getLearnerP().getLearningTime()))
@@ -1965,7 +2121,9 @@ class SimulatorQueue(Simulator):
                                             self.Q_diff[-1][1],
                                             self.alphas[-1],
                                             self.V[-1],
-                                            self.gradV[-1]
+                                            self.gradV[-1],
+                                            self.nevents_proba[-1],
+                                            self.ntrajectories_Q[-1]
                                             ), 'UTF-8'))
 
     def check_done(self, tmax, t, state, action, reward):
@@ -2004,7 +2162,6 @@ class SimulatorQueue(Simulator):
 
 if __name__ == "__main__":
     import runpy
-
     runpy.run_path("../../setup.py")
 
     test = False
@@ -2075,7 +2232,8 @@ if __name__ == "__main__":
     if not test and False:
         #--- Test the Simulator class ---#
         # NOTE: (2021/10/19) This test works
-        # from Python.lib import environments, agents
+
+        #from Python.lib import environments, agents
         from environments import gridworlds
         from agents import GenericAgent
         from agents.policies import random_walks
