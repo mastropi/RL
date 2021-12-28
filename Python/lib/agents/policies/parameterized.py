@@ -73,9 +73,9 @@ class PolQueueTwoActionsLogit(GenericParameterizedPolicyTwoActions):
 
         return gradient
 
-    def getPolicyForAction(self, action, state):
+    def getPolicyForAction(self, action, state, buffer_size=None):
         """
-        Returns the value of the policy for the given action when the environment is at the given state
+        Returns the value of the policy for the given action when the environment is at the given state (or buffer size)
 
         action: Actions
             Accept or Reject action at which the policy is evaluated.
@@ -85,10 +85,18 @@ class PolQueueTwoActionsLogit(GenericParameterizedPolicyTwoActions):
             The queue's buffer size is computed from the state using the getBufferSizeFromState() method
             defined in the environment object.
 
+        buffer_size: (opt) int
+            Buffer size triggering the action.
+            default: None, in which case the buffer size is computed from the given state.
+
         Return: float
         Value of the policy for the given action given the environment's state.
         """
-        buffer_size = self.env.getBufferSizeFromState(state)
+        if state is None and buffer_size is None:
+            raise ValueError("Either 'state' or 'buffer_size' must be not None")
+
+        if state is not None:
+            buffer_size = self.env.getBufferSizeFromState(state)
 
         policy_accept = 1 / (1 + np.exp( self.beta * (buffer_size - self.theta) ))
 
@@ -166,7 +174,7 @@ class PolQueueTwoActionsLinearStep(GenericParameterizedPolicyTwoActions):
 
         return slope
 
-    def getPolicyForAction(self, action, state):
+    def getPolicyForAction(self, action, state, buffer_size=None):
         """
         Returns the value of the policy for the given action when the environment is at the given state
 
@@ -178,10 +186,18 @@ class PolQueueTwoActionsLinearStep(GenericParameterizedPolicyTwoActions):
             The queue's buffer size is computed from the state using the getBufferSizeFromState() method
             defined in the environment object.
 
+        buffer_size: (opt) int
+            Buffer size triggering the action.
+            default: None, in which case the buffer size is computed from the given state.
+
         Return: float
         Value of the policy for the given action given the environment's state.
         """
-        buffer_size = self.env.getBufferSizeFromState(state)
+        if state is None and buffer_size is None:
+            raise ValueError("Either 'state' or 'buffer_size' must be not None")
+
+        if state is not None:
+            buffer_size = self.env.getBufferSizeFromState(state)
 
         if buffer_size <= self.theta[0]:
             policy_accept = 1.0

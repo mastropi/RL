@@ -728,7 +728,7 @@ class SimulatorQueue(Simulator):
                 assert self.N > 1, "The simulation system has more than one particle in Fleming-Viot mode ({})".format(self.N)
                 print("Running Fleming-Viot simulation on {} particles and absorption size = {}..." \
                       .format(self.N, dict_params_simul['buffer_size_activation'] - 1))
-                t, event_times, phi, probas_stationary, average_reward = \
+                t, event_times, phi, probas_stationary, expected_reward = \
                     self.run_simulation_fv( t_learn,
                                             dict_params_simul['buffer_size_activation'] - 1,   # We pass the absorption size to this function
                                             proba_surv, expected_absorption_time,
@@ -736,8 +736,8 @@ class SimulatorQueue(Simulator):
                 print("\n*** RESULTS OF FLEMING-VIOT SIMULATION ***")
                 #print("Phi(t):\n{}".format(phi))
                 print("P(K-1), P(K): {}".format(probas_stationary))
-                print("rho = {}".format(average_reward))
-                self.learnerV.setAverageReward(average_reward)
+                print("rho = {}".format(expected_reward))
+                self.learnerV.setAverageReward(expected_reward)
                 self.learnerV.setProbasStationary(probas_stationary)
             else:
                 # Monte-Carlo learning is the default
@@ -1012,8 +1012,16 @@ class SimulatorQueue(Simulator):
             The time step period to be verbose.
             default: 1 => be verbose at every simulation step.
 
-        Return: int
-        The last time step of the simulation process.
+        Return: tuple
+        Tuple with the following elements:
+        (below, K is determined by the parameterized acceptance policy as the smallest buffer size with deterministic rejection)
+        - t: the last time step (integer-valued) of the simulation process.
+        - event_times: list of times at which an event occurred during the simulation.
+        - phi: dictionary of lists with the empirical distribution of the buffer sizes of interest, namely K-1 and K,
+        which are an estimate of the probability of those buffer sizes conditional to survival (not absorption).
+        - probas_stationary: dictionary of floats indexed by the buffer sizes of interest, namely K-1 and K, containing
+        the estimated stationary probability at those buffer sizes.
+        - expected_reward: the estimated expected reward.
         """
         #---------------------------------- Auxiliary functions ------------------------------#
         def get_blocking_buffer_sizes():
@@ -1195,28 +1203,39 @@ class SimulatorQueue(Simulator):
 
             return probas_stationary, integrals
 
-        def estimate_average_reward(phi, probas_stationary):
+        def estimate_expected_reward(phi, probas_stationary):
             """
-            Computes the average reward using the stationary probability of each buffer size of interest,
-            the policy, and the associated reward defined in the queue environment
+            Estimates the expected reward of the queue system assuming a non-zero reward happens at the buffer sizes
+            defined by the keys (typically K-1 and K) contained in the phi dictionary, which stores
+            the empirical distribution of each buffer size at each event time t, an estimate of Pr(bs / T>t),
+            where T is the time to absorption (survival time) of the process with absorption at the
+            buffer_size_absorption value, derived from the original non-absorbed process.
 
-            :param phi: dict
+            The expected reward is estimated as:
+            E[R] = sum_{buffer sizes bs with rejection probability Pi > 0} { R(bs) * Pi(reject/bs) * Pr(bs) }
+
+            where R(bs) is reward associated to a rejection at buffer size bs defined in the queue environment,
+            and Pr(bs) is the stationary probability estimate of buffer size bs.
+
+            Arguments:
+            phi: dict
                 Dictionary with the empirical distribution of the buffer sizes of interest which are
                 the dictionary keys. The empirical distribution gives the probability of those buffer sizes
                 at each time, conditional to survival up to that time.
-            :param probas_stationary: dict
+
+            probas_stationary: dict
                 Dictionary with the estimated stationary probability of the buffer sizes of interest which are
                 the dictionary keys.
-            :return: float
-                Estimated average reward based on a stationary evolution of the system and the reward function
-                stored in the queue environment.
+
+            Return: float
+            Estimated expected reward.
             """
-            average_reward = 0.0
+            expected_reward = 0.0
             for bs in phi.keys():
-                average_reward += self.compute_reward_for_buffer_size(bs) * \
-                                  self.learnerP.getPolicy().getPolicyForAction(Actions.REJECT, state) * \
+                expected_reward += self.compute_reward_for_buffer_size(bs) * \
+                                  self.learnerP.getPolicy().getPolicyForAction(Actions.REJECT, None, bs) * \
                                   probas_stationary[bs]
-            return average_reward
+            return expected_reward
         #---------------------------------- Auxiliary functions ------------------------------#
 
         #---------------------------- Check input parameters ---------------------------------#
@@ -1361,15 +1380,15 @@ class SimulatorQueue(Simulator):
             probas_stationary, integrals = estimate_stationary_probability(event_times, phi, proba_surv, expected_absorption_time)
 
             # Compute the average reward based on the stationary probability and the empirical distribution of each buffer size bs
-            average_reward = estimate_average_reward(phi, probas_stationary)
+            expected_reward = estimate_expected_reward(phi, probas_stationary)
         else:
             probas_stationary = dict()
             integrals = dict()
             for bs in phi.keys():
                 probas_stationary[bs] = integrals[bs] = 0.0
-            average_reward = 0.0    # The average reward is non-zero only when the stationary probability of at least one buffer size of interest is non-zero
+            expected_reward = 0.0    # The average reward is non-zero only when the stationary probability of at least one buffer size of interest is non-zero
 
-        return t, event_times, phi, probas_stationary, average_reward
+        return t, event_times, phi, probas_stationary, expected_reward
 
     @measure_exec_time
     def estimate_Q_values_until_stationarity(self, t_learn, t_sim_max=50, N=100, verbose=False, verbose_period=1):
