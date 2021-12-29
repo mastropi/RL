@@ -18,6 +18,7 @@ if __name__ == "__main__":
     runpy.run_path('../../setup.py')
 
 import os
+import sys
 import copy
 import warnings
 from enum import Enum, unique
@@ -63,9 +64,35 @@ class Simulator:
 
     agent: Agent
         Agent object that is responsible of performing the actions on the environment and learning from them.
+
+    seed: (opt) int
+        Seed to use in the simulations as base seed (then the seed for each simulation is changed from this base seed).
+        default: None, in which case a random seed is generated.
+
+    log: (opt) bool
+        Whether to create a log file where printed messages are sent to.
+        The name of the file is created from the datetime of execution in the logsdir and has extension .log.
+        default: False
+
+    save: (opt) bool
+        Whether to save the results to a file.
+        The name of the file is created from the datetime of execution in the resultsdir and has extension .csv.
+        default: False
+
+    logsdir: (opt) string
+        Name of the directory where the log file should be created if requested.
+        default: None, in which case the log file is created in the directory from where execution is launched.
+
+    resultsdir: (opt) string
+        Name of the directory where the results file should be created if requested.
+        default: None, in which case the results file is created in the directory from where execution is launched.
+
+    debug: (opt) bool
+        Whether to show messages useful for debugging.
+        default: False
     """
 
-    def __init__(self, env, agent, seed=None, save=False, resultsdir=None, debug=False):
+    def __init__(self, env, agent, seed=None, log=False, save=False, logsdir=None, resultsdir=None, debug=False):
 #        if not isinstance(env, EnvironmentDiscrete):
 #            raise TypeError("The environment must be of type {} from the {} module ({})" \
 #                            .format(EnvironmentDiscrete.__name__, EnvironmentDiscrete.__module__, env.__class__))
@@ -76,13 +103,32 @@ class Simulator:
 #                            .format(GenericAgent.__name__, GenericAgent.__module__, agent.__class__))
 
         self.debug = debug
+        self.log = log
         self.save = save
+
+        dt_today_str = generate_datetime_string(prefix=self.__class__.__name__)
+        if self.log:
+            if logsdir is None:
+                logsdir = os.getcwd()
+            logsdir = os.path.abspath(logsdir)
+            self.logfile = os.path.join(logsdir, generate_datetime_string(dt_str=dt_today_str, extension=".log"))
+            self.fh_log = open(self.logfile, "w")
+            self.stdout_sys = sys.stdout
+            print("-----> File opened for log:\n{}".format(self.logfile))
+            print("-----> If the process stops for some reason, finalize the file with simul.close().")
+            # Redirect the console output to the log file
+            sys.stdout = self.fh_log
+        else:
+            self.logfile = None
+            self.fh_log = None
+            self.stdout_sys = None
+
         if self.save:
             if resultsdir is None:
                 resultsdir = os.getcwd()
             resultsdir = os.path.abspath(resultsdir)
-            self.results_file = os.path.join(resultsdir, generate_datetime_string(prefix=self.__class__.__name__, extension=".csv"))
-            self.fh_results = open(self.results_file, "wb")
+            self.results_file = os.path.join(resultsdir, generate_datetime_string(dt_str=dt_today_str, extension=".csv"))
+            self.fh_results = open(self.results_file, "w")
             print("-----> File opened for output with simulation results:\n{}".format(self.results_file))
             print("-----> If the process stops for some reason, finalize the file with simul.close().")
         else:
@@ -110,6 +156,11 @@ class Simulator:
         self.agent.getLearner().reset(reset_episode=reset_episode, reset_value_functions=reset_value_functions)
 
     def close(self):
+        if self.fh_log is not None:
+            self.fh_log.close()
+            sys.stdout = self.stdout_sys
+            print("\n------> Log file created as:")
+            print("------> {}".format(self.logfile))
         if self.fh_results is not None:
             self.fh_results.close()
             print("\n------> Output file with simulation results created as:")
@@ -527,8 +578,8 @@ class SimulatorQueue(Simulator):
         default: 1
     """
 
-    def __init__(self, env, agent, dict_nsteps, N=1, seed=None, save=False, resultsdir=None, debug=False):
-        super().__init__(env, agent, seed, save, resultsdir, debug)
+    def __init__(self, env, agent, dict_nsteps, N=1, seed=None, log=False, save=False, logsdir=None, resultsdir=None, debug=False):
+        super().__init__(env, agent, seed, log, save, logsdir, resultsdir, debug)
         self.dict_nsteps = dict_nsteps
         # Attributes used during Fleming-Viot simulation (each env in envs is one of the N particles)
         self.N = N
@@ -693,14 +744,15 @@ class SimulatorQueue(Simulator):
                 self.env.set_seed(self.seed)
         # --- Parse input parameters
 
-        print("Simulation starts at: {}".format(datetime.today().strftime("%Y-%m-%d %H:%M:%S")))
+        dt_start = datetime.today().strftime("%Y-%m-%d %H:%M:%S")
+        print("Simulation starts at: {}".format(dt_start))
 
         if verbose:
             print("Value function at start of experiment: {}".format(self.learnerV.getV()))
 
         if self.save:
             # Initialize the output file with the results with the column names
-            self.fh_results.write(b"theta,theta_next,Pr(K-1),Pr(K),Q_diff(K-1),Q_diff(K),alpha,V,gradV\n")
+            self.fh_results.write("theta,theta_next,Pr(K-1),Pr(K),Q_diff(K-1),Q_diff(K),alpha,V,gradV,nevents_mc,nevents_proba,ntrajectories_Q\n")
 
         # There are two simulation time scales (both integers and starting at 0):
         # - t: the number of queue state changes (a.k.a. number of queue iterations)
@@ -857,9 +909,13 @@ class SimulatorQueue(Simulator):
                                                ('ntrajectories_Q', self.ntrajectories_Q)
                                                 ])
 
-        print("Simulation ends at: {}".format(datetime.today().strftime("%Y-%m-%d %H:%M:%S")))
+        dt_end = datetime.today().strftime("%Y-%m-%d %H:%M:%S")
+        print("Simulation ends at: {}".format(dt_end))
+        datetime_diff = datetime.strptime(dt_end, "%Y-%m-%d %H:%M:%S") - datetime.strptime(dt_start, "%Y-%m-%d %H:%M:%S")
+        time_elapsed = datetime_diff.total_seconds()
+        print("Execution time: {:.1f} min, {:.1f} hours".format(time_elapsed / 60, time_elapsed / 3600))
 
-        # Closes the object (e.g. any result files are closed)
+        # Closes the object (e.g. any log and result files are closed)
         self.close()
 
         return self.learnerV, self.learnerP, df_learning
@@ -1412,6 +1468,11 @@ class SimulatorQueue(Simulator):
             - the stationary distribution
             - the value of the integral P(T>t)*Phi(t,bs)
             """
+            if tracemalloc.is_tracing():
+                mem_usage = tracemalloc.get_traced_memory()
+                print("[MEM] estimate_proba_stationary: Memory used so far: current={:.3f} MB, peak={:.3f} MB".format(mem_usage[0]/1024/1024, mem_usage[1]/1024/1024))
+                mem_snapshot_1 = tracemalloc.take_snapshot()
+
             if expected_absorption_time <= 0.0 or np.isnan(expected_absorption_time) or expected_absorption_time is None:
                 raise ValueError("The expected absorption time must be a positive float ({})".format(expected_absorption_time))
 
@@ -1425,6 +1486,14 @@ class SimulatorQueue(Simulator):
                 if True:
                     print("integrals[{}] = {:.3f}".format(bs, integrals[bs]))
                 probas_stationary[bs] = integrals[bs] / expected_absorption_time
+
+            if tracemalloc.is_tracing():
+                mem_snapshot_2 = tracemalloc.take_snapshot()
+                mem_stats_diff = mem_snapshot_2.compare_to(mem_snapshot_1, key_type='lineno')    # Possible key_type's are 'filename', 'lineno', 'traceback' 
+                print("[MEM] estimate_proba_stationary: Top difference in memory usage:")
+                for stat in mem_stats_diff[:10]:
+                    #if stat.size / stat.count > 1E6:   # To print the events with largest memory consumption for EACH of their occurrence 
+                    print(stat)
 
             return probas_stationary, integrals
 
@@ -2169,7 +2238,7 @@ class SimulatorQueue(Simulator):
         agent.getLearnerP().update_learning_rate_by_episode()
 
         if self.save:
-            self.fh_results.write(bytes("{},{},{},{},{},{},{},{},{}\n" \
+            self.fh_results.write("{},{},{},{},{},{},{},{},{},{},{},{}\n" \
                                     .format(self.thetas[-1][0],
                                             self.thetas_updated[-1],
                                             self.proba_stationary[-1][0],
@@ -2182,7 +2251,7 @@ class SimulatorQueue(Simulator):
                                             self.nevents_mc[-1],
                                             self.nevents_proba[-1],
                                             self.ntrajectories_Q[-1]
-                                            ), 'UTF-8'))
+                                            ))
 
     def check_done(self, tmax, t, state, action, reward):
         """
@@ -2454,16 +2523,25 @@ if __name__ == "__main__":
                      .format(learner.__class__, gamma, nexperiments, nepisodes))
 
     if not test and True:
+        # --- Test the SimulatorQueue class ---#
+
+        # Look for memory leaks
+        # Ref: https://pythonspeed.com/fil/docs/fil/other-tools.html (from the Fil profiler which also seems interesting)
+        # Doc: https://docs.python.org/3/library/tracemalloc.html
+        #tracemalloc.start()
+
         start_time_all = timer()
 
-        # --- Test the SimulatorQueue class ---#
         from agents.queues import AgeQueue, LearnerTypes
         from environments.queues import EnvQueueSingleBufferWithJobClasses
         from agents.policies.parameterized import PolQueueTwoActionsLinearStep, PolQueueTwoActionsLogit
         from agents.learners.continuing.mc import LeaMC
         from agents.learners.policies import LeaPolicyGradient
 
-        resultsdir = "../../RL-002-QueueBlocking/results/RL/single-server"
+        # ---------------------- OUTPUT FILES --------------------#
+        create_log = False; logsdir = "../../RL-002-QueueBlocking/logs/RL/single-server"
+        save_results = True; resultsdir = "../../RL-002-QueueBlocking/results/RL/single-server"
+        # ---------------------- OUTPUT FILES --------------------#
 
         capacity = np.Inf
         nservers = 1
@@ -2481,8 +2559,8 @@ if __name__ == "__main__":
         #n_particles_fv = 400; t_sim = 200
         n_particles_fv = 800; t_sim = 800
         #n_particles_fv = 800; t_sim = 1000
-        #learning_method = LearningMethod.MC; nparticles = 1; plot_trajectories = False; symbol = 'b.-'
-        learning_method = LearningMethod.FV; nparticles = n_particles_fv; plot_trajectories = False; symbol = 'g.-'
+        learning_method = LearningMethod.MC; nparticles = 1; plot_trajectories = False; symbol = 'b.-'; benchmark_file = os.path.join( os.path.abspath(resultsdir), "benchmark_fv.csv" )
+        #learning_method = LearningMethod.FV; nparticles = n_particles_fv; plot_trajectories = False; symbol = 'g.-'; benchmark_file = None
 
         # Simulator on a given number of iterations for the queue simulation and a given number of iterations to learn the policy
         t_learn = 5 #198 - 91 #198 #250 #50
@@ -2525,7 +2603,7 @@ if __name__ == "__main__":
                                                            alpha_min=alpha_min, fixed_window=fixed_window)})
         agent_gradient = AgeQueue(env_queue_mm, policies, learners)
 
-        seed = 1769 #1717
+        seed = 1859 # (for learning step 53+91=144) #1769 (for learning step 53, NOT 52 because it took too long) #1717
         dict_nsteps = dict({'queue': t_sim, 'learn': t_learn})
         dict_params_simul = dict({
             'nparticles': nparticles,
@@ -2534,7 +2612,7 @@ if __name__ == "__main__":
             'seed': np.nan
             })
         dict_params_info = dict({'plot': False, 'log': False})
-        simul = SimulatorQueue(env_queue_mm, agent_gradient, dict_nsteps, N=nparticles, save=True, resultsdir=resultsdir, debug=False)
+        simul = SimulatorQueue(env_queue_mm, agent_gradient, dict_nsteps, N=nparticles, log=create_log, save=save_results, logsdir=logsdir, resultsdir=resultsdir, debug=False)
 
         params = dict({
             '1(a)-System-#Servers': nservers,
@@ -2682,3 +2760,5 @@ if __name__ == "__main__":
         end_time_all = timer()
         elapsed_time_all = end_time_all - start_time_all
         print("\n+++ OVERALL execution time: {:.1f} min, {:.1f} hours".format(elapsed_time_all/60, elapsed_time_all/3600))
+
+        tracemalloc.stop()

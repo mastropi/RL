@@ -103,14 +103,40 @@ def show_exec_params(dict_params):
         print("{}: {}".format(key, dict_params[key]))
     print("**************** Execution parameters ***********************")
 
-def generate_datetime_string(format="%Y%m%d_%H%M%S", prefix="", suffix="", extension="", sep="_"):
+def generate_datetime_string(dt_str=None, format="%Y%m%d_%H%M%S", prefix="", suffix="", extension="", sep="_"):
     """
-    Returns a string containing today's date time in the given format using the datetime.today().strftime(format)
+    Returns a string containing today()'s datetime in the given format using the datetime.today().strftime(format)
 
-    If `prefix` or `suffix` is given, separator `sep` is used to separate them from the formatted datetime.
-    The `extension` extension is added without separator.
+    Arguments:
+    dt_str: (opt) str
+        The datetime string value to use when generating the string.
+        default: None, in which case the datetime string contains today()'s datetime
+
+    format: (opt) str
+        Datetime format in the strftime() function to use to generate the datetime string for today()'s datetime.
+
+    prefix: (opt) str
+        Prefix to add to the datetime string.
+        default: empty string
+
+    suffix: (opt) str
+        Suffix to add to the datetime string.
+        default: empty string
+
+    extension: (opt) str
+        Extension to add at the end of the datetime string, after any suffix.
+        default: empty string
+
+    sep: (opt) str
+        Separator between the prefix and the datetime string and between the datetime string and the suffix,
+        whenever a prefix/suffix is requested.
+        default: empty string
     """
-    dt_str = datetime.today().strftime(format)
+    if dt_str is None:
+        dt_str = datetime.today().strftime(format)
+    elif not isinstance(dt_str, str):
+        raise ValueError("Parameter 'dt_str' must be a string (type={})".format(type(dt_str)))
+
     if prefix is not None and prefix != "":
         dt_str = prefix + sep + dt_str
     if suffix is not None and suffix != "":
