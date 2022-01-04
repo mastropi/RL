@@ -2762,3 +2762,43 @@ if __name__ == "__main__":
         print("\n+++ OVERALL execution time: {:.1f} min, {:.1f} hours".format(elapsed_time_all/60, elapsed_time_all/3600))
 
         tracemalloc.stop()
+
+    PLOT_RESULTS_TOGETHER = False
+    if PLOT_RESULTS_TOGETHER:
+        # Read the results from files and plot the MC and FV results on the same graph
+        import os
+        import numpy as np
+        import pandas as pd
+        import matplotlib.pyplot as plt
+        from matplotlib.ticker import MaxNLocator
+        resultsdir = "E:/Daniel/Projects/PhD-RL-Toulouse/projects/RL-002-QueueBlocking/results/RL/single-server"
+
+        theta_opt = 19
+        # theta_start = 39, N = 800, t_sim = 800
+        results_file_fv = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20211230_001050.csv")
+        results_file_mc = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220101_145647.csv")
+
+        # theta_start = 1, N = 400, t_sim = 400
+        results_file_fv = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220102_093954.csv")
+        results_file_mc = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220102_173144.csv")
+
+        results_fv = pd.read_csv(results_file_fv)
+        results_mc = pd.read_csv(results_file_mc)
+
+        N = 800
+        t_sim = 800*N
+        t_learn = results_fv.shape[0]
+        nevents_mean = np.mean(results_fv['nevents_mc'] + results_fv['nevents_proba'])
+        assert nevents_mean == np.mean(results_mc['nevents_mc'])
+
+        plt.figure()
+        plt.plot(results_fv['theta'], 'g.-')
+        plt.plot(results_mc['theta'], 'r.-')
+        ax = plt.gca()
+        ax.set_xlabel('Learning step')
+        ax.set_ylabel('theta')
+        ax.set_ylim((0, 40))
+        ax.axhline(theta_opt, color='black', linestyle='dashed')
+        ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+        ax.legend(["Fleming-Viot", "Monte-Carlo", "Optimum theta"])
+        plt.title("# particles N = {}, Simulation time for P(T>t) and E(T_A) = {}, # learning steps = {}, Average number of events per learning step = {:.0f}".format(N, t_sim, t_learn, nevents_mean))
