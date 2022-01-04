@@ -694,6 +694,12 @@ class LeaPolicyGradient(GenericLearner):
 
             # Update the policy on the new theta and record it into the history of its updates
             self.policy.setThetaParameter(theta)
+        else:
+            # Remove the array because in this parameterized policy setting theta is of dimension 1
+            theta = theta[0]
+
+        # theta is one dimensional, so convert it to scalar
+        theta_prev = theta_prev[0]
 
         return theta_prev, theta, Q_mean_Km1, gradV_left, Q_diff_Km1
 

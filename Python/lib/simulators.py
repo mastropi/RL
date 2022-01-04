@@ -2312,14 +2312,16 @@ if __name__ == "__main__":
     import runpy
     runpy.run_path("../../setup.py")
 
-    test = False
+    test = True
 
     # --------------- Unit tests on methods defined in this file ------------------ #
     if test:
         from environments.queues import EnvQueueSingleBufferWithJobClasses
 
         # ---------------- generate_event() in SimulatorQueue --------------------- #
-        print("Testing generate_event() in SimulatorQueue class:")
+        print("\n")
+        print("".join(np.repeat("*", 20)))
+        print("Test #1: Testing generate_event() in SimulatorQueue class:")
 
         # Setup the simulator with the minimum required information
         capacity = 10
@@ -2376,7 +2378,159 @@ if __name__ == "__main__":
                            atol=3 * se_phat)  # true probabilities should be contained in +/- 3 SE(phat) from phat
         # ---------------- generate_event() in SimulatorQueue --------------------- #
 
-    # --------------- Unit tests on methods defined in this file ------------------#
+        # ----------------------- run() in SimulatorQueue ------------------------- #
+        # This set of tests run the learning process of the optimum theta so that we can perform regression tests
+        from agents.policies.parameterized import PolQueueTwoActionsLinearStep
+        from agents.queues import AgeQueue, LearnerTypes
+        from agents.learners.policies import LeaPolicyGradient
+
+        # ---------------- A) SINGLE-SERVER TESTS ----------------- #
+        # -- General setup
+        # Define the queue environment
+        capacity = np.Inf
+        nservers = 1
+        job_class_rates = [0.7]
+        service_rates = [1.0]
+        queue = QueueMM(job_class_rates, service_rates, nservers, capacity)
+        env_queue_mm = EnvQueueSingleBufferWithJobClasses(queue, job_class_rates, rewardOnJobRejection_ExponentialCost, None)
+
+        # Learner of the value function
+        learnerV = LeaFV(env_queue_mm, gamma=1.0)
+
+        # Acceptance policy definition
+        theta_start = 1.0
+        policies = dict({PolicyTypes.ACCEPT: PolQueueTwoActionsLinearStep(env_queue_mm, theta_start), PolicyTypes.ASSIGN: None})
+
+        # Seed and learning steps
+        seed = 1717
+        t_learn = 5
+        dict_params_info = dict({'plot': False, 'log': False})
+
+        # --- FV simulation --- #
+        print("\n")
+        print("".join(np.repeat("*", 20)))
+        print("Test #2A: Testing run() in SimulatorQueue class for the FV-based policy gradient learning:")
+
+        # Learning method (MC or FV)
+        n_particles_fv = 30; t_sim = 50
+        learning_method = LearningMethod.FV; nparticles = n_particles_fv; symbol = 'g.-'
+
+        # Define the Learners (of the value function and the policy)
+        learners = dict({LearnerTypes.V: learnerV,
+                         LearnerTypes.Q: None,
+                         LearnerTypes.P: LeaPolicyGradient(env_queue_mm, policies[PolicyTypes.ACCEPT], learnerV)})
+        agent_gradient = AgeQueue(env_queue_mm, policies, learners)
+
+        # Simulation parameters
+        dict_nsteps = dict({'queue': t_sim, 'learn': t_learn})
+        dict_params_simul = dict({
+            'nparticles': nparticles,
+            't_sim': None,                              # The number of simulation steps by learning step is defined by the t_sim parameter defined above
+            'buffer_size_activation': np.nan,           # This value will be defined by the simulation process as it is updated at each updated theta value
+            'seed': np.nan
+            })
+        simul = SimulatorQueue(env_queue_mm, agent_gradient, dict_nsteps, N=nparticles, log=False, save=False, debug=False)
+
+        # Run the simulation!
+        params = dict({
+            '1(a)-System-#Servers': nservers,
+            '1(b)-System-JobClassRates': job_class_rates,
+            '1(c)-System-ServiceRates': service_rates,
+            '1(d)-System-TrueTheta': COST_EXP_BUFFER_SIZE_REF,
+            '2(a)-Learning-Method': learning_method.name,
+            '2(b)-Learning-Method#Particles': nparticles,
+            '2(c)-Learning-GradientEstimation': "Theoretical",
+            '2(d)-Learning-#Steps': t_learn,
+            '2(e)-Learning-SimulationTimePerLearningStep': t_sim,
+        })
+        show_exec_params(params)
+        # Set the initial theta value
+        agent_gradient.getLearnerP().getPolicy().setThetaParameter(theta_start)
+        _, _, df_learning = simul.run(dict_params_simul, dict_params_info=dict_params_info, seed=seed, verbose=False)
+
+        print(df_learning)
+        df_learning_expected = pd.DataFrame.from_items([
+                                                ('theta', [1.0, 1.0, 2.0, 3.0, 4.0]),
+                                                ('theta_next', [1.0, 2.0, 3.0, 4.0, 5.0]),
+                                                ('Pr(K-1)', [0.433118, 0.340047, 0.168419, 0.099661, 0.029651]),
+                                                ('Pr(K)', [0.297484, 0.348222, 0.138949, 0.067456, 0.013789]),
+                                                ('Q_diff(K-1)', [0.18, 0.65, 0.65, 0.46, 0.29]),
+                                                ('Q_diff(K)', [-0.14, 0.35, 0.36, 0.30, 0.31]),
+                                                ('alpha', [0.1]*5),
+                                                ('V', [-1.250, -1.285, -1.415, -1.460, -1.535]),
+                                                ('gradV', [0.077961, 0.221030, 0.109472, 0.045844, 0.008599]),
+                                                ('nevents_mc', [102, 100, 90, 97, 116]),
+                                                ('nevents_proba', [953, 892, 2052, 665, 419]),
+                                                ('ntrajectories_Q', [100.0]*5)
+                                                ])
+        assert np.allclose(df_learning, df_learning_expected, atol=1E-6)
+        # --- FV simulation --- #
+
+        # --- MC simulation --- #
+        print("\n")
+        print("".join(np.repeat("*", 20)))
+        print("Test #2B: Testing run() in SimulatorQueue class for the MC-based policy gradient learning:")
+
+        # Learning method (MC or FV)
+        t_sim = n_particles_fv * 50
+        learning_method = LearningMethod.MC; symbol = 'r.-'
+
+        # Define the Learners (of the value function and the policy)
+        learners = dict({LearnerTypes.V: learnerV,
+                         LearnerTypes.Q: None,
+                         LearnerTypes.P: LeaPolicyGradient(env_queue_mm, policies[PolicyTypes.ACCEPT], learnerV)})
+        agent_gradient = AgeQueue(env_queue_mm, policies, learners)
+
+        # Simulation parameters
+        dict_nsteps = dict({'queue': t_sim, 'learn': t_learn})
+        dict_params_simul = dict({
+            'nparticles': 1,
+            't_sim': None,                              # The number of simulation steps by learning step is defined by the t_sim parameter defined above
+            'buffer_size_activation': np.nan,           # This value will be defined by the simulation process as it is updated at each updated theta value
+            'seed': np.nan
+            })
+        simul = SimulatorQueue(env_queue_mm, agent_gradient, dict_nsteps, N=nparticles, log=False, save=False, debug=False)
+
+        # Run the simulation!
+        params = dict({
+            '1(a)-System-#Servers': nservers,
+            '1(b)-System-JobClassRates': job_class_rates,
+            '1(c)-System-ServiceRates': service_rates,
+            '1(d)-System-TrueTheta': COST_EXP_BUFFER_SIZE_REF,
+            '2(a)-Learning-Method': learning_method.name,
+            '2(b)-Learning-Method#Particles': nparticles,
+            '2(c)-Learning-GradientEstimation': "Theoretical",
+            '2(d)-Learning-#Steps': t_learn,
+            '2(e)-Learning-SimulationTimePerLearningStep': t_sim,
+        })
+        show_exec_params(params)
+        # Set the initial theta value
+        agent_gradient.getLearnerP().getPolicy().setThetaParameter(theta_start)
+        _, _, df_learning = simul.run(dict_params_simul, dict_params_info=dict_params_info, seed=seed, verbose=False)
+
+        print(df_learning)
+        df_learning_expected = pd.DataFrame.from_items([
+                                                ('theta', [1.0, 2.0, 3.0, 4.0, 5.0]),
+                                                ('theta_next', [2.0, 3.0, 4.0, 5.0, 6.0]),
+                                                ('Pr(K-1)', [0.332127, 0.215013, 0.182142, 0.098069, 0.063485]),
+                                                ('Pr(K)', [0.328396, 0.172206, 0.146759, 0.071062, 0.052470]),
+                                                ('Q_diff(K-1)', [0.46, 0.33, 0.31, 0.52, 0.02]),
+                                                ('Q_diff(K)', [0.64, 0.13, 0.82, 0.28, 0.38]),
+                                                ('alpha', [0.1]*5),
+                                                ('V', [-1.210, -1.345, -1.375, -1.290, -1.650]),
+                                                ('gradV', [0.152778, 0.070954, 0.056464, 0.050996, 0.001270]),
+                                                ('nevents_mc', [2983, 2935, 2948, 2999, 2946]),
+                                                ('nevents_proba', [3572, 4150, 6376, 5440, 7103]),
+                                                ('ntrajectories_Q', [100.0]*5)
+                                                ])
+        assert np.allclose(df_learning, df_learning_expected, atol=1E-6)
+        # --- MC simulation --- #
+        # ---------------- A) SINGLE-SERVER TESTS -----------------#
+        # ----------------------- run() in SimulatorQueue ------------------------- #
+    # --------------- Unit tests on methods defined in this file ------------------ #
+
+
+    # ------------ General tests on the classes defined in this file ---------------#
     if not test and False:
         #--- Test the Simulator class ---#
         # NOTE: (2021/10/19) This test works
