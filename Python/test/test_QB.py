@@ -564,7 +564,7 @@ class Test_QB_Particles(unittest.TestCase):
                 print("\n\t--> Running Fleming-Viot estimation...")
                 dict_params_simul['maxevents'] = np.Inf
                 dict_params_simul['seed'] = seed_rep
-                proba_blocking_fv, integral, expected_survival_time, \
+                proba_blocking_fv, integral, expected_absorption_time, \
                     n_survival_curve_observations, n_survival_time_observations, \
                         est_fv, est_abs, est_surv, dict_stats_fv = estimators.estimate_blocking_fv(env_queue, agent,
                                                                                                    dict_params_simul,
@@ -592,16 +592,16 @@ class Test_QB_Particles(unittest.TestCase):
                 print("execution time MC + FV: {:.1f} sec, {:.1f} min".format(exec_time, exec_time/60))
 
                 if nparticles == nparticles_min and r == 1:
-                    rhos = est_fv.rhos
+                    rhos = est_fv.getLoads()
                     print("Computing TRUE blocking probability for nservers={}, K={}, rhos={}...".format(nservers, K, rhos))
                     proba_blocking_true = compute_blocking_probability_birth_death_process(rhos, K)
 
                 # Results
                 if run_mc:
                     print("\tP(K) by MC: {:.6f}% (simulation time = {:.1f} out of max={}, #events {} out of {})" \
-                          .format(proba_blocking_mc*100, est_mc.get_simulation_time(), est_mc.maxtime, est_mc.nevents, est_mc.getMaxNumberOfEvents()))
+                          .format(proba_blocking_mc*100, est_mc.get_simulation_time(), est_mc.getMaxSimulationTime(), est_mc.getNumberOfEvents(), est_mc.getMaxNumberOfEvents()))
                 print("\tP(K) estimated by FV: {:.6f}%, E(T) = {:.1f} (simulation time = {:.1f} out of max={}, #events {} out of {})" \
-                      .format(proba_blocking_fv*100, est_fv.expected_survival_time, est_fv.get_simulation_time(), est_fv.maxtime, est_fv.nevents, est_fv.getMaxNumberOfEvents()))
+                      .format(proba_blocking_fv*100, est_fv.get_expected_absorption_time(), est_fv.get_simulation_time(), est_fv.getMaxSimulationTime(), est_fv.getNumberOfEvents(), est_fv.getMaxNumberOfEvents()))
                 print("\tTrue P(K): {:.6f}%".format(proba_blocking_true*100))
 
                 # Store the results
@@ -615,7 +615,7 @@ class Test_QB_Particles(unittest.TestCase):
                                            dict_stats_mc.get('time'),
                                            dict_stats_mc.get('nevents'),
                                            n_return_observations,
-                                           est_fv.expected_survival_time,
+                                           est_fv.get_expected_absorption_time(),
                                            n_survival_time_observations,
                                            proba_blocking_fv,
                                            dict_stats_fv['time'],
@@ -633,7 +633,7 @@ class Test_QB_Particles(unittest.TestCase):
         time_end_all = timer()
 
         print("Total execution time: {:.1f} min".format((time_end_all - time_start_all) / 60))
-        title = "Simulation results for #servers={}, K={}, rhos={}, ({}<=N<={}), T<={}, #Events<={}, Rep={}".format(nservers, K, rhos, nparticles_min, nparticles_max, est_fv.maxtime, est_fv.getMaxNumberOfEvents(), replications)
+        title = "Simulation results for #servers={}, K={}, rhos={}, ({}<=N<={}), T<={}, #Events<={}, Rep={}".format(nservers, K, rhos, nparticles_min, nparticles_max, est_fv.getMaxSimulationTime(), est_fv.getMaxNumberOfEvents(), replications)
         print(title)
         print("Raw results by N:")
         print(df_results)
@@ -749,7 +749,7 @@ class Test_QB_Particles(unittest.TestCase):
 
                     print("\t\t*** FLEMING-VIOT ESTIMATION ***")
                     dict_params_simul['maxevents'] = np.Inf
-                    proba_blocking_fv, integral, expected_survival_time, \
+                    proba_blocking_fv, integral, expected_absorption_time, \
                         n_survival_curve_observations, n_survival_time_observations, \
                             est_fv, est_abs, est_surv, dict_stats_fv = estimators.estimate_blocking_fv(env_queue, agent,
                                                                                                        dict_params_simul,
@@ -769,7 +769,7 @@ class Test_QB_Particles(unittest.TestCase):
                     # Show estimations
                     if run_mc:
                         print("\t\tP(K) by MC: {:.6f}%".format(proba_blocking_mc*100))
-                    print("\t\tP(K) estimated by FV (integral={:g} (n={}), E(T)={:.1f} (n={})): {:.6f}%".format(integral, n_survival_curve_observations, expected_survival_time, n_survival_time_observations, proba_blocking_fv*100))
+                    print("\t\tP(K) estimated by FV (integral={:g} (n={}), E(T)={:.1f} (n={})): {:.6f}%".format(integral, n_survival_curve_observations, expected_absorption_time, n_survival_time_observations, proba_blocking_fv*100))
                     print("\t\tTrue P(K): {:.6f}%".format(proba_blocking_true*100))
 
                     # Analyze the fairness of the comparison of results based on simulation time number of observed events
@@ -821,7 +821,7 @@ class Test_QB_Particles(unittest.TestCase):
                                                                 ('n(RT)', [n_return_observations]),
                                                                 ('Pr(FV)', [proba_blocking_fv]),
                                                                 ('integral', [integral]),
-                                                                ('E(T)', [expected_survival_time]),
+                                                                ('E(T)', [expected_absorption_time]),
                                                                 ('n(FV)', [dict_stats_fv['nevents']]),
                                                                 ('n(PT)', [n_survival_curve_observations]),
                                                                 ('n(ET)', [n_survival_time_observations]),
@@ -847,10 +847,10 @@ class Test_QB_Particles(unittest.TestCase):
                                                 'K': est_fv.queue.getCapacity(),
                                                 'nparticles': dict_params_simul['nparticles'],
                                                 'nmeantimes': dict_params_simul['nmeantimes'],
-                                                'maxtime_mc': est_mc is not None and est_mc.maxtime or 0.0,
-                                                'maxtime_fv': est_fv.maxtime,
+                                                'maxtime_mc': est_mc is not None and est_mc.getMaxSimulationTime() or 0.0,
+                                                'maxtime_fv': est_fv.getMaxSimulationTime(),
                                                 'buffer_size_activation': buffer_size_activation_value,
-                                                'mean_lifetime': expected_survival_time,
+                                                'mean_lifetime': expected_absorption_time,
                                                 'n_survival_curve_observations': n_survival_curve_observations,
                                                 'n_survival_time_observations': n_survival_time_observations,
                                                 'proba_blocking_fv': proba_blocking_fv,
@@ -881,7 +881,7 @@ class Test_QB_Particles(unittest.TestCase):
 
             # Show the results obtained for the current K
             print("Simulation results for #servers={}, rhos={}, K={}, N={}, T={} ({}x), max #events={}" \
-                  .format(self.nservers, self.rhos, K, nparticles, est_fv.maxtime, nmeantimes, est_fv.getMaxNumberOfEvents()))
+                  .format(self.nservers, self.rhos, K, nparticles, est_fv.getMaxSimulationTime(), nmeantimes, est_fv.getMaxNumberOfEvents()))
             print(df_proba_blocking_estimates)
 
         # Correctly define the row indices from 0 to the number of records in each data frame
@@ -1231,7 +1231,7 @@ def test_mc_implementation(nservers, K, paramsfile, nmeantimes=None, repmax=None
                 exec_time = time_end - time_start
                 print("execution time: {:.1f} sec, {:.1f} min".format(exec_time, exec_time/60))
                 print("\tP(K) by MC: {:.6f}% (simulation time = {:.1f} out of max={}, #events {} out of {})" \
-                      .format(proba_blocking_mc*100, est_mc.get_simulation_time(), est_mc.maxtime, est_mc.nevents, est_mc.getMaxNumberOfEvents()))
+                      .format(proba_blocking_mc*100, est_mc.get_simulation_time(), est_mc.getMaxSimulationTime(), est_mc.getNumberOfEvents(), est_mc.getMaxNumberOfEvents()))
                 print("\tTrue P(K): {:.6f}%".format(proba_blocking_true*100))
     
                 # Store the results
@@ -1903,7 +1903,7 @@ def closeLogFile(fh_log, stdout_sys, dt_start):
     dt_end = datetime.today().strftime("%Y-%m-%d %H:%M:%S")
     print("Ended at: {}".format(dt_end))
     datetime_diff = datetime.strptime(dt_end, "%Y-%m-%d %H:%M:%S") - datetime.strptime(dt_start, "%Y-%m-%d %H:%M:%S")
-    time_elapsed = datetime_diff.days*86400 + datetime_diff.seconds
+    time_elapsed = datetime_diff.total_seconds()
     print("Execution time: {:.1f} min, {:.1f} hours".format(time_elapsed / 60, time_elapsed / 3600))
 
     fh_log.close()
@@ -2190,10 +2190,10 @@ if __name__ == "__main__":
             results, results_agg, proba_functions, est_fv, est_mc = test.analyze_estimates(
                                             replications=replications,
                                             K_values=K_values,
-                                            nparticles_values=[1000], #[1000],   #[5]
-                                            nmeantimes_values=[1000], # [1000],   #[100]
-                                            buffer_size_activation_values=[0.2],#[0.1, 0.3, 0.5, 0.7], #[0.1, 0.3, 0.4, 0.5, 0.6, 0.8],
-                                            burnin_cycles_absorption_values=[3], #[3, 3, 2, 1],#[3, 3, 2, 2, 1, 1], #[3, 3, 3, 2, 2, 1],
+                                            nparticles_values=[3200], #[1000],   #[5]
+                                            nmeantimes_values=[1000], #[1000],   #[100]
+                                            buffer_size_activation_values=[0.1, 0.15, 0.2, 0.25, 0.3, 0.33, 0.35, 0.4, 0.5, 0.6],#[0.1, 0.3, 0.5, 0.7], #[0.1, 0.3, 0.4, 0.5, 0.6, 0.8],
+                                            burnin_cycles_absorption_values=[0], #[3, 3, 2, 1],#[3, 3, 2, 2, 1, 1], #[3, 3, 3, 2, 2, 1],
                                             seed=1313,
                                             run_mc=run_mc)
             save_dataframes([{'df': results, 'file': resultsfile},
