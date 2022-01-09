@@ -17,6 +17,9 @@ class PolJobAssignmentProbabilistic:
     policy_assign: Policy
         Policy object specifying the assignment policy to use to assign a new job class to a server in the queue
         based on a probabilistic approach.
+        Ex: In a scenario with 2 job classes and 3 servers, the following policy assigns job class 0
+        to server 0 or 1 with equal probability and job class 1 to server 1 or 2 with equal probability:
+        PolJobAssignmentProbabilistic( [[0.5, 0.5, 0.0], [0.0, 0.5, 0.5]] )
     """
 
     def __init__(self, policy_assign :list):

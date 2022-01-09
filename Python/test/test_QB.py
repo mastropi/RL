@@ -22,25 +22,18 @@ from datetime import datetime
 import unittest
 import matplotlib
 from matplotlib import pyplot as plt, cm, ticker as mtick
-from Python.lib.utils.basic import aggregation_bygroups
 
+from Python.lib.utils.basic import aggregation_bygroups, is_scalar
 import Python.lib.utils.plotting as plotting
 
-from Python.lib.agents import queues
 from Python.lib.agents.queues import AgeQueue, PolicyTypes as QueuePolicyTypes
 from Python.lib.agents.policies.job_assignment import PolJobAssignmentProbabilistic
-import Python.lib.queues as queues
 import Python.lib.estimators as estimators
+import Python.lib.queues as queues  # The keyword `queues` is used in the code
 from Python.lib.queues import Event
 from Python.lib.environments.queues import EnvQueueSingleBufferWithJobClasses, rewardOnJobClassAcceptance
-from Python.lib.estimators import EventType, FinalizeType, FinalizeCondition, plot_curve_estimates
+from Python.lib.estimators import FinalizeType, plot_curve_estimates
 from Python.lib.utils.computing import get_server_loads, compute_job_rates_by_server, compute_blocking_probability_birth_death_process
-
-#from importlib import reload
-#reload(estimators)
-#from Python.lib.estimators import EstimatorQueueBlockingFlemingViot
-
-#import test_utils
 
 DEFAULT_NUMPY_PRECISION = np.get_printoptions().get('precision')
 DEFAULT_NUMPY_SUPPRESS = np.get_printoptions().get('suppress')
@@ -566,9 +559,9 @@ class Test_QB_Particles(unittest.TestCase):
                 dict_params_simul['seed'] = seed_rep
                 proba_blocking_fv, integral, expected_absorption_time, \
                     n_survival_curve_observations, n_survival_time_observations, \
-                        est_fv, est_abs, est_surv, dict_stats_fv = estimators.estimate_blocking_fv(env_queue, agent,
-                                                                                                   dict_params_simul,
-                                                                                                   dict_params_info=dict_params_info)
+                        est_fv, est_abs, dict_stats_fv = estimators.estimate_blocking_fv(env_queue, agent,
+                                                                                         dict_params_simul,
+                                                                                         dict_params_info=dict_params_info)
 
                 if run_mc:
                     print("\t--> Running Monte-Carlo estimation...")
@@ -664,6 +657,8 @@ class Test_QB_Particles(unittest.TestCase):
                             run_mc=True,
                             dict_params_info={'plot': True, 'log': False}):
         #--- Parse input parameters
+        if is_scalar(burnin_cycles_absorption_values):
+            burnin_cycles_absorption_values = [burnin_cycles_absorption_values] * len(buffer_size_activation_values)
         assert len(nparticles_values) == len(K_values), "The number of values in the nparticles parameter is the same as in K_values."
         assert len(nmeantimes_values) == len(K_values), "The number of values in the nmeantimes parameter is the same as in K_values."
         assert len(burnin_cycles_absorption_values) == len(buffer_size_activation_values), "The number of values in the burnin_cycles_absorption_values parameter is the same as in buffer_size_activation_values."
@@ -751,9 +746,9 @@ class Test_QB_Particles(unittest.TestCase):
                     dict_params_simul['maxevents'] = np.Inf
                     proba_blocking_fv, integral, expected_absorption_time, \
                         n_survival_curve_observations, n_survival_time_observations, \
-                            est_fv, est_abs, est_surv, dict_stats_fv = estimators.estimate_blocking_fv(env_queue, agent,
-                                                                                                       dict_params_simul,
-                                                                                                       dict_params_info=dict_params_info)
+                            est_fv, est_abs, dict_stats_fv = estimators.estimate_blocking_fv(env_queue, agent,
+                                                                                             dict_params_simul,
+                                                                                             dict_params_info=dict_params_info)
 
                     if run_mc:
                         print("\t\t*** MONTE-CARLO ESTIMATION ***")
@@ -1934,10 +1929,10 @@ if __name__ == "__main__":
     # python test_QB.py 3 J 5 10
     print("User arguments: {}".format(sys.argv))
     if len(sys.argv) == 1:    # Only the execution file name is contained in sys.argv
-        sys.argv += [3]       # Number of servers in the system to simulate
+        sys.argv += [1]       # Number of servers in the system to simulate
         sys.argv += ["J"]     # Either "N" for number of particles or "J" for buffer size"
         sys.argv += [8]       # Number of replications
-        sys.argv += [1]       # Number of the test to run: only one is accepted
+        sys.argv += [10]       # Number of the test to run: only one is accepted
     if len(sys.argv) == 5:    # Only the 4 required arguments are given by the user
         sys.argv += [1]       # Number of methods to run: 1 (only FV), 2 (FV & MC)
         sys.argv += ["save"]  # Either "nosave" or anything else for saving the results and log
@@ -2195,7 +2190,8 @@ if __name__ == "__main__":
                                             buffer_size_activation_values=[0.1, 0.15, 0.2, 0.25, 0.3, 0.33, 0.35, 0.4, 0.5, 0.6],#[0.1, 0.3, 0.5, 0.7], #[0.1, 0.3, 0.4, 0.5, 0.6, 0.8],
                                             burnin_cycles_absorption_values=[0], #[3, 3, 2, 1],#[3, 3, 2, 2, 1, 1], #[3, 3, 3, 2, 2, 1],
                                             seed=1313,
-                                            run_mc=run_mc)
+                                            run_mc=run_mc,
+                                            dict_params_info={'plot': False, 'log': False})
             save_dataframes([{'df': results, 'file': resultsfile},
                              {'df': results_agg, 'file': resultsfile_agg},
                              {'df': proba_functions, 'file': proba_functions_file}])

@@ -10,7 +10,7 @@ import numpy as np
 
 import Python.lib.queues as queues
 from Python.lib.environments.queues import Actions, EnvQueueSingleBufferWithJobClasses, rewardOnJobClassAcceptance
-from agents.policies import GenericParameterizedPolicyTwoActions
+from Python.lib.agents.policies import GenericParameterizedPolicyTwoActions
 
 
 class PolQueueTwoActionsLogit(GenericParameterizedPolicyTwoActions):

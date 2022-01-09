@@ -11,7 +11,7 @@ import warnings
 import numpy as np
 import copy
 
-from utils.basic import as_array
+from Python.lib.utils.basic import as_array
 
 
 def mad(x):
@@ -116,7 +116,7 @@ def get_server_loads(job_rates, service_rates):
     """
     return [b/d for b, d in zip(job_rates, service_rates)]
 
-def compute_job_rates_by_server(job_class_rates, nservers, policy_assign):
+def compute_job_rates_by_server(job_class_rates, nservers, policy_assign_map):
     """
     Computes the equivalent job arrival rates for each server from the job arrival rates (to the single buffer)
     and the job assignment policy of the agent.
@@ -131,7 +131,7 @@ def compute_job_rates_by_server(job_class_rates, nservers, policy_assign):
     nservers: int
         Number of servers in the queue system.
 
-    policy_assign: assignment policy given by a list of lists
+    policy_assign_map: list of lists
         List of probabilities of assigning each job class to a server in the queue system.
         Ex: In a scenario with 2 job classes and 3 servers, the following policy assigns job class 0
         to server 0 or 1 with equal probability and job class 1 to server 1 or 2 with equal probability:
@@ -146,7 +146,7 @@ def compute_job_rates_by_server(job_class_rates, nservers, policy_assign):
     job_rates_by_server = [0]*R
     for r in range(R):
         for c in range(J):
-            job_rates_by_server[r] += policy_assign[c][r] * job_class_rates[c]
+            job_rates_by_server[r] += policy_assign_map[c][r] * job_class_rates[c]
 
     return job_rates_by_server
 

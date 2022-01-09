@@ -8,9 +8,13 @@ Created on Thu Oct 14 13:43:28 2021
 
 from enum import Enum, unique
 
-from environments.queues import ActionTypes
-from . import GenericAgent
-from .policies.job_assignment import PolJobAssignmentProbabilistic
+if __name__ == "__main__":
+    import runpy
+    runpy.run_path("../../../setup.py")
+
+from Python.lib.environments.queues import ActionTypes
+from Python.lib.agents import GenericAgent
+from Python.lib.agents.policies.job_assignment import PolJobAssignmentProbabilistic
 
 
 @unique

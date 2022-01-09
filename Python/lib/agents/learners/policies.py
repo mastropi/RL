@@ -10,8 +10,8 @@ import copy
 import numpy as np
 import pandas as pd
 
-from agents.learners import GenericLearner
-from utils.basic import find
+from Python.lib.agents.learners import GenericLearner
+from Python.lib.utils.basic import find
 
 class LeaPolicyGradient(GenericLearner):
     """
@@ -721,13 +721,13 @@ class LeaPolicyGradient(GenericLearner):
 
 
 if __name__ == "__main__":
-    from environments.queues import EnvQueueSingleBufferWithJobClasses, rewardOnJobRejection_ExponentialCost
-    from agents.learners.continuing.mc import LeaMC
-    from agents.learners.policies import LeaPolicyGradient
-    from agents.policies.parameterized import PolQueueTwoActionsLinearStep
-    from agents.queues import AgeQueue, PolicyTypes, LearnerTypes
-    from queues import QueueMM
-    from simulators import SimulatorQueue
+    from Python.lib.environments.queues import EnvQueueSingleBufferWithJobClasses, rewardOnJobRejection_ExponentialCost
+    from Python.lib.agents.learners.continuing.mc import LeaMC
+    from Python.lib.agents.learners.policies import LeaPolicyGradient
+    from Python.lib.agents.policies.parameterized import PolQueueTwoActionsLinearStep
+    from Python.lib.agents.queues import AgeQueue, PolicyTypes, LearnerTypes
+    from Python.lib.queues import QueueMM
+    from Python.lib.simulators import SimulatorQueue
 
     #------------------ Test of computeCorrectedReturn() -------------------#
     capacity = np.Inf
@@ -758,7 +758,7 @@ if __name__ == "__main__":
     dict_nsteps = dict({'queue': t_sim, 'learn': 1})
     start_state = [ np.ceil(theta) ]
     simul = SimulatorQueue(env_queue_mm, agent_gradient_mc, dict_nsteps, debug=False)
-    simul.run(start_state, seed=1717, verbose=False)
+    simul.run(dict_params_simul={'tsim': t_sim}, start_state=start_state, seed=1717, verbose=False)
 
     learner.estimateAverageRewardUnderPolicy()
     G = learner.computeCorrectedReturn(learner.getAverageRewardUnderPolicy())

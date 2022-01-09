@@ -30,16 +30,19 @@ from datetime import datetime
 from timeit import default_timer as timer
 import tracemalloc
 
-from agents.learners.episodic.discrete.td import LeaTDLambdaAdaptive
-from agents.learners.continuing.fv import LeaFV
-from agents.queues import PolicyTypes
-from environments.queues import rewardOnJobRejection_ExponentialCost, Actions, COST_EXP_BUFFER_SIZE_REF
-from estimators import estimate_proba_survival_and_expected_absorption_time_mc
+from Python.lib.agents.learners.episodic.discrete.td import LeaTDLambdaAdaptive
+from Python.lib.agents.learners.continuing.fv import LeaFV
+from Python.lib.agents.policies.job_assignment import PolJobAssignmentProbabilistic
+from Python.lib.agents.policies.parameterized import PolQueueTwoActionsLinearStep
+from Python.lib.agents.queues import PolicyTypes
+from Python.lib.environments.queues import rewardOnJobRejection_ExponentialCost, Actions, COST_EXP_BUFFER_SIZE_REF
+from Python.lib.estimators import estimate_proba_survival_and_expected_absorption_time_mc
+import Python.lib.queues as queues
+from Python.lib.queues import Event
 
-from utils.basic import merge_values_in_time, index_linear2multi, measure_exec_time, show_exec_params, generate_datetime_string
-from utils.computing import rmse, compute_job_rates_by_server, generate_min_exponential_time, stationary_distribution_birth_death_process
-import utils.plotting as plotting
-from queues import QueueMM, Event
+from Python.lib.utils.basic import merge_values_in_time, index_linear2multi, measure_exec_time, show_exec_params, generate_datetime_string
+from Python.lib.utils.computing import rmse, compute_job_rates_by_server, generate_min_exponential_time, stationary_distribution_birth_death_process
+import Python.lib.utils.plotting as plotting
 
 @unique
 class LearningMethod(Enum):
@@ -2316,7 +2319,9 @@ if __name__ == "__main__":
 
     # --------------- Unit tests on methods defined in this file ------------------ #
     if test:
-        from environments.queues import EnvQueueSingleBufferWithJobClasses
+        from Python.lib.agents.queues import AgeQueue, LearnerTypes
+        from Python.lib.agents.learners.policies import LeaPolicyGradient
+        from Python.lib.environments.queues import EnvQueueSingleBufferWithJobClasses
 
         # ---------------- generate_event() in SimulatorQueue --------------------- #
         print("\n")
@@ -2380,9 +2385,6 @@ if __name__ == "__main__":
 
         # ----------------------- run() in SimulatorQueue ------------------------- #
         # This set of tests run the learning process of the optimum theta so that we can perform regression tests
-        from agents.policies.parameterized import PolQueueTwoActionsLinearStep
-        from agents.queues import AgeQueue, LearnerTypes
-        from agents.learners.policies import LeaPolicyGradient
 
         # ---------------- A) SINGLE-SERVER TESTS ----------------- #
         # -- General setup
@@ -2536,10 +2538,10 @@ if __name__ == "__main__":
         # NOTE: (2021/10/19) This test works
 
         #from Python.lib import environments, agents
-        from environments import gridworlds
-        from agents import GenericAgent
-        from agents.policies import random_walks
-        from agents.learners.episodic.discrete import mc, td
+        from Python.lib.environments import gridworlds
+        from Python.lib.agents import GenericAgent
+        from Python.lib.agents.policies import random_walks
+        from Python.lib.agents.learners.episodic.discrete import mc, td
 
         # Plotting setup
         colormap = cm.get_cmap("jet")
@@ -2707,11 +2709,10 @@ if __name__ == "__main__":
 
         start_time_all = timer()
 
-        from agents.queues import AgeQueue, LearnerTypes
-        from environments.queues import EnvQueueSingleBufferWithJobClasses
-        from agents.policies.parameterized import PolQueueTwoActionsLinearStep, PolQueueTwoActionsLogit
-        from agents.learners.continuing.mc import LeaMC
-        from agents.learners.policies import LeaPolicyGradient
+        from Python.lib.agents.queues import AgeQueue, LearnerTypes
+        from Python.lib.environments.queues import EnvQueueSingleBufferWithJobClasses
+        from Python.lib.agents.learners.continuing.mc import LeaMC
+        from Python.lib.agents.learners.policies import LeaPolicyGradient
 
         # ---------------------- OUTPUT FILES --------------------#
         create_log = False; logsdir = "../../RL-002-QueueBlocking/logs/RL/single-server"

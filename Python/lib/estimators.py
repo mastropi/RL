@@ -16,10 +16,7 @@ import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt, cm    # cm is for colormaps (e.g. cm.get_cmap())
 from timeit import default_timer as timer
-
-from Python.lib.agents import queues
-from Python.lib.agents.queues import AgeQueue, PolicyTypes as QueuePolicyTypes
-from Python.lib.agents.policies.job_assignment import PolJobAssignmentProbabilistic
+from datetime import datetime
 
 DEFAULT_NUMPY_PRECISION = np.get_printoptions().get('precision')
 DEFAULT_NUMPY_SUPPRESS = np.get_printoptions().get('suppress')
@@ -29,29 +26,19 @@ if __name__ == "__main__":
     import runpy
     runpy.run_path('../../setup.py')
 
-    from datetime import datetime
-    from Python.lib.environments.queues import EnvQueueSingleBufferWithJobClasses, rewardOnJobClassAcceptance, ActionTypes
-    from agents.policies.parameterized import PolQueueTwoActionsLinearStepOnJobClasses, PolQueueTwoActionsLinearStep
-    import Python.lib.queues as queues  # The keyword `queues` is used in test code
-    from Python.lib.queues import Event, GenericQueue
-    from Python.lib.utils.basic import  array_of_objects, find, find_last_value_in_list, insort, \
-                                        list_contains_either, merge_values_in_time, measure_exec_time
-    from Python.lib.utils.computing import get_server_loads, compute_job_rates_by_server, \
-        compute_blocking_probability_birth_death_process, \
-        stationary_distribution_birth_death_process, \
-        stationary_distribution_birth_death_process_at_capacity_unnormalized
-else:
-    from environments.queues import EnvQueueSingleBufferWithJobClasses, rewardOnJobClassAcceptance, ActionTypes
-    # DM-2021/07/16-START: Comment out when gym is not installed
-    #from .agents.policies.parameterized import PolQueueRandomizedLinearStep
-    # DM-2021/07/16-END
-    from queues import Event, GenericQueue
-    from utils.basic import array_of_objects, find, find_last_value_in_list, insort,\
-                            list_contains_either, merge_values_in_time, measure_exec_time
-    from utils.computing import get_server_loads, compute_job_rates_by_server, \
-        compute_blocking_probability_birth_death_process, \
-        stationary_distribution_birth_death_process, \
-        stationary_distribution_birth_death_process_at_capacity_unnormalized
+from Python.lib.environments.queues import EnvQueueSingleBufferWithJobClasses, rewardOnJobClassAcceptance, ActionTypes
+from Python.lib.agents.queues import AgeQueue, PolicyTypes as QueuePolicyTypes
+from Python.lib.agents.policies.job_assignment import PolJobAssignmentProbabilistic
+from Python.lib.agents.policies.parameterized import PolQueueTwoActionsLinearStepOnJobClasses, PolQueueTwoActionsLinearStep
+import Python.lib.queues as queues  # The keyword `queues` is used in test code
+from Python.lib.queues import Event, GenericQueue
+
+from Python.lib.utils.basic import  array_of_objects, find, find_last_value_in_list, insort, \
+                                    list_contains_either, merge_values_in_time, measure_exec_time
+from Python.lib.utils.computing import get_server_loads, compute_job_rates_by_server, \
+    compute_blocking_probability_birth_death_process, \
+    stationary_distribution_birth_death_process, \
+    stationary_distribution_birth_death_process_at_capacity_unnormalized
 
 DEBUG_TIME_GENERATION = False
 DEBUG_SPECIAL_EVENTS = False
@@ -193,6 +180,10 @@ class EstimatorQueueBlockingFlemingViot:
         of the expected return time to absorption and of the survival probability given activation.
         default: False
 
+    reward_func: function
+        Function returning the reward received when blocking occurs as a function of the buffer size.
+        default: None, in which case the reward received when blocking is always 1.
+
     policy_accept: (opt) Acceptance Policy
         Policy that defines the acceptance of an arriving job to the queue.
         It is expected to define a queue environment of type EnvQueueSingleBufferWithJobClasses
@@ -292,6 +283,7 @@ class EstimatorQueueBlockingFlemingViot:
                  nmeantimes=None,
                  burnin_cycles_absorption=0,
                  burnin_cycles_complete_all_particles=False,
+                 reward_func=None,
                  policy_accept=None,
                  policy_assign=None,
                  mean_lifetime=None, proba_survival_given_activation=None,
@@ -420,6 +412,7 @@ class EstimatorQueueBlockingFlemingViot:
         self.mean_lifetime = mean_lifetime  # A possibly separate estimation of the expected absorption cycle time having started at the absorption set (based on the ENTRY distribution of such set)
                                             # NOTE that the expected absorption cycle time, when estimated by this process, is called
                                             # self.expected_absorption_time (see the reset_results() method below).
+        self.reward_func = reward_func
         self.is_expected_absorption_time_estimated_from_burnin = self.reactivate and self.mean_lifetime is None and self.burnin_cycles_absorption > 0
             ## NOTE that we need to require that the number of burn-in absorption cycles be > 0 in order to estimate E(T)
             ## because o.w. we are NOT starting at an absorption state that follows the (stationary) distribution
@@ -1196,7 +1189,7 @@ class EstimatorQueueBlockingFlemingViot:
 
         #-- 1) FV: Simulate until activation
         time_start = timer()
-        if FV_estimation():
+        if FV_estimation() and self.nservers > 1:
             simulate_until_all_particles_are_activated_before_starting_fv_process()
 
         #-- 2) FV & MC: Simulate until first absorption
@@ -2057,8 +2050,8 @@ class EstimatorQueueBlockingFlemingViot:
         mostly for plotting purposes.        
         """
         for server in range(self.nservers):
-            assert self.particles[P].getMostRecentEventTime() == self.times_buffer[P], \
-                 "The most recent event time for the particle coincides with the last time when the buffer size changed (self.times_buffer[P]):" \
+            assert self.particles[P].getMostRecentEventTime() == 0.0 or self.particles[P].getMostRecentEventTime() == self.times_buffer[P], \
+                 "The most recent event time for the particle coincides with the last time when the buffer size changed whenever that most recent time is positive (self.times_buffer[P]):" \
                  "\nP={}, server={}: most recent event time={:.3f}; last time the buffer changed size={:.3f}" \
                  .format(P, server, self.particles[P].getMostRecentEventTime(), self.times_buffer[P])
             self.trajectories[P][server]['t'] += [ self.times_buffer[P] ]
@@ -4957,6 +4950,11 @@ def estimate_blocking_fv(   env_queue: EnvQueueSingleBufferWithJobClasses,
                                                plotFlag=False,  #dict_params_info['plot'],
                                                log=dict_params_info['log'])
     proba_blocking_fv, integral, _, _ = est_fv.simulate(EventType.ACTIVATION)
+        ## DM-2022/01/09: Note that starting at an ACTIVATION state is ONLY valid in the single-server case.
+        ## In fact, in the multi-server case, we should draw the start state from the STATIONARY DISTRIBUTION of activation.
+        ## Note that the simulate_until_all_particles_are_activated_before_starting_fv_process() function that is called
+        ## by run_simulation() --in turn called by the simulate() method called here-- is called when nservers > 1
+        ## and it asserts that no particle is an activation state.
     if dict_params_info['plot']:
         df_proba_survival_and_blocking_conditional = est_fv.estimate_proba_survival_and_blocking_conditional()
         plot_curve_estimates(df_proba_survival_and_blocking_conditional,

@@ -8,7 +8,7 @@ Created on 09 Oct 2021
 
 import numpy as np
 
-from utils.basic import as_array
+from Python.lib.utils.basic import as_array
 
 
 class GenericParameterizedPolicyTwoActions:

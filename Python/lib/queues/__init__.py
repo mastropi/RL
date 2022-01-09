@@ -18,12 +18,8 @@ if __name__ == "__main__":
 
     runpy.run_path('../../../setup.py')
 
-    from Python.lib.utils.basic import is_scalar
-    from Python.lib.utils.computing import generate_min_exponential_time
-else:
-    from utils.basic import is_scalar
-    from utils.computing import generate_min_exponential_time
-
+from Python.lib.utils.basic import is_scalar
+from Python.lib.utils.computing import generate_min_exponential_time
 
 @unique
 class Event(Enum):

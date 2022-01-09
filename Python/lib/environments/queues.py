@@ -10,7 +10,7 @@ Created on 22 Mar 2021
                 In the particular case of queue environments, it should ALSO define the queue system that is responsible
                 of generating the time and type of the next event.
                 This allows for the simulation of an SMDP, i.e. a Semi-Markov Decision Process, where the times at which
-                the MDP iterates are random (in this case, defined by the queue system behind).
+                the MDP iterates are random (in this case, defined by the queue system behind it).
 
                 Note that it should NOT define any agents acting on the environment, as this is done separately.
 """
@@ -25,12 +25,9 @@ from gym import spaces
 if __name__ == "__main__":
     # Needed to run tests (see end of program)
     import runpy
-
     runpy.run_path('../../../setup.py')
 
-    from Python.lib.queues import GenericQueue, QueueMM
-else:
-    from Python.lib.queues import GenericQueue, QueueMM
+from Python.lib.queues import GenericQueue, QueueMM
 
 # NOTE: We use IntEnum instead of Enum because of the problem of comparison described here!!
 # https://stackoverflow.com/questions/28125055/enum-in-python-doesnt-work-as-expected
@@ -54,9 +51,9 @@ class Actions(IntEnum):
     ACCEPT = 1
     OTHER = 99      # This is used for actions of ActionTypes = ASSIGN (where the action is actually the server number to which the accepted job is assigned)
 
-# Reference buffer size used in the definition of the exponential cost when blocking an incoming job
+# Default reference buffer size used in the definition of the exponential cost when blocking an incoming job
 # This value is the minimum expected cost that is searched for by the learning process when only hard (i.e. deterministic) blocking is used)
-COST_EXP_BUFFER_SIZE_REF = 20
+COST_EXP_BUFFER_SIZE_REF = 40
 
 
 #---------------------------- Reward functions that can be used in different environments -----------------------------#
@@ -74,7 +71,14 @@ def rewardOnJobClassAcceptance(env, state, action, next_state):
     else:
         return 0.0
 
-def rewardOnJobRejection_ExponentialCost(env, state, action, next_state):
+def rewardOnJobRejection_ExponentialCost(env, state, action, next_state, dict_params=None):
+    if dict_params is None:
+        dict_params = dict({'buffer_size_ref': COST_EXP_BUFFER_SIZE_REF})
+    if 'buffer_size_ref' not in dict_params.keys():
+        raise ValueError("Parameter 'buffer_size_ref' must be given in the parameters dictionary containing"
+                         " the reference buffer size, above which there is an exponentially increasing cost with"
+                         " the buffer size when a job is rejected.")
+
     "Negative reward received when an incoming job is rejected as a function of the queue's buffer size associated to the given state"
     if action == Actions.REJECT:
         # Blocking occurred
@@ -82,7 +86,7 @@ def rewardOnJobRejection_ExponentialCost(env, state, action, next_state):
         assert env.getBufferSizeFromState(state) == env.getBufferSizeFromState(next_state), \
             "At REJECT, the queue's buffer size after rejection ({}) is the same as before rejection ({})" \
             .format(env.getBufferSizeFromState(state), env.getBufferSizeFromState(next_state))
-        reward = -costBlockingExponential(env.getBufferSizeFromState(state), COST_EXP_BUFFER_SIZE_REF)
+        reward = -costBlockingExponential(env.getBufferSizeFromState(state), dict_params['buffer_size_ref'])
         assert reward < 0.0, "The reward of blocking is negative ({})".format(reward)
         return reward
     else:
@@ -138,9 +142,16 @@ class EnvQueueSingleBufferWithJobClasses(gym.Env):
 
     rewards_accept_by_job_class: list
         List of rewards for the acceptance of the different job class whose rate is given in job_class_rates.
+
+    dict_params_reward_funct: (opt) dict
+        Dictionary containing non-standard parameters (i.e. besides the state, the action and the next state)
+        on which the reward function `reward_func` depends on.
+        default: None, in which case the default parameter values are used
     """
 
-    def __init__(self, queue: QueueMM, job_class_rates: list, reward_func, rewards_accept_by_job_class: list):
+    def __init__(self, queue: QueueMM, job_class_rates: list,
+                 reward_func, rewards_accept_by_job_class: list,
+                 dict_params_reward_func: dict=None):
         #-- Environment
         self.queue = queue
         self.job_class = None
@@ -148,6 +159,7 @@ class EnvQueueSingleBufferWithJobClasses(gym.Env):
 
         #-- Rewards
         self.reward_func = reward_func
+        self.dict_params_reward_func = dict_params_reward_func
         self.rewards_accept_by_job_class = rewards_accept_by_job_class
 
         # Create temporary variables that are shorter to reference and still easy to understand
@@ -284,7 +296,7 @@ class EnvQueueSingleBufferWithJobClasses(gym.Env):
         next_state = self.getState()
         # Reward observed by going from S(t) to S(t+1) via action A(t)
         if self.reward_func is not None:
-            reward = self.reward_func(self, state, action, next_state)
+            reward = self.reward_func(self, state, action, next_state, dict_params=self.dict_params_reward_func)
         else:
             reward = 0.0
 
@@ -348,7 +360,13 @@ class EnvQueueSingleBufferWithJobClasses(gym.Env):
     def getRewardFunction(self):
         return self.reward_func
 
+    def getParamsRewardFunc(self):
+        return self.dict_params_reward_func
+
     #------ SETTERS ------#
+    def setParamsRewardFunc(self, dict_params):
+        self.dict_params_reward_func = dict_params
+
     def _setServerSizes(self, sizes : int or list or np.array):
         "Sets the size of the servers in the queue"
         self.queue.setServerSizes(sizes)
