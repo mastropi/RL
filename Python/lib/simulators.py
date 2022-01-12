@@ -68,6 +68,10 @@ class Simulator:
     agent: Agent
         Agent object that is responsible of performing the actions on the environment and learning from them.
 
+    case: (opt) int
+        Simulation case, which can be used to group simulations by specific settings of interest.
+        default: 1
+
     seed: (opt) int
         Seed to use in the simulations as base seed (then the seed for each simulation is changed from this base seed).
         default: None, in which case a random seed is generated.
@@ -95,7 +99,7 @@ class Simulator:
         default: False
     """
 
-    def __init__(self, env, agent, seed=None, log=False, save=False, logsdir=None, resultsdir=None, debug=False):
+    def __init__(self, env, agent, case=1, seed=None, log=False, save=False, logsdir=None, resultsdir=None, debug=False):
 #        if not isinstance(env, EnvironmentDiscrete):
 #            raise TypeError("The environment must be of type {} from the {} module ({})" \
 #                            .format(EnvironmentDiscrete.__name__, EnvironmentDiscrete.__module__, env.__class__))
@@ -108,6 +112,7 @@ class Simulator:
         self.debug = debug
         self.log = log
         self.save = save
+        self.case = case
 
         dt_today_str = generate_datetime_string(prefix=self.__class__.__name__)
         if self.log:
@@ -157,6 +162,13 @@ class Simulator:
 
         # Reset the learner to the first episode state
         self.agent.getLearner().reset(reset_episode=reset_episode, reset_value_functions=reset_value_functions)
+
+    def getCase(self):
+        return self.case
+
+    def setCase(self, case):
+        "Sets the simulation case, identifying a common set of simulations performed by a certain criterion"
+        self.case = case
 
     def close(self):
         if self.fh_log is not None:
@@ -581,8 +593,8 @@ class SimulatorQueue(Simulator):
         default: 1
     """
 
-    def __init__(self, env, agent, dict_nsteps, N=1, seed=None, log=False, save=False, logsdir=None, resultsdir=None, debug=False):
-        super().__init__(env, agent, seed, log, save, logsdir, resultsdir, debug)
+    def __init__(self, env, agent, dict_nsteps, case=1, N=1, seed=None, log=False, save=False, logsdir=None, resultsdir=None, debug=False):
+        super().__init__(env, agent, case, seed, log, save, logsdir, resultsdir, debug)
         self.dict_nsteps = dict_nsteps
         # Attributes used during Fleming-Viot simulation (each env in envs is one of the N particles)
         self.N = N
@@ -724,7 +736,9 @@ class SimulatorQueue(Simulator):
             - [TODO] number of visits to each state at the end of the simulation.
         """
         # --- Parse input parameters
-        if dict_params_simul['t_sim'] is None:
+        if dict_params_simul is None or not isinstance(dict_params_simul, dict):
+            raise ValueError("Input parameter dict_params_simul must be a dictionary: dict_params_simul={}".format(dict_params_simul))
+        if dict_params_simul.get('t_sim', None) is None:
             # Case when the simulation time (simulation steps, which normally equals # events) is the same
             # for all learning steps (typically when learning via the FV method).
             # Otherwise, in the MC method, the number of simulation steps is normally read from a benchmark file
@@ -753,10 +767,6 @@ class SimulatorQueue(Simulator):
         if verbose:
             print("Value function at start of experiment: {}".format(self.learnerV.getV()))
 
-        if self.save:
-            # Initialize the output file with the results with the column names
-            self.fh_results.write("theta,theta_next,Pr(K-1),Pr(K),Q_diff(K-1),Q_diff(K),alpha,V,gradV,nevents_mc,nevents_proba,ntrajectories_Q\n")
-
         # There are two simulation time scales (both integers and starting at 0):
         # - t: the number of queue state changes (a.k.a. number of queue iterations)
         # - t_learn: the number of learning steps (of the value functions and policies)
@@ -783,7 +793,7 @@ class SimulatorQueue(Simulator):
                 # of the system itself... and I don't think the learn() method should be responsible for the simulation
                 # because simulating is a quite computing intensive task!!
 
-                if dict_params_simul['t_sim'] is not None:
+                if dict_params_simul.get('t_sim', None) is not None:
                     assert len(dict_params_simul) == self.dict_nsteps['learn']
                     dict_params_simul['nmeantimes'] = dict_params_simul['t_sim'][t_learn - 1]
 
@@ -829,7 +839,7 @@ class SimulatorQueue(Simulator):
             else:
                 # Monte-Carlo learning is the default
                 assert self.N == 1, "The simulation system has only one particle in Monte-Carlo mode ({})".format(self.N)
-                if dict_params_simul['t_sim'] is None:
+                if dict_params_simul.get('t_sim', None) is None:
                     # Use the number of simulation steps defined in the object
                     t_sim = self.dict_nsteps['queue']
                 else:
@@ -931,9 +941,6 @@ class SimulatorQueue(Simulator):
         datetime_diff = datetime.strptime(dt_end, "%Y-%m-%d %H:%M:%S") - datetime.strptime(dt_start, "%Y-%m-%d %H:%M:%S")
         time_elapsed = datetime_diff.total_seconds()
         print("Execution time: {:.1f} min, {:.1f} hours".format(time_elapsed / 60, time_elapsed / 3600))
-
-        # Closes the object (e.g. any log and result files are closed)
-        self.close()
 
         return self.learnerV, self.learnerP, df_learning
 
@@ -2259,8 +2266,10 @@ class SimulatorQueue(Simulator):
         agent.getLearnerP().update_learning_rate_by_episode()
 
         if self.save:
-            self.fh_results.write("{},{},{},{},{},{},{},{},{},{},{},{}\n" \
-                                    .format(self.thetas[-1][0],
+            self.fh_results.write("{},{},{},{},{},{},{},{},{},{},{},{},{},{}\n" \
+                                    .format(self.case,
+                                            self.envs[0].getParamsRewardFunc().get('buffer_size_ref', None),
+                                            self.thetas[-1],
                                             self.thetas_updated[-1],
                                             self.proba_stationary[-1][0],
                                             self.proba_stationary[-1][1],
@@ -2315,7 +2324,7 @@ if __name__ == "__main__":
     import runpy
     runpy.run_path("../../setup.py")
 
-    test = True
+    test = False
 
     # --------------- Unit tests on methods defined in this file ------------------ #
     if test:
@@ -2334,7 +2343,7 @@ if __name__ == "__main__":
         job_class_rates = [0.7, 0.5]
         service_rates = [1.0, 0.8, 1.3, 0.75]
         job_rates_by_server = compute_job_rates_by_server(job_class_rates, nservers, [[0.5, 0.5, 0.0, 0.0], [0.0, 0.5, 0.4, 0.1]])
-        queue = QueueMM(job_rates_by_server, service_rates, nservers, capacity)
+        queue = queues.QueueMM(job_rates_by_server, service_rates, nservers, capacity)
         env_queue_mm = EnvQueueSingleBufferWithJobClasses(queue, job_class_rates, None, None)
         simul = SimulatorQueue(env_queue_mm, None, None, N=1)
 
@@ -2393,7 +2402,8 @@ if __name__ == "__main__":
         nservers = 1
         job_class_rates = [0.7]
         service_rates = [1.0]
-        queue = QueueMM(job_class_rates, service_rates, nservers, capacity)
+        job_rates_by_server = job_class_rates
+        queue = queues.QueueMM(job_rates_by_server, service_rates, nservers, capacity)
         env_queue_mm = EnvQueueSingleBufferWithJobClasses(queue, job_class_rates, rewardOnJobRejection_ExponentialCost, None)
 
         # Learner of the value function
@@ -2720,33 +2730,42 @@ if __name__ == "__main__":
         # ---------------------- OUTPUT FILES --------------------#
 
         capacity = np.Inf
-        nservers = 1
-        job_class_rates = [0.7]
-        service_rates = [1.0]
-        queue = QueueMM(job_class_rates, service_rates, nservers, capacity)
+        nservers = 1 #3    # 1
+        job_class_rates = [0.7] #[0.8, 0.7] # [0.7]
+        service_rates = [1.0] #[1.0, 1.0, 1.0]
+        policy_assign = PolJobAssignmentProbabilistic([[1.0]]) #[[0.5, 0.5, 0.0], [0.0, 0.5, 0.5]] )
+        job_rates_by_server = compute_job_rates_by_server(  job_class_rates,
+                                                            nservers,
+                                                            policy_assign.getProbabilisticMap())
+        queue = queues.QueueMM(job_rates_by_server, service_rates, nservers, capacity)
+
         env_queue_mm = EnvQueueSingleBufferWithJobClasses(queue, job_class_rates, rewardOnJobRejection_ExponentialCost, None)
 
-        # Acceptance policy definition
-        theta_start = 1.0  # 36.0 # 39.0 # 1.3, 11.3  # IMPORTANT: This value should NOT be integer, o.w. the policy gradient will always be 0 regardless of the state at which blocking occurs
-        policies = dict({PolicyTypes.ACCEPT: PolQueueTwoActionsLinearStep(env_queue_mm, theta_start), PolicyTypes.ASSIGN: None})
-        #policies = dict({PolicyTypes.ACCEPT: PolQueueTwoActionsLogit(env_queue_mm, theta_start, beta=1.0), PolicyTypes.ASSIGN: None})
-
         # Learning method (MC or FV)
-        n_particles_fv = 50; t_sim = 100
+        n_particles_fv = 10; t_sim = 20
+        #n_particles_fv = 500; t_sim = 100       # For the MC simulation on different theta_ref values, I considered the average number of events (~ 50,000) over the 250 learning steps in the FV simulation starting at theta = 39 for theta_ref = 20, recorded here: SimulatorQueue_20211230_001050.csv
         #n_particles_fv = 800; t_sim = 800
         #n_particles_fv = 800; t_sim = 1000
-        learning_method = LearningMethod.MC; nparticles = 1; plot_trajectories = False; symbol = 'b.-'; benchmark_file = os.path.join( os.path.abspath(resultsdir), "benchmark_fv.csv" )
+
+        # MC (with no benchmark)
+        learning_method = LearningMethod.MC; nparticles = 1; plot_trajectories = False; symbol = 'b.-'; benchmark_file = None
+        # MC (with benchmark)
+        #learning_method = LearningMethod.MC; nparticles = 1; plot_trajectories = False; symbol = 'b.-'; benchmark_file = os.path.join(os.path.abspath(resultsdir), "benchmark_fv.csv")
         #learning_method = LearningMethod.FV; nparticles = n_particles_fv; plot_trajectories = False; symbol = 'g.-'; benchmark_file = None
 
         # Simulator on a given number of iterations for the queue simulation and a given number of iterations to learn the policy
-        t_learn = 5 #198 - 91 #198 #250 #50
+        t_learn = 10 #100 #198 - 91 #198 #250 #50
+
+        # Acceptance policy definition
+        policies = dict({PolicyTypes.ACCEPT: PolQueueTwoActionsLinearStep(env_queue_mm, theta=1.0), PolicyTypes.ASSIGN: policy_assign})
+        #policies = dict({PolicyTypes.ACCEPT: PolQueueTwoActionsLogit(env_queue_mm, theta=1.0, beta=1.0), PolicyTypes.ASSIGN: None})
 
         # Learners definition
         fixed_window = False
-        alpha_start = 1.0 #/ t_sim  # Use `/ t_sim` when using update of theta at each simulation step (i.e. LeaPolicyGradient.learn_TR() is called instead of LeaPolicyGradient.learn())
+        alpha_start = 1.0  # / t_sim  # Use `/ t_sim` when using update of theta at each simulation step (i.e. LeaPolicyGradient.learn_TR() is called instead of LeaPolicyGradient.learn())
         adjust_alpha = True
         min_time_to_update_alpha = int(t_learn / 2.5)
-        alpha_min = 0.0 # 0.1
+        alpha_min = 0.0  # 0.1
         gamma = 1.0
         if learning_method == LearningMethod.FV:
             t_sim_values_by_learning_step = None  # The simulation time for each learning step is the same for ALL learning steps and equal to t_sim defined above
@@ -2755,21 +2774,23 @@ if __name__ == "__main__":
             # Read the number of events to use from the FV simulation if given, so that we can do a fair comparison of results
             # Otherwise, extend the simulation time to as many particles used in the FV case
             if benchmark_file is not None:
-                print("Reading number of simulation time steps for each learning step from the benchmark file:\n{}".format(benchmark_file))
+                print("Reading number of simulation time steps for each learning step from the benchmark file:\n{}" \
+                        .format(benchmark_file))
                 df_benchmark = pd.read_csv(benchmark_file)
                 # The number of events to use in the MC simulation is defined by the # events used in the FV estimation
                 if 'nevents_mc' not in df_benchmark.columns or 'nevents_proba' not in df_benchmark.columns:
                     raise ValueError("The benchmark file should have at least the following columns: 'nevents_mc' and 'n_events_proba'." \
                                         "\nColumns found: {}".format(df_benchmark.columns))
-                t_sim_values_by_learning_step = list( df_benchmark['nevents_mc'] + df_benchmark['nevents_proba'] )
+                t_sim_values_by_learning_step = list(df_benchmark['nevents_mc'] + df_benchmark['nevents_proba'])
                 if len(t_sim_values_by_learning_step) != t_learn:
                     raise ValueError("The number of simulation times read from the benchmark file ({}) does not coincide with the number of learning steps ({})" \
                                      .format(len(t_sim_values_by_learning_step), t_learn))
             else:
+                t_sim_values_by_learning_step = None
                 t_sim *= n_particles_fv
             learnerV = LeaMC(env_queue_mm, gamma=gamma)
         assert t_sim_values_by_learning_step is None or \
-                isinstance(t_sim_values_by_learning_step, list) and len(t_sim_values_by_learning_step) == t_learn
+               isinstance(t_sim_values_by_learning_step, list) and len(t_sim_values_by_learning_step) == t_learn
 
         learners = dict({LearnerTypes.V: learnerV,
                          LearnerTypes.Q: None,
@@ -2779,159 +2800,195 @@ if __name__ == "__main__":
                                                            alpha_min=alpha_min, fixed_window=fixed_window)})
         agent_gradient = AgeQueue(env_queue_mm, policies, learners)
 
-        seed = 1859 # (for learning step 53+91=144) #1769 (for learning step 53, NOT 52 because it took too long) #1717
+        seed = 1717  #1859 (for learning step 53+91=144) #1769 (for learning step 53, NOT 52 because it took too long) #1717
         dict_nsteps = dict({'queue': t_sim, 'learn': t_learn})
         dict_params_simul = dict({
             'nparticles': nparticles,
-            't_sim': t_sim_values_by_learning_step,     # This is a list with either ONE element or as many elements as the number of learning steps
-            'buffer_size_activation': np.nan,           # This value will be defined by the simulation process as it is updated at each updated theta value
+            't_sim': t_sim_values_by_learning_step,
+            # This is a list with either ONE element or as many elements as the number of learning steps
+            'buffer_size_activation': np.nan,
+            # This value will be defined by the simulation process as it is updated at each updated theta value
             'seed': np.nan
-            })
-        dict_params_info = dict({'plot': False, 'log': False})
-        simul = SimulatorQueue(env_queue_mm, agent_gradient, dict_nsteps, N=nparticles, log=create_log, save=save_results, logsdir=logsdir, resultsdir=resultsdir, debug=False)
-
-        params = dict({
-            '1(a)-System-#Servers': nservers,
-            '1(b)-System-JobClassRates': job_class_rates,
-            '1(c)-System-ServiceRates': service_rates,
-            '1(d)-System-TrueTheta': COST_EXP_BUFFER_SIZE_REF,
-            '2(a)-Learning-Method': learning_method.name,
-            '2(b)-Learning-Method#Particles': nparticles,
-            '2(c)-Learning-GradientEstimation': "Theoretical",
-            '2(d)-Learning-#Steps': t_learn,
-            '2(e)-Learning-SimulationTimePerLearningStep': t_sim,
-            '2(f)-Learning-AlphaStart': alpha_start,
-            '2(g)-Learning-AdjustAlpha?': adjust_alpha,
-            '2(h)-Learning-MinEpisodeToAdjustAlpha': min_time_to_update_alpha,
-            '2(i)-Learning-AlphaMin': alpha_min,
         })
-        show_exec_params(params)
+        dict_params_info = dict({'plot': False, 'log': False})
+        simul = SimulatorQueue(env_queue_mm, agent_gradient, dict_nsteps, N=nparticles, log=create_log,
+                               save=save_results, logsdir=logsdir, resultsdir=resultsdir, debug=False)
 
-        learnerV, learnerP, df_learning = simul.run(dict_params_simul, dict_params_info=dict_params_info, seed=seed, verbose=True)
+        if save_results:
+            # Initialize the output file with the results with the column names
+            simul.fh_results.write("case,theta_true,theta,theta_next,Pr(K-1),Pr(K),Q_diff(K-1),Q_diff(K),alpha,V,gradV,nevents_mc,nevents_proba,ntrajectories_Q\n")
 
-        # Save the estimation of G(t) for the last learning step to a file
-        #file_results_G = "G.csv"
-        #pd.DataFrame({'G': simul.G}).to_csv(file_results_G)
+        #------- Iterate on each initial theta value listed here
+        #theta_true_values = np.linspace(start=1.0, stop=20.0, num=20)
+        theta_true_values = [32.0-1, 34.0-1, 36.0-1] #[10.0-1, 15.0-1, 20.0-1, 25.0-1, 30.0-1]  # 39.0
+        theta_opt_values = np.nan*np.ones(len(theta_true_values)) # List of optimum theta values achieved by the learning algorithm
+        theta_start = 1.0
+        verbose = False
+        for i, theta_true in enumerate(theta_true_values):
+            print("\nSimulating with {} learning on a queue environment with optimum theta (one less the deterministic blocking size) = {}".format(learning_method.name, theta_true))
+            simul.setCase(i+1)
 
-        #-- Plot theta and the gradient of the value function
-        SET_YLIM = False
+            # Set the true theta value
+            env_queue_mm.setParamsRewardFunc(dict({'buffer_size_ref': np.ceil(theta_true+1)}))
 
-        # Estimated value function
-        ax, line_est = plotting.plot_colormap(df_learning['theta'], -df_learning['V'], cmap_name="Blues")
+            # Set the number of learning steps to double the true theta value
+            simul.dict_nsteps['learn'] = int(theta_true*2)
 
-        # True value function
-        # Block size for each theta, defined by the fact that K-1 is between theta and theta+1 => K = ceiling(theta+1)
-        Ks = [np.int(np.ceil(np.squeeze(t)+1)) for t in df_learning['theta']]
-        rho = job_class_rates[0] / service_rates[0]
-        # Blocking probability = Pr(K)
-        p_stationary = [stationary_distribution_birth_death_process(1, K, [rho])[1] for K in Ks]
-        pblock_K = np.array([p[-1] for p in p_stationary])
-        pblock_Km1 = np.array([p[-2] for p in p_stationary])
-        # Blocking probability adjusted for different jump rates between K-1 and K (affected by the non-deterministic probability of blocking at K-1)
-        pblock_K_adj = np.squeeze([pK * (1 - (K-1-theta)) for K, theta, pK in zip(Ks, df_learning['theta'], pblock_K)])
-        pblock_Km1_adj = pblock_Km1 #np.squeeze([pKm1 + pK - pK_adj for pKm1, pK, pK_adj in zip(pblock_Km1, pblock_K, pblock_K_adj)])
-        #assert np.allclose(pblock_K + pblock_Km1, pblock_K_adj + pblock_Km1_adj)
-        # True value function: expected cost at K which is the buffer size where blocking most likely occurs...
-        # (in fact, if theta is say 3.1, the probability of blocking at 4 (= K-1) is small and most blocking
-        # will occur at K; if theta is 3.9, the probability of blocking at 4 (= K-1)
-        # i.e. we compute at K-1 and NOT at K because we want to compare the true value function
-        # with the *estimated* value function when the policy starts blocking at buffer size = theta
-        #Vtrue = np.array([rewardOnJobRejection_ExponentialCost(env_queue_mm, (K, None), Actions.REJECT, (K, None)) * pK for K, pK in zip(Ks, pblock_K)])
+            # Reset the theta value to the initial theta
+            agent_gradient.getLearnerP().getPolicy().setThetaParameter(theta_start)
 
-        # ACTUAL true value function, which takes into account the probability of blocking at K-1 as well, where the policy is non-deterministic (for non-integer theta)
-        # The problem with this approach is that the stationary distribution of the chain is NOT the same as with chain
-        # where rejection ONLY occurs at s=K... in fact, the transition probabilities to s=K and to s=K-1 when the
-        # initial state is s=K-1 are affected by the non-deterministic probability of blocking when s=K-1...
-        # Qualitatively, the stationary probability of K would be reduced and the stationary probability of K-1 would be
-        # increased by the same amount.
-        Vtrue = np.array([rewardOnJobRejection_ExponentialCost(env_queue_mm, (K, None), Actions.REJECT, (K, None)) * pK +
-                          rewardOnJobRejection_ExponentialCost(env_queue_mm, (K-1, None), Actions.REJECT, (K-1, None)) * (K - 1 - theta) * pKm1
-                            for K, theta, pK, pKm1 in zip(Ks, df_learning['theta'], pblock_K_adj, pblock_Km1_adj)])
+            # Show execution parameters
+            params = dict({
+                '1(a)-System-#Servers': nservers,
+                '1(b)-System-JobClassRates': job_class_rates,
+                '1(c)-System-ServiceRates': service_rates,
+                '1(d)-System-TrueTheta': theta_true,
+                '2(a)-Learning-Method': learning_method.name,
+                '2(b)-Learning-Method#Particles': nparticles,
+                '2(c)-Learning-GradientEstimation': "Theoretical",
+                '2(d)-Learning-#Steps': simul.dict_nsteps['learn'],
+                '2(e)-Learning-SimulationTimePerLearningStep': t_sim,
+                '2(f)-Learning-AlphaStart': alpha_start,
+                '2(g)-Learning-AdjustAlpha?': adjust_alpha,
+                '2(h)-Learning-MinEpisodeToAdjustAlpha': min_time_to_update_alpha,
+                '2(i)-Learning-AlphaMin': alpha_min,
+            })
+            show_exec_params(params)
 
-        # True grad(V)
-        # Ref: my hand-written notes in Letter-size block of paper with my notes on the general environment - agent setup
-        gradVtrue = [-rewardOnJobRejection_ExponentialCost(env_queue_mm, (K-1, None), Actions.REJECT, (K-1, None)) * pKm1 for K, pKm1 in zip(Ks, pblock_Km1)]
+            learnerV, learnerP, df_learning = simul.run(dict_params_simul, dict_params_info=dict_params_info, seed=seed, verbose=verbose)
+            theta_opt_values[i] = df_learning['theta_next'].iloc[-1]
 
-        ord = np.argsort(Ks)
-        # NOTE that we plot the true value function at K-1 (not at K) because K-1 is the value that is closest to theta
-        # and we are plotting the *estimated* value function vs. theta (NOT vs. K).
-        #line_true, = ax.plot([Ks[o]-1 for o in ord], [-Vtrue[o] for o in ord], 'g.-', linewidth=5, markersize=20)
-        line_true, = ax.plot(df_learning['theta'], -Vtrue, 'gx-')  # Use when computing the ACTUAL true Value function V, which also depends on theta!
-        ax.set_xlim((0, ax.get_xlim()[1]))
-        ax.set_yscale('log')
-        #ax.set_ylim((0, 10))
-        ax.set_xlabel('theta (for estimated functions) / K-1 for true value function')
-        ax.set_ylabel('Value function V (cost)')
-        ax.legend([line_est, line_true], ['Estimated V', 'True V'], loc='upper left')
-        ax2 = ax.twinx()
-        ax2, line_grad = plotting.plot_colormap(df_learning['theta'], -df_learning['gradV'], cmap_name="Reds", ax=ax2)
-        line_gradtrue, = ax2.plot([Ks[o]-1 for o in ord], [-gradVtrue[o] for o in ord], 'k.-', linewidth=3, markersize=12)
-        ax2.axhline(0, color="lightgray")
-        ax2.set_ylabel('grad(V)')
-        if SET_YLIM:
-            ax2.set_ylim((-5,5))        # Note: grad(V) is expected to be -1 or +1...
-        ax2.legend([line_grad, line_gradtrue], ['grad(V)', 'True grad(V)'], loc='upper right')
-        plt.title("Value function and its gradient as a function of theta and K. " +
-                    "Optimum K = {}, Theta start = {}, t_sim = {:.0f}".format(COST_EXP_BUFFER_SIZE_REF, theta_start, t_sim))
+        print("Optimum theta found by the learning algorithm for each considered true theta value:\n{}" \
+              .format(pd.DataFrame.from_items([('theta_true', theta_true_values), ('theta_opt', theta_opt_values)])))
 
-        # grad(V) vs. V
-        plt.figure()
-        plt.plot(-df_learning['V'], -df_learning['gradV'], 'k.')
-        ax = plt.gca()
-        ax.axhline(0, color="lightgray")
-        ax.axvline(0, color="lightgray")
-        ax.set_xscale('log')
-        #ax.set_xlim((-1, 1))
-        if SET_YLIM:
-            ax.set_ylim((-1, 1))
-        ax.set_xlabel('Value function V (cost)')
-        ax.set_ylabel('grad(V)')
+        # Closes the object (e.g. any log and result files are closed)
+        simul.close()
 
-        # Plot evolution of theta
-        if plot_trajectories:
-            assert N == 1, "The simulated system has only one particle (N={})".format(N)
-            # NOTE: (2021/11/27) I verified that the values of learnerP.getRewards() for the last learning step
-            # are the same to those for learnerV.getRewards() (which only stores the values for the LAST learning step)
-            plt.figure()
-            # Times at which the trajectory of states is recorded
-            times = learnerP.getTimes()
-            times_unique = np.unique(times)
-            assert len(times_unique) == len(learnerP.getPolicy().getThetas()) - 1, \
-                "The number of unique learning times ({}) is equal to the number of theta updates ({})".format(len(times_unique), len(learnerP.getPolicy().getThetas()) - 1)
-                ## Note that we subtract 1 to the number of learning thetas because the first theta stored in the policy object is the initial theta before any update
-            plt.plot(np.r_[0.0, times_unique], learnerP.getPolicy().getThetas(), 'b.-')
-                ## We add 0.0 as the first time to plot because the first theta value stored in the policy is the initial theta with which the simulation started
-            ax = plt.gca()
-            # Add vertical lines signalling the BEGINNING of each queue simulation
-            times_sim_starts = range(0, t_learn*(t_sim+1), t_sim+1)
-            for t in times_sim_starts:
-                ax.axvline(t, color='lightgray', linestyle='dashed')
+        if len(theta_true_values) == 1:
+            # Save the estimation of G(t) for the last learning step to a file
+            #file_results_G = "G.csv"
+            #pd.DataFrame({'G': simul.G}).to_csv(file_results_G)
 
-            # Buffer sizes
-            buffer_sizes = [env_queue_mm.getBufferSizeFromState(s) for s in learnerP.getStates()]
-            ax.plot(times, buffer_sizes, 'g.', markersize=3)
-            # Mark the start of each queue simulation
-            # DM-2021/11/28: No longer feasible (or easy to do) because the states are recorded twice for the same time step (namely at the first DEATH after a BIRTH event)
-            ax.plot(times_sim_starts, [buffer_sizes[t] for t in times_sim_starts], 'gx')
-            ax.set_xlabel("time step")
-            ax.set_ylabel("theta")
+            #-- Plot theta and the gradient of the value function
+            SET_YLIM = False
 
-            # Secondary plot showing the rewards received
+            # Estimated value function
+            ax, line_est = plotting.plot_colormap(df_learning['theta'], -df_learning['V'], cmap_name="Blues")
+
+            # True value function
+            # Block size for each theta, defined by the fact that K-1 is between theta and theta+1 => K = ceiling(theta+1)
+            Ks = [np.int(np.ceil(np.squeeze(t)+1)) for t in df_learning['theta']]
+            rho = [j / s for j, s in zip(job_rates_by_server, service_rates)]
+            # Blocking probability = Pr(K)
+            p_stationary = [stationary_distribution_birth_death_process(nservers, K, rho)[1] for K in Ks]
+            pblock_K = np.array([p[-1] for p in p_stationary])
+            pblock_Km1 = np.array([p[-2] for p in p_stationary])
+            # Blocking probability adjusted for different jump rates between K-1 and K (affected by the non-deterministic probability of blocking at K-1)
+            pblock_K_adj = np.squeeze([pK * (1 - (K-1-theta)) for K, theta, pK in zip(Ks, df_learning['theta'], pblock_K)])
+            pblock_Km1_adj = pblock_Km1 #np.squeeze([pKm1 + pK - pK_adj for pKm1, pK, pK_adj in zip(pblock_Km1, pblock_K, pblock_K_adj)])
+            #assert np.allclose(pblock_K + pblock_Km1, pblock_K_adj + pblock_Km1_adj)
+            # True value function: expected cost at K which is the buffer size where blocking most likely occurs...
+            # (in fact, if theta is say 3.1, the probability of blocking at 4 (= K-1) is small and most blocking
+            # will occur at K; if theta is 3.9, the probability of blocking at 4 (= K-1)
+            # i.e. we compute at K-1 and NOT at K because we want to compare the true value function
+            # with the *estimated* value function when the policy starts blocking at buffer size = theta
+            #Vtrue = np.array([rewardOnJobRejection_ExponentialCost(env_queue_mm, (K, None), Actions.REJECT, (K, None)) * pK for K, pK in zip(Ks, pblock_K)])
+
+            # ACTUAL true value function, which takes into account the probability of blocking at K-1 as well, where the policy is non-deterministic (for non-integer theta)
+            # The problem with this approach is that the stationary distribution of the chain is NOT the same as with chain
+            # where rejection ONLY occurs at s=K... in fact, the transition probabilities to s=K and to s=K-1 when the
+            # initial state is s=K-1 are affected by the non-deterministic probability of blocking when s=K-1...
+            # Qualitatively, the stationary probability of K would be reduced and the stationary probability of K-1 would be
+            # increased by the same amount.
+            Vtrue = np.array([rewardOnJobRejection_ExponentialCost(env_queue_mm, (K, None), Actions.REJECT, (K, None)) * pK +
+                              rewardOnJobRejection_ExponentialCost(env_queue_mm, (K-1, None), Actions.REJECT, (K-1, None)) * (K - 1 - theta) * pKm1
+                                for K, theta, pK, pKm1 in zip(Ks, df_learning['theta'], pblock_K_adj, pblock_Km1_adj)])
+
+            # True grad(V)
+            # Ref: my hand-written notes in Letter-size block of paper with my notes on the general environment - agent setup
+            gradVtrue = [-rewardOnJobRejection_ExponentialCost(env_queue_mm, (K-1, None), Actions.REJECT, (K-1, None)) * pKm1 for K, pKm1 in zip(Ks, pblock_Km1)]
+
+            ord = np.argsort(Ks)
+            # NOTE that we plot the true value function at K-1 (not at K) because K-1 is the value that is closest to theta
+            # and we are plotting the *estimated* value function vs. theta (NOT vs. K).
+            #line_true, = ax.plot([Ks[o]-1 for o in ord], [-Vtrue[o] for o in ord], 'g.-', linewidth=5, markersize=20)
+            line_true, = ax.plot(df_learning['theta'], -Vtrue, 'gx-')  # Use when computing the ACTUAL true Value function V, which also depends on theta!
+            ax.set_xlim((0, ax.get_xlim()[1]))
+            ax.set_yscale('log')
+            #ax.set_ylim((0, 10))
+            ax.set_xlabel('theta (for estimated functions) / K-1 for true value function')
+            ax.set_ylabel('Value function V (cost)')
+            ax.legend([line_est, line_true], ['Estimated V', 'True V'], loc='upper left')
             ax2 = ax.twinx()
-            ax2.plot(times, -np.array(learnerP.getRewards()), 'r-', alpha=0.3)
-            # Highlight with points the non-zero rewards
-            ax2.plot(times, [-r if r != 0.0 else None for r in learnerP.getRewards()], 'r.')
-            ax2.set_ylabel("Reward")
-            ax2.set_yscale('log')
-            plt.title("Optimum Theta = {}, Theta start = {}, t_sim = {:.0f}, t_learn = {:.0f}, fixed_window={}".format(COST_EXP_BUFFER_SIZE_REF, theta_start, t_sim, t_learn, fixed_window))
-        else:
+            ax2, line_grad = plotting.plot_colormap(df_learning['theta'], -df_learning['gradV'], cmap_name="Reds", ax=ax2)
+            line_gradtrue, = ax2.plot([Ks[o]-1 for o in ord], [-gradVtrue[o] for o in ord], 'k.-', linewidth=3, markersize=12)
+            ax2.axhline(0, color="lightgray")
+            ax2.set_ylabel('grad(V)')
+            if SET_YLIM:
+                ax2.set_ylim((-5,5))        # Note: grad(V) is expected to be -1 or +1...
+            ax2.legend([line_grad, line_gradtrue], ['grad(V)', 'True grad(V)'], loc='upper right')
+            plt.title("Value function and its gradient as a function of theta and K. " +
+                        "Optimum K = {}, Theta start = {}, t_sim = {:.0f}".format(np.ceil(theta_true+1), theta_start, t_sim))
+
+            # grad(V) vs. V
             plt.figure()
-            plt.plot(learnerP.getPolicy().getThetas(), symbol)
-            plt.title("Method: {}, Optimum Theta = {}, Theta start = {}, t_sim = {:.0f}, t_learn = {:.0f}, fixed_window={}" \
-                      .format(learning_method.name, COST_EXP_BUFFER_SIZE_REF, theta_start, t_sim, t_learn, fixed_window))
+            plt.plot(-df_learning['V'], -df_learning['gradV'], 'k.')
             ax = plt.gca()
-            ylim = ax.get_ylim()
-            ax.set_ylim((0, ylim[1]))
+            ax.axhline(0, color="lightgray")
+            ax.axvline(0, color="lightgray")
+            ax.set_xscale('log')
+            #ax.set_xlim((-1, 1))
+            if SET_YLIM:
+                ax.set_ylim((-1, 1))
+            ax.set_xlabel('Value function V (cost)')
+            ax.set_ylabel('grad(V)')
+
+            # Plot evolution of theta
+            if plot_trajectories:
+                assert N == 1, "The simulated system has only one particle (N={})".format(N)
+                # NOTE: (2021/11/27) I verified that the values of learnerP.getRewards() for the last learning step
+                # are the same to those for learnerV.getRewards() (which only stores the values for the LAST learning step)
+                plt.figure()
+                # Times at which the trajectory of states is recorded
+                times = learnerP.getTimes()
+                times_unique = np.unique(times)
+                assert len(times_unique) == len(learnerP.getPolicy().getThetas()) - 1, \
+                    "The number of unique learning times ({}) is equal to the number of theta updates ({})".format(len(times_unique), len(learnerP.getPolicy().getThetas()) - 1)
+                    ## Note that we subtract 1 to the number of learning thetas because the first theta stored in the policy object is the initial theta before any update
+                plt.plot(np.r_[0.0, times_unique], learnerP.getPolicy().getThetas(), 'b.-')
+                    ## We add 0.0 as the first time to plot because the first theta value stored in the policy is the initial theta with which the simulation started
+                ax = plt.gca()
+                # Add vertical lines signalling the BEGINNING of each queue simulation
+                times_sim_starts = range(0, t_learn*(t_sim+1), t_sim+1)
+                for t in times_sim_starts:
+                    ax.axvline(t, color='lightgray', linestyle='dashed')
+
+                # Buffer sizes
+                buffer_sizes = [env_queue_mm.getBufferSizeFromState(s) for s in learnerP.getStates()]
+                ax.plot(times, buffer_sizes, 'g.', markersize=3)
+                # Mark the start of each queue simulation
+                # DM-2021/11/28: No longer feasible (or easy to do) because the states are recorded twice for the same time step (namely at the first DEATH after a BIRTH event)
+                ax.plot(times_sim_starts, [buffer_sizes[t] for t in times_sim_starts], 'gx')
+                ax.set_xlabel("time step")
+                ax.set_ylabel("theta")
+
+                # Secondary plot showing the rewards received
+                ax2 = ax.twinx()
+                ax2.plot(times, -np.array(learnerP.getRewards()), 'r-', alpha=0.3)
+                # Highlight with points the non-zero rewards
+                ax2.plot(times, [-r if r != 0.0 else None for r in learnerP.getRewards()], 'r.')
+                ax2.set_ylabel("Reward")
+                ax2.set_yscale('log')
+                plt.title("Optimum Theta = {}, Theta start = {}, t_sim = {:.0f}, t_learn = {:.0f}, fixed_window={}" \
+                          .format(theta_true, theta_start, t_sim, t_learn, fixed_window))
+            else:
+                plt.figure()
+                plt.plot(learnerP.getPolicy().getThetas(), symbol)
+                plt.title("Method: {}, Optimum Theta = {}, Theta start = {}, t_sim = {:.0f}, t_learn = {:.0f}, fixed_window={}" \
+                          .format(learning_method.name, theta_true, theta_start, t_sim, t_learn, fixed_window))
+                ax = plt.gca()
+                ylim = ax.get_ylim()
+                ax.set_ylim((0, ylim[1]))
 
         end_time_all = timer()
         elapsed_time_all = end_time_all - start_time_all

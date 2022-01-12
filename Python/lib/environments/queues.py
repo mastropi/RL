@@ -146,6 +146,7 @@ class EnvQueueSingleBufferWithJobClasses(gym.Env):
     dict_params_reward_funct: (opt) dict
         Dictionary containing non-standard parameters (i.e. besides the state, the action and the next state)
         on which the reward function `reward_func` depends on.
+        Ex: dict_params_reward_func = {'buffer_size_ref': 20}
         default: None, in which case the default parameter values are used
     """
 
