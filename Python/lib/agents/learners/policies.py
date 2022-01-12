@@ -588,8 +588,8 @@ class LeaPolicyGradient(GenericLearner):
             # Note that we bound the delta theta to avoid too large changes!
             # We use "strange" numbers to avoid having theta fall always on the same distance from an integer (e.g. 4.1, 5.1, etc.)
             # The lower and upper bounds are asymmetric (larger lower bound) so that a large negative reward can lead to a large reduction of theta.
-            bound_delta_theta_upper = +1.1234 #+np.Inf #+2.1310  # +1.131
-            bound_delta_theta_lower = -1.1234 #-np.Inf #-5.3123  # -1.131 #-5.312314 #-1.0
+            bound_delta_theta_upper = +np.Inf #+1.1234 #+np.Inf #+2.1310  # +1.131
+            bound_delta_theta_lower = -np.Inf #-1.1234 #-np.Inf #-5.3123  # -1.131 #-5.312314 #-1.0
 
             #alpha = self.getLearningRate()
             # DM-2021/12/24: An attempt to make alpha proportional to the INVERSE of the second derivative of V,
@@ -603,9 +603,15 @@ class LeaPolicyGradient(GenericLearner):
             # (page 4) of going from K to K-u (for the first term in the sum) and
             # from K-1 to K-1-u (for the second term in the sum), i.e. of serving u jobs between the current job arrival
             # and the next job arrival, and then "trivially" upper bounding that sum.
-            # The problem with this approach is that
+            # The PROBLEM with this approach is that alpha is proportional to the inverse of grad(V)... and then
+            # to compute the new theta, we multiply again by grad(V), so the grad(V) cancels out...
+            # (except for the sign, which of course is a crucial ingredient of the theta update!)
+            # In addition, the value of alpha happens to be inversely proportional to the stationary probability
+            # (which makes its value very big when the stationary probability is very small... thus making theta
+            # oscillate largely around the optimum theta...)
             # Ref: handwritten notes written on 21-Dec-2021 thru 24-Dec-2021.
-            alpha = self.getLearningRate() / theta[0] / proba_stationary / np.abs(gradV)
+            #alpha = self.getLearningRate() / theta[0] / proba_stationary / np.abs(gradV)
+            alpha = self.getLearningRate()
             delta_theta = np.max([bound_delta_theta_lower, np.min([alpha * gradV, bound_delta_theta_upper])])
             print("Estimated grad(V(theta)) = {}".format(gradV))
             print("Delta(theta) = alpha * grad(V) = {:.3f} * {:e} = {:.6f}".format(alpha, gradV, delta_theta))

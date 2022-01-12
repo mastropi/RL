@@ -781,9 +781,14 @@ class SimulatorQueue(Simulator):
                       .format(t_learn, self.dict_nsteps['learn']))
                 print("Theta parameter of policy: {}".format(self.learnerP.getPolicy().getThetaParameter()))
 
-            # Buffer size of sure blocking which is used to define the buffer size for activation and the start state for the simulations run
+            # Buffer size of sure blocking, which is used to define the buffer size for activation and the start state for the simulations run
+            # We set the activation buffer size as a specific fraction of the buffer size K of sure blocking.
+            # This fraction is chosen as the optimum found theoretically to have the same complexity in reaching
+            # a signal that leads to estimations of the numerator Phi(t) and the denominator E(T1+T2) in the
+            # FV estimation of the stationary probability (found on Fri, 07-Jan-2022 at IRIT-N7 with Matt, Urtzi and
+            # Szymon), namely J = K/3.
             K = self.learnerP.getPolicy().getBufferSizeForDeterministicBlocking()
-            dict_params_simul['buffer_size_activation'] = np.max([1, int(K / 4)])
+            dict_params_simul['buffer_size_activation'] = np.max([1, int(K/3)])
             if isinstance(self.learnerV, LeaFV):
                 # TODO: (2021/12/16) SHOULD WE MOVE ALL this learning process of the average reward and stationary probabilities to the learn() method of the LeaFV class?
                 # At this point I don't think we should do this, because the learn() method in the GenericLearner subclasses
@@ -798,9 +803,6 @@ class SimulatorQueue(Simulator):
                     dict_params_simul['nmeantimes'] = dict_params_simul['t_sim'][t_learn - 1]
 
                 #-- Estimation of the survival probability P(T>t) and the expected absorption cycle time, E(T_A) by MC
-                # We set the activation buffer size as a specific fraction of the buffer size K of sure blocking.
-                # This fraction is chosen based on our initial experiments estimating the blocking probability
-                # where we obtain the smallest MSE for the estimated blocking probability (between 0.2K and 0.3K).
                 if self.show_messages(verbose, verbose_period, t_learn):
                     print("Running Monte-Carlo simulation on one particle starting at an absorption state with buffer size = {}..." \
                           .format(dict_params_simul['buffer_size_activation'] - 1))
@@ -2235,10 +2237,10 @@ class SimulatorQueue(Simulator):
                 .format(K-1, K, probas_stationary, Q_values)
 
             # Regular gradient ascent based on grad(V)
-            #theta_prev, theta, V, gradV, G = agent.getLearnerP().learn_linear_theoretical_from_estimated_values(t, probas_stationary[K-1], Q_values[K-1])
+            theta_prev, theta, V, gradV, G = agent.getLearnerP().learn_linear_theoretical_from_estimated_values(t, probas_stationary[K-1], Q_values[K-1])
 
             # IGA: Integer Gradient Ascent
-            theta_prev, theta, V, gradV, G = agent.getLearnerP().learn_linear_theoretical_from_estimated_values_IGA(t, probas_stationary, Q_values)
+            #theta_prev, theta, V, gradV, G = agent.getLearnerP().learn_linear_theoretical_from_estimated_values_IGA(t, probas_stationary, Q_values)
 
         if simul_info is not None:
             nevents_mc = simul_info.get('nevents_mc', 0)
@@ -2256,7 +2258,7 @@ class SimulatorQueue(Simulator):
         self.Q_diff += [[Q_values[K-1][1] - Q_values[K-1][0], Q_values[K][1] - Q_values[K][0]]]
         self.V += [V]               # NOTE: This is NOT always the average value, rho... for instance, NOT when linear_theoretical_from_estimated_values() is called above
         self.gradV += [gradV]
-        self.G = G
+        self.G = G                  # Note that G is Q_diff when we estimate the gradient from its theoretical expression, using the estimates of the stationary probabilities and the differences of Q
         self.nevents_mc += [nevents_mc]
         self.nevents_proba += [nevents_proba]
         self.ntrajectories_Q += [ntrajectories_Q]
@@ -2742,19 +2744,23 @@ if __name__ == "__main__":
         env_queue_mm = EnvQueueSingleBufferWithJobClasses(queue, job_class_rates, rewardOnJobRejection_ExponentialCost, None)
 
         # Learning method (MC or FV)
-        n_particles_fv = 10; t_sim = 20
+        # NOTE: (2022/01/12) t_sim becomes nmeantimes in the simulation that estimates P(T>t) and E(T_A) for the FV estimation,
+        # that is, it is the number of expected job arrivals during the simulation of the queue (which is precisely what
+        # we have defined to control the relative error of the estimation of E(T1+T2).
+        #n_particles_fv = 10; t_sim = 200        # For testing with small values
+        n_particles_fv = 10000; t_sim = 10000    # (2022/01/12) These values are defined with the goal of achieving an error of 20% in the estimation of Phi(t) and of E(T1+T2) when K=40 and rho=0.7
         #n_particles_fv = 500; t_sim = 100       # For the MC simulation on different theta_ref values, I considered the average number of events (~ 50,000) over the 250 learning steps in the FV simulation starting at theta = 39 for theta_ref = 20, recorded here: SimulatorQueue_20211230_001050.csv
         #n_particles_fv = 800; t_sim = 800
         #n_particles_fv = 800; t_sim = 1000
 
         # MC (with no benchmark)
-        learning_method = LearningMethod.MC; nparticles = 1; plot_trajectories = False; symbol = 'b.-'; benchmark_file = None
+        #learning_method = LearningMethod.MC; nparticles = 1; plot_trajectories = False; symbol = 'b.-'; benchmark_file = None
         # MC (with benchmark)
         #learning_method = LearningMethod.MC; nparticles = 1; plot_trajectories = False; symbol = 'b.-'; benchmark_file = os.path.join(os.path.abspath(resultsdir), "benchmark_fv.csv")
-        #learning_method = LearningMethod.FV; nparticles = n_particles_fv; plot_trajectories = False; symbol = 'g.-'; benchmark_file = None
+        learning_method = LearningMethod.FV; nparticles = n_particles_fv; plot_trajectories = False; symbol = 'g.-'; benchmark_file = None
 
         # Simulator on a given number of iterations for the queue simulation and a given number of iterations to learn the policy
-        t_learn = 10 #100 #198 - 91 #198 #250 #50
+        t_learn = 250 #100 #198 - 91 #198 #250 #50
 
         # Acceptance policy definition
         policies = dict({PolicyTypes.ACCEPT: PolQueueTwoActionsLinearStep(env_queue_mm, theta=1.0), PolicyTypes.ASSIGN: policy_assign})
@@ -2762,10 +2768,10 @@ if __name__ == "__main__":
 
         # Learners definition
         fixed_window = False
-        alpha_start = 1.0  # / t_sim  # Use `/ t_sim` when using update of theta at each simulation step (i.e. LeaPolicyGradient.learn_TR() is called instead of LeaPolicyGradient.learn())
+        alpha_start = 100  # / t_sim  # Use `/ t_sim` when using update of theta at each simulation step (i.e. LeaPolicyGradient.learn_TR() is called instead of LeaPolicyGradient.learn())
         adjust_alpha = True
-        min_time_to_update_alpha = int(t_learn / 2.5)
-        alpha_min = 0.0  # 0.1
+        min_time_to_update_alpha = int(t_learn / 3)
+        alpha_min = 0.1  # 0.1
         gamma = 1.0
         if learning_method == LearningMethod.FV:
             t_sim_values_by_learning_step = None  # The simulation time for each learning step is the same for ALL learning steps and equal to t_sim defined above
@@ -2820,9 +2826,9 @@ if __name__ == "__main__":
 
         #------- Iterate on each initial theta value listed here
         #theta_true_values = np.linspace(start=1.0, stop=20.0, num=20)
-        theta_true_values = [32.0-1, 34.0-1, 36.0-1] #[10.0-1, 15.0-1, 20.0-1, 25.0-1, 30.0-1]  # 39.0
+        theta_true_values = [20.0-1] #[32.0-1, 34.0-1, 36.0-1] #[10.0-1, 15.0-1, 20.0-1, 25.0-1, 30.0-1]  # 39.0
         theta_opt_values = np.nan*np.ones(len(theta_true_values)) # List of optimum theta values achieved by the learning algorithm
-        theta_start = 1.0
+        theta_start = 39.0
         verbose = False
         for i, theta_true in enumerate(theta_true_values):
             print("\nSimulating with {} learning on a queue environment with optimum theta (one less the deterministic blocking size) = {}".format(learning_method.name, theta_true))
@@ -2832,7 +2838,13 @@ if __name__ == "__main__":
             env_queue_mm.setParamsRewardFunc(dict({'buffer_size_ref': np.ceil(theta_true+1)}))
 
             # Set the number of learning steps to double the true theta value
-            simul.dict_nsteps['learn'] = int(theta_true*2)
+            # Use this ONLY when looking at the MC method and running the learning process on several true theta values
+            # to see when the MC method breaks... i.e. when it can no longer learn the optimum theta.
+            # The logic behind this choice is that we start at theta = 1.0 and we expect to have a +1 change in
+            # theta at every learning step, so we would expect to reach the optimum value after about a number of
+            # learning steps equal to the true theta value... so in the end, to give some margin, we allow for as
+            # many learning steps as twice the value of true theta parameter.
+            #simul.dict_nsteps['learn'] = int(theta_true*2)
 
             # Reset the theta value to the initial theta
             agent_gradient.getLearnerP().getPolicy().setThetaParameter(theta_start)
@@ -2846,12 +2858,13 @@ if __name__ == "__main__":
                 '2(a)-Learning-Method': learning_method.name,
                 '2(b)-Learning-Method#Particles': nparticles,
                 '2(c)-Learning-GradientEstimation': "Theoretical",
-                '2(d)-Learning-#Steps': simul.dict_nsteps['learn'],
-                '2(e)-Learning-SimulationTimePerLearningStep': t_sim,
-                '2(f)-Learning-AlphaStart': alpha_start,
-                '2(g)-Learning-AdjustAlpha?': adjust_alpha,
-                '2(h)-Learning-MinEpisodeToAdjustAlpha': min_time_to_update_alpha,
-                '2(i)-Learning-AlphaMin': alpha_min,
+                '2(d)-Learning-ThetaStart': theta_start,
+                '2(e)-Learning-#Steps': simul.dict_nsteps['learn'],
+                '2(f)-Learning-SimulationTimePerLearningStep': t_sim,
+                '2(g)-Learning-AlphaStart': alpha_start,
+                '2(h)-Learning-AdjustAlpha?': adjust_alpha,
+                '2(i)-Learning-MinEpisodeToAdjustAlpha': min_time_to_update_alpha,
+                '2(j)-Learning-AlphaMin': alpha_min,
             })
             show_exec_params(params)
 
