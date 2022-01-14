@@ -116,6 +116,60 @@ def get_server_loads(job_rates, service_rates):
     """
     return [b/d for b, d in zip(job_rates, service_rates)]
 
+def compute_nparticles_and_nsteps_for_fv_process(rhos: list, capacity: int, buffer_size_activation: int=0, error_rel_phi=0.50, error_rel_et=0.50):
+    """
+    Computes the minimum number of particles and number of discrete steps to use in the FV process
+    for maximum relative errors in the estimation of Phi(t, K) and of E(T_A) where K is the capacity of the queue.
+
+    Arguments:
+    rhos: list
+        List of the server intensities: lambda / mu for each server in the system, where lambda is the job
+        arrival rate and mu is the service rate.
+
+    capacity: int
+        Capacity of the system: maximum size of the buffer placed at the entrance of the system.
+
+    buffer_size_activation: (opt) int
+        Buffer size J that defines the activation set of states, such as J-1 defines the absorption set of states.
+        default: 0, in which case the value K/3 is used, which is the optimum in the sense that the algorithm complexity
+        to estimate Phi(t, K) and E(T_A) is the same.
+
+    error_rel_phi: (opt) float
+        Maximum relative error for the estimation of Phi(t, K).
+        This is the relative error incurred in the estimation of a binomial probability based on N trials,
+        which is equal to sqrt((1-p)/p) / sqrt(N)
+        default: 0.50
+
+    error_rel_et: (opt) float
+        Maximum relative error for the estimation of the expected absorption cycle time E(T_A).
+        The calculation of the number of cycles needed assumes that the standard deviation of the estimation of E(T_A)
+        is proportional to E(T_A), which gives a relative error equal to 1/sqrt(M) where M is the number of cycles.
+        (Note that from simulations of the FV estimation for different J/K values, it was found that
+        the standard deviation is proportional to E(T_A)^1.6, more precisely Std(T_A) = 0.01 * E(T_A)^1.6)
+        The number of discrete steps is then computed as M/p, where p is the blocking probability of the given
+        queue system.
+        default: 0.50
+    """
+    K = capacity
+    if buffer_size_activation == 0:
+        J = int( np.round(K/3) )
+    else:
+        J = buffer_size_activation
+
+    # -- Blocking probability
+    # This is the equivalent of a queue that has the blocking probability observed under the Fleming-Viot process
+    capacity_effective = int( np.ceil((K-J)/2) )
+    pK = compute_blocking_probability_birth_death_process(rhos, capacity_effective)
+
+    # Expected return time to J (under stationarity), which is what mostly defines the magnitude of E(T_A) = E(T1+T2)
+    pJ = compute_blocking_probability_birth_death_process(rhos, J)
+
+    N = int(np.ceil( (1 - pK) / pK / error_rel_phi**2 ))
+    M = int(np.ceil( 1 / error_rel_et**2 ))
+    T = int(np.ceil( M / pJ ))
+
+    return N, T
+
 def compute_job_rates_by_server(job_class_rates, nservers, policy_assign_map):
     """
     Computes the equivalent job arrival rates for each server from the job arrival rates (to the single buffer)
@@ -150,7 +204,7 @@ def compute_job_rates_by_server(job_class_rates, nservers, policy_assign_map):
 
     return job_rates_by_server
 
-def compute_blocking_probability_birth_death_process(rhos :list, capacity :int):
+def compute_blocking_probability_birth_death_process(rhos: list, capacity: int):
     """
     Computes the true blocking probability of a birth-death process with R servers and total capacity C.
     
@@ -200,7 +254,7 @@ def compute_blocking_probability_birth_death_process(rhos :list, capacity :int):
 
     return proba_blocking       
 
-def stationary_distribution_birth_death_process(nservers :int, capacity :int, rhos :list):
+def stationary_distribution_birth_death_process(nservers: int, capacity: int, rhos: list):
     """
     Computes the stationary distribution of a birth-death process for all its possible states.
 
@@ -259,7 +313,7 @@ def stationary_distribution_birth_death_process(nservers :int, capacity :int, rh
 
     return x, dist
 
-def stationary_distribution_birth_death_process_at_capacity_unnormalized(nservers :int, capacity :int, rhos :list, ncases_expected=None):
+def stationary_distribution_birth_death_process_at_capacity_unnormalized(nservers: int, capacity: int, rhos: list, ncases_expected=None):
     """
     Computes the UNNORMALIZED stationary distribution of a birth-death process for the state subspace
     associated to a fixed capacity, i.e. for all the n = (n1, n2, ..., nR) such that their sum is equal
