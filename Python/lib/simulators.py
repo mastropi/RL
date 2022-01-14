@@ -2972,7 +2972,6 @@ if __name__ == "__main__":
             ax.axhline(0, color="lightgray")
             ax.axvline(0, color="lightgray")
             ax.set_xscale('log')
-            ax.yaxis.set_major_locator(MaxNLocator(integer=True))
             #ax.set_xlim((-1, 1))
             if SET_YLIM:
                 ax.set_ylim((-1, 1))
@@ -3007,6 +3006,7 @@ if __name__ == "__main__":
                 ax.plot(times_sim_starts, [buffer_sizes[t] for t in times_sim_starts], 'gx')
                 ax.set_xlabel("time step")
                 ax.set_ylabel("theta")
+                ax.yaxis.set_major_locator(MaxNLocator(integer=True))
 
                 # Secondary plot showing the rewards received
                 ax2 = ax.twinx()
@@ -3023,8 +3023,13 @@ if __name__ == "__main__":
                 plt.title("Method: {}, Optimum Theta = {}, Theta start = {}, t_sim = {:.0f}, t_learn = {:.0f}, fixed_window={}" \
                           .format(learning_method.name, theta_true, theta_start, t_sim, t_learn, fixed_window))
                 ax = plt.gca()
+                ax.set_xlabel('Learning step')
+                ax.set_ylabel('theta')
                 ylim = ax.get_ylim()
                 ax.set_ylim((0, ylim[1]))
+                ax.axhline(theta_true, color='black', linestyle='dashed')   # This is the last true theta value considered for the simulations
+                ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+                ax.set_aspect(1/ax.get_data_ratio())
 
         end_time_all = timer()
         elapsed_time_all = end_time_all - start_time_all
@@ -3037,7 +3042,7 @@ if __name__ == "__main__":
         # Read the results from files and plot the MC and FV results on the same graph
         resultsdir = "E:/Daniel/Projects/PhD-RL-Toulouse/projects/RL-002-QueueBlocking/results/RL/single-server"
 
-        theta_opt = 19
+        theta_true = 19
         # theta_start = 39, N = 800, t_sim = 800
         results_file_fv = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20211230_001050.csv")
         results_file_mc = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220101_145647.csv")
@@ -3062,7 +3067,8 @@ if __name__ == "__main__":
         ax.set_xlabel('Learning step')
         ax.set_ylabel('theta')
         ax.set_ylim((0, 40))
-        ax.axhline(theta_opt, color='black', linestyle='dashed')
+        ax.axhline(theta_true, color='black', linestyle='dashed')
         ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+        ax.set_aspect(1 / ax.get_data_ratio())
         ax.legend(["Fleming-Viot", "Monte-Carlo", "Optimum theta"])
         plt.title("# particles N = {}, Simulation time for P(T>t) and E(T_A) = {}, # learning steps = {}, Average number of events per learning step = {:.0f}".format(N, t_sim, t_learn, nevents_mean))
