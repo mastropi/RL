@@ -39,12 +39,12 @@ class GenericParameterizedPolicyTwoActions:
         # Store the start theta in the object
         self.setThetaParameter(self.theta_start)
 
-        # Attribute that keep track of all the theta parameter values taken during the learning process
-        self.thetas = [self.theta_start]
+        # Attribute that keeps track of all the theta parameter values taken during the learning process
+        self.thetas = []
 
     def reset(self):
         self.setThetaParameter(self.theta_start)
-        self.thetas = [self.theta_start]
+        self.thetas = []
 
     def choose_action(self, state):
         """
