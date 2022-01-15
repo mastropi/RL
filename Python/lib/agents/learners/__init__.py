@@ -27,6 +27,7 @@ class AlphaUpdateType(Enum):
     FIRST_STATE_VISIT = 1
     EVERY_STATE_VISIT = 2
 
+identity = lambda x: x
 
 class GenericLearner:
     """
@@ -42,6 +43,7 @@ class GenericLearner:
 
     def __init__(self, env, alpha :float,
                  adjust_alpha=False,
+                 func_adjust_alpha=None,
                  min_count_to_update_alpha=0, min_time_to_update_alpha=0,
                  alpha_min=0.):
         """
@@ -54,6 +56,16 @@ class GenericLearner:
         alpha: positive float
             Initial learning rate.
 
+        adjust_alpha: bool
+            Whether alpha should be updated when the methods that are responsible for updating alpha are called.
+            default: False
+
+        func_adjust_alpha: func
+            Function that is used on the counter of whatever KPI is used to divide the initial alpha
+            when the methods responsible for updating alpha perform the update operation.
+            Ex: `np.sqrt`, in which case alpha is updated as alpha_start / np.sqrt(n) where n is the counter of the KPI
+            default: None, in which case the identity function is applied to n when dividing alpha
+
         min_count_to_update_alpha: int
             Minimum count of a state-action pair at which alpha starts to be updated by the update_learning_rate(s,a) method.
 
@@ -63,6 +75,7 @@ class GenericLearner:
         self.env = env
         self.alpha = alpha          # Initial and maximum learning rate
         self.adjust_alpha = adjust_alpha
+        self.func_adjust_alpha = func_adjust_alpha is None and identity or func_adjust_alpha
         self.min_count_to_update_alpha = min_count_to_update_alpha
         self.min_time_to_update_alpha = min_time_to_update_alpha
         self.alpha_min = alpha_min  # Used when adjust_alpha=True
@@ -184,7 +197,7 @@ class GenericLearner:
         #          .format(state, self.dict_state_action_count[str(state)], self.alpha_min, self.alphas[str(state)]))
         if self.adjust_alpha:
             state_action_count = self.getCount(state, action)
-            time_divisor = np.max([1, state_action_count - self.min_count_to_update_alpha])
+            time_divisor = self.func_adjust_alpha( np.max([1, state_action_count - self.min_count_to_update_alpha]) )
                 ## Note: We don't sum anything to the difference count - min_count because we want to have the same
                 ## time_divisor value when min_count = 0, in which case the first update occurs when count = 2
                 ## (yielding time_divisor = 2), as when min_count > 0 (e.g. if min_count = 5, then we would have the
@@ -209,7 +222,7 @@ class GenericLearner:
         The updated value of alpha.
         """
         if self.adjust_alpha:
-            time_divisor = np.max([1, self._time - self.min_time_to_update_alpha])
+            time_divisor = self.func_adjust_alpha( np.max([1, self._time - self.min_time_to_update_alpha]) )
                 ## See comment in method update_learning_rate() about not adding any constant to the difference time - min_time
             print("\tUpdating alpha by learning episode: time divisor = {}".format(time_divisor))
             alpha_prev = self._alpha

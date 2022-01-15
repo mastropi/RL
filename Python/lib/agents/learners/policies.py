@@ -39,12 +39,13 @@ class LeaPolicyGradient(GenericLearner):
 
     def __init__(self, env, policy, learnerV, alpha=0.1,
                  adjust_alpha=False,
+                 func_adjust_alpha=None,
                  min_count_to_update_alpha=0,
                  min_time_to_update_alpha=0,
                  alpha_min=0.,
                  fixed_window=False,
                  debug=False):
-        super().__init__(env, alpha, adjust_alpha, min_count_to_update_alpha, min_time_to_update_alpha, alpha_min)
+        super().__init__(env, alpha, adjust_alpha, func_adjust_alpha, min_count_to_update_alpha, min_time_to_update_alpha, alpha_min)
         self.debug = debug
 
         self.fixed_window = fixed_window
@@ -570,6 +571,8 @@ class LeaPolicyGradient(GenericLearner):
         # -- Parse input parameters
 
         theta = self.policy.getThetaParameter()
+        # WE ASSUME THAT theta IS SCALAR!
+        theta = theta[0]
         theta_prev = copy.deepcopy(theta)
 
         # Store the value of theta (BEFORE its update) --> for plotting purposes
@@ -661,6 +664,8 @@ class LeaPolicyGradient(GenericLearner):
         - Q_diff: the difference in the state-action values between the accept action and the reject action
         """
         theta = self.policy.getThetaParameter()
+        # WE ASSUME THAT theta IS SCALAR!
+        theta = theta[0]
         theta_prev = copy.deepcopy(theta)
 
         # Store the value of theta (BEFORE its update) --> for plotting purposes
@@ -700,12 +705,6 @@ class LeaPolicyGradient(GenericLearner):
 
             # Update the policy on the new theta and record it into the history of its updates
             self.policy.setThetaParameter(theta)
-        else:
-            # Remove the array because in this parameterized policy setting theta is of dimension 1
-            theta = theta[0]
-
-        # theta is one dimensional, so convert it to scalar
-        theta_prev = theta_prev[0]
 
         return theta_prev, theta, Q_mean_Km1, gradV_left, Q_diff_Km1
 
