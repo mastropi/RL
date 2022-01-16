@@ -613,18 +613,18 @@ class SimulatorQueue(Simulator):
         # or as self.env (for instance when estimating Q(K-1, a) via Monte-Carlo on one particle (both in MC and FV modes)
         self.envs = [self.env if i == 0 else copy.deepcopy(self.env) for i in range(self.N)]
 
-        # Job-rates by server (assuming jobs are pre-assigned to servers)
-        self.job_rates_by_server = compute_job_rates_by_server(self.env.getJobClassRates(),
-                                                               self.env.getNumServers(),
-                                                               self.agent.getAssignmentPolicy().getProbabilisticMap())
-
         # Learners for the value function and the policy
         if agent is not None:
             self.learnerV = self.agent.getLearnerV()
             self.learnerP = self.agent.getLearnerP()
+            # Job-rates by server (assuming jobs are pre-assigned to servers)
+            self.job_rates_by_server = compute_job_rates_by_server(self.env.getJobClassRates(),
+                                                                   self.env.getNumServers(),
+                                                                   self.agent.getAssignmentPolicy().getProbabilisticMap())
         else:
             self.learnerV = None
             self.learnerP = None
+            self.job_rates_by_server = None
 
         # Storage of learning history
         self.alphas = []            # Learning rates used in the learning of the policy when updating from theta to theta_next (i.e. from thetas -> thetas_updated)
@@ -652,15 +652,15 @@ class SimulatorQueue(Simulator):
                 env.reset(state)
 
         if self.agent is not None:
-            # Reset the learner of the value function
+            # Reset the learners
             # This is expected to be called after each learning step, i.e. before a new queue simulation is run
-            self.agent.getLearnerV().reset(reset_value_functions=reset_value_functions, reset_trajectory=True, reset_counts=reset_counts)
-
-            # Reset the auxiliary attributes of the policy learner (e.g. trajectory, etc.)
-            # but NOT the history of theta nor the counts of visited states or actions because
-            # these are used to adjust the policy learning rate as necessary, which follows the learning time scale
-            # and NOT the simulation time scale.
-            self.agent.getLearnerP().reset(reset_value_functions=reset_value_functions, reset_trajectory=False, reset_counts=reset_counts)
+            # Based on this, note that we do NOT reset the trajectory stored in the policy learner because we want to
+            # keep the WHOLE history of learning (i.e. for all queue simulation episodes) in the policy learner.
+            # Note that we reset the time and alphas of the value function learner (because this happens within each
+            # learning step or queue simulation episode), but we do NOT reset the time and alphas of the policy
+            # learner because the learning step here is defined by a new queue simulation episode.
+            self.agent.getLearnerV().reset(reset_time=True,  reset_alphas=True,  reset_value_functions=reset_value_functions, reset_trajectory=True,  reset_counts=reset_counts)
+            self.agent.getLearnerP().reset(reset_time=False, reset_alphas=False, reset_value_functions=reset_value_functions, reset_trajectory=False, reset_counts=reset_counts)
             if not reset_value_functions:
                 # Set the start value of the value functions to their current estimate
                 # Goal: we can use the current estimated values in the next learning step,
@@ -668,7 +668,7 @@ class SimulatorQueue(Simulator):
                 self.agent.getLearnerV().setVStart(self.agent.getLearnerV().getV())
                 self.agent.getLearnerV().setQStart(self.agent.getLearnerV().getQ())
 
-    def run(self, dict_params_simul: dict, dict_params_info: dict={'plot': False, 'log': False},
+    def run(self, dict_params_simul: dict, dict_params_info: dict={'plot': False, 'log': False}, dict_info: dict={},
             start_state=None,
             seed=None, state_observe=None,
             verbose=False, verbose_period=1,
@@ -694,6 +694,13 @@ class SimulatorQueue(Simulator):
             - 'plot': whether to create plots
             - 'log': whether to show messages
             default: None
+
+        dict_info: (opt) dict
+            Dictionary with information of interest to store in the results file.
+            From this dictionary, when defined, we extract the following keys:
+            - 'exponent': the exponent used to define the values of N (# particles) and T (# time steps) used in the
+            simulation.
+            default: {}
 
         start_state: (opt) int or list or numpy array
             State at which the queue environment starts.
@@ -934,6 +941,7 @@ class SimulatorQueue(Simulator):
                                         'K': K,
                                         'J_factor': dict_params_simul['buffer_size_activation_factor'],
                                         'J': dict_params_simul['buffer_size_activation'],
+                                        'exponent': dict_info.get('exponent'),
                                         'N': dict_params_simul['nparticles'],
                                         'T': dict_params_simul['t_sim'],
                                         'err_phi': err_phi,
@@ -2279,6 +2287,7 @@ class SimulatorQueue(Simulator):
             K = simul_info.get('K', 0)
             J_factor = simul_info.get('J_factor', 0.0)
             J = simul_info.get('J', 0)
+            exponent = simul_info.get('exponent', 0.0)  # Exponent that defines N and T w.r.t. a reference N0 and T0 as N0*exp(exponent) in order to consider different N and T values of interest (e.g. exponent = -2, -1, 0, 1, 2, etc.)
             N = simul_info.get('N', 0)              # number of particles used in the FV process (this is 1 for MC)
             T = simul_info.get('T', 0)              # simulation time multiplier of 1/lambda (nmeantimes) (this is N_fv*T in MC)
             err_phi = simul_info.get('err_phi', 0)  # expected relative error in the estimation of Phi(t,K) when using N particles
@@ -2292,6 +2301,7 @@ class SimulatorQueue(Simulator):
             K = 0
             J_factor = 0.0
             J = 0
+            exponent = 0.0
             N = 0
             T = 0
             err_phi = 0.0
@@ -2317,7 +2327,7 @@ class SimulatorQueue(Simulator):
         agent.getLearnerP().update_learning_rate_by_episode()
 
         if self.save:
-            self.fh_results.write("{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}\n" \
+            self.fh_results.write("{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}\n" \
                                     .format(self.case,
                                             t_learn,
                                             self.envs[0].getParamsRewardFunc().get('buffer_size_ref', None)-1,  # -1 because buffer_size_ref is K and the theta parameter, which is the one we want to store here is K-1
@@ -2326,6 +2336,7 @@ class SimulatorQueue(Simulator):
                                             K,
                                             J_factor,
                                             J,
+                                            exponent,
                                             N,
                                             T,
                                             err_phi,
@@ -2379,12 +2390,18 @@ class SimulatorQueue(Simulator):
     def getJobRatesByServer(self):
         return self.job_rates_by_server
 
+    def getLearnerV(self):
+        return self.learnerV
+
+    def getLearnerP(self):
+        return self.learnerP
+
 
 if __name__ == "__main__":
     import runpy
     runpy.run_path("../../setup.py")
 
-    test = True
+    test = False
 
     # --------------- Unit tests on methods defined in this file ------------------ #
     if test:
@@ -2413,17 +2430,8 @@ if __name__ == "__main__":
         queue = queues.QueueMM(job_rates_by_server, service_rates, nservers, capacity)
         env_queue_mm = EnvQueueSingleBufferWithJobClasses(queue, job_class_rates, None, None)
 
-        # Policies and learners of the agent
-        # (these are not really needed by the test but
-        policies = dict({PolicyTypes.ACCEPT: None, PolicyTypes.ASSIGN: policy_assign})
-        learnerV = LeaMC(env_queue_mm)
-        learners = dict({LearnerTypes.V: learnerV,
-                         LearnerTypes.Q: None,
-                         LearnerTypes.P: LeaPolicyGradient(env_queue_mm, policies[PolicyTypes.ACCEPT], learnerV)})
-        agent = AgeQueue(env_queue_mm, policies, learners)
-
         # The simulation object
-        simul = SimulatorQueue(env_queue_mm, agent, None, N=1)
+        simul = SimulatorQueue(env_queue_mm, None, None, N=1)
 
         np.random.seed(1717)
         time, event, job_class_or_server, idx_env = simul.generate_event()
@@ -2534,7 +2542,7 @@ if __name__ == "__main__":
         })
         show_exec_params(params)
         # Set the initial theta value
-        agent_gradient.getLearnerP().getPolicy().setThetaParameter(theta_start)
+        simul.getLearnerP().getPolicy().setThetaParameter(theta_start)
         _, _, df_learning = simul.run(dict_params_simul, dict_params_info=dict_params_info, seed=seed, verbose=False)
 
         print(df_learning)
@@ -2594,7 +2602,7 @@ if __name__ == "__main__":
         })
         show_exec_params(params)
         # Set the initial theta value
-        agent_gradient.getLearnerP().getPolicy().setThetaParameter(theta_start)
+        simul.getLearnerP().getPolicy().setThetaParameter(theta_start)
         _, _, df_learning = simul.run(dict_params_simul, dict_params_info=dict_params_info, seed=seed, verbose=False)
 
         print(df_learning)
@@ -2899,7 +2907,7 @@ if __name__ == "__main__":
 
         if save_results:
             # Initialize the output file with the results with the column names
-            simul.fh_results.write("case,t_learn,theta_true,theta,theta_next,K,J/K,J,N,T,err_phi,err_et,seed,Pr(K-1),Pr(K),Q_diff(K-1),Q_diff(K),alpha,V,gradV,nevents_mc,nevents_proba,ntrajectories_Q\n")
+            simul.fh_results.write("case,t_learn,theta_true,theta,theta_next,K,J/K,J,exponent,N,T,err_phi,err_et,seed,Pr(K-1),Pr(K),Q_diff(K-1),Q_diff(K),alpha,V,gradV,nevents_mc,nevents_proba,ntrajectories_Q\n")
 
         #------- Iterate on each initial theta value listed here
         #theta_true_values = np.linspace(start=1.0, stop=20.0, num=20)
@@ -2949,8 +2957,11 @@ if __name__ == "__main__":
                         case += 1
                         simul.setCase(case)
 
+                        # Reset the policy learner (this is especially important to reset the learning rate alpha to its initial value!)
+                        simul.getLearnerP().reset()
+
                         # Reset the theta value to the initial theta
-                        agent_gradient.getLearnerP().getPolicy().setThetaParameter(theta_start)
+                        simul.getLearnerP().getPolicy().setThetaParameter(theta_start)
 
                         # Set the parameters for this run
                         dict_params_simul['nparticles'] = N
@@ -2984,7 +2995,10 @@ if __name__ == "__main__":
                         })
                         show_exec_params(params)
 
-                        learnerV, learnerP, df_learning = simul.run(dict_params_simul, dict_params_info=dict_params_info, seed=seed, verbose=verbose)
+                        learnerV, learnerP, df_learning = simul.run(dict_params_simul,
+                                                                    dict_params_info=dict_params_info,
+                                                                    dict_info={'exponent': exponent},
+                                                                    seed=seed, verbose=verbose)
                         theta_opt_values[i] = df_learning['theta_next'].iloc[-1]
 
         print("Optimum theta found by the learning algorithm for each considered true theta value:\n{}" \

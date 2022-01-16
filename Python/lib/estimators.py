@@ -5012,7 +5012,7 @@ def estimate_blocking_fv(   env_queue: EnvQueueSingleBufferWithJobClasses,
 def estimate_proba_survival_and_expected_absorption_time_mc(env_queue, agent, dict_params_simul, dict_params_info):
     """
     Estimates the survival probability given activation, P(T>t), and the expected absorption cycle time, E(T0)
-    using Monte-Carlo simulation of the queue.
+    using Monte-Carlo simulation of a single queue (i.e. from one particle let run long enough).
 
     Arguments:
     env_queue: Queue environment
@@ -5023,7 +5023,6 @@ def estimate_proba_survival_and_expected_absorption_time_mc(env_queue, agent, di
 
     dict_params_simul: dict
         Dictionary containing the simulation parameters as follows:
-        - 'nparticles'
         - 'nmeantimes'
         - 'buffer_size_activation'
         - 'seed'

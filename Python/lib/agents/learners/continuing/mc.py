@@ -47,7 +47,7 @@ class LeaMC(GenericLearner):
         self.V_hist = []
         self.Q_hist = []
 
-        super().reset(reset_value_functions=True)
+        super().reset()
 
     # Overrides superclass method
     def reset_supporting_attributes(self):

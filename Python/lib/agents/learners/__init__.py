@@ -27,6 +27,7 @@ class AlphaUpdateType(Enum):
     FIRST_STATE_VISIT = 1
     EVERY_STATE_VISIT = 2
 
+# Identity function: used to define the default transformation function of the counter (n) that adjusts alpha
 identity = lambda x: x
 
 class GenericLearner:
@@ -102,20 +103,31 @@ class GenericLearner:
         self.alpha_mean = []    # Average alpha
         self.alphas = []        # List of alphas used during the learning process.
 
-    def reset(self, reset_value_functions=False, reset_trajectory=False, reset_counts=False):
+    def reset(self, reset_time=True, reset_alphas=True, reset_value_functions=True, reset_trajectory=True, reset_counts=True):
         """
         Resets the variables that store information about the learning process
 
         Parameters:
-        reset_value_functions: bool, optional
+        reset_time: (opt) bool
+            Whether to reset the learning time counter.
+            default: True
+
+        reset_alphas: (opt) bool
+            Whether to reset the learning rate and its history.
+            default: True
+
+        reset_value_functions: (opt) bool
             Whether to reset all the value functions to their initial estimates.
+            default: True
 
-        reset_counts: bool, optional
+        reset_trajectory: (opt) bool
+            Whether to reset the information of the trajectory (states, actions, rewards).
+            default: True
+
+        reset_counts: (opt) bool
             Whether to reset the counters (of e.g. the states or the action-states).
+            default: True
         """
-        self.alpha_mean = []
-        self.alphas = []
-
         # Reset the latest learning state, action, and reward
         self.state = None
         self.action = None
@@ -124,6 +136,14 @@ class GenericLearner:
         # Reset the attributes that keep track of visited states
         self.reset_supporting_attributes()
         self.reset_return()
+
+        if reset_time:
+            self._time = 0
+
+        if reset_alphas:
+            self._alpha = self.alpha
+            self.alpha_mean = []
+            self.alphas = []
 
         if reset_value_functions:
             # Only reset the initial estimates of the value functions when requested
