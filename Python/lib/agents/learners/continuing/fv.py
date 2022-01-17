@@ -23,7 +23,7 @@ class LeaFV(LeaMC):
         The environment where learning takes place.
     """
 
-    def __init__(self, env, alpha=0.1, gamma=1.0,
+    def __init__(self, env, alpha=1.0, gamma=1.0,
                  adjust_alpha=False, alpha_update_type=AlphaUpdateType.FIRST_STATE_VISIT,
                  alpha_min=0.,
                  V_start=0.0, Q_start=0.0,

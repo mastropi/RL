@@ -608,6 +608,9 @@ class SimulatorQueue(Simulator):
         self.dict_learning_params = dict_learning_params
         # Attributes used during Fleming-Viot simulation (each env in envs is one of the N particles)
         self.N = N
+        # TODO: (2022/01/17) We should NOT copy ALL the environment to work with the N particles... In fact, the environment characteristics are the same for ALL particles, the only thing that changes is the latest state and change time of each particle
+        # This may be behind the memory error I got when running the FV process at my laptop.
+
         # Note: it's important that the first environment stored in self.envs be self.env (and NOT a copy)
         # because in the process we sometimes refer to it as self.envs[0] (for instance when resetting the environments)
         # or as self.env (for instance when estimating Q(K-1, a) via Monte-Carlo on one particle (both in MC and FV modes)
@@ -681,6 +684,9 @@ class SimulatorQueue(Simulator):
         Parameters:
         dict_params_simul: dict
             Dictionary containing the simulation parameters as follows:
+            - 'theta_true': true value of the theta parameter to use for the simulation, which should be estimated
+            by the process.
+            - 'theta_start': initial value of theta at which the learning process starts.
             - 'nparticles': # particles to use in the FV simulation.
             - 't_sim': number of simulation steps per learning step. This is either a scalar or a list with as many
             elements as the number of learning steps defined in self.dict_learning_params['t_learn'].
@@ -747,13 +753,12 @@ class SimulatorQueue(Simulator):
             - df_learning: pandas data frame containing two columns: 'theta', 'gradV' containing the history
             of the observed thetas and gradients of the value function responsible for its update.
         """
-        # --- Parse input parameters
-        if dict_params_simul is None or not isinstance(dict_params_simul, dict):
-            raise ValueError("Input parameter dict_params_simul must be a dictionary: dict_params_simul={}".format(dict_params_simul))
-        if  'nparticles' not in dict_params_simul.keys() or 't_sim' not in dict_params_simul.keys() or \
-            'buffer_size_activation_factor' not in dict_params_simul.keys():
-            raise ValueError("The dict_params_simul dictionary must contain the following keys:"
-                             " 'nparticles', 't_sim', 'buffer_size_activation_factor': {}".format(dict_params_simul))
+        # -- Parse input parameters
+        set_required_entries_params_simul= {'theta_true', 'theta_start', 'nparticles', 't_sim', 'buffer_size_activation_factor'}
+        if not set_required_entries_params_simul.issubset(dict_params_simul.keys()):
+            raise ValueError("Missing entries in the dict_params_simul dictionary: {}" \
+                             .format(set_required_entries_params_simul.difference(dict_params_simul.keys())))
+
         if is_scalar(dict_params_simul['t_sim']):
             # Case when the simulation time (simulation steps, which normally equals # events) is the same
             # for all learning steps (typically when learning via the FV method).
@@ -773,6 +778,13 @@ class SimulatorQueue(Simulator):
         # Compute the server intensitites which is used to compute the expected relative errors associated to nparticles and t_sim
         rhos = [l / m for l, m in zip(self.getJobRatesByServer(), self.env.getServiceRates())]
 
+        # Set the number of particles to use in the simulation
+        self.setNumberParticlesAndCreateEnvironments(dict_params_simul['nparticles'])
+        assert self.N == dict_params_simul['nparticles']
+
+        # Set the true theta parameter (which is defined by a parameter of the queue environment) to use for the simulation
+        self.env.setParamsRewardFunc(dict({'buffer_size_ref': np.ceil(dict_params_simul['theta_true'] + 1)}))
+
         # Simulation seed
         # NOTE: This seed is used as the base seed to generate the seeds that are used at each learning step
         if seed is not None:
@@ -780,10 +792,16 @@ class SimulatorQueue(Simulator):
                 self.env.set_seed(seed)
             else:
                 self.env.set_seed(self.seed)
-        # --- Parse input parameters
+        # -- Parse input parameters
 
         dt_start = datetime.today().strftime("%Y-%m-%d %H:%M:%S")
         print("Simulation starts at: {}".format(dt_start))
+
+        # -- Reset the learners
+        # Reset the policy learner (this is especially important to reset the learning rate alpha to its initial value!)
+        simul.getLearnerP().reset()
+        # Reset the theta value to the initial theta
+        simul.getLearnerP().getPolicy().setThetaParameter(dict_params_simul['theta_start'])
 
         if verbose:
             print("Value function at start of experiment: {}".format(self.learnerV.getV()))
@@ -933,7 +951,7 @@ class SimulatorQueue(Simulator):
             # Use this when using REINFORCE to learn theta
             #self.learn(self.agent, t)
             # Use this when estimating the theoretical grad(V)
-            err_phi, err_et = compute_rel_errors_for_fv_process(rhos, K, dict_params_simul['nparticles'], dict_params_simul['t_sim'], dict_params_simul['buffer_size_activation_factor'])
+            err_phi, err_et = compute_rel_errors_for_fv_process(rhos, K, self.N, dict_params_simul['t_sim'], dict_params_simul['buffer_size_activation_factor'])
             self.learn(self.agent, t,
                        probas_stationary=probas_stationary,
                        Q_values=dict({K-1: [Q0_Km1, Q1_Km1], K: [Q0_K, Q1_K]}),
@@ -942,7 +960,7 @@ class SimulatorQueue(Simulator):
                                         'J_factor': dict_params_simul['buffer_size_activation_factor'],
                                         'J': dict_params_simul['buffer_size_activation'],
                                         'exponent': dict_info.get('exponent'),
-                                        'N': dict_params_simul['nparticles'],
+                                        'N': self.N,
                                         'T': dict_params_simul['t_sim'],
                                         'err_phi': err_phi,
                                         'err_et': err_et,
@@ -2387,6 +2405,9 @@ class SimulatorQueue(Simulator):
         return verbose and np.mod(t_learn - 1, verbose_period) == 0
 
     # ------ GETTERS ------#
+    def getEnv(self):
+        return self.env
+
     def getJobRatesByServer(self):
         return self.job_rates_by_server
 
@@ -2395,6 +2416,26 @@ class SimulatorQueue(Simulator):
 
     def getLearnerP(self):
         return self.learnerP
+
+    def getNumLearningSteps(self):
+        return self.dict_learning_params['t_learn']
+
+    # ------ SETTERS ------#
+    def setNumberParticlesAndCreateEnvironments(self, N):
+        """
+        Sets the number of particles of the simulator and creates the environments that are needed
+        to run the simulation on them
+        """
+        self.N = N
+        # Note: it's important that the first environment stored in self.envs be self.env (and NOT a copy)
+        # because in the process we sometimes refer to it as self.envs[0] (for instance when resetting the environments)
+        # or as self.env (for instance when estimating Q(K-1, a) via Monte-Carlo on one particle (both in MC and FV modes)
+        if hasattr(self, 'envs'):
+            del self.envs
+        self.envs = [self.env if i == 0 else copy.deepcopy(self.env) for i in range(self.N)]
+
+    def setNumLearningSteps(self, t_learn):
+        self.dict_learning_params['t_learn'] = t_learn
 
 
 if __name__ == "__main__":
@@ -2492,6 +2533,9 @@ if __name__ == "__main__":
         queue = queues.QueueMM(job_rates_by_server, service_rates, nservers, capacity)
         env_queue_mm = EnvQueueSingleBufferWithJobClasses(queue, job_class_rates, rewardOnJobRejection_ExponentialCost, None)
 
+        # Optimum theta parameter defined by the environment
+        theta_true = COST_EXP_BUFFER_SIZE_REF - 1
+
         # Learner of the value function
         learnerV = LeaFV(env_queue_mm, gamma=1.0)
 
@@ -2522,6 +2566,8 @@ if __name__ == "__main__":
         # Simulation parameters
         dict_learning_params = dict({'mode': LearningMode.IGA, 't_learn': t_learn})
         dict_params_simul = dict({
+            'theta_true': theta_true,
+            'theta_start': theta_start,
             'nparticles': nparticles,
             't_sim': t_sim,
             'buffer_size_activation_factor': 0.3
@@ -2533,7 +2579,7 @@ if __name__ == "__main__":
             '1(a)-System-#Servers': nservers,
             '1(b)-System-JobClassRates': job_class_rates,
             '1(c)-System-ServiceRates': service_rates,
-            '1(d)-System-TrueTheta': COST_EXP_BUFFER_SIZE_REF,
+            '1(d)-System-TrueTheta': theta_true,
             '2(a)-Learning-Method': learning_method.name,
             '2(b)-Learning-Method#Particles': nparticles,
             '2(c)-Learning-GradientEstimation': "Theoretical",
@@ -2582,6 +2628,8 @@ if __name__ == "__main__":
         # Simulation parameters
         dict_learning_params = dict({'mode': LearningMode.IGA, 't_learn': t_learn})
         dict_params_simul = dict({
+            'theta_true': theta_true,
+            'theta_start': theta_start,
             'nparticles': 1,
             't_sim': t_sim,
             'buffer_size_activation_factor': 0.3
@@ -2593,7 +2641,7 @@ if __name__ == "__main__":
             '1(a)-System-#Servers': nservers,
             '1(b)-System-JobClassRates': job_class_rates,
             '1(c)-System-ServiceRates': service_rates,
-            '1(d)-System-TrueTheta': COST_EXP_BUFFER_SIZE_REF,
+            '1(d)-System-TrueTheta': theta_true,
             '2(a)-Learning-Method': learning_method.name,
             '2(b)-Learning-Method#Particles': nparticles,
             '2(c)-Learning-GradientEstimation': "Theoretical",
@@ -2797,6 +2845,171 @@ if __name__ == "__main__":
     if not test and True:
         # --- Test the SimulatorQueue class ---#
 
+        # ---------------------------- Auxiliary functions ---------------------------#
+        def define_queue_environment_and_agent(dict_params: dict):
+            """
+            Define the queue environment on which the simulation will take place
+
+            Arguments:
+            capacity: int
+                Capacity of the queue
+
+            nservers: int
+                Number of servers in the queue system.
+
+            job_class_rates: list
+                Job arrival rates by job class.
+
+            service_rates: list
+                Service rates of the servers in the queue system.
+
+            policy_assignment_probabilities: list of lists
+
+            reward_func: function
+                Function returning the reward given by the environment for each state and action.
+
+            rewards_accept_by_job_class: list
+                List of rewards for the acceptance of the different job classes whose rate is given in job_class_rates.
+
+            Return: Tuple
+            Duple containing:
+            - the queue environment created from the input parameters
+            - the intensities of each server in the queue system, computed from the job class arrival rates
+            and the given assignment probabilities.
+            """
+            set_entries_params = {'environment', 'policy', 'learners', 'agent'}
+            if not set_entries_params.issubset(dict_params.keys()):
+                raise ValueError("Missing entries in the dict_params dictionary: {}" \
+                                 .format(set_entries_params.difference(dict_params.keys())))
+
+            # Environment            
+            set_entries_params_environment = {'capacity', 'nservers', 'job_class_rates', 'service_rates',
+                                              'policy_assignment_probabilities', 'reward_func',
+                                              'rewards_accept_by_job_class'}
+            if not set_entries_params_environment.issubset(dict_params['environment'].keys()):
+                raise ValueError("Missing entries in the dict_params['environment'] dictionary: {}" \
+                                 .format(set_entries_params_environment.difference(dict_params['environment'].keys())))
+
+            # Policy (Job Acceptance)
+            set_entries_params_policy = {'parameterized_policy', 'theta'}
+            if not set_entries_params_policy.issubset(dict_params['policy'].keys()):
+                raise ValueError("Missing entries in the dict_params['policy'] dictionary: {}" \
+                                 .format(set_entries_params_policy.difference(dict_params['policy'].keys())))
+
+            # Learners (of V, Q, and P)
+            set_entries_params_learners = {'V', 'Q', 'P'}
+            if not set_entries_params_learners.issubset(dict_params['learners'].keys()):
+                raise ValueError("Missing entries in the dict_params['learners'] dictionary: {}" \
+                                 .format(set_entries_params_learners.difference(dict_params['learners'].keys())))
+
+            # Agent
+            set_entries_params_agent = {'agent'}
+            if not set_entries_params_agent.issubset(dict_params['agent'].keys()):
+                raise ValueError("Missing entries in the dict_params['agent'] dictionary: {}" \
+                                 .format(set_entries_params_agent.difference(dict_params['agent'].keys())))
+
+            # Store the parameters into different dictionaries, for easier handling below
+            dict_params_env = dict_params['environment']
+            dict_params_policy = dict_params['policy']
+            dict_params_learners = dict_params['learners']
+            dict_params_agent = dict_params['agent']
+
+            # Queue
+            policy_assign = PolJobAssignmentProbabilistic(dict_params_env['policy_assignment_probabilities'])
+            job_rates_by_server = compute_job_rates_by_server(dict_params_env['job_class_rates'],
+                                                              dict_params_env['nservers'],
+                                                              policy_assign.getProbabilisticMap())
+            # Queue M/M/c/K
+            queue = queues.QueueMM( job_rates_by_server, dict_params_env['service_rates'],
+                                    dict_params_env['nservers'], dict_params_env['capacity'])
+
+            # Queue environment
+            env_queue_mm = EnvQueueSingleBufferWithJobClasses(queue, dict_params_env['job_class_rates'],
+                                                              dict_params_env['reward_func'],
+                                                              dict_params_env['rewards_accept_by_job_class'])
+            rhos = [l / m for l, m in zip(job_rates_by_server, dict_params_env['service_rates'])]
+
+            # Acceptance and assignment policies
+            policies = dict({PolicyTypes.ACCEPT: dict_params_policy['parameterized_policy'](env_queue_mm, theta=dict_params_policy['theta']),
+                             PolicyTypes.ASSIGN: policy_assign})
+
+            # Learners (for V, Q, and P)
+            learnerV = dict_params_learners['V']['learner'](env_queue_mm, gamma=dict_params_learners['V']['params'].get('gamma'))
+            learnerQ = None
+            learnerP = dict_params_learners['P']['learner'](env_queue_mm, policies[PolicyTypes.ACCEPT],
+                                                learnerV,
+                                                alpha=dict_params_learners['P']['params'].get('alpha_start'),
+                                                adjust_alpha=dict_params_learners['P']['params'].get('adjust_alpha'),
+                                                func_adjust_alpha=dict_params_learners['P']['params'].get('func_adjust_alpha'),
+                                                min_time_to_update_alpha=dict_params_learners['P']['params'].get('min_time_to_update_alpha'),
+                                                alpha_min=dict_params_learners['P']['params'].get('alpha_min'),
+                                                fixed_window=dict_params_learners['P']['params'].get('fixed_window'))
+
+            # TODO: (2022/01/17) Can we add the following assertion at some point?
+            #from Python.lib.agents.learners import GenericLearner
+            #assert isinstance(learnerV, GenericLearner)
+            learners = dict({LearnerTypes.V: learnerV,
+                             LearnerTypes.Q: learnerQ,
+                             LearnerTypes.P: learnerP
+                             })
+
+            # Agent operating on the given policies and learners
+            agent = dict_params_agent['agent'](env_queue_mm, policies, learners)
+
+            return env_queue_mm, rhos, agent
+
+        def run_simulation_policy_learning(simul, dict_params_simul, dict_info,
+                                                  dict_params_info: dict={'plot': False, 'log': False},
+                                                  seed=None, verbose=False):
+            set_required_entries_info = {'case', 'ncases', 'learning_method', 'exponent',
+                                         'rhos', 'K_true', 'K', 'N0', 'T0',
+                                         'alpha_start', 'adjust_alpha', 'min_time_to_update_alpha', 'alpha_min'}
+            if not set_required_entries_info.issubset(dict_info.keys()):
+                raise ValueError("Missing entries in the dict_info dictionary: {}" \
+                                 .format(set_required_entries_info.difference(dict_info.keys())))
+
+            error_rel_phi_real, error_rel_et_real = compute_rel_errors_for_fv_process(dict_info['rhos'],
+                                                                                      dict_info['K'],
+                                                                                      dict_params_simul['nparticles'],
+                                                                                      dict_params_simul['t_sim'],
+                                                                                      dict_params_simul['buffer_size_activation_factor'])
+
+            print("\n--> CASE {} of {}: theta_true={:.3f} (K_true={}), theta={:.3f} (K={}), J/K={:.3f}," \
+                  " exponent={}: N={} (err_nom={:.1f}%, err={:.1f}%), T={} (err_nom={:.1f}%, err={:.1f}%)" \
+                  .format(dict_info['case'], dict_info['ncases'], dict_params_simul['theta_true'], dict_info['K_true'],
+                          dict_params_simul['theta_start'], dict_info['K'], dict_params_simul['buffer_size_activation_factor'],
+                          dict_info['exponent'], dict_params_simul['nparticles'], error_rel_phi * 100, error_rel_phi_real * 100,
+                          dict_params_simul['t_sim'], error_rel_et * 100, error_rel_et_real * 100))
+            print("Nominal values for the number of particles and number of cycles: N0={}, T0={}".format(dict_info['N0'], dict_info['T0']))
+
+            # Show execution parameters
+            params = dict({
+                '1(a)-System-#Servers': simul.getEnv().getNumServers(),
+                '1(b)-System-JobClassRates': simul.getEnv().getJobClassRates(),
+                '1(c)-System-ServiceRates': simul.getEnv().getServiceRates(),
+                '1(d)-System-TrueTheta': dict_params_simul['theta_true'],
+                '2(a)-Learning-Method': dict_info['learning_method'],
+                '2(b)-Learning-Method#Particles (% Rel Error Phi)': (dict_params_simul['nparticles'], error_rel_phi * 100),
+                '2(c)-Learning-Method#TimeSteps (% Rel Error E(T))': (dict_params_simul['t_sim'], error_rel_et * 100),
+                '2(d)-Learning-LearningMode': simul.dict_learning_params['mode'].name,
+                '2(e)-Learning-ThetaStart': dict_params_simul['theta_start'],
+                '2(f)-Learning-#Steps': simul.getNumLearningSteps(),
+                '2(g)-Learning-SimulationTimePerLearningStep': dict_params_simul['t_sim'],
+                '2(h)-Learning-AlphaStart': dict_info['alpha_start'],
+                '2(i)-Learning-AdjustAlpha?': dict_info['adjust_alpha'],
+                '2(j)-Learning-MinEpisodeToAdjustAlpha': dict_info['min_time_to_update_alpha'],
+                '2(k)-Learning-AlphaMin': dict_info['alpha_min'],
+            })
+            show_exec_params(params)
+
+            _, _, df_learning = simul.run(  dict_params_simul,
+                                            dict_params_info=dict_params_info,
+                                            dict_info=dict_info,
+                                            seed=seed, verbose=verbose)
+
+            return df_learning['theta_next'].iloc[-1], df_learning
+        # ---------------------------- Auxiliary functions ---------------------------#
+
         # Look for memory leaks
         # Ref: https://pythonspeed.com/fil/docs/fil/other-tools.html (from the Fil profiler which also seems interesting)
         # Doc: https://docs.python.org/3/library/tracemalloc.html
@@ -2814,195 +3027,157 @@ if __name__ == "__main__":
         save_results = True; resultsdir = "../../RL-002-QueueBlocking/results/RL/single-server"
         # ---------------------- OUTPUT FILES --------------------#
 
-        capacity = np.Inf
-        nservers = 1 #3    # 1
-        job_class_rates = [0.7] #[0.8, 0.7] # [0.7]
-        service_rates = [1.0] #[1.0, 1.0, 1.0]
-        policy_assign = PolJobAssignmentProbabilistic([[1.0]]) #[[0.5, 0.5, 0.0], [0.0, 0.5, 0.5]] )
-        job_rates_by_server = compute_job_rates_by_server(  job_class_rates,
-                                                            nservers,
-                                                            policy_assign.getProbabilisticMap())
-        rhos = [l / m for l, m in zip(job_rates_by_server, service_rates)]
-        queue = queues.QueueMM(job_rates_by_server, service_rates, nservers, capacity)
+        # -- Parameters defining the environment, policies, learners and agent
+        # Learning parameter for the value function V
+        gamma = 1.0
 
-        env_queue_mm = EnvQueueSingleBufferWithJobClasses(queue, job_class_rates, rewardOnJobRejection_ExponentialCost, None)
-
-        # Learning method (MC or FV)
-        # NOTE: (2022/01/12) t_sim becomes nmeantimes in the simulation that estimates P(T>t) and E(T_A) for the FV estimation,
-        # that is, it is the number of expected job arrivals during the simulation of the queue (which is precisely what
-        # we have defined to control the relative error of the estimation of E(T1+T2).
-        # NOTE: (2022/01/15) These values n_particles_fv and t_sim are ONLY used for the SimulatorQueue constructor,
-        # as we define these values in the LOOPs below where we vary nparticles and t_sim
-        n_particles_fv = 35; t_sim = 50        # For testing with small values
-        #n_particles_fv = 125; t_sim = 125       # For rho=0.7, K=20, J=round(K/3), er=50%
-        #n_particles_fv = 10000; t_sim = 10000    # (2022/01/12) These values are defined with the goal of achieving an error of 20% in the estimation of Phi(t) and of E(T1+T2) when K=40 and rho=0.7
-        #n_particles_fv = 500; t_sim = 100       # For the MC simulation on different theta_ref values, I considered the average number of events (~ 50,000) over the 250 learning steps in the FV simulation starting at theta = 39 for theta_ref = 20, recorded here: SimulatorQueue_20211230_001050.csv
-        #n_particles_fv = 800; t_sim = 800
-        #n_particles_fv = 800; t_sim = 1000
-
+        # Learning parameters for the policy P
         # MC (with no benchmark)
-        #learning_method = LearningMethod.MC; nparticles = 1; plot_trajectories = False; symbol = 'b.-'; benchmark_file = None
+        #learning_method = LearningMethod.MC; plot_trajectories = False; symbol = 'b.-'; benchmark_file = None
         # MC (with benchmark)
-        #learning_method = LearningMethod.MC; nparticles = 1; plot_trajectories = False; symbol = 'b.-'; benchmark_file = os.path.join(os.path.abspath(resultsdir), "benchmark_fv.csv")
-        learning_method = LearningMethod.FV; nparticles = n_particles_fv; plot_trajectories = False; symbol = 'g.-'; benchmark_file = None
-
-        # Simulator on a given number of iterations for the queue simulation and a given number of iterations to learn the policy
-        # 2022/01/14: t_learn = 10 times the optimum true theta so that we are supposed to reach that optimum under the REINFORCE_TRUE learning mode with decreasing alpha
-        t_learn = 150 #100 #198 - 91 #198 #250 #50
-
-        # Acceptance policy definition
-        policies = dict({PolicyTypes.ACCEPT: PolQueueTwoActionsLinearStep(env_queue_mm, theta=1.0), PolicyTypes.ASSIGN: policy_assign})
-        #policies = dict({PolicyTypes.ACCEPT: PolQueueTwoActionsLogit(env_queue_mm, theta=1.0, beta=1.0), PolicyTypes.ASSIGN: None})
-
-        # Learners definition
+        #learning_method = LearningMethod.MC; plot_trajectories = False; symbol = 'b.-'; benchmark_file = os.path.join(os.path.abspath(resultsdir), "benchmark_fv.csv")
+        # FV
+        learning_method = LearningMethod.FV; plot_trajectories = False; symbol = 'g.-'; benchmark_file = None
+        if learning_method == LearningMethod.FV:
+            learnerV = LeaFV
+        else:
+            # Monte-Carlo learner is the default
+            learnerV = LeaMC
         fixed_window = False
         alpha_start = 10  # / t_sim  # Use `/ t_sim` when using update of theta at each simulation step (i.e. LeaPolicyGradient.learn_TR() is called instead of LeaPolicyGradient.learn())
         adjust_alpha = True
+        func_adjust_alpha = np.sqrt
         min_time_to_update_alpha = 0 #int(t_learn / 3)
         alpha_min = 0.1  # 0.1
-        gamma = 1.0
-        if learning_method == LearningMethod.FV:
-            t_sim_values_by_learning_step = None  # The simulation time for each learning step is the same for ALL learning steps and equal to t_sim defined above
-            learnerV = LeaFV(env_queue_mm, gamma=gamma)
-        else:
-            # Read the number of events to use from the FV simulation if given, so that we can do a fair comparison of results
-            # Otherwise, extend the simulation time to as many particles used in the FV case
-            if benchmark_file is not None:
-                print("Reading number of simulation time steps for each learning step from the benchmark file:\n{}" \
-                        .format(benchmark_file))
-                df_benchmark = pd.read_csv(benchmark_file)
-                # The number of events to use in the MC simulation is defined by the # events used in the FV estimation
-                if 'nevents_mc' not in df_benchmark.columns or 'nevents_proba' not in df_benchmark.columns:
-                    raise ValueError("The benchmark file should have at least the following columns: 'nevents_mc' and 'n_events_proba'." \
-                                        "\nColumns found: {}".format(df_benchmark.columns))
-                t_sim_values_by_learning_step = list(df_benchmark['nevents_mc'] + df_benchmark['nevents_proba'])
-                if len(t_sim_values_by_learning_step) != t_learn:
-                    raise ValueError("The number of simulation times read from the benchmark file ({}) does not coincide with the number of learning steps ({})" \
-                                     .format(len(t_sim_values_by_learning_step), t_learn))
-            else:
-                t_sim_values_by_learning_step = None
-                t_sim *= n_particles_fv
-            learnerV = LeaMC(env_queue_mm, gamma=gamma)
-        assert t_sim_values_by_learning_step is None or \
-               isinstance(t_sim_values_by_learning_step, list) and len(t_sim_values_by_learning_step) == t_learn
 
-        learners = dict({LearnerTypes.V: learnerV,
-                         LearnerTypes.Q: None,
-                         LearnerTypes.P: LeaPolicyGradient(env_queue_mm, policies[PolicyTypes.ACCEPT], learnerV,
-                                                           alpha=alpha_start, adjust_alpha=adjust_alpha,
-                                                           func_adjust_alpha=np.sqrt,
-                                                           min_time_to_update_alpha=min_time_to_update_alpha,
-                                                           alpha_min=alpha_min, fixed_window=fixed_window)})
-        agent_gradient = AgeQueue(env_queue_mm, policies, learners)
+        dict_params = dict({ 'environment': {   'capacity': np.Inf,
+                                                'nservers': 1, #3
+                                                'job_class_rates': [0.7], # [0.8, 0.7]
+                                                'service_rates': [1.0], # [1.0, 1.0, 1.0]
+                                                'policy_assignment_probabilities': [[1.0]], # [[0.5, 0.5, 0.0], [0.0, 0.5, 0.5]] )
+                                                'reward_func': rewardOnJobRejection_ExponentialCost,
+                                                'rewards_accept_by_job_class': None
+                                            },
+                            'policy': { 'parameterized_policy': PolQueueTwoActionsLinearStep,
+                                        'theta': 1.0    # This value is dummy in the sense that it will be updated below
+                                    },
+                            'learners': {   'V': {  'learner': learnerV,
+                                                    'params': {'gamma': 1}
+                                                  },
+                                            'Q': {  'learner': None,
+                                                    'params': {}},
+                                            'P': {  'learner': LeaPolicyGradient,
+                                                    'params': { 'alpha_start': alpha_start,
+                                                                'adjust_alpha': adjust_alpha,
+                                                                'func_adjust_alpha': func_adjust_alpha,
+                                                                'min_time_to_update_alpha': min_time_to_update_alpha,
+                                                                'alpha_min': alpha_min,
+                                                                'fixed_window': fixed_window
+                                                                }
+                                                }
+                                        },
+                            'agent': {'agent': AgeQueue}
+                           })
+        env_queue_mm, rhos, agent = define_queue_environment_and_agent(dict_params)
 
+        # -- Simulation parameters that are common for ALL parameter settings
+        # 2022/01/14: t_learn = 10 times the optimum true theta so that we are supposed to reach that optimum under the REINFORCE_TRUE learning mode with decreasing alpha
+        t_learn = 150 #100 #198 - 91 #198 #250 #50
         seed = 1717  #1859 (for learning step 53+91=144) #1769 (for learning step 53, NOT 52 because it took too long) #1717
+        verbose = False
         dict_learning_params = dict({'mode': LearningMode.REINFORCE_TRUE, 't_learn': t_learn})
-        dict_params_simul = dict({
-            'nparticles': nparticles,
-            't_sim': t_sim_values_by_learning_step,
-        })
         dict_params_info = dict({'plot': False, 'log': False})
-        simul = SimulatorQueue(env_queue_mm, agent_gradient, dict_learning_params, N=nparticles, log=create_log,
-                               save=save_results, logsdir=logsdir, resultsdir=resultsdir, debug=False)
 
+        # Simulator object
+        simul = SimulatorQueue(env_queue_mm, agent, dict_learning_params,
+                               log=create_log, save=save_results, logsdir=logsdir, resultsdir=resultsdir, debug=False)
+
+        # Open the file to store the results
         if save_results:
             # Initialize the output file with the results with the column names
             simul.fh_results.write("case,t_learn,theta_true,theta,theta_next,K,J/K,J,exponent,N,T,err_phi,err_et,seed,Pr(K-1),Pr(K),Q_diff(K-1),Q_diff(K),alpha,V,gradV,nevents_mc,nevents_proba,ntrajectories_Q\n")
 
-        #------- Iterate on each initial theta value listed here
-        #theta_true_values = np.linspace(start=1.0, stop=20.0, num=20)
-        theta_true_values = [10.0-1] #[32.0-1, 34.0-1, 36.0-1] #[10.0-1, 15.0-1, 20.0-1, 25.0-1, 30.0-1]  # 39.0
-        theta_start_values = [20.0-1, 25.0-1]
-        J_factor_values = [0.2, 0.3, 0.5] #[0.2, 0.3, 0.5, 0.7]
-        NT_exponents = [-2, -1, 0, 1, 2]       # Exponents to consider for different N and T values as in exp(exponent)*N0, where N0 is the reference value to achieve a pre-specified relative error
-        # Accepted relative errors for the estimation of Phi and of E(T_A)
-        error_rel_phi = 0.7
-        error_rel_et = 0.7
+        # Run the simulations, either from parameters defined by a benchmark file or from parameters defined below
+        if benchmark_file is None:
+            # -- Iterate on each set of parameters defined here
+            # theta_true_values = np.linspace(start=1.0, stop=20.0, num=20)
+            theta_true_values = [10.0 - 1]  # [32.0-1, 34.0-1, 36.0-1] #[10.0-1, 15.0-1, 20.0-1, 25.0-1, 30.0-1]  # 39.0
+            theta_start_values = [20.0 - 1, 25.0 - 1]
+            J_factor_values = [0.2, 0.3, 0.5]  # [0.2, 0.3, 0.5, 0.7]
+            NT_exponents = [-2, -1, 0, 1]  # Exponents to consider for different N and T values as in exp(exponent)*N0, where N0 is the reference value to achieve a pre-specified relative error
+            # Accepted relative errors for the estimation of Phi and of E(T_A)
+            error_rel_phi = 0.5
+            error_rel_et = 0.5
 
-        # Output variables
-        theta_opt_values = np.nan*np.ones(len(theta_true_values)) # List of optimum theta values achieved by the learning algorithm
-        verbose = False
-        case = 0
-        ncases = len(theta_true_values) * len(theta_start_values) * len(J_factor_values) * len(NT_exponents)
-        for i, theta_true in enumerate(theta_true_values):
-            print("\nSimulating with {} learning on a queue environment with optimum theta (one less the deterministic blocking size) = {}".format(learning_method.name, theta_true))
+            # Output variables of the simulation
+            case = 0
+            ncases = len(theta_true_values) * len(theta_start_values) * len(J_factor_values) * len(NT_exponents)
+            theta_opt_values = np.nan*np.ones(ncases) # List of optimum theta values achieved by the learning algorithm for each parameter setting
+            for i, theta_true in enumerate(theta_true_values):
+                print("\nSimulating with {} learning on a queue environment with optimum theta (one less the deterministic blocking size) = {}".format(learning_method.name, theta_true))
 
-            # Set the true theta value
-            env_queue_mm.setParamsRewardFunc(dict({'buffer_size_ref': np.ceil(theta_true+1)}))
+                # Set the number of learning steps to double the true theta value
+                # Use this ONLY when looking at the MC method and running the learning process on several true theta values
+                # to see when the MC method breaks... i.e. when it can no longer learn the optimum theta.
+                # The logic behind this choice is that we start at theta = 1.0 and we expect to have a +1 change in
+                # theta at every learning step, so we would expect to reach the optimum value after about a number of
+                # learning steps equal to the true theta value... so in the end, to give some margin, we allow for as
+                # many learning steps as twice the value of true theta parameter.
+                #simul.dict_learning_params['t_learn'] = int(theta_true*2)
 
-            # Set the number of learning steps to double the true theta value
-            # Use this ONLY when looking at the MC method and running the learning process on several true theta values
-            # to see when the MC method breaks... i.e. when it can no longer learn the optimum theta.
-            # The logic behind this choice is that we start at theta = 1.0 and we expect to have a +1 change in
-            # theta at every learning step, so we would expect to reach the optimum value after about a number of
-            # learning steps equal to the true theta value... so in the end, to give some margin, we allow for as
-            # many learning steps as twice the value of true theta parameter.
-            #simul.dict_learning_params['t_learn'] = int(theta_true*2)
+                for k, theta_start in enumerate(theta_start_values):
+                    K_true = simul.learnerP.getPolicy().getBufferSizeForDeterministicBlockingFromTheta(theta_true)
+                    K = simul.learnerP.getPolicy().getBufferSizeForDeterministicBlockingFromTheta(theta_start)
+                    for j, J_factor in enumerate(J_factor_values):
+                        N0, T0 = \
+                            compute_nparticles_and_nsteps_for_fv_process(rhos, K, J_factor, error_rel_phi=error_rel_phi, error_rel_et=error_rel_et)
+                        # Values of reference for N and T... we will consider smaller and larger values separated constantly
+                        # in logarithmic scale (note that we use base e as opposed to base 10 for the log scale because
+                        # using base 10 may lead to too small values (e.g. 1), which do not make sense analyzing.
+                        Nmin = 10
+                        Tmin = 10
+                        N_values = [np.max([Nmin, int( np.round(N0 * np.exp(e)) )]) for e in NT_exponents]
+                        T_values = [np.max([Tmin, int( np.round(T0 * np.exp(e)) )]) for e in NT_exponents]
+                        for exponent, N, T in zip(NT_exponents, N_values, T_values):
+                            # Set the parameters for this run
+                            case += 1
+                            simul.setCase(case)
+                            t_sim = T       # This is used just for the title of plots done below (after the loop)
+                            dict_params_simul = {
+                                'theta_true': theta_true,
+                                'theta_start': theta_start,
+                                'buffer_size_activation_factor': J_factor,
+                                'nparticles': N,
+                                't_sim': T
+                                }
+                            dict_info = {'case': case,
+                                         'ncases': ncases,
+                                         'learning_method': learning_method.name,
+                                         'exponent': exponent,
+                                         'rhos': rhos,
+                                         'K_true': K_true,
+                                         'K': K,
+                                         'N0': N0,
+                                         'T0': T0,
+                                         'alpha_start': alpha_start,
+                                         'adjust_alpha': adjust_alpha,
+                                         'min_time_to_update_alpha': min_time_to_update_alpha,
+                                         'alpha_min': alpha_min
+                                         }
 
-            for j, theta_start in enumerate(theta_start_values):
-                K_true = simul.learnerP.getPolicy().getBufferSizeForDeterministicBlockingFromTheta(theta_true)
-                K = simul.learnerP.getPolicy().getBufferSizeForDeterministicBlockingFromTheta(theta_start)
-                for k, J_factor in enumerate(J_factor_values):
-                    dict_params_simul['buffer_size_activation_factor'] = J_factor
-                    N0, T0 = \
-                        compute_nparticles_and_nsteps_for_fv_process(rhos, K, J_factor, error_rel_phi=error_rel_phi, error_rel_et=error_rel_et)
-                    # Values of reference for N and T... we will consider smaller and larger values separated constantly
-                    # in logarithmic scale (note that we use base e as opposed to base 10 for the log scale because
-                    # using base 10 may lead to too small values (e.g. 1), which do not make sense analyzing.
-                    Nmin = 10
-                    Tmin = 10
-                    N_values = [np.max([Nmin, int( np.round(N0 * np.exp(k)) )]) for k in NT_exponents]
-                    T_values = [np.max([Tmin, int( np.round(T0 * np.exp(k)) )]) for k in NT_exponents]
-                    for exponent, N, T in zip(NT_exponents, N_values, T_values):
-                        case += 1
-                        simul.setCase(case)
+                            # Run the simulation process
+                            theta_opt_values[case], df_learning = run_simulation_policy_learning(simul,
+                                                                                              dict_params_simul,
+                                                                                              dict_info,
+                                                                                              dict_params_info=dict_params_info,
+                                                                                              seed=seed,
+                                                                                              verbose=verbose)
+        else:
+            # Read the execution parameters from the benchmark file
+            pass
 
-                        # Reset the policy learner (this is especially important to reset the learning rate alpha to its initial value!)
-                        simul.getLearnerP().reset()
-
-                        # Reset the theta value to the initial theta
-                        simul.getLearnerP().getPolicy().setThetaParameter(theta_start)
-
-                        # Set the parameters for this run
-                        dict_params_simul['nparticles'] = N
-                        dict_params_simul['t_sim'] = T
-                        error_rel_phi_real, error_rel_et_real = compute_rel_errors_for_fv_process(rhos, K, dict_params_simul['nparticles'], dict_params_simul['t_sim'], J_factor)
-
-                        print("\n--> CASE {} of {}: theta_true={:.3f} (K_true={}), theta={:.3f} (K={}), J/K={:.3f}," \
-                                " exponent={}: N={} (err_nom={:.1f}%, err={:.1f}%), T={} (err_nom={:.1f}%, err={:.1f}%)" \
-                              .format(case, ncases, theta_true, K_true, theta_start, K, J_factor,
-                                      exponent, N, error_rel_phi*100, error_rel_phi_real*100,
-                                                T, error_rel_et*100, error_rel_et_real*100))
-                        print("Nominal values for the number of particles and number of cycles: N0={}, T0={}".format(N0, T0))
-
-                        # Show execution parameters
-                        params = dict({
-                            '1(a)-System-#Servers': nservers,
-                            '1(b)-System-JobClassRates': job_class_rates,
-                            '1(c)-System-ServiceRates': service_rates,
-                            '1(d)-System-TrueTheta': theta_true,
-                            '2(a)-Learning-Method': learning_method.name,
-                            '2(b)-Learning-Method#Particles (% Rel Error Phi)': (dict_params_simul['nparticles'], error_rel_phi*100),
-                            '2(c)-Learning-Method#TimeSteps (% Rel Error E(T))': (dict_params_simul['t_sim'], error_rel_et*100),
-                            '2(d)-Learning-LearningMode': simul.dict_learning_params['mode'].name,
-                            '2(e)-Learning-ThetaStart': theta_start,
-                            '2(f)-Learning-#Steps': simul.dict_learning_params['t_learn'],
-                            '2(g)-Learning-SimulationTimePerLearningStep': dict_params_simul['t_sim'],
-                            '2(h)-Learning-AlphaStart': alpha_start,
-                            '2(i)-Learning-AdjustAlpha?': adjust_alpha,
-                            '2(j)-Learning-MinEpisodeToAdjustAlpha': min_time_to_update_alpha,
-                            '2(k)-Learning-AlphaMin': alpha_min,
-                        })
-                        show_exec_params(params)
-
-                        learnerV, learnerP, df_learning = simul.run(dict_params_simul,
-                                                                    dict_params_info=dict_params_info,
-                                                                    dict_info={'exponent': exponent},
-                                                                    seed=seed, verbose=verbose)
-                        theta_opt_values[i] = df_learning['theta_next'].iloc[-1]
-
-        print("Optimum theta found by the learning algorithm for each considered true theta value:\n{}" \
-              .format(pd.DataFrame.from_items([('theta_true', theta_true_values), ('theta_opt', theta_opt_values)])))
+        print("Optimum theta found by the learning algorithm for each considered parameter setting:\n{}" \
+              .format(pd.DataFrame.from_items([('theta_opt', theta_opt_values)])))
 
         # Closes the object (e.g. any log and result files are closed)
         simul.close()
@@ -3021,9 +3196,8 @@ if __name__ == "__main__":
             # True value function
             # Block size for each theta, defined by the fact that K-1 is between theta and theta+1 => K = ceiling(theta+1)
             Ks = [np.int(np.ceil(np.squeeze(t)+1)) for t in df_learning['theta']]
-            rho = [j / s for j, s in zip(job_rates_by_server, service_rates)]
             # Blocking probability = Pr(K)
-            p_stationary = [stationary_distribution_birth_death_process(nservers, K, rho)[1] for K in Ks]
+            p_stationary = [stationary_distribution_birth_death_process(simul.getEnv().getNumServers(), K, rhos)[1] for K in Ks]
             pblock_K = np.array([p[-1] for p in p_stationary])
             pblock_Km1 = np.array([p[-2] for p in p_stationary])
             # Blocking probability adjusted for different jump rates between K-1 and K (affected by the non-deterministic probability of blocking at K-1)
@@ -3093,12 +3267,12 @@ if __name__ == "__main__":
                 # are the same to those for learnerV.getRewards() (which only stores the values for the LAST learning step)
                 plt.figure()
                 # Times at which the trajectory of states is recorded
-                times = learnerP.getTimes()
+                times = simul.getLearnerP().getTimes()
                 times_unique = np.unique(times)
-                assert len(times_unique) == len(learnerP.getPolicy().getThetas()) - 1, \
-                    "The number of unique learning times ({}) is equal to the number of theta updates ({})".format(len(times_unique), len(learnerP.getPolicy().getThetas()) - 1)
+                assert len(times_unique) == len(simul.getLearnerP().getPolicy().getThetas()) - 1, \
+                    "The number of unique learning times ({}) is equal to the number of theta updates ({})".format(len(times_unique), len(simul.getLearnerP().getPolicy().getThetas()) - 1)
                     ## Note that we subtract 1 to the number of learning thetas because the first theta stored in the policy object is the initial theta before any update
-                plt.plot(np.r_[0.0, times_unique], learnerP.getPolicy().getThetas(), 'b.-')
+                plt.plot(np.r_[0.0, times_unique], simul.getLearnerP().getPolicy().getThetas(), 'b.-')
                     ## We add 0.0 as the first time to plot because the first theta value stored in the policy is the initial theta with which the simulation started
                 ax = plt.gca()
                 # Add vertical lines signalling the BEGINNING of each queue simulation
@@ -3107,7 +3281,7 @@ if __name__ == "__main__":
                     ax.axvline(t, color='lightgray', linestyle='dashed')
 
                 # Buffer sizes
-                buffer_sizes = [env_queue_mm.getBufferSizeFromState(s) for s in learnerP.getStates()]
+                buffer_sizes = [env_queue_mm.getBufferSizeFromState(s) for s in simul.getLearnerP().getStates()]
                 ax.plot(times, buffer_sizes, 'g.', markersize=3)
                 # Mark the start of each queue simulation
                 # DM-2021/11/28: No longer feasible (or easy to do) because the states are recorded twice for the same time step (namely at the first DEATH after a BIRTH event)
@@ -3118,16 +3292,16 @@ if __name__ == "__main__":
 
                 # Secondary plot showing the rewards received
                 ax2 = ax.twinx()
-                ax2.plot(times, -np.array(learnerP.getRewards()), 'r-', alpha=0.3)
+                ax2.plot(times, -np.array(simul.getLearnerP().getRewards()), 'r-', alpha=0.3)
                 # Highlight with points the non-zero rewards
-                ax2.plot(times, [-r if r != 0.0 else None for r in learnerP.getRewards()], 'r.')
+                ax2.plot(times, [-r if r != 0.0 else None for r in simul.getLearnerP().getRewards()], 'r.')
                 ax2.set_ylabel("Reward")
                 ax2.set_yscale('log')
                 plt.title("Optimum Theta = {}, Theta start = {}, t_sim = {:.0f}, t_learn = {:.0f}, fixed_window={}" \
                           .format(theta_true, theta_start, t_sim, t_learn, fixed_window))
             else:
                 plt.figure()
-                plt.plot(learnerP.getPolicy().getThetas(), symbol)
+                plt.plot(simul.getLearnerP().getPolicy().getThetas(), symbol)
                 plt.title("Method: {}, Optimum Theta = {}, Theta start = {}, t_sim = {:.0f}, t_learn = {:.0f}, fixed_window={}" \
                           .format(learning_method.name, theta_true, theta_start, t_sim, t_learn, fixed_window))
                 ax = plt.gca()

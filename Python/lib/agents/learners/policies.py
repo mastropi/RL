@@ -48,7 +48,7 @@ class LeaPolicyGradient(GenericLearner):
         super().__init__(env, alpha, adjust_alpha, func_adjust_alpha, min_count_to_update_alpha, min_time_to_update_alpha, alpha_min)
         self.debug = debug
 
-        self.fixed_window = fixed_window
+        self.fixed_window = fixed_window is None and False or fixed_window
 
         self.policy = policy
         self.learnerV = learnerV

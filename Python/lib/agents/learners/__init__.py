@@ -42,7 +42,7 @@ class GenericLearner:
     and once prior to the first simulation.
     """
 
-    def __init__(self, env, alpha :float,
+    def __init__(self, env, alpha: float=1.0,
                  adjust_alpha=False,
                  func_adjust_alpha=None,
                  min_count_to_update_alpha=0, min_time_to_update_alpha=0,
@@ -54,8 +54,9 @@ class GenericLearner:
             The environment needs not be "discrete" in the sense the gym package uses discrete, namely that there is
             a pre-defined number of states (as is the case in the EnvironmentDiscrete environment of gym).
 
-        alpha: positive float
+        alpha: (opt) positive float
             Initial learning rate.
+            default: 1.0
 
         adjust_alpha: bool
             Whether alpha should be updated when the methods that are responsible for updating alpha are called.
@@ -74,12 +75,12 @@ class GenericLearner:
             Minimum learning time step at which alpha starts to be updated by the update_learning_rate_by_episode() method.
         """
         self.env = env
-        self.alpha = alpha          # Initial and maximum learning rate
-        self.adjust_alpha = adjust_alpha
+        self.alpha = alpha is None and 1.0 or alpha          # Initial and maximum learning rate
+        self.adjust_alpha = adjust_alpha is None and False or adjust_alpha
         self.func_adjust_alpha = func_adjust_alpha is None and identity or func_adjust_alpha
-        self.min_count_to_update_alpha = min_count_to_update_alpha
-        self.min_time_to_update_alpha = min_time_to_update_alpha
-        self.alpha_min = alpha_min  # Used when adjust_alpha=True
+        self.min_count_to_update_alpha = min_count_to_update_alpha is None and 0 or min_count_to_update_alpha
+        self.min_time_to_update_alpha = min_time_to_update_alpha is None and 0 or min_time_to_update_alpha
+        self.alpha_min = alpha_min is None and 0.0 or alpha_min # Used when adjust_alpha=True
 
         # Observed state, action, and reward at the latest learning time
         self.state = None           # S(t): state BEFORE taking the action A(t) and receiving reward R(t+1)
