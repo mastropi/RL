@@ -42,7 +42,7 @@ import Python.lib.queues as queues
 from Python.lib.queues import Event
 
 from Python.lib.utils.basic import is_scalar, merge_values_in_time, index_linear2multi, measure_exec_time, \
-    show_exec_params, generate_datetime_string
+    show_exec_params, generate_datetime_string, find_last
 from Python.lib.utils.computing import rmse, compute_job_rates_by_server, compute_nparticles_and_nsteps_for_fv_process,\
     compute_rel_errors_for_fv_process, generate_min_exponential_time, stationary_distribution_birth_death_process
 import Python.lib.utils.plotting as plotting
@@ -846,6 +846,7 @@ class SimulatorQueue(Simulator):
                     # There is a different simulation time for each learning step
                     assert len(dict_params_simul) == self.dict_learning_params['t_learn']
                     dict_params_simul['nmeantimes'] = dict_params_simul['t_sim'][t_learn - 1]
+                    t_sim = dict_params_simul['nmeantimes']
 
                 #-- Estimation of the survival probability P(T>t) and the expected absorption cycle time, E(T_A) by MC
                 if self.show_messages(verbose, verbose_period, t_learn):
@@ -898,12 +899,13 @@ class SimulatorQueue(Simulator):
                 # Selection of the start state as one having buffer size = J, in order to have a fair(?) comparison with the FV method
                 start_state = self.choose_state_for_buffer_size(self.env, dict_params_simul['buffer_size_activation'])
                 t = self.run_simulation_mc(t_learn, start_state, t_sim, seed=dict_params_simul['seed'], verbose=verbose, verbose_period=verbose_period)
-                probas_stationary = self.estimate_stationary_probability_mc()
+                probas_stationary, time_step_last_return, last_time_at_start_buffer_size = self.estimate_stationary_probability_mc(start_state)
                 nevents_mc = t
                 assert nevents_mc == t_sim
                 if self.show_messages(verbose, verbose_period, t_learn):
                     print("\n*** RESULTS OF MONTE-CARLO SIMULATION on {} events ***".format(nevents_mc))
-                    print("P(K-1), P(K): {}".format(probas_stationary))
+                    print("P(K-1), P(K): {}, last return time to initial buffer size: time_step = {} ({:.1f}%), t = {:.1f}" \
+                          .format(probas_stationary, time_step_last_return, time_step_last_return / t * 100, last_time_at_start_buffer_size))
 
             if probas_stationary[K-1] > 0.0:
                 # When the parameterized policy is a linear step linear function with only one buffer size where its
@@ -951,7 +953,7 @@ class SimulatorQueue(Simulator):
             # Use this when using REINFORCE to learn theta
             #self.learn(self.agent, t)
             # Use this when estimating the theoretical grad(V)
-            err_phi, err_et = compute_rel_errors_for_fv_process(rhos, K, self.N, dict_params_simul['t_sim'], dict_params_simul['buffer_size_activation_factor'])
+            err_phi, err_et = compute_rel_errors_for_fv_process(rhos, K, self.N, t_sim, dict_params_simul['buffer_size_activation_factor'])
             self.learn(self.agent, t,
                        probas_stationary=probas_stationary,
                        Q_values=dict({K-1: [Q0_Km1, Q1_Km1], K: [Q0_K, Q1_K]}),
@@ -961,7 +963,7 @@ class SimulatorQueue(Simulator):
                                         'J': dict_params_simul['buffer_size_activation'],
                                         'exponent': dict_info.get('exponent'),
                                         'N': self.N,
-                                        'T': dict_params_simul['t_sim'],
+                                        'T': t_sim,
                                         'err_phi': err_phi,
                                         'err_et': err_et,
                                         'seed': dict_params_simul['seed'],
@@ -1198,7 +1200,7 @@ class SimulatorQueue(Simulator):
 
         return t
 
-    def estimate_stationary_probability_mc(self):
+    def estimate_stationary_probability_mc(self, start_state):
         """
         Monte-Carlo estimation of the stationary probability of buffer sizes K-1 and K based on the observed trajectory
         in continuous-time.
@@ -1206,24 +1208,53 @@ class SimulatorQueue(Simulator):
         The stationary probability is estimated as the fraction of time spent at each buffer size over the total
         simulation time (sum of sojourn times).
 
+        Arguments:
+        start_state: int or list or numpy array
+            State of the queue environment at which the Monte-Carlo simulation started.
+            This is used to check that the initial state actually stored in the trajectory is this state
+            and that therefore we are doing the correct computation to estimate the stationary probability
+            of the buffer sizes of interest.
+
         Return: dict
         Dictionary with the estimated stationary probability for buffer sizes K-1 and K, where K is the first integer
         larger than or equal to theta + 1  --theta being the parameter of the linear step acceptance policy.
         """
-        # Event times and sojourn times
+        # Event times
         times = self.learnerV.getTimes()
-        sojourn_times = [times[0]] + np.diff(times) # Each sojourn time is the time the Markov Chain sojourned at the state stored in `states`
-        total_sojourn_times = np.sum(sojourn_times)
+
+        # Sojourn times
+        # Each sojourn time is the time the Markov Chain sojourned at the state stored in `states`, retrieved below
+        # IMPORTANT: This means that the first state in `states` is the state PRIOR to the first time stored in `times`.
+        sojourn_times = [times[0]] + np.diff(times)
 
         # States and associated buffer sizes
         states = self.learnerV.getStates()
         buffer_sizes = [self.env.getBufferSizeFromState(s) for s in states]
+        buffer_size_start = self.env.getBufferSizeFromState(start_state)
+        assert buffer_sizes[0] == buffer_size_start, \
+                "The buffer size of the first state stored in the chain trajectory ({})" \
+                " equals the buffer size of the state at which the simulation started ({})" \
+                .format(buffer_sizes[0], buffer_size_start)
 
         K = self.learnerP.getPolicy().getBufferSizeForDeterministicBlocking()
-        probas_stationary = dict({K-1:  np.sum([st for bs, st in zip(buffer_sizes, sojourn_times) if bs == K-1]) / total_sojourn_times,
-                                  K:    np.sum([st for bs, st in zip(buffer_sizes, sojourn_times) if bs == K]) / total_sojourn_times})
+        sojourn_times_by_buffer_size = dict({ K-1:  np.sum([st for bs, st in zip(buffer_sizes, sojourn_times) if bs == K-1]),
+                                                K:  np.sum([st for bs, st in zip(buffer_sizes, sojourn_times) if bs == K])})
 
-        return probas_stationary
+        # Compute the stationary probabilities of the buffer sizes of interest by Find the last time the chain visited the starting position
+        probas_stationary = dict({K-1: np.nan, K: np.nan})
+        idx_last_visit_to_initial_position = find_last(buffer_sizes, buffer_sizes[0])
+        if idx_last_visit_to_initial_position >= 0:
+            last_time_at_start_buffer_size = times[idx_last_visit_to_initial_position]
+            for k in [K-1, K]:
+                probas_stationary[k] = sojourn_times_by_buffer_size[k] / last_time_at_start_buffer_size
+        else:
+            warnings.warn("The Markov Chain never returned to the initial position/buffer-size ({})."
+                            "\nThe estimated stationary probabilities will be set to NaN.".format(buffer_sizes[0]))
+            last_time_at_start_buffer_size = np.nan
+            for k in [K-1, K]:
+                probas_stationary[k] = np.nan
+
+        return probas_stationary, idx_last_visit_to_initial_position, last_time_at_start_buffer_size
 
     @measure_exec_time
     def run_simulation_mc_DT(self, t_learn, start_state, t_sim_max, agent=None, verbose=False, verbose_period=1):
@@ -2960,27 +2991,34 @@ if __name__ == "__main__":
 
         def run_simulation_policy_learning(simul, dict_params_simul, dict_info,
                                                   dict_params_info: dict={'plot': False, 'log': False},
-                                                  seed=None, verbose=False):
+                                                  params_read_from_benchmark_file=False, seed=None, verbose=False):
             set_required_entries_info = {'case', 'ncases', 'learning_method', 'exponent',
-                                         'rhos', 'K_true', 'K', 'N0', 'T0',
+                                         'rhos', 'K_true', 'K', 'N0', 'T0', 'error_rel_phi', 'error_rel_et',
                                          'alpha_start', 'adjust_alpha', 'min_time_to_update_alpha', 'alpha_min'}
             if not set_required_entries_info.issubset(dict_info.keys()):
                 raise ValueError("Missing entries in the dict_info dictionary: {}" \
                                  .format(set_required_entries_info.difference(dict_info.keys())))
 
-            error_rel_phi_real, error_rel_et_real = compute_rel_errors_for_fv_process(dict_info['rhos'],
-                                                                                      dict_info['K'],
-                                                                                      dict_params_simul['nparticles'],
-                                                                                      dict_params_simul['t_sim'],
-                                                                                      dict_params_simul['buffer_size_activation_factor'])
+            if not params_read_from_benchmark_file:
+                error_rel_phi_real, error_rel_et_real = compute_rel_errors_for_fv_process(dict_info['rhos'],
+                                                                                          dict_info['K'],
+                                                                                          dict_params_simul['nparticles'],
+                                                                                          dict_params_simul['t_sim'],
+                                                                                          dict_params_simul['buffer_size_activation_factor'])
 
-            print("\n--> CASE {} of {}: theta_true={:.3f} (K_true={}), theta={:.3f} (K={}), J/K={:.3f}," \
-                  " exponent={}: N={} (err_nom={:.1f}%, err={:.1f}%), T={} (err_nom={:.1f}%, err={:.1f}%)" \
-                  .format(dict_info['case'], dict_info['ncases'], dict_params_simul['theta_true'], dict_info['K_true'],
-                          dict_params_simul['theta_start'], dict_info['K'], dict_params_simul['buffer_size_activation_factor'],
-                          dict_info['exponent'], dict_params_simul['nparticles'], error_rel_phi * 100, error_rel_phi_real * 100,
-                          dict_params_simul['t_sim'], error_rel_et * 100, error_rel_et_real * 100))
-            print("Nominal values for the number of particles and number of cycles: N0={}, T0={}".format(dict_info['N0'], dict_info['T0']))
+                print("\n--> CASE {} of {}: theta_true={:.3f} (K_true={}), theta={:.3f} (K={}), J/K={:.3f}," \
+                      " exponent={}: N={} (err_nom={:.1f}%, err={:.1f}%), T={} (err_nom={:.1f}%, err={:.1f}%)" \
+                      .format(dict_info['case'], dict_info['ncases'], dict_params_simul['theta_true'], dict_info['K_true'],
+                              dict_params_simul['theta_start'], dict_info['K'], dict_params_simul['buffer_size_activation_factor'],
+                              dict_info['exponent'], dict_params_simul['nparticles'], dict_info['error_rel_phi'] * 100, error_rel_phi_real * 100,
+                              dict_params_simul['t_sim'], dict_info['error_rel_et'] * 100, error_rel_et_real * 100))
+                print("Nominal values for the number of particles and number of cycles: N0={}, T0={}".format(dict_info['N0'], dict_info['T0']))
+            else:
+                print("\n--> CASE {} of {}: theta_true={:.3f} (K_true={}), theta={:.3f} (K={}), J/K={:.3f}," \
+                      " exponent={}: N={}, T={})" \
+                      .format(dict_info['case'], dict_info['ncases'], dict_params_simul['theta_true'], dict_info['K_true'],
+                              dict_params_simul['theta_start'], dict_info['K'], dict_params_simul['buffer_size_activation_factor'],
+                              dict_info['exponent'], dict_params_simul['nparticles'], dict_params_simul['t_sim']))
 
             # Show execution parameters
             params = dict({
@@ -2989,8 +3027,8 @@ if __name__ == "__main__":
                 '1(c)-System-ServiceRates': simul.getEnv().getServiceRates(),
                 '1(d)-System-TrueTheta': dict_params_simul['theta_true'],
                 '2(a)-Learning-Method': dict_info['learning_method'],
-                '2(b)-Learning-Method#Particles (% Rel Error Phi)': (dict_params_simul['nparticles'], error_rel_phi * 100),
-                '2(c)-Learning-Method#TimeSteps (% Rel Error E(T))': (dict_params_simul['t_sim'], error_rel_et * 100),
+                '2(b)-Learning-Method#Particles (% Rel Error Phi)': (dict_params_simul['nparticles'], dict_info['error_rel_phi'] * 100),
+                '2(c)-Learning-Method#TimeSteps (% Rel Error E(T))': (dict_params_simul['t_sim'], dict_info['error_rel_et'] * 100),
                 '2(d)-Learning-LearningMode': simul.dict_learning_params['mode'].name,
                 '2(e)-Learning-ThetaStart': dict_params_simul['theta_start'],
                 '2(f)-Learning-#Steps': simul.getNumLearningSteps(),
@@ -3035,9 +3073,9 @@ if __name__ == "__main__":
         # MC (with no benchmark)
         #learning_method = LearningMethod.MC; plot_trajectories = False; symbol = 'b.-'; benchmark_file = None
         # MC (with benchmark)
-        #learning_method = LearningMethod.MC; plot_trajectories = False; symbol = 'b.-'; benchmark_file = os.path.join(os.path.abspath(resultsdir), "benchmark_fv.csv")
+        learning_method = LearningMethod.MC; plot_trajectories = False; symbol = 'b.-'; benchmark_file = os.path.join(os.path.abspath(resultsdir), "benchmark_fv.csv")
         # FV
-        learning_method = LearningMethod.FV; plot_trajectories = False; symbol = 'g.-'; benchmark_file = None
+        #learning_method = LearningMethod.FV; plot_trajectories = False; symbol = 'g.-'; benchmark_file = None
         if learning_method == LearningMethod.FV:
             learnerV = LeaFV
         else:
@@ -3159,6 +3197,8 @@ if __name__ == "__main__":
                                          'K': K,
                                          'N0': N0,
                                          'T0': T0,
+                                         'error_rel_phi': error_rel_phi,
+                                         'error_rel_et': error_rel_et,
                                          'alpha_start': alpha_start,
                                          'adjust_alpha': adjust_alpha,
                                          'min_time_to_update_alpha': min_time_to_update_alpha,
@@ -3166,7 +3206,7 @@ if __name__ == "__main__":
                                          }
 
                             # Run the simulation process
-                            theta_opt_values[case], df_learning = run_simulation_policy_learning(simul,
+                            theta_opt_values[case-1], df_learning = run_simulation_policy_learning(simul,
                                                                                               dict_params_simul,
                                                                                               dict_info,
                                                                                               dict_params_info=dict_params_info,
@@ -3174,7 +3214,71 @@ if __name__ == "__main__":
                                                                                               verbose=verbose)
         else:
             # Read the execution parameters from the benchmark file
-            pass
+            print("Reading benchmark data containing the parameter settings from file\n{}".format(benchmark_file))
+            benchmark = pd.read_csv(benchmark_file)
+            benchmark_groups = benchmark[ benchmark['t_learn'] == 1 ]
+            ncases = len(benchmark_groups)
+            theta_true_values = np.nan*np.ones(ncases)
+            theta_opt_values = np.nan*np.ones(ncases) # List of optimum theta values achieved by the learning algorithm for each parameter setting
+            idx = -1
+            for i in range(benchmark_groups.shape[0]):
+                idx += 1
+                case = benchmark_groups['case'].iloc[i]
+                theta_true = benchmark_groups['theta_true'].iloc[i]
+                theta_true_values[idx] = theta_true
+                theta_start = benchmark_groups['theta'].iloc[i]
+                J_factor = benchmark_groups['J/K'].iloc[i]
+                exponent = benchmark_groups['exponent'].iloc[i]
+                N = benchmark_groups['N'].iloc[i]
+                T = benchmark_groups['T'].iloc[i]
+                seed = benchmark_groups['seed'].iloc[i]
+
+                # Get the number of events to run the simulation for (from the benchmark file)
+                benchmark_nevents = benchmark[ benchmark['case'] == case ]
+                t_sim = list( benchmark_nevents['nevents_mc'] + benchmark_nevents['nevents_proba'] )
+                assert len(t_sim) == benchmark_nevents.shape[0], \
+                        "There are as many values for the number of simulation steps per learning step as the number" \
+                        " of learning steps read from the benchmark file ({})" \
+                        .format(len(t_sim), benchmark_nevents.shape[0])
+                t_learn = benchmark_nevents['t_learn'].iloc[-1]
+                simul.setNumLearningSteps(t_learn)
+
+                K_true = simul.learnerP.getPolicy().getBufferSizeForDeterministicBlockingFromTheta(theta_true)
+                K = simul.learnerP.getPolicy().getBufferSizeForDeterministicBlockingFromTheta(theta_start)
+
+                simul.setCase(case)
+                dict_params_simul = {
+                    'theta_true': theta_true,
+                    'theta_start': theta_start,
+                    'buffer_size_activation_factor': J_factor,
+                    'nparticles': 1,
+                    't_sim': t_sim
+                }
+                dict_info = {'case': case,
+                             'ncases': ncases,
+                             'learning_method': learning_method.name,
+                             'exponent': exponent,
+                             'rhos': rhos,
+                             'K_true': K_true,
+                             'K': K,
+                             'N0': N,
+                             'T0': T,
+                             'error_rel_phi': 0.0,
+                             'error_rel_et': 0.0,
+                             'alpha_start': alpha_start,
+                             'adjust_alpha': adjust_alpha,
+                             'min_time_to_update_alpha': min_time_to_update_alpha,
+                             'alpha_min': alpha_min
+                             }
+
+                # Run the simulation process
+                theta_opt_values[idx], df_learning = run_simulation_policy_learning(simul,
+                                                                                     dict_params_simul,
+                                                                                     dict_info,
+                                                                                     dict_params_info=dict_params_info,
+                                                                                     params_read_from_benchmark_file=True,
+                                                                                     seed=seed,
+                                                                                     verbose=verbose)
 
         print("Optimum theta found by the learning algorithm for each considered parameter setting:\n{}" \
               .format(pd.DataFrame.from_items([('theta_opt', theta_opt_values)])))
