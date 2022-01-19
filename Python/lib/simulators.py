@@ -2473,7 +2473,7 @@ if __name__ == "__main__":
     import runpy
     runpy.run_path("../../setup.py")
 
-    test = False
+    test = True
 
     # --------------- Unit tests on methods defined in this file ------------------ #
     if test:
@@ -2567,9 +2567,6 @@ if __name__ == "__main__":
         # Optimum theta parameter defined by the environment
         theta_true = COST_EXP_BUFFER_SIZE_REF - 1
 
-        # Learner of the value function
-        learnerV = LeaFV(env_queue_mm, gamma=1.0)
-
         # Acceptance policy definition
         theta_start = 1.0
         policies = dict({PolicyTypes.ACCEPT: PolQueueTwoActionsLinearStep(env_queue_mm, theta_start), PolicyTypes.ASSIGN: None})
@@ -2582,16 +2579,21 @@ if __name__ == "__main__":
         # --- FV simulation --- #
         print("\n")
         print("".join(np.repeat("*", 20)))
-        print("Test #2A: Testing run() in SimulatorQueue class for the FV-based policy gradient learning:")
+        print("Test #2A: Testing run() in SimulatorQueue class for the FV-based policy gradient learning with mode {}:".format(LearningMode.IGA))
 
         # Learning method (MC or FV)
         n_particles_fv = 30; t_sim = 50
         learning_method = LearningMethod.FV; nparticles = n_particles_fv; symbol = 'g.-'
 
         # Define the Learners (of the value function and the policy)
+        if learning_method == LearningMethod.FV:
+            learnerV = LeaFV(env_queue_mm, gamma=1.0)
+        else:
+            # Monte-Carlo learner is the default
+            learnerV = LeaMC(env_queue_mm, gamma=1.0)
         learners = dict({LearnerTypes.V: learnerV,
                          LearnerTypes.Q: None,
-                         LearnerTypes.P: LeaPolicyGradient(env_queue_mm, policies[PolicyTypes.ACCEPT], learnerV)})
+                         LearnerTypes.P: LeaPolicyGradient(env_queue_mm, policies[PolicyTypes.ACCEPT], learnerV, alpha=1.0)})
         agent_gradient = AgeQueue(env_queue_mm, policies, learners)
 
         # Simulation parameters
@@ -2613,7 +2615,7 @@ if __name__ == "__main__":
             '1(d)-System-TrueTheta': theta_true,
             '2(a)-Learning-Method': learning_method.name,
             '2(b)-Learning-Method#Particles': nparticles,
-            '2(c)-Learning-GradientEstimation': "Theoretical",
+            '2(c)-Learning-GradientEstimation': dict_learning_params['mode'].name,
             '2(d)-Learning-#Steps': t_learn,
             '2(e)-Learning-SimulationTimePerLearningStep': t_sim,
         })
@@ -2627,30 +2629,87 @@ if __name__ == "__main__":
         df_learning_expected = pd.DataFrame.from_items([
                                                 ('theta', [1.0, 1.0, 2.0, 3.0, 4.0]),
                                                 ('theta_next', [1.0, 2.0, 3.0, 4.0, 5.0]),
-                                                ('Pr(K-1)', [0.433118, 0.340047, 0.168419, 0.099661, 0.029651]),
-                                                ('Pr(K)', [0.297484, 0.348222, 0.138949, 0.067456, 0.013789]),
-                                                ('Q_diff(K-1)', [0.18, 0.65, 0.65, 0.46, 0.29]),
-                                                ('Q_diff(K)', [-0.14, 0.35, 0.36, 0.30, 0.31]),
-                                                ('alpha', [0.1]*5),
-                                                ('V', [-1.250, -1.285, -1.415, -1.460, -1.535]),
-                                                ('gradV', [0.077961, 0.221030, 0.109472, 0.045844, 0.008599]),
+                                                ('Pr(K-1)', [0.433118, 0.340047, 0.168419, 0.099661, 0.041231]),
+                                                ('Pr(K)', [0.297484, 0.348222, 0.138949, 0.067456, 0.024993]),
+                                                ('Q_diff(K-1)', [0.18, 0.65, 0.65, 0.46, 0.23]),
+                                                ('Q_diff(K)', [-0.14, 0.35, 0.36, 0.30, 0.29]),
+                                                ('alpha', [1.0]*5),
+                                                ('V', [-1.250, -1.285, -1.415, -1.460, -1.645]),
+                                                ('gradV', [0.077961, 0.221030, 0.109472, 0.045844, 0.009483]),
+                                                ('nevents_mc', [102, 100, 90, 97, 113]),
+                                                ('nevents_proba', [953, 892, 2052, 665, 305]),
+                                                ('ntrajectories_Q', [100.0]*5)
+                                                ])
+        assert np.allclose(df_learning, df_learning_expected, atol=1E-6)
+
+        #-- Simulation with method REINFORCE_TRUE
+        del simul
+        print("\n")
+        print("".join(np.repeat("*", 20)))
+        print("Test #2B: Testing run() in SimulatorQueue class for the FV-based policy gradient learning with mode {}:".format(LearningMode.REINFORCE_TRUE))
+
+        dict_learning_params = dict({'mode': LearningMode.REINFORCE_TRUE, 't_learn': t_learn})
+        dict_params_simul = dict({
+            'theta_true': theta_true,
+            'theta_start': theta_start,
+            'nparticles': nparticles,
+            't_sim': t_sim,
+            'buffer_size_activation_factor': 0.3
+            })
+        simul = SimulatorQueue(env_queue_mm, agent_gradient, dict_learning_params, N=nparticles, log=False, save=False, debug=False)
+
+        # Run the simulation!
+        params = dict({
+            '1(a)-System-#Servers': nservers,
+            '1(b)-System-JobClassRates': job_class_rates,
+            '1(c)-System-ServiceRates': service_rates,
+            '1(d)-System-TrueTheta': theta_true,
+            '2(a)-Learning-Method': learning_method.name,
+            '2(b)-Learning-Method#Particles': nparticles,
+            '2(c)-Learning-GradientEstimation': dict_learning_params['mode'].name,
+            '2(d)-Learning-#Steps': t_learn,
+            '2(e)-Learning-SimulationTimePerLearningStep': t_sim,
+        })
+        show_exec_params(params)
+        # Set the initial theta value
+        simul.getLearnerP().getPolicy().setThetaParameter(theta_start)
+        _, _, df_learning = simul.run(dict_params_simul, dict_params_info=dict_params_info, seed=seed, verbose=False)
+
+        print(df_learning)
+        # EXPECTED RESULT WHEN USING REINFORCE_TRUE
+        df_learning_expected = pd.DataFrame.from_items([
+                                                ('theta', [1.0, 1.077961, 1.193699, 1.275615, 1.390810]),
+                                                ('theta_next', [1.077961, 1.193699, 1.275615, 1.390810,1.473622]),
+                                                ('Pr(K-1)', [0.433118, 0.350721, 0.215568, 0.209445, 0.192587]),
+                                                ('Pr(K)', [0.297484, 0.019749, 0.041478, 0.069409, 0.053632]),
+                                                ('Q_diff(K-1)', [0.18, 0.33, 0.38, 0.55, 0.43]),
+                                                ('Q_diff(K)', [-0.14, 0.55, 0.38, 0.70, 0.32]),
+                                                ('alpha', [1.0]*5),
+                                                ('V', [-1.250, -2.105, -1.800, -2.075, -2.015]),
+                                                ('gradV', [0.077961, 0.115738, 0.081916, 0.115195, 0.082812]),
                                                 ('nevents_mc', [102, 100, 90, 97, 116]),
-                                                ('nevents_proba', [953, 892, 2052, 665, 419]),
+                                                ('nevents_proba', [953, 853, 2065, 676, 446]),
                                                 ('ntrajectories_Q', [100.0]*5)
                                                 ])
         assert np.allclose(df_learning, df_learning_expected, atol=1E-6)
         # --- FV simulation --- #
 
         # --- MC simulation --- #
+        del simul
         print("\n")
         print("".join(np.repeat("*", 20)))
-        print("Test #2B: Testing run() in SimulatorQueue class for the MC-based policy gradient learning:")
+        print("Test #2C: Testing run() in SimulatorQueue class for the MC-based policy gradient learning with mode {}:".format(LearningMode.IGA))
 
         # Learning method (MC or FV)
         t_sim = n_particles_fv * 50
         learning_method = LearningMethod.MC; symbol = 'r.-'
 
         # Define the Learners (of the value function and the policy)
+        if learning_method == LearningMethod.FV:
+            learnerV = LeaFV(env_queue_mm, gamma=1.0)
+        else:
+            # Monte-Carlo learner is the default
+            learnerV = LeaMC(env_queue_mm, gamma=1.0)
         learners = dict({LearnerTypes.V: learnerV,
                          LearnerTypes.Q: None,
                          LearnerTypes.P: LeaPolicyGradient(env_queue_mm, policies[PolicyTypes.ACCEPT], learnerV)})
@@ -2665,7 +2724,7 @@ if __name__ == "__main__":
             't_sim': t_sim,
             'buffer_size_activation_factor': 0.3
             })
-        simul = SimulatorQueue(env_queue_mm, agent_gradient, dict_learning_params, N=nparticles, log=False, save=False, debug=False)
+        simul = SimulatorQueue(env_queue_mm, agent_gradient, dict_learning_params, N=1, log=False, save=False, debug=False)
 
         # Run the simulation!
         params = dict({
@@ -2675,7 +2734,7 @@ if __name__ == "__main__":
             '1(d)-System-TrueTheta': theta_true,
             '2(a)-Learning-Method': learning_method.name,
             '2(b)-Learning-Method#Particles': nparticles,
-            '2(c)-Learning-GradientEstimation': "Theoretical",
+            '2(c)-Learning-GradientEstimation': dict_learning_params['mode'].name,
             '2(d)-Learning-#Steps': t_learn,
             '2(e)-Learning-SimulationTimePerLearningStep': t_sim,
         })
@@ -2689,15 +2748,66 @@ if __name__ == "__main__":
         df_learning_expected = pd.DataFrame.from_items([
                                                 ('theta', [1.0, 2.0, 3.0, 4.0, 5.0]),
                                                 ('theta_next', [2.0, 3.0, 4.0, 5.0, 6.0]),
-                                                ('Pr(K-1)', [0.332127, 0.215013, 0.182142, 0.098069, 0.063485]),
-                                                ('Pr(K)', [0.328396, 0.172206, 0.146759, 0.071062, 0.052470]),
-                                                ('Q_diff(K-1)', [0.46, 0.33, 0.31, 0.52, 0.02]),
-                                                ('Q_diff(K)', [0.64, 0.13, 0.82, 0.28, 0.38]),
-                                                ('alpha', [0.1]*5),
-                                                ('V', [-1.210, -1.345, -1.375, -1.290, -1.650]),
-                                                ('gradV', [0.152778, 0.070954, 0.056464, 0.050996, 0.001270]),
-                                                ('nevents_mc', [2983, 2935, 2948, 2999, 2946]),
-                                                ('nevents_proba', [3572, 4150, 6376, 5440, 7103]),
+                                                ('Pr(K-1)', [0.880587, 0.504685, 0.356000, 0.211230, 0.111037]),
+                                                ('Pr(K)', [0.584390, 0.344043, 0.288000, 0.168449, 0.054849]),
+                                                ('Q_diff(K-1)', [0.40, 0.44, 0.28, 0.32, 0.30]),
+                                                ('Q_diff(K)', [0.38, 0.14, 0.57, 0.14, 0.80]),
+                                                ('alpha', [1.0]*5),
+                                                ('V', [-1.33, -1.55, -1.30, -1.36, -1.65]),
+                                                ('gradV', [0.352235, 0.222062, 0.099680, 0.067594, 0.033311]),
+                                                ('nevents_mc', [1500, 1500, 1500, 1500, 1500]),
+                                                ('nevents_proba', [1500, 1500, 1500, 1500, 1500]),
+                                                ('ntrajectories_Q', [100.0]*5)
+                                                ])
+        assert np.allclose(df_learning, df_learning_expected, atol=1E-6)
+
+        # -- Simulation with mode REINFORCE_TRUE
+        del simul
+        print("\n")
+        print("".join(np.repeat("*", 20)))
+        print("Test #2D: Testing run() in SimulatorQueue class for the MC-based policy gradient learning with mode {}:".format(LearningMode.REINFORCE_TRUE))
+
+        dict_learning_params = dict({'mode': LearningMode.REINFORCE_TRUE, 't_learn': t_learn})
+        dict_params_simul = dict({
+            'theta_true': theta_true,
+            'theta_start': theta_start,
+            'nparticles': 1,
+            't_sim': t_sim,
+            'buffer_size_activation_factor': 0.3
+            })
+        simul = SimulatorQueue(env_queue_mm, agent_gradient, dict_learning_params, N=1, log=False, save=False, debug=False)
+
+        # Run the simulation!
+        params = dict({
+            '1(a)-System-#Servers': nservers,
+            '1(b)-System-JobClassRates': job_class_rates,
+            '1(c)-System-ServiceRates': service_rates,
+            '1(d)-System-TrueTheta': theta_true,
+            '2(a)-Learning-Method': learning_method.name,
+            '2(b)-Learning-Method#Particles': nparticles,
+            '2(c)-Learning-GradientEstimation': dict_learning_params['mode'].name,
+            '2(d)-Learning-#Steps': t_learn,
+            '2(e)-Learning-SimulationTimePerLearningStep': t_sim,
+        })
+        show_exec_params(params)
+        # Set the initial theta value
+        simul.getLearnerP().getPolicy().setThetaParameter(theta_start)
+        _, _, df_learning = simul.run(dict_params_simul, dict_params_info=dict_params_info, seed=seed, verbose=False)
+
+        print(df_learning)
+        # EXPECTED RESULT WHEN USING IGA
+        df_learning_expected = pd.DataFrame.from_items([
+                                                ('theta', [1.0, 1.352235, 1.522148, 1.700000, 1.776142]),
+                                                ('theta_next', [1.352235, 1.522148, 1.700000, 1.776142, 2.027189]),
+                                                ('Pr(K-1)', [0.880587, 0.606832, 0.573716, 0.543871, 0.512342]),
+                                                ('Pr(K)', [0.584390, 0.172806, 0.228152, 0.304086, 0.232155]),
+                                                ('Q_diff(K-1)', [0.40, 0.28, 0.31, 0.14, 0.49]),
+                                                ('Q_diff(K)', [0.38, 0.15, 0.53, 0.15, 0.39]),
+                                                ('alpha', [1.0]*5),
+                                                ('V', [-1.330, -1.920, -1.725, -1.700, -1.645]),
+                                                ('gradV', [0.352235, 0.169913, 0.177852, 0.076142, 0.251047]),
+                                                ('nevents_mc', [1500, 1500, 1500, 1500, 1500]),
+                                                ('nevents_proba', [1500, 1500, 1500, 1500, 1500]),
                                                 ('ntrajectories_Q', [100.0]*5)
                                                 ])
         assert np.allclose(df_learning, df_learning_expected, atol=1E-6)

@@ -29,7 +29,7 @@ class LeaPolicyGradient(GenericLearner):
 
     alpha: (opt) float
         Learning rate. This is the initial learning rate when the value of alpha is adjusted as simulation progresses.
-        default: 0.1
+        default: 1.0
 
     fixed_window: (opt) bool
         Whether to use a fixed window to estimate the return G(t) for the update of parameter theta.
@@ -37,7 +37,7 @@ class LeaPolicyGradient(GenericLearner):
         default: False
     """
 
-    def __init__(self, env, policy, learnerV, alpha=0.1,
+    def __init__(self, env, policy, learnerV, alpha=1.0,
                  adjust_alpha=False,
                  func_adjust_alpha=None,
                  min_count_to_update_alpha=0,
