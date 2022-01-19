@@ -89,7 +89,10 @@ class GenericLearner:
 
         # Trajectory history: information of the times, states, actions, and rewards stored as part of the learning process
         # (so that we can be retrieve it for e.g. analysis or plotting)
-        self.times = []         # This time is expected to be a *discrete* time, indexing the respective states, actions and rewards
+        self.times = []         # This time is either a DISCRETE time or a CONTINUOUS time depending on what
+                                # type of process (discrete or continuous) is used to model the evolution of the environment
+                                # where the learner takes place.
+                                # The time si associated to the state, action and reward stored in the respective attributes
         self.states = []        # Stores S(t), the state at each time t stored in `times`
         self.actions = []       # Stores A(t), the action taken at state S(t)
         self.rewards = []       # Stores R(t) = R(S(t), A(t)), the reward received after taking action A(t) on state S(t)
@@ -97,8 +100,8 @@ class GenericLearner:
         self.dict_state_action_counts = dict()
 
         # Learning time and learning rate at that time
-        self._time = 0              # Int: this value is expected to be updated by the user, whenever learning takes place
-        self._alpha = self.alpha    # Float: current learning rate (at the learning time `self._time`)
+        self._t = 0              # Int: this value is expected to be updated by the user, whenever learning takes place
+        self._alpha = self.alpha    # Float: current learning rate (at the learning time `self._t`)
 
         # Information about the historical learning rates
         self.alpha_mean = []    # Average alpha
@@ -139,7 +142,7 @@ class GenericLearner:
         self.reset_return()
 
         if reset_time:
-            self._time = 0
+            self._t = 0
 
         if reset_alphas:
             self._alpha = self.alpha
@@ -195,7 +198,7 @@ class GenericLearner:
         It can be used to update the learning rate alpha by the number of learning episodes
         (see update_learning_rate_by_episode()).
         """
-        self._time += 1
+        self._t += 1
 
     def update_learning_rate(self, state, action):
         """
@@ -243,7 +246,7 @@ class GenericLearner:
         The updated value of alpha.
         """
         if self.adjust_alpha:
-            time_divisor = self.func_adjust_alpha( np.max([1, self._time - self.min_time_to_update_alpha]) )
+            time_divisor = self.func_adjust_alpha( np.max([1, self._t - self.min_time_to_update_alpha]) )
                 ## See comment in method update_learning_rate() about not adding any constant to the difference time - min_time
             print("\tUpdating alpha by learning episode: time divisor = {}".format(time_divisor))
             alpha_prev = self._alpha
@@ -268,15 +271,15 @@ class GenericLearner:
         self.reward = reward
         self._update_trajectory_history(t)
 
-    def _update_trajectory_history(self, t):
+    def _update_trajectory_history(self, time):
         """
         Updates the history of the visited states, actions taken, and observed rewards at the given simulation time
 
         Arguments:
-        t: int
-            Time to which the stored state, action, and reward are associated.
+        time: int or float
+            Discrete or continuous time to which the stored state, action, and reward are associated.
         """
-        self.times += [t]
+        self.times += [time]
         self.states += [self.state]
         self.actions += [self.action]
         self.rewards += [self.reward]
@@ -303,7 +306,7 @@ class GenericLearner:
 
     def getLearningTime(self):
         "Returns the number of times learning took place according to the learning time attribute"
-        return self._time
+        return self._t
 
     def getCount(self, state, action):
         "Returns the number of times the given state and action has been visited during the learning process"

@@ -1162,6 +1162,7 @@ class SimulatorQueue(Simulator):
         # Time step in the queue trajectory (the first time step is t = 0)
         done = False
         t = 0
+        time_abs = 0.0      # Measure of the ABSOLUTE time of the latest event
         while not done:
             t += 1
 
@@ -1171,6 +1172,7 @@ class SimulatorQueue(Simulator):
             # Generate next event
             # Note: this function takes care of NOT generating a service event when a server is empty.
             time, event, job_class_or_server, _ = self.generate_event([self.env])
+            time_abs += time
 
             # Analyze the event
             if event == Event.BIRTH:
@@ -1186,7 +1188,7 @@ class SimulatorQueue(Simulator):
             # S(t): state BEFORE an action is taken
             # A(t): action taken given the state S(t)
             # R(t): reward received by taking action A(t) and transition to S(t+1)
-            self.update_trajectory(agent, (t_learn - 1) * (tmax + 1) + t, t, state, action, reward)
+            self.update_trajectory(agent, (t_learn - 1) * (tmax + 1) + t, time_abs, state, action, reward)
 
             if self.debug:
                 print("{} | t={}: event={}, action={} -> state={}, reward={}".format(state, t, event, action, next_state, reward), end="\n")
@@ -1225,7 +1227,9 @@ class SimulatorQueue(Simulator):
         # Sojourn times
         # Each sojourn time is the time the Markov Chain sojourned at the state stored in `states`, retrieved below
         # IMPORTANT: This means that the first state in `states` is the state PRIOR to the first time stored in `times`.
-        sojourn_times = [times[0]] + np.diff(times)
+        # IMPORTANT 2: We should convert the output of np.diff() to a list otherwise the value "summed" on the left
+        # with the initial time value `times[0]` will be ADDED to all entries in the array returned by np.diff()!!
+        sojourn_times = [times[0]] + list( np.diff(times) )
 
         # States and associated buffer sizes
         states = self.learnerV.getStates()
@@ -1240,8 +1244,12 @@ class SimulatorQueue(Simulator):
         K = self.learnerP.getPolicy().getBufferSizeForDeterministicBlocking()
         probas_stationary = dict({K-1: np.nan, K: np.nan})
         idx_last_visit_to_initial_position = find_last(buffer_sizes, buffer_sizes[0])
-        if idx_last_visit_to_initial_position >= 0:
-            last_time_at_start_buffer_size = times[idx_last_visit_to_initial_position]
+        assert idx_last_visit_to_initial_position >= 0, \
+            "The return time to the initial buffer size is always observed, as the first value is always the value searched for ({}):\n{}".format(buffer_sizes[0], np.c_[buffer_sizes, times])
+        if idx_last_visit_to_initial_position > 0:
+            last_time_at_start_buffer_size = times[idx_last_visit_to_initial_position-1]
+                ## we subtract -1 to the index because the times list contains the times at which the Markov Chain
+                ## STOPS visiting the state in states.
 
             # Compute the total sojourn time at each buffer size of interest
             # IMPORTANT: we need to limit this computation to the moment we observe the last return time to the
@@ -1251,14 +1259,20 @@ class SimulatorQueue(Simulator):
                         K: np.sum([st for bs, st in zip(buffer_sizes[:idx_last_visit_to_initial_position], sojourn_times[:idx_last_visit_to_initial_position]) if bs == K])})
 
             for k in [K-1, K]:
-                assert sojourn_times_by_buffer_size[k] <= last_time_at_start_buffer_size
+                assert sojourn_times_by_buffer_size[k] <= last_time_at_start_buffer_size, \
+                    "The total sojourn time at position s={} ({}) is at most equal to the last time of return to the buffer size ({})" \
+                    .format(k, sojourn_times_by_buffer_size[k], last_time_at_start_buffer_size)
                 probas_stationary[k] = sojourn_times_by_buffer_size[k] / last_time_at_start_buffer_size
         else:
+            # The system never returned to the initial buffer size
+            # => We set the stationary probability to 0.0 (and NOT to NaN) in order to avoid an assertion error in
+            # the policy learner dealing with stationary probabilities that require that they are between 0 and 1.
+            # (e.g. see agents/learners/policies.py)
             warnings.warn("The Markov Chain never returned to the initial position/buffer-size ({})."
-                            "\nThe estimated stationary probabilities will be set to NaN.".format(buffer_sizes[0]))
-            last_time_at_start_buffer_size = np.nan
+                            "\nThe estimated stationary probabilities will be set to 0.0.".format(buffer_sizes[0]))
+            last_time_at_start_buffer_size = 0.0
             for k in [K-1, K]:
-                probas_stationary[k] = np.nan
+                probas_stationary[k] = 0.0
 
         return probas_stationary, idx_last_visit_to_initial_position, last_time_at_start_buffer_size
 
@@ -2154,7 +2168,7 @@ class SimulatorQueue(Simulator):
 
         Return: tuple
         Tuple containing the following elements:
-        - the time of the event
+        - the time to the event (relative to whatever absolute time the queue system is at)
         - the event type (Event.BIRTH or Event.DEATH)
         - an index that represents either:
             - the job class, if the generated event is an arriving job
