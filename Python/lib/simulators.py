@@ -1236,16 +1236,22 @@ class SimulatorQueue(Simulator):
                 " equals the buffer size of the state at which the simulation started ({})" \
                 .format(buffer_sizes[0], buffer_size_start)
 
-        K = self.learnerP.getPolicy().getBufferSizeForDeterministicBlocking()
-        sojourn_times_by_buffer_size = dict({ K-1:  np.sum([st for bs, st in zip(buffer_sizes, sojourn_times) if bs == K-1]),
-                                                K:  np.sum([st for bs, st in zip(buffer_sizes, sojourn_times) if bs == K])})
-
         # Compute the stationary probabilities of the buffer sizes of interest by Find the last time the chain visited the starting position
+        K = self.learnerP.getPolicy().getBufferSizeForDeterministicBlocking()
         probas_stationary = dict({K-1: np.nan, K: np.nan})
         idx_last_visit_to_initial_position = find_last(buffer_sizes, buffer_sizes[0])
         if idx_last_visit_to_initial_position >= 0:
             last_time_at_start_buffer_size = times[idx_last_visit_to_initial_position]
+
+            # Compute the total sojourn time at each buffer size of interest
+            # IMPORTANT: we need to limit this computation to the moment we observe the last return time to the
+            # initial buffer size! (o.w. we could be overestimating the probability and even estimate it larger than 1)
+            sojourn_times_by_buffer_size = \
+                dict({K-1: np.sum([st for bs, st in zip(buffer_sizes[:idx_last_visit_to_initial_position], sojourn_times[:idx_last_visit_to_initial_position]) if bs == K-1]),
+                        K: np.sum([st for bs, st in zip(buffer_sizes[:idx_last_visit_to_initial_position], sojourn_times[:idx_last_visit_to_initial_position]) if bs == K])})
+
             for k in [K-1, K]:
+                assert sojourn_times_by_buffer_size[k] <= last_time_at_start_buffer_size
                 probas_stationary[k] = sojourn_times_by_buffer_size[k] / last_time_at_start_buffer_size
         else:
             warnings.warn("The Markov Chain never returned to the initial position/buffer-size ({})."
@@ -2473,7 +2479,7 @@ if __name__ == "__main__":
     import runpy
     runpy.run_path("../../setup.py")
 
-    test = True
+    test = False
 
     # --------------- Unit tests on methods defined in this file ------------------ #
     if test:
@@ -2748,13 +2754,13 @@ if __name__ == "__main__":
         df_learning_expected = pd.DataFrame.from_items([
                                                 ('theta', [1.0, 2.0, 3.0, 4.0, 5.0]),
                                                 ('theta_next', [2.0, 3.0, 4.0, 5.0, 6.0]),
-                                                ('Pr(K-1)', [0.880587, 0.504685, 0.356000, 0.211230, 0.111037]),
-                                                ('Pr(K)', [0.584390, 0.344043, 0.288000, 0.168449, 0.054849]),
+                                                ('Pr(K-1)', [0.879253, 0.502008, 0.356000, 0.209893, 0.111037]),
+                                                ('Pr(K)', [0.584390, 0.340027, 0.288000, 0.167112, 0.054849]),
                                                 ('Q_diff(K-1)', [0.40, 0.44, 0.28, 0.32, 0.30]),
                                                 ('Q_diff(K)', [0.38, 0.14, 0.57, 0.14, 0.80]),
                                                 ('alpha', [1.0]*5),
                                                 ('V', [-1.33, -1.55, -1.30, -1.36, -1.65]),
-                                                ('gradV', [0.352235, 0.222062, 0.099680, 0.067594, 0.033311]),
+                                                ('gradV', [0.351701, 0.220884, 0.099680, 0.067166, 0.033311]),
                                                 ('nevents_mc', [1500, 1500, 1500, 1500, 1500]),
                                                 ('nevents_proba', [1500, 1500, 1500, 1500, 1500]),
                                                 ('ntrajectories_Q', [100.0]*5)
@@ -2797,15 +2803,15 @@ if __name__ == "__main__":
         print(df_learning)
         # EXPECTED RESULT WHEN USING IGA
         df_learning_expected = pd.DataFrame.from_items([
-                                                ('theta', [1.0, 1.352235, 1.522148, 1.700000, 1.776142]),
-                                                ('theta_next', [1.352235, 1.522148, 1.700000, 1.776142, 2.027189]),
-                                                ('Pr(K-1)', [0.880587, 0.606832, 0.573716, 0.543871, 0.512342]),
-                                                ('Pr(K)', [0.584390, 0.172806, 0.228152, 0.304086, 0.232155]),
-                                                ('Q_diff(K-1)', [0.40, 0.28, 0.31, 0.14, 0.49]),
-                                                ('Q_diff(K)', [0.38, 0.15, 0.53, 0.15, 0.39]),
+                                                ('theta', [1.0, 1.351701, 1.514461, 1.652701, 1.756130]),
+                                                ('theta_next', [1.351701, 1.514461, 1.652701, 1.756130, 1.972434]),
+                                                ('Pr(K-1)', [0.879253, 0.602813, 0.576000, 0.544363, 0.515010]),
+                                                ('Pr(K)', [0.584390, 0.168788, 0.221333, 0.300200, 0.226818]),
+                                                ('Q_diff(K-1)', [0.40, 0.27, 0.24, 0.19, 0.42]),
+                                                ('Q_diff(K)', [0.38, 0.15, 0.51, 0.60, 0.28]),
                                                 ('alpha', [1.0]*5),
-                                                ('V', [-1.330, -1.920, -1.725, -1.700, -1.645]),
-                                                ('gradV', [0.352235, 0.169913, 0.177852, 0.076142, 0.251047]),
+                                                ('V', [-1.330, -1.935, -1.700, -1.735, -1.660]),
+                                                ('gradV', [0.351701, 0.162760, 0.138240, 0.103429, 0.216304]),
                                                 ('nevents_mc', [1500, 1500, 1500, 1500, 1500]),
                                                 ('nevents_proba', [1500, 1500, 1500, 1500, 1500]),
                                                 ('ntrajectories_Q', [100.0]*5)
