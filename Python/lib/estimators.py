@@ -4326,8 +4326,8 @@ class EstimatorQueueBlockingFlemingViot:
         # - state=activation
         # - state=block
         reflines_zero = range(0, (K+1)*self.N, K+1)
-        reflines_absorption = range(self.buffer_size_activation-1, (self.buffer_size_activation-1+(K+1))*self.N, K+1)
-        reflines_block = range(K, (K+(K+1))*self.N, K+1)
+        reflines_absorption = range(self.buffer_size_activation-1, self.buffer_size_activation-1+(K+1)*self.N, K+1)
+        reflines_block = range(K, K+(K+1)*self.N, K+1)
         particle_numbers = self.particles_to_simulate
         if False:
             for p in particle_numbers:

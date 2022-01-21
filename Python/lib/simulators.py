@@ -42,7 +42,7 @@ import Python.lib.queues as queues
 from Python.lib.queues import Event
 
 from Python.lib.utils.basic import is_scalar, merge_values_in_time, index_linear2multi, measure_exec_time, \
-    show_exec_params, generate_datetime_string, find_last
+    show_exec_params, generate_datetime_string, find_last, insort
 from Python.lib.utils.computing import rmse, compute_job_rates_by_server, compute_nparticles_and_nsteps_for_fv_process,\
     compute_rel_errors_for_fv_process, generate_min_exponential_time, stationary_distribution_birth_death_process
 import Python.lib.utils.plotting as plotting
@@ -58,6 +58,10 @@ class LearningMode(Enum):
     REINFORCE_RETURN = 1        # When learning is based on the observed return, which estimates the expected value giving grad(V)
     REINFORCE_TRUE = 2          # When learning is based on the expected value giving grad(V)
     IGA = 3                     # When learning is based on Integer Gradient Ascent, where delta(theta) is +/- 1 or 0.
+
+
+DEBUG_ESTIMATORS = False
+DEBUG_TRAJECTORIES = False
 
 
 # TODO: (2020/05) Rename this class to SimulatorDiscreteEpisodic as it simulates on a discrete (in what sense?) environment running on episodes
@@ -675,7 +679,7 @@ class SimulatorQueue(Simulator):
             start_state=None,
             seed=None, state_observe=None,
             verbose=False, verbose_period=1,
-            colormap="seismic", pause=0):
+            ax=None, colormap="seismic", pause=0):
         """
         Runs a Reinforcement Learning experiment on a queue environment for the given number of time steps.
         No reset of the learning history is done at the beginning of the simulation.
@@ -799,9 +803,9 @@ class SimulatorQueue(Simulator):
 
         # -- Reset the learners
         # Reset the policy learner (this is especially important to reset the learning rate alpha to its initial value!)
-        simul.getLearnerP().reset()
+        self.getLearnerP().reset()
         # Reset the theta value to the initial theta
-        simul.getLearnerP().getPolicy().setThetaParameter(dict_params_simul['theta_start'])
+        self.getLearnerP().getPolicy().setThetaParameter(dict_params_simul['theta_start'])
 
         if verbose:
             print("Value function at start of experiment: {}".format(self.learnerV.getV()))
@@ -852,33 +856,54 @@ class SimulatorQueue(Simulator):
                 if self.show_messages(verbose, verbose_period, t_learn):
                     print("Running Monte-Carlo simulation on one particle starting at an absorption state with buffer size = {}..." \
                           .format(dict_params_simul['buffer_size_activation'] - 1))
-                est_mc, expected_absorption_time, n_absorption_time_observations, \
-                    proba_surv, n_survival_curve_observations = \
-                        estimate_proba_survival_and_expected_absorption_time_mc(self.env, self.agent, dict_params_simul, dict_params_info)
-                nevents_mc = est_mc.nevents
-                if self.show_messages(verbose, verbose_period, t_learn):
+                #est_mc, expected_absorption_time, n_absorption_time_observations, \
+                #proba_surv, n_survival_curve_observations = \
+                #    estimate_proba_survival_and_expected_absorption_time_mc(self.env, self.agent, dict_params_simul,
+                #                                                            dict_params_info)
+                #nevents_mc = est_mc.nevents
+                #n_cycles = n_absorption_time_observations
+
+                start_state = self.choose_state_for_buffer_size(self.env, dict_params_simul['buffer_size_activation'] - 1)
+                t, time_end_simulation, n_cycles, time_end_last_cycle, survival_times = \
+                    self.run_simulation_mc(t_learn, start_state, t_sim,
+                                           track_absorptions=True, track_survival=True,
+                                           seed=dict_params_simul['seed'], verbose=verbose, verbose_period=verbose_period)
+                nevents_mc = t
+
+                # Estimate P(T>t) and E(T_A)
+                proba_surv = self.estimate_survival_probability(survival_times)
+                expected_absorption_time = self.estimate_expected_cycle_time(n_cycles, time_end_last_cycle, time_end_simulation)
+
+                if DEBUG_ESTIMATORS or self.show_messages(verbose, verbose_period, t_learn):
                     print("\n*** RESULTS OF MC ESTIMATION OF P(T>t) and E(T) on {} events ***".format(nevents_mc))
+                    #max_rows = pd.get_option('display.max_rows')
+                    #pd.set_option('display.max_rows', None)
                     #print("P(T>t):\n{}".format(proba_surv))
+                    #pd.set_option('display.max_rows', max_rows)
                     print("E(T) = {:.1f}, Max observed survival time = {:.1f}".format(expected_absorption_time, proba_surv['t'].iloc[-1]))
 
                 #-- FLeming-Viot simulation to compute the empirical distribution and then estimate the average reward
                 # The empirical distribution Phi(t, bs) estimates the conditional probability of buffer sizes bs
                 # for which the acceptance policy is > 0
                 assert self.N > 1, "The simulation system has more than one particle in Fleming-Viot mode ({})".format(self.N)
-                if self.show_messages(verbose, verbose_period, t_learn):
+                if DEBUG_ESTIMATORS or self.show_messages(verbose, verbose_period, t_learn):
                     print("Running Fleming-Viot simulation on {} particles and absorption size = {}..." \
                           .format(self.N, dict_params_simul['buffer_size_activation'] - 1))
                 t, event_times, phi, probas_stationary, expected_reward = \
                     self.run_simulation_fv( t_learn,
                                             dict_params_simul['buffer_size_activation'] - 1,   # We pass the absorption size to this function
                                             proba_surv, expected_absorption_time,
-                                            verbose=verbose, verbose_period=verbose_period)
+                                            verbose=verbose, verbose_period=verbose_period,
+                                            plot=DEBUG_TRAJECTORIES, ax=ax)
                 assert t == len(event_times) - 1, "The last time step of the simulation ({}) coincides with the number of events observed ({})" \
                                                 .format(t, len(event_times))
                     ## We subtract 1 to len(event_times) because the first event time is 0.0 which is NOT an event time
-                if self.show_messages(verbose, verbose_period, t_learn):
+                if DEBUG_ESTIMATORS or self.show_messages(verbose, verbose_period, t_learn):
                     print("\n*** RESULTS OF FLEMING-VIOT SIMULATION ***")
+                    #max_rows = pd.get_option('display.max_rows')
+                    #pd.set_option('display.max_rows', None)
                     #print("Phi(t):\n{}".format(phi))
+                    #pd.set_option('display.max_rows', max_rows)
                     print("P(K-1), P(K): {}".format(probas_stationary))
                     print("rho = {}".format(expected_reward))
                 self.learnerV.setAverageReward(expected_reward)
@@ -886,6 +911,12 @@ class SimulatorQueue(Simulator):
             else:
                 # Monte-Carlo learning is the default
                 assert self.N == 1, "The simulation system has only one particle in Monte-Carlo mode ({})".format(self.N)
+
+                # Define the following two quantities as None because they are sent to the output results file
+                # in the FV case and here they should be found as existing variables.
+                n_cycles = None
+                expected_absorption_time = None
+
                 if not is_scalar(dict_params_simul['t_sim']):
                     # There is a different simulation time for each learning step
                     # => Use a number of simulation steps defined in a benchmark for each learning step
@@ -898,11 +929,11 @@ class SimulatorQueue(Simulator):
                 #start_state = self.choose_state_for_buffer_size(self.env, K)
                 # Selection of the start state as one having buffer size = J, in order to have a fair(?) comparison with the FV method
                 start_state = self.choose_state_for_buffer_size(self.env, dict_params_simul['buffer_size_activation'])
-                t = self.run_simulation_mc(t_learn, start_state, t_sim, seed=dict_params_simul['seed'], verbose=verbose, verbose_period=verbose_period)
+                t, _ = self.run_simulation_mc(t_learn, start_state, t_sim, seed=dict_params_simul['seed'], verbose=verbose, verbose_period=verbose_period)
                 probas_stationary, time_step_last_return, last_time_at_start_buffer_size = self.estimate_stationary_probability_mc(start_state)
                 nevents_mc = t
                 assert nevents_mc == t_sim
-                if self.show_messages(verbose, verbose_period, t_learn):
+                if DEBUG_ESTIMATORS or self.show_messages(verbose, verbose_period, t_learn):
                     print("\n*** RESULTS OF MONTE-CARLO SIMULATION on {} events ***".format(nevents_mc))
                     print("P(K-1), P(K): {}, last return time to initial buffer size: time_step = {} ({:.1f}%), t = {:.1f}" \
                           .format(probas_stationary, time_step_last_return, time_step_last_return / t * 100, last_time_at_start_buffer_size))
@@ -911,38 +942,38 @@ class SimulatorQueue(Simulator):
                 # When the parameterized policy is a linear step linear function with only one buffer size where its
                 # derivative is non-zero, only the DIFFERENCE of two state-action values impacts the gradient, namely:
                 # Q(K-1, a=1) - Q(K-1, a=0)
-                if self.show_messages(verbose, verbose_period, t_learn):
+                if DEBUG_ESTIMATORS or self.show_messages(verbose, verbose_period, t_learn):
                     print("\nEstimating the difference of the state-action values when the initial buffer size is K-1={}...".format(K-1))
                 N = 100; t_sim_max = 250
                 K, Q0_Km1, Q1_Km1, n_Km1, max_t_Km1 = self.estimate_Q_values_until_mixing(t_learn, K-1, t_sim_max=t_sim_max, N=N, verbose=verbose, verbose_period=verbose_period)
                 #K, Q0_Km1, Q1_Km1, n, max_t = self.estimate_Q_values_until_stationarity(t_learn, t_sim_max=50, N=N, verbose=verbose, verbose_period=verbose_period)
-                if self.show_messages(verbose, verbose_period, t_learn):
+                if DEBUG_ESTIMATORS or self.show_messages(verbose, verbose_period, t_learn):
                     print("--> Estimated state-action values on n={} realizations out of {} with max simulation time = {:.1f} out of {:.1f}:\nQ(K-1={}, a=1) = {}\nQ(K-1={}, a=0) = {}\nQ_diff = Q(K-1,1) - Q(K-1,0) = {}" \
                           .format(n_Km1, N, max_t_Km1, t_sim_max, K-1, Q1_Km1, K-1, Q0_Km1, Q1_Km1 - Q0_Km1))
             else:
                 Q0_Km1 = 0.0
                 Q1_Km1 = 0.0
                 n_Km1 = 0
-                if self.show_messages(verbose, verbose_period, t_learn):
+                if DEBUG_ESTIMATORS or self.show_messages(verbose, verbose_period, t_learn):
                     print("Estimation of Q_diff(K-1) skipped because the estimated stationary probability Pr(K-1) = 0.")
-            if self.show_messages(verbose, verbose_period, t_learn):
+            if DEBUG_ESTIMATORS or self.show_messages(verbose, verbose_period, t_learn):
                 print("--> Estimated stationary probability: Pr(K-1={}) = {}".format(K-1, probas_stationary[K - 1]))
 
             if probas_stationary[K] > 0.0:
                 # Same as above, but for buffer size = K
-                if self.show_messages(verbose, verbose_period, t_learn):
+                if DEBUG_ESTIMATORS or self.show_messages(verbose, verbose_period, t_learn):
                     print("\nEstimating the difference of the state-action values when the initial buffer size is K={}...".format(K))
                 N = 100; t_sim_max = 250
                 K, Q0_K, Q1_K, n_K, max_t_K = self.estimate_Q_values_until_mixing(t_learn, K, t_sim_max=t_sim_max, N=N, verbose=verbose, verbose_period=verbose_period)
                 #K, Q0_K, Q1_K, n_K, max_t_K = self.estimate_Q_values_until_stationarity(t_learn, t_sim_max=50, N=N, verbose=verbose, verbose_period=verbose_period)
-                if self.show_messages(verbose, verbose_period, t_learn):
+                if DEBUG_ESTIMATORS or self.show_messages(verbose, verbose_period, t_learn):
                     print("--> Estimated state-action values on n={} realizations out of {} with max simulation time = {:.1f} out of {:.1f}:\nQ(K={}, a=1) = {}\nQ(K={}, a=0) = {}\nQ_diff = Q(K,1) - Q(K,0) = {}" \
                           .format(n_K, N, max_t_K, t_sim_max, K, Q1_K, K, Q0_K, Q1_K - Q0_K))
             else:
                 Q0_K = 0.0
                 Q1_K = 0.0
                 n_K = 0
-                if self.show_messages(verbose, verbose_period, t_learn):
+                if DEBUG_ESTIMATORS or self.show_messages(verbose, verbose_period, t_learn):
                     print("Estimation of Q_diff(K) skipped because the estimated stationary probability Pr(K) = 0.")
             if self.show_messages(verbose, verbose_period, t_learn):
                 print("--> Estimated stationary probability: Pr(K={}) = {}".format(K, probas_stationary[K]))
@@ -967,6 +998,8 @@ class SimulatorQueue(Simulator):
                                         'err_phi': err_phi,
                                         'err_et': err_et,
                                         'seed': dict_params_simul['seed'],
+                                        'expected_absorption_time': expected_absorption_time,
+                                        'n_cycles': n_cycles,
                                         'nevents_mc': nevents_mc,
                                         'nevents_proba': t,
                                         'n_Q': np.mean([n_Km1, n_K])}))
@@ -1005,7 +1038,7 @@ class SimulatorQueue(Simulator):
 
     def manage_job_arrival(self, t, env, agent, state, job_class):
         """
-        Manages a completed service event
+        Manages an incoming job event, whether it is accepted or not and what is done if it is accepted
 
         Arguments:
         t: int
@@ -1110,7 +1143,9 @@ class SimulatorQueue(Simulator):
         return action, next_state, reward
 
     @measure_exec_time
-    def run_simulation_mc(self, t_learn, start_state, t_sim_max, agent=None, seed=None, verbose=False, verbose_period=1):
+    def run_simulation_mc(self, t_learn, start_state, t_sim_max, agent=None,
+                                track_absorptions=False, track_survival=False,
+                                seed=None, verbose=False, verbose_period=1):
         """
         Runs the continuous-time simulation using Monte-Carlo
 
@@ -1129,6 +1164,15 @@ class SimulatorQueue(Simulator):
             Agent object that is responsible of performing the actions on the environment and learning from them.
             default: None, in which case the agent defined in the object is used
 
+        track_absorptions: (opt) bool
+            Whether to track the absorption times.
+            default: False
+
+        track_survival: (opt) bool
+            Whether to track the survival times.
+            When True, it only has an effect when track_absorptions = True as well.
+            default: False
+
         seed: (opt) int
             Seed to use in the simulation process.
             default: None, in which case the simulation cannot be reproduced at a later stage
@@ -1141,8 +1185,17 @@ class SimulatorQueue(Simulator):
             The time step period to be verbose.
             default: 1 => be verbose at every simulation step.
 
-        Return: int
-        The last time step of the simulation process.
+        Return: tuple
+        If track_absorptions = False and track_survival = False:
+        - t: the last time step of the simulation process.
+        - time: the continuous time of the last observed event during the simulation.
+        If track_absorptions = True and track_survival = False, in addition:
+        - n_cycles: the number of cycles observed in the simulation, until the last return to the start buffer size.
+        - time_end_last_cycle: the continuous time at which the Markov Chain returns to the start buffer size.
+        If track_survival = True, in addition:
+        - survival_times: list with the observed survival times, sorted increasingly.
+
+        Note that track_survival = True has no effect if track_absorptions = False.
         """
         #-- Parse input parameters
         if agent is None:
@@ -1156,13 +1209,27 @@ class SimulatorQueue(Simulator):
         # Set the start state of the environment to the given start state
         job_class = None
         self.env.setState((start_state, job_class))
+        buffer_size_start = self.env.getBufferSize()
         if verbose:
-            print("MC simulation: The queue environments starts at state {}".format(self.env.getState()))
+            print("MC simulation: The queue environments starts at state {} (buffer size = {})" \
+                  .format(self.env.getState(), buffer_size_start))
 
         # Time step in the queue trajectory (the first time step is t = 0)
         done = False
         t = 0
         time_abs = 0.0      # Measure of the ABSOLUTE time of the latest event
+        # Information about the return cycles
+        buffer_size_prev = buffer_size_start
+        time_last_absorption = 0.0
+        n_cycles = 0
+        time_last_absorption = 0.0
+        # Information about the survival times
+        if track_survival:
+            time_last_activation = None
+            survival_times = [0.0]
+                ## NOTE: We include the initial time in the list of survival times so that the survival probability
+                ## associated to them corresponds to the segment at and AFTER the time value stored in survival_times.
+                ## In addition, this setup makes the survival probability function go from 1.0 to 0.0.
         while not done:
             t += 1
 
@@ -1190,8 +1257,34 @@ class SimulatorQueue(Simulator):
             # R(t): reward received by taking action A(t) and transition to S(t+1)
             self.update_trajectory(agent, (t_learn - 1) * (tmax + 1) + t, time_abs, state, action, reward)
 
+            # -- Check absorption cycles and survival times
+            # ABSORPTION: We touch a state in the absorption set COMING FROM ABOVE
+            buffer_size = self.env.getBufferSizeFromState(next_state)
+            if buffer_size == buffer_size_start and buffer_size_prev > buffer_size:
+                n_cycles += 1
+                time_last_absorption = time_abs
+                if track_survival and time_last_activation is not None:
+                    time_to_absorption = time_last_absorption - time_last_activation
+                    assert time_to_absorption > 0
+                    insort(survival_times, time_to_absorption, unique=False)
+                        ## NOTE: We use unique=False because it happened already that the inserted time is very
+                        ## close to a time already existing in the list of survival times and an assertion inside
+                        ## insort() failed! (although that should never happen... the set of time coincidences has measure 0)
+
+                    # Reset the time of last activation to None so that we are now alert to setting it again
+                    # the next time it occurs
+                    time_last_activation = None
+
+            # ACTIVATION: We touch a state having the start buffer size + 1 COMING FROM BELOW
+            # (Note that the condition "coming from below" is important because we normally need to observe the
+            # activation states under their steady-state activation distribution)
+            if track_survival and buffer_size == buffer_size_start + 1 and buffer_size_prev < buffer_size_start + 1:
+                time_last_activation = time_abs
+
             if self.debug:
-                print("{} | t={}: event={}, action={} -> state={}, reward={}".format(state, t, event, action, next_state, reward), end="\n")
+                print("{} | t={}: time={}, event={}, action={} -> state={}, reward={}".format(state, t, time_abs, event, action, next_state, reward), end="\n")
+
+            buffer_size_prev = buffer_size
 
             done = self.check_done(tmax, t, state, action, reward)
 
@@ -1200,7 +1293,13 @@ class SimulatorQueue(Simulator):
             print("==> agent ENDS at time t={} at state {} coming from state = {}, action = {}, reward = {}, gradient = {})" \
                     .format(t, self.env.getState(), state, action, reward, gradient_for_action))
 
-        return t
+        if track_absorptions:
+            if track_survival:
+                return t, time_abs, n_cycles, time_last_absorption, survival_times
+            else:
+                return t, time_abs, n_cycles, time_last_absorption
+        else:
+            return t, time_abs
 
     def estimate_stationary_probability_mc(self, start_state):
         """
@@ -1388,9 +1487,36 @@ class SimulatorQueue(Simulator):
 
         return probas_stationary
 
+    def estimate_survival_probability(self, survival_times):
+        assert survival_times[0] == 0.0
+        # Number of observed death events used to measure survival times
+        N = len(survival_times) - 1
+
+        if N > 0:
+            proba_surv = [n / N for n in range(N, -1, -1)] # This is N downto 0 (i.e. N+1 elements as there are in survival_times)
+            assert proba_surv[-1] == 0.0
+        else:
+            proba_surv = [1.0]
+
+        assert proba_surv[0] == 1.0
+        return pd.DataFrame.from_items([('t', survival_times),
+                                        ('P(T>t)', proba_surv)])
+
+    def estimate_expected_cycle_time(self, n_cycles, time_end_last_cycle, time_end_simulation):
+        "Estimates the expected return time to the initial buffer size"
+        if n_cycles > 0:
+            assert time_end_last_cycle > 0.0
+            expected_cycle_time = time_end_last_cycle / n_cycles
+        else:
+            warnings.warn("No absorption cycle was observed, the expected absorption time is estimated as the maximum time observed in the simulation: {}".format(time_end_simulation))
+            expected_cycle_time = time_end_simulation
+        assert expected_cycle_time > 0.0
+
+        return expected_cycle_time
+
     @measure_exec_time
     def run_simulation_fv(self, t_learn, buffer_size_absorption, proba_surv, expected_absorption_time,
-                                agent=None, verbose=False, verbose_period=1):
+                                agent=None, verbose=False, verbose_period=1, plot=False, ax=None):
         """
         Runs the Fleming-Viot simulation of the particle system and estimates the expected reward
         (equivalent to the blocking probability when the blocking reward is always equal to 1)
@@ -1492,7 +1618,10 @@ class SimulatorQueue(Simulator):
                 idx_reactivate += 1
             assert idx_reactivate < self.N, "The reactivation particle ID ({}) is < N (={}) for particle with ID = {}" \
                                             .format(idx_reactivate, self.N, idx_particle)
+            assert idx_reactivate != idx_particle, "The particle chosen for reactivation ({}) is different from the particle being reactivated ({})" \
+                                                    .format(idx_reactivate, idx_particle)
 
+            # Update the state of the reactivated particle to the reactivation state
             self.envs[idx_particle].setState( self.envs[idx_reactivate].getState() )
 
             return idx_reactivate
@@ -1533,6 +1662,13 @@ class SimulatorQueue(Simulator):
 
             # Merge the times where Phi(t,bs) and P(T>t) are measured
             df_proba_surv_phi = merge_proba_survival_and_phi(proba_surv, df_phi)
+
+            if DEBUG_ESTIMATORS:
+                plt.figure()
+                plt.step(df_proba_surv_phi['t'], df_proba_surv_phi['P(T>t)'], 'b-', where='post')
+                colors = ['green', 'red']
+                for idx, bs in enumerate(buffer_sizes_of_interest):
+                    plt.step(df_proba_surv_phi['t'], df_proba_surv_phi['Phi'][bs], color=colors[idx], where='post')
 
             # Stationary probability for each buffer size of interest
             probas_stationary, integrals = estimate_proba_stationary(df_proba_surv_phi, expected_absorption_time)
@@ -1622,7 +1758,7 @@ class SimulatorQueue(Simulator):
 
             if tracemalloc.is_tracing():
                 mem_snapshot_2 = tracemalloc.take_snapshot()
-                mem_stats_diff = mem_snapshot_2.compare_to(mem_snapshot_1, key_type='lineno')    # Possible key_type's are 'filename', 'lineno', 'traceback' 
+                mem_stats_diff = mem_snapshot_2.compare_to(mem_snapshot_1, key_type='lineno')    # Possible key_type's are 'filename', 'lineno', 'traceback'
                 if self.show_messages(verbose, verbose_period, t_learn):
                     print("[MEM] estimate_proba_stationary: Top difference in memory usage:")
                     for stat in mem_stats_diff[:10]:
@@ -1720,6 +1856,11 @@ class SimulatorQueue(Simulator):
             ## maxtime: it's useless to go with the FV simulation beyond the maximum observed survival time
             ## because the contribution to the integral used in the estimation of the average reward is 0.0 after that.
         is_any_phi_value_gt_0 = False
+        idx_reactivate = None
+        if plot:
+            # Variables needed to udpate the plot that shows the trajectories of the particles (online)
+            time0 = [0.0] * self.N
+            y0 = [buffer_size_absorption + 1] * self.N
         while not done:
             t += 1
 
@@ -1750,13 +1891,30 @@ class SimulatorQueue(Simulator):
                 if self.envs[idx_particle].getBufferSizeFromState(next_state) == buffer_size_absorption:
                     # The particle has been absorbed
                     # => Reactivate it to any of the other particles
-                    reactivate_particle(idx_particle)
+                    if plot:
+                        # Show the absorption before reactivation takes place
+                        y = self.env.getBufferSizeFromState(next_state)
+                        self.plot_update_trajectory(ax, idx_particle, buffer_size_absorption+1, time0[idx_particle], y0[idx_particle], event_times[-1], y)
+                        time0[idx_particle] = event_times[-1]
+                        y0[idx_particle] = y
+                    idx_reactivate = reactivate_particle(idx_particle)
                     next_state = self.envs[idx_particle].getState()
+                    if DEBUG_TRAJECTORIES:
+                        print("*** Particle {} REACTIVATED to particle {}".format(idx_particle, idx_reactivate))
 
-            if self.debug:
-                print("{} | t={}: event={}, action={} -> state={}, reward={}".format(state, t, event, action, next_state, reward), end="\n")
+            if DEBUG_TRAJECTORIES:
+                print("P=P{}: {} | t={}: time={}, event={}, action={} -> state={}, reward={}" \
+                      .format(idx_particle, state, t, event_times[-1], event, action, next_state, reward), end="\n")
 
             is_any_phi_value_gt_0 = max([is_any_phi_value_gt_0, update_phi(phi)])
+
+            if plot:
+                y = self.env.getBufferSizeFromState(next_state)
+                self.plot_update_trajectory(ax, idx_particle, buffer_size_absorption+1, time0[idx_particle], y0[idx_particle], event_times[-1], y, r=idx_reactivate)
+                time0[idx_particle] = event_times[-1]
+                y0[idx_particle] = y
+
+            idx_reactivate = None
 
         # DONE
         if self.show_messages(verbose, verbose_period, t_learn):
@@ -2362,6 +2520,8 @@ class SimulatorQueue(Simulator):
             err_phi = simul_info.get('err_phi', 0)  # expected relative error in the estimation of Phi(t,K) when using N particles
             err_et = simul_info.get('err_et', 0)    # expected relative error in the estimation of E(T_A) when using T time steps
             seed = simul_info.get('seed')
+            expected_absorption_time = simul_info.get('expected_absorption_time')
+            n_cycles = simul_info.get('n_cycles')
             nevents_mc = simul_info.get('nevents_mc', 0)
             nevents_proba = simul_info.get('nevents_proba', 0)
             ntrajectories_Q = simul_info.get('n_Q', 0.0)
@@ -2375,6 +2535,9 @@ class SimulatorQueue(Simulator):
             T = 0
             err_phi = 0.0
             err_et = 0.0
+            seed = None
+            expected_absorption_time = None
+            n_cycles = None
             nevents_mc = 0
             nevents_proba = 0
             ntrajectories_Q = 0.0
@@ -2396,7 +2559,7 @@ class SimulatorQueue(Simulator):
         agent.getLearnerP().update_learning_rate_by_episode()
 
         if self.save:
-            self.fh_results.write("{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}\n" \
+            self.fh_results.write("{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}\n" \
                                     .format(self.case,
                                             t_learn,
                                             self.envs[0].getParamsRewardFunc().get('buffer_size_ref', None)-1,  # -1 because buffer_size_ref is K and the theta parameter, which is the one we want to store here is K-1
@@ -2411,6 +2574,8 @@ class SimulatorQueue(Simulator):
                                             err_phi,
                                             err_et,
                                             seed,
+                                            expected_absorption_time,
+                                            n_cycles,
                                             self.proba_stationary[-1][0],
                                             self.proba_stationary[-1][1],
                                             self.Q_diff[-1][0],
@@ -2487,6 +2652,34 @@ class SimulatorQueue(Simulator):
 
     def setNumLearningSteps(self, t_learn):
         self.dict_learning_params['t_learn'] = t_learn
+
+    def plot_update_trajectory(self, ax, p, J, x0, y0, x1, y1, r=None):
+        "p: particle number to update; r: particle to which p is reactivated (if any)"
+        assert ax is not None
+        policy = self.getLearnerP().getPolicy()
+        K = policy.getBufferSizeForDeterministicBlocking()
+        colormap = cm.get_cmap("jet")
+        if r is not None:
+            # Mark the color of the line with the color of the reactivation particle
+            c = r
+        else:
+            c = p
+        color = colormap((c + 1) / self.N)
+        # Non-overlapping step plots at vertical positions (K+1)*p
+        print("Updating TRAJECTORY of particle {} (K={}, J={}): [{}, {}] -> [{}, {}]".format(p, K, J, x0, y0, x1, y1))
+        ax.step([x0, x1], [(K + 1) * p + y0, (K + 1) * p + y1], 'x-', where='post', color=color, markersize=3)
+
+        # Reference lines
+        reflines_zero = range(0, (K+1)*self.N, K+1)
+        reflines_absorption = range(J-1, J-1+(K+1)*self.N, K+1)
+        reflines_block = range(K, K+(K+1)*self.N, K+1)
+        ax.hlines(reflines_block, 0, x1, color='gray', linestyles='dashed')
+        ax.hlines(reflines_absorption, 0, x1, color='red', linestyles='dashed')
+        ax.hlines(reflines_zero, 0, x1, color='gray')
+
+        # Vertical line when the particle has been reactivated
+        if r is not None:
+            ax.axvline(x1, color=color, linestyle='dashed')
 
 
 if __name__ == "__main__":
@@ -2603,6 +2796,7 @@ if __name__ == "__main__":
 
         # Learning method (MC or FV)
         n_particles_fv = 30; t_sim = 50
+        #n_particles_fv = 5; t_sim = 20     # To use when DEBUG_TRAJECTORIES = True
         learning_method = LearningMethod.FV; nparticles = n_particles_fv; symbol = 'g.-'
 
         # Define the Learners (of the value function and the policy)
@@ -2693,7 +2887,13 @@ if __name__ == "__main__":
         show_exec_params(params)
         # Set the initial theta value
         simul.getLearnerP().getPolicy().setThetaParameter(theta_start)
-        _, _, df_learning = simul.run(dict_params_simul, dict_params_info=dict_params_info, seed=seed, verbose=False)
+        if DEBUG_TRAJECTORIES:
+            plt.figure()
+            ax = plt.gca()
+            plt.title("N = {}, K= {}, T = {}".format(nparticles, int( np.ceil(theta_start+1) ), t_sim))
+        else:
+            ax = None
+        _, _, df_learning = simul.run(dict_params_simul, dict_params_info=dict_params_info, seed=seed, verbose=False, ax=ax)
 
         print(df_learning)
         # EXPECTED RESULT WHEN USING REINFORCE_TRUE
@@ -3203,9 +3403,9 @@ if __name__ == "__main__":
         # MC (with no benchmark)
         #learning_method = LearningMethod.MC; plot_trajectories = False; symbol = 'b.-'; benchmark_file = None
         # MC (with benchmark)
-        learning_method = LearningMethod.MC; plot_trajectories = False; symbol = 'b.-'; benchmark_file = os.path.join(os.path.abspath(resultsdir), "benchmark_fv.csv")
+        #learning_method = LearningMethod.MC; plot_trajectories = False; symbol = 'b.-'; benchmark_file = os.path.join(os.path.abspath(resultsdir), "benchmark_fv.csv")
         # FV
-        #learning_method = LearningMethod.FV; plot_trajectories = False; symbol = 'g.-'; benchmark_file = None
+        learning_method = LearningMethod.FV; plot_trajectories = False; symbol = 'g.-'; benchmark_file = None
         if learning_method == LearningMethod.FV:
             learnerV = LeaFV
         else:
@@ -3263,16 +3463,16 @@ if __name__ == "__main__":
         # Open the file to store the results
         if save_results:
             # Initialize the output file with the results with the column names
-            simul.fh_results.write("case,t_learn,theta_true,theta,theta_next,K,J/K,J,exponent,N,T,err_phi,err_et,seed,Pr(K-1),Pr(K),Q_diff(K-1),Q_diff(K),alpha,V,gradV,nevents_mc,nevents_proba,ntrajectories_Q\n")
+            simul.fh_results.write("case,t_learn,theta_true,theta,theta_next,K,J/K,J,exponent,N,T,err_phi,err_et,seed,E(T),n_cycles,Pr(K-1),Pr(K),Q_diff(K-1),Q_diff(K),alpha,V,gradV,nevents_mc,nevents_proba,ntrajectories_Q\n")
 
         # Run the simulations, either from parameters defined by a benchmark file or from parameters defined below
         if benchmark_file is None:
             # -- Iterate on each set of parameters defined here
             # theta_true_values = np.linspace(start=1.0, stop=20.0, num=20)
             theta_true_values = [10.0 - 1]  # [32.0-1, 34.0-1, 36.0-1] #[10.0-1, 15.0-1, 20.0-1, 25.0-1, 30.0-1]  # 39.0
-            theta_start_values = [20.0 - 1, 25.0 - 1]
-            J_factor_values = [0.2, 0.3, 0.5]  # [0.2, 0.3, 0.5, 0.7]
-            NT_exponents = [-2, -1, 0, 1]  # Exponents to consider for different N and T values as in exp(exponent)*N0, where N0 is the reference value to achieve a pre-specified relative error
+            theta_start_values = [19.0] #[20.0 - 1, 25.0 - 1]
+            J_factor_values = [0.2] #[0.2, 0.3, 0.5]  # [0.2, 0.3, 0.5, 0.7]
+            NT_exponents = [0] #[-2, -1, 0, 1]  # Exponents to consider for different N and T values as in exp(exponent)*N0, where N0 is the reference value to achieve a pre-specified relative error
             # Accepted relative errors for the estimation of Phi and of E(T_A)
             error_rel_phi = 0.5
             error_rel_et = 0.5
