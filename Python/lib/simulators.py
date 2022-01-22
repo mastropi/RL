@@ -927,8 +927,9 @@ class SimulatorQueue(Simulator):
 
                 # Smart selection of the start state as one having buffer size = K-1 so that we can better estimate Pr(K-1)
                 #start_state = self.choose_state_for_buffer_size(self.env, K)
-                # Selection of the start state as one having buffer size = J, in order to have a fair(?) comparison with the FV method
-                start_state = self.choose_state_for_buffer_size(self.env, dict_params_simul['buffer_size_activation'])
+                # Selection of the start state as one having buffer size = J-1, in order to have a fair comparison with the FV method
+                # where particles are reactivated when they reach J-1.
+                start_state = self.choose_state_for_buffer_size(self.env, dict_params_simul['buffer_size_activation'] - 1)
                 t, _ = self.run_simulation_mc(t_learn, start_state, t_sim, seed=dict_params_simul['seed'], verbose=verbose, verbose_period=verbose_period)
                 probas_stationary, time_step_last_return, last_time_at_start_buffer_size = self.estimate_stationary_probability_mc(start_state)
                 nevents_mc = t
@@ -1858,7 +1859,7 @@ class SimulatorQueue(Simulator):
         is_any_phi_value_gt_0 = False
         idx_reactivate = None
         if plot:
-            # Variables needed to udpate the plot that shows the trajectories of the particles (online)
+            # Variables needed to update the plot that shows the trajectories of the particles (online)
             time0 = [0.0] * self.N
             y0 = [buffer_size_absorption + 1] * self.N
         while not done:
@@ -2759,8 +2760,7 @@ if __name__ == "__main__":
         phat = 1.0 * nevents_by_rate / N
         se_phat = np.sqrt(p * (1 - p) / N)
         print("EXPECTED / OBSERVED / SE proportions of events by rate on N={}:\n{}".format(N, np.c_[p, phat, se_phat]))
-        assert np.allclose(phat, p,
-                           atol=3 * se_phat)  # true probabilities should be contained in +/- 3 SE(phat) from phat
+        assert np.allclose(phat, p, atol=3 * se_phat)  # true probabilities should be contained in +/- 3 SE(phat) from phat
         # ---------------- generate_event() in SimulatorQueue --------------------- #
 
         # ----------------------- run() in SimulatorQueue ------------------------- #
@@ -3403,9 +3403,9 @@ if __name__ == "__main__":
         # MC (with no benchmark)
         #learning_method = LearningMethod.MC; plot_trajectories = False; symbol = 'b.-'; benchmark_file = None
         # MC (with benchmark)
-        #learning_method = LearningMethod.MC; plot_trajectories = False; symbol = 'b.-'; benchmark_file = os.path.join(os.path.abspath(resultsdir), "benchmark_fv.csv")
+        learning_method = LearningMethod.MC; plot_trajectories = False; symbol = 'b.-'; benchmark_file = os.path.join(os.path.abspath(resultsdir), "benchmark_fv.csv")
         # FV
-        learning_method = LearningMethod.FV; plot_trajectories = False; symbol = 'g.-'; benchmark_file = None
+        #learning_method = LearningMethod.FV; plot_trajectories = False; symbol = 'g.-'; benchmark_file = None
         if learning_method == LearningMethod.FV:
             learnerV = LeaFV
         else:
@@ -3695,6 +3695,12 @@ if __name__ == "__main__":
             ax.set_ylabel('grad(V)')
 
             # Plot evolution of theta
+            if is_scalar(t_sim):
+                title = "Method: {}, Optimum Theta = {}, Theta start = {}, t_sim = {:.0f}, t_learn = {:.0f}, fixed_window={}" \
+                          .format(learning_method.name, theta_true, theta_start, t_sim, t_learn, fixed_window)
+            else:
+                title = "Method: {}, Optimum Theta = {}, Theta start = {}, t_learn = {:.0f}, fixed_window={}" \
+                    .format(learning_method.name, theta_true, theta_start, t_learn, fixed_window)
             if plot_trajectories:
                 assert N == 1, "The simulated system has only one particle (N={})".format(N)
                 # NOTE: (2021/11/27) I verified that the values of learnerP.getRewards() for the last learning step
@@ -3731,13 +3737,11 @@ if __name__ == "__main__":
                 ax2.plot(times, [-r if r != 0.0 else None for r in simul.getLearnerP().getRewards()], 'r.')
                 ax2.set_ylabel("Reward")
                 ax2.set_yscale('log')
-                plt.title("Optimum Theta = {}, Theta start = {}, t_sim = {:.0f}, t_learn = {:.0f}, fixed_window={}" \
-                          .format(theta_true, theta_start, t_sim, t_learn, fixed_window))
+                plt.title(title)
             else:
                 plt.figure()
                 plt.plot(simul.getLearnerP().getPolicy().getThetas(), symbol)
-                plt.title("Method: {}, Optimum Theta = {}, Theta start = {}, t_sim = {:.0f}, t_learn = {:.0f}, fixed_window={}" \
-                          .format(learning_method.name, theta_true, theta_start, t_sim, t_learn, fixed_window))
+                plt.title(title)
                 ax = plt.gca()
                 ax.set_xlabel('Learning step')
                 ax.set_ylabel('theta')
