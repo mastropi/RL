@@ -644,9 +644,9 @@ class SimulatorQueue(Simulator):
                                     # HOWEVER, it is NOT always the case that this is the average reward, see the self.learn() method for more details.
         self.gradV = []             # Gradient of the value function (grad(J) in Sutton) for the theta before the update, that is responsible for the theta update.
         self.G = None               # G(t) for each simulation time step t as estimated by self.learn().
-        self.nevents_mc = []        # # events used in the Monte-Carlo simulation, either to estimate the stationary probabilities under the MC approach, or P(T>t) and E(T_A) under the FV approach.
-        self.nevents_proba = []     # # events used to estimate the stationary probability in each episode.
-        self.ntrajectories_Q = []   # Average number of trajectory pairs used to estimate Q_diff in each episode.
+        self.n_events_mc = []       # number of events used in the Monte-Carlo simulation, either to estimate the stationary probabilities under the MC approach, or P(T>t) and E(T_A) under the FV approach.
+        self.n_events_proba = []    # number of events used to estimate the stationary probability in each episode.
+        self.n_trajectories_Q = []  # Average number of trajectory pairs used to estimate Q_diff in each episode.
                                     # The average is over the trajectory pairs used to estimate Q_diff(K-1) and Q_diff(K)
 
     # IMPORTANT: This method overrides the method of the superclass! (so when reset() is called from the super()
@@ -773,7 +773,10 @@ class SimulatorQueue(Simulator):
             # to estimate P(T>t) and E(T_A) in the FV method.
             # => Use the number of simulation steps defined in the object
             dict_params_simul['nmeantimes'] = dict_params_simul['t_sim']    # This is used in Fleming-Viot simulation
-            t_sim = dict_params_simul['t_sim']                              # This is used in Monte-Carlo simulation
+            dict_params_simul['T'] = dict_params_simul['t_sim']                              # This is used in Monte-Carlo simulation
+
+        dict_params_info['verbose'] = verbose
+        dict_params_info['verbose_period'] = verbose_period
 
         if dict_params_info['plot']:
             # TODO: See the run() method in the Simulator class
@@ -816,6 +819,7 @@ class SimulatorQueue(Simulator):
         t_learn = 0
         while t_learn < self.dict_learning_params['t_learn']:
             t_learn += 1
+            dict_params_info['t_learn'] = t_learn
             # Reset the learners
             self.reset(reset_value_functions=False, reset_counts=False)
 
@@ -850,62 +854,24 @@ class SimulatorQueue(Simulator):
                     # There is a different simulation time for each learning step
                     assert len(dict_params_simul) == self.dict_learning_params['t_learn']
                     dict_params_simul['nmeantimes'] = dict_params_simul['t_sim'][t_learn - 1]
-                    t_sim = dict_params_simul['nmeantimes']
+                    dict_params_simul['T'] = dict_params_simul['nmeantimes']
 
                 #-- Estimation of the survival probability P(T>t) and the expected absorption cycle time, E(T_A) by MC
                 if self.show_messages(verbose, verbose_period, t_learn):
                     print("Running Monte-Carlo simulation on one particle starting at an absorption state with buffer size = {}..." \
                           .format(dict_params_simul['buffer_size_activation'] - 1))
-                #est_mc, expected_absorption_time, n_absorption_time_observations, \
+                #est_mc, expected_cycle_time, n_absorption_time_observations, \
                 #proba_surv, n_survival_curve_observations = \
                 #    estimate_proba_survival_and_expected_absorption_time_mc(self.env, self.agent, dict_params_simul,
                 #                                                            dict_params_info)
-                #nevents_mc = est_mc.nevents
+                #n_events_mc = est_mc.nevents
                 #n_cycles = n_absorption_time_observations
 
-                start_state = self.choose_state_for_buffer_size(self.env, dict_params_simul['buffer_size_activation'] - 1)
-                t, time_end_simulation, n_cycles, time_end_last_cycle, survival_times = \
-                    self.run_simulation_mc(t_learn, start_state, t_sim,
-                                           track_absorptions=True, track_survival=True,
-                                           seed=dict_params_simul['seed'], verbose=verbose, verbose_period=verbose_period)
-                nevents_mc = t
-
-                # Estimate P(T>t) and E(T_A)
-                proba_surv = self.estimate_survival_probability(survival_times)
-                expected_absorption_time = self.estimate_expected_cycle_time(n_cycles, time_end_last_cycle, time_end_simulation)
-
-                if DEBUG_ESTIMATORS or self.show_messages(verbose, verbose_period, t_learn):
-                    print("\n*** RESULTS OF MC ESTIMATION OF P(T>t) and E(T) on {} events ***".format(nevents_mc))
-                    #max_rows = pd.get_option('display.max_rows')
-                    #pd.set_option('display.max_rows', None)
-                    #print("P(T>t):\n{}".format(proba_surv))
-                    #pd.set_option('display.max_rows', max_rows)
-                    print("E(T) = {:.1f}, Max observed survival time = {:.1f}".format(expected_absorption_time, proba_surv['t'].iloc[-1]))
-
-                #-- FLeming-Viot simulation to compute the empirical distribution and then estimate the average reward
-                # The empirical distribution Phi(t, bs) estimates the conditional probability of buffer sizes bs
-                # for which the acceptance policy is > 0
-                assert self.N > 1, "The simulation system has more than one particle in Fleming-Viot mode ({})".format(self.N)
-                if DEBUG_ESTIMATORS or self.show_messages(verbose, verbose_period, t_learn):
-                    print("Running Fleming-Viot simulation on {} particles and absorption size = {}..." \
-                          .format(self.N, dict_params_simul['buffer_size_activation'] - 1))
-                t, event_times, phi, probas_stationary, expected_reward = \
-                    self.run_simulation_fv( t_learn,
-                                            dict_params_simul['buffer_size_activation'] - 1,   # We pass the absorption size to this function
-                                            proba_surv, expected_absorption_time,
-                                            verbose=verbose, verbose_period=verbose_period,
-                                            plot=DEBUG_TRAJECTORIES, ax=ax)
-                assert t == len(event_times) - 1, "The last time step of the simulation ({}) coincides with the number of events observed ({})" \
-                                                .format(t, len(event_times))
-                    ## We subtract 1 to len(event_times) because the first event time is 0.0 which is NOT an event time
-                if DEBUG_ESTIMATORS or self.show_messages(verbose, verbose_period, t_learn):
-                    print("\n*** RESULTS OF FLEMING-VIOT SIMULATION ***")
-                    #max_rows = pd.get_option('display.max_rows')
-                    #pd.set_option('display.max_rows', None)
-                    #print("Phi(t):\n{}".format(phi))
-                    #pd.set_option('display.max_rows', max_rows)
-                    print("P(K-1), P(K): {}".format(probas_stationary))
-                    print("rho = {}".format(expected_reward))
+                proba_blocking_fv, expected_reward, probas_stationary, \
+                    expected_cycle_time, n_cycles, \
+                        n_events_mc, n_events_fv = estimate_blocking_fv(self, dict_params_simul, dict_params_info)
+                # Equivalent (discrete) simulation time, as if it were a Monte-Carlo simulation
+                t = n_events_mc + n_events_fv
                 self.learnerV.setAverageReward(expected_reward)
                 self.learnerV.setProbasStationary(probas_stationary)
             else:
@@ -914,30 +880,19 @@ class SimulatorQueue(Simulator):
 
                 # Define the following two quantities as None because they are sent to the output results file
                 # in the FV case and here they should be found as existing variables.
-                n_cycles = None
-                expected_absorption_time = None
-
                 if not is_scalar(dict_params_simul['t_sim']):
                     # There is a different simulation time for each learning step
                     # => Use a number of simulation steps defined in a benchmark for each learning step
                     assert len(dict_params_simul['t_sim']) == self.dict_learning_params['t_learn'], \
                             "The number of simulation steps read from the benchmark file ({}) coincides with the number of learning steps ({})" \
                             .format(len(dict_params_simul['t_sim']), self.dict_learning_params['t_learn'])
-                    t_sim = dict_params_simul['t_sim'][t_learn - 1]
-
-                # Smart selection of the start state as one having buffer size = K-1 so that we can better estimate Pr(K-1)
-                #start_state = self.choose_state_for_buffer_size(self.env, K)
-                # Selection of the start state as one having buffer size = J-1, in order to have a fair comparison with the FV method
-                # where particles are reactivated when they reach J-1.
-                start_state = self.choose_state_for_buffer_size(self.env, dict_params_simul['buffer_size_activation'] - 1)
-                t, _ = self.run_simulation_mc(t_learn, start_state, t_sim, seed=dict_params_simul['seed'], verbose=verbose, verbose_period=verbose_period)
-                probas_stationary, time_step_last_return, last_time_at_start_buffer_size = self.estimate_stationary_probability_mc(start_state)
-                nevents_mc = t
-                assert nevents_mc == t_sim
-                if DEBUG_ESTIMATORS or self.show_messages(verbose, verbose_period, t_learn):
-                    print("\n*** RESULTS OF MONTE-CARLO SIMULATION on {} events ***".format(nevents_mc))
-                    print("P(K-1), P(K): {}, last return time to initial buffer size: time_step = {} ({:.1f}%), t = {:.1f}" \
-                          .format(probas_stationary, time_step_last_return, time_step_last_return / t * 100, last_time_at_start_buffer_size))
+                    dict_params_simul['T'] = dict_params_simul['t_sim'][t_learn - 1]
+                proba_blocking_mc, expected_reward, probas_stationary, expected_cycle_time, n_cycles, n_events = \
+                    estimate_blocking_mc(self, dict_params_simul, dict_params_info)
+                # Discrete simulation time
+                t = n_events
+                n_events_mc = n_events
+                n_events_fv = 0  # This information is output to the results file and therefore we set it to 0 here as we are in the MC approach
 
             if probas_stationary[K-1] > 0.0:
                 # When the parameterized policy is a linear step linear function with only one buffer size where its
@@ -985,7 +940,7 @@ class SimulatorQueue(Simulator):
             # Use this when using REINFORCE to learn theta
             #self.learn(self.agent, t)
             # Use this when estimating the theoretical grad(V)
-            err_phi, err_et = compute_rel_errors_for_fv_process(rhos, K, self.N, t_sim, dict_params_simul['buffer_size_activation_factor'])
+            err_phi, err_et = compute_rel_errors_for_fv_process(rhos, K, self.N, dict_params_simul['T'], dict_params_simul['buffer_size_activation_factor'])
             self.learn(self.agent, t,
                        probas_stationary=probas_stationary,
                        Q_values=dict({K-1: [Q0_Km1, Q1_Km1], K: [Q0_K, Q1_K]}),
@@ -995,14 +950,14 @@ class SimulatorQueue(Simulator):
                                         'J': dict_params_simul['buffer_size_activation'],
                                         'exponent': dict_info.get('exponent'),
                                         'N': self.N,
-                                        'T': t_sim,
+                                        'T': dict_params_simul['T'],
                                         'err_phi': err_phi,
                                         'err_et': err_et,
                                         'seed': dict_params_simul['seed'],
-                                        'expected_absorption_time': expected_absorption_time,
+                                        'expected_cycle_time': expected_cycle_time,
                                         'n_cycles': n_cycles,
-                                        'nevents_mc': nevents_mc,
-                                        'nevents_proba': t,
+                                        'n_events_mc': n_events_mc,
+                                        'n_events_proba': n_events_fv,
                                         'n_Q': np.mean([n_Km1, n_K])}))
 
             if self.show_messages(verbose, verbose_period, t_learn):
@@ -1024,9 +979,9 @@ class SimulatorQueue(Simulator):
                                             ('alpha', self.alphas),
                                             ('V', self.V),
                                             ('gradV', self.gradV),
-                                            ('nevents_mc', self.nevents_mc),
-                                            ('nevents_proba', self.nevents_proba),
-                                            ('ntrajectories_Q', self.ntrajectories_Q)
+                                            ('n_events_mc', self.n_events_mc),
+                                            ('n_events_proba', self.n_events_proba),
+                                            ('n_trajectories_Q', self.n_trajectories_Q)
                                                 ])
 
         dt_end = datetime.today().strftime("%Y-%m-%d %H:%M:%S")
@@ -1036,6 +991,11 @@ class SimulatorQueue(Simulator):
         print("Execution time: {:.1f} min, {:.1f} hours".format(time_elapsed / 60, time_elapsed / 3600))
 
         return self.learnerV, self.learnerP, df_learning
+
+    def get_blocking_buffer_sizes(self):
+        # TODO: (2021/12/08) These buffer sizes should be derived from the buffer sizes where the rejection probability is > 0
+        K = self.learnerP.getPolicy().getBufferSizeForDeterministicBlocking()
+        return [K - 1, K]
 
     def manage_job_arrival(self, t, env, agent, state, job_class):
         """
@@ -1145,6 +1105,7 @@ class SimulatorQueue(Simulator):
 
     @measure_exec_time
     def run_simulation_mc(self, t_learn, start_state, t_sim_max, agent=None,
+                                track_return_cycles=False,
                                 track_absorptions=False, track_survival=False,
                                 seed=None, verbose=False, verbose_period=1):
         """
@@ -1164,6 +1125,10 @@ class SimulatorQueue(Simulator):
         agent: (opt) Agent
             Agent object that is responsible of performing the actions on the environment and learning from them.
             default: None, in which case the agent defined in the object is used
+
+        track_return_cycles: (opt) bool
+            Whether to track the return cycles to the initial buffer size.
+            default: False
 
         track_absorptions: (opt) bool
             Whether to track the absorption times.
@@ -1187,16 +1152,25 @@ class SimulatorQueue(Simulator):
             default: 1 => be verbose at every simulation step.
 
         Return: tuple
-        If track_absorptions = False and track_survival = False:
+        If track_return_cycles = False, track_absorptions = False and track_survival = False:
         - t: the last time step of the simulation process.
         - time: the continuous time of the last observed event during the simulation.
+
+        If track_return_cycles = True, in addition:
+        - n_cycles: the number of cycles observed in the simulation, until the last return to the initial buffer size.
+
         If track_absorptions = True and track_survival = False, in addition:
-        - n_cycles: the number of cycles observed in the simulation, until the last return to the start buffer size.
-        - time_end_last_cycle: the continuous time at which the Markov Chain returns to the start buffer size.
-        If track_survival = True, in addition:
+        - n_cycles: the number of cycles observed in the simulation, until the last return to the initial buffer size
+        from ABOVE (i.e. as if it were an absorption).
+        - time_end_last_cycle: the continuous time at which the Markov Chain returns to the initial buffer size
+        from ABOVE (i.e. as if it were an absorption).
+
+        If track_absorptions = True and track_survival = True, in addition:
         - survival_times: list with the observed survival times, sorted increasingly.
 
-        Note that track_survival = True has no effect if track_absorptions = False.
+        Note that:
+        - either track_return_cycles or track_absorptions may be True. If both are True, the first one has precedence.
+        - track_survival = True has no effect if track_absorptions = False.
         """
         #-- Parse input parameters
         if agent is None:
@@ -1221,8 +1195,9 @@ class SimulatorQueue(Simulator):
         time_abs = 0.0      # Measure of the ABSOLUTE time of the latest event
         # Information about the return cycles
         buffer_size_prev = buffer_size_start
-        time_last_absorption = 0.0
-        n_cycles = 0
+        n_cycles_return = 0
+        n_cycles_absorption = 0
+        time_last_return = 0.0
         time_last_absorption = 0.0
         # Information about the survival times
         if track_survival:
@@ -1290,23 +1265,28 @@ class SimulatorQueue(Simulator):
             # R(t): reward received by taking action A(t) and transition to S(t+1)
             self.update_trajectory(agent, (t_learn - 1) * (tmax + 1) + t, time_abs, state, action, reward)
 
-            # -- Check absorption cycles and survival times
-            # ABSORPTION: We touch a state in the absorption set COMING FROM ABOVE
+            # -- Check return and absorption cycles and survival times
+            # RETURN: The initial buffer size is observed again.
+            # ABSORPTION: The initial buffer size is observed again when coming from ABOVE, i.e. from a state
+            # with a larger buffer size.
             buffer_size = self.env.getBufferSizeFromState(next_state)
-            if buffer_size == buffer_size_start and buffer_size_prev > buffer_size:
-                n_cycles += 1
-                time_last_absorption = time_abs
-                if track_survival and time_last_activation is not None:
-                    time_to_absorption = time_last_absorption - time_last_activation
-                    assert time_to_absorption > 0
-                    insort(survival_times, time_to_absorption, unique=False)
-                        ## NOTE: We use unique=False because it happened already that the inserted time is very
-                        ## close to a time already existing in the list of survival times and an assertion inside
-                        ## insort() failed! (although that should never happen... the set of time coincidences has measure 0)
+            if buffer_size == buffer_size_start:
+                n_cycles_return += 1
+                time_last_return = time_abs
+                if buffer_size_prev > buffer_size:
+                    n_cycles_absorption += 1
+                    time_last_absorption = time_abs
+                    if track_survival and time_last_activation is not None:
+                        time_to_absorption = time_last_absorption - time_last_activation
+                        assert time_to_absorption > 0
+                        insort(survival_times, time_to_absorption, unique=False)
+                            ## NOTE: We use unique=False because it happened already that the inserted time is very
+                            ## close to a time already existing in the list of survival times and an assertion inside
+                            ## insort() failed! (although that should never happen... the set of time coincidences has measure 0)
 
-                    # Reset the time of last activation to None so that we are now alert to setting it again
-                    # the next time it occurs
-                    time_last_activation = None
+                        # Reset the time of last activation to None so that we are now alert to setting it again
+                        # the next time it occurs
+                        time_last_activation = None
 
             # ACTIVATION: We touch a state having the start buffer size + 1 COMING FROM BELOW
             # (Note that the condition "coming from below" is important because we normally need to observe the
@@ -1330,13 +1310,14 @@ class SimulatorQueue(Simulator):
             plotting.plot_event_times(self.job_rates_by_server, times_inter_arrival, jobs_arrival, class_name="Job class")
             plotting.plot_event_times(self.env.getServiceRates(), times_service, servers_service, class_name="Server")
 
+        if track_return_cycles:
+            return t, time_abs, n_cycles_return, time_last_return
         if track_absorptions:
             if track_survival:
-                return t, time_abs, n_cycles, time_last_absorption, survival_times
+                return t, time_abs, n_cycles_absorption, time_last_absorption, survival_times
             else:
-                return t, time_abs, n_cycles, time_last_absorption
-        else:
-            return t, time_abs
+                return t, time_abs, n_cycles_absorption, time_last_absorption
+        return t, time_abs
 
     def estimate_stationary_probability_mc(self, start_state):
         """
@@ -1353,9 +1334,12 @@ class SimulatorQueue(Simulator):
             and that therefore we are doing the correct computation to estimate the stationary probability
             of the buffer sizes of interest.
 
-        Return: dict
-        Dictionary with the estimated stationary probability for buffer sizes K-1 and K, where K is the first integer
+        Return: tuple
+        Tuple with the following elements:
+        - probas_stationary: Dictionary with the estimated stationary probability for buffer sizes K-1 and K, where K is the first integer
         larger than or equal to theta + 1  --theta being the parameter of the linear step acceptance policy.
+        - last_t_to_initial_position: time step at which the system returned to the initial buffer size for the last time.
+        - last_time_to_initial_position: continuous time at which the system returned to the initial buffer size for the last time.
         """
         # Event times
         times = self.learnerV.getTimes()
@@ -1524,7 +1508,7 @@ class SimulatorQueue(Simulator):
 
         return probas_stationary
 
-    def estimate_survival_probability(self, survival_times):
+    def compute_survival_probability(self, survival_times):
         assert survival_times[0] == 0.0
         # Number of observed death events used to measure survival times
         N = len(survival_times) - 1
@@ -1550,6 +1534,61 @@ class SimulatorQueue(Simulator):
         assert expected_cycle_time > 0.0
 
         return expected_cycle_time
+
+    def estimate_expected_reward(self, probas_stationary):
+        """
+        Estimates the expected reward of the queue system assuming a non-zero reward happens at the buffer sizes
+        of interest, i.e. those where the policy yields a positive probability of rejection.
+
+        The expected reward is estimated as:
+        E[R] = sum_{buffer sizes bs with rejection probability Pi > 0} { R(bs) * Pi(reject/bs) * Pr(bs) }
+
+        where R(bs) is reward associated to a rejection at buffer size bs defined in the queue environment,
+        and Pr(bs) is the stationary probability estimate of buffer size bs.
+
+        Arguments:
+        probas_stationary: dict
+            Dictionary with the estimated stationary probability of the buffer sizes of interest which are
+            the dictionary keys.
+
+        Return: float
+        Estimated expected reward.
+        """
+        expected_reward = 0.0
+        buffer_sizes_of_interest = self.get_blocking_buffer_sizes()
+        assert len(probas_stationary) == len(buffer_sizes_of_interest)
+        for bs in buffer_sizes_of_interest:
+            expected_reward += self.compute_reward_for_buffer_size(bs) * \
+                               self.learnerP.getPolicy().getPolicyForAction(Actions.REJECT, None, bs) * \
+                               probas_stationary[bs]
+        return expected_reward
+
+    def compute_proba_blocking(self, probas_stationary):
+        """
+        Computes the blocking probability of the queue system
+
+        The blocking probability is computed as:
+        Pr(BLOCK) = sum_{buffer sizes bs with rejection probability Pi > 0} { Pi(reject/bs) * Pr(bs) }
+
+        where Pr(bs) is the estimated stationary probability for buffer size bs.
+
+        Arguments:
+        probas_stationary: dict
+            Dictionary with the estimated stationary probability of the buffer sizes of interest which are
+            the dictionary keys.
+
+        Return: float
+        Estimated blocking probability.
+        """
+        proba_blocking = 0.0
+        buffer_sizes_of_interest = self.get_blocking_buffer_sizes()
+        assert len(probas_stationary) == len(buffer_sizes_of_interest), \
+            "The length of the probas_stationary dictionary is the same as the number of buffer sizes of interest ({}):\n{}" \
+                .format(buffer_sizes_of_interest, probas_stationary)
+        for bs in buffer_sizes_of_interest:
+            proba_blocking += self.learnerP.getPolicy().getPolicyForAction(Actions.REJECT, None, bs) * \
+                              probas_stationary[bs]
+        return proba_blocking
 
     @measure_exec_time
     def run_simulation_fv(self, t_learn, buffer_size_absorption, proba_surv, expected_absorption_time,
@@ -1599,14 +1638,8 @@ class SimulatorQueue(Simulator):
         which are an estimate of the probability of those buffer sizes conditional to survival (not absorption).
         - probas_stationary: dictionary of floats indexed by the buffer sizes of interest, namely K-1 and K, containing
         the estimated stationary probability at those buffer sizes.
-        - expected_reward: the estimated expected reward.
         """
         #---------------------------------- Auxiliary functions ------------------------------#
-        def get_blocking_buffer_sizes():
-            # TODO: (2021/12/08) These buffer sizes should be derived from the buffer sizes where the acceptance policy is > 0
-            K = self.learnerP.getPolicy().getBufferSizeForDeterministicBlocking()
-            return [K-1, K]
-
         def update_phi(phi):
             """
             Updates the conditional probability of each buffer size of interest, which are given by the keys
@@ -1764,13 +1797,16 @@ class SimulatorQueue(Simulator):
             """
             Computes the stationary probability for each buffer size of interest via Approximation 1 in Matt's draft"
 
-            :param df_phi_proba_surv: pandas data frame
+            Arguments:
+            df_phi_proba_surv: pandas data frame
                 Data frame with the survival probability P(T>t) and the empirical distribution for each buffer size
                 of interest on which the integral that leads to the Fleming-Viot estimation of the stationary
                 probability of the buffer size is computed.
-            :param expected_absorption_time: float
+
+            expected_absorption_time: float
                 Estimated expected absorption cycle time.
-            :return: tuple of dict
+
+            Return: tuple of dict
             Duple with two dictionaries indexed by the buffer sizes (bs) of interest with the following content:
             - the stationary distribution
             - the value of the integral P(T>t)*Phi(t,bs)
@@ -1804,40 +1840,6 @@ class SimulatorQueue(Simulator):
                         print(stat)
 
             return probas_stationary, integrals
-
-        def estimate_expected_reward(phi, probas_stationary):
-            """
-            Estimates the expected reward of the queue system assuming a non-zero reward happens at the buffer sizes
-            defined by the keys (typically K-1 and K) contained in the phi dictionary, which stores
-            the empirical distribution of each buffer size at each event time t, an estimate of Pr(bs / T>t),
-            where T is the time to absorption (survival time) of the process with absorption at the
-            buffer_size_absorption value, derived from the original non-absorbed process.
-
-            The expected reward is estimated as:
-            E[R] = sum_{buffer sizes bs with rejection probability Pi > 0} { R(bs) * Pi(reject/bs) * Pr(bs) }
-
-            where R(bs) is reward associated to a rejection at buffer size bs defined in the queue environment,
-            and Pr(bs) is the stationary probability estimate of buffer size bs.
-
-            Arguments:
-            phi: dict
-                Dictionary with the empirical distribution of the buffer sizes of interest which are
-                the dictionary keys. The empirical distribution gives the probability of those buffer sizes
-                at each time, conditional to survival up to that time.
-
-            probas_stationary: dict
-                Dictionary with the estimated stationary probability of the buffer sizes of interest which are
-                the dictionary keys.
-
-            Return: float
-            Estimated expected reward.
-            """
-            expected_reward = 0.0
-            for bs in phi.keys():
-                expected_reward += self.compute_reward_for_buffer_size(bs) * \
-                                  self.learnerP.getPolicy().getPolicyForAction(Actions.REJECT, None, bs) * \
-                                  probas_stationary[bs]
-            return expected_reward
         #---------------------------------- Auxiliary functions ------------------------------#
 
         #---------------------------- Check input parameters ---------------------------------#
@@ -1875,7 +1877,7 @@ class SimulatorQueue(Simulator):
                     .format(i, env.getState())
 
         # Buffer sizes whose stationary probability is of interest
-        buffer_sizes_of_interest = get_blocking_buffer_sizes()
+        buffer_sizes_of_interest = self.get_blocking_buffer_sizes()
 
         # Event times (continuous times at which an event happens)
         # The first event time is 0.0
@@ -2008,17 +2010,13 @@ class SimulatorQueue(Simulator):
         if is_any_phi_value_gt_0:
             # Compute the stationary probability of each buffer size bs in Phi(t,bs) using Phi(t,bs), P(T>t) and E(T_A)
             probas_stationary, integrals = estimate_stationary_probability(event_times, phi, proba_surv, expected_absorption_time)
-
-            # Compute the average reward based on the stationary probability and the empirical distribution of each buffer size bs
-            expected_reward = estimate_expected_reward(phi, probas_stationary)
         else:
             probas_stationary = dict()
             integrals = dict()
             for bs in phi.keys():
                 probas_stationary[bs] = integrals[bs] = 0.0
-            expected_reward = 0.0    # The average reward is non-zero only when the stationary probability of at least one buffer size of interest is non-zero
 
-        return t, event_times, phi, probas_stationary, expected_reward
+        return t, event_times, phi, probas_stationary
 
     @measure_exec_time
     def estimate_Q_values_until_stationarity(self, t_learn, t_sim_max=50, N=100, verbose=False, verbose_period=1):
@@ -2546,9 +2544,9 @@ class SimulatorQueue(Simulator):
             Dictionary containing relevant information (for keeping a record of) about the simulations run to achieve
             the estimated stationary probabilities and the Q values.
             When given, the dictionary is expected to contain the following keys:
-            - 'nevents_mc': # events in the MC simulation that estimates the stationary probabilities or that estimates
+            - 'n_events_mc': # events in the MC simulation that estimates the stationary probabilities or that estimates
             P(T>t) and E(T_A) in the FV approach.
-            - 'nevents_proba': # events in the FV simulation that estimates Phi(t) for the buffer sizes of interest.
+            - 'n_events_fv': # events in the FV simulation that estimates Phi(t) for the buffer sizes of interest.
             - 'n_Q': average number of # trajectory pairs used to estimate all the Q values given in the Q_values dict.
             In general, this is an average because we may need to run different trajectory pairs, for instance when
             using IGA, where we need to estimate Q_diff(K-1) and Q_diff(K), i.e. differences of Q between the two
@@ -2600,11 +2598,11 @@ class SimulatorQueue(Simulator):
             err_phi = simul_info.get('err_phi', 0)  # expected relative error in the estimation of Phi(t,K) when using N particles
             err_et = simul_info.get('err_et', 0)    # expected relative error in the estimation of E(T_A) when using T time steps
             seed = simul_info.get('seed')
-            expected_absorption_time = simul_info.get('expected_absorption_time')
+            expected_cycle_time = simul_info.get('expected_cycle_time')
             n_cycles = simul_info.get('n_cycles')
-            nevents_mc = simul_info.get('nevents_mc', 0)
-            nevents_proba = simul_info.get('nevents_proba', 0)
-            ntrajectories_Q = simul_info.get('n_Q', 0.0)
+            n_events_mc = simul_info.get('n_events_mc', 0)
+            n_events_fv = simul_info.get('n_events_fv', 0)
+            n_trajectories_Q = simul_info.get('n_Q', 0.0)
         else:
             t_learn = 0
             K = 0
@@ -2616,11 +2614,11 @@ class SimulatorQueue(Simulator):
             err_phi = 0.0
             err_et = 0.0
             seed = None
-            expected_absorption_time = None
+            expected_cycle_time = None
             n_cycles = None
-            nevents_mc = 0
-            nevents_proba = 0
-            ntrajectories_Q = 0.0
+            n_events_mc = 0
+            n_events_fv = 0
+            n_trajectories_Q = 0.0
 
         self.alphas += [agent.getLearnerP().getLearningRate()]
         self.thetas += [theta_prev]
@@ -2630,9 +2628,9 @@ class SimulatorQueue(Simulator):
         self.V += [V]               # NOTE: This is NOT always the average value, rho... for instance, NOT when linear_theoretical_from_estimated_values() is called above
         self.gradV += [gradV]
         self.G = G                  # Note that G is Q_diff when we estimate the gradient from its theoretical expression, using the estimates of the stationary probabilities and the differences of Q
-        self.nevents_mc += [nevents_mc]
-        self.nevents_proba += [nevents_proba]
-        self.ntrajectories_Q += [ntrajectories_Q]
+        self.n_events_mc += [n_events_mc]
+        self.n_events_fv += [n_events_fv]
+        self.n_trajectories_Q += [n_trajectories_Q]
 
         agent.getLearnerP().update_learning_time()
         #print("*** Learning-time updated: time = {} ***".format(agent.getLearnerP().getLearningTime()))
@@ -2654,7 +2652,7 @@ class SimulatorQueue(Simulator):
                                             err_phi,
                                             err_et,
                                             seed,
-                                            expected_absorption_time,
+                                            expected_cycle_time,
                                             n_cycles,
                                             self.proba_stationary[-1][0],
                                             self.proba_stationary[-1][1],
@@ -2663,9 +2661,9 @@ class SimulatorQueue(Simulator):
                                             self.alphas[-1],
                                             self.V[-1],
                                             self.gradV[-1],
-                                            self.nevents_mc[-1],
-                                            self.nevents_proba[-1],
-                                            self.ntrajectories_Q[-1]
+                                            self.n_events_mc[-1],
+                                            self.n_events_fv[-1],
+                                            self.n_trajectories_Q[-1]
                                             ))
 
     def check_done(self, tmax, t, state, action, reward):
@@ -2762,11 +2760,151 @@ class SimulatorQueue(Simulator):
             ax.axvline(x1, color=color, linestyle='dashed')
 
 
+def estimate_blocking_mc(simul, dict_params_simul, dict_params_info):
+    """
+    Estimates the blocking probability using Monte-Carlo
+
+    Arguments:
+    simul: SimulatorQueue
+        Simulation object used for the simulation that allows estimating the blocking probability.
+
+    dict_params_simul: dict
+        Dictionary containing the simulation parameters.
+
+    dict_params_info: dict
+        Dictionary containing information to display or parameters to deal with the information to display.
+
+    Return: tuple
+    Tuple with the following elements:
+    - proba_blocking: the estimated blocking probability.
+    - expected_reward: the estimated expected reward.
+    - probas_stationary: dictionary with the estimated stationary probability for each buffer size where blocking
+    may occur
+    - expected_cycle_time: estimated expected cycle time E(T) of return to the initial buffer size.
+    used in the denominator of the MC estimator of the blocking probability.
+    - n_cycles: number of cycles observed to estimate E(T).
+    - n_events: number of events observed during the simulation.
+    """
+    # Smart selection of the start state as one having buffer size = K-1 so that we can better estimate Pr(K-1)
+    # start_state = simul.choose_state_for_buffer_size(simul.env, K)
+    # Selection of the start state as one having buffer size = J-1, in order to have a fair comparison with the FV method
+    # where particles are reactivated when they reach J-1.
+    start_state = simul.choose_state_for_buffer_size(simul.env, dict_params_simul['buffer_size_activation'] - 1)
+    t, time_last_event, n_cycles, time_last_return = \
+            simul.run_simulation_mc(dict_params_info['t_learn'], start_state, dict_params_simul['T'],
+                                    track_return_cycles=True,
+                                    seed=dict_params_simul['seed'],
+                                    verbose=dict_params_info['verbose'],
+                                    verbose_period=dict_params_info['verbose_period'])
+    probas_stationary, time_step_last_return, last_time_at_start_buffer_size = \
+                                                        simul.estimate_stationary_probability_mc(start_state)
+    n_events = t
+    assert n_events == dict_params_simul['T']
+
+    proba_blocking = simul.compute_proba_blocking(probas_stationary)
+    expected_reward = simul.estimate_expected_reward(probas_stationary)
+    expected_cycle_time = simul.estimate_expected_cycle_time(n_cycles, time_last_return, time_last_event)
+
+    if DEBUG_ESTIMATORS or simul.show_messages(dict_params_info['verbose'], dict_params_info['verbose_period'], dict_params_info['t_learn']):
+        print("\n*** RESULTS OF MONTE-CARLO SIMULATION on {} events ***".format(n_events))
+        print("P(K-1), P(K): {}, last return time to initial buffer size: time_step = {} ({:.1f}%), t = {:.1f}" \
+              .format(probas_stationary, time_step_last_return, time_step_last_return / t * 100, last_time_at_start_buffer_size))
+
+    return proba_blocking, expected_reward, probas_stationary, expected_cycle_time, n_cycles, n_events
+
+
+def estimate_blocking_fv(simul, dict_params_simul, dict_params_info, ax=None):
+    """
+    Estimates the blocking probability using the Fleming-Viot approach
+
+    Arguments:
+    simul: SimulatorQueue
+        Simulation object used for the simulation that allows estimating the blocking probability.
+
+    dict_params_simul: dict
+        Dictionary containing the simulation parameters.
+
+    dict_params_info: dict
+        Dictionary containing information to display or parameters to deal with the information to display.
+
+    ax: (none) Axes
+        Axes object used when DEBUG_TRAJECTORIES = True to plot the trajectories of the particles.
+        default: None
+
+    Return: tuple
+    Tuple with the following elements:
+    - proba_blocking: the estimated blocking probability.
+    - expected_reward: the estimated expected reward.
+    - probas_stationary: dictionary with the estimated stationary probability for each buffer size where blocking
+    may occur.
+    - expected_absorption_time: estimated expected absorption time E(T_A) used in the denominator of the FV estimator
+    of the blocking probability.
+    - n_cycles: number of cycles observed to estimate E(T_A).
+    - n_events_mc: number of events observed during the simulation of the single queue used to estimate E(T_A).
+    - n_events_fv: number of events observed during the FV simulation that estimates Phi(t).
+    """
+    # -- Step 1: Simulate a single queue to estimate P(T>t) and E(T_A)
+    start_state = simul.choose_state_for_buffer_size(simul.getEnv(), dict_params_simul['buffer_size_activation'] - 1)
+    t, time_end_simulation, n_cycles, time_end_last_cycle, survival_times = \
+        simul.run_simulation_mc(dict_params_info['t_learn'], start_state, dict_params_simul['T'],
+                                track_absorptions=True, track_survival=True,
+                                seed=dict_params_simul['seed'],
+                                verbose=dict_params_info['verbose'], verbose_period=dict_params_info['verbose_period'])
+    n_events_mc = t
+
+    # Estimate P(T>t) and E(T_A)
+    proba_surv = simul.compute_survival_probability(survival_times)
+    expected_absorption_time = simul.estimate_expected_cycle_time(n_cycles, time_end_last_cycle, time_end_simulation)
+
+    if DEBUG_ESTIMATORS or simul.show_messages(dict_params_info['verbose'], dict_params_info['verbose_period'], t_learn):
+        print("\n*** RESULTS OF MC ESTIMATION OF P(T>t) and E(T) on {} events ***".format(n_events_mc))
+        # max_rows = pd.get_option('display.max_rows')
+        # pd.set_option('display.max_rows', None)
+        # print("P(T>t):\n{}".format(proba_surv))
+        # pd.set_option('display.max_rows', max_rows)
+        print("E(T) = {:.1f}, Max observed survival time = {:.1f}".format(expected_absorption_time,
+                                                                          proba_surv['t'].iloc[-1]))
+
+    # -- Step 2: Simulate N particles with FLeming-Viot to compute the empirical distribution and estimate the expected reward
+    # The empirical distribution Phi(t, bs) estimates the conditional probability of buffer sizes bs
+    # for which the probability of rejection is > 0
+    assert simul.N > 1, "The simulation system has more than one particle in Fleming-Viot mode ({})".format(simul.N)
+    if DEBUG_ESTIMATORS or simul.show_messages(dict_params_info['verbose'], dict_params_info['verbose_period'], dict_params_info['t_learn']):
+        print("Running Fleming-Viot simulation on {} particles and absorption size = {}..." \
+              .format(simul.N, dict_params_simul['buffer_size_activation'] - 1))
+    t, event_times, phi, probas_stationary = \
+        simul.run_simulation_fv(t_learn,
+                                dict_params_simul['buffer_size_activation'] - 1,
+                                # We pass the absorption size to this function
+                                proba_surv, expected_absorption_time,
+                                verbose=dict_params_info['verbose'], verbose_period=dict_params_info['verbose_period'],
+                                plot=DEBUG_TRAJECTORIES, ax=ax)
+    assert t == len(event_times) - 1, "The last time step of the simulation ({}) coincides with the number of events observed ({})" \
+                                        .format(t, len(event_times))
+        ## We subtract 1 to len(event_times) because the first event time is 0.0 which is NOT an event time
+    n_events_fv = t
+
+    proba_blocking = simul.compute_proba_blocking(probas_stationary)
+    expected_reward = simul.estimate_expected_reward(probas_stationary)
+
+    if DEBUG_ESTIMATORS or simul.show_messages(dict_params_info['verbose'], dict_params_info['verbose_period'], dict_params_info['t_learn']):
+        print("\n*** RESULTS OF FLEMING-VIOT SIMULATION ***")
+        # max_rows = pd.get_option('display.max_rows')
+        # pd.set_option('display.max_rows', None)
+        # print("Phi(t):\n{}".format(phi))
+        # pd.set_option('display.max_rows', max_rows)
+        print("P(K-1), P(K): {}".format(probas_stationary))
+        print("Pr(BLOCK) = {}".format(proba_blocking))
+        print("Expected reward = {}".format(expected_reward))
+
+    return proba_blocking, expected_reward, probas_stationary, expected_absorption_time, n_cycles, n_events_mc, n_events_fv
+
+
 if __name__ == "__main__":
     import runpy
     runpy.run_path("../../setup.py")
 
-    test = False
+    test = True
 
     # --------------- Unit tests on methods defined in this file ------------------ #
     if test:
@@ -2822,7 +2960,7 @@ if __name__ == "__main__":
         # Keep track of the number of events observed for each rate (either a job class rate or a service rate)
         rates = job_class_rates + service_rates
         valid_rates = job_class_rates + [r if s > 0 else np.nan for r, s in zip(simul.envs[0].getServiceRates(), simul.envs[0].getQueueState())]
-        nevents_by_rate = np.zeros(len(rates))
+        n_events_by_rate = np.zeros(len(rates))
         N = 100
         # Expected proportion of events for each exponential
         p = np.array( [r / np.nansum(valid_rates) if r > 0 else 0.0 for r in valid_rates] )
@@ -2830,15 +2968,16 @@ if __name__ == "__main__":
             time, event, job_class_or_server, _ = simul.generate_event()
             if event == Event.BIRTH:
                 # The BIRTH events are associated to indices at the beginning of the rates list
-                nevents_by_rate[job_class_or_server] += 1
+                n_events_by_rate[job_class_or_server] += 1
             elif event == Event.DEATH:
                 # The DEATH event are associated to indices at the end of the rates list
                 # so we sum the returned index to the number of job class rates.
-                nevents_by_rate[len(job_class_rates) + job_class_or_server] += 1
+                n_events_by_rate[len(job_class_rates) + job_class_or_server] += 1
         # Observed proportions of events by server and type of event
-        phat = 1.0 * nevents_by_rate / N
+        phat = 1.0 * n_events_by_rate / N
         se_phat = np.sqrt(p * (1 - p) / N)
         print("EXPECTED / OBSERVED / SE proportions of events by rate on N={}:\n{}".format(N, np.c_[p, phat, se_phat]))
+        print("NOTE: If the test fails, run it again, because it maybe just for chance because of the random seed chosen when running the test.")
         assert np.allclose(phat, p, atol=3 * se_phat)  # true probabilities should be contained in +/- 3 SE(phat) from phat
         # ---------------- generate_event() in SimulatorQueue --------------------- #
 
@@ -2929,9 +3068,9 @@ if __name__ == "__main__":
                                                 ('alpha', [1.0]*5),
                                                 ('V', [-1.375, -1.265, -1.345, -1.690, 0.0]),
                                                 ('gradV', [0.088272, 0.113181, 0.056632, 0.008199, 0.0]),
-                                                ('nevents_mc', [50, 50, 50, 50, 50]),
-                                                ('nevents_proba', [400, 365, 751, 219, 54]),
-                                                ('ntrajectories_Q', [100.0]*4 + [0.0])
+                                                ('n_events_mc', [50, 50, 50, 50, 50]),
+                                                ('n_events_fv', [400, 365, 751, 219, 54]),
+                                                ('n_trajectories_Q', [100.0]*4 + [0.0])
                                                 ])
         assert np.allclose(df_learning, df_learning_expected, atol=1E-6)
 
@@ -2986,9 +3125,9 @@ if __name__ == "__main__":
                                                 ('alpha', [1.0]*5),
                                                 ('V', [-1.375, -1.815, -2.005, -1.740, -1.855]),
                                                 ('gradV', [0.088272, 0.106070, 0.091885, 0.104847, 0.096218]),
-                                                ('nevents_mc', [50, 50, 50, 50, 50]),
-                                                ('nevents_proba', [400, 231, 380, 181, 458]),
-                                                ('ntrajectories_Q', [100.0]*5)
+                                                ('n_events_mc', [50, 50, 50, 50, 50]),
+                                                ('n_events_fv', [400, 231, 380, 181, 458]),
+                                                ('n_trajectories_Q', [100.0]*5)
                                                 ])
         assert np.allclose(df_learning, df_learning_expected, atol=1E-6)
         # --- FV simulation --- #
@@ -3054,9 +3193,9 @@ if __name__ == "__main__":
                                                 ('alpha', [1.0]*5),
                                                 ('V', [-1.325, -1.500, -1.295, -1.360, -1.605]),
                                                 ('gradV', [0.121688, 0.084698, 0.064262, 0.029959, 0.024256]),
-                                                ('nevents_mc', [1500, 1500, 1500, 1500, 1500]),
-                                                ('nevents_proba', [1500, 1500, 1500, 1500, 1500]),
-                                                ('ntrajectories_Q', [100.0]*5)
+                                                ('n_events_mc', [1500, 1500, 1500, 1500, 1500]),
+                                                ('n_events_fv', [0]*5),
+                                                ('n_trajectories_Q', [100.0]*5)
                                                 ])
         assert np.allclose(df_learning, df_learning_expected, atol=1E-6)
 
@@ -3105,9 +3244,9 @@ if __name__ == "__main__":
                                                 ('alpha', [1.0]*5),
                                                 ('V', [-1.325, -2.070, -1.885, -1.740, -1.900]),
                                                 ('gradV', [0.121688, 0.029903, 0.175694, 0.139217, 0.135442]),
-                                                ('nevents_mc', [1500, 1500, 1500, 1500, 1500]),
-                                                ('nevents_proba', [1500, 1500, 1500, 1500, 1500]),
-                                                ('ntrajectories_Q', [100.0]*5)
+                                                ('n_events_mc', [1500, 1500, 1500, 1500, 1500]),
+                                                ('n_events_fv', [0]*5),
+                                                ('n_trajectories_Q', [100.0]*5)
                                                 ])
         assert np.allclose(df_learning, df_learning_expected, atol=1E-6)
         # --- MC simulation --- #
@@ -3542,7 +3681,7 @@ if __name__ == "__main__":
         # Open the file to store the results
         if save_results:
             # Initialize the output file with the results with the column names
-            simul.fh_results.write("case,t_learn,theta_true,theta,theta_next,K,J/K,J,exponent,N,T,err_phi,err_et,seed,E(T),n_cycles,Pr(K-1),Pr(K),Q_diff(K-1),Q_diff(K),alpha,V,gradV,nevents_mc,nevents_proba,ntrajectories_Q\n")
+            simul.fh_results.write("case,t_learn,theta_true,theta,theta_next,K,J/K,J,exponent,N,T,err_phi,err_et,seed,E(T),n_cycles,Pr(K-1),Pr(K),Q_diff(K-1),Q_diff(K),alpha,V,gradV,n_events_mc,n_events_fv,n_trajectories_Q\n")
 
         # Run the simulations, either from parameters defined by a benchmark file or from parameters defined below
         if benchmark_file is None:
@@ -3644,7 +3783,7 @@ if __name__ == "__main__":
 
                 # Get the number of events to run the simulation for (from the benchmark file)
                 benchmark_nevents = benchmark[ benchmark['case'] == case ]
-                t_sim = list( benchmark_nevents['nevents_mc'] + benchmark_nevents['nevents_proba'] )
+                t_sim = list( benchmark_nevents['n_events_mc'] + benchmark_nevents['n_events_fv'] )
                 assert len(t_sim) == benchmark_nevents.shape[0], \
                         "There are as many values for the number of simulation steps per learning step as the number" \
                         " of learning steps read from the benchmark file ({})" \
@@ -3861,8 +4000,8 @@ if __name__ == "__main__":
         N = 800
         t_sim = 800*N
         t_learn = results_fv.shape[0]
-        nevents_mean = np.mean(results_fv['nevents_mc'] + results_fv['nevents_proba'])
-        assert nevents_mean == np.mean(results_mc['nevents_mc'])
+        n_events_mean = np.mean(results_fv['n_events_mc'] + results_fv['n_events_fv'])
+        assert n_events_mean == np.mean(results_mc['n_events_mc'])
 
         plt.figure()
         plt.plot(results_fv['theta'], 'g.-')
@@ -3875,4 +4014,4 @@ if __name__ == "__main__":
         ax.yaxis.set_major_locator(MaxNLocator(integer=True))
         ax.set_aspect(1 / ax.get_data_ratio())
         ax.legend(["Fleming-Viot", "Monte-Carlo", "Optimum theta"])
-        plt.title("# particles N = {}, Simulation time for P(T>t) and E(T_A) = {}, # learning steps = {}, Average number of events per learning step = {:.0f}".format(N, t_sim, t_learn, nevents_mean))
+        plt.title("# particles N = {}, Simulation time for P(T>t) and E(T_A) = {}, # learning steps = {}, Average number of events per learning step = {:.0f}".format(N, t_sim, t_learn, n_events_mean))
