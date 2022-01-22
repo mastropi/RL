@@ -1231,6 +1231,17 @@ class SimulatorQueue(Simulator):
                 ## NOTE: We include the initial time in the list of survival times so that the survival probability
                 ## associated to them corresponds to the segment at and AFTER the time value stored in survival_times.
                 ## In addition, this setup makes the survival probability function go from 1.0 to 0.0.
+        if DEBUG_ESTIMATORS:
+            # Check realization of the arrival and service rates
+            time_last_arrival = 0.0
+            if buffer_size_start == 0:
+                time_last_service = np.nan
+            else:
+                time_last_service = 0.0
+            jobs_arrival = []
+            times_inter_arrival = []
+            servers_service = []
+            times_service = []
         while not done:
             t += 1
 
@@ -1247,10 +1258,31 @@ class SimulatorQueue(Simulator):
                 # The event is an incoming job class
                 # => Update the state of the queue, apply the acceptance policy, and finally the server assignment policy
                 action, next_state, reward, gradient_for_action = self.manage_job_arrival(t, self.env, agent, state, job_class_or_server)
+                if DEBUG_ESTIMATORS:
+                    jobs_arrival += [job_class_or_server]
+                    times_inter_arrival += [time_abs - time_last_arrival]
+                    # Prepare for the next iteration
+                    time_last_arrival = time_abs
+                    if self.env.getBufferSize() == 1:
+                        # The queue can now experience a service
+                        # => Set the last service time to the last event time, so that we can measure the next
+                        # service time when it occurs.
+                        time_last_service = time_abs
+
             elif event == Event.DEATH:
                 # The event is a completed service
                 # => Update the state of the queue
                 action, next_state, reward = self.manage_service(self.env, agent, state, job_class_or_server)
+                if DEBUG_ESTIMATORS:
+                    assert not np.isnan(time_last_service)
+                    servers_service += [job_class_or_server]
+                    times_service += [time_abs - time_last_service]
+                    # Prepare for the next iteration
+                    if self.env.getBufferSize() == 0:
+                        # The queue can now longer experience a service event
+                        time_last_service = np.nan
+                    else:
+                        time_last_service = time_abs
 
             # Update the trajectory used in the learning process, where we store:
             # S(t): state BEFORE an action is taken
@@ -1293,6 +1325,10 @@ class SimulatorQueue(Simulator):
         if self.show_messages(verbose, verbose_period, t_learn):
             print("==> agent ENDS at time t={} at state {} coming from state = {}, action = {}, reward = {}, gradient = {})" \
                     .format(t, self.env.getState(), state, action, reward, gradient_for_action))
+
+        if DEBUG_ESTIMATORS:
+            plotting.plot_event_times(self.job_rates_by_server, times_inter_arrival, jobs_arrival, class_name="Job class")
+            plotting.plot_event_times(self.env.getServiceRates(), times_service, servers_service, class_name="Server")
 
         if track_absorptions:
             if track_survival:
@@ -1833,7 +1869,7 @@ class SimulatorQueue(Simulator):
             # Set the start state of the queue environment so that we start at an activation state
             start_state = self.choose_state_for_buffer_size(env, buffer_size_absorption + 1)
             env.setState((start_state, None))
-            assert env.getBufferSizeFromState( env.getState() ) == buffer_size_absorption + 1, \
+            assert env.getBufferSize() == buffer_size_absorption + 1, \
                     "The start state of all environments/particles must be an activation state (start state of env #{}: {})" \
                     .format(i, env.getState())
 
@@ -1862,6 +1898,19 @@ class SimulatorQueue(Simulator):
             # Variables needed to update the plot that shows the trajectories of the particles (online)
             time0 = [0.0] * self.N
             y0 = [buffer_size_absorption + 1] * self.N
+        if DEBUG_ESTIMATORS:
+            # Check realization of the arrival and service rates
+            times_last_arrival = [0.0] * self.N
+            jobs_arrival = []
+            times_inter_arrival = []
+
+            if self.env.getBufferSize() == 0:
+                # Initially all the particles have no jobs, therefore no service events can happen for any of them
+                times_last_service = [np.nan] * self.N
+            else:
+                times_last_service = [0.0] * self.N
+            servers_service = []
+            times_service = []
         while not done:
             t += 1
 
@@ -1879,6 +1928,17 @@ class SimulatorQueue(Simulator):
                 # => Update the state of the queue, apply the acceptance policy, and finally the server assignment policy
                 action, next_state, reward, gradient_for_action = \
                     self.manage_job_arrival(t, self.envs[idx_particle], agent, state, job_class_or_server)
+                if DEBUG_ESTIMATORS:
+                    # TODO: (2022/01/21) Fix this logic as it does NOT take care of different job classes. In fact the latest arrival time (regardless of the job class) is used as reference time to compute the new inter-arrival time for the current job class!)
+                    jobs_arrival += [job_class_or_server]
+                    times_inter_arrival += [event_times[-1] - times_last_arrival[idx_particle]]
+                    # Prepare for the next iteration
+                    times_last_arrival[idx_particle] = event_times[-1]
+                    if self.envs[idx_particle].getBufferSizeFromState(next_state) == 1:
+                        # The particle can now experience a service event
+                        # => Reset the time of the last service to the current time, so that we can measure the time
+                        # of the next service experienced by this particle.
+                        times_last_service[idx_particle] = event_times[-1]
 
                 # Stop when we reached the maxtime, which is set above to the maximum observed survival time
                 # (since going beyond does not contribute to the integral used in the FV estimator)
@@ -1903,6 +1963,20 @@ class SimulatorQueue(Simulator):
                     if DEBUG_TRAJECTORIES:
                         print("*** Particle {} REACTIVATED to particle {}".format(idx_particle, idx_reactivate))
 
+                # This should come AFTER the possible reactivation, because the next state will never be 0
+                # when reactivation takes place.
+                if DEBUG_ESTIMATORS:
+                    assert not np.isnan(times_last_service[idx_particle])
+                    servers_service += [job_class_or_server]
+                    times_service += [event_times[-1] - times_last_service[idx_particle]]
+                    # Prepare for the next iteration
+                    if self.envs[idx_particle].getBufferSize() == 0:
+                        # The particle can no longer experience a service event
+                        # => Reset the time of the last service to NaN
+                        times_last_service[idx_particle] = np.nan
+                    else:
+                        times_last_service[idx_particle] = event_times[-1]
+
             if DEBUG_TRAJECTORIES:
                 print("P=P{}: {} | t={}: time={}, event={}, action={} -> state={}, reward={}" \
                       .format(idx_particle, state, t, event_times[-1], event, action, next_state, reward), end="\n")
@@ -1925,6 +1999,10 @@ class SimulatorQueue(Simulator):
         for bs in phi.keys():
             assert len(event_times) == len(phi[bs]), "The length of the event times where phi is measured ({}) coincides with the length of phi ({})" \
                                                 .format(len(event_times), len(phi))
+
+        if DEBUG_ESTIMATORS:
+            plotting.plot_event_times(self.job_rates_by_server, times_inter_arrival, jobs_arrival, class_name="Job class")
+            plotting.plot_event_times(self.env.getServiceRates(), times_service, servers_service, class_name="Server")
 
         if is_any_phi_value_gt_0:
             # Compute the stationary probability of each buffer size bs in Phi(t,bs) using Phi(t,bs), P(T>t) and E(T_A)
@@ -3678,8 +3756,13 @@ if __name__ == "__main__":
             if SET_YLIM:
                 ax2.set_ylim((-5,5))        # Note: grad(V) is expected to be -1 or +1...
             ax2.legend([line_grad, line_gradtrue], ['grad(V)', 'True grad(V)'], loc='upper right')
-            plt.title("Value function and its gradient as a function of theta and K. " +
-                        "Optimum K = {}, Theta start = {}, t_sim = {:.0f}".format(np.ceil(theta_true+1), theta_start, t_sim))
+            if is_scalar(t_sim):
+                title = "Value function and its gradient as a function of theta and K. " + \
+                        "Optimum K = {}, Theta start = {}, t_sim = {:.0f}".format(np.ceil(theta_true+1), theta_start, t_sim)
+            else:
+                title = "Value function and its gradient as a function of theta and K. " + \
+                        "Optimum K = {}, Theta start = {}".format(np.ceil(theta_true+1), theta_start)
+            plt.title(title)
 
             # grad(V) vs. V
             plt.figure()
