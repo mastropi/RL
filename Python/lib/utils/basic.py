@@ -38,7 +38,7 @@ def measure_exec_time(func):
         exec_time = end - start
         #if "{:.1f}".format(exec_time) != "0.0":
         if exec_time > 1:
-            print("+++ Execution time: {:.1f} sec".format(exec_time))
+            print("+++ Execution time for {}: {:.1f} sec".format(func.__name__, exec_time))
         return results
     return func_decorated
 

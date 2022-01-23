@@ -3722,8 +3722,8 @@ class EstimatorQueueBlockingFlemingViot:
         if not self.finalize_info['type'] in [FinalizeType.NONE, FinalizeType.ESTIMATE_CENSORED]:
             assert sum(self.is_particle_active) == 0, "The number of active particles is 0 ({})".format(sum(self.is_particle_active))
 
-        total_absorption_time = np.sum(self.ktimes_sum)
-        total_absorption_n = np.sum(self.ktimes_n)
+        total_absorption_time = np.sum(self.ktimes_sum)     # This is a sum over particles
+        total_absorption_n = np.sum(self.ktimes_n)          # This is a sum over particles
 
         if False:
             print("Estimating expected absorption cycle time...")
@@ -4913,7 +4913,8 @@ def estimate_blocking_fv(   env_queue: EnvQueueSingleBufferWithJobClasses,
     # - In order to have independent estimates of P(T>t) and E(T0) we observe T and T0 in different absorption cycles,
     # in particular in alternating cycles.
     #
-    # Censored particles, i.e. those that do not end at the end of an absorption cycle, have their truncated cycle removed.
+    # Strategy for censored particles: REMOVE_CENSORED
+    # i.e. the particles that do not end at the end of an absorption cycle have their truncated cycle removed.
     time_start = timer()
     est_abs, expected_absorption_time, n_absorption_time_observations, \
         proba_survival_given_activation, n_survival_curve_observations = \
@@ -4929,8 +4930,12 @@ def estimate_blocking_fv(   env_queue: EnvQueueSingleBufferWithJobClasses,
     # - estimated expected return time to absorption, E(T0)
     # - the survival curve P(T>t)
     # - the maximum observed survival time (which is used to define the simulation time)
-    finalize_type = FinalizeType.ABSORB_CENSORED    # We don't need to discard the still active particles because these do not affect the estimation of the conditional blocking probability
-    maxtime_from_proba_survival = 1.1*est_abs.get_max_observed_survival_time()
+    #
+    # Strategy for censored particles: ABSORB_CENSORED
+    # i.e. we don't need to discard the still active particles because these do not affect the estimation
+    # of the conditional blocking probability
+    finalize_type = FinalizeType.ABSORB_CENSORED
+    maxtime_from_proba_survival = est_abs.get_max_observed_survival_time()
     seed = dict_params_simul['seed'] + 2
     if dict_params_info['log']:
         print("\tStep 2 of 2: Running Fleming-Viot simulation using an ACTIVATION start state to estimate blocking probability using E(T) = {:.1f} (out of simul time={:.1f}) (seed={})..." \
@@ -4981,8 +4986,16 @@ def estimate_blocking_fv(   env_queue: EnvQueueSingleBufferWithJobClasses,
         print("execution time: {:.1f} sec, {:.1f} min".format(exec_time, exec_time/60))
 
     # Compute simulation statistics
-    time_abs = est_abs.get_simulation_time()
+    time_abs = est_abs.maxtime #est_abs.get_simulation_time()
+        ## NOTE: We don't call est_abs.get_simulation_time() to get the simulation time (continuous) used
+        ## for the estimation of P(T>t) and E(T0) because that returns the maximum simulation time AFTER removal of
+        ## any subtrajectories that did not come back to the initial buffer size (when REMOVE_CENSORED strategy is
+        ## in place, which is the most common.
+        ## And this is NOT what we want to store here: we want to store the FULL simulation time used.
     time_fv = est_fv.get_simulation_time()
+        ## Last observed time SUMMED over all particles
+        ## The above note is NOT a problem here because the strategy for censored particles in the FV simulation
+        ## is ABSORB_CENSORED, whose reason is explained above.
     time = time_abs + time_fv
     time_abs_prop = time_abs / time
     time_fv_prop = time_fv / time
@@ -4997,12 +5010,16 @@ def estimate_blocking_fv(   env_queue: EnvQueueSingleBufferWithJobClasses,
         'time_fv': time_fv,
         'time_abs_prop': time_abs_prop,
         'time_fv_prop': time_fv_prop,
+        'time_max_survival': maxtime_from_proba_survival,
         'nevents': nevents,
         'nevents_abs': nevents_abs,
         'nevents_fv': nevents_fv,
         'nevents_abs_prop': nevents_abs_prop,
         'nevents_fv_prop': nevents_fv_prop,
             })
+    assert est_fv.getMaxSimulationTime() == maxtime_from_proba_survival, \
+            "The simulation time of the FV process ({:.1f}) coincides with the maximum observed survival time ({:.1f})"\
+            .format(est_fv.getMaxSimulationTime(), maxtime_from_proba_survival)
 
     return  proba_blocking_fv, integral, expected_absorption_time, \
             n_survival_curve_observations, n_absorption_time_observations, \
