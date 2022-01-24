@@ -8,8 +8,8 @@ Created on Mon Mar 30 19:57:16 2020
 
 import numpy as np
 
-from agents.learners.episodic.discrete import Learner, AlphaUpdateType
-from .value_functions import ValueFunctionApprox
+from Python.lib.agents.learners.episodic.discrete import Learner, AlphaUpdateType
+from Python.lib.agents.learners.episodic.discrete.value_functions import ValueFunctionApprox
 import Python.lib.utils.plotting as plotting
 from matplotlib import pyplot as plt, cm 
 

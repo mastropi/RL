@@ -63,7 +63,7 @@ COST_EXP_BUFFER_SIZE_REF = 40
 # - A(t) the action applied at state S(t)
 # - S(t+1) the next state where the system is at after applying action A(t) on state S(t)
 
-def rewardOnJobClassAcceptance(env, state, action, next_state):
+def rewardOnJobClassAcceptance(env, state, action, next_state, dict_params=None):
     # The state is assumed to be a tuple (k, i) where k is the buffer size and i is the class of the arriving job
     if action == Actions.ACCEPT:
         job_class = state[1]
@@ -187,16 +187,19 @@ class EnvQueueSingleBufferWithJobClasses(gym.Env):
         start_state = ([0]*self.queue.getNServers(), self.job_class)
         self.reset(start_state)
 
-    def reset(self, state):
+    def reset(self, state=None):
         """
         Resets the state of the environment and the last action it received
 
         Arguments:
-        state: duple
+        state: (opt) duple
             Duple containing the following information:
             - server sizes: list with the size of each queue in each server making up the queue system
             - job_class: class of the arriving job
+            default: None, in which case the queue is reset to the state with all 0s in the servers and None job class
         """
+        if state is None:
+            state = ([0] * self.queue.getNServers(), None)
         self.setState(state)
         self.action = None
 

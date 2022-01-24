@@ -498,22 +498,21 @@ def plot(plotting_func,
     # Assertions
     assert isinstance(xvars, list)
     assert isinstance(yvars, list)
-    assert isinstance(xvars, list)
-    assert isinstance(yvars, list)
     assert isinstance(dict_params['pointlabels'], list)
     assert isinstance(dict_params['splines']['weights'], list)
     assert isinstance(dict_params['splines']['smooth_par'], list)
-    assert len(xvars) == n_subplots
-    assert len(yvars) == n_subplots
-    assert len(dict_params['pointlabels']) == n_subplots
-    assert len(dict_params['splines']['weights']) == n_subplots
-    assert len(dict_params['splines']['smooth_par']) == n_subplots
+    assert len(xvars) == n_subplots, "xvars={}, n_subplots={}".format(xvars, n_subplots)
+    assert len(yvars) == n_subplots, "yvars={}, n_subplots={}".format(yvars, n_subplots)
+    assert len(dict_params['pointlabels']) == n_subplots, "pointlabels={}, n_subplots={}".format(dict_params['pointlabels'], n_subplots)
+    assert len(dict_params['splines']['weights']) == n_subplots, "splines weights={}, n_subplots={}".format(dict_params['splines']['weights'], n_subplots)
+    assert len(dict_params['splines']['smooth_par']) == n_subplots, "splines smooth parameters={}, n_subplots={}".format(dict_params['splines']['smooth_par'], n_subplots)
     #----- Parse input parameters -----
 
     # Create the axes on which the plots will be produced
     axes = plt.figure(figsize=figsize).subplots(nrows=subplots[0], ncols=subplots[1])
     if n_subplots == 1:
         # Convert axes to an array, so that everything works fine from now on
+        # An alternative would have been to use squeeze=False in the subplots() command! (which preserves the output axes as a list or array)
         axes = np.array([axes])
     # Convert the axes array to a 1D array so that we can easily go over all of them
     axes1D = axes.reshape((n_subplots,), order='C')    # 'C' is the default, i.e. "C language"-order (along the rows first), as opposed to Fortran order (along the columns first)

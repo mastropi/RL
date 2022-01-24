@@ -7,6 +7,7 @@ Created on Thu Jun  4 19:16:02 2020
 """
 
 import runpy
+
 runpy.run_path('../../setup.py')
 
 import os
@@ -15,6 +16,7 @@ import numpy as np
 import pandas as pd
 import copy
 import re
+from enum import Enum, unique
 
 from warnings import warn
 from timeit import default_timer as timer
@@ -26,17 +28,27 @@ from matplotlib import pyplot as plt, cm, ticker as mtick
 from Python.lib.utils.basic import aggregation_bygroups, is_scalar
 import Python.lib.utils.plotting as plotting
 
-from Python.lib.agents.queues import AgeQueue, PolicyTypes as QueuePolicyTypes
+from Python.lib.agents.learners.continuing.fv import LeaFV
+from Python.lib.agents.queues import AgeQueue, PolicyTypes as QueuePolicyTypes, LearnerTypes
 from Python.lib.agents.policies.job_assignment import PolJobAssignmentProbabilistic
+from Python.lib.agents.policies.parameterized import PolQueueTwoActionsLinearStep
 import Python.lib.estimators as estimators
+import Python.lib.simulators as simulators
 import Python.lib.queues as queues  # The keyword `queues` is used in the code
 from Python.lib.queues import Event
-from Python.lib.environments.queues import EnvQueueSingleBufferWithJobClasses, rewardOnJobClassAcceptance
+from Python.lib.environments.queues import EnvQueueSingleBufferWithJobClasses, rewardOnJobRejection_ExponentialCost
 from Python.lib.estimators import FinalizeType, plot_curve_estimates
 from Python.lib.utils.computing import get_server_loads, compute_job_rates_by_server, compute_blocking_probability_birth_death_process
 
 DEFAULT_NUMPY_PRECISION = np.get_printoptions().get('precision')
 DEFAULT_NUMPY_SUPPRESS = np.get_printoptions().get('suppress')
+
+
+@unique
+class Process(Enum):
+    Estimators = 1
+    Simulators = 2
+
 
 class Test_QB_Particles(unittest.TestCase):
 
@@ -445,47 +457,66 @@ class Test_QB_Particles(unittest.TestCase):
                 (reactivate, finalize_type, nparticles, nmeantimes)
 
     @classmethod
-    def test_fv_implementation(cls, nservers=1, K=5, buffer_size_activation=1, burnin_cycles_absorption=5,
+    def test_fv_implementation(cls,
+                               estimation_process=Process.Estimators,
+                               nservers=1, K=5, buffer_size_activation=1, burnin_cycles_absorption=5,
+                               nparticles=[],
                                nparticles_min=40, nparticles_max=80, nparticles_step_prop=1,
                                nmeantimes=500,
                                replications=5,
-                               run_mc=True):
+                               run_mc=True,
+                               seed=1717):
         """
         2021/04/19: Analyze convergence of the FV algorithm as number of particles N increases
 
         Arguments:
-        nparticles_step_prop: positive float
+        estimation_process: (opt) Process
+            The estimation process that should be used to estimate the blocking probability, whether the estimator
+            defined in estimators.py (Process.Estimators) or the estimator defined in simulators.py (Process.Simulators).
+            default: Process.Estimators
+
+        nparticles: (opt) list
+            List giving the number of particles to considered in each simulation.
+            If given, it takes precedence over parameters nparticles_min and nparticles_max.
+            default: []
+
+        nparticles_step_prop: (opt) positive float
             Step proportion: N(n+1) = (1 + prop)*N(n),
             so that we scale the step as the number of particles increases.
     
-        nmeantimes: int
-            nmeantimes parameter of the Fleming-Viot estimator class which should allow for enough time
-            for the observation of the required burn-in cycles for all the N particles included in the FV simulation.
+        nmeantimes: (opt) int or list
+            Number of discrete time steps to run the queue to estimate either the blocking probability (for MC)
+            or to estimate P(T>t) and E(T_A) for the FV estimator.
+            If not scalar, it should have the same number of elements as the number of particles that are tried
+            in this simulation.
+            default: 500
         """
 
         #--- System setup
         rate_birth = 0.7
         if nservers == 1:
             job_class_rates = [rate_birth]
-            rate_death = [1]
+            rate_death = [1.0]
             policy_assign = PolJobAssignmentProbabilistic([[1]])
-            rewards_accept_by_job_class = [1]
+            rewards_accept_by_job_class = None # [1]
         elif nservers == 3:
             job_class_rates = [0.8, 0.7]
-            rate_death = [1, 1, 1]
+            rate_death = [1.0, 1.0, 1.0]
             policy_assign = PolJobAssignmentProbabilistic([[0.5, 0.5, 0.0], [0.0, 0.5, 0.5]])
-            rewards_accept_by_job_class = [1, 1]
+            rewards_accept_by_job_class = None # [1, 1]
         else:
             raise ValueError("Given Number of servers ({}) is invalid. Valid values are: 1, 3".format(nservers))
 
         # Create the queue, the queue environment, and the agent acting on it
         queue = queues.QueueMM(rate_birth, rate_death, nservers, K)
         env_queue = EnvQueueSingleBufferWithJobClasses(queue, job_class_rates=job_class_rates,
-                                                       reward_func=rewardOnJobClassAcceptance,
+                                                       reward_func=rewardOnJobRejection_ExponentialCost,
                                                        rewards_accept_by_job_class=rewards_accept_by_job_class)
         # Define the agent acting on the queue environment
-        policies = dict({QueuePolicyTypes.ACCEPT: None, QueuePolicyTypes.ASSIGN: policy_assign})
-        learners = None
+        policies = dict({QueuePolicyTypes.ACCEPT: PolQueueTwoActionsLinearStep(env_queue, float(K-1)), QueuePolicyTypes.ASSIGN: policy_assign})
+        learners = dict({LearnerTypes.V: LeaFV(env_queue, gamma=1.0),
+                         LearnerTypes.Q: None,
+                         LearnerTypes.P: None})
         agent = AgeQueue(queue, policies, learners)
         job_rates_by_server = compute_job_rates_by_server(job_class_rates, nservers, policy_assign.getProbabilisticMap())
 
@@ -502,12 +533,31 @@ class Test_QB_Particles(unittest.TestCase):
             buffer_size_activation_value = int( round(buffer_size_activation*K) )
         else:
             buffer_size_activation_value = buffer_size_activation
-        seed = 1717
 
-        # Info parameters 
+        if nparticles is None or isinstance(nparticles, list) and len(nparticles) == 0:
+            # Create the list of nparticles values from the min and max nparticles to consider
+            nparticles = nparticles_min
+            nparticles_list = [nparticles]
+            while nparticles < nparticles_max:
+               nparticles += int(nparticles_step_prop * nparticles)
+               nparticles_list += [nparticles]
+        elif is_scalar(nparticles):
+            nparticles_list = [nparticles]
+        else:
+            # nparticles is a list
+            nparticles_list = list(nparticles)
+
+        if not is_scalar(nmeantimes) and len(nmeantimes) > 1 and len(nmeantimes) != len(nparticles):
+            raise ValueError("Parameter nmeantimes must be either scalar or have the same length as the number of particles to try ({}): {}" \
+                             .format(len(nparticles), nmeantimes))
+        if is_scalar(nmeantimes):
+            nmeantimes_list = [nmeantimes] * len(nparticles_list)
+        else:
+            nmeantimes_list = nmeantimes
+
+        # Info parameters
         dict_params_info = {'plot': True, 'log': False}
 
-        nparticles = nparticles_min
         df_results = pd.DataFrame(columns=['K',
                                            'BSA',
                                            'N',
@@ -515,27 +565,27 @@ class Test_QB_Particles(unittest.TestCase):
                                            'replication',
                                            'Pr(MC)',
                                            'EMC(T)',
-                                           'Time(MC)',
+                                           'Time(MC)',          # Last continuous time value observed in the MC simulation
                                            '#Events(MC)',
                                            '#Cycles(MC)',
                                            'E(T)',
                                            '#Cycles(E(T))',
+                                           'MaxSurvTime',
                                            'Pr(FV)',
-                                           'Time(FV)',
+                                           'Time(FV)',          # Last continuous time value observed in the FV simulation
                                            '#Events(FV)',
                                            '#Samples(S(t))',
                                            'Pr(K)',
                                            'seed',
                                            'exec_time'])
-        case = 0
-        ncases = int( np.log(nparticles_max / nparticles_min) / np.log(1 + nparticles_step_prop)) + 1
+        #ncases = int( np.log(nparticles_max / nparticles_min) / np.log(1 + nparticles_step_prop)) + 1
+        ncases = len(nparticles_list)
 
         print("System: # servers={}, K={}, rhos={}, buffer_size_activation={}, #burn-in absorption cycles={}" \
               .format(nservers, K, get_server_loads(job_rates_by_server, rate_death), buffer_size_activation_value, burnin_cycles_absorption))
         time_start_all = timer()
-        while nparticles <= nparticles_max:
-            case += 1 
-            print("\n*** Running simulation for nparticles={} ({} of {}) on {} replications...".format(nparticles, case, ncases, replications))
+        for case, (nparticles, nmeantimes) in enumerate(zip(nparticles_list, nmeantimes_list)):
+            print("\n*** Running simulation for nparticles={} ({} of {}) on {} replications...".format(nparticles, case+1, ncases, replications))
 
             dict_params_simul = {
                 'nparticles': nparticles,
@@ -557,44 +607,93 @@ class Test_QB_Particles(unittest.TestCase):
                 print("\n\t--> Running Fleming-Viot estimation...")
                 dict_params_simul['maxevents'] = np.Inf
                 dict_params_simul['seed'] = seed_rep
-                proba_blocking_fv, integral, expected_absorption_time, \
-                    n_survival_curve_observations, n_survival_time_observations, \
-                        est_fv, est_abs, dict_stats_fv = estimators.estimate_blocking_fv(env_queue, agent,
-                                                                                         dict_params_simul,
-                                                                                         dict_params_info=dict_params_info)
+                if estimation_process == Process.Estimators:
+                    proba_blocking_fv, integral, expected_absorption_time, \
+                        n_survival_curve_observations, n_absorption_time_observations, \
+                            est_fv, est_abs, dict_stats_fv = estimators.estimate_blocking_fv(env_queue, agent,
+                                                                                             dict_params_simul,
+                                                                                             dict_params_info=dict_params_info)
+                    time_fv = dict_stats_fv['time']
+                    n_events_fv = dict_stats_fv['nevents']  # TOTAL number of events: _abs + (properly) _fv
+                    max_survival_time = dict_stats_fv['time_max_survival']
+                elif estimation_process == Process.Simulators:
+                    envs_queue = [env_queue if i == 0 else copy.deepcopy(env_queue) for i in range(nparticles)]
+                    dict_params_simul['T'] = dict_params_simul['nmeantimes']
+                    proba_blocking_fv, expected_reward, probas_stationary, \
+                        expected_absorption_time, n_absorption_time_observations, \
+                            time_last_absorption, time_end_simulation_et, max_survival_time, \
+                                n_events_et, n_events_fv_only = simulators.estimate_blocking_fv(envs_queue, agent,
+                                                                                                dict_params_simul, dict_params_info)
+                    integral = np.nan
+                    time_fv = np.nan
+                    n_events_fv = n_events_et + n_events_fv_only
+                    n_survival_curve_observations = n_absorption_time_observations
 
                 if run_mc:
                     print("\t--> Running Monte-Carlo estimation...")
-                    dict_params_simul['maxevents'] = dict_stats_fv['nevents']
+                    dict_params_simul['maxevents'] = n_events_fv
                     dict_params_simul['seed'] = seed_rep + 2  # This is the same seed used in the FV simulation in estimate_blocking_fv(), so we can compare better
-                    proba_blocking_mc, \
-                        expected_return_time_mc, \
-                            n_return_observations, \
-                                est_mc, dict_stats_mc = estimators.estimate_blocking_mc(env_queue, agent, dict_params_simul, dict_params_info=dict_params_info)
+                    if estimation_process == Process.Estimators:
+                        proba_blocking_mc, \
+                            expected_return_time_mc, \
+                                n_return_observations, \
+                                    est_mc, dict_stats_mc = estimators.estimate_blocking_mc(env_queue, agent, dict_params_simul,
+                                                                                            dict_params_info=dict_params_info)
+                        time_mc = dict_stats_mc.get('time'),
+                        n_events_mc = dict_stats_mc.get('nevents', 0)
+                    elif estimation_process == Process.Simulators:
+                        dict_params_simul['T'] = n_events_fv
+                        proba_blocking_mc, expected_reward_mc, probas_stationary, \
+                            expected_return_time_mc, n_return_observations, \
+                                n_events_mc = simulators.estimate_blocking_mc(env_queue, agent, dict_params_simul, dict_params_info=dict_params_info)
+                        time_mc = 0.0
+                    max_survival_time = 0.0
 
                     # Check comparability in terms of # events in each simulation (MC vs. FV)
-                    if dict_stats_mc['nevents'] != dict_stats_fv['nevents']:
-                        message = "!!!! #events(MC) != #events(FV) ({}, {}) !!!!".format(dict_stats_mc['nevents'], dict_stats_fv['nevents'])
+                    if n_events_mc != n_events_fv:
+                        message = "!!!! #events(MC) != #events(FV) ({}, {}) !!!!".format(n_events_mc, n_events_fv)
                         print(message)  # Shown in the log
                         warn(message)   # Shown in the console
                 else:
                     proba_blocking_mc, expected_return_time_mc, n_return_observations, est_mc, dict_stats_mc = np.nan, None, None, None, {}
+                    time_mc = 0.0
+                    n_events_mc = 0
 
                 time_end = timer()
                 exec_time = time_end - time_start
                 print("execution time MC + FV: {:.1f} sec, {:.1f} min".format(exec_time, exec_time/60))
 
-                if nparticles == nparticles_min and r == 1:
-                    rhos = est_fv.getLoads()
+                if case+1 == 1 and r == 1:
+                    # Compute the true blocking probability only ONCE, namely for the first replication of the first N value case
+                    rhos = [l / m for l, m in zip(job_rates_by_server, env_queue.getServiceRates())]
                     print("Computing TRUE blocking probability for nservers={}, K={}, rhos={}...".format(nservers, K, rhos))
                     proba_blocking_true = compute_blocking_probability_birth_death_process(rhos, K)
 
-                # Results
+                # -- Results
                 if run_mc:
-                    print("\tP(K) by MC: {:.6f}% (simulation time = {:.1f} out of max={}, #events {} out of {})" \
+                    # MC results
+                    if estimation_process == Process.Estimators:
+                        print("\tP(K) by MC: {:.6f}% (simulation time = {:.1f} out of max={:.1f}, #events {} out of {})" \
                           .format(proba_blocking_mc*100, est_mc.get_simulation_time(), est_mc.getMaxSimulationTime(), est_mc.getNumberOfEvents(), est_mc.getMaxNumberOfEvents()))
-                print("\tP(K) estimated by FV: {:.6f}%, E(T) = {:.1f} (simulation time = {:.1f} out of max={}, #events {} out of {})" \
-                      .format(proba_blocking_fv*100, est_fv.get_expected_absorption_time(), est_fv.get_simulation_time(), est_fv.getMaxSimulationTime(), est_fv.getNumberOfEvents(), est_fv.getMaxNumberOfEvents()))
+                    elif estimation_process == Process.Simulators:
+                        print("\tP(K) by MC: {:.6f}% (#events {})" \
+                          .format(proba_blocking_mc*100, n_events_mc))
+
+                # FV results
+                if estimation_process == Process.Estimators:
+                    print("\tP(K) estimated by FV: {:.6f}%, E(T) = {:.1f} (simulation time for E(T) = {:.1f} ({} steps) (complete cycles span {:.1f}%),"
+                            " max survival time = {:.1f}, #events = {} (ET) + {} (FV) = {})" \
+                          .format(  proba_blocking_fv*100, expected_absorption_time, dict_stats_fv['time_abs'], dict_stats_fv['nevents_abs'],
+                                    expected_absorption_time*n_absorption_time_observations / dict_stats_fv['time_abs']*100,
+                                    dict_stats_fv['time_max_survival'],
+                                    dict_stats_fv['nevents_abs'], dict_stats_fv['nevents_fv'], dict_stats_fv['nevents']))
+                elif estimation_process == Process.Simulators:
+                    print("\tP(K) estimated by FV: {:.6f}%, E(T) = {:.1f} (simulation time for E(T) = {:.1f} ({} steps) (complete cycles span {:.1f}%),"
+                            " max survival time = {:.1f}, #events = {} (ET) + {} (FV) = {})" \
+                          .format(  proba_blocking_fv * 100, expected_absorption_time, time_end_simulation_et, n_events_et,
+                                    time_last_absorption/time_end_simulation_et*100,
+                                    max_survival_time,
+                                    n_events_et, n_events_fv_only, n_events_fv))
                 print("\tTrue P(K): {:.6f}%".format(proba_blocking_true*100))
 
                 # Store the results
@@ -605,28 +704,33 @@ class Test_QB_Particles(unittest.TestCase):
                                            r,
                                            proba_blocking_mc,
                                            expected_return_time_mc,
-                                           dict_stats_mc.get('time'),
-                                           dict_stats_mc.get('nevents'),
+                                           time_mc,
+                                           n_events_mc,
                                            n_return_observations,
-                                           est_fv.get_expected_absorption_time(),
-                                           n_survival_time_observations,
+                                           expected_absorption_time,
+                                           n_absorption_time_observations,
+                                           max_survival_time,
                                            proba_blocking_fv,
-                                           dict_stats_fv['time'],
-                                           dict_stats_fv['nevents'],
+                                           time_fv,
+                                           n_events_fv,
                                            n_survival_curve_observations,
                                            proba_blocking_true,
                                            dict_params_simul['seed'],
                                            exec_time]],
-                                         columns=df_results.columns, index=[case])
+                                         columns=df_results.columns, index=[case+1])
                 df_results = df_results.append(df_append)
 
             print("Results:")
             print(df_results)
-            nparticles += int( nparticles_step_prop*nparticles )
         time_end_all = timer()
 
         print("Total execution time: {:.1f} min".format((time_end_all - time_start_all) / 60))
-        title = "Simulation results for #servers={}, K={}, rhos={}, ({}<=N<={}), T<={}, #Events<={}, Rep={}".format(nservers, K, rhos, nparticles_min, nparticles_max, est_fv.getMaxSimulationTime(), est_fv.getMaxNumberOfEvents(), replications)
+        if estimation_process == Process.Estimators:
+            title = "Simulation results for #servers={}, K={}, rhos={}, ({}<=N<={}), T<={}, #Events<={}, Rep={}" \
+                .format(nservers, K, rhos, nparticles_min, nparticles_max, est_fv.getMaxSimulationTime(), est_fv.getMaxNumberOfEvents(), replications)
+        elif estimation_process == Process.Simulators:
+            title = "Simulation results for #servers={}, K={}, rhos={}, ({}<=N<={}), T={}, #Events<={}, Rep={}" \
+                .format(nservers, K, rhos, nparticles_min, nparticles_max, dict_params_simul['T'], n_events_fv, replications)
         print(title)
         print("Raw results by N:")
         print(df_results)
@@ -643,8 +747,11 @@ class Test_QB_Particles(unittest.TestCase):
             df_results = df_results.astype({'#Events(MC)_mean': np.int})
             df_results = df_results.astype({'#Cycles(MC)_mean': np.int})
         df_results = df_results.astype({'#Events(FV)_mean': np.int})
-            
-        return df_results, df_results_agg_by_N, est_fv, est_mc
+
+        if estimation_process == Process.Estimators:
+            return df_results, df_results_agg_by_N, est_fv, est_mc
+        else:
+            return df_results, df_results_agg_by_N, None, None
 
     def analyze_estimates(  self,
                             replications=5,
@@ -693,8 +800,7 @@ class Test_QB_Particles(unittest.TestCase):
             print("Pr(K)={:.6f}%".format(proba_blocking_true*100))
 
             # Create the queue environment that is simulated below
-            env_queue = EnvQueueSingleBufferWithJobClasses(queue, job_class_rates=self.job_class_rates, reward_func=rewardOnJobClassAcceptance, rewards_accept_by_job_class=[1] * len(self.job_class_rates))
-                ## The rewards_accept_by_job_class are not used at this point, so I just set them to 1 for all job classes.
+            env_queue = EnvQueueSingleBufferWithJobClasses(queue, job_class_rates=self.job_class_rates, reward_func=rewardOnJobRejection_ExponentialCost, rewards_accept_by_job_class=None) #[1] * len(self.job_class_rates))
             # Define the agent acting on the queue environment
             policies = dict({QueuePolicyTypes.ACCEPT: None, QueuePolicyTypes.ASSIGN: self.policy_assign})
             learners = None
@@ -745,7 +851,7 @@ class Test_QB_Particles(unittest.TestCase):
                     print("\t\t*** FLEMING-VIOT ESTIMATION ***")
                     dict_params_simul['maxevents'] = np.Inf
                     proba_blocking_fv, integral, expected_absorption_time, \
-                        n_survival_curve_observations, n_survival_time_observations, \
+                        n_survival_curve_observations, n_absorption_time_observations, \
                             est_fv, est_abs, dict_stats_fv = estimators.estimate_blocking_fv(env_queue, agent,
                                                                                              dict_params_simul,
                                                                                              dict_params_info=dict_params_info)
@@ -764,7 +870,7 @@ class Test_QB_Particles(unittest.TestCase):
                     # Show estimations
                     if run_mc:
                         print("\t\tP(K) by MC: {:.6f}%".format(proba_blocking_mc*100))
-                    print("\t\tP(K) estimated by FV (integral={:g} (n={}), E(T)={:.1f} (n={})): {:.6f}%".format(integral, n_survival_curve_observations, expected_absorption_time, n_survival_time_observations, proba_blocking_fv*100))
+                    print("\t\tP(K) estimated by FV (integral={:g} (n={}), E(T)={:.1f} (n={})): {:.6f}%".format(integral, n_survival_curve_observations, expected_absorption_time, n_absorption_time_observations, proba_blocking_fv*100))
                     print("\t\tTrue P(K): {:.6f}%".format(proba_blocking_true*100))
 
                     # Analyze the fairness of the comparison of results based on simulation time number of observed events
@@ -819,7 +925,7 @@ class Test_QB_Particles(unittest.TestCase):
                                                                 ('E(T)', [expected_absorption_time]),
                                                                 ('n(FV)', [dict_stats_fv['nevents']]),
                                                                 ('n(PT)', [n_survival_curve_observations]),
-                                                                ('n(ET)', [n_survival_time_observations]),
+                                                                ('n(ET)', [n_absorption_time_observations]),
                                                                 ('Pr(K)', [proba_blocking_true]),
                                                                 ('ratio_mc_fv_time', [dict_stats_mc.get('time') is None and np.nan or dict_stats_mc.get('time') / dict_stats_fv['time']]),
                                                                 ('ratio_mc_fv_events', [dict_stats_mc.get('nevents') is None and np.nan or dict_stats_mc.get('nevents') / dict_stats_fv['nevents']]),
@@ -847,7 +953,7 @@ class Test_QB_Particles(unittest.TestCase):
                                                 'buffer_size_activation': buffer_size_activation_value,
                                                 'mean_lifetime': expected_absorption_time,
                                                 'n_survival_curve_observations': n_survival_curve_observations,
-                                                'n_survival_time_observations': n_survival_time_observations,
+                                                'n_absorption_time_observations': n_absorption_time_observations,
                                                 'proba_blocking_fv': proba_blocking_fv,
                                                 'finalize_type': est_fv.getFinalizeType(),
                                                 'seed': seed_rep
@@ -1145,19 +1251,19 @@ def test_mc_implementation(nservers, K, paramsfile, nmeantimes=None, repmax=None
         job_class_rates = [rate_birth]
         rate_death = [1]
         policy_assign = PolJobAssignmentProbabilistic([[1]])
-        rewards_accept_by_job_class = [1]
+        rewards_accept_by_job_class = None  # [1]
     elif nservers == 3:
         job_class_rates = [0.8, 0.7]
         rate_death = [1, 1, 1]
         policy_assign = PolJobAssignmentProbabilistic([[0.5, 0.5, 0.0], [0.0, 0.5, 0.5]])
-        rewards_accept_by_job_class = [1, 1]
+        rewards_accept_by_job_class = None  # [1, 1]
     else:
         raise ValueError("Given Number of servers ({}) is invalid. Valid values are: 1, 3".format(nservers))
 
     # Create the queue, the queue environment, and the agent acting on it
     queue = queues.QueueMM(rate_birth, rate_death, nservers, K)
     env_queue = EnvQueueSingleBufferWithJobClasses(queue, job_class_rates=job_class_rates,
-                                                   reward_func=rewardOnJobClassAcceptance,
+                                                   reward_func=rewardOnJobRejection_ExponentialCost,
                                                    rewards_accept_by_job_class=rewards_accept_by_job_class)
     # Define the agent acting on the queue environment
     policies = dict({QueuePolicyTypes.ACCEPT: None, QueuePolicyTypes.ASSIGN: policy_assign})
@@ -1683,25 +1789,25 @@ def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None, y2=Non
     #--- Parse input parameters
 
     # 1) Average P(K) + error bars
-    axes_error = plotting.plot(plotting.plot_errorbars,
-                  df_results, xvars, yvars,
-                  yref=prob_true, yref_legend="True value",
-                  figsize=figsize, subplots=subplots,
-                  dict_options={'axis': axis_properties,
-                                'multipliers': {'x': 1, 'y': 100, 'error': 2},
-                                'labels': {'x': xlabel, 'y': "Blocking probability (%)", 'x2': xlabel2},
-                                'properties': {'color': "black", 'color_center': colors}})
+    axes_error = plotting.plot( plotting.plot_errorbars,
+                                df_results, xvars, yvars,
+                                yref=prob_true, yref_legend="True value",
+                                figsize=figsize, subplots=subplots,
+                                dict_options={'axis': axis_properties,
+                                              'multipliers': {'x': 1, 'y': 100, 'error': 2},
+                                              'labels': {'x': xlabel, 'y': "Blocking probability (%)", 'x2': xlabel2},
+                                              'properties': {'color': "black", 'color_center': colors}})
   
     # 2) Violin plots
-    axes_violin = plotting.plot(plotting.plot_violins,
-                         df_results, xvars, yvars,
-                         yref=prob_true, yref_legend="True value",
-                         figsize=figsize, subplots=subplots,
-                         dict_options={'axis': axis_properties,
-                                       'multipliers': {'x': 1, 'y': 100},
-                                       'labels': {'x': xlabel, 'y': "Blocking probability (%)", 'x2': xlabel2},
-                                       'properties': {'color': colors, 'color_center': colors}})
-  
+    axes_violin = plotting.plot( plotting.plot_violins,
+                                 df_results, xvars, yvars,
+                                 yref=prob_true, yref_legend="True value",
+                                 figsize=figsize, subplots=subplots,
+                                 dict_options={'axis': axis_properties,
+                                               'multipliers': {'x': 1, 'y': 100},
+                                               'labels': {'x': xlabel, 'y': "Blocking probability (%)", 'x2': xlabel2},
+                                               'properties': {'color': colors, 'color_center': colors}})
+
     #-- Compute variability and bias
     df2plot = pd.DataFrame()
     nvars = []
@@ -1985,7 +2091,13 @@ if __name__ == "__main__":
         
         #******************* ACTUAL EXECUTION ***************
         #-- Single-server
-        results, results_agg, est_fv, est_mc = Test_QB_Particles.test_fv_implementation(nservers=nservers, K=5, buffer_size_activation=0.5, replications=replications, run_mc=run_mc)
+        results, results_agg, est_fv, est_mc = Test_QB_Particles.test_fv_implementation(estimation_process=Process.Simulators,
+                                                                                        nservers=nservers, K=5, buffer_size_activation=0.5,
+                                                                                        nparticles=[10, 20, 40], #[24, 66, 179],
+                                                                                        nmeantimes=500, #[170, 463, 1259],
+                                                                                        #nparticles_min=40, nparticles_max=160,
+                                                                                        replications=replications, run_mc=run_mc,
+                                                                                        seed=1313)
     
         #results, results_agg, est_fv, est_mc = Test_QB_Particles.test_fv_implementation(nservers=1, K=20, buffer_size_activation=0.25)
         #results, results_agg, est_fv, est_mc = Test_QB_Particles.test_fv_implementation(nservers=1, K=20, buffer_size_activation=0.5)
@@ -2024,7 +2136,9 @@ if __name__ == "__main__":
                          {'df': results_agg, 'file': resultsfile_agg}])
     
         # Plot results
-        axes = plot_results_fv_mc(results, x="N", x2="#cycles(MC)_mean", xlabel="# particles", xlabel2="# Cycles", plot_mc=run_mc)
+        axes = plot_results_fv_mc(results, x="N", x2="#Cycles(MC)_mean",
+                                  xlabel="# particles", xlabel2="# Cycles",
+                                  ymin=0.0, plot_mc=run_mc, splines=False)
     
         if fh_log is not None:
             closeLogFile(fh_log, stdout_sys, dt_start)

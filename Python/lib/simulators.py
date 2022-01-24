@@ -645,7 +645,7 @@ class SimulatorQueue(Simulator):
         self.gradV = []             # Gradient of the value function (grad(J) in Sutton) for the theta before the update, that is responsible for the theta update.
         self.G = None               # G(t) for each simulation time step t as estimated by self.learn().
         self.n_events_mc = []       # number of events used in the Monte-Carlo simulation, either to estimate the stationary probabilities under the MC approach, or P(T>t) and E(T_A) under the FV approach.
-        self.n_events_proba = []    # number of events used to estimate the stationary probability in each episode.
+        self.n_events_fv = []       # number of events used to estimate the stationary probability in each episode.
         self.n_trajectories_Q = []  # Average number of trajectory pairs used to estimate Q_diff in each episode.
                                     # The average is over the trajectory pairs used to estimate Q_diff(K-1) and Q_diff(K)
 
@@ -666,20 +666,23 @@ class SimulatorQueue(Simulator):
             # Note that we reset the time and alphas of the value function learner (because this happens within each
             # learning step or queue simulation episode), but we do NOT reset the time and alphas of the policy
             # learner because the learning step here is defined by a new queue simulation episode.
-            self.agent.getLearnerV().reset(reset_time=True,  reset_alphas=True,  reset_value_functions=reset_value_functions, reset_trajectory=True,  reset_counts=reset_counts)
-            self.agent.getLearnerP().reset(reset_time=False, reset_alphas=False, reset_value_functions=reset_value_functions, reset_trajectory=False, reset_counts=reset_counts)
+            if self.agent.getLearnerV() is not None:
+                self.agent.getLearnerV().reset(reset_time=True,  reset_alphas=True,  reset_value_functions=reset_value_functions, reset_trajectory=True,  reset_counts=reset_counts)
+            if self.agent.getLearnerP() is not None:
+                self.agent.getLearnerP().reset(reset_time=False, reset_alphas=False, reset_value_functions=reset_value_functions, reset_trajectory=False, reset_counts=reset_counts)
             if not reset_value_functions:
                 # Set the start value of the value functions to their current estimate
                 # Goal: we can use the current estimated values in the next learning step,
                 # e.g. use it as a baseline when computing the time difference delta(t).
-                self.agent.getLearnerV().setVStart(self.agent.getLearnerV().getV())
-                self.agent.getLearnerV().setQStart(self.agent.getLearnerV().getQ())
+                if self.agent.getLearnerV() is not None:
+                    self.agent.getLearnerV().setVStart(self.agent.getLearnerV().getV())
+                    self.agent.getLearnerV().setQStart(self.agent.getLearnerV().getQ())
 
     def run(self, dict_params_simul: dict, dict_params_info: dict={'plot': False, 'log': False}, dict_info: dict={},
             start_state=None,
             seed=None, state_observe=None,
             verbose=False, verbose_period=1,
-            ax=None, colormap="seismic", pause=0):
+            colormap="seismic", pause=0):
         """
         Runs a Reinforcement Learning experiment on a queue environment for the given number of time steps.
         No reset of the learning history is done at the beginning of the simulation.
@@ -811,7 +814,7 @@ class SimulatorQueue(Simulator):
         self.getLearnerP().getPolicy().setThetaParameter(dict_params_simul['theta_start'])
 
         if verbose:
-            print("Value function at start of experiment: {}".format(self.learnerV.getV()))
+            print("Value function at start of experiment: {}".format(self.getLearnerV().getV()))
 
         # There are two simulation time scales (both integers and starting at 0):
         # - t: the number of queue state changes (a.k.a. number of queue iterations)
@@ -828,10 +831,10 @@ class SimulatorQueue(Simulator):
             # the seed at each learning step as we do here)
             dict_params_simul['seed'] = self.env.get_seed() + t_learn - 1
 
-            if self.show_messages(True, verbose_period, t_learn):
+            if show_messages(True, verbose_period, t_learn):
                 print("\n************************ Learning step {} of {} running ****************************" \
                       .format(t_learn, self.dict_learning_params['t_learn']))
-                print("Theta parameter of policy: {}".format(self.learnerP.getPolicy().getThetaParameter()))
+                print("Theta parameter of policy: {}".format(self.getLearnerP().getPolicy().getThetaParameter()))
 
             # Buffer size of sure blocking, which is used to define the buffer size for activation and the start state for the simulations run
             # We set the activation buffer size as a specific fraction of the buffer size K of sure blocking.
@@ -839,9 +842,11 @@ class SimulatorQueue(Simulator):
             # a signal that leads to estimations of the numerator Phi(t) and the denominator E(T1+T2) in the
             # FV estimation of the stationary probability (found on Fri, 07-Jan-2022 at IRIT-N7 with Matt, Urtzi and
             # Szymon), namely J = K/3.
-            K = self.learnerP.getPolicy().getBufferSizeForDeterministicBlocking()
+            if self.getLearnerP() is not None:
+                assert self.agent.getAcceptancePolicy().getThetaParameter() == self.getLearnerP().getPolicy().getThetaParameter()
+            K = self.agent.getAcceptancePolicy().getBufferSizeForDeterministicBlocking()
             dict_params_simul['buffer_size_activation'] = np.max([1, int( np.round(dict_params_simul['buffer_size_activation_factor']*K) )])
-            if isinstance(self.learnerV, LeaFV):
+            if isinstance(self.getLearnerV(), LeaFV):
                 # TODO: (2021/12/16) SHOULD WE MOVE ALL this learning process of the average reward and stationary probabilities to the learn() method of the LeaFV class?
                 # At this point I don't think we should do this, because the learn() method in the GenericLearner subclasses
                 # learns the value function from the RESULTS of a SIMULATION ALREADY CARRIED OUT.
@@ -857,7 +862,7 @@ class SimulatorQueue(Simulator):
                     dict_params_simul['T'] = dict_params_simul['nmeantimes']
 
                 #-- Estimation of the survival probability P(T>t) and the expected absorption cycle time, E(T_A) by MC
-                if self.show_messages(verbose, verbose_period, t_learn):
+                if show_messages(verbose, verbose_period, t_learn):
                     print("Running Monte-Carlo simulation on one particle starting at an absorption state with buffer size = {}..." \
                           .format(dict_params_simul['buffer_size_activation'] - 1))
                 #est_mc, expected_cycle_time, n_absorption_time_observations, \
@@ -868,12 +873,12 @@ class SimulatorQueue(Simulator):
                 #n_cycles = n_absorption_time_observations
 
                 proba_blocking_fv, expected_reward, probas_stationary, \
-                    expected_cycle_time, n_cycles, \
-                        n_events_mc, n_events_fv = estimate_blocking_fv(self, dict_params_simul, dict_params_info)
+                    expected_cycle_time, n_cycles, time_last_absorption, time_end_simulation_et, max_survival_time, \
+                        n_events_mc, n_events_fv = estimate_blocking_fv(self.envs, self.agent, dict_params_simul, dict_params_info)
                 # Equivalent (discrete) simulation time, as if it were a Monte-Carlo simulation
                 t = n_events_mc + n_events_fv
-                self.learnerV.setAverageReward(expected_reward)
-                self.learnerV.setProbasStationary(probas_stationary)
+                self.getLearnerV().setAverageReward(expected_reward)
+                self.getLearnerV().setProbasStationary(probas_stationary)
             else:
                 # Monte-Carlo learning is the default
                 assert self.N == 1, "The simulation system has only one particle in Monte-Carlo mode ({})".format(self.N)
@@ -888,54 +893,55 @@ class SimulatorQueue(Simulator):
                             .format(len(dict_params_simul['t_sim']), self.dict_learning_params['t_learn'])
                     dict_params_simul['T'] = dict_params_simul['t_sim'][t_learn - 1]
                 proba_blocking_mc, expected_reward, probas_stationary, expected_cycle_time, n_cycles, n_events = \
-                    estimate_blocking_mc(self, dict_params_simul, dict_params_info)
+                    estimate_blocking_mc(self.env, self.agent, dict_params_simul, dict_params_info)
                 # Discrete simulation time
                 t = n_events
                 n_events_mc = n_events
                 n_events_fv = 0  # This information is output to the results file and therefore we set it to 0 here as we are in the MC approach
+                max_survival_time = 0.0
 
             if probas_stationary[K-1] > 0.0:
                 # When the parameterized policy is a linear step linear function with only one buffer size where its
                 # derivative is non-zero, only the DIFFERENCE of two state-action values impacts the gradient, namely:
                 # Q(K-1, a=1) - Q(K-1, a=0)
-                if DEBUG_ESTIMATORS or self.show_messages(verbose, verbose_period, t_learn):
+                if DEBUG_ESTIMATORS or show_messages(verbose, verbose_period, t_learn):
                     print("\nEstimating the difference of the state-action values when the initial buffer size is K-1={}...".format(K-1))
                 N = 100; t_sim_max = 250
                 K, Q0_Km1, Q1_Km1, n_Km1, max_t_Km1 = self.estimate_Q_values_until_mixing(t_learn, K-1, t_sim_max=t_sim_max, N=N, verbose=verbose, verbose_period=verbose_period)
                 #K, Q0_Km1, Q1_Km1, n, max_t = self.estimate_Q_values_until_stationarity(t_learn, t_sim_max=50, N=N, verbose=verbose, verbose_period=verbose_period)
-                if DEBUG_ESTIMATORS or self.show_messages(verbose, verbose_period, t_learn):
+                if DEBUG_ESTIMATORS or show_messages(verbose, verbose_period, t_learn):
                     print("--> Estimated state-action values on n={} realizations out of {} with max simulation time = {:.1f} out of {:.1f}:\nQ(K-1={}, a=1) = {}\nQ(K-1={}, a=0) = {}\nQ_diff = Q(K-1,1) - Q(K-1,0) = {}" \
                           .format(n_Km1, N, max_t_Km1, t_sim_max, K-1, Q1_Km1, K-1, Q0_Km1, Q1_Km1 - Q0_Km1))
             else:
                 Q0_Km1 = 0.0
                 Q1_Km1 = 0.0
                 n_Km1 = 0
-                if DEBUG_ESTIMATORS or self.show_messages(verbose, verbose_period, t_learn):
+                if DEBUG_ESTIMATORS or show_messages(verbose, verbose_period, t_learn):
                     print("Estimation of Q_diff(K-1) skipped because the estimated stationary probability Pr(K-1) = 0.")
-            if DEBUG_ESTIMATORS or self.show_messages(verbose, verbose_period, t_learn):
+            if DEBUG_ESTIMATORS or show_messages(verbose, verbose_period, t_learn):
                 print("--> Estimated stationary probability: Pr(K-1={}) = {}".format(K-1, probas_stationary[K - 1]))
 
             if probas_stationary[K] > 0.0:
                 # Same as above, but for buffer size = K
-                if DEBUG_ESTIMATORS or self.show_messages(verbose, verbose_period, t_learn):
+                if DEBUG_ESTIMATORS or show_messages(verbose, verbose_period, t_learn):
                     print("\nEstimating the difference of the state-action values when the initial buffer size is K={}...".format(K))
                 N = 100; t_sim_max = 250
                 K, Q0_K, Q1_K, n_K, max_t_K = self.estimate_Q_values_until_mixing(t_learn, K, t_sim_max=t_sim_max, N=N, verbose=verbose, verbose_period=verbose_period)
                 #K, Q0_K, Q1_K, n_K, max_t_K = self.estimate_Q_values_until_stationarity(t_learn, t_sim_max=50, N=N, verbose=verbose, verbose_period=verbose_period)
-                if DEBUG_ESTIMATORS or self.show_messages(verbose, verbose_period, t_learn):
+                if DEBUG_ESTIMATORS or show_messages(verbose, verbose_period, t_learn):
                     print("--> Estimated state-action values on n={} realizations out of {} with max simulation time = {:.1f} out of {:.1f}:\nQ(K={}, a=1) = {}\nQ(K={}, a=0) = {}\nQ_diff = Q(K,1) - Q(K,0) = {}" \
                           .format(n_K, N, max_t_K, t_sim_max, K, Q1_K, K, Q0_K, Q1_K - Q0_K))
             else:
                 Q0_K = 0.0
                 Q1_K = 0.0
                 n_K = 0
-                if DEBUG_ESTIMATORS or self.show_messages(verbose, verbose_period, t_learn):
+                if DEBUG_ESTIMATORS or show_messages(verbose, verbose_period, t_learn):
                     print("Estimation of Q_diff(K) skipped because the estimated stationary probability Pr(K) = 0.")
-            if self.show_messages(verbose, verbose_period, t_learn):
+            if show_messages(verbose, verbose_period, t_learn):
                 print("--> Estimated stationary probability: Pr(K={}) = {}".format(K, probas_stationary[K]))
 
             # Learn the value function and the policy
-            theta_prev = self.learnerP.getPolicy().getThetaParameter()
+            theta_prev = self.getLearnerP().getPolicy().getThetaParameter()
 
             # Use this when using REINFORCE to learn theta
             #self.learn(self.agent, t)
@@ -956,14 +962,15 @@ class SimulatorQueue(Simulator):
                                         'seed': dict_params_simul['seed'],
                                         'expected_cycle_time': expected_cycle_time,
                                         'n_cycles': n_cycles,
+                                        'max_survival_time': max_survival_time,
                                         'n_events_mc': n_events_mc,
-                                        'n_events_proba': n_events_fv,
+                                        'n_events_fv': n_events_fv,
                                         'n_Q': np.mean([n_Km1, n_K])}))
 
-            if self.show_messages(verbose, verbose_period, t_learn):
-                print("\tUpdated value function at the end of the queue simulation: average reward V = {}".format(self.learnerV.getV()))
-                print("\tSame observed average reward (computed from Policy learner) = {}".format(self.learnerP.getAverageRewardUnderPolicy()))
-                print("\tUpdated theta parameter of policy after learning: theta = {} -> {}".format(theta_prev, self.learnerP.getPolicy().getThetaParameter()))
+            if show_messages(verbose, verbose_period, t_learn):
+                print("\tUpdated value function at the end of the queue simulation: average reward V = {}".format(self.getLearnerV().getV()))
+                print("\tSame observed average reward (computed from Policy learner) = {}".format(self.getLearnerP().getAverageRewardUnderPolicy()))
+                print("\tUpdated theta parameter of policy after learning: theta = {} -> {}".format(theta_prev, self.getLearnerP().getPolicy().getThetaParameter()))
 
         if dict_params_info['plot']:
             # TODO
@@ -980,7 +987,7 @@ class SimulatorQueue(Simulator):
                                             ('V', self.V),
                                             ('gradV', self.gradV),
                                             ('n_events_mc', self.n_events_mc),
-                                            ('n_events_proba', self.n_events_proba),
+                                            ('n_events_fv', self.n_events_fv),
                                             ('n_trajectories_Q', self.n_trajectories_Q)
                                                 ])
 
@@ -990,411 +997,7 @@ class SimulatorQueue(Simulator):
         time_elapsed = datetime_diff.total_seconds()
         print("Execution time: {:.1f} min, {:.1f} hours".format(time_elapsed / 60, time_elapsed / 3600))
 
-        return self.learnerV, self.learnerP, df_learning
-
-    def get_blocking_buffer_sizes(self):
-        # TODO: (2021/12/08) These buffer sizes should be derived from the buffer sizes where the rejection probability is > 0
-        K = self.learnerP.getPolicy().getBufferSizeForDeterministicBlocking()
-        return [K - 1, K]
-
-    def manage_job_arrival(self, t, env, agent, state, job_class):
-        """
-        Manages an incoming job event, whether it is accepted or not and what is done if it is accepted
-
-        Arguments:
-        t: int
-            Discrete time step at which the job arrival takes place.
-
-        env: Queue environment
-            Queue environment where the service takes place.
-
-        agent: Agent
-            Agent acting on the environment.
-
-        state: State of the queue environment
-            The state in which the queue environment is in.
-
-        job_class: int
-            Class of the arriving job.
-
-        Return: tuple
-        Triple with the following elements:
-        - action taken by the agent
-        - the next state of the queue
-        - the reward received
-        - gradient: the policy gradient for the action taken given the state
-        """
-        # Store the class of the arriving job
-        env.setJobClass(job_class)
-
-        # Perform a step on the environment by applying the acceptance policy
-        action_accept_reject, next_state, reward_accept_reject, _ = self.step(t, env, PolicyTypes.ACCEPT)
-
-        # Assign the job to a server if accepted
-        if action_accept_reject == Actions.ACCEPT:
-            # Assign the job just accepted to a server and update the next_state value
-            # (because the next_state from the ACCEPT action has not been updated above
-            # as we need to know to which server the accepted job is assigned in order
-            # to know the next state of the queue environment)
-            _, next_state, reward_assign, _ = self.step(t, env, PolicyTypes.ASSIGN)
-        else:
-            reward_assign = 0.0
-        action = action_accept_reject
-        reward = reward_accept_reject + reward_assign
-
-        if action == Actions.ACCEPT and reward != 0.0:
-            print("--> action = {}, REWARD ASSIGN: {}, REWARD = {}".format(action_accept_reject, reward_assign, reward))
-            raise ValueError("A non-zero reward is not possible when the action is ACCEPT.")
-
-        # Update the average reward (just for information purposes)
-        agent.getLearnerV().updateAverageReward(t, reward)
-
-        # Compute and store the gradient of the policy evaluated on the taken action A(t) given the state S(t)
-        # Goal: depending on the learning method, this value may be useful
-        gradient_for_action = agent.getLearnerP().getPolicy().getGradient(action_accept_reject, state)
-        agent.getLearnerP().record_gradient(state, action_accept_reject, gradient_for_action)
-
-        return action, next_state, reward, gradient_for_action
-
-    def manage_service(self, env, agent, state, server):
-        """
-        Manages a completed service event
-
-        Arguments:
-        env: Queue environment
-            Queue environment where the service takes place.
-
-        agent: Agent
-            Agent acting on the environment.
-            This parameter is not used but it is left for consistency between manage_job_arrival() method.
-
-        state: State of the queue environment
-            The state in which the queue environment is in (it's only used when storing the trajectory and for assertions)
-
-        server: int
-            Server index where the service takes place.
-
-        Return: tuple
-        Triple with the following elements:
-        - action taken: None (because no action is taken when a service is completed)
-        - the next state of the queue
-        - the reward received: NaN, as no reward is received when a service is completed.
-        """
-        queue_state = env.getQueueState()
-        assert queue_state[server] > 0, "The server where the completed service occurs has at least one job"
-
-        # Compute and set the next state of the affected server in the queue system
-        next_queue_state = copy.deepcopy(queue_state)
-        next_queue_state[server] -= 1
-
-        env.setState((next_queue_state, None))
-        next_state = env.getState()
-        assert env.getBufferSizeFromState(next_state) == env.getBufferSizeFromState(state) - 1, \
-            "The buffer size after a DEATH decreased by 1: S(t) = {}, S(t+1) = {}" \
-                .format(env.getBufferSizeFromState(state), env.getBufferSizeFromState(next_state))
-
-        # We set the action to None because there is no action by the agent when a service is completed
-        action = None
-        # We set the reward to NaN because a reward may happen ONLY when a new job arrives.
-        # If there are rewards due to serviced jobs, we would impact those rewards into the reward
-        # received when a new job arrives (which is not the case at this moment (28-Nov-2021),
-        # i.e. the reward when a job is serviced is 0).
-        reward = np.nan
-
-        return action, next_state, reward
-
-    @measure_exec_time
-    def run_simulation_mc(self, t_learn, start_state, t_sim_max, agent=None,
-                                track_return_cycles=False,
-                                track_absorptions=False, track_survival=False,
-                                seed=None, verbose=False, verbose_period=1):
-        """
-        Runs the continuous-time simulation using Monte-Carlo
-
-        Arguments:
-        t_learn: int
-            The learning time step to which the simulation will contribute.
-
-        start_state: int or list or numpy array
-            State at which the queue environment starts for the simulation.
-
-        t_sim_max: int
-            Maximum simulation time steps allowed for the simulation.
-            This is equivalent to the number of observed events, as any new event generates a new time step.
-
-        agent: (opt) Agent
-            Agent object that is responsible of performing the actions on the environment and learning from them.
-            default: None, in which case the agent defined in the object is used
-
-        track_return_cycles: (opt) bool
-            Whether to track the return cycles to the initial buffer size.
-            default: False
-
-        track_absorptions: (opt) bool
-            Whether to track the absorption times.
-            default: False
-
-        track_survival: (opt) bool
-            Whether to track the survival times.
-            When True, it only has an effect when track_absorptions = True as well.
-            default: False
-
-        seed: (opt) int
-            Seed to use in the simulation process.
-            default: None, in which case the simulation cannot be reproduced at a later stage
-
-        verbose: (opt) bool
-            Whether to be verbose in the simulation process.
-            default: False
-
-        verbose_period: (opt) int
-            The time step period to be verbose.
-            default: 1 => be verbose at every simulation step.
-
-        Return: tuple
-        If track_return_cycles = False, track_absorptions = False and track_survival = False:
-        - t: the last time step of the simulation process.
-        - time: the continuous time of the last observed event during the simulation.
-
-        If track_return_cycles = True, in addition:
-        - n_cycles: the number of cycles observed in the simulation, until the last return to the initial buffer size.
-
-        If track_absorptions = True and track_survival = False, in addition:
-        - n_cycles: the number of cycles observed in the simulation, until the last return to the initial buffer size
-        from ABOVE (i.e. as if it were an absorption).
-        - time_end_last_cycle: the continuous time at which the Markov Chain returns to the initial buffer size
-        from ABOVE (i.e. as if it were an absorption).
-
-        If track_absorptions = True and track_survival = True, in addition:
-        - survival_times: list with the observed survival times, sorted increasingly.
-
-        Note that:
-        - either track_return_cycles or track_absorptions may be True. If both are True, the first one has precedence.
-        - track_survival = True has no effect if track_absorptions = False.
-        """
-        #-- Parse input parameters
-        if agent is None:
-            agent = self.agent
-        tmax = t_sim_max
-
-        # Seed
-        if seed is not None:
-            self.env.set_seed(seed)
-
-        # Set the start state of the environment to the given start state
-        job_class = None
-        self.env.setState((start_state, job_class))
-        buffer_size_start = self.env.getBufferSize()
-        if verbose:
-            print("MC simulation: The queue environments starts at state {} (buffer size = {})" \
-                  .format(self.env.getState(), buffer_size_start))
-
-        # Time step in the queue trajectory (the first time step is t = 0)
-        done = False
-        t = 0
-        time_abs = 0.0      # Measure of the ABSOLUTE time of the latest event
-        # Information about the return cycles
-        buffer_size_prev = buffer_size_start
-        n_cycles_return = 0
-        n_cycles_absorption = 0
-        time_last_return = 0.0
-        time_last_absorption = 0.0
-        # Information about the survival times
-        if track_survival:
-            time_last_activation = None
-            survival_times = [0.0]
-                ## NOTE: We include the initial time in the list of survival times so that the survival probability
-                ## associated to them corresponds to the segment at and AFTER the time value stored in survival_times.
-                ## In addition, this setup makes the survival probability function go from 1.0 to 0.0.
-        if DEBUG_ESTIMATORS:
-            # Check realization of the arrival and service rates
-            time_last_arrival = 0.0
-            if buffer_size_start == 0:
-                time_last_service = np.nan
-            else:
-                time_last_service = 0.0
-            jobs_arrival = []
-            times_inter_arrival = []
-            servers_service = []
-            times_service = []
-        while not done:
-            t += 1
-
-            # Current state
-            state = self.env.getState()
-
-            # Generate next event
-            # Note: this function takes care of NOT generating a service event when a server is empty.
-            time, event, job_class_or_server, _ = self.generate_event([self.env])
-            time_abs += time
-
-            # Analyze the event
-            if event == Event.BIRTH:
-                # The event is an incoming job class
-                # => Update the state of the queue, apply the acceptance policy, and finally the server assignment policy
-                action, next_state, reward, gradient_for_action = self.manage_job_arrival(t, self.env, agent, state, job_class_or_server)
-                if DEBUG_ESTIMATORS:
-                    jobs_arrival += [job_class_or_server]
-                    times_inter_arrival += [time_abs - time_last_arrival]
-                    # Prepare for the next iteration
-                    time_last_arrival = time_abs
-                    if self.env.getBufferSize() == 1:
-                        # The queue can now experience a service
-                        # => Set the last service time to the last event time, so that we can measure the next
-                        # service time when it occurs.
-                        time_last_service = time_abs
-
-            elif event == Event.DEATH:
-                # The event is a completed service
-                # => Update the state of the queue
-                action, next_state, reward = self.manage_service(self.env, agent, state, job_class_or_server)
-                if DEBUG_ESTIMATORS:
-                    assert not np.isnan(time_last_service)
-                    servers_service += [job_class_or_server]
-                    times_service += [time_abs - time_last_service]
-                    # Prepare for the next iteration
-                    if self.env.getBufferSize() == 0:
-                        # The queue can now longer experience a service event
-                        time_last_service = np.nan
-                    else:
-                        time_last_service = time_abs
-
-            # Update the trajectory used in the learning process, where we store:
-            # S(t): state BEFORE an action is taken
-            # A(t): action taken given the state S(t)
-            # R(t): reward received by taking action A(t) and transition to S(t+1)
-            self.update_trajectory(agent, (t_learn - 1) * (tmax + 1) + t, time_abs, state, action, reward)
-
-            # -- Check return and absorption cycles and survival times
-            # RETURN: The initial buffer size is observed again.
-            # ABSORPTION: The initial buffer size is observed again when coming from ABOVE, i.e. from a state
-            # with a larger buffer size.
-            buffer_size = self.env.getBufferSizeFromState(next_state)
-            if buffer_size == buffer_size_start:
-                n_cycles_return += 1
-                time_last_return = time_abs
-                if buffer_size_prev > buffer_size:
-                    n_cycles_absorption += 1
-                    time_last_absorption = time_abs
-                    if track_survival and time_last_activation is not None:
-                        time_to_absorption = time_last_absorption - time_last_activation
-                        assert time_to_absorption > 0
-                        insort(survival_times, time_to_absorption, unique=False)
-                            ## NOTE: We use unique=False because it happened already that the inserted time is very
-                            ## close to a time already existing in the list of survival times and an assertion inside
-                            ## insort() failed! (although that should never happen... the set of time coincidences has measure 0)
-
-                        # Reset the time of last activation to None so that we are now alert to setting it again
-                        # the next time it occurs
-                        time_last_activation = None
-
-            # ACTIVATION: We touch a state having the start buffer size + 1 COMING FROM BELOW
-            # (Note that the condition "coming from below" is important because we normally need to observe the
-            # activation states under their steady-state activation distribution)
-            if track_survival and buffer_size == buffer_size_start + 1 and buffer_size_prev < buffer_size_start + 1:
-                time_last_activation = time_abs
-
-            if self.debug:
-                print("{} | t={}: time={}, event={}, action={} -> state={}, reward={}".format(state, t, time_abs, event, action, next_state, reward), end="\n")
-
-            buffer_size_prev = buffer_size
-
-            done = self.check_done(tmax, t, state, action, reward)
-
-        # DONE
-        if self.show_messages(verbose, verbose_period, t_learn):
-            print("==> agent ENDS at time t={} at state {} coming from state = {}, action = {}, reward = {}, gradient = {})" \
-                    .format(t, self.env.getState(), state, action, reward, gradient_for_action))
-
-        if DEBUG_ESTIMATORS:
-            plotting.plot_event_times(self.job_rates_by_server, times_inter_arrival, jobs_arrival, class_name="Job class")
-            plotting.plot_event_times(self.env.getServiceRates(), times_service, servers_service, class_name="Server")
-
-        if track_return_cycles:
-            return t, time_abs, n_cycles_return, time_last_return
-        if track_absorptions:
-            if track_survival:
-                return t, time_abs, n_cycles_absorption, time_last_absorption, survival_times
-            else:
-                return t, time_abs, n_cycles_absorption, time_last_absorption
-        return t, time_abs
-
-    def estimate_stationary_probability_mc(self, start_state):
-        """
-        Monte-Carlo estimation of the stationary probability of buffer sizes K-1 and K based on the observed trajectory
-        in continuous-time.
-
-        The stationary probability is estimated as the fraction of time spent at each buffer size over the total
-        simulation time (sum of sojourn times).
-
-        Arguments:
-        start_state: int or list or numpy array
-            State of the queue environment at which the Monte-Carlo simulation started.
-            This is used to check that the initial state actually stored in the trajectory is this state
-            and that therefore we are doing the correct computation to estimate the stationary probability
-            of the buffer sizes of interest.
-
-        Return: tuple
-        Tuple with the following elements:
-        - probas_stationary: Dictionary with the estimated stationary probability for buffer sizes K-1 and K, where K is the first integer
-        larger than or equal to theta + 1  --theta being the parameter of the linear step acceptance policy.
-        - last_t_to_initial_position: time step at which the system returned to the initial buffer size for the last time.
-        - last_time_to_initial_position: continuous time at which the system returned to the initial buffer size for the last time.
-        """
-        # Event times
-        times = self.learnerV.getTimes()
-
-        # Sojourn times
-        # Each sojourn time is the time the Markov Chain sojourned at the state stored in `states`, retrieved below
-        # IMPORTANT: This means that the first state in `states` is the state PRIOR to the first time stored in `times`.
-        # IMPORTANT 2: We should convert the output of np.diff() to a list otherwise the value "summed" on the left
-        # with the initial time value `times[0]` will be ADDED to all entries in the array returned by np.diff()!!
-        sojourn_times = [times[0]] + list( np.diff(times) )
-
-        # States and associated buffer sizes
-        states = self.learnerV.getStates()
-        buffer_sizes = [self.env.getBufferSizeFromState(s) for s in states]
-        buffer_size_start = self.env.getBufferSizeFromState(start_state)
-        assert buffer_sizes[0] == buffer_size_start, \
-                "The buffer size of the first state stored in the chain trajectory ({})" \
-                " equals the buffer size of the state at which the simulation started ({})" \
-                .format(buffer_sizes[0], buffer_size_start)
-
-        # Compute the stationary probabilities of the buffer sizes of interest by Find the last time the chain visited the starting position
-        K = self.learnerP.getPolicy().getBufferSizeForDeterministicBlocking()
-        probas_stationary = dict({K-1: np.nan, K: np.nan})
-        idx_last_visit_to_initial_position = find_last(buffer_sizes, buffer_sizes[0])
-        assert idx_last_visit_to_initial_position >= 0, \
-            "The return time to the initial buffer size is always observed, as the first value is always the value searched for ({}):\n{}".format(buffer_sizes[0], np.c_[buffer_sizes, times])
-        if idx_last_visit_to_initial_position > 0:
-            last_time_at_start_buffer_size = times[idx_last_visit_to_initial_position-1]
-                ## we subtract -1 to the index because the times list contains the times at which the Markov Chain
-                ## STOPS visiting the state in states.
-
-            # Compute the total sojourn time at each buffer size of interest
-            # IMPORTANT: we need to limit this computation to the moment we observe the last return time to the
-            # initial buffer size! (o.w. we could be overestimating the probability and even estimate it larger than 1)
-            sojourn_times_by_buffer_size = \
-                dict({K-1: np.sum([st for bs, st in zip(buffer_sizes[:idx_last_visit_to_initial_position], sojourn_times[:idx_last_visit_to_initial_position]) if bs == K-1]),
-                        K: np.sum([st for bs, st in zip(buffer_sizes[:idx_last_visit_to_initial_position], sojourn_times[:idx_last_visit_to_initial_position]) if bs == K])})
-
-            for k in [K-1, K]:
-                assert sojourn_times_by_buffer_size[k] <= last_time_at_start_buffer_size, \
-                    "The total sojourn time at position s={} ({}) is at most equal to the last time of return to the buffer size ({})" \
-                    .format(k, sojourn_times_by_buffer_size[k], last_time_at_start_buffer_size)
-                probas_stationary[k] = sojourn_times_by_buffer_size[k] / last_time_at_start_buffer_size
-        else:
-            # The system never returned to the initial buffer size
-            # => We set the stationary probability to 0.0 (and NOT to NaN) in order to avoid an assertion error in
-            # the policy learner dealing with stationary probabilities that require that they are between 0 and 1.
-            # (e.g. see agents/learners/policies.py)
-            warnings.warn("The Markov Chain never returned to the initial position/buffer-size ({})."
-                            "\nThe estimated stationary probabilities will be set to 0.0.".format(buffer_sizes[0]))
-            last_time_at_start_buffer_size = 0.0
-            for k in [K-1, K]:
-                probas_stationary[k] = 0.0
-
-        return probas_stationary, idx_last_visit_to_initial_position, last_time_at_start_buffer_size
+        return self.getLearnerV(), self.getLearnerP(), df_learning
 
     @measure_exec_time
     def run_simulation_mc_DT(self, t_learn, start_state, t_sim_max, agent=None, verbose=False, verbose_period=1):
@@ -1448,7 +1051,7 @@ class SimulatorQueue(Simulator):
 
             # Next state
             # Note: this function takes care of NOT generating a service event when a server is empty.
-            time, event, job_class_or_server, _ = self.generate_event([self.env])
+            time, event, job_class_or_server, _ = generate_event([self.env])
             if event == Event.BIRTH:
                 # The event is an incoming job class
                 # => Increment the discrete time step, set the arriving job class in the queue environment, and apply the acceptance policy
@@ -1456,19 +1059,19 @@ class SimulatorQueue(Simulator):
                 # (this guarantees that the stationary distribution of the discrete-time process coincides with that of the continuous-time process)
                 t += 1
 
-                action, next_state, reward, gradient_for_action = self.manage_job_arrival(t, self.env, agent, state, job_class_or_server)
+                action, next_state, reward, gradient_for_action = manage_job_arrival(t, self.env, agent, state, job_class_or_server)
 
                 # Update the trajectory used in the learning process, where we store:
                 # S(t): state BEFORE an action is taken
                 # A(t): action taken given the state S(t)
                 # R(t): reward received by taking action A(t) and transition to S(t+1)
-                self.update_trajectory(agent, (t_learn - 1) * (tmax + 1) + t, t, state, action, reward)
+                update_trajectory(agent, (t_learn - 1) * (tmax + 1) + t, t, state, action, reward)
 
-                done = self.check_done(tmax, t, state, action, reward)
+                done = check_done(tmax, t, state, action, reward)
             elif event == Event.DEATH:
                 # The event is a completed service
                 # => Update the state of the queue but do NOT update the discrete-time step
-                action, next_state, reward = self.manage_service(self.env, agent, state, job_class_or_server)
+                action, next_state, reward = manage_service(self.env, agent, state, job_class_or_server)
                 if event_prev == Event.BIRTH or event_prev is None:
                     # Add the state PRIOR to the FIRST DEATH after a BIRTH (or the very first DEATH event
                     # if that is the first event that occurs in the simulation), so that we record the state
@@ -1476,7 +1079,7 @@ class SimulatorQueue(Simulator):
                     # at the end showing the states of the system at each time step does not raise suspicion
                     # because the buffer size doesn't change between two consecutive time steps --which would be
                     # inconsistent with the fact that a new time step is defined when a new job arrives).
-                    self.update_trajectory(agent, (t_learn - 1) * (tmax + 1) + t, t, state, action, reward)
+                    update_trajectory(agent, (t_learn - 1) * (tmax + 1) + t, t, state, action, reward)
 
             if self.debug:
                 print("{} | t={}: event={}, action={} -> state={}, reward={}".format(state, t, event, action, next_state, reward), end="\n")
@@ -1484,7 +1087,7 @@ class SimulatorQueue(Simulator):
             event_prev = event
 
         # DONE
-        if self.show_messages(verbose, verbose_period, t_learn):
+        if show_messages(verbose, verbose_period, t_learn):
             print("==> agent ENDS at time t={} at state {} coming from state = {}, action = {}, reward = {}, gradient = {})" \
                     .format(t, self.env.getState(), state, action, reward, gradient_for_action))
 
@@ -1499,524 +1102,16 @@ class SimulatorQueue(Simulator):
         Dictionary with the estimated stationary probability for buffer sizes K-1 and K, where K is the first integer
         larger than or equal to theta + 1  --theta being the parameter of the linear step acceptance policy.
         """
-        states_with_actions = [s for s, a in zip(self.learnerV.getStates(), self.learnerV.getActions()) if a is not None]
+        states_with_actions = [s for s, a in zip(self.getLearnerV().getStates(), self.getLearnerV().getActions()) if a is not None]
         buffer_sizes = [self.env.getBufferSizeFromState(s) for s in states_with_actions]
         # print("buffer sizes, actions = {}".format(np.c_[buffer_sizes, actions]))
-        K = self.learnerP.getPolicy().getBufferSizeForDeterministicBlocking()
+        if self.getLearnerP() is not None:
+            assert self.agent.getAcceptancePolicy().getThetaParameter() == self.getLearnerP().getPolicy().getThetaParameter()
+        K = self.agent.getAcceptancePolicy().getBufferSizeForDeterministicBlocking()
         probas_stationary = dict({K-1:  np.sum([1 for bs in buffer_sizes if bs == K-1]) / len(buffer_sizes),
                                   K:    np.sum([1 for bs in buffer_sizes if bs == K]) / len(buffer_sizes)})
 
         return probas_stationary
-
-    def compute_survival_probability(self, survival_times):
-        assert survival_times[0] == 0.0
-        # Number of observed death events used to measure survival times
-        N = len(survival_times) - 1
-
-        if N > 0:
-            proba_surv = [n / N for n in range(N, -1, -1)] # This is N downto 0 (i.e. N+1 elements as there are in survival_times)
-            assert proba_surv[-1] == 0.0
-        else:
-            proba_surv = [1.0]
-
-        assert proba_surv[0] == 1.0
-        return pd.DataFrame.from_items([('t', survival_times),
-                                        ('P(T>t)', proba_surv)])
-
-    def estimate_expected_cycle_time(self, n_cycles, time_end_last_cycle, time_end_simulation):
-        "Estimates the expected return time to the initial buffer size"
-        if n_cycles > 0:
-            assert time_end_last_cycle > 0.0
-            expected_cycle_time = time_end_last_cycle / n_cycles
-        else:
-            warnings.warn("No absorption cycle was observed, the expected absorption time is estimated as the maximum time observed in the simulation: {}".format(time_end_simulation))
-            expected_cycle_time = time_end_simulation
-        assert expected_cycle_time > 0.0
-
-        return expected_cycle_time
-
-    def estimate_expected_reward(self, probas_stationary):
-        """
-        Estimates the expected reward of the queue system assuming a non-zero reward happens at the buffer sizes
-        of interest, i.e. those where the policy yields a positive probability of rejection.
-
-        The expected reward is estimated as:
-        E[R] = sum_{buffer sizes bs with rejection probability Pi > 0} { R(bs) * Pi(reject/bs) * Pr(bs) }
-
-        where R(bs) is reward associated to a rejection at buffer size bs defined in the queue environment,
-        and Pr(bs) is the stationary probability estimate of buffer size bs.
-
-        Arguments:
-        probas_stationary: dict
-            Dictionary with the estimated stationary probability of the buffer sizes of interest which are
-            the dictionary keys.
-
-        Return: float
-        Estimated expected reward.
-        """
-        expected_reward = 0.0
-        buffer_sizes_of_interest = self.get_blocking_buffer_sizes()
-        assert len(probas_stationary) == len(buffer_sizes_of_interest)
-        for bs in buffer_sizes_of_interest:
-            expected_reward += self.compute_reward_for_buffer_size(bs) * \
-                               self.learnerP.getPolicy().getPolicyForAction(Actions.REJECT, None, bs) * \
-                               probas_stationary[bs]
-        return expected_reward
-
-    def compute_proba_blocking(self, probas_stationary):
-        """
-        Computes the blocking probability of the queue system
-
-        The blocking probability is computed as:
-        Pr(BLOCK) = sum_{buffer sizes bs with rejection probability Pi > 0} { Pi(reject/bs) * Pr(bs) }
-
-        where Pr(bs) is the estimated stationary probability for buffer size bs.
-
-        Arguments:
-        probas_stationary: dict
-            Dictionary with the estimated stationary probability of the buffer sizes of interest which are
-            the dictionary keys.
-
-        Return: float
-        Estimated blocking probability.
-        """
-        proba_blocking = 0.0
-        buffer_sizes_of_interest = self.get_blocking_buffer_sizes()
-        assert len(probas_stationary) == len(buffer_sizes_of_interest), \
-            "The length of the probas_stationary dictionary is the same as the number of buffer sizes of interest ({}):\n{}" \
-                .format(buffer_sizes_of_interest, probas_stationary)
-        for bs in buffer_sizes_of_interest:
-            proba_blocking += self.learnerP.getPolicy().getPolicyForAction(Actions.REJECT, None, bs) * \
-                              probas_stationary[bs]
-        return proba_blocking
-
-    @measure_exec_time
-    def run_simulation_fv(self, t_learn, buffer_size_absorption, proba_surv, expected_absorption_time,
-                                agent=None, verbose=False, verbose_period=1, plot=False, ax=None):
-        """
-        Runs the Fleming-Viot simulation of the particle system and estimates the expected reward
-        (equivalent to the blocking probability when the blocking reward is always equal to 1)
-
-        Arguments:
-        t_learn: int
-            The learning time step to which the simulation will contribute.
-            Only used for informative purposes or to decide whether to show information in the log.
-
-        buffer_size_absorption: non-negative int
-            Buffer size at which the particle is absorbed.
-
-        proba_surv: pandas data frame
-            Probability of survival given the process started at the activation set, Pr(T>t / s in activation set),
-            used to estimate the blocking probability for each blocking buffer size.
-            Typically this estimation is obtained by running a Monte-Carlo simulation of the queue.
-            It should be a pandas data frame with at least two columns:
-            - 't': the times at which the survival probability is estimated.
-            - 'P(T>t)': the survival probability for each t.
-
-        expected_absorption_time: positive float
-            Expected absorption cycle time E(T_A) used to estimate the blocking probability
-            for each blocking buffer size.
-
-        agent: (opt) Agent
-            Agent object that is responsible of performing the actions on the environment and learning from them.
-            default: None, in which case the agent defined in the object is used
-
-        verbose: (opt) bool
-            Whether to be verbose in the simulation process.
-            default: False
-
-        verbose_period: (opt) int
-            The time step period to be verbose.
-            default: 1 => be verbose at every simulation step.
-
-        Return: tuple
-        Tuple with the following elements:
-        (below, K is determined by the parameterized acceptance policy as the smallest buffer size with deterministic rejection)
-        - t: the last time step (integer-valued) of the simulation process.
-        - event_times: list of times at which an event occurred during the simulation.
-        - phi: dictionary of lists with the empirical distribution of the buffer sizes of interest, namely K-1 and K,
-        which are an estimate of the probability of those buffer sizes conditional to survival (not absorption).
-        - probas_stationary: dictionary of floats indexed by the buffer sizes of interest, namely K-1 and K, containing
-        the estimated stationary probability at those buffer sizes.
-        """
-        #---------------------------------- Auxiliary functions ------------------------------#
-        def update_phi(phi):
-            """
-            Updates the conditional probability of each buffer size of interest, which are given by the keys
-            of the dictionary of the input parameter phi, which is updated.
-
-            Arguments:
-            phi: dict
-                Dictionary of lists, where the list for each entry (the buffer size of interest)
-                contains the empirical distribution at each time when a change happens.
-                This input parameter is updated by the function.
-
-            Return: bool
-            Whether any of the newly computed Phi values is non-zero. This can be used to decide whether we need to
-            compute the integral that gives rise to the Fleming-Viot estimate of the stationary probability, or we
-            already know that the integral is already 0 because all the Phi(t) values are 0.
-            """
-            any_new_value_gt_0 = False
-            for bs in phi.keys():
-                phi[bs] += [empirical_mean(bs)]
-                if phi[bs][-1] > 0.0:
-                    any_new_value_gt_0 = True
-            return any_new_value_gt_0
-
-        def empirical_mean(buffer_size):
-            "Compute the proportion of environments/particles at the given buffer size"
-            return np.mean([int(bs == buffer_size) for bs in [env.getBufferSizeFromState(env.getState()) for env in self.envs]])
-
-        def reactivate_particle(idx_particle):
-            """
-            Chooses a particle to reactivate a particle that has been absorbed
-
-            Reactivation means that the state of the particle is set to be the state of the chosen particle.
-
-            Arguments:
-            idx_particle: int
-                The index of the particle to be reactivated.
-
-            Return: int
-            The index of the particle to which it is reactivated.
-            """
-            # Select a reactivation particle out of the other N-1 particles
-            assert self.N > 1, "There is more than one particle in the system (N={})".format(self.N)
-            idx_reactivate = np.random.randint(0, self.N-1)
-            if idx_reactivate >= idx_particle:
-                # The chosen particle is beyond the particle to reactivate
-                # => increase the index of the particle by 1 so that we choose the correct particle
-                idx_reactivate += 1
-            assert idx_reactivate < self.N, "The reactivation particle ID ({}) is < N (={}) for particle with ID = {}" \
-                                            .format(idx_reactivate, self.N, idx_particle)
-            assert idx_reactivate != idx_particle, "The particle chosen for reactivation ({}) is different from the particle being reactivated ({})" \
-                                                    .format(idx_reactivate, idx_particle)
-
-            # Update the state of the reactivated particle to the reactivation state
-            self.envs[idx_particle].setState( self.envs[idx_reactivate].getState() )
-
-            return idx_reactivate
-
-        def estimate_stationary_probability(t, phi, proba_surv, expected_absorption_time):
-            """
-            Estimates the stationary probability for each buffer size of interest in phi using the Fleming-Viot estimator
-
-            Arguments:
-            t: list
-                Times at which the empirical distribution phi is measured.
-
-            phi: dict of lists
-                Empirical distribution of buffer sizes of interest which are the keys of the dictionary.
-                The list in each dictionary entry should have the same length as `t`.
-
-            proba_surv: pandas data frame
-                Data frame with at least the following two columns:
-                - 't': times at which the survival probability is estimated
-                - 'P(T>t)': the survival probability estimate for the corresponding 't' value given the process
-                started at the stationary activation distribution of states.
-
-            expected_absorption_time: float
-                Estimated expected absorption cycle time, i.e. the expected time the queue system takes in a
-                re-absorption cycle when starting at the stationary absorption distribution of states.
-
-            Return: tuple of dict
-            Duple with two dictionaries indexed by the buffer sizes (bs) of interest with the following content:
-            - the stationary distribution
-            - the value of the integral P(T>t)*Phi(t,bs)
-           """
-            # Create a data frame from t and phi where each buffer size in which phi is measured is a different column
-            df_phi = pd.DataFrame({'t': t})
-            buffer_sizes_of_interest = list( phi.keys() )
-            for bs in buffer_sizes_of_interest:
-                df_phi[bs] = phi[bs]
-            df_phi.columns = pd.MultiIndex.from_arrays([['t'] + ['Phi']*len(buffer_sizes_of_interest), [''] + buffer_sizes_of_interest])
-
-            # Merge the times where Phi(t,bs) and P(T>t) are measured
-            df_proba_surv_phi = merge_proba_survival_and_phi(proba_surv, df_phi)
-
-            if DEBUG_ESTIMATORS:
-                plt.figure()
-                plt.step(df_proba_surv_phi['t'], df_proba_surv_phi['P(T>t)'], 'b-', where='post')
-                colors = ['green', 'red']
-                for idx, bs in enumerate(buffer_sizes_of_interest):
-                    plt.step(df_proba_surv_phi['t'], df_proba_surv_phi['Phi'][bs], color=colors[idx], where='post')
-
-            # Stationary probability for each buffer size of interest
-            probas_stationary, integrals = estimate_proba_stationary(df_proba_surv_phi, expected_absorption_time)
-
-            return probas_stationary, integrals
-
-        def merge_proba_survival_and_phi(proba_surv, df_phi):
-            """
-            Merges the the survival probability and the empirical distribution of buffer sizes of interest
-            on a common set of time values into a data frame.
-
-            Arguments:
-            proba_surv: pandas data frame
-                Data frame containing the time and P(T>t) survival probability given activation.
-
-            df_phi: pandas data frame
-                Data frame containing the time and the Phi(t,bs) value for each buffer size of interest bs.
-
-            return: pandas data frame
-            Data frame with the following columns:
-            - 't': time at which a change in any of the input quantities happens
-            - 'P(T>t)': survival probability given the process started at the stationary activation distribution of states.
-            - 'Phi(t,bs)': empirical distribution for each buffer size of interest given the process started
-            at the stationary activation distribution of states.
-            """
-            phi_by_t = dict()
-            buffer_sizes_of_interest = list( df_phi['Phi'].columns )
-            for bs in buffer_sizes_of_interest:
-                # Merge the time values at which the survival probability is measured (changes) with the time values
-                # at which the empirical distribution Phi is measured for each buffer size of interest.
-                t, proba_surv_by_t, phi_by_t[bs] = merge_values_in_time(list(proba_surv['t']), list(proba_surv['P(T>t)']),
-                                                                        list(df_phi['t']), list(df_phi['Phi'][bs]), unique=False)
-
-            #-- Merged data frame
-            # Initialize with P(T>t)
-            # Note: We construct the data frame one column at a time because when defining both columns together
-            # in a single call to pd.DataFrame() the order of the columns is not guaranteed!
-            df_merged = pd.DataFrame({'t': t})
-            df_merged = pd.concat([df_merged, pd.DataFrame({'P(T>t)': proba_surv_by_t})], axis=1)
-
-            # Append Phi for each buffer size of interest
-            for bs in buffer_sizes_of_interest:
-                df_merged = pd.concat([df_merged, pd.DataFrame({bs: phi_by_t[bs]})], axis=1)
-
-            # Create hierarchical indexing in the columns so that we can access each Phi(t,bs) as df_merged['Phi'][bs][t]
-            df_merged.columns = pd.MultiIndex.from_arrays([list(df_merged.columns[:2]) + ['Phi']*len(buffer_sizes_of_interest), ['', ''] + buffer_sizes_of_interest])
-
-            if self.debug:
-                print("Survival Probability and Empirical Distribution for each buffer size of interest :")
-                print(df_merged)
-
-            return df_merged
-
-        def estimate_proba_stationary(df_phi_proba_surv, expected_absorption_time):
-            """
-            Computes the stationary probability for each buffer size of interest via Approximation 1 in Matt's draft"
-
-            Arguments:
-            df_phi_proba_surv: pandas data frame
-                Data frame with the survival probability P(T>t) and the empirical distribution for each buffer size
-                of interest on which the integral that leads to the Fleming-Viot estimation of the stationary
-                probability of the buffer size is computed.
-
-            expected_absorption_time: float
-                Estimated expected absorption cycle time.
-
-            Return: tuple of dict
-            Duple with two dictionaries indexed by the buffer sizes (bs) of interest with the following content:
-            - the stationary distribution
-            - the value of the integral P(T>t)*Phi(t,bs)
-            """
-            if tracemalloc.is_tracing():
-                mem_usage = tracemalloc.get_traced_memory()
-                print("[MEM] estimate_proba_stationary: Memory used so far: current={:.3f} MB, peak={:.3f} MB".format(mem_usage[0]/1024/1024, mem_usage[1]/1024/1024))
-                mem_snapshot_1 = tracemalloc.take_snapshot()
-
-            if expected_absorption_time <= 0.0 or np.isnan(expected_absorption_time) or expected_absorption_time is None:
-                raise ValueError("The expected absorption time must be a positive float ({})".format(expected_absorption_time))
-
-            probas_stationary = dict()
-            integrals = dict()
-            for bs in df_phi_proba_surv['Phi'].columns:
-                # Integrate => Multiply the survival, the empirical distribution Phi, delta(t) and SUM
-                integrals[bs] = 0.0
-                for i in range(0, df_phi_proba_surv.shape[0] - 1):
-                    integrals[bs] += (df_phi_proba_surv['P(T>t)'].iloc[i] * df_phi_proba_surv['Phi'][bs].iloc[i]) * (df_phi_proba_surv['t'].iloc[i+1] - df_phi_proba_surv['t'].iloc[i])
-                if self.show_messages(verbose, verbose_period, t_learn):
-                    print("integrals[{}] = {:.3f}".format(bs, integrals[bs]))
-                probas_stationary[bs] = integrals[bs] / expected_absorption_time
-
-            if tracemalloc.is_tracing():
-                mem_snapshot_2 = tracemalloc.take_snapshot()
-                mem_stats_diff = mem_snapshot_2.compare_to(mem_snapshot_1, key_type='lineno')    # Possible key_type's are 'filename', 'lineno', 'traceback'
-                if self.show_messages(verbose, verbose_period, t_learn):
-                    print("[MEM] estimate_proba_stationary: Top difference in memory usage:")
-                    for stat in mem_stats_diff[:10]:
-                        #if stat.size / stat.count > 1E6:   # To print the events with largest memory consumption for EACH of their occurrence
-                        print(stat)
-
-            return probas_stationary, integrals
-        #---------------------------------- Auxiliary functions ------------------------------#
-
-        #---------------------------- Check input parameters ---------------------------------#
-        if buffer_size_absorption < 0 \
-            or not isinstance(buffer_size_absorption, int) and not isinstance(buffer_size_absorption, np.int32) \
-                and not isinstance(buffer_size_absorption, np.int64):
-            raise ValueError("The buffer size for absorption must be integer and >= 0 ({})".format(buffer_size_absorption))
-
-        # Check the survival probability values
-        if proba_surv is None and not isinstance(proba_surv, pd.core.frame.DataFrame):
-            raise ValueError("The survival probability estimate must be given and be a DataFrame")
-        if 't' not in proba_surv.columns or 'P(T>t)' not in proba_surv.columns:
-            raise ValueError("The data frame with the estimated survival probability must contain at least columns 't' and 'P(T>t)' (columns: {})" \
-                             .format(proba_surv.columns))
-        if proba_surv['P(T>t)'].iloc[0] != 1.0:
-            raise ValueError("The first value of the survival function must be 1.0 ({:.3f})".format(proba_surv['P(T>t)'].iloc[0]))
-        if proba_surv['P(T>t)'].iloc[-1] not in [1.0, 0.0]:
-            raise ValueError("The survival function at the last measured time is either 1.0 "
-                            "(when no particles have been absorbed) or 0.0 "
-                            "(when at least one particle has been absorbed) ({})".format(proba_surv['P(T>t)'].iloc[-1]))
-        #---------------------------- Check input parameters ---------------------------------#
-
-        #-- Parse input parameters
-        if agent is None:
-            agent = self.agent
-
-        # Set the start state of each environment/particle to an activation state, as this is a requirement
-        # for the empirical distribution Phi(t).
-        for i, env in enumerate(self.envs):
-            # Set the start state of the queue environment so that we start at an activation state
-            start_state = self.choose_state_for_buffer_size(env, buffer_size_absorption + 1)
-            env.setState((start_state, None))
-            assert env.getBufferSize() == buffer_size_absorption + 1, \
-                    "The start state of all environments/particles must be an activation state (start state of env #{}: {})" \
-                    .format(i, env.getState())
-
-        # Buffer sizes whose stationary probability is of interest
-        buffer_sizes_of_interest = self.get_blocking_buffer_sizes()
-
-        # Event times (continuous times at which an event happens)
-        # The first event time is 0.0
-        event_times = [0.0]
-
-        # Phi(t, bs): Empirical probability of the buffer sizes of interest (bs)
-        # at each time when an event happens (ANY event, both arriving job or completed service)
-        phi = dict()
-        for bs in buffer_sizes_of_interest:
-            phi[bs] = [empirical_mean(bs)]
-
-        # Time step in the queue trajectory (the first time step is t = 0)
-        done = False
-        t = 0
-        maxtime = proba_surv['t'].iloc[-1]
-            ## maxtime: it's useless to go with the FV simulation beyond the maximum observed survival time
-            ## because the contribution to the integral used in the estimation of the average reward is 0.0 after that.
-        is_any_phi_value_gt_0 = False
-        idx_reactivate = None
-        if plot:
-            # Variables needed to update the plot that shows the trajectories of the particles (online)
-            time0 = [0.0] * self.N
-            y0 = [buffer_size_absorption + 1] * self.N
-        if DEBUG_ESTIMATORS:
-            # Check realization of the arrival and service rates
-            times_last_arrival = [0.0] * self.N
-            jobs_arrival = []
-            times_inter_arrival = []
-
-            if self.env.getBufferSize() == 0:
-                # Initially all the particles have no jobs, therefore no service events can happen for any of them
-                times_last_service = [np.nan] * self.N
-            else:
-                times_last_service = [0.0] * self.N
-            servers_service = []
-            times_service = []
-        while not done:
-            t += 1
-
-            # Generate an event over all possible event types and particles
-            # Note: this function takes care of NOT generating a service event when a server is empty.
-            time, event, job_class_or_server, idx_particle = self.generate_event()
-            assert 0 <= idx_particle < self.N, "The chosen particle for change is between 0 and N-1={} ({})".format(self.N-1, idx_particle)
-            # Store the absolute event time
-            event_times += [ event_times[-1] + time ]
-
-            # Get the current state of the selected particle because that's the one whose state we are going to possibly change
-            state = self.envs[idx_particle].getState()
-            if event == Event.BIRTH:
-                # The event is an incoming job class
-                # => Update the state of the queue, apply the acceptance policy, and finally the server assignment policy
-                action, next_state, reward, gradient_for_action = \
-                    self.manage_job_arrival(t, self.envs[idx_particle], agent, state, job_class_or_server)
-                if DEBUG_ESTIMATORS:
-                    # TODO: (2022/01/21) Fix this logic as it does NOT take care of different job classes. In fact the latest arrival time (regardless of the job class) is used as reference time to compute the new inter-arrival time for the current job class!)
-                    jobs_arrival += [job_class_or_server]
-                    times_inter_arrival += [event_times[-1] - times_last_arrival[idx_particle]]
-                    # Prepare for the next iteration
-                    times_last_arrival[idx_particle] = event_times[-1]
-                    if self.envs[idx_particle].getBufferSizeFromState(next_state) == 1:
-                        # The particle can now experience a service event
-                        # => Reset the time of the last service to the current time, so that we can measure the time
-                        # of the next service experienced by this particle.
-                        times_last_service[idx_particle] = event_times[-1]
-
-                # Stop when we reached the maxtime, which is set above to the maximum observed survival time
-                # (since going beyond does not contribute to the integral used in the FV estimator)
-                done = event_times[-1] > maxtime
-            elif event == Event.DEATH:
-                # The event is a completed service
-                # => Update the state of the queue but do NOT update the discrete-time step
-                action, next_state, reward = self.manage_service(self.envs[idx_particle], agent, state, job_class_or_server)
-
-                # Check if the particle has been ABSORBED
-                if self.envs[idx_particle].getBufferSizeFromState(next_state) == buffer_size_absorption:
-                    # The particle has been absorbed
-                    # => Reactivate it to any of the other particles
-                    if plot:
-                        # Show the absorption before reactivation takes place
-                        y = self.env.getBufferSizeFromState(next_state)
-                        self.plot_update_trajectory(ax, idx_particle, buffer_size_absorption+1, time0[idx_particle], y0[idx_particle], event_times[-1], y)
-                        time0[idx_particle] = event_times[-1]
-                        y0[idx_particle] = y
-                    idx_reactivate = reactivate_particle(idx_particle)
-                    next_state = self.envs[idx_particle].getState()
-                    if DEBUG_TRAJECTORIES:
-                        print("*** Particle {} REACTIVATED to particle {}".format(idx_particle, idx_reactivate))
-
-                # This should come AFTER the possible reactivation, because the next state will never be 0
-                # when reactivation takes place.
-                if DEBUG_ESTIMATORS:
-                    assert not np.isnan(times_last_service[idx_particle])
-                    servers_service += [job_class_or_server]
-                    times_service += [event_times[-1] - times_last_service[idx_particle]]
-                    # Prepare for the next iteration
-                    if self.envs[idx_particle].getBufferSize() == 0:
-                        # The particle can no longer experience a service event
-                        # => Reset the time of the last service to NaN
-                        times_last_service[idx_particle] = np.nan
-                    else:
-                        times_last_service[idx_particle] = event_times[-1]
-
-            if DEBUG_TRAJECTORIES:
-                print("P=P{}: {} | t={}: time={}, event={}, action={} -> state={}, reward={}" \
-                      .format(idx_particle, state, t, event_times[-1], event, action, next_state, reward), end="\n")
-
-            is_any_phi_value_gt_0 = max([is_any_phi_value_gt_0, update_phi(phi)])
-
-            if plot:
-                y = self.env.getBufferSizeFromState(next_state)
-                self.plot_update_trajectory(ax, idx_particle, buffer_size_absorption+1, time0[idx_particle], y0[idx_particle], event_times[-1], y, r=idx_reactivate)
-                time0[idx_particle] = event_times[-1]
-                y0[idx_particle] = y
-
-            idx_reactivate = None
-
-        # DONE
-        if self.show_messages(verbose, verbose_period, t_learn):
-            print("==> agent ENDS at discrete time t={} (continuous time = {:.1f}, compared to maximum observed time for P(T>t) = {:.1f}) at state {} coming from state = {}, action = {}, reward = {})" \
-                    .format(t, event_times[-1], proba_surv['t'].iloc[-1], self.envs[idx_particle].getState(), state, action, reward))
-        # Assertion
-        for bs in phi.keys():
-            assert len(event_times) == len(phi[bs]), "The length of the event times where phi is measured ({}) coincides with the length of phi ({})" \
-                                                .format(len(event_times), len(phi))
-
-        if DEBUG_ESTIMATORS:
-            plotting.plot_event_times(self.job_rates_by_server, times_inter_arrival, jobs_arrival, class_name="Job class")
-            plotting.plot_event_times(self.env.getServiceRates(), times_service, servers_service, class_name="Server")
-
-        if is_any_phi_value_gt_0:
-            # Compute the stationary probability of each buffer size bs in Phi(t,bs) using Phi(t,bs), P(T>t) and E(T_A)
-            probas_stationary, integrals = estimate_stationary_probability(event_times, phi, proba_surv, expected_absorption_time)
-        else:
-            probas_stationary = dict()
-            integrals = dict()
-            for bs in phi.keys():
-                probas_stationary[bs] = integrals[bs] = 0.0
-
-        return t, event_times, phi, probas_stationary
 
     @measure_exec_time
     def estimate_Q_values_until_stationarity(self, t_learn, t_sim_max=50, N=100, verbose=False, verbose_period=1):
@@ -2053,16 +1148,18 @@ class SimulatorQueue(Simulator):
         - The state-action value for (K-1, a=Accept)
         - N: the number of realizations used to compute the state-action values
         """
-        if not isinstance(self.learnerP.getPolicy(), PolQueueTwoActionsLinearStep):
+        if not isinstance(self.getLearnerP().getPolicy(), PolQueueTwoActionsLinearStep):
             raise ValueError("The agent's policy must be of type {} ({})" \
-                             .format(type(PolQueueTwoActionsLinearStep), type(self.learner.getPolicy())))
+                             .format(type(PolQueueTwoActionsLinearStep), type(self.getLearnerP().getPolicy())))
 
-        K = self.learnerP.getPolicy().getBufferSizeForDeterministicBlocking()
+        if self.getLearnerP() is not None:
+            assert self.agent.getAcceptancePolicy().getThetaParameter() == self.getLearnerP().getPolicy().getThetaParameter()
+        K = self.agent.getAcceptancePolicy().getBufferSizeForDeterministicBlocking()
 
         # 1) Starting at (K-1, a=1) is like starting at s=K (because the reward of the first action is 0)
-        if self.show_messages(verbose, verbose_period, t_learn):
+        if show_messages(verbose, verbose_period, t_learn):
             print("\n1) Running simulation on N={} queues for {} time steps to estimate Q(K-1, a=1)...".format(N, t_sim_max))
-        start_state = self.choose_state_for_buffer_size(self.env, K)
+        start_state = choose_state_for_buffer_size(self.env, K)
         Q1 = 0.0
         for _ in range(N):
             agent_Q = copy.deepcopy(self.agent)
@@ -2074,11 +1171,11 @@ class SimulatorQueue(Simulator):
         Q1 /= N
 
         # 2) Starting at (K-1, a=0) is like starting at s=K-1 and adding one reward for the first rejection
-        if self.show_messages(verbose, verbose_period, t_learn):
+        if show_messages(verbose, verbose_period, t_learn):
             print("2) Running simulation on N={} queues for {} time steps to estimate Q(K-1, a=0)...".format(N, t_sim_max))
-        start_state = self.choose_state_for_buffer_size(self.env, K - 1)
+        start_state = choose_state_for_buffer_size(self.env, K - 1)
         # Reward received from the initial rejection of the job at buffer size K-1
-        first_reward = self.compute_reward_for_buffer_size(K - 1)
+        first_reward = compute_reward_for_buffer_size(self.env, K - 1)
         Q0 = 0.0
         for _ in range(N):
             agent_Q = copy.deepcopy(self.agent)
@@ -2131,11 +1228,13 @@ class SimulatorQueue(Simulator):
         - n: the number of realizations, where trajectories mix, that are used to compute the state-action values
         - Maximum discrete time at which the pair of trajectories mix over the n pair of trajectories that mix
         """
-        if not isinstance(self.learnerP.getPolicy(), PolQueueTwoActionsLinearStep):
+        if not isinstance(self.getLearnerP().getPolicy(), PolQueueTwoActionsLinearStep):
             raise ValueError("The agent's policy must be of type {} ({})" \
-                             .format(type(PolQueueTwoActionsLinearStep), type(self.learner.getPolicy())))
+                             .format(type(PolQueueTwoActionsLinearStep), type(self.getLearnerP().getPolicy())))
 
-        K = self.learnerP.getPolicy().getBufferSizeForDeterministicBlocking()
+        if self.getLearnerP() is not None:
+            assert self.agent.getAcceptancePolicy().getThetaParameter() == self.getLearnerP().getPolicy().getThetaParameter()
+        K = self.agent.getAcceptancePolicy().getBufferSizeForDeterministicBlocking()
 
         Q0 = 0.0
         Q1 = 0.0
@@ -2228,7 +1327,7 @@ class SimulatorQueue(Simulator):
                 env.setJobClass(job_class)
 
                 # Perform a step on the environment by applying the acceptance policy
-                action_accept_reject, next_state, reward_accept_reject, _ = self.step(t, env, PolicyTypes.ACCEPT)
+                action_accept_reject, next_state, reward_accept_reject, _ = step(t, env, self.agent, PolicyTypes.ACCEPT)
 
                 # Assign the job to a server if accepted
                 if action_accept_reject == Actions.ACCEPT:
@@ -2236,7 +1335,7 @@ class SimulatorQueue(Simulator):
                     # (because the next_state from the ACCEPT action has not been updated above
                     # as we need to know to which server the accepted job is assigned in order
                     # to know the next state of the queue environment)
-                    _, next_state, reward_assign, _ = self.step(t, env, PolicyTypes.ASSIGN)
+                    _, next_state, reward_assign, _ = step(t, env, self.agent, PolicyTypes.ASSIGN)
                 else:
                     reward_assign = 0.0
 
@@ -2278,7 +1377,9 @@ class SimulatorQueue(Simulator):
 
         # Set the state of each environment AFTER taking the respective action at time t=0.
         # This is buffer_size when the first action is Reject and buffer_size+1 when the first action is Accept.
-        K = self.learnerP.getPolicy().getBufferSizeForDeterministicBlocking()
+        if self.getLearnerP() is not None:
+            assert self.agent.getAcceptancePolicy().getThetaParameter() == self.getLearnerP().getPolicy().getThetaParameter()
+        K = self.agent.getAcceptancePolicy().getBufferSizeForDeterministicBlocking()
 
         # History of states, actions and rewards of each environment (2 x <undef> list)
         # Used for informational purposes, but actually we don't need to store the history because we are computing
@@ -2289,7 +1390,7 @@ class SimulatorQueue(Simulator):
                   [(buffer_size, None)]]
         actions = [[Actions.REJECT],
                    [Actions.ACCEPT]]
-        rewards = [[self.compute_reward_for_buffer_size(buffer_size)],
+        rewards = [[compute_reward_for_buffer_size(self.env, buffer_size)],
                    [0.0]]
 
         # Set the NEW state of the environments once the above actions have been taken on the respective states
@@ -2311,10 +1412,10 @@ class SimulatorQueue(Simulator):
             # so that we can compare their state-action at the same discrete time value and find the mixing time.
             # Note: the generate_events() function takes care of NOT generating a service event when a server is empty.
             while t0 == t:
-                time0, event0, job_class_or_server0, _ = self.generate_event([envs[0]])
+                time0, event0, job_class_or_server0, _ = generate_event([envs[0]])
                 t0, state0, action0, next_state0, reward0 = apply_event(envs[0], t, event0, job_class_or_server0)
             while t1 == t:
-                time1, event1, job_class_or_server1, _ = self.generate_event([envs[1]])
+                time1, event1, job_class_or_server1, _ = generate_event([envs[1]])
                 t1, state1, action1, next_state1, reward1 = apply_event(envs[1], t, event1, job_class_or_server1)
             assert t0 == t1 and t0 == t + 1, \
                 "The discrete time step is the same in both queues and has increased by one w.r.t. the global time step t (t={:}, t0={:}, t1={:})" \
@@ -2343,11 +1444,11 @@ class SimulatorQueue(Simulator):
                       .format(t, states[-2][0], states[-2][1], [event0, event1], [action0, action1], [state0, state1], [reward0, reward1]), end="\n")
 
         # DONE
-        if self.show_messages(verbose, verbose_period, t_learn):
+        if show_messages(verbose, verbose_period, t_learn):
             print("==> simulation ENDS at discrete time t={} at states = {} coming from states = {}, actions = {} rewards = {})" \
                     .format(t, [state0, state1], [states[-2][0], states[-2][1]], [action0, action1], [reward0, reward1]))
 
-#        if self.show_messages(verbose, verbose_period, t_learn):
+#        if show_messages(verbose, verbose_period, t_learn):
 #           plt.figure()
 #           print("Mixing time t={}, Q0={}, Q1={}".format(t, Q0, Q1))
 #           print(np.c_[[envs[0].getBufferSizeFromState(s) for s in states[0]], actions[0], rewards[0],
@@ -2366,155 +1467,6 @@ class SimulatorQueue(Simulator):
             t_mix = t
 
         return t, Q0, Q1, t_mix
-
-    def choose_state_for_buffer_size(self, env, buffer_size):
-        """
-        Chooses randomly a server in the queue environment to have its queue size equal to the given buffer size,
-        while the queue size of all other servers are set to 0, so that the buffer size of the system is equal
-        to the given buffer size.
-
-        Arguments:
-        env: Queue environment
-            Queue environment containing the servers.
-
-        buffer_size: int
-            Buffer size to be set in the system.
-
-        Return: list
-        List containing the state to set the queue environment at that guarantees that the system's buffer size is
-        equal to the given buffer size.
-        """
-        state = [0] * env.getNumServers()
-        state[np.random.randint(0, len(state))] = buffer_size
-        return state
-
-    def generate_event(self, envs=None):
-        """
-        Generates the next event for the queue system **by taking into account the server's queue sizes**,
-        meaning that no completed service can occur on an empty server.
-
-        The next event can be either:
-        - an incoming job (of a given class)
-        - a completed service in a server in the queue system having at least one job
-
-        envs: (opt) list of queue environments
-            List of queue environments to consider for the generation of the event, i.e. where the event could be
-            generated.
-            default: None, which means that self.envs is used
-
-        Return: tuple
-        Tuple containing the following elements:
-        - the time to the event (relative to whatever absolute time the queue system is at)
-        - the event type (Event.BIRTH or Event.DEATH)
-        - an index that represents either:
-            - the job class, if the generated event is an arriving job
-            - the server, if the generated event is a completed service
-        - the environment/particle where the event takes place
-        """
-        #-- Parse input parameters
-        if envs is None:
-            envs = self.envs
-
-        # Define a 2D numpy array where the different environments/particles are in the first dimension
-        # and the job classes and servers are in the second dimension. The value of each entry is
-        # either the job class arrival rate or the server service rate, depending on the column position
-        # (first come the job classes and then the servers).
-        # A service rate is NaN when the server size is 0, so that the server cannot be selected to experience
-        # a service rate.
-        valid_rates = np.array(
-                        [env.getJobClassRates() + [r if s > 0 else np.nan for r, s in zip(env.getServiceRates(), env.getQueueState())]
-                         for env in envs])
-
-        # Generate the event time and the index on the rates array to which it is associated
-        event_time, event_idx = generate_min_exponential_time(valid_rates.flatten())
-
-        # Convert the linear index back to the 2D index in valid_rates where the indices represent:
-        # (selected env/particle, selected rate)
-        idx_env, job_class_or_server = index_linear2multi(event_idx, valid_rates.shape)
-
-        # Define whether the generated event is an incoming job class or a completed service
-        # and return a different tuple accordingly.
-        # It is assumed that the number of job classes and servers are the same in each environment.
-        n_job_classes = self.env.getNumJobClasses()
-        if job_class_or_server < n_job_classes:
-            # The event is an incoming job class
-            job_class = job_class_or_server
-            return event_time, Event.BIRTH, job_class, idx_env
-        else:
-            # The event is a completed service event
-            idx_server = job_class_or_server - n_job_classes
-            return event_time, Event.DEATH, idx_server, idx_env
-
-    def step(self, t, env, policy_type):
-        """
-        Arguments:
-        t: int
-            Current queue transition associated to the current step.
-
-        env: environment
-            The environment where the agent acts.
-
-        policy_type: PolicyTypes
-            Type of policy to apply when stepping. Possible values are:
-            - PolicyTypes.ACCEPT
-            - PolicyTypes.ASSIGN
-
-        Return: tuple
-        Tuple containing the following elements:
-        - action: the action taken by the agent on the given policy
-        - observation: the next state on which the queue transitions to after the action taken
-        - reward: the reward received by the agent after taking the action and transitioning to the next state
-        - info: dictionary with relevant additional information
-        """
-        action, observation, reward, info = self.agent.act(env, policy_type)
-
-        return action, observation, reward, info
-
-    def update_trajectory(self, agent, t_total, t_sim, state, action, reward):
-        """
-
-        Arguments:
-        agent: Agent
-            Agent that is responsible of performing the actions on the environment and learning from them
-            on which the trajectory to update is stored.
-
-        t_total: int
-            Total time, used to store the trajectory for the policy learning.
-            Normally this would be the total simulation time computed from the learning steps.
-
-        t_sim: int
-            Simulation time, used to store the trajectory for the value function learning.
-
-        state: State (however the state is defined, e.g. as the buffer size)
-            State at the given time to store in the trajectory.
-
-        action: Action
-            Action taken at the given time to store in the trajectory.
-
-        reward: float
-            Reward received by the agent after taking the given action at the given state, to store in the trajectory.
-        """
-        agent.getLearnerV().update_trajectory(t_sim, state, action, reward)
-        # DM-2021/11/28: This assertion is no longer true because we are now storing in the trajectory ALSO the states
-        # occurring just before the FIRST DEATH event happening after a BIRTH event (so that we can show it in the
-        # trajectory plot we show at the end of the simulation and thus avoid the suspicion that something is wrong
-        # when we observe no change in the buffer size from one time step to the next --given that a new time step
-        # is created ONLY when a new job arrives (i.e. a BIRTH event occurs)
-        #assert action is not None, "The action is not None when learning the policy"
-        agent.getLearnerP().update_trajectory(t_total, state, action, reward)
-
-    def compute_reward_for_buffer_size(self, bs):
-        "Computes the reward received when blocking at the given buffer size"
-        # *** We assume that the state of the environment is a duple: (list with server queue sizes, job class of latest arriving job) ***
-        state = ([0] * self.env.getNumServers(), None)
-        # We set the first server to have occupancy equal to the buffer size of interest
-        # as we assume that the reward function ONLY depends on the buffer size, and NOT on the actual state
-        # of the multi-server system.
-        state[0][0] = bs
-        reward_func = self.env.getRewardFunction()
-        reward = reward_func(self.env, state, Actions.REJECT, state)
-
-        return reward
 
     @measure_exec_time
     def learn(self, agent, t, probas_stationary: dict=None, Q_values: dict=None, simul_info: dict=None):
@@ -2573,7 +1525,9 @@ class SimulatorQueue(Simulator):
             # because, either it is empty as the rewards are not recorded while running the Fleming-Viot process,
             # or it does not reflect the actual values of each state-value of the original system.
             assert probas_stationary is not None and Q_values is not None
-            K = agent.getLearnerP().getPolicy().getBufferSizeForDeterministicBlocking()
+            if self.getLearnerP() is not None:
+                assert self.agent.getAcceptancePolicy().getThetaParameter() == self.getLearnerP().getPolicy().getThetaParameter()
+            K = agent.getAcceptancePolicy().getBufferSizeForDeterministicBlocking()
             keys_probas = probas_stationary.keys()
             keys_Q_values = Q_values.keys()
             assert [K-1, K] == sorted(keys_probas) and [K-1, K] == sorted(keys_Q_values), \
@@ -2598,8 +1552,9 @@ class SimulatorQueue(Simulator):
             err_phi = simul_info.get('err_phi', 0)  # expected relative error in the estimation of Phi(t,K) when using N particles
             err_et = simul_info.get('err_et', 0)    # expected relative error in the estimation of E(T_A) when using T time steps
             seed = simul_info.get('seed')
-            expected_cycle_time = simul_info.get('expected_cycle_time')
-            n_cycles = simul_info.get('n_cycles')
+            expected_cycle_time = simul_info.get('expected_cycle_time', 0.0)
+            n_cycles = simul_info.get('n_cycles', 0)
+            max_survival_time = simul_info.get('max_survival_time', 0.0)
             n_events_mc = simul_info.get('n_events_mc', 0)
             n_events_fv = simul_info.get('n_events_fv', 0)
             n_trajectories_Q = simul_info.get('n_Q', 0.0)
@@ -2614,8 +1569,9 @@ class SimulatorQueue(Simulator):
             err_phi = 0.0
             err_et = 0.0
             seed = None
-            expected_cycle_time = None
-            n_cycles = None
+            expected_cycle_time = 0.0
+            n_cycles = 0
+            max_survival_time = 0.0
             n_events_mc = 0
             n_events_fv = 0
             n_trajectories_Q = 0.0
@@ -2637,7 +1593,7 @@ class SimulatorQueue(Simulator):
         agent.getLearnerP().update_learning_rate_by_episode()
 
         if self.save:
-            self.fh_results.write("{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}\n" \
+            self.fh_results.write("{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}\n" \
                                     .format(self.case,
                                             t_learn,
                                             self.envs[0].getParamsRewardFunc().get('buffer_size_ref', None)-1,  # -1 because buffer_size_ref is K and the theta parameter, which is the one we want to store here is K-1
@@ -2654,6 +1610,7 @@ class SimulatorQueue(Simulator):
                                             seed,
                                             expected_cycle_time,
                                             n_cycles,
+                                            max_survival_time,
                                             self.proba_stationary[-1][0],
                                             self.proba_stationary[-1][1],
                                             self.Q_diff[-1][0],
@@ -2666,41 +1623,12 @@ class SimulatorQueue(Simulator):
                                             self.n_trajectories_Q[-1]
                                             ))
 
-    def check_done(self, tmax, t, state, action, reward):
-        """
-        Checks whether the simulation is done
-
-        tmax: int
-            Maximum discrete time allowed for the simulation.
-
-        t: int
-            Current queue simulation time.
-
-        state: Environment dependent
-            S(t): state of the environment at time t, BEFORE the action is taken.
-
-        action: Environment dependent
-            A(t): action received by the environment at time t.
-
-        reward: float
-            R(t+1): reward yielded by the environment after taking action A(t) at state S(t).
-
-        Return: bool
-            Whether the queue simulation is done because the maximum number of iterations has been reached.
-        """
-        if t < tmax:
-            done = False
-        else:
-            done = True
-
-        return done
-
-    def show_messages(self, verbose, verbose_period, t_learn):
-        return verbose and np.mod(t_learn - 1, verbose_period) == 0
-
     # ------ GETTERS ------#
     def getEnv(self):
         return self.env
+
+    def getAgent(self):
+        return self.agent
 
     def getJobRatesByServer(self):
         return self.job_rates_by_server
@@ -2731,40 +1659,435 @@ class SimulatorQueue(Simulator):
     def setNumLearningSteps(self, t_learn):
         self.dict_learning_params['t_learn'] = t_learn
 
-    def plot_update_trajectory(self, ax, p, J, x0, y0, x1, y1, r=None):
-        "p: particle number to update; r: particle to which p is reactivated (if any)"
-        assert ax is not None
-        policy = self.getLearnerP().getPolicy()
-        K = policy.getBufferSizeForDeterministicBlocking()
-        colormap = cm.get_cmap("jet")
-        if r is not None:
-            # Mark the color of the line with the color of the reactivation particle
-            c = r
-        else:
-            c = p
-        color = colormap((c + 1) / self.N)
-        # Non-overlapping step plots at vertical positions (K+1)*p
-        print("Updating TRAJECTORY of particle {} (K={}, J={}): [{}, {}] -> [{}, {}]".format(p, K, J, x0, y0, x1, y1))
-        ax.step([x0, x1], [(K + 1) * p + y0, (K + 1) * p + y1], 'x-', where='post', color=color, markersize=3)
 
-        # Reference lines
-        reflines_zero = range(0, (K+1)*self.N, K+1)
-        reflines_absorption = range(J-1, J-1+(K+1)*self.N, K+1)
-        reflines_block = range(K, K+(K+1)*self.N, K+1)
-        ax.hlines(reflines_block, 0, x1, color='gray', linestyles='dashed')
-        ax.hlines(reflines_absorption, 0, x1, color='red', linestyles='dashed')
-        ax.hlines(reflines_zero, 0, x1, color='gray')
+def generate_event(envs):
+    """
+    Generates the next event happening on the given system of queue environments, which are assumed to have all
+    the same characteristics in terms of number of job classes that can arrive and number of servers that can serve.
 
-        # Vertical line when the particle has been reactivated
-        if r is not None:
-            ax.axvline(x1, color=color, linestyle='dashed')
+    Note that the method takes into account the server's queue sizes, meaning that no completed service can occur
+    on an empty server in the system.
+
+    The next event can be either:
+    - an incoming job (of a given class);
+    - a completed service in a server in the queue system having at least one job.
+
+    Arguments:
+    envs: list
+        List of queue environments to consider for the generation of the event, i.e. where the event COULD be
+        generated.
+
+    Return: tuple
+    Tuple containing the following elements:
+    - the time to the event (relative to whatever absolute time the queue system is at)
+    - the event type (Event.BIRTH or Event.DEATH)
+    - an index that represents either:
+        - the job class, if the generated event is an arriving job
+        - the server, if the generated event is a completed service
+    - the environment/particle where the event takes place
+    """
+    # Define a 2D numpy array where the different environments/particles are in the first dimension
+    # and the job classes and servers are in the second dimension. The value of each entry is
+    # either the job class arrival rate or the server service rate, depending on the column position
+    # (first come the job classes and then the servers).
+    # A service rate is NaN when the server size is 0, so that the server cannot be selected to experience
+    # a service rate.
+    valid_rates = np.array(
+                    [env.getJobClassRates() + [r if s > 0 else np.nan for r, s in zip(env.getServiceRates(), env.getQueueState())]
+                     for env in envs])
+    #print("\nQueue states:\n{}".format([[s for s in env.getQueueState()] for env in envs]))
+    #print("Valid rates: {}".format(valid_rates))
+
+    # Generate the event time and the index on the rates array to which it is associated
+    event_time, event_idx = generate_min_exponential_time(valid_rates.flatten())
+
+    # Convert the linear index back to the 2D index in valid_rates where the indices represent:
+    # (selected env/particle, selected rate)
+    idx_env, job_class_or_server = index_linear2multi(event_idx, valid_rates.shape)
+
+    # Define whether the generated event is an incoming job class or a completed service
+    # and return a different tuple accordingly.
+    # It is assumed that the number of job classes and servers are the same in each environment.
+    n_job_classes = envs[0].getNumJobClasses()
+    if job_class_or_server < n_job_classes:
+        # The event is an incoming job class
+        job_class = job_class_or_server
+        return event_time, Event.BIRTH, job_class, idx_env
+    else:
+        # The event is a completed service event
+        idx_server = job_class_or_server - n_job_classes
+        return event_time, Event.DEATH, idx_server, idx_env
 
 
-def estimate_blocking_mc(simul, dict_params_simul, dict_params_info):
+def manage_job_arrival(t, env, agent, state, job_class):
+    """
+    Manages an incoming job event, whether it is accepted or not and what is done if it is accepted
+
+    Arguments:
+    t: int
+        Discrete time step at which the job arrival takes place.
+
+    env: Queue environment
+        Queue environment where the service takes place.
+
+    agent: Agent
+        Agent acting on the environment.
+
+    state: State of the queue environment
+        The state in which the queue environment is in.
+
+    job_class: int
+        Class of the arriving job.
+
+    Return: tuple
+    Triple with the following elements:
+    - action taken by the agent
+    - the next state of the queue
+    - the reward received
+    - gradient: the policy gradient for the action taken given the state
+    """
+    # Store the class of the arriving job
+    env.setJobClass(job_class)
+
+    # Perform a step on the environment by applying the acceptance policy
+    action_accept_reject, next_state, reward_accept_reject, _ = step(t, env, agent, PolicyTypes.ACCEPT)
+
+    # Assign the job to a server if accepted
+    if action_accept_reject == Actions.ACCEPT:
+        # Assign the job just accepted to a server and update the next_state value
+        # (because the next_state from the ACCEPT action has not been updated above
+        # as we need to know to which server the accepted job is assigned in order
+        # to know the next state of the queue environment)
+        _, next_state, reward_assign, _ = step(t, env, agent, PolicyTypes.ASSIGN)
+    else:
+        reward_assign = 0.0
+    action = action_accept_reject
+    reward = reward_accept_reject + reward_assign
+
+    if action == Actions.ACCEPT and reward != 0.0:
+        print("--> action = {}, REWARD ASSIGN: {}, REWARD = {}".format(action_accept_reject, reward_assign, reward))
+        raise ValueError("A non-zero reward is not possible when the action is ACCEPT.")
+
+    # Update the average reward (just for information purposes)
+    if agent.getLearnerV() is not None:
+        agent.getLearnerV().updateAverageReward(t, reward)
+
+    # Compute and store the gradient of the policy evaluated on the taken action A(t) given the state S(t)
+    # Goal: depending on the learning method, this value may be useful
+    if agent.getLearnerP() is not None:
+        gradient_for_action = agent.getLearnerP().getPolicy().getGradient(action_accept_reject, state)
+        agent.getLearnerP().record_gradient(state, action_accept_reject, gradient_for_action)
+    else:
+        gradient_for_action = 0.0
+
+    return action, next_state, reward, gradient_for_action
+
+
+def manage_service(env, agent, state, server):
+    """
+    Manages a completed service event
+
+    Arguments:
+    env: Queue environment
+        Queue environment where the service takes place.
+
+    agent: Agent
+        Agent acting on the environment.
+        This parameter is not used but it is left for consistency between manage_job_arrival() method.
+
+    state: State of the queue environment
+        The state in which the queue environment is in (it's only used when storing the trajectory and for assertions)
+
+    server: int
+        Server index where the service takes place.
+
+    Return: tuple
+    Triple with the following elements:
+    - action taken: None (because no action is taken when a service is completed)
+    - the next state of the queue
+    - the reward received: NaN, as no reward is received when a service is completed.
+    """
+    queue_state = env.getQueueState()
+    assert queue_state[server] > 0, "The server where the completed service occurs has at least one job"
+
+    # Compute and set the next state of the affected server in the queue system
+    next_queue_state = copy.deepcopy(queue_state)
+    next_queue_state[server] -= 1
+
+    env.setState((next_queue_state, None))
+    next_state = env.getState()
+    assert env.getBufferSizeFromState(next_state) == env.getBufferSizeFromState(state) - 1, \
+        "The buffer size after a DEATH decreased by 1: S(t) = {}, S(t+1) = {}" \
+            .format(env.getBufferSizeFromState(state), env.getBufferSizeFromState(next_state))
+
+    # We set the action to None because there is no action by the agent when a service is completed
+    action = None
+    # We set the reward to NaN because a reward may happen ONLY when a new job arrives.
+    # If there are rewards due to serviced jobs, we would impact those rewards into the reward
+    # received when a new job arrives (which is not the case at this moment (28-Nov-2021),
+    # i.e. the reward when a job is serviced is 0).
+    reward = np.nan
+
+    return action, next_state, reward
+
+
+def update_trajectory(agent, t_total, t_sim, state, action, reward):
+    """
+
+    Arguments:
+    agent: Agent
+        Agent that is responsible of performing the actions on the environment and learning from them
+        on which the trajectory to update is stored.
+
+    t_total: int
+        Total time, used to store the trajectory for the policy learning.
+        Normally this would be the total simulation time computed from the learning steps.
+
+    t_sim: float
+        Continuous simulation time, used to store the trajectory for the value function learning.
+
+    state: State (however the state is defined, e.g. as the buffer size)
+        State at the given time to store in the trajectory.
+
+    action: Action
+        Action taken at the given time to store in the trajectory.
+
+    reward: float
+        Reward received by the agent after taking the given action at the given state, to store in the trajectory.
+    """
+    if agent.getLearnerV() is not None:
+        agent.getLearnerV().update_trajectory(t_sim, state, action, reward)
+    if agent.getLearnerP() is not None:
+        # DM-2021/11/28: This assertion is no longer true because we are now storing in the trajectory ALSO the states
+        # occurring just before the FIRST DEATH event happening after a BIRTH event (so that we can show it in the
+        # trajectory plot we show at the end of the simulation and thus avoid the suspicion that something is wrong
+        # when we observe no change in the buffer size from one time step to the next --given that a new time step
+        # is created ONLY when a new job arrives (i.e. a BIRTH event occurs)
+        # assert action is not None, "The action is not None when learning the policy"
+        agent.getLearnerP().update_trajectory(t_total, state, action, reward)
+
+
+def compute_reward_for_buffer_size(env, bs):
+    "Computes the reward given by the environment when blocking at the given buffer size bs"
+    # *** We assume that the state of the environment is a duple: (list with server queue sizes, job class of latest arriving job) ***
+    state = ([0] * env.getNumServers(), None)
+    # We set the first server to have occupancy equal to the buffer size of interest
+    # as we assume that the reward function ONLY depends on the buffer size, and NOT on the actual state
+    # of the multi-server system.
+    state[0][0] = bs
+    reward_func = env.getRewardFunction()
+    reward = reward_func(env, state, Actions.REJECT, state)
+
+    return reward
+
+
+def step(t, env, agent, policy_type):
+    """
+    Arguments:
+    t: int
+        Current queue transition associated to the current step.
+
+    env: environment
+        The environment where the agent acts.
+
+    agent: Agent
+        The agent interacting with the environment.
+        It should have the act() method defined.
+
+    policy_type: PolicyTypes
+        Type of policy to apply when stepping. Possible values are:
+        - PolicyTypes.ACCEPT
+        - PolicyTypes.ASSIGN
+
+    Return: tuple
+    Tuple containing the following elements:
+    - action: the action taken by the agent on the given policy
+    - observation: the next state on which the queue transitions to after the action taken
+    - reward: the reward received by the agent after taking the action and transitioning to the next state
+    - info: dictionary with relevant additional information
+    """
+    action, observation, reward, info = agent.act(env, policy_type)
+
+    return action, observation, reward, info
+
+
+def check_done(tmax, t, state, action, reward):
+    """
+    Checks whether the simulation is done
+
+    tmax: int
+        Maximum discrete time allowed for the simulation.
+
+    t: int
+        Current queue simulation time.
+
+    state: Environment dependent
+        S(t): state of the environment at time t, BEFORE the action is taken.
+
+    action: Environment dependent
+        A(t): action received by the environment at time t.
+
+    reward: float
+        R(t+1): reward yielded by the environment after taking action A(t) at state S(t).
+
+    Return: bool
+        Whether the queue simulation is done because the maximum number of iterations has been reached.
+    """
+    if t < tmax:
+        done = False
+    else:
+        done = True
+
+    return done
+
+
+def choose_state_for_buffer_size(env, buffer_size):
+    """
+    Chooses randomly a server in the queue environment to have its queue size equal to the given buffer size,
+    while the queue size of all other servers are set to 0, so that the buffer size of the system is equal
+    to the given buffer size.
+
+    Arguments:
+    env: Queue environment
+        Queue environment containing the servers.
+
+    buffer_size: int
+        Buffer size to be set in the system.
+
+    Return: list
+    List containing the state to set the queue environment at that guarantees that the system's buffer size is
+    equal to the given buffer size.
+    """
+    state = [0] * env.getNumServers()
+    state[np.random.randint(0, len(state))] = buffer_size
+    return state
+
+
+def get_blocking_buffer_sizes(agent):
+    # TODO: (2021/12/08) These buffer sizes should be derived from the buffer sizes where the rejection probability is > 0
+    if agent.getLearnerP() is not None:
+        assert agent.getAcceptancePolicy().getThetaParameter() == agent.getLearnerP().getPolicy().getThetaParameter()
+    K = agent.getAcceptancePolicy().getBufferSizeForDeterministicBlocking()
+    return [K - 1, K]
+
+
+def compute_proba_blocking(agent, probas_stationary):
+    """
+    Computes the blocking probability of the queue system
+
+    The blocking probability is computed as:
+    Pr(BLOCK) = sum_{buffer sizes bs with rejection probability Pi > 0} { Pi(reject/bs) * Pr(bs) }
+
+    where Pr(bs) is the estimated stationary probability for buffer size bs.
+
+    Arguments:
+    agent: Agent
+        Agent where the accept/reject policy is defined.
+
+    probas_stationary: dict
+        Dictionary with the estimated stationary probability of the buffer sizes of interest which are
+        the dictionary keys.
+
+    Return: float
+    Estimated blocking probability.
+    """
+    proba_blocking = 0.0
+    buffer_sizes_of_interest = get_blocking_buffer_sizes(agent)
+    assert len(probas_stationary) == len(buffer_sizes_of_interest), \
+        "The length of the probas_stationary dictionary is the same as the number of buffer sizes of interest ({}):\n{}" \
+            .format(buffer_sizes_of_interest, probas_stationary)
+    for bs in buffer_sizes_of_interest:
+        if False:
+            print("---> Computing blocking probability...")
+            print("buffer size = {}, Pr(Reject) = {:.3f}%, Pr({}) = {:.3f}%" \
+                  .format(bs, agent.getAcceptancePolicy().getPolicyForAction(Actions.REJECT, None, bs)*100, bs, probas_stationary[bs]*100))
+        if agent.getLearnerP() is not None:
+            assert agent.getAcceptancePolicy().getThetaParameter() == agent.getLearnerP().getPolicy().getThetaParameter()
+        proba_blocking += agent.getAcceptancePolicy().getPolicyForAction(Actions.REJECT, None, bs) * \
+                          probas_stationary[bs]
+    return proba_blocking
+
+
+def estimate_expected_reward(env, agent, probas_stationary):
+    """
+    Estimates the expected reward of the queue system defined in the given environment assuming a non-zero reward
+    happens at the buffer sizes of interest, i.e. those where the policy yields a positive probability of rejection.
+
+    The expected reward is estimated as:
+    E[R] = sum_{buffer sizes bs with rejection probability Pi > 0} { R(bs) * Pi(reject/bs) * Pr(bs) }
+
+    where R(bs) is reward associated to a rejection at buffer size bs defined in the queue environment,
+    and Pr(bs) is the stationary probability estimate of buffer size bs.
+
+    Arguments:
+    env: Queue environment
+        Queue environment where the reward function of the blocking buffer size is defined.
+
+    agent: Agent
+        Agent where the accept/reject policy is defined.
+
+    probas_stationary: dict
+        Dictionary with the estimated stationary probability of the buffer sizes of interest which are
+        the dictionary keys.
+
+    Return: float
+    Estimated expected reward.
+    """
+    expected_reward = 0.0
+    buffer_sizes_of_interest = get_blocking_buffer_sizes(agent)
+    assert len(probas_stationary) == len(buffer_sizes_of_interest)
+    for bs in buffer_sizes_of_interest:
+        if agent.getLearnerP() is not None:
+            assert agent.getAcceptancePolicy().getThetaParameter() == agent.getLearnerP().getPolicy().getThetaParameter()
+        expected_reward += compute_reward_for_buffer_size(env, bs) * \
+                           agent.getAcceptancePolicy().getPolicyForAction(Actions.REJECT, None, bs) * \
+                           probas_stationary[bs]
+    return expected_reward
+
+
+def estimate_expected_cycle_time(n_cycles, time_end_last_cycle, time_end_simulation):
+    "Estimates the expected return time to the initial buffer size"
+    if n_cycles > 0:
+        assert time_end_last_cycle > 0.0
+        expected_cycle_time = time_end_last_cycle / n_cycles
+    else:
+        warnings.warn(
+            "No absorption cycle was observed, the expected absorption time is estimated as the maximum time observed in the simulation: {}".format(
+                time_end_simulation))
+        expected_cycle_time = time_end_simulation
+    assert expected_cycle_time > 0.0
+
+    return expected_cycle_time
+
+
+def compute_survival_probability(survival_times):
+    assert survival_times[0] == 0.0
+    # Number of observed death events used to measure survival times
+    N = len(survival_times) - 1
+
+    if N > 0:
+        proba_surv = [n / N for n in
+                      range(N, -1, -1)]  # This is N downto 0 (i.e. N+1 elements as there are in survival_times)
+        assert proba_surv[-1] == 0.0
+    else:
+        proba_surv = [1.0]
+
+    assert proba_surv[0] == 1.0
+    return pd.DataFrame.from_items([('t', survival_times),
+                                    ('P(T>t)', proba_surv)])
+
+
+def estimate_blocking_mc(env, agent, dict_params_simul, dict_params_info):
     """
     Estimates the blocking probability using Monte-Carlo
 
     Arguments:
+    env: Queue environment
+        Queue environment where the simulation runs.
+
+    agent: Agent
+        Agent that interacts with the environment.
+
     simul: SimulatorQueue
         Simulation object used for the simulation that allows estimating the blocking probability.
 
@@ -2785,27 +2108,34 @@ def estimate_blocking_mc(simul, dict_params_simul, dict_params_info):
     - n_cycles: number of cycles observed to estimate E(T).
     - n_events: number of events observed during the simulation.
     """
+    # Reset environment and learner of the value functions
+    # IMPORTANT: We should NOT reset the learner of the policy because this function could be called as part of a
+    # policy learning process! Note that the learner of the value function V MUST be reset regardless of this because
+    # at this point a new queue simulation starts and at that point the value function should be learned anew.
+    env.reset()
+    if agent.getLearnerV() is not None:
+        agent.getLearnerV().reset()
+
     # Smart selection of the start state as one having buffer size = K-1 so that we can better estimate Pr(K-1)
-    # start_state = simul.choose_state_for_buffer_size(simul.env, K)
+    # start_state = choose_state_for_buffer_size(simul.env, K)
     # Selection of the start state as one having buffer size = J-1, in order to have a fair comparison with the FV method
     # where particles are reactivated when they reach J-1.
-    start_state = simul.choose_state_for_buffer_size(simul.env, dict_params_simul['buffer_size_activation'] - 1)
+    start_state = choose_state_for_buffer_size(env, dict_params_simul['buffer_size_activation'] - 1)
     t, time_last_event, n_cycles, time_last_return = \
-            simul.run_simulation_mc(dict_params_info['t_learn'], start_state, dict_params_simul['T'],
-                                    track_return_cycles=True,
-                                    seed=dict_params_simul['seed'],
-                                    verbose=dict_params_info['verbose'],
-                                    verbose_period=dict_params_info['verbose_period'])
+            run_simulation_mc(env, agent, dict_params_info.get('t_learn', 0), start_state, dict_params_simul['T'],
+                              track_return_cycles=True,
+                              seed=dict_params_simul['seed'],
+                              verbose=dict_params_info.get('verbose', False), verbose_period=dict_params_info.get('verbose_period', 1))
     probas_stationary, time_step_last_return, last_time_at_start_buffer_size = \
-                                                        simul.estimate_stationary_probability_mc(start_state)
+                                                        estimate_stationary_probability_mc(env, agent, start_state)
     n_events = t
     assert n_events == dict_params_simul['T']
 
-    proba_blocking = simul.compute_proba_blocking(probas_stationary)
-    expected_reward = simul.estimate_expected_reward(probas_stationary)
-    expected_cycle_time = simul.estimate_expected_cycle_time(n_cycles, time_last_return, time_last_event)
+    proba_blocking = compute_proba_blocking(agent, probas_stationary)
+    expected_reward = estimate_expected_reward(env, agent, probas_stationary)
+    expected_cycle_time = estimate_expected_cycle_time(n_cycles, time_last_return, time_last_event)
 
-    if DEBUG_ESTIMATORS or simul.show_messages(dict_params_info['verbose'], dict_params_info['verbose_period'], dict_params_info['t_learn']):
+    if DEBUG_ESTIMATORS or show_messages(dict_params_info.get('verbose', False), dict_params_info.get('verbose_period', 1), dict_params_info.get('t_learn', 0)):
         print("\n*** RESULTS OF MONTE-CARLO SIMULATION on {} events ***".format(n_events))
         print("P(K-1), P(K): {}, last return time to initial buffer size: time_step = {} ({:.1f}%), t = {:.1f}" \
               .format(probas_stationary, time_step_last_return, time_step_last_return / t * 100, last_time_at_start_buffer_size))
@@ -2813,23 +2143,345 @@ def estimate_blocking_mc(simul, dict_params_simul, dict_params_info):
     return proba_blocking, expected_reward, probas_stationary, expected_cycle_time, n_cycles, n_events
 
 
-def estimate_blocking_fv(simul, dict_params_simul, dict_params_info, ax=None):
+@measure_exec_time
+def run_simulation_mc(env, agent, t_learn, start_state, t_sim_max,
+                      track_return_cycles=False,
+                      track_absorptions=False, track_survival=False,
+                      seed=None, verbose=False, verbose_period=1):
+    """
+    Runs the continuous-time simulation using Monte-Carlo
+
+    Arguments:
+    agent: Agent
+        Agent object that is responsible of performing the actions on the environment and learning from them.
+
+    t_learn: int
+        The learning time step to which the simulation will contribute.
+
+    start_state: int or list or numpy array
+        State at which the queue environment starts for the simulation.
+
+    t_sim_max: int
+        Maximum simulation time steps allowed for the simulation.
+        This is equivalent to the number of observed events, as any new event generates a new time step.
+
+    track_return_cycles: (opt) bool
+        Whether to track the return cycles to the initial buffer size.
+        default: False
+
+    track_absorptions: (opt) bool
+        Whether to track the absorption times.
+        default: False
+
+    track_survival: (opt) bool
+        Whether to track the survival times.
+        When True, it only has an effect when track_absorptions = True as well.
+        default: False
+
+    seed: (opt) int
+        Seed to use in the simulation process.
+        default: None, in which case the simulation cannot be reproduced at a later stage
+
+    verbose: (opt) bool
+        Whether to be verbose in the simulation process.
+        default: False
+
+    verbose_period: (opt) int
+        The time step period to be verbose.
+        default: 1 => be verbose at every simulation step.
+
+    Return: tuple
+    If track_return_cycles = False, track_absorptions = False and track_survival = False:
+    - t: the last time step of the simulation process.
+    - time: the continuous time of the last observed event during the simulation.
+
+    If track_return_cycles = True, in addition:
+    - n_cycles: the number of cycles observed in the simulation, until the last return to the initial buffer size.
+
+    If track_absorptions = True and track_survival = False, in addition:
+    - n_cycles: the number of cycles observed in the simulation, until the last return to the initial buffer size
+    from ABOVE (i.e. as if it were an absorption).
+    - time_end_last_cycle: the continuous time at which the Markov Chain returns to the initial buffer size
+    from ABOVE (i.e. as if it were an absorption).
+
+    If track_absorptions = True and track_survival = True, in addition:
+    - survival_times: list with the observed survival times, sorted increasingly.
+
+    Note that:
+    - either track_return_cycles or track_absorptions may be True. If both are True, the first one has precedence.
+    - track_survival = True has no effect if track_absorptions = False.
+    """
+    # -- Parse input parameters
+    tmax = t_sim_max
+
+    # Seed
+    if seed is not None:
+        env.set_seed(seed)
+
+    # Set the start state of the environment to the given start state
+    job_class = None
+    env.setState((start_state, job_class))
+    buffer_size_start = env.getBufferSize()
+    if verbose:
+        print("MC simulation: The queue environments starts at state {} (buffer size = {})" \
+              .format(env.getState(), buffer_size_start))
+
+    # Store the initial position as part of the trajectory
+    update_trajectory(agent, (t_learn - 1) * (tmax + 1) + 0, 0.0, env.getState(), None, np.nan)
+
+    # Time step in the queue trajectory (the first time step is t = 0)
+    done = False
+    t = 0
+    t_arrivals = 0  # Number of arrival events. Used to decide the end of the simulation, when track_absorptions = True
+    time_abs = 0.0  # Measure of the ABSOLUTE time of the latest event
+    # Information about the return cycles
+    n_cycles_return = 0
+    n_cycles_absorption = 0
+    time_last_return = 0.0
+    time_last_absorption = 0.0
+    # Information about the survival times
+    if track_survival:
+        time_last_activation = None
+        survival_times = [0.0]
+        ## NOTE: We include the initial time in the list of survival times so that the survival probability
+        ## associated to them corresponds to the segment at and AFTER the time value stored in survival_times.
+        ## In addition, this setup makes the survival probability function go from 1.0 to 0.0.
+    if DEBUG_ESTIMATORS:
+        # Check realization of the arrival and service rates
+        time_last_arrival = 0.0
+        if buffer_size_start == 0:
+            time_last_service = np.nan
+        else:
+            time_last_service = 0.0
+        jobs_arrival = []
+        times_inter_arrival = []
+        servers_service = []
+        times_service = []
+    while not done:
+        t += 1
+
+        # Current state
+        state = env.getState()
+
+        # Generate next event
+        # Note: this function takes care of NOT generating a service event when a server is empty.
+        time, event, job_class_or_server, _ = generate_event([env])
+        time_abs += time
+        if False: #DEBUG_TRAJECTORIES:
+            print("Time step t = {}: Exponential time generated: {:.3f} --> ABS time = {:.3f}".format(t, time, time_abs))
+
+        # Analyze the event
+        if event == Event.BIRTH:
+            # The event is an incoming job class
+            # => Update the state of the queue, apply the acceptance policy, and finally the server assignment policy
+            t_arrivals += 1
+            action, next_state, reward, gradient_for_action = manage_job_arrival(t, env, agent, state, job_class_or_server)
+
+            # Check ACTIVATION: we touch a state having the start buffer size + 1 COMING FROM BELOW
+            # (Note that the condition "coming from below" is important because we normally need to observe the
+            # activation states under their steady-state activation distribution)
+            buffer_size = env.getBufferSizeFromState(next_state)
+            if track_survival and buffer_size == buffer_size_start + 1:
+                time_last_activation = time_abs
+                if DEBUG_ESTIMATORS:
+                    print("--> ACTIVATION @time = {:.3f}".format(time_abs))
+
+            if DEBUG_ESTIMATORS:
+                jobs_arrival += [job_class_or_server]
+                times_inter_arrival += [time_abs - time_last_arrival]
+                # Prepare for the next iteration
+                time_last_arrival = time_abs
+                if env.getBufferSize() == 1:
+                    # The queue can now experience a service
+                    # => Set the last service time to the last event time, so that we can measure the next
+                    # service time when it occurs.
+                    time_last_service = time_abs
+
+        elif event == Event.DEATH:
+            # The event is a completed service
+            # => Update the state of the queue
+            action, next_state, reward = manage_service(env, agent, state, job_class_or_server)
+
+            # Check ABSORPTION
+            buffer_size = env.getBufferSizeFromState(next_state)
+            if buffer_size == buffer_size_start:
+                n_cycles_absorption += 1
+                time_last_absorption = time_abs
+                if track_survival and time_last_activation is not None:
+                    time_to_absorption = time_abs - time_last_activation
+                    if DEBUG_ESTIMATORS:
+                        print("--> ABSORPTION @time = {:.3f}".format(time_abs))
+                        print("\tACTIVATION time = {:.3f} --> time to absorption = {:.3f}" \
+                              .format(time_last_activation, time_to_absorption))
+                    assert time_to_absorption > 0
+                    insort(survival_times, time_to_absorption, unique=False)
+                    ## NOTE: We use unique=False because it happened already that the inserted time is very
+                    ## close to a time already existing in the list of survival times and an assertion inside
+                    ## insort() failed! (although that should never happen... the set of time coincidences has measure 0)
+
+                    # Reset the time of last activation to None so that we are now alert to setting it again
+                    # the next time it occurs
+                    time_last_activation = None
+
+            if DEBUG_ESTIMATORS:
+                assert not np.isnan(time_last_service)
+                servers_service += [job_class_or_server]
+                times_service += [time_abs - time_last_service]
+                # Prepare for the next iteration
+                if env.getBufferSize() == 0:
+                    # The queue can now longer experience a service event
+                    time_last_service = np.nan
+                else:
+                    time_last_service = time_abs
+
+        # Update the trajectory used in the learning process, where we store:
+        # S(t): state BEFORE an action is taken
+        # A(t): action taken given the state S(t)
+        # R(t): reward received by taking action A(t) and transition to S(t+1)
+        update_trajectory(agent, (t_learn - 1) * (tmax + 1) + t, time_abs, next_state, action, reward)
+
+        # Check RETURN: the initial buffer size is observed again.
+        buffer_size = env.getBufferSizeFromState(next_state)
+        if buffer_size == buffer_size_start:
+            n_cycles_return += 1
+            time_last_return = time_abs
+
+        if DEBUG_TRAJECTORIES:
+            print("{} | t={}: time={:.3f}, event={}, action={} -> state={}, reward={:.3f}" \
+                  .format(state, t, time_abs, event, action, next_state, reward), end="\n")
+
+        if track_absorptions:
+            # Tracking absorptions means that we are running this simulation for the FV estimation of P(T>t) and E(T_A)
+            # => We need to stop when a certain number of ARRIVALS have occurred
+            # (because that's how the required simulation time has been determined in order to guarantee a maximum
+            # relative error of the estimation of E(T_A) --see compute_nparticles_and_nsteps_for_fv_process()
+            # in utils.computing)
+            done = check_done(tmax, t_arrivals, state, action, reward)
+        else:
+            done = check_done(tmax, t, state, action, reward)
+
+    # DONE
+    if show_messages(verbose, verbose_period, t_learn):
+        print("==> agent ENDS at time t={} at state {} coming from state = {}, action = {}, reward = {}, gradient = {})" \
+              .format(t, env.getState(), state, action, reward, gradient_for_action))
+
+    if DEBUG_ESTIMATORS:
+        job_rates_by_server = compute_job_rates_by_server(env.getJobClassRates(),
+                                                          env.getNumServers(),
+                                                          agent.getAssignmentPolicy().getProbabilisticMap())
+        plotting.plot_event_times(job_rates_by_server, times_inter_arrival, jobs_arrival, class_name="Job class")
+        plotting.plot_event_times(env.getServiceRates(), times_service, servers_service, class_name="Server")
+
+    if track_return_cycles:
+        return t, time_abs, n_cycles_return, time_last_return
+    if track_absorptions:
+        if track_survival:
+            return t, time_abs, n_cycles_absorption, time_last_absorption, survival_times
+        else:
+            return t, time_abs, n_cycles_absorption, time_last_absorption
+    return t, time_abs
+
+
+def estimate_stationary_probability_mc(env, agent, start_state):
+    """
+    Monte-Carlo estimation of the stationary probability of buffer sizes K-1 and K based on the observed trajectory
+    in continuous-time.
+
+    The stationary probability is estimated as the fraction of time spent at each buffer size over the total
+    simulation time (sum of sojourn times).
+
+    Arguments:
+    env:
+
+    agent:
+
+    start_state: int or list or numpy array
+        State of the queue environment at which the Monte-Carlo simulation started.
+        This is used to check that the initial state actually stored in the trajectory is this state
+        and that therefore we are doing the correct computation to estimate the stationary probability
+        of the buffer sizes of interest.
+
+    Return: tuple
+    Tuple with the following elements:
+    - probas_stationary: Dictionary with the estimated stationary probability for buffer sizes K-1 and K, where K is the first integer
+    larger than or equal to theta + 1  --theta being the parameter of the linear step acceptance policy.
+    - last_t_to_initial_position: time step at which the system returned to the initial buffer size for the last time.
+    - last_time_to_initial_position: continuous time at which the system returned to the initial buffer size for the last time.
+    """
+    # Event times
+    times = agent.getLearnerV().getTimes()
+
+    # Sojourn times
+    # Each sojourn time is the time the Markov Chain sojourned at the state stored in `states`, retrieved below
+    # IMPORTANT: This means that the first state in `states` is the state PRIOR to the first time stored in `times`.
+    # IMPORTANT 2: We should convert the output of np.diff() to a list otherwise the value "summed" on the left
+    # with the initial time value `times[0]` will be ADDED to all entries in the array returned by np.diff()!!
+    sojourn_times = [times[0]] + list( np.diff(times) )
+
+    # States and associated buffer sizes
+    states = agent.getLearnerV().getStates()
+    buffer_sizes = [env.getBufferSizeFromState(s) for s in states]
+    buffer_size_start = env.getBufferSizeFromState(start_state)
+    assert buffer_sizes[0] == buffer_size_start, \
+            "The buffer size of the first state stored in the chain trajectory ({})" \
+            " equals the buffer size of the state at which the simulation started ({})" \
+            .format(buffer_sizes[0], buffer_size_start)
+
+    # Compute the stationary probabilities of the buffer sizes of interest by Find the last time the chain visited the starting position
+    if agent.getLearnerP() is not None:
+        assert agent.getAcceptancePolicy().getThetaParameter() == agent.getLearnerP().getPolicy().getThetaParameter()
+    K = agent.getAcceptancePolicy().getBufferSizeForDeterministicBlocking()
+    probas_stationary = dict({K-1: np.nan, K: np.nan})
+    idx_last_visit_to_initial_position = find_last(buffer_sizes, buffer_sizes[0])
+    assert idx_last_visit_to_initial_position >= 0, \
+        "The return time to the initial buffer size is always observed, as the first value is always the value searched for ({}):\n{}".format(buffer_sizes[0], np.c_[buffer_sizes, times])
+    if idx_last_visit_to_initial_position > 0:
+        last_time_at_start_buffer_size = times[idx_last_visit_to_initial_position-1]
+            ## we subtract -1 to the index because the times list contains the times at which the Markov Chain
+            ## STOPS visiting the state in states.
+
+        # Compute the total sojourn time at each buffer size of interest
+        # IMPORTANT: we need to limit this computation to the moment we observe the last return time to the
+        # initial buffer size! (o.w. we could be overestimating the probability and even estimate it larger than 1)
+        sojourn_times_by_buffer_size = \
+            dict({K-1: np.sum([st for bs, st in zip(buffer_sizes[:idx_last_visit_to_initial_position], sojourn_times[:idx_last_visit_to_initial_position]) if bs == K-1]),
+                    K: np.sum([st for bs, st in zip(buffer_sizes[:idx_last_visit_to_initial_position], sojourn_times[:idx_last_visit_to_initial_position]) if bs == K])})
+
+        for k in [K-1, K]:
+            assert sojourn_times_by_buffer_size[k] <= last_time_at_start_buffer_size, \
+                "The total sojourn time at position of interest (e.g. blocking) s={} ({}) is at most equal to the last time of return to the buffer size ({})" \
+                .format(k, sojourn_times_by_buffer_size[k], last_time_at_start_buffer_size)
+            probas_stationary[k] = sojourn_times_by_buffer_size[k] / last_time_at_start_buffer_size
+    else:
+        # The system never returned to the initial buffer size
+        # => We set the stationary probability to 0.0 (and NOT to NaN) in order to avoid an assertion error in
+        # the policy learner dealing with stationary probabilities that require that they are between 0 and 1.
+        # (e.g. see agents/learners/policies.py)
+        warnings.warn("The Markov Chain never returned to the initial position/buffer-size ({})."
+                        "\nThe estimated stationary probabilities will be set to 0.0.".format(buffer_sizes[0]))
+        last_time_at_start_buffer_size = 0.0
+        for k in [K-1, K]:
+            probas_stationary[k] = 0.0
+
+    return probas_stationary, idx_last_visit_to_initial_position, last_time_at_start_buffer_size
+
+
+def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info):
     """
     Estimates the blocking probability using the Fleming-Viot approach
 
     Arguments:
-    simul: SimulatorQueue
-        Simulation object used for the simulation that allows estimating the blocking probability.
+    envs: List
+        List of queue environments used to run the FV process.
+
+    agent: Agent
+        Agent interacting with each of the environments given in envs.
 
     dict_params_simul: dict
         Dictionary containing the simulation parameters.
 
     dict_params_info: dict
         Dictionary containing information to display or parameters to deal with the information to display.
-
-    ax: (none) Axes
-        Axes object used when DEBUG_TRAJECTORIES = True to plot the trajectories of the particles.
-        default: None
 
     Return: tuple
     Tuple with the following elements:
@@ -2840,54 +2492,75 @@ def estimate_blocking_fv(simul, dict_params_simul, dict_params_info, ax=None):
     - expected_absorption_time: estimated expected absorption time E(T_A) used in the denominator of the FV estimator
     of the blocking probability.
     - n_cycles: number of cycles observed to estimate E(T_A).
-    - n_events_mc: number of events observed during the simulation of the single queue used to estimate E(T_A).
+    - time_last_absorption: continuous time of the last absorption observed, used in the estimation of E(T_A).
+    - time_end_simulation_et: continuous time of the end of the simulation run to estimate E(T_A) and P(T>t).
+    - n_events_et: number of events observed during the simulation of the single queue used to estimate E(T_A) and P(T>t).
     - n_events_fv: number of events observed during the FV simulation that estimates Phi(t).
     """
+    # Reset environment and learner of the value functions
+    # IMPORTANT: We should NOT reset the learner of the policy because this function could be called as part of a
+    # policy learning process! Note that the learner of the value function V MUST be reset regardless of this because
+    # at this point a new queue simulation starts and at that point the value function should be learned anew.
+    for env in envs:
+        env.reset()
+    if agent.getLearnerV() is not None:
+        agent.getLearnerV().reset()
+
     # -- Step 1: Simulate a single queue to estimate P(T>t) and E(T_A)
-    start_state = simul.choose_state_for_buffer_size(simul.getEnv(), dict_params_simul['buffer_size_activation'] - 1)
+    start_state = choose_state_for_buffer_size(envs[0], dict_params_simul['buffer_size_activation'] - 1)
     t, time_end_simulation, n_cycles, time_end_last_cycle, survival_times = \
-        simul.run_simulation_mc(dict_params_info['t_learn'], start_state, dict_params_simul['T'],
-                                track_absorptions=True, track_survival=True,
-                                seed=dict_params_simul['seed'],
-                                verbose=dict_params_info['verbose'], verbose_period=dict_params_info['verbose_period'])
-    n_events_mc = t
+        run_simulation_mc(envs[0], agent, dict_params_info.get('t_learn', 0), start_state, dict_params_simul['T'],
+                          track_absorptions=True, track_survival=True,
+                          seed=dict_params_simul['seed'],
+                          verbose=dict_params_info.get('verbose', False), verbose_period=dict_params_info.get('verbose_period', 1))
+    n_events_et = t
+    time_last_absorption = time_end_last_cycle
+    time_end_simulation_et = time_end_simulation
+    max_survival_time = survival_times[-1]
 
     # Estimate P(T>t) and E(T_A)
-    proba_surv = simul.compute_survival_probability(survival_times)
-    expected_absorption_time = simul.estimate_expected_cycle_time(n_cycles, time_end_last_cycle, time_end_simulation)
+    proba_surv = compute_survival_probability(survival_times)
+    expected_absorption_time = estimate_expected_cycle_time(n_cycles, time_end_last_cycle, time_end_simulation)
 
-    if DEBUG_ESTIMATORS or simul.show_messages(dict_params_info['verbose'], dict_params_info['verbose_period'], t_learn):
-        print("\n*** RESULTS OF MC ESTIMATION OF P(T>t) and E(T) on {} events ***".format(n_events_mc))
-        # max_rows = pd.get_option('display.max_rows')
-        # pd.set_option('display.max_rows', None)
-        # print("P(T>t):\n{}".format(proba_surv))
-        # pd.set_option('display.max_rows', max_rows)
-        print("E(T) = {:.1f}, Max observed survival time = {:.1f}".format(expected_absorption_time,
-                                                                          proba_surv['t'].iloc[-1]))
+    if DEBUG_ESTIMATORS or show_messages(dict_params_info.get('verbose', False), dict_params_info.get('verbose_period', 1), dict_params_info.get('t_learn', 0)):
+        print("\n*** RESULTS OF MC ESTIMATION OF P(T>t) and E(T) on {} events ***".format(n_events_et))
+        max_rows = pd.get_option('display.max_rows')
+        pd.set_option('display.max_rows', None)
+        print("P(T>t):\n{}".format(proba_surv))
+        pd.set_option('display.max_rows', max_rows)
+        print("E(T) = {:.1f} ({} cycles, last absorption at {:.3f}), Max observed survival time = {:.1f}" \
+              .format(expected_absorption_time, n_cycles, time_end_last_cycle, proba_surv['t'].iloc[-1]))
+
+    if DEBUG_TRAJECTORIES:
+        ax0 = plot_trajectory(envs[0], agent, dict_params_simul['buffer_size_activation'])
+        xticks = range(int(ax0.get_xlim()[1]))
+        ax0.set_xticks(xticks)
+        ax0.vlines(xticks, 0, ax0.get_ylim()[1], color="lightgray")
 
     # -- Step 2: Simulate N particles with FLeming-Viot to compute the empirical distribution and estimate the expected reward
     # The empirical distribution Phi(t, bs) estimates the conditional probability of buffer sizes bs
     # for which the probability of rejection is > 0
-    assert simul.N > 1, "The simulation system has more than one particle in Fleming-Viot mode ({})".format(simul.N)
-    if DEBUG_ESTIMATORS or simul.show_messages(dict_params_info['verbose'], dict_params_info['verbose_period'], dict_params_info['t_learn']):
+    N = len(envs)
+    assert N > 1, "The simulation system has more than one particle in Fleming-Viot mode ({})".format(N)
+    if DEBUG_ESTIMATORS or show_messages(dict_params_info.get('verbose', False), dict_params_info.get('verbose_period', 1), dict_params_info.get('t_learn', 0)):
         print("Running Fleming-Viot simulation on {} particles and absorption size = {}..." \
-              .format(simul.N, dict_params_simul['buffer_size_activation'] - 1))
+              .format(N, dict_params_simul['buffer_size_activation'] - 1))
     t, event_times, phi, probas_stationary = \
-        simul.run_simulation_fv(t_learn,
-                                dict_params_simul['buffer_size_activation'] - 1,
-                                # We pass the absorption size to this function
-                                proba_surv, expected_absorption_time,
-                                verbose=dict_params_info['verbose'], verbose_period=dict_params_info['verbose_period'],
-                                plot=DEBUG_TRAJECTORIES, ax=ax)
+        run_simulation_fv(  dict_params_info.get('t_learn', 0), envs, agent,
+                            dict_params_simul['buffer_size_activation'] - 1,
+                            # We pass the absorption size to this function
+                            proba_surv, expected_absorption_time,
+                            verbose=dict_params_info.get('verbose', False), verbose_period=dict_params_info.get('verbose_period', 1),
+                            plot=DEBUG_TRAJECTORIES)
     assert t == len(event_times) - 1, "The last time step of the simulation ({}) coincides with the number of events observed ({})" \
                                         .format(t, len(event_times))
         ## We subtract 1 to len(event_times) because the first event time is 0.0 which is NOT an event time
     n_events_fv = t
 
-    proba_blocking = simul.compute_proba_blocking(probas_stationary)
-    expected_reward = simul.estimate_expected_reward(probas_stationary)
+    proba_blocking = compute_proba_blocking(agent, probas_stationary)
+    expected_reward = estimate_expected_reward(envs[0], agent, probas_stationary)
 
-    if DEBUG_ESTIMATORS or simul.show_messages(dict_params_info['verbose'], dict_params_info['verbose_period'], dict_params_info['t_learn']):
+    if DEBUG_ESTIMATORS or show_messages(dict_params_info.get('verbose', False), dict_params_info.get('verbose_period', False), dict_params_info.get('t_learn', 0)):
         print("\n*** RESULTS OF FLEMING-VIOT SIMULATION ***")
         # max_rows = pd.get_option('display.max_rows')
         # pd.set_option('display.max_rows', None)
@@ -2897,14 +2570,565 @@ def estimate_blocking_fv(simul, dict_params_simul, dict_params_info, ax=None):
         print("Pr(BLOCK) = {}".format(proba_blocking))
         print("Expected reward = {}".format(expected_reward))
 
-    return proba_blocking, expected_reward, probas_stationary, expected_absorption_time, n_cycles, n_events_mc, n_events_fv
+    return proba_blocking, expected_reward, probas_stationary, expected_absorption_time, n_cycles, \
+           time_last_absorption, time_end_simulation_et, max_survival_time, \
+           n_events_et, n_events_fv
+
+
+@measure_exec_time
+def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption, proba_surv, expected_absorption_time,
+                      verbose=False, verbose_period=1, plot=False):
+    """
+    Runs the Fleming-Viot simulation of the particle system and estimates the expected reward
+    (equivalent to the blocking probability when the blocking reward is always equal to 1)
+
+    Arguments:
+    envs: list
+        List of queue environments used to run the FV process.
+
+    agent: Agent
+        Agent interacting with the set of environments given in envs.
+
+    t_learn: int
+        The learning time step to which the simulation will contribute.
+        Only used for informative purposes or to decide whether to show information in the log.
+
+    buffer_size_absorption: non-negative int
+        Buffer size at which the particle is absorbed.
+
+    proba_surv: pandas data frame
+        Probability of survival given the process started at the activation set, Pr(T>t / s in activation set),
+        used to estimate the blocking probability for each blocking buffer size.
+        Typically this estimation is obtained by running a Monte-Carlo simulation of the queue.
+        It should be a pandas data frame with at least two columns:
+        - 't': the times at which the survival probability is estimated.
+        - 'P(T>t)': the survival probability for each t.
+
+    expected_absorption_time: positive float
+        Expected absorption cycle time E(T_A) used to estimate the blocking probability
+        for each blocking buffer size.
+
+    agent: (opt) Agent
+        Agent object that is responsible of performing the actions on the environment and learning from them.
+        default: None, in which case the agent defined in the object is used
+
+    verbose: (opt) bool
+        Whether to be verbose in the simulation process.
+        default: False
+
+    verbose_period: (opt) int
+        The time step period to be verbose.
+        default: 1 => be verbose at every simulation step.
+
+    Return: tuple
+    Tuple with the following elements:
+    (below, K is determined by the parameterized acceptance policy as the smallest buffer size with deterministic rejection)
+    - t: the last time step (integer-valued) of the simulation process.
+    - event_times: list of times at which an event occurred during the simulation.
+    - phi: dictionary of lists with the empirical distribution of the buffer sizes of interest, namely K-1 and K,
+    which are an estimate of the probability of those buffer sizes conditional to survival (not absorption).
+    - probas_stationary: dictionary of floats indexed by the buffer sizes of interest, namely K-1 and K, containing
+    the estimated stationary probability at those buffer sizes.
+    """
+
+    # ---------------------------------- Auxiliary functions ------------------------------#
+    def update_phi(envs, phi):
+        """
+        Updates the conditional probability of each buffer size of interest, which are given by the keys
+        of the dictionary of the input parameter phi, which is updated.
+
+        Arguments:
+        envs: list
+            List of queue environments used to run the FV process.
+
+        phi: dict
+            Dictionary of lists, where the list for each entry (the buffer size of interest)
+            contains the empirical distribution at each time when a change happens.
+            This input parameter is updated by the function.
+
+        Return: bool
+        Whether any of the newly computed Phi values (for each buffer size of interest) is non-zero.
+        This can be used to decide whether we need to compute the integral that gives rise to the Fleming-Viot estimate
+        of the stationary probability, or we already know that the integral is already 0 because ALL the Phi(t) values
+        are 0.
+        """
+        any_new_value_gt_0 = False
+        for bs in phi.keys():
+            phi[bs] += [empirical_mean(envs, bs)]
+            if phi[bs][-1] > 0.0:
+                any_new_value_gt_0 = True
+        return any_new_value_gt_0
+
+    def empirical_mean(envs, buffer_size):
+        "Compute the proportion of environments/particles at the given buffer size"
+        return np.mean([int(bs == buffer_size) for bs in [env.getBufferSize() for env in envs]])
+
+    def reactivate_particle(envs, idx_particle):
+        """
+        Chooses a particle to reactivate a particle that has been absorbed
+
+        Reactivation means that the state of the particle is set to be the state of the chosen particle.
+
+        Arguments:
+        envs: list
+            List of queue environments used to run the FV process.
+
+        idx_particle: int
+            The index of the particle to be reactivated.
+
+        Return: int
+        The index of the particle to which it is reactivated.
+        """
+        # Select a reactivation particle out of the other N-1 particles
+        N = len(envs)
+        assert N > 1, "There is more than one particle in the system (N={})".format(N)
+        idx_reactivate = np.random.randint(0, N - 1)
+        if idx_reactivate >= idx_particle:
+            # The chosen particle is beyond the particle to reactivate
+            # => increase the index of the particle by 1 so that we choose the correct particle
+            idx_reactivate += 1
+        assert idx_reactivate < N, "The reactivation particle ID ({}) is < N (={}) for particle with ID = {}" \
+            .format(idx_reactivate, N, idx_particle)
+        assert idx_reactivate != idx_particle, "The particle chosen for reactivation ({}) is different from the particle being reactivated ({})" \
+            .format(idx_reactivate, idx_particle)
+
+        # Update the state of the reactivated particle to the reactivation state
+        envs[idx_particle].setState(envs[idx_reactivate].getState())
+
+        return idx_reactivate
+
+    def estimate_stationary_probability(t, phi, proba_surv, expected_absorption_time):
+        """
+        Estimates the stationary probability for each buffer size of interest in phi using the Fleming-Viot estimator
+
+        Arguments:
+        t: list
+            Times at which the empirical distribution phi is measured.
+
+        phi: dict of lists
+            Empirical distribution of buffer sizes of interest which are the keys of the dictionary.
+            The list in each dictionary entry should have the same length as `t`.
+
+        proba_surv: pandas data frame
+            Data frame with at least the following two columns:
+            - 't': times at which the survival probability is estimated
+            - 'P(T>t)': the survival probability estimate for the corresponding 't' value given the process
+            started at the stationary activation distribution of states.
+
+        expected_absorption_time: float
+            Estimated expected absorption cycle time, i.e. the expected time the queue system takes in a
+            re-absorption cycle when starting at the stationary absorption distribution of states.
+
+        Return: tuple of dict
+        Duple with two dictionaries indexed by the buffer sizes (bs) of interest with the following content:
+        - the stationary distribution
+        - the value of the integral P(T>t)*Phi(t,bs)
+       """
+        # Create a data frame from t and phi where each buffer size in which phi is measured is a different column
+        df_phi = pd.DataFrame({'t': t})
+        buffer_sizes_of_interest = sorted( list(phi.keys()) )
+        for bs in buffer_sizes_of_interest:
+            df_phi[bs] = phi[bs]
+        df_phi.columns = pd.MultiIndex.from_arrays(
+            [['t'] + ['Phi'] * len(buffer_sizes_of_interest), [''] + buffer_sizes_of_interest])
+
+        # Merge the times where Phi(t,bs) and P(T>t) are measured
+        df_proba_surv_phi = merge_proba_survival_and_phi(proba_surv, df_phi)
+
+        if DEBUG_ESTIMATORS:
+            plt.figure()
+            plt.step(df_proba_surv_phi['t'], df_proba_surv_phi['P(T>t)'], 'b-', where='post')
+            colors = ['green', 'red']
+            #for idx, bs in enumerate(buffer_sizes_of_interest):
+            #    plt.step(df_proba_surv_phi['t'], df_proba_surv_phi['Phi'][bs], color=colors[idx], where='post')
+            K = buffer_sizes_of_interest[-1]
+            plt.step(df_proba_surv_phi['t'], df_proba_surv_phi['Phi'][K], color="red", where='post')
+            plt.step(df_proba_surv_phi['t'], df_proba_surv_phi['Phi'][K]*df_proba_surv_phi['P(T>t)'], color="green", where='post')
+
+        # Stationary probability for each buffer size of interest
+        probas_stationary, integrals = estimate_proba_stationary(df_proba_surv_phi, expected_absorption_time)
+
+        return probas_stationary, integrals
+
+    def merge_proba_survival_and_phi(proba_surv, df_phi):
+        """
+        Merges the the survival probability and the empirical distribution of buffer sizes of interest
+        on a common set of time values into a data frame.
+
+        Arguments:
+        proba_surv: pandas data frame
+            Data frame containing the time and P(T>t) survival probability given activation.
+
+        df_phi: pandas data frame
+            Data frame containing the time and the Phi(t,bs) value for each buffer size of interest bs.
+
+        return: pandas data frame
+        Data frame with the following columns:
+        - 't': time at which a change in any of the input quantities happens
+        - 'P(T>t)': survival probability given the process started at the stationary activation distribution of states.
+        - 'Phi(t,bs)': empirical distribution for each buffer size of interest given the process started
+        at the stationary activation distribution of states.
+        """
+        phi_by_t = dict()
+        buffer_sizes_of_interest = list(df_phi['Phi'].columns)
+        for bs in buffer_sizes_of_interest:
+            # Merge the time values at which the survival probability is measured (changes) with the time values
+            # at which the empirical distribution Phi is measured for each buffer size of interest.
+            t, proba_surv_by_t, phi_by_t[bs] = merge_values_in_time(list(proba_surv['t']), list(proba_surv['P(T>t)']),
+                                                                    list(df_phi['t']), list(df_phi['Phi'][bs]),
+                                                                    unique=False)
+
+        # -- Merged data frame
+        # Initialize with P(T>t)
+        # Note: We construct the data frame one column at a time because when defining both columns together
+        # in a single call to pd.DataFrame() the order of the columns is not guaranteed!
+        df_merged = pd.DataFrame({'t': t})
+        df_merged = pd.concat([df_merged, pd.DataFrame({'P(T>t)': proba_surv_by_t})], axis=1)
+
+        # Append Phi for each buffer size of interest
+        for bs in buffer_sizes_of_interest:
+            df_merged = pd.concat([df_merged, pd.DataFrame({bs: phi_by_t[bs]})], axis=1)
+
+        # Create hierarchical indexing in the columns so that we can access each Phi(t,bs) as df_merged['Phi'][bs][t]
+        df_merged.columns = pd.MultiIndex.from_arrays(
+            [list(df_merged.columns[:2]) + ['Phi'] * len(buffer_sizes_of_interest),
+             ['', ''] + buffer_sizes_of_interest])
+
+        if DEBUG_ESTIMATORS:
+            print("Survival Probability and Empirical Distribution for each buffer size of interest :")
+            print(df_merged)
+
+        return df_merged
+
+    def estimate_proba_stationary(df_phi_proba_surv, expected_absorption_time):
+        """
+        Computes the stationary probability for each buffer size of interest via Approximation 1 in Matt's draft"
+
+        Arguments:
+        df_phi_proba_surv: pandas data frame
+            Data frame with the survival probability P(T>t) and the empirical distribution for each buffer size
+            of interest on which the integral that leads to the Fleming-Viot estimation of the stationary
+            probability of the buffer size is computed.
+
+        expected_absorption_time: float
+            Estimated expected absorption cycle time.
+
+        Return: tuple of dict
+        Duple with two dictionaries indexed by the buffer sizes (bs) of interest with the following content:
+        - the stationary distribution
+        - the value of the integral P(T>t)*Phi(t,bs)
+        """
+        if tracemalloc.is_tracing():
+            mem_usage = tracemalloc.get_traced_memory()
+            print("[MEM] estimate_proba_stationary: Memory used so far: current={:.3f} MB, peak={:.3f} MB".format(
+                mem_usage[0] / 1024 / 1024, mem_usage[1] / 1024 / 1024))
+            mem_snapshot_1 = tracemalloc.take_snapshot()
+
+        if expected_absorption_time <= 0.0 or np.isnan(expected_absorption_time) or expected_absorption_time is None:
+            raise ValueError("The expected absorption time must be a positive float ({})".format(expected_absorption_time))
+
+        probas_stationary = dict()
+        integrals = dict()
+        for bs in df_phi_proba_surv['Phi'].columns:
+            # Integrate => Multiply the survival, the empirical distribution Phi, delta(t) and SUM
+            integrals[bs] = 0.0
+            if False: #DEBUG_ESTIMATORS:
+                max_rows = pd.get_option('display.max_rows')
+                pd.set_option('display.max_rows', None)
+                print("Data for integral for bs = {}:\n{}".format(bs, df_phi_proba_surv))
+                pd.set_option('display.max_rows', max_rows)
+            for i in range(0, df_phi_proba_surv.shape[0] - 1):
+                integrals[bs] += (df_phi_proba_surv['P(T>t)'].iloc[i] * df_phi_proba_surv['Phi'][bs].iloc[i]) * \
+                                 (df_phi_proba_surv['t'].iloc[i+1] - df_phi_proba_surv['t'].iloc[i])
+            if DEBUG_ESTIMATORS or show_messages(verbose, verbose_period, t_learn):
+                print("integrals[{}] = {:.3f}, E(T) = {:.3f}".format(bs, integrals[bs], expected_absorption_time))
+            probas_stationary[bs] = integrals[bs] / expected_absorption_time
+
+        if tracemalloc.is_tracing():
+            mem_snapshot_2 = tracemalloc.take_snapshot()
+            mem_stats_diff = mem_snapshot_2.compare_to(mem_snapshot_1,
+                                                       key_type='lineno')  # Possible key_type's are 'filename', 'lineno', 'traceback'
+            if show_messages(verbose, verbose_period, t_learn):
+                print("[MEM] estimate_proba_stationary: Top difference in memory usage:")
+                for stat in mem_stats_diff[:10]:
+                    # if stat.size / stat.count > 1E6:   # To print the events with largest memory consumption for EACH of their occurrence
+                    print(stat)
+
+        return probas_stationary, integrals
+
+    # ---------------------------------- Auxiliary functions ------------------------------#
+
+    # ---------------------------- Check input parameters ---------------------------------#
+    if buffer_size_absorption < 0 \
+            or not isinstance(buffer_size_absorption, int) and not isinstance(buffer_size_absorption, np.int32) \
+            and not isinstance(buffer_size_absorption, np.int64):
+        raise ValueError("The buffer size for absorption must be integer and >= 0 ({})".format(buffer_size_absorption))
+
+    # Check the survival probability values
+    if proba_surv is None and not isinstance(proba_surv, pd.core.frame.DataFrame):
+        raise ValueError("The survival probability estimate must be given and be a DataFrame")
+    if 't' not in proba_surv.columns or 'P(T>t)' not in proba_surv.columns:
+        raise ValueError(
+            "The data frame with the estimated survival probability must contain at least columns 't' and 'P(T>t)' (columns: {})" \
+            .format(proba_surv.columns))
+    if proba_surv['P(T>t)'].iloc[0] != 1.0:
+        raise ValueError(
+            "The first value of the survival function must be 1.0 ({:.3f})".format(proba_surv['P(T>t)'].iloc[0]))
+    if proba_surv['P(T>t)'].iloc[-1] not in [1.0, 0.0]:
+        raise ValueError("The survival function at the last measured time is either 1.0 "
+                         "(when no particles have been absorbed) or 0.0 "
+                         "(when at least one particle has been absorbed) ({})".format(proba_surv['P(T>t)'].iloc[-1]))
+    # ---------------------------- Check input parameters ---------------------------------#
+
+    # -- Parse input parameters
+    N = len(envs)
+
+    # Set the start state of each environment/particle to an activation state, as this is a requirement
+    # for the empirical distribution Phi(t).
+    for i, env in enumerate(envs):
+        # Set the start state of the queue environment so that we start at an activation state
+        start_state = choose_state_for_buffer_size(env, buffer_size_absorption + 1)
+        env.setState((start_state, None))
+        assert env.getBufferSize() == buffer_size_absorption + 1, \
+            "The start state of all environments/particles must be an activation state (start state of env #{}: {})" \
+                .format(i, env.getState())
+
+    # Buffer sizes whose stationary probability is of interest
+    buffer_sizes_of_interest = get_blocking_buffer_sizes(agent)
+
+    # Event times (continuous times at which an event happens)
+    # The first event time is 0.0
+    event_times = [0.0]
+
+    # Phi(t, bs): Empirical probability of the buffer sizes of interest (bs)
+    # at each time when an event happens (ANY event, both arriving job or completed service)
+    phi = dict()
+    for bs in buffer_sizes_of_interest:
+        phi[bs] = [empirical_mean(envs, bs)]
+
+    # Time step in the queue trajectory (the first time step is t = 0)
+    done = False
+    t = 0
+    maxtime = proba_surv['t'].iloc[-1]
+    ## maxtime: it's useless to go with the FV simulation beyond the maximum observed survival time
+    ## because the contribution to the integral used in the estimation of the average reward is 0.0 after that.
+    is_any_phi_value_gt_0 = False
+    idx_reactivate = None
+    if plot:
+        # Initialize the plot
+        ax = plt.figure().subplots(1,1)
+        if agent.getLearnerP() is not None:
+            assert agent.getAcceptancePolicy().getThetaParameter() == agent.getLearnerP().getPolicy().getThetaParameter()
+        K = agent.getAcceptancePolicy().getBufferSizeForDeterministicBlocking()
+        ax.set_title("N = {}, K= {}, maxtime = {:.1f}" \
+                     .format(N,
+                             K,
+                             maxtime))
+
+        # Variables needed to update the plot that shows the trajectories of the particles (online)
+        time0 = [0.0] * N
+        y0 = [buffer_size_absorption + 1] * N
+    if DEBUG_ESTIMATORS:
+        # Check realization of the arrival and service rates
+        times_last_arrival = [0.0] * N
+        jobs_arrival = []
+        times_inter_arrival = []
+
+        if envs[0].getBufferSize() == 0:
+            # Initially all the particles have no jobs, therefore no service events can happen for any of them
+            for env in envs:
+                assert env.getBufferSize() == 0
+            times_last_service = [np.nan] * N
+        else:
+            times_last_service = [0.0] * N
+        servers_service = []
+        times_service = []
+    while not done:
+        t += 1
+
+        # Generate an event over all possible event types and particles
+        # Note: this function takes care of NOT generating a service event when a server is empty.
+        time, event, job_class_or_server, idx_particle = generate_event(envs)
+        assert 0 <= idx_particle < N, "The chosen particle for change is between 0 and N-1={} ({})".format(N-1, idx_particle)
+        # Store the absolute event time
+        event_times += [event_times[-1] + time]
+
+        # Get the current state of the selected particle because that's the one whose state we are going to possibly change
+        state = envs[idx_particle].getState()
+        if event == Event.BIRTH:
+            # The event is an incoming job class
+            # => Update the state of the queue, apply the acceptance policy, and finally the server assignment policy
+            action, next_state, reward, gradient_for_action = manage_job_arrival(t, envs[idx_particle], agent, state, job_class_or_server)
+            if DEBUG_ESTIMATORS:
+                # TODO: (2022/01/21) Fix this logic as it does NOT take care of different job classes. In fact the latest arrival time (regardless of the job class) is used as reference time to compute the new inter-arrival time for the current job class!)
+                jobs_arrival += [job_class_or_server]
+                times_inter_arrival += [event_times[-1] - times_last_arrival[idx_particle]]
+                # Prepare for the next iteration
+                times_last_arrival[idx_particle] = event_times[-1]
+                if envs[idx_particle].getBufferSizeFromState(next_state) == 1:
+                    # The particle can now experience a service event
+                    # => Reset the time of the last service to the current time, so that we can measure the time
+                    # of the next service experienced by this particle.
+                    times_last_service[idx_particle] = event_times[-1]
+        elif event == Event.DEATH:
+            # The event is a completed service
+            # => Update the state of the queue
+            # (Note that the state of the queue in envs[idx_particle] is updated by manage_service())
+            action, next_state, reward = manage_service(envs[idx_particle], agent, state, job_class_or_server)
+
+            # Check if the particle has been ABSORBED
+            if envs[idx_particle].getBufferSize() == buffer_size_absorption:
+                # The particle has been absorbed
+                # => Reactivate it to any of the other particles
+                if plot:
+                    # Show the absorption before reactivation takes place
+                    y = envs[idx_particle].getBufferSize()
+                    J = buffer_size_absorption + 1
+                    plot_update_trajectory( ax, idx_particle, N, K, J,
+                                            time0[idx_particle], y0[idx_particle], event_times[-1], y)
+                    # Update the coordinates of the latest plotted point for this particle, for the next iteration
+                    time0[idx_particle] = event_times[-1]
+                    y0[idx_particle] = y
+                idx_reactivate = reactivate_particle(envs, idx_particle)
+                next_state = envs[idx_particle].getState()
+                assert envs[idx_particle].getBufferSize() > buffer_size_absorption
+                if DEBUG_TRAJECTORIES:
+                    print("*** Particle {} REACTIVATED to particle {}".format(idx_particle, idx_reactivate))
+
+            # This should come AFTER the possible reactivation, because the next state will never be 0
+            # when reactivation takes place.
+            if DEBUG_ESTIMATORS:
+                assert not np.isnan(times_last_service[idx_particle])
+                servers_service += [job_class_or_server]
+                times_service += [event_times[-1] - times_last_service[idx_particle]]
+                # Prepare for the next iteration
+                if envs[idx_particle].getBufferSize() == 0:
+                    # The particle can no longer experience a service event
+                    # => Reset the time of the last service to NaN
+                    times_last_service[idx_particle] = np.nan
+                else:
+                    times_last_service[idx_particle] = event_times[-1]
+
+        if DEBUG_TRAJECTORIES:
+            print("P=P{}: {} | t={}: time={}, event={}, action={} -> state={}, reward={}" \
+                  .format(idx_particle, state, t, event_times[-1], event, action, next_state, reward), end="\n")
+
+        is_any_phi_value_gt_0 = max([is_any_phi_value_gt_0, update_phi(envs, phi)])
+
+        if plot:
+            y = envs[0].getBufferSizeFromState(next_state)
+            if agent.getLearnerP() is not None:
+                assert agent.getAcceptancePolicy().getThetaParameter() == agent.getLearnerP().getPolicy().getThetaParameter()
+            K = agent.getAcceptancePolicy().getBufferSizeForDeterministicBlocking()
+            J = buffer_size_absorption + 1
+            plot_update_trajectory( ax, idx_particle, N, K, J,
+                                    time0[idx_particle], y0[idx_particle], event_times[-1], y,
+                                    r=None) #idx_reactivate)
+            time0[idx_particle] = event_times[-1]
+            y0[idx_particle] = y
+
+        idx_reactivate = None
+
+        # Stop when we reached the maxtime, which is set above to the maximum observed survival time
+        # (since going beyond does not contribute to the integral used in the FV estimator)
+        done = event_times[-1] > maxtime
+
+    # DONE
+    if show_messages(verbose, verbose_period, t_learn):
+        print(
+            "==> agent ENDS at discrete time t={} (continuous time = {:.1f}, compared to maximum observed time for P(T>t) = {:.1f}) at state {} coming from state = {}, action = {}, reward = {})" \
+            .format(t, event_times[-1], proba_surv['t'].iloc[-1], envs[idx_particle].getState(), state, action, reward))
+    # Assertion
+    for bs in phi.keys():
+        assert len(event_times) == len(phi[bs]), \
+            "The length of the event times where phi is measured ({}) coincides with the length of phi ({})" \
+            .format(len(event_times), len(phi))
+
+    if DEBUG_ESTIMATORS:
+        # NOTE: It is assumed that the job arrival rates and service rates are the same for ALL N environments
+        # where the FV process is run.
+        job_rates_by_server = compute_job_rates_by_server(envs[0].getJobClassRates(),
+                                                          envs[0].getNumServers(),
+                                                          agent.getAssignmentPolicy().getProbabilisticMap())
+        plotting.plot_event_times(job_rates_by_server, times_inter_arrival, jobs_arrival, class_name="Job class")
+        plotting.plot_event_times(envs[0].getServiceRates(), times_service, servers_service, class_name="Server")
+
+    if is_any_phi_value_gt_0:
+        # Compute the stationary probability of each buffer size bs in Phi(t,bs) using Phi(t,bs), P(T>t) and E(T_A)
+        probas_stationary, integrals = estimate_stationary_probability(event_times, phi, proba_surv,
+                                                                       expected_absorption_time)
+    else:
+        probas_stationary = dict()
+        integrals = dict()
+        for bs in phi.keys():
+            probas_stationary[bs] = integrals[bs] = 0.0
+
+    return t, event_times, phi, probas_stationary
+
+
+def show_messages(verbose, verbose_period, t_learn):
+    return verbose and np.mod(t_learn - 1, verbose_period) == 0
+
+
+def plot_update_trajectory(ax, p, N, K, J, x0, y0, x1, y1, marker='-', r=None):
+    "p: particle number to update; r: particle to which p is reactivated (if any)"
+    assert ax is not None
+    colormap = cm.get_cmap("jet")
+    if r is not None:
+        # Mark the color of the line with the color of the reactivation particle
+        c = r
+    else:
+        c = p
+    color = colormap((c + 1) / N)
+    # Non-overlapping step plots at vertical positions (K+1)*p
+    print("Updating TRAJECTORY of particle {} (K={}, J={}): [{}, {}] -> [{}, {}]".format(p, K, J, x0, y0, x1, y1))
+    ax.step([x0, x1], [(K + 1) * p + y0, (K + 1) * p + y1], marker, where='post', color=color, markersize=3)
+
+    # Reference lines
+    reflines_zero = range(0, (K+1)*N, K+1)
+    reflines_absorption = range(J-1, J-1+(K+1)*N, K+1)
+    reflines_block = range(K, K+(K+1)*N, K+1)
+    ax.hlines(reflines_block, 0, x1, color='gray', linestyles='dashed')
+    ax.hlines(reflines_absorption, 0, x1, color='red', linestyles='dashed')
+    ax.hlines(reflines_zero, 0, x1, color='gray')
+
+    # Vertical line when the particle has been reactivated
+    if r is not None:
+        ax.axvline(x1, color=color, linestyle='dashed')
+
+
+def plot_trajectory(env, agent, J):
+    """
+    Plots the buffer sizes of the system as a function of time observed during simulation.
+    We assume there is only one queue to be plotted.
+    """
+    assert agent.getLearnerV() is not None
+    if agent.getLearnerP() is not None:
+        assert agent.getAcceptancePolicy().getThetaParameter() == agent.getLearnerP().getPolicy().getThetaParameter()
+    K = agent.getAcceptancePolicy().getBufferSizeForDeterministicBlocking()
+    times = agent.getLearnerV().getTimes()
+    states = agent.getLearnerV().getStates()
+    #print("Times and states to plot:\n{}".format(np.c_[times, states]))
+    buffer_sizes = [env.getBufferSizeFromState(s) for s in states]
+
+    # Non-overlapping step plots at vertical positions (K+1)*p
+    ax = plt.figure().subplots(1,1)
+    ax.step(times, buffer_sizes, 'x-', where='post', color="blue", markersize=3)
+
+    # Reference lines
+    ax.axhline(0, color="gray")
+    ax.axhline(J-1, color="red", linestyle="dashed")
+    ax.axhline(K, color='gray', linestyle='dashed')
+    ax.set_title("Evolution of buffer size of the system: K = {}, J = {}".format(K, J))
+
+    return ax
 
 
 if __name__ == "__main__":
     import runpy
     runpy.run_path("../../setup.py")
 
-    test = True
+    test = False
 
     # --------------- Unit tests on methods defined in this file ------------------ #
     if test:
@@ -2937,7 +3161,7 @@ if __name__ == "__main__":
         simul = SimulatorQueue(env_queue_mm, None, None, N=1)
 
         np.random.seed(1717)
-        time, event, job_class_or_server, idx_env = simul.generate_event()
+        time, event, job_class_or_server, idx_env = generate_event(simul.envs)
         print("Observed minimum time {} for an {} associated to job class (if BIRTH) or server (if DEATH) = {}".format(time, event, job_class_or_server))
         time_expected, event_expected, job_class_or_server_expected, idx_env_expected = 0.36603, Event.BIRTH, 0, 0
         assert np.allclose(time, time_expected, atol=1E-5)
@@ -2947,8 +3171,9 @@ if __name__ == "__main__":
 
         # Repeat the realization to check that we always get a BIRTH event because by default the queue sizes of the servers are initialized at 0
         N = 10
-        for _ in range(N):
-            _, event, _, _ = simul.generate_event()
+        for i in range(N):
+            print("Generating event number {} out of {}...".format(i+1, N))
+            _, event, _, _ = generate_event(simul.envs)
             assert event == Event.BIRTH
 
         #-- Repeat the realization to check the distribution of event types and selected job classes or servers
@@ -2965,7 +3190,7 @@ if __name__ == "__main__":
         # Expected proportion of events for each exponential
         p = np.array( [r / np.nansum(valid_rates) if r > 0 else 0.0 for r in valid_rates] )
         for _ in range(N):
-            time, event, job_class_or_server, _ = simul.generate_event()
+            time, event, job_class_or_server, _ = generate_event(simul.envs)
             if event == Event.BIRTH:
                 # The BIRTH events are associated to indices at the beginning of the rates list
                 n_events_by_rate[job_class_or_server] += 1
@@ -3061,16 +3286,16 @@ if __name__ == "__main__":
         df_learning_expected = pd.DataFrame.from_items([
                                                 ('theta', [1.0, 2.0, 3.0, 4.0, 5.0]),
                                                 ('theta_next', [2.0, 3.0, 4.0, 5.0, 5.0]),
-                                                ('Pr(K-1)', [0.238573, 0.174124, 0.138127, 0.031534, 0.0]),
-                                                ('Pr(K)', [0.154395, 0.096396, 0.097273, 0.015617, 0.0]),
-                                                ('Q_diff(K-1)', [0.37, 0.65, 0.41, 0.26, 0.00]),
-                                                ('Q_diff(K)', [0.17, 0.40, 0.73, 0.32, 0.00]),
+                                                ('Pr(K-1)', [0.269096, 0.185156, 0.167206, 0.039376, 0.062921]),
+                                                ('Pr(K)', [0.205425, 0.094288, 0.112091, 0.015120, 0.047722]),
+                                                ('Q_diff(K-1)', [0.48, 0.72, 0.40, 0.28, 0.17]),
+                                                ('Q_diff(K)', [0.71, 0.50, 0.73, 0.18, -0.23]),
                                                 ('alpha', [1.0]*5),
-                                                ('V', [-1.375, -1.265, -1.345, -1.690, 0.0]),
-                                                ('gradV', [0.088272, 0.113181, 0.056632, 0.008199, 0.0]),
-                                                ('n_events_mc', [50, 50, 50, 50, 50]),
-                                                ('n_events_fv', [400, 365, 751, 219, 54]),
-                                                ('n_trajectories_Q', [100.0]*4 + [0.0])
+                                                ('V', [-1.350, -1.290, -1.330, -1.660, -1.405]),
+                                                ('gradV', [0.129166, 0.133313, 0.066882, 0.011025, 0.010697]),
+                                                ('n_events_mc', [93, 97, 90, 99, 90]),
+                                                ('n_events_fv', [470, 409, 729, 416, 804]),
+                                                ('n_trajectories_Q', [100.0]*5)
                                                 ])
         assert np.allclose(df_learning, df_learning_expected, atol=1E-6)
 
@@ -3105,28 +3330,22 @@ if __name__ == "__main__":
         show_exec_params(params)
         # Set the initial theta value
         simul.getLearnerP().getPolicy().setThetaParameter(theta_start)
-        if DEBUG_TRAJECTORIES:
-            plt.figure()
-            ax = plt.gca()
-            plt.title("N = {}, K= {}, T = {}".format(nparticles, int( np.ceil(theta_start+1) ), t_sim))
-        else:
-            ax = None
-        _, _, df_learning = simul.run(dict_params_simul, dict_params_info=dict_params_info, seed=seed, verbose=False, ax=ax)
+        _, _, df_learning = simul.run(dict_params_simul, dict_params_info=dict_params_info, seed=seed, verbose=False)
 
         print(df_learning)
         # EXPECTED RESULT WHEN USING REINFORCE_TRUE
         df_learning_expected = pd.DataFrame.from_items([
-                                                ('theta', [1.0, 1.088272, 1.194342, 1.286227, 1.391074]),
-                                                ('theta_next', [1.088272, 1.194342, 1.286227, 1.391074, 1.487292]),
-                                                ('Pr(K-1)', [0.238573, 0.145301, 0.224110, 0.194161, 0.213818]),
-                                                ('Pr(K)', [0.154395, 0.008228, 0.016207, 0.027941, 0.033667]),
-                                                ('Q_diff(K-1)', [0.37, 0.73, 0.41, 0.54, 0.45]),
-                                                ('Q_diff(K)', [0.17, 0.58, 0.65, 0.47, 0.66]),
+                                                ('theta', [1.0, 1.129166, 1.208916, 1.317273, 1.377084]),
+                                                ('theta_next', [1.129166, 1.208916, 1.317273, 1.377084, 1.456888]),
+                                                ('Pr(K-1)', [0.269096, 0.215539, 0.208380, 0.139095, 0.210012]),
+                                                ('Pr(K)', [0.205425, 0.029455, 0.015344, 0.027546, 0.053595]),
+                                                ('Q_diff(K-1)', [0.48, 0.37, 0.52, 0.43, 0.38]),
+                                                ('Q_diff(K)', [0.71, 0.45, 0.24, 0.03, 0.93]),
                                                 ('alpha', [1.0]*5),
-                                                ('V', [-1.375, -1.815, -2.005, -1.740, -1.855]),
-                                                ('gradV', [0.088272, 0.106070, 0.091885, 0.104847, 0.096218]),
-                                                ('n_events_mc', [50, 50, 50, 50, 50]),
-                                                ('n_events_fv', [400, 231, 380, 181, 458]),
+                                                ('V', [-1.350, -1.975, -2.140, -1.895, -1.720]),
+                                                ('gradV', [0.129166, 0.079749, 0.108357, 0.059811, 0.079804]),
+                                                ('n_events_mc', [93, 90, 89, 97, 83]),
+                                                ('n_events_fv', [470, 242, 340, 190, 474]),
                                                 ('n_trajectories_Q', [100.0]*5)
                                                 ])
         assert np.allclose(df_learning, df_learning_expected, atol=1E-6)
@@ -3186,13 +3405,13 @@ if __name__ == "__main__":
         df_learning_expected = pd.DataFrame.from_items([
                                                 ('theta', [1.0, 2.0, 3.0, 4.0, 5.0]),
                                                 ('theta_next', [2.0, 3.0, 4.0, 5.0, 6.0]),
-                                                ('Pr(K-1)', [0.312022, 0.192495, 0.149446, 0.093623, 0.059160]),
-                                                ('Pr(K)', [0.193163, 0.121562, 0.124576, 0.065502, 0.029230]),
+                                                ('Pr(K-1)', [0.611731, 0.188644, 0.148607, 0.086340, 0.051746]),
+                                                ('Pr(K)', [0.192246, 0.111336, 0.123782, 0.072948, 0.028608]),
                                                 ('Q_diff(K-1)', [0.39, 0.44, 0.43, 0.32, 0.41]),
                                                 ('Q_diff(K)', [0.42, 0.15, 0.63, 0.07, 0.93]),
                                                 ('alpha', [1.0]*5),
                                                 ('V', [-1.325, -1.500, -1.295, -1.360, -1.605]),
-                                                ('gradV', [0.121688, 0.084698, 0.064262, 0.029959, 0.024256]),
+                                                ('gradV', [0.238575, 0.083003, 0.063901, 0.027629, 0.021216]),
                                                 ('n_events_mc', [1500, 1500, 1500, 1500, 1500]),
                                                 ('n_events_fv', [0]*5),
                                                 ('n_trajectories_Q', [100.0]*5)
@@ -3235,15 +3454,15 @@ if __name__ == "__main__":
         print(df_learning)
         # EXPECTED RESULT WHEN USING REINFORCE_TRUE
         df_learning_expected = pd.DataFrame.from_items([
-                                                ('theta', [1.0, 1.121688, 1.151592, 1.327286, 1.466503]),
-                                                ('theta_next', [1.121688, 1.151592, 1.327286, 1.466503, 1.601945]),
-                                                ('Pr(K-1)', [0.312022, 0.249194, 0.247456, 0.224544, 0.211628]),
-                                                ('Pr(K)', [0.193163, 0.032198, 0.022803, 0.052561, 0.056979]),
-                                                ('Q_diff(K-1)', [0.39, 0.12, 0.71, 0.62, 0.64]),
-                                                ('Q_diff(K)', [0.42, 0.35, 0.61, 0.07, 0.18]),
+                                                ('theta', [1.0, 1.238575, 1.311557, 1.412920, 1.557364]),
+                                                ('theta_next', [1.238575, 1.311557, 1.412920, 1.557364, 1.641042]),
+                                                ('Pr(K-1)', [0.611731, 0.214652, 0.230370, 0.206348, 0.190178]),
+                                                ('Pr(K)', [0.192246, 0.057525, 0.059673, 0.072304, 0.069053]),
+                                                ('Q_diff(K-1)', [0.39, 0.34, 0.44, 0.70, 0.44]),
+                                                ('Q_diff(K)', [0.42, 0.26, 0.55, 0.27, 0.27]),
                                                 ('alpha', [1.0]*5),
-                                                ('V', [-1.325, -2.070, -1.885, -1.740, -1.900]),
-                                                ('gradV', [0.121688, 0.029903, 0.175694, 0.139217, 0.135442]),
+                                                ('V', [-1.325, -2.020, -1.710, -1.750, -1.800]),
+                                                ('gradV', [0.238575, 0.072982, 0.101363, 0.144444, 0.083678]),
                                                 ('n_events_mc', [1500, 1500, 1500, 1500, 1500]),
                                                 ('n_events_fv', [0]*5),
                                                 ('n_trajectories_Q', [100.0]*5)
@@ -3621,9 +3840,9 @@ if __name__ == "__main__":
         # MC (with no benchmark)
         #learning_method = LearningMethod.MC; plot_trajectories = False; symbol = 'b.-'; benchmark_file = None
         # MC (with benchmark)
-        learning_method = LearningMethod.MC; plot_trajectories = False; symbol = 'b.-'; benchmark_file = os.path.join(os.path.abspath(resultsdir), "benchmark_fv.csv")
+        #learning_method = LearningMethod.MC; plot_trajectories = False; symbol = 'b.-'; benchmark_file = os.path.join(os.path.abspath(resultsdir), "benchmark_fv.csv")
         # FV
-        #learning_method = LearningMethod.FV; plot_trajectories = False; symbol = 'g.-'; benchmark_file = None
+        learning_method = LearningMethod.FV; plot_trajectories = False; symbol = 'g.-'; benchmark_file = None
         if learning_method == LearningMethod.FV:
             learnerV = LeaFV
         else:
@@ -3681,7 +3900,7 @@ if __name__ == "__main__":
         # Open the file to store the results
         if save_results:
             # Initialize the output file with the results with the column names
-            simul.fh_results.write("case,t_learn,theta_true,theta,theta_next,K,J/K,J,exponent,N,T,err_phi,err_et,seed,E(T),n_cycles,Pr(K-1),Pr(K),Q_diff(K-1),Q_diff(K),alpha,V,gradV,n_events_mc,n_events_fv,n_trajectories_Q\n")
+            simul.fh_results.write("case,t_learn,theta_true,theta,theta_next,K,J/K,J,exponent,N,T,err_phi,err_et,seed,E(T),n_cycles,max_time_surv,Pr(K-1),Pr(K),Q_diff(K-1),Q_diff(K),alpha,V,gradV,n_events_mc,n_events_fv,n_trajectories_Q\n")
 
         # Run the simulations, either from parameters defined by a benchmark file or from parameters defined below
         if benchmark_file is None:
@@ -3712,8 +3931,8 @@ if __name__ == "__main__":
                 #simul.dict_learning_params['t_learn'] = int(theta_true*2)
 
                 for k, theta_start in enumerate(theta_start_values):
-                    K_true = simul.learnerP.getPolicy().getBufferSizeForDeterministicBlockingFromTheta(theta_true)
-                    K = simul.learnerP.getPolicy().getBufferSizeForDeterministicBlockingFromTheta(theta_start)
+                    K_true = simul.agent.getAcceptancePolicy().getBufferSizeForDeterministicBlockingFromTheta(theta_true)
+                    K = simul.agent.getAcceptancePolicy().getBufferSizeForDeterministicBlockingFromTheta(theta_start)
                     for j, J_factor in enumerate(J_factor_values):
                         N0, T0 = \
                             compute_nparticles_and_nsteps_for_fv_process(rhos, K, J_factor, error_rel_phi=error_rel_phi, error_rel_et=error_rel_et)
@@ -3791,8 +4010,8 @@ if __name__ == "__main__":
                 t_learn = benchmark_nevents['t_learn'].iloc[-1]
                 simul.setNumLearningSteps(t_learn)
 
-                K_true = simul.learnerP.getPolicy().getBufferSizeForDeterministicBlockingFromTheta(theta_true)
-                K = simul.learnerP.getPolicy().getBufferSizeForDeterministicBlockingFromTheta(theta_start)
+                K_true = simul.agent.getAcceptancePolicy().getBufferSizeForDeterministicBlockingFromTheta(theta_true)
+                K = simul.agent.getAcceptancePolicy().getBufferSizeForDeterministicBlockingFromTheta(theta_start)
 
                 simul.setCase(case)
                 dict_params_simul = {
