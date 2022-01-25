@@ -3789,7 +3789,7 @@ if __name__ == "__main__":
                                                   dict_params_info: dict={'plot': False, 'log': False},
                                                   params_read_from_benchmark_file=False, seed=None, verbose=False):
             set_required_entries_info = {'case', 'ncases', 'learning_method', 'exponent',
-                                         'rhos', 'K_true', 'K', 'N0', 'T0', 'error_rel_phi', 'error_rel_et',
+                                         'rhos', 'K_true', 'K', 'error_rel_phi', 'error_rel_et',
                                          'alpha_start', 'adjust_alpha', 'min_time_to_update_alpha', 'alpha_min'}
             if not set_required_entries_info.issubset(dict_info.keys()):
                 raise ValueError("Missing entries in the dict_info dictionary: {}" \
@@ -3808,7 +3808,6 @@ if __name__ == "__main__":
                               dict_params_simul['theta_start'], dict_info['K'], dict_params_simul['buffer_size_activation_factor'],
                               dict_info['exponent'], dict_params_simul['nparticles'], dict_info['error_rel_phi'] * 100, error_rel_phi_real * 100,
                               dict_params_simul['t_sim'], dict_info['error_rel_et'] * 100, error_rel_et_real * 100))
-                print("Nominal values for the number of particles and number of cycles: N0={}, T0={}".format(dict_info['N0'], dict_info['T0']))
             else:
                 print("\n--> CASE {} of {}: theta_true={:.3f} (K_true={}), theta={:.3f} (K={}), J/K={:.3f}," \
                       " exponent={}: N={}, T={})" \
@@ -3940,8 +3939,8 @@ if __name__ == "__main__":
             J_factor_values = [0.2] #[0.2, 0.3, 0.5]  # [0.2, 0.3, 0.5, 0.7]
             NT_exponents = [0] #[-2, -1, 0, 1]  # Exponents to consider for different N and T values as in exp(exponent)*N0, where N0 is the reference value to achieve a pre-specified relative error
             # Accepted relative errors for the estimation of Phi and of E(T_A)
-            error_rel_phi = 0.5
-            error_rel_et = 0.5
+            error_rel_phi = [0.13] #0.5
+            error_rel_et = [0.3] #0.5
 
             # Output variables of the simulation
             case = 0
@@ -3963,16 +3962,14 @@ if __name__ == "__main__":
                     K_true = simul.agent.getAcceptancePolicy().getBufferSizeForDeterministicBlockingFromTheta(theta_true)
                     K = simul.agent.getAcceptancePolicy().getBufferSizeForDeterministicBlockingFromTheta(theta_start)
                     for j, J_factor in enumerate(J_factor_values):
-                        N0, T0 = \
-                            compute_nparticles_and_nsteps_for_fv_process(rhos, K, J_factor, error_rel_phi=error_rel_phi, error_rel_et=error_rel_et)
-                        # Values of reference for N and T... we will consider smaller and larger values separated constantly
-                        # in logarithmic scale (note that we use base e as opposed to base 10 for the log scale because
-                        # using base 10 may lead to too small values (e.g. 1), which do not make sense analyzing.
                         Nmin = 10
                         Tmin = 10
-                        N_values = [np.max([Nmin, int( np.round(N0 * np.exp(e)) )]) for e in NT_exponents]
-                        T_values = [np.max([Tmin, int( np.round(T0 * np.exp(e)) )]) for e in NT_exponents]
-                        for exponent, N, T in zip(NT_exponents, N_values, T_values):
+                        NT_values = [compute_nparticles_and_nsteps_for_fv_process(rhos, K, J_factor, error_rel_phi=err1, error_rel_et=err2)
+                                              for err1, err2 in zip(error_rel_phi, error_rel_et)]
+                        for idx, (exponent, (N, T)) in enumerate( zip(NT_exponents, NT_values) ):
+                            # Lower bound for N and T so that we don't have too little particles!
+                            N = np.max([Nmin, N])
+                            T = np.max([Tmin, T])
                             # Set the parameters for this run
                             case += 1
                             simul.setCase(case)
@@ -3991,10 +3988,8 @@ if __name__ == "__main__":
                                          'rhos': rhos,
                                          'K_true': K_true,
                                          'K': K,
-                                         'N0': N0,
-                                         'T0': T0,
-                                         'error_rel_phi': error_rel_phi,
-                                         'error_rel_et': error_rel_et,
+                                         'error_rel_phi': error_rel_phi[idx],
+                                         'error_rel_et': error_rel_et[idx],
                                          'alpha_start': alpha_start,
                                          'adjust_alpha': adjust_alpha,
                                          'min_time_to_update_alpha': min_time_to_update_alpha,
@@ -4057,8 +4052,6 @@ if __name__ == "__main__":
                              'rhos': rhos,
                              'K_true': K_true,
                              'K': K,
-                             'N0': N,
-                             'T0': T,
                              'error_rel_phi': 0.0,
                              'error_rel_et': 0.0,
                              'alpha_start': alpha_start,
