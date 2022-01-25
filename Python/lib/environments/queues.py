@@ -129,7 +129,7 @@ def costBlockingExponential(buffer_size: int, buffer_size_ref :int):
     #   f = (B * (1 - indicator) + B*b**(s - sref) * indicator) * p
     #   plt.plot(s, f, 'b-');
     #   ax = plt.gca(); ax.set_ylim((0,2))
-    B = 1       # Blocking associated just to the fact the queue is blocked
+    B = 5.0      # Blocking associated just to the fact the queue is blocked
     b = 3.0     # Base of the exponential function
     #cost = B if buffer_size <= buffer_size_ref else B * b**(buffer_size - buffer_size_ref)
     cost = B * (1 + b**(buffer_size - buffer_size_ref))
