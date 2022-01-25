@@ -42,7 +42,7 @@ import Python.lib.queues as queues
 from Python.lib.queues import Event
 
 from Python.lib.utils.basic import is_scalar, merge_values_in_time, index_linear2multi, measure_exec_time, \
-    show_exec_params, generate_datetime_string, find_last, insort
+    show_exec_params, generate_datetime_string, find_last, insort, aggregation_bygroups
 from Python.lib.utils.computing import rmse, compute_job_rates_by_server, compute_nparticles_and_nsteps_for_fv_process,\
     compute_rel_errors_for_fv_process, generate_min_exponential_time, stationary_distribution_birth_death_process
 import Python.lib.utils.plotting as plotting
@@ -923,7 +923,7 @@ class SimulatorQueue(Simulator):
                 n_Km1 = 0
                 if DEBUG_ESTIMATORS or show_messages(verbose, verbose_period, t_learn):
                     print("Estimation of Q_diff(K-1) skipped because the estimated stationary probability Pr(K-1) = 0.")
-            if DEBUG_ESTIMATORS or show_messages(verbose, verbose_period, t_learn):
+            if True or DEBUG_ESTIMATORS or show_messages(verbose, verbose_period, t_learn):
                 print("--> Estimated stationary probability: Pr(K-1={}) = {}".format(K-1, probas_stationary[K - 1]))
 
             if probas_stationary[K] > 0.0:
@@ -3878,8 +3878,8 @@ if __name__ == "__main__":
             # Monte-Carlo learner is the default
             learnerV = LeaMC
         fixed_window = False
-        alpha_start = 10  # / t_sim  # Use `/ t_sim` when using update of theta at each simulation step (i.e. LeaPolicyGradient.learn_TR() is called instead of LeaPolicyGradient.learn())
-        adjust_alpha = True
+        alpha_start = 10.0  # / t_sim  # Use `/ t_sim` when using update of theta at each simulation step (i.e. LeaPolicyGradient.learn_TR() is called instead of LeaPolicyGradient.learn())
+        adjust_alpha = False #True
         func_adjust_alpha = np.sqrt
         min_time_to_update_alpha = 0 #int(t_learn / 3)
         alpha_min = 0.1  # 0.1
@@ -3916,8 +3916,8 @@ if __name__ == "__main__":
 
         # -- Simulation parameters that are common for ALL parameter settings
         # 2022/01/14: t_learn = 10 times the optimum true theta so that we are supposed to reach that optimum under the REINFORCE_TRUE learning mode with decreasing alpha
-        t_learn = 150 #100 #198 - 91 #198 #250 #50
-        seed = 1717  #1859 (for learning step 53+91=144) #1769 (for learning step 53, NOT 52 because it took too long) #1717
+        t_learn = 200 #100 #198 - 91 #198 #250 #50
+        seed = 1313  #1859 (for learning step 53+91=144) #1769 (for learning step 53, NOT 52 because it took too long) #1717
         verbose = False
         dict_learning_params = dict({'mode': LearningMode.REINFORCE_TRUE, 't_learn': t_learn})
         dict_params_info = dict({'plot': False, 'log': False})
@@ -4082,88 +4082,90 @@ if __name__ == "__main__":
         # Closes the object (e.g. any log and result files are closed)
         simul.close()
 
+        PLOT_GRADIENT = False
         if len(theta_true_values) == 1:
-            # Save the estimation of G(t) for the last learning step to a file
-            #file_results_G = "G.csv"
-            #pd.DataFrame({'G': simul.G}).to_csv(file_results_G)
+            if PLOT_GRADIENT:
+                # Save the estimation of G(t) for the last learning step to a file
+                #file_results_G = "G.csv"
+                #pd.DataFrame({'G': simul.G}).to_csv(file_results_G)
 
-            #-- Plot theta and the gradient of the value function
-            SET_YLIM = False
+                #-- Plot theta and the gradient of the value function
+                SET_YLIM = False
 
-            # Estimated value function
-            ax, line_est = plotting.plot_colormap(df_learning['theta'], -df_learning['V'], cmap_name="Blues")
+                # Estimated value function
+                ax, line_est = plotting.plot_colormap(df_learning['theta'], -df_learning['V'], cmap_name="Blues")
 
-            # True value function
-            # Block size for each theta, defined by the fact that K-1 is between theta and theta+1 => K = ceiling(theta+1)
-            Ks = [np.int(np.ceil(np.squeeze(t)+1)) for t in df_learning['theta']]
-            # Blocking probability = Pr(K)
-            p_stationary = [stationary_distribution_birth_death_process(simul.getEnv().getNumServers(), K, rhos)[1] for K in Ks]
-            pblock_K = np.array([p[-1] for p in p_stationary])
-            pblock_Km1 = np.array([p[-2] for p in p_stationary])
-            # Blocking probability adjusted for different jump rates between K-1 and K (affected by the non-deterministic probability of blocking at K-1)
-            pblock_K_adj = np.squeeze([pK * (1 - (K-1-theta)) for K, theta, pK in zip(Ks, df_learning['theta'], pblock_K)])
-            pblock_Km1_adj = pblock_Km1 #np.squeeze([pKm1 + pK - pK_adj for pKm1, pK, pK_adj in zip(pblock_Km1, pblock_K, pblock_K_adj)])
-            #assert np.allclose(pblock_K + pblock_Km1, pblock_K_adj + pblock_Km1_adj)
-            # True value function: expected cost at K which is the buffer size where blocking most likely occurs...
-            # (in fact, if theta is say 3.1, the probability of blocking at 4 (= K-1) is small and most blocking
-            # will occur at K; if theta is 3.9, the probability of blocking at 4 (= K-1)
-            # i.e. we compute at K-1 and NOT at K because we want to compare the true value function
-            # with the *estimated* value function when the policy starts blocking at buffer size = theta
-            #Vtrue = np.array([rewardOnJobRejection_ExponentialCost(env_queue_mm, (K, None), Actions.REJECT, (K, None)) * pK for K, pK in zip(Ks, pblock_K)])
+                # True value function
+                # Block size for each theta, defined by the fact that K-1 is between theta and theta+1 => K = ceiling(theta+1)
+                Ks = [np.int(np.ceil(np.squeeze(t)+1)) for t in df_learning['theta']]
+                # Blocking probability = Pr(K)
+                p_stationary = [stationary_distribution_birth_death_process(simul.getEnv().getNumServers(), K, rhos)[1] for K in Ks]
+                pblock_K = np.array([p[-1] for p in p_stationary])
+                pblock_Km1 = np.array([p[-2] for p in p_stationary])
+                # Blocking probability adjusted for different jump rates between K-1 and K (affected by the non-deterministic probability of blocking at K-1)
+                pblock_K_adj = np.squeeze([pK * (1 - (K-1-theta)) for K, theta, pK in zip(Ks, df_learning['theta'], pblock_K)])
+                pblock_Km1_adj = pblock_Km1 #np.squeeze([pKm1 + pK - pK_adj for pKm1, pK, pK_adj in zip(pblock_Km1, pblock_K, pblock_K_adj)])
+                #assert np.allclose(pblock_K + pblock_Km1, pblock_K_adj + pblock_Km1_adj)
+                # True value function: expected cost at K which is the buffer size where blocking most likely occurs...
+                # (in fact, if theta is say 3.1, the probability of blocking at 4 (= K-1) is small and most blocking
+                # will occur at K; if theta is 3.9, the probability of blocking at 4 (= K-1)
+                # i.e. we compute at K-1 and NOT at K because we want to compare the true value function
+                # with the *estimated* value function when the policy starts blocking at buffer size = theta
+                #Vtrue = np.array([rewardOnJobRejection_ExponentialCost(env_queue_mm, (K, None), Actions.REJECT, (K, None)) * pK for K, pK in zip(Ks, pblock_K)])
 
-            # ACTUAL true value function, which takes into account the probability of blocking at K-1 as well, where the policy is non-deterministic (for non-integer theta)
-            # The problem with this approach is that the stationary distribution of the chain is NOT the same as with chain
-            # where rejection ONLY occurs at s=K... in fact, the transition probabilities to s=K and to s=K-1 when the
-            # initial state is s=K-1 are affected by the non-deterministic probability of blocking when s=K-1...
-            # Qualitatively, the stationary probability of K would be reduced and the stationary probability of K-1 would be
-            # increased by the same amount.
-            Vtrue = np.array([rewardOnJobRejection_ExponentialCost(env_queue_mm, (K, None), Actions.REJECT, (K, None)) * pK +
-                              rewardOnJobRejection_ExponentialCost(env_queue_mm, (K-1, None), Actions.REJECT, (K-1, None)) * (K - 1 - theta) * pKm1
-                                for K, theta, pK, pKm1 in zip(Ks, df_learning['theta'], pblock_K_adj, pblock_Km1_adj)])
+                # ACTUAL true value function, which takes into account the probability of blocking at K-1 as well, where the policy is non-deterministic (for non-integer theta)
+                # The problem with this approach is that the stationary distribution of the chain is NOT the same as with chain
+                # where rejection ONLY occurs at s=K... in fact, the transition probabilities to s=K and to s=K-1 when the
+                # initial state is s=K-1 are affected by the non-deterministic probability of blocking when s=K-1...
+                # Qualitatively, the stationary probability of K would be reduced and the stationary probability of K-1 would be
+                # increased by the same amount.
+                Vtrue = np.array([rewardOnJobRejection_ExponentialCost(env_queue_mm, (K, None), Actions.REJECT, (K, None)) * pK +
+                                  rewardOnJobRejection_ExponentialCost(env_queue_mm, (K-1, None), Actions.REJECT, (K-1, None)) * (K - 1 - theta) * pKm1
+                                    for K, theta, pK, pKm1 in zip(Ks, df_learning['theta'], pblock_K_adj, pblock_Km1_adj)])
 
-            # True grad(V)
-            # Ref: my hand-written notes in Letter-size block of paper with my notes on the general environment - agent setup
-            gradVtrue = [-rewardOnJobRejection_ExponentialCost(env_queue_mm, (K-1, None), Actions.REJECT, (K-1, None)) * pKm1 for K, pKm1 in zip(Ks, pblock_Km1)]
+                # True grad(V)
+                # Ref: my hand-written notes in Letter-size block of paper with my notes on the general environment - agent setup
+                gradVtrue = [-rewardOnJobRejection_ExponentialCost(env_queue_mm, (K-1, None), Actions.REJECT, (K-1, None)) * pKm1 for K, pKm1 in zip(Ks, pblock_Km1)]
 
-            ord = np.argsort(Ks)
-            # NOTE that we plot the true value function at K-1 (not at K) because K-1 is the value that is closest to theta
-            # and we are plotting the *estimated* value function vs. theta (NOT vs. K).
-            #line_true, = ax.plot([Ks[o]-1 for o in ord], [-Vtrue[o] for o in ord], 'g.-', linewidth=5, markersize=20)
-            line_true, = ax.plot(df_learning['theta'], -Vtrue, 'gx-')  # Use when computing the ACTUAL true Value function V, which also depends on theta!
-            ax.set_xlim((0, ax.get_xlim()[1]))
-            ax.set_yscale('log')
-            #ax.set_ylim((0, 10))
-            ax.set_xlabel('theta (for estimated functions) / K-1 for true value function')
-            ax.set_ylabel('Value function V (cost)')
-            ax.legend([line_est, line_true], ['Estimated V', 'True V'], loc='upper left')
-            ax2 = ax.twinx()
-            ax2, line_grad = plotting.plot_colormap(df_learning['theta'], -df_learning['gradV'], cmap_name="Reds", ax=ax2)
-            line_gradtrue, = ax2.plot([Ks[o]-1 for o in ord], [-gradVtrue[o] for o in ord], 'k.-', linewidth=3, markersize=12)
-            ax2.axhline(0, color="lightgray")
-            ax2.set_ylabel('grad(V)')
-            if SET_YLIM:
-                ax2.set_ylim((-5,5))        # Note: grad(V) is expected to be -1 or +1...
-            ax2.legend([line_grad, line_gradtrue], ['grad(V)', 'True grad(V)'], loc='upper right')
-            if is_scalar(t_sim):
-                title = "Value function and its gradient as a function of theta and K. " + \
-                        "Optimum K = {}, Theta start = {}, t_sim = {:.0f}".format(np.ceil(theta_true+1), theta_start, t_sim)
-            else:
-                title = "Value function and its gradient as a function of theta and K. " + \
-                        "Optimum K = {}, Theta start = {}".format(np.ceil(theta_true+1), theta_start)
-            plt.title(title)
+                ord = np.argsort(Ks)
+                # NOTE that we plot the true value function at K-1 (not at K) because K-1 is the value that is closest to theta
+                # and we are plotting the *estimated* value function vs. theta (NOT vs. K).
+                #line_true, = ax.plot([Ks[o]-1 for o in ord], [-Vtrue[o] for o in ord], 'g.-', linewidth=5, markersize=20)
+                line_true, = ax.plot(df_learning['theta'], -Vtrue, 'gx-')  # Use when computing the ACTUAL true Value function V, which also depends on theta!
+                ax.set_xlim((0, ax.get_xlim()[1]))
+                ax.set_yscale('log')
+                #ax.set_ylim((0, 10))
+                ax.set_xlabel('theta (for estimated functions) / K-1 for true value function')
+                ax.set_ylabel('Value function V (cost)')
+                ax.legend([line_est, line_true], ['Estimated V', 'True V'], loc='upper left')
+                ax2 = ax.twinx()
+                ax2, line_grad = plotting.plot_colormap(df_learning['theta'], -df_learning['gradV'], cmap_name="Reds", ax=ax2)
+                line_gradtrue, = ax2.plot([Ks[o]-1 for o in ord], [-gradVtrue[o] for o in ord], 'k.-', linewidth=3, markersize=12)
+                ax2.axhline(0, color="lightgray")
+                ax2.set_ylabel('grad(V)')
+                if SET_YLIM:
+                    ax2.set_ylim((-5,5))        # Note: grad(V) is expected to be -1 or +1...
+                ax2.legend([line_grad, line_gradtrue], ['grad(V)', 'True grad(V)'], loc='upper right')
+                if is_scalar(t_sim):
+                    title = "Value function and its gradient as a function of theta and K. " + \
+                            "Optimum K = {}, Theta start = {}, t_sim = {:.0f}".format(np.ceil(theta_true+1), theta_start, t_sim)
+                else:
+                    title = "Value function and its gradient as a function of theta and K. " + \
+                            "Optimum K = {}, Theta start = {}".format(np.ceil(theta_true+1), theta_start)
+                plt.title(title)
 
-            # grad(V) vs. V
-            plt.figure()
-            plt.plot(-df_learning['V'], -df_learning['gradV'], 'k.')
-            ax = plt.gca()
-            ax.axhline(0, color="lightgray")
-            ax.axvline(0, color="lightgray")
-            ax.set_xscale('log')
-            #ax.set_xlim((-1, 1))
-            if SET_YLIM:
-                ax.set_ylim((-1, 1))
-            ax.set_xlabel('Value function V (cost)')
-            ax.set_ylabel('grad(V)')
+                # grad(V) vs. V
+                plt.figure()
+                plt.plot(-df_learning['V'], -df_learning['gradV'], 'k.')
+                ax = plt.gca()
+                ax.axhline(0, color="lightgray")
+                ax.axvline(0, color="lightgray")
+                ax.set_xscale('log')
+                #ax.set_xlim((-1, 1))
+                if SET_YLIM:
+                    ax.set_ylim((-1, 1))
+                ax.set_xlabel('Value function V (cost)')
+                ax.set_ylabel('grad(V)')
 
             # Plot evolution of theta
             if is_scalar(t_sim):
@@ -4217,7 +4219,7 @@ if __name__ == "__main__":
                 ax.set_xlabel('Learning step')
                 ax.set_ylabel('theta')
                 ylim = ax.get_ylim()
-                ax.set_ylim((0, ylim[1]))
+                ax.set_ylim((0, np.max([ylim[1], K_true])))
                 ax.axhline(theta_true, color='black', linestyle='dashed')   # This is the last true theta value considered for the simulations
                 ax.yaxis.set_major_locator(MaxNLocator(integer=True))
                 ax.set_aspect(1/ax.get_data_ratio())
@@ -4263,3 +4265,119 @@ if __name__ == "__main__":
         ax.set_aspect(1 / ax.get_data_ratio())
         ax.legend(["Fleming-Viot", "Monte-Carlo", "Optimum theta"])
         plt.title("# particles N = {}, Simulation time for P(T>t) and E(T_A) = {}, # learning steps = {}, Average number of events per learning step = {:.0f}".format(N, t_sim, t_learn, n_events_mean))
+
+
+    PLOT_RESULTS_RL = False
+    if PLOT_RESULTS_RL:
+        import os
+        import numpy as np
+        import pandas as pd
+        import matplotlib.pyplot as plt
+        from matplotlib.ticker import MaxNLocator
+        from Python.lib.utils.basic import aggregation_bygroups
+
+        # Read the results from files and plot the MC and FV results on the same graph
+        resultsdir = "E:/Daniel/Projects/PhD-RL-Toulouse/projects/RL-002-QueueBlocking/results/RL/single-server"
+
+        #results_file_fv = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220121_031815_FV-J=0.5K-K=20.csv")
+        #results_file_mc = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220121_150307_MC-J=0.5K-K=20.csv")
+        results_file_fv = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_025611_FV-K=20-J=0.5K.csv")
+        results_file_mc = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_131828_MC-K=20-J=0.5K.csv")
+
+        results_file_fv = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220124_040745_FV-K=30-J=0.5K.csv")
+        results_file_mc = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_161121_MC-K=30-J=0.5K.csv")
+
+        # Alpha constant
+        results_file_fv = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_121657_FV-K0=20-K=30-J=0.5-AlphaConst.csv")
+        results_file_mc = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_123300_MC-K0=20-K=30-J=0.5-AlphaConst.csv")
+
+        #results_file_fv = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_122700_FV-K0=10-K=30-J=0.5-AlphaConst.csv")
+        #results_file_mc = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_124237_MC-K0=10-K=30-J=0.5-AlphaConst.csv")
+
+        results_file_fv = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_180636_FV-K0=30-K=5-J=0.5-AlphaConst.csv")
+        results_file_mc = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_181511_MC-K0=30-K=5-J=0.5-AlphaConst.csv")
+
+        # Alpha constant + clipping
+        #results_file_fv = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_125902_FV-K0=20-K=30-J=0.5-AlphaConst-Clipping.csv")
+        #results_file_mc = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_132227_MC-K0=20-K=30-J=0.5-AlphaConst-Clipping.csv")
+
+        results_fv = pd.read_csv(results_file_fv)
+        results_mc = pd.read_csv(results_file_mc)
+
+        all_cases = aggregation_bygroups(results_fv,    ['case', 'theta_true', 'J/K', 'exponent', 'N', 'T'],
+                                                        ['K', 'n_events_mc', 'n_events_fv'],
+                                         stats=['count', 'mean', 'std', 'min', 'max'])
+        J_factor_values = all_cases.index.get_level_values('J/K')
+        case_values = all_cases.index.get_level_values('case')
+        theta_true_values = all_cases.index.get_level_values('theta_true')
+        exponent_values = all_cases.index.get_level_values('exponent')
+        N_values = all_cases.index.get_level_values('N')
+        T_values = all_cases.index.get_level_values('T')
+        # Cases are sorted from larger error to smaller error
+        case_descs = ['Larger error', 'Mid error', 'Smaller error']
+        colors = ['red', 'blue', 'green']
+        colors = ['black', 'black', 'black']
+        linestyles = ['dotted', 'dashed', 'solid']
+        linestyles = ['solid', 'dashed', 'solid']
+        linewidth = 2
+        fontsize = 20
+        n_subplots = 1
+        for J_factor in np.unique(J_factor_values):
+            cases = case_values[ J_factor_values == J_factor ]
+            ncases = len(cases)
+
+            # IMPORTANT: We assume that the true theta value and the start theta values are ALL the same for all cases
+            theta_true = theta_true_values[0]
+            theta_start = results_fv['theta'][0]
+
+            axes = plt.figure(figsize=(18,18)).subplots(1, n_subplots, squeeze=False)
+            legend = [[], []]
+            figfile = os.path.join(os.path.abspath(resultsdir),
+                                   "RL-single-FVMC-theta={}-start={}-J={}K.jpg" \
+                                    .format(theta_true, theta_start, J_factor))
+            for idx_case, case in enumerate(cases):
+                print("Plotting case {} with idx_case = {}".format(case, idx_case))
+                # The metadata for the title and legend
+                case_desc = case_descs[idx_case]
+                N = N_values[idx_case]
+                T = T_values[idx_case]
+                n_events_et = all_cases['n_events_mc']['mean'].iloc[idx_case]
+                n_events_fv = all_cases['n_events_fv']['mean'].iloc[idx_case]
+
+                # The data to plot
+                ind = results_fv['case'] == case
+                K_start = int( np.ceil(theta_start + 1) )
+                x = results_fv['t_learn'][ind]
+                y_fv = results_fv['theta'][ind]
+                y_mc = results_mc['theta'][ind]
+                axes[0][0].plot(x, y_fv, color='green', linestyle=linestyles[idx_case], linewidth=linewidth)
+                axes[0][n_subplots-1].plot(x, y_mc, color='red', linestyle=linestyles[idx_case], linewidth=linewidth)
+
+                # Errors
+                err_phi = results_fv['err_phi'][ind].iloc[0]
+                err_et = results_fv['err_et'][ind].iloc[0]
+
+                legend[0] += ["{}) {}: FVRL (N={}, T={}, error(Phi)={:.0f}%, error(ET)={:.0f}%)" #, avg #events per learning step={})" \
+                                .format(idx_case+1, case_desc, N, T, err_phi*100, err_et*100)] #, n_events_et + n_events_fv)]
+                legend[n_subplots-1] += ["{}) {}: MC (comparable to FVRL case ({})" #, avg #events per learning step={})" \
+                                .format(idx_case+1, case_desc, idx_case+1)] #, n_events_et + n_events_fv)]
+
+            for idx in range(n_subplots):
+                axes[0][idx].set_xlabel('Learning step', fontsize=fontsize)
+                axes[0][idx].set_ylabel('theta', fontsize=fontsize)
+                for tick in axes[0][idx].xaxis.get_major_ticks():
+                    tick.label.set_fontsize(fontsize)
+                for tick in axes[0][idx].yaxis.get_major_ticks():
+                    tick.label.set_fontsize(fontsize)
+                axes[0][idx].set_ylim((0, np.max([axes[0][idx].get_ylim()[1], K_start, K_true])))
+                axes[0][idx].axhline(theta_true, color='gray', linestyle='dashed')
+                axes[0][idx].yaxis.set_major_locator(MaxNLocator(integer=True))
+                axes[0][idx].set_aspect(1 / axes[0][idx].get_data_ratio())
+                axes[0][idx].legend(legend[idx] + ["Optimum theta"], fontsize='medium')
+                #plt.title("# particles N = {}, Simulation time for P(T>t) and E(T_A) = {}, # learning steps = {}, Average number of events per learning step = {:.0f}" \
+                #          .format(N, 0, 0, 0))
+
+            plt.gcf().subplots_adjust(left=0.15)
+                ## To avoid cut off of vertical axis label!!
+                ## Ref: https://stackoverflow.com/questions/6774086/why-is-my-xlabel-cut-off-in-my-matplotlib-plot
+            plt.savefig(figfile)
