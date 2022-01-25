@@ -793,7 +793,10 @@ class SimulatorQueue(Simulator):
         assert self.N == dict_params_simul['nparticles']
 
         # Set the true theta parameter (which is defined by a parameter of the queue environment) to use for the simulation
-        self.env.setParamsRewardFunc(dict({'buffer_size_ref': np.ceil(dict_params_simul['theta_true'] + 1)}))
+        # NOTE that this is done in EACH environment used in the simulation, because this environment is the one passed to functions
+        # and the one that is used to retrieve the value of the true theta parameter.
+        for env in self.envs:
+            env.setParamsRewardFunc(dict({'buffer_size_ref': np.ceil(dict_params_simul['theta_true'] + 1)}))
 
         # Simulation seed
         # NOTE: This seed is used as the base seed to generate the seeds that are used at each learning step
@@ -1876,7 +1879,8 @@ def compute_reward_for_buffer_size(env, bs):
     # of the multi-server system.
     state[0][0] = bs
     reward_func = env.getRewardFunction()
-    reward = reward_func(env, state, Actions.REJECT, state)
+    params_reward_func = env.getParamsRewardFunc()
+    reward = reward_func(env, state, Actions.REJECT, state, dict_params=params_reward_func)
 
     return reward
 
