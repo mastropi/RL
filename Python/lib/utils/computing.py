@@ -169,8 +169,8 @@ def compute_nparticles_and_nsteps_for_fv_process(rhos: list, capacity: int, buff
     pJ = compute_blocking_probability_birth_death_process(rhos, J)
 
     N = int(np.ceil( (1 - pK) / pK / error_rel_phi**2 ))
-    M = int(np.ceil( 1 / error_rel_et**2 ))
-    T = int(np.ceil( M / pJ ))
+    #M = int(np.ceil( 1 / error_rel_et**2 ))
+    T = int(np.ceil( 1 / error_rel_et**2 / pJ ))
 
     return N, T
 
@@ -538,12 +538,12 @@ if __name__ == "__main__":
     error_rel_et = 0.7
     N, T = compute_nparticles_and_nsteps_for_fv_process(rhos, K, J_factor, error_rel_phi=error_rel_phi, error_rel_et=error_rel_et)
     print("N={}, T={}".format(N, T))
-    assert np.all([N==149, T==78])
+    assert np.all([N==149, T==54])
 
     # The inverse operation
     err1, err2 = compute_rel_errors_for_fv_process(rhos, K, N, T, J_factor)
     print("err1={:.3f}%, err2={:.3f}%".format(err1*100, err2*100))
-    assert np.allclose([err1, err2], [0.49928, 0.57735])
+    assert np.allclose([err1, err2], [0.49928, 0.69388])
     assert err1 <= error_rel_phi and err2 <= error_rel_et
         ## NOTE that the relative error for E(T_A) is not so close to the nominal relative error...
         ## but this is fine, as the reason is that the number of cycles M that then defines T in the first function call

@@ -606,6 +606,9 @@ def aggregation_bygroups(df, groupvars, analvars,
     If the 'std' and 'n' (count) summary statistics is part of the `dict_stats` dictionary,
     the Standard Error (SE) is also computed as 'std' / sqrt('n')
     """
+    if not isinstance(df, pd.DataFrame):
+        raise ValueError("Parameter 'df' must be a pandas DataFrame ({})".format(type(df)))
+
     # Cast all analysis variables to float in order to compute statistics like mean, std, etc.!!
     # Ref: https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.astype.html
     for var in analvars:
