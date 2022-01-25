@@ -910,9 +910,11 @@ class SimulatorQueue(Simulator):
                 if DEBUG_ESTIMATORS or show_messages(verbose, verbose_period, t_learn):
                     print("\nEstimating the difference of the state-action values when the initial buffer size is K-1={}...".format(K-1))
                 N = 100; t_sim_max = 250
-                K, Q0_Km1, Q1_Km1, n_Km1, max_t_Km1 = self.estimate_Q_values_until_mixing(t_learn, K-1, t_sim_max=t_sim_max, N=N, verbose=verbose, verbose_period=verbose_period)
+                K, Q0_Km1, Q1_Km1, n_Km1, max_t_Km1 = \
+                    self.estimate_Q_values_until_mixing(t_learn, K-1, t_sim_max=t_sim_max, N=N, \
+                                                        seed=dict_params_simul['seed']*100, verbose=verbose, verbose_period=verbose_period)
                 #K, Q0_Km1, Q1_Km1, n, max_t = self.estimate_Q_values_until_stationarity(t_learn, t_sim_max=50, N=N, verbose=verbose, verbose_period=verbose_period)
-                if DEBUG_ESTIMATORS or show_messages(verbose, verbose_period, t_learn):
+                if True or DEBUG_ESTIMATORS or show_messages(verbose, verbose_period, t_learn):
                     print("--> Estimated state-action values on n={} realizations out of {} with max simulation time = {:.1f} out of {:.1f}:\nQ(K-1={}, a=1) = {}\nQ(K-1={}, a=0) = {}\nQ_diff = Q(K-1,1) - Q(K-1,0) = {}" \
                           .format(n_Km1, N, max_t_Km1, t_sim_max, K-1, Q1_Km1, K-1, Q0_Km1, Q1_Km1 - Q0_Km1))
             else:
@@ -929,7 +931,9 @@ class SimulatorQueue(Simulator):
                 if DEBUG_ESTIMATORS or show_messages(verbose, verbose_period, t_learn):
                     print("\nEstimating the difference of the state-action values when the initial buffer size is K={}...".format(K))
                 N = 100; t_sim_max = 250
-                K, Q0_K, Q1_K, n_K, max_t_K = self.estimate_Q_values_until_mixing(t_learn, K, t_sim_max=t_sim_max, N=N, verbose=verbose, verbose_period=verbose_period)
+                K, Q0_K, Q1_K, n_K, max_t_K = \
+                    self.estimate_Q_values_until_mixing(t_learn, K, t_sim_max=t_sim_max, N=N, \
+                                                        seed=dict_params_simul['seed']*100 + 1, verbose=verbose, verbose_period=verbose_period)
                 #K, Q0_K, Q1_K, n_K, max_t_K = self.estimate_Q_values_until_stationarity(t_learn, t_sim_max=50, N=N, verbose=verbose, verbose_period=verbose_period)
                 if DEBUG_ESTIMATORS or show_messages(verbose, verbose_period, t_learn):
                     print("--> Estimated state-action values on n={} realizations out of {} with max simulation time = {:.1f} out of {:.1f}:\nQ(K={}, a=1) = {}\nQ(K={}, a=0) = {}\nQ_diff = Q(K,1) - Q(K,0) = {}" \
@@ -1176,9 +1180,9 @@ class SimulatorQueue(Simulator):
         # 2) Starting at (K-1, a=0) is like starting at s=K-1 and adding one reward for the first rejection
         if show_messages(verbose, verbose_period, t_learn):
             print("2) Running simulation on N={} queues for {} time steps to estimate Q(K-1, a=0)...".format(N, t_sim_max))
-        start_state = choose_state_for_buffer_size(self.env, K - 1)
+        start_state = choose_state_for_buffer_size(self.env, K-1)
         # Reward received from the initial rejection of the job at buffer size K-1
-        first_reward = compute_reward_for_buffer_size(self.env, K - 1)
+        first_reward = compute_reward_for_buffer_size(self.env, K-1)
         Q0 = 0.0
         for _ in range(N):
             agent_Q = copy.deepcopy(self.agent)
@@ -1192,7 +1196,7 @@ class SimulatorQueue(Simulator):
         return K, Q0, Q1, N, t_sim_max
 
     @measure_exec_time
-    def estimate_Q_values_until_mixing(self, t_learn, buffer_size, t_sim_max=250, N=100, verbose=False, verbose_period=1):
+    def estimate_Q_values_until_mixing(self, t_learn, buffer_size, t_sim_max=250, N=100, seed=None, verbose=False, verbose_period=1):
         """
         Estimates the state-action values for the case of a parameterized policy defined as a linear function of theta
         with only one buffer size with non-zero derivative.
@@ -1239,12 +1243,17 @@ class SimulatorQueue(Simulator):
             assert self.agent.getAcceptancePolicy().getThetaParameter() == self.getLearnerP().getPolicy().getThetaParameter()
         K = self.agent.getAcceptancePolicy().getBufferSizeForDeterministicBlocking()
 
+        np.random.seed(seed)
+
         Q0 = 0.0
         Q1 = 0.0
         n = 0           # Number of times Q0 and Q1 can be estimated from mixing trajectories (out of N)
         max_t_mix = 0.0 # Maximum discrete mixing time observed over the n pair of trajectories that mix
-        for _ in range(N):
-            _, Q0_, Q1_, t_mix = self.run_simulation_2_until_mixing(t_learn, buffer_size, t_sim_max, verbose=False, verbose_period=verbose_period)
+        for i in range(N):
+            if False:
+                print("Estimating Qdiff... {} out of {} replications".format(i, N))
+            _, Q0_, Q1_, t_mix = self.run_simulation_2_until_mixing(t_learn, buffer_size, t_sim_max, \
+                                                                    verbose=verbose, verbose_period=verbose_period)
             if not np.isnan(Q0_) and not np.isnan(Q1_):
                 Q0 += Q0_
                 Q1 += Q1_
@@ -1359,8 +1368,7 @@ class SimulatorQueue(Simulator):
                 env.setState((next_queue_state, None))
                 next_state = env.getState()
 
-                assert env.getBufferSizeFromState(next_state) == env.getBufferSizeFromState(
-                    state) - 1, \
+                assert env.getBufferSizeFromState(next_state) == env.getBufferSizeFromState(state) - 1, \
                     "The buffer size after a DEATH decreased by 1: S(t) = {}, S(t+1) = {}" \
                         .format(env.getBufferSizeFromState(state),
                                 env.getBufferSizeFromState(next_state))
@@ -1410,6 +1418,8 @@ class SimulatorQueue(Simulator):
         # Initialize the state-action values with the first observed reward (at t=0)
         Q0 = rewards[0][0]
         Q1 = rewards[1][0]
+        if False:
+            print("--> First reward Q(s={},a=1)={:.1f}, Q(s={},a=0)={:.1f}".format(buffer_size, Q1, buffer_size, Q0))
         while not done:
             # Generate events for each queue environment until the discrete time changes,
             # so that we can compare their state-action at the same discrete time value and find the mixing time.
@@ -1417,9 +1427,17 @@ class SimulatorQueue(Simulator):
             while t0 == t:
                 time0, event0, job_class_or_server0, _ = generate_event([envs[0]])
                 t0, state0, action0, next_state0, reward0 = apply_event(envs[0], t, event0, job_class_or_server0)
+                if False:
+                    print("\tChanging state of queue 0... t0={}, state={}, event={}, action={}, next_state={}, reward={:.1f}" \
+                      .format(t0, state0, event0, action0, next_state0, reward0))
+            if False:
+                print("")
             while t1 == t:
                 time1, event1, job_class_or_server1, _ = generate_event([envs[1]])
                 t1, state1, action1, next_state1, reward1 = apply_event(envs[1], t, event1, job_class_or_server1)
+                if False:
+                    print("\tChanging state of queue 1... t1={}, state={}, event={}, action={}, next_state={}, reward={:.1f}" \
+                      .format(t1, state1, event1, action1, next_state1, reward1))
             assert t0 == t1 and t0 == t + 1, \
                 "The discrete time step is the same in both queues and has increased by one w.r.t. the global time step t (t={:}, t0={:}, t1={:})" \
                 .format(t, t0, t1)
@@ -1427,7 +1445,7 @@ class SimulatorQueue(Simulator):
 
             # Update the history
             times[0] += [time0]; times[1] += [time1]
-            states[0] += [state0]; states[1] += [state1]
+            states[0] += [next_state0]; states[1] += [next_state1]
             actions[0] += [action0]; actions[1] += [action1]
             rewards[0] += [reward0]; rewards[1] += [reward1]
 
@@ -1435,21 +1453,28 @@ class SimulatorQueue(Simulator):
             assert not np.isnan(reward0) and not np.isnan(reward1), "The reward given by each queue are not NaN (r0={}, r1={})".format(reward0, reward1)
             Q0 += reward0
             Q1 += reward1
+            if False:
+                print("\t\tEvent1 = {} (action1={}, state1={}), Event0 = {} (action0={}, state0={}): Updated rewards:\n"
+                    "\t\tQ(s={},a=1)={:.1f}\n" \
+                    "\t\tQ(s={},a=0)={:.1f}" \
+                    .format(event1, action1, next_state1, event0, action0, next_state0, buffer_size, Q1, buffer_size, Q0))
 
             # Check if the trajectories meet at the same state-action
-            if t > maxtime or mixing(state0, action0, state1, action1):
+            if t > maxtime or mixing(next_state0, action0, next_state1, action1):
                 # Either we reached the maximum simulation time allowed or mixing occurs
                 # => Stop the simulation
+                if False:
+                    print("*** TRAJECTORIES MIXED! (Q1={:.1f}, Q0={:.1f}, Qdiff = {:.1f}) ***".format(Q1, Q0, Q1 - Q0))
                 done = True
 
             if self.debug:
                 print("t={}: states = [{}, {}] events={} actions={} -> states={} rewards={}" \
-                      .format(t, states[-2][0], states[-2][1], [event0, event1], [action0, action1], [state0, state1], [reward0, reward1]), end="\n")
+                      .format(t, states[-2][0], states[-2][1], [event0, event1], [action0, action1], [next_state0, next_state1], [reward0, reward1]), end="\n")
 
         # DONE
         if show_messages(verbose, verbose_period, t_learn):
             print("==> simulation ENDS at discrete time t={} at states = {} coming from states = {}, actions = {} rewards = {})" \
-                    .format(t, [state0, state1], [states[-2][0], states[-2][1]], [action0, action1], [reward0, reward1]))
+                    .format(t, [next_state0, next_state1], [states[-2][0], states[-2][1]], [action0, action1], [reward0, reward1]))
 
 #        if show_messages(verbose, verbose_period, t_learn):
 #           plt.figure()
