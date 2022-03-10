@@ -4112,6 +4112,7 @@ if __name__ == "__main__":
         simul.close()
 
         PLOT_GRADIENT = False
+        PLOT_TRAJECTORY = True
         if len(theta_true_values) == 1:
             if PLOT_GRADIENT:
                 # Save the estimation of G(t) for the last learning step to a file
@@ -4203,7 +4204,7 @@ if __name__ == "__main__":
             else:
                 title = "Method: {}, Optimum Theta = {}, Theta start = {}, t_learn = {:.0f}, fixed_window={}" \
                     .format(learning_method.name, theta_true, theta_start, t_learn, fixed_window)
-            if plot_trajectories:
+            if PLOT_TRAJECTORY and plot_trajectories:
                 assert N == 1, "The simulated system has only one particle (N={})".format(N)
                 # NOTE: (2021/11/27) I verified that the values of learnerP.getRewards() for the last learning step
                 # are the same to those for learnerV.getRewards() (which only stores the values for the LAST learning step)
@@ -4240,7 +4241,7 @@ if __name__ == "__main__":
                 ax2.set_ylabel("Reward")
                 ax2.set_yscale('log')
                 plt.title(title)
-            else:
+            elif PLOT_TRAJECTORY:
                 plt.figure()
                 plt.plot(simul.getLearnerP().getPolicy().getThetas(), symbol)
                 plt.title(title)
@@ -4295,7 +4296,6 @@ if __name__ == "__main__":
         ax.legend(["Fleming-Viot", "Monte-Carlo", "Optimum theta"])
         plt.title("# particles N = {}, Simulation time for P(T>t) and E(T_A) = {}, # learning steps = {}, Average number of events per learning step = {:.0f}".format(N, t_sim, t_learn, n_events_mean))
 
-
     PLOT_RESULTS_RL = False
     if PLOT_RESULTS_RL:
         import os
@@ -4308,34 +4308,141 @@ if __name__ == "__main__":
         # Read the results from files and plot the MC and FV results on the same graph
         resultsdir = "E:/Daniel/Projects/PhD-RL-Toulouse/projects/RL-002-QueueBlocking/results/RL/single-server"
 
+        # -- Alpha adaptive
         #results_file_fv = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220121_031815_FV-J=0.5K-K=20.csv")
         #results_file_mc = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220121_150307_MC-J=0.5K-K=20.csv")
         results_file_fv = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_025611_FV-K=20-J=0.5K.csv")
         results_file_mc = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_131828_MC-K=20-J=0.5K.csv")
+        K_true = 19 # Optimum blocking size, the integer-valued K at which the expected cost is minimum
 
         results_file_fv = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220124_040745_FV-K=30-J=0.5K.csv")
         results_file_mc = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_161121_MC-K=30-J=0.5K.csv")
+        K_true = 19 # Optimum blocking size, the integer-valued K at which the expected cost is minimum
 
-        # Alpha constant
+        # All exponents, K0 = 10
+        # 2022/02/01 --> But this is wrong because of the error about the true theta, which was not updated to the one we set!
+        results_file_fv = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_025523_FV-K0=40-K=10-AlphaAdaptive.csv")
+        results_file_mc = os.path.join(os.path.abspath(resultsdir), ".csv")
+        K_true = 9 # Optimum blocking size, the integer-valued K at which the expected cost is minimum
+
+        # -- Alpha constant
         results_file_fv = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_121657_FV-K0=20-K=30-J=0.5-AlphaConst.csv")
         results_file_mc = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_123300_MC-K0=20-K=30-J=0.5-AlphaConst.csv")
+        K_true = 19 # Optimum blocking size, the integer-valued K at which the expected cost is minimum
 
         #results_file_fv = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_122700_FV-K0=10-K=30-J=0.5-AlphaConst.csv")
         #results_file_mc = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_124237_MC-K0=10-K=30-J=0.5-AlphaConst.csv")
 
         results_file_fv = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_180636_FV-K0=30-K=5-J=0.5-AlphaConst.csv")
         results_file_mc = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_181511_MC-K0=30-K=5-J=0.5-AlphaConst.csv")
+        K_true = 24 # Optimum blocking size, the integer-valued K at which the expected cost is minimum
 
-        # Alpha constant + clipping
+        # J/K = 0.5, K0 = 10
+        results_file_fv1 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220130_105312_FV-K0=30-K=10-J=0.5-E1.5-AlphaConst(B=5).csv")
+        results_file_mc1 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220130_112523_MC-K0=30-K=10-J=0.5-E1.5-AlphaConst(B=5).csv")
+        K_true = 9 # Optimum blocking size, the integer-valued K at which the expected cost is minimum
+
+        # J/K = 0.5, K0 = 20
+        results_file_fv1 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_190830_FV-K0=20-K=30-J=0.5-E1.5-AlphaConst(B=5).csv")
+        results_file_mc1 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_192242_MC-K0=20-K=30-J=0.5-E1.5-AlphaConst(B=5).csv")
+        results_file_fv2 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_193204_FV-K0=20-K=30-J=0.5-E1.0-AlphaConst(B=5).csv")
+        results_file_mc2 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_200859_MC-K0=20-K=30-J=0.5-E1.0-AlphaConst(B=5).csv")
+        results_file_fv3 = os.path.join(os.path.abspath(resultsdir), ".csv")
+        results_file_mc3 = os.path.join(os.path.abspath(resultsdir), ".csv")
+        K_true = 19 # Optimum blocking size, the integer-valued K at which the expected cost is minimum
+
+        # J/K = 0.5, K0 = 25
+        # These only simulates for 300 learning steps
+        #results_file_fv1 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_233513_FV-K0=25-K=35-J=0.5-E1.5-AlphaConst(B=5).csv")
+        #results_file_mc1 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220126_004040_MC-K0=25-K=35-J=0.5-E1.5-AlphaConst(B=5).csv")
+        #results_file_fv2 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_235038_FV-K0=25-K=35-J=0.5-E1.0-AlphaConst(B=5).csv")
+        #results_file_mc2 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220126_032802_MC-K0=25-K=35-J=0.5-E1.0-AlphaConst(B=5).csv")
+
+        results_file_fv1 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220126_033710_FV-K0=25-K=35-J=0.5-E1.5-AlphaConst(B=5).csv")
+        results_file_mc1 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220126_133352_MC-K0=25-K=35-K=0.5-E1.5-AlphaConst(B=5).csv")
+        results_file_fv2 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220126_033755_FV-K0=25-K=35-J=0.5-E1.0-AlphaConst(B=5).csv")
+        results_file_mc2 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220126_133409_MC-K0=25-K=35-K=0.5-E1.0-AlphaConst(B=5).csv")
+        results_file_fv3 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_235230_FV-K0=25-K=35-J=0.5-E0.5-AlphaConst(B=5).csv")
+        results_file_mc3 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220127_022406_MC-K0=25-K=35-K=0.5-E0.5-AlphaConst(B=5).csv")
+        K_true = 24 # Optimum blocking size, the integer-valued K at which the expected cost is minimum
+
+        # J/K = 0.3, K0 = 20
+        # These only simulates for 300 learning steps
+        #results_file_fv1 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_235638_FV-K0=20-K=30-J=0.3-E1.5-AlphaConst(B=5).csv")
+        #results_file_mc1 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220126_004118_MC-K0=20-K=30-J=0.3-E1.5-AlphaConst(B=5).csv")
+        #results_file_fv2 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_235608_FV-K0=20-K=30-J=0.3-E1.0-AlphaConst(B=5).csv")
+        #results_file_mc2 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220126_023359_MC-K0=20-K=30-J=0.3-E1.0-AlphaConst(B=5).csv")
+
+        results_file_fv1 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220126_135652_FV-K0=20-K=30-J=0.3-E1.5-AlphaConst(B=5).csv")
+        results_file_mc1 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220126_193306_MC-K0=20-K=30-J=0.3-E1.5-AlphaConst(B=5).csv")
+        results_file_fv2 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220126_135719_FV-K0=20-K=30-J=0.3-E1.0-AlphaConst(B=5).csv")
+        results_file_mc2 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220126_193252_MC-K0=20-K=30-J=0.3-E1.0-AlphaConst(B=5).csv")
+        K_true = 19 # Optimum blocking size, the integer-valued K at which the expected cost is minimum
+
+        theta_update_strategy = "normal"
+
+        # -- Alpha constant + clipping
         #results_file_fv = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_125902_FV-K0=20-K=30-J=0.5-AlphaConst-Clipping.csv")
         #results_file_mc = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_132227_MC-K0=20-K=30-J=0.5-AlphaConst-Clipping.csv")
 
+        # J/K = 0.5, K0 = 20
+        results_file_fv1 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_212158_FV-K0=20-K=30-J=0.5-E1.5-Clipping.csv")
+        results_file_mc1 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_214819_MC-K0=20-K=30-J=0.5-E1.5-Clipping.csv")
+        results_file_fv2 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_212353_FV-K0=20-K=30-J=0.5-E1.0-Clipping.csv")
+        results_file_mc2 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_220710_MC-K0=20-K=30-J=0.5-E1.0-Clipping.csv")
+        K_true = 19 # Optimum blocking size, the integer-valued K at which the expected cost is minimum
+
+        # J/K = 0.3, K0 = 20
+        results_file_fv1 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220126_035241_FV-K0=20-K=30-J=0.3-E1.5-Clipping.csv")
+        results_file_mc1 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220126_131153_MC-K0=20-K=30-J=0.3-E1.5-Clipping.csv")
+        results_file_fv2 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220126_035406_FV-K0=20-K=30-J=0.3-E1.0-Clipping.csv")
+        results_file_mc2 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220126_131215_MC-K0=20-K=30-J=0.3-E1.0-Clipping.csv")
+        K_true = 19 # Optimum blocking size, the integer-valued K at which the expected cost is minimum
+
+        # J/K = 0.5, K0 = 25
+        results_file_fv1 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220126_034444_FV-K0=25-K=35-J=0.5-E1.5-Clipping.csv")
+        results_file_mc1 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220126_131125_MC-K0=25-K=35-J=0.5-E1.5-Clipping.csv")
+        results_file_fv2 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220126_034327_FV-K0=25-K=35-J=0.5-E1.0-Clipping.csv")
+        results_file_mc2 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220126_131057_MC-K0=25-K=35-J=0.5-E1.0-Clipping.csv")
+        K_true = 24 # Optimum blocking size, the integer-valued K at which the expected cost is minimum
+
+        theta_update_strategy = "clipping"
+
+
+        # Read the data
         results_fv = pd.read_csv(results_file_fv)
-        results_mc = pd.read_csv(results_file_mc)
+
+        results_fv1 = pd.read_csv(results_file_fv1); results_fv1['case'] = 1
+        results_mc1 = pd.read_csv(results_file_mc1); results_mc1['case'] = 1
+        results_fv2 = pd.read_csv(results_file_fv2); results_fv2['case'] = 2
+        results_mc2 = pd.read_csv(results_file_mc2); results_mc2['case'] = 2
+        results_fv3 = pd.read_csv(results_file_fv3); results_fv3['case'] = 3
+        results_mc3 = pd.read_csv(results_file_mc3); results_mc3['case'] = 3
+
+        results_fv = pd.concat([results_fv1, results_fv2, results_fv3])
+        results_mc = pd.concat([results_mc1, results_mc2, results_mc3])
+
+        results_fv = results_fv1
+        results_mc = results_mc1
+        error = 1.5
+        results_fv = results_fv2
+        results_mc = results_mc2
+        error = 1.0
+
+        # Whether to set specific tick marks for the Y-axis in order to align visually two contiguous plots in the paper
+        set_special_axis_ticks = True
+        #set_special_axis_ticks = False
+
+        t_learn_max = 200
+        if t_learn_max is not None:
+            results_fv = results_fv[ results_fv['t_learn'] <= 200 ]
+            results_mc = results_mc[ results_mc['t_learn'] <= 200 ]
 
         all_cases = aggregation_bygroups(results_fv,    ['case', 'theta_true', 'J/K', 'exponent', 'N', 'T'],
                                                         ['K', 'n_events_mc', 'n_events_fv'],
                                          stats=['count', 'mean', 'std', 'min', 'max'])
+        n_events_by_case = aggregation_bygroups(results_mc, ['case'], ['n_events_mc'])
+
         J_factor_values = all_cases.index.get_level_values('J/K')
         case_values = all_cases.index.get_level_values('case')
         theta_true_values = all_cases.index.get_level_values('theta_true')
@@ -4347,49 +4454,64 @@ if __name__ == "__main__":
         colors = ['red', 'blue', 'green']
         colors = ['black', 'black', 'black']
         linestyles = ['dotted', 'dashed', 'solid']
+        #linestyles = ['dashed', 'solid', 'solid']
         linestyles = ['solid', 'dashed', 'solid']
         linewidth = 2
-        fontsize = 20
+        fontsize = 22
         n_subplots = 1
+        # Shift of the optimum theta when we define the cost as an increasing function of the blocking size
+        rho = 0.7
+        b = 3.0
+        shift_optimum = np.log( -np.log(rho) / (np.log(b) + np.log(rho)) ) / np.log(b) # ~ -0.66667 when rho = 0.7 and b = 3.0
         for J_factor in np.unique(J_factor_values):
             cases = case_values[ J_factor_values == J_factor ]
             ncases = len(cases)
 
             # IMPORTANT: We assume that the true theta value and the start theta values are ALL the same for all cases
-            theta_true = theta_true_values[0]
-            theta_start = results_fv['theta'][0]
+            theta_true = theta_true_values[0] + shift_optimum
+            #K_true = int(np.ceil(theta_true + 1))
+            theta_start = results_fv['theta'].iloc[0]
+            K_start = int(np.ceil(theta_start + 1))
 
             axes = plt.figure(figsize=(18,18)).subplots(1, n_subplots, squeeze=False)
             legend = [[], []]
             figfile = os.path.join(os.path.abspath(resultsdir),
-                                   "RL-single-FVMC-theta={}-start={}-J={}K.jpg" \
-                                    .format(theta_true, theta_start, J_factor))
+                                   "RL-single-FVMC-K0={}-start={}-J={}-E{:.1f}-{}.jpg" \
+                                    .format(K_true, K_start, J_factor, error, theta_update_strategy))
             for idx_case, case in enumerate(cases):
-                print("Plotting case {} with idx_case = {}".format(case, idx_case))
+                print("Plotting case {} with idx_case = {}, K_true={}, K_start={}, J={}K".format(case, idx_case, K_true, K_start, J_factor))
                 # The metadata for the title and legend
                 case_desc = case_descs[idx_case]
                 N = N_values[idx_case]
                 T = T_values[idx_case]
                 n_events_et = all_cases['n_events_mc']['mean'].iloc[idx_case]
                 n_events_fv = all_cases['n_events_fv']['mean'].iloc[idx_case]
+                #n_events_mean = n_events_by_case.iloc[idx_case]['n_events_mc']['mean']
 
                 # The data to plot
                 ind = results_fv['case'] == case
                 K_start = int( np.ceil(theta_start + 1) )
+                K_opt_fv = int( np.round( results_fv['theta'][ind].iloc[-1] ) ) + 1    # Optimum K found by the algorithm = closest integer to last theta + 1
+                K_opt_mc = int( np.round( results_mc['theta'][ind].iloc[-1] ) ) + 1    # Optimum K found by the algorithm = closest integer to last theta + 1
                 x = results_fv['t_learn'][ind]
                 y_fv = results_fv['theta'][ind]
                 y_mc = results_mc['theta'][ind]
                 axes[0][0].plot(x, y_fv, color='green', linestyle=linestyles[idx_case], linewidth=linewidth)
-                axes[0][n_subplots-1].plot(x, y_mc, color='red', linestyle=linestyles[idx_case], linewidth=linewidth)
+                axes[0][n_subplots-1].plot(x, y_mc, color='red', linestyle='dashed', linewidth=linewidth)
 
                 # Errors
                 err_phi = results_fv['err_phi'][ind].iloc[0]
                 err_et = results_fv['err_et'][ind].iloc[0]
 
-                legend[0] += ["{}) {}: FVRL (N={}, T={}, error(Phi)={:.0f}%, error(ET)={:.0f}%)" #, avg #events per learning step={})" \
-                                .format(idx_case+1, case_desc, N, T, err_phi*100, err_et*100)] #, n_events_et + n_events_fv)]
-                legend[n_subplots-1] += ["{}) {}: MC (comparable to FVRL case ({})" #, avg #events per learning step={})" \
-                                .format(idx_case+1, case_desc, idx_case+1)] #, n_events_et + n_events_fv)]
+                #legend[0] += ["{}) {}: FVRL (N={}, T={}, error(Phi)={:.0f}%, error(ET)={:.0f}%)" #, avg #events per learning step={})" \
+                #                .format(idx_case+1, case_desc, N, T, err_phi*100, err_et*100)] #, n_events_et + n_events_fv)]
+                #legend[n_subplots-1] += ["{}) {}: MC (comparable to FVRL case ({})" #, avg #events per learning step={})" \
+                #                .format(idx_case+1, case_desc, idx_case+1)] #, n_events_et + n_events_fv)]
+                #legend[0] += ["FVRL (N={}, T={}, expected error = {:.0f}%)\n(avg #events per learning step={:.0f})" \
+                #                  .format(N, T, error*100, n_events_mean)]
+                #legend[n_subplots-1] += ["MC (avg #events per learning step={:.0f})".format(n_events_mean)]
+                legend[0] += ["N={}, T={}: expected error = {:.0f}%)\n(avg #events per learning step={:.0f})" \
+                                  .format(N, T, error*100, n_events_mean)]
 
             for idx in range(n_subplots):
                 axes[0][idx].set_xlabel('Learning step', fontsize=fontsize)
@@ -4402,7 +4524,14 @@ if __name__ == "__main__":
                 axes[0][idx].axhline(theta_true, color='gray', linestyle='dashed')
                 axes[0][idx].yaxis.set_major_locator(MaxNLocator(integer=True))
                 axes[0][idx].set_aspect(1 / axes[0][idx].get_data_ratio())
-                axes[0][idx].legend(legend[idx] + ["Optimum theta"], fontsize='medium')
+                if set_special_axis_ticks:
+                    axes[0][idx].set_yticks(range(0, 36, 5))
+                #axes[0][idx].legend(legend[idx] + ["Optimum theta"], fontsize='xx-large', loc='lower right')
+                axes[0][idx].text(axes[0][idx].get_xlim()[1]/1.7, 5,
+                                  "N={}, T={}\nAvg #events per step = {:.0f}\n\nK* = {}\nEstimated K* (FV) = {}\nEstimated K* (MC) = {}" \
+                                  .format(N, T, n_events_mean, K_true, K_opt_fv, K_opt_mc),
+                                  horizontalalignment='center',
+                                  fontsize=fontsize, bbox={'facecolor': 'none', 'edgecolor': 'black'})
                 #plt.title("# particles N = {}, Simulation time for P(T>t) and E(T_A) = {}, # learning steps = {}, Average number of events per learning step = {:.0f}" \
                 #          .format(N, 0, 0, 0))
 
