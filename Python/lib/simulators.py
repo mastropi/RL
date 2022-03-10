@@ -59,6 +59,11 @@ class LearningMode(Enum):
     REINFORCE_TRUE = 2          # When learning is based on the expected value giving grad(V)
     IGA = 3                     # When learning is based on Integer Gradient Ascent, where delta(theta) is +/- 1 or 0.
 
+@unique
+class ReactivateMethod(Enum):
+    RANDOM = 1                  # Random choice of the reactivation particle among the N-1 other non-absorbed particles
+    VALUE_FUNCTION = 2          # Choice of the reactivation particle based on the value function of each state at which the other N-1 particles are located
+
 
 DEBUG_ESTIMATORS = False
 DEBUG_TRAJECTORIES = False
@@ -2694,7 +2699,7 @@ def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption, proba_surv, 
 
     def reactivate_particle(envs, idx_particle):
         """
-        Chooses a particle to reactivate a particle that has been absorbed
+        Reactivates a particle that has been absorbed
 
         Reactivation means that the state of the particle is set to be the state of the chosen particle.
 
@@ -2711,18 +2716,49 @@ def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption, proba_surv, 
         # Select a reactivation particle out of the other N-1 particles
         N = len(envs)
         assert N > 1, "There is more than one particle in the system (N={})".format(N)
-        idx_reactivate = np.random.randint(0, N - 1)
-        if idx_reactivate >= idx_particle:
-            # The chosen particle is beyond the particle to reactivate
-            # => increase the index of the particle by 1 so that we choose the correct particle
-            idx_reactivate += 1
-        assert idx_reactivate < N, "The reactivation particle ID ({}) is < N (={}) for particle with ID = {}" \
-            .format(idx_reactivate, N, idx_particle)
-        assert idx_reactivate != idx_particle, "The particle chosen for reactivation ({}) is different from the particle being reactivated ({})" \
-            .format(idx_reactivate, idx_particle)
+        idx_reactivate = choose_particle(idx_particle, N, ReactivateMethod.RANDOM)
 
         # Update the state of the reactivated particle to the reactivation state
         envs[idx_particle].setState(envs[idx_reactivate].getState())
+
+        return idx_reactivate
+
+    def choose_particle(idx_particle: int, N: int, method: ReactivateMethod):
+        """
+        Chooses a particle among N-1 possible particles using the given method
+
+        Arguments:
+        idx_particle: int
+            The index of the particle to be reactivated.
+
+        N: int
+            Number of particles in the Fleming-Viot system.
+
+        method: ReactivateMethod
+            Reactivation method to use which defines how the particle is chosen
+            (e.g. randomly or using a probability distribution that depends on the value function of the state
+            where each potential non-absorbed particle is located).
+
+        Return: int
+        The index of the chosen particle.
+        """
+        if method == ReactivateMethod.RANDOM:
+            idx_reactivate = np.random.randint(0, N - 1)
+            if idx_reactivate >= idx_particle:
+                # The chosen particle is beyond the particle to reactivate
+                # => increase the index of the particle by 1 so that we choose the correct particle
+                idx_reactivate += 1
+        elif method == ReactivateMethod.VALUE_FUNCTION:
+            # TODO: (2022/03/10) Inquiry the value function of each of the N-1 particles based on their state and use a probability distribution that is proportional to it.
+            # To begin with, consider an increasing linear function of the buffer size, and then estimate the value function
+            # appropriately based on the queue's dynamics.
+            # Note: the value function should be defined as part of the learner in self.learnerV attribute of the SimulatorQueue object.
+            idx_reactivate = -1
+
+        assert 0 <= idx_reactivate < N, "The reactivation particle ID ({}) is between 0 and N (={}) for particle with ID = {}" \
+            .format(idx_reactivate, N, idx_particle)
+        assert idx_reactivate != idx_particle, "The particle chosen for reactivation ({}) is different from the particle being reactivated ({})" \
+            .format(idx_reactivate, idx_particle)
 
         return idx_reactivate
 

@@ -26,8 +26,6 @@ import test_utils
 #reload(Python.lib.agents.learners.episodic.discrete.mc)
 #reload(Python.lib.agents.learners.episodic.discrete)
 
-import agents.learners.episodic.discrete.value_functions
-
 
 class Test_MC_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
 

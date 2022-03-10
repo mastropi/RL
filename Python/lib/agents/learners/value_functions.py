@@ -2,7 +2,7 @@
 """
 Created on Mon Mar 30 19:57:16 2020
 
-@author: Daniel Mastropetro
+@author: Daniel Mastropietro
 @description: Definition of value function estimators.
 
 The value functions used by the learner classes are assumed to:

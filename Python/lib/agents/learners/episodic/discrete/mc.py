@@ -9,8 +9,8 @@ Created on Fri Apr 10 10:36:13 2020
 import numpy as np
 import pandas as pd
 
-from agents.learners.episodic.discrete import Learner, AlphaUpdateType
-from .value_functions import ValueFunctionApprox
+from Python.lib.agents.learners.episodic.discrete import Learner, AlphaUpdateType
+from Python.lib.agents.learners.value_functions import ValueFunctionApprox
 
 DEFAULT_NUMPY_PRECISION = np.get_printoptions().get('precision')
 DEFAULT_NUMPY_SUPPRESS = np.get_printoptions().get('suppress')
