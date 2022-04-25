@@ -106,7 +106,7 @@ class Test_TD_Lambda_GW1D(unittest.TestCase, test_utils.EpisodeSimulation):
         learner_tdlambda = td.LeaTDLambda(self.env, alpha=params_alpha_gamma_lambda[0],
                                           gamma=params_alpha_gamma_lambda[1],
                                           lmbda=params_alpha_gamma_lambda[2],
-                                          adjust_alpha=adjust_alpha, adjust_alpha_by_episode=adjust_alpha_by_episode, alpha_min=0.0,
+                                          adjust_alpha=adjust_alpha, adjust_alpha_by_episode=adjust_alpha_by_episode, alpha_min=alpha_min,
                                           debug=False)
         agent_rw_tdlambda = agents.GenericAgent(self.policy_rw, learner_tdlambda)
 
@@ -148,18 +148,19 @@ class Test_TD_Lambda_GW1D(unittest.TestCase, test_utils.EpisodeSimulation):
                           observed, self.env.getV(), RMSE_by_episode, state_info['alphas_by_episode'],
                           max_rmse=self.max_rmse, color_rmse=self.color_rmse, plotFlag=self.plotFlag)
 
-    def no_test_random_walk_adaptive_onecase(self):
+    def test_random_walk_adaptive_onecase(self):
         print("\nTesting " + self.id())
 
         # Learner and agent
-        params = dict({'alpha': 1.0,
+        # (we use the same parameters as for the test case in dataprovider with labmda = 0.7
+        params = dict({'alpha': 2.0,
                        'gamma': 1.0,
                        'lambda': np.nan,
                        'alpha_min': 0.0,
                        'lambda_min': 0.0,
                        })
         learner_tdlambda_adaptive = td.LeaTDLambdaAdaptive(self.env, alpha=params['alpha'], gamma=params['gamma'],
-                                                           alpha_update_type=AlphaUpdateType.FIRST_STATE_VISIT,  # Every-visit is the default
+                                                           alpha_update_type=AlphaUpdateType.EVERY_STATE_VISIT,  # Every-visit is the default
                                                            adjust_alpha=True, adjust_alpha_by_episode=False, alpha_min=params['alpha_min'],
                                                            lambda_min=params['lambda_min'], burnin=False, debug=False)
         agent_rw_tdlambda_adaptive = agents.GenericAgent(self.policy_rw, learner_tdlambda_adaptive)
@@ -171,12 +172,18 @@ class Test_TD_Lambda_GW1D(unittest.TestCase, test_utils.EpisodeSimulation):
                                                      verbose=True, verbose_period=100,
                                                      plot=False, pause=0.001)
 
-        # Expected values with alpha = 0.2, gamma = 0.9, lambda = 0.8
+        # Expected values with: (we use the same parameters as with the above test case in dataprovider using lambda = 0.7)
+        # 19-size gridworld
+        # alpha = 2.0, gamma = 1.0
+        # alpha_update_type = AlphaUpdateType.EVERY_STATE_VISIT
+        # adjust_alpha = True, adjust_alpha_by_episode = False
         # seed = 1717, nepisodes=20, start_state = 9
-        expected = np.array([ 0.,       -0.84353544, -0.78968225, -0.65385009, -0.55649136, -0.45755451,
- -0.36783142, -0.25143119, -0.2038609,  -0.08730269, -0.05066575,  0.01550673,
-  0.04311948,  0.09924234,  0.16607023,  0.22774784,  0.36150155,  0.44464534,
-  0.56831782,  0.70843306,  0.        ])
+        # lambda as the Boltzmann function of delta(t) / average( abs(V(t)) )
+        expected = np.array([-1.000000, -0.914800, -0.841925, -0.664785, -0.392792,
+                             -0.249244, -0.154211, -0.093055, -0.041201, -0.016698,
+                             -0.006381, -0.005999, -0.009759, -0.013459, -0.009742,
+                              0.012727,  0.100282,  0.307882,  0.419977,  0.775499, 1.000000])
+
         observed = agent_rw_tdlambda_adaptive.getLearner().getV().getValues()
         print("\nobserved: " + test_utils.array2str(observed))
         (ax, ax2) = self.plot_results(params,
@@ -186,7 +193,7 @@ class Test_TD_Lambda_GW1D(unittest.TestCase, test_utils.EpisodeSimulation):
 
         ax2.plot(np.arange(self.nepisodes)+1, agent_rw_tdlambda_adaptive.getLearner().lambda_mean_by_episode, color="orange")
         
-        #assert np.allclose(observed, expected, atol=1E-6)
+        assert np.allclose(observed, expected, atol=1E-6)
     #------------------------------------------- TESTS ----------------------------------------
 
 
@@ -194,7 +201,7 @@ class Test_TD_Lambda_GW2D(unittest.TestCase, test_utils.EpisodeSimulation):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.seed = 1713
+        self.seed = 1717
         self.nepisodes = 300
         self.start_state = None
         self.colormap = cm.get_cmap("rainbow")  # useful colormaps are "jet", "rainbow", seismic"
@@ -210,8 +217,8 @@ class Test_TD_Lambda_GW2D(unittest.TestCase, test_utils.EpisodeSimulation):
 
         ######################## Environments: 2D gridworld
         #----- Simple environment with two terminal states with reward -1 and reward +1
-        cls.ny = 15
-        cls.nx = 15
+        cls.ny = 5
+        cls.nx = 5
         cls.nS = cls.ny * cls.nx
         # Define the fontsize to use when displaying state value function in the image
         # plotted by test_utils.plot_results_2D().
@@ -257,7 +264,7 @@ class Test_TD_Lambda_GW2D(unittest.TestCase, test_utils.EpisodeSimulation):
         # Learner and agent
         params = dict({'alpha': 1.0,
                        'gamma': 1.0,
-                       'lambda': 0.8,
+                       'lambda': 0.7,
                        'alpha_min': 0.0,
                        'nepisodes': self.nepisodes,
                        })
@@ -279,23 +286,24 @@ class Test_TD_Lambda_GW2D(unittest.TestCase, test_utils.EpisodeSimulation):
         # alpha = 1.0, gamma = 1.0, lambda = 0.7, alpha_min = 0.0
         # alpha_update_type = AlphaUpdateType.FIRST_STATE_VISIT
         # adjust_alpha = True, adjust_alpha_by_episode = False
-        # seed = 1717, nepisodes = 100, start_state = None
-        expected_values = np.array([-1.000000, -0.573276, -0.202550, -0.082087, 0.013090,
-                                    -0.591732, -0.370538, -0.093806, 0.009337, 0.128144,
-                                    -0.274736, -0.192355, 0.006298, 0.175507, 0.322365,
-                                    -0.097125, -0.047149, 0.116088, 0.378265, 0.675200,
-                                    -0.028522, 0.051864, 0.180279, 0.472643, 1.000000])
+        # seed = 1717, nepisodes = 300, start_state = None
+        expected_values = np.array([-1.000000,	-0.600664,	-0.340097,	-0.199044,	-0.109807,
+                                    -0.598136,	-0.440290,	-0.250745,	-0.110556,	-0.009195,
+                                    -0.335323,	-0.245785,	-0.109325,	 0.057424,	 0.185493,
+                                    -0.163590,	-0.082114,	 0.035308,	 0.267254,	 0.538616,
+                                    -0.084325,	-0.000746,	 0.142019,	 0.426486,	 1.000000,
+                                    ])
 
         print("Agent ends at state {}:".format(self.env.getState()))
         self.env._render()
         observed_values = agent_rw_tdlambda.getLearner().getV().getValues()
         #print("\nobserved values: %s" %(test_utils.array2str(observed_values)) )
         observed = np.asarray( observed_values ).reshape(self.ny, self.nx)
-        #print("\nobserved: ")
-        #print(observed)
+        print("\nobserved: ")
+        print(observed)
         test_utils.plot_results_2D(observed, params, colormap=self.colormap, fontsize=self.fontsize)
 
-        #assert np.allclose(observed_values, expected_values, atol=1E-6)
+        assert np.allclose(observed_values, expected_values, atol=1E-6)
 
     def test_random_walk_logn_rewards(self):
         print("\nTesting " + self.id())
@@ -303,7 +311,7 @@ class Test_TD_Lambda_GW2D(unittest.TestCase, test_utils.EpisodeSimulation):
         # Learner and agent
         params = dict({'alpha': 1.0,
                        'gamma': 1.0,
-                       'lambda': 0.8,
+                       'lambda': 0.7,
                        'alpha_min': 0.0,
                        'nepisodes': self.nepisodes,
                        })
@@ -321,20 +329,26 @@ class Test_TD_Lambda_GW2D(unittest.TestCase, test_utils.EpisodeSimulation):
                                                      plot=True, colormap=self.colormap, pause=self.pause)
 
         # Expected 2D state value function given as 1D array with:
-        expected_values = np.array([-1.000000, -0.573276, -0.202550, -0.082087, 0.013090,
-                                    -0.591732, -0.370538, -0.093806, 0.009337, 0.128144,
-                                    -0.274736, -0.192355, 0.006298, 0.175507, 0.322365,
-                                    -0.097125, -0.047149, 0.116088, 0.378265, 0.675200,
-                                    -0.028522, 0.051864, 0.180279, 0.472643, 1.000000])
+        # 2D grid = 5 x 5
+        # alpha = 1.0, gamma = 1.0, lambda = 0.7, alpha_min = 0.0
+        # alpha_update_type = AlphaUpdateType.FIRST_STATE_VISIT
+        # adjust_alpha = True, adjust_alpha_by_episode = False
+        # seed = 1717, nepisodes = 300, start_state = None
+        expected_values = np.array([-0.586914,	-1.000000,	-0.275543,	 0.534306,	 0.529651,
+                                    -0.447301,	-0.386761,	 0.160712,	 1.000000,	 0.496648,
+                                    -0.263472,	-0.210891,	-0.001141,	 0.264747,	 0.124014,
+                                    -0.223334,	-0.210347,	-0.169349,	-0.249459,	-0.393667,
+                                    -0.192741,	-0.196232,	-0.272632,	-0.510045,	-1.000000
+                                    ])
 
         print("Agent ends at state {}:".format(self.env_logn_rewards.getState()))
         self.env_logn_rewards._render()
         observed_values = agent_rw_tdlambda.getLearner().getV().getValues()
         #print("\nobserved values: %s" %(test_utils.array2str(observed_values)) )
         observed = np.asarray( observed_values ).reshape(self.ny, self.nx)
-        #print("\nobserved: ")
-        #print(observed)
-        #assert np.allclose(observed_values, expected_values, atol=1E-6)
+        print("\nobserved: ")
+        print(observed)
+        assert np.allclose(observed_values, expected_values, atol=1E-6)
 
         test_utils.plot_results_2D(observed, params, colormap=self.colormap, fontsize=self.fontsize)
     ####################### TD(lambda) #######################
@@ -369,26 +383,28 @@ class Test_TD_Lambda_GW2D(unittest.TestCase, test_utils.EpisodeSimulation):
 
         # Expected 2D state value function given as 1D array with:
         # 2D grid = 5 x 5
-        # alpha = 1.0, gamma = 1.0, lambda = 0.7, alpha_min = 0.0
+        # alpha = 1.0, gamma = 1.0, alpha_min = 0.0
         # alpha_update_type = AlphaUpdateType.FIRST_STATE_VISIT
         # adjust_alpha = True, adjust_alpha_by_episode = False
-        # seed = 1717, nepisodes = 100, start_state = None
-        expected_values = np.array([-1.000000, -0.573276, -0.202550, -0.082087, 0.013090,
-                                    -0.591732, -0.370538, -0.093806, 0.009337, 0.128144,
-                                    -0.274736, -0.192355, 0.006298, 0.175507, 0.322365,
-                                    -0.097125, -0.047149, 0.116088, 0.378265, 0.675200,
-                                    -0.028522, 0.051864, 0.180279, 0.472643, 1.000000])
+        # seed = 1717, nepisodes = 300, start_state = None
+        # lambda as the Boltzmann function of delta(t) / average( abs(V(t)) )
+        expected_values = np.array([-1.000000,	-0.621289,	-0.356950,	-0.197688,	-0.095204,
+                                    -0.597418,	-0.449396,	-0.250112,	-0.100089,	 0.021283,
+                                    -0.330550,	-0.235789,	-0.092370,	 0.075680,	 0.224815,
+                                    -0.153306,	-0.058187,	 0.074201,	 0.301015,	 0.564076,
+                                    -0.051561,	 0.038582,	 0.192242,	 0.472891,	 1.000000
+                                    ])
 
         print("Agent ends at state {}:".format(self.env.getState()))
         self.env._render()
         observed_values = agent_rw_tdlambda_adaptive.getLearner().getV().getValues()
         #print("\nobserved values: %s" %(test_utils.array2str(observed_values)) )
         observed = np.asarray( observed_values ).reshape(self.ny, self.nx)
-        #print("\nobserved: ")
-        #print(observed)
+        print("\nobserved: ")
+        print(observed)
         test_utils.plot_results_2D(observed, params, colormap=self.colormap, fontsize=self.fontsize)
 
-        #assert np.allclose(observed_values, expected_values, atol=1E-6)
+        assert np.allclose(observed_values, expected_values, atol=1E-6)
 
     def test_random_walk_adaptive_logn_rewards(self):
         print("\nTesting " + self.id())
@@ -418,26 +434,28 @@ class Test_TD_Lambda_GW2D(unittest.TestCase, test_utils.EpisodeSimulation):
 
         # Expected 2D state value function given as 1D array with:
         # 2D grid = 5 x 5
-        # alpha = 1.0, gamma = 1.0, lambda = 0.7, alpha_min = 0.0
+        # alpha = 1.0, gamma = 1.0, alpha_min = 0.0
         # alpha_update_type = AlphaUpdateType.FIRST_STATE_VISIT
         # adjust_alpha = True, adjust_alpha_by_episode = False
-        # seed = 1717, nepisodes = 100, start_state = None
-        expected_values = np.array([-1.000000, -0.573276, -0.202550, -0.082087, 0.013090,
-                                    -0.591732, -0.370538, -0.093806, 0.009337, 0.128144,
-                                    -0.274736, -0.192355, 0.006298, 0.175507, 0.322365,
-                                    -0.097125, -0.047149, 0.116088, 0.378265, 0.675200,
-                                    -0.028522, 0.051864, 0.180279, 0.472643, 1.000000])
+        # seed = 1717, nepisodes = 300, start_state = None
+        # lambda as the Boltzmann function of delta(t) / average( abs(V(t)) )
+        expected_values = np.array([-0.581206,	-1.000000,	-0.219902,	 0.682737,	 0.615329,
+                                    -0.384120,	-0.365205,	 0.239536,	 1.000000,	 0.514185,
+                                    -0.149668,	-0.120553,	 0.113366,	 0.304064,	 0.135725,
+                                    -0.087527,	-0.083462,	-0.053985,	-0.200866,	-0.354783,
+                                    -0.067125,	-0.107176,	-0.198340,	-0.464890,	-1.000000
+                                    ])
 
         print("Agent ends at state {}:".format(self.env_logn_rewards.getState()))
         self.env_logn_rewards._render()
         observed_values = agent_rw_tdlambda_adaptive.getLearner().getV().getValues()
         #print("\nobserved values: %s" %(test_utils.array2str(observed_values)) )
         observed = np.asarray( observed_values ).reshape(self.ny, self.nx)
-        #print("\nobserved: ")
-        #print(observed)
+        print("\nobserved: ")
+        print(observed)
         test_utils.plot_results_2D(observed, params, colormap=self.colormap, fontsize=self.fontsize)
 
-        #assert np.allclose(observed_values, expected_values, atol=1E-6)
+        assert np.allclose(observed_values, expected_values, atol=1E-6)
     ####################### ADAPTIVE TD(lambda) #######################
     #------------------------------------------- TESTS ----------------------------------------
 
