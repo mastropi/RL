@@ -41,23 +41,23 @@ class LeaTDLambda(Learner):
         self.lmbda = lmbda
         # Eligibility traces
         self._z = np.zeros(self.env.getNumStates())
-        self._z_all = np.zeros((0,self.env.getNumStates()))
+        self._z_all = np.zeros((0, self.env.getNumStates()))
         
         # (Nov-2020) Product of alpha and z (the eligibility trace)
         # which gives the EFFECTIVE alpha value of the Stochastic Approximation algorithm
         # Goal: Compare the rate of convergence of the non-adaptive vs. the adaptive TD(lambda)
         # by keeping track of the effective alpha as a FUNCTION of the episode number for EACH STATE
         self._times_nonzero_update = [[] for _ in self.env.all_states]
-        self._alphas_effective = np.zeros((0,self.env.getNumStates()))
+        self._alphas_effective = np.zeros((0, self.env.getNumStates()))
 
     def _reset_at_start_of_episode(self):
         super()._reset_at_start_of_episode()
         self._z[:] = 0.
-        self._z_all = np.zeros((0,self.env.getNumStates()))
-        self._alphas_effective = np.zeros((0,self.env.getNumStates()))
+        self._z_all = np.zeros((0, self.env.getNumStates()))
+        self._alphas_effective = np.zeros((0, self.env.getNumStates()))
 
     def setParams(self, alpha=None, gamma=None, lmbda=None, adjust_alpha=None, alpha_update_type=None,
-                  adjust_alpha_by_episode=None, alpha_min=0.):
+                  adjust_alpha_by_episode=None, alpha_min=None):
         super().setParams(alpha, adjust_alpha, alpha_update_type, adjust_alpha_by_episode, alpha_min)
         self.gamma = gamma if gamma is not None else self.gamma
         self.lmbda = lmbda if lmbda is not None else self.lmbda
@@ -104,11 +104,10 @@ class LeaTDLambda(Learner):
         # In the linear case the gradient is equal to the feature associated to state s,
         # which is stored at column s of the feature matrix X.
         gradient_V = self.V.X[:,state]
-            ## Note: the above returns a ROW vector which is good because the weights are stored as a ROW vector
         self._z = self.gamma * lmbda * self._z + \
                     gradient_V                                    # For every-visit TD(lambda)
                     #gradient_V * (self._state_counts[state] == 1)  # For first-visit TD(lambda)
-        self._z_all = np.r_[self._z_all, self._z.reshape(1,len(self._z))]
+        self._z_all = np.r_[self._z_all, self._z.reshape(1, len(self._z))]
 
     def _plotZ(self):
         plt.figure()
@@ -338,7 +337,7 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
 
             ax.set_xticks(self.env.all_states)
             ax.set_xlim((0, self.env.getNumStates()-1))
-            ax.set_ylim((0,1.02))
+            ax.set_ylim((0, 1.02))
             ax.set_ylabel("Lambda")
             ax.tick_params(axis='y', colors="orange")
             ax.yaxis.label.set_color("orange")

@@ -225,8 +225,8 @@ class Simulator:
             if we set the seed again now, the experiments would have always the same outcome.
 
         compute_rmse: bool, optional
-            Whether to compute the RMSE over states (weighted by their number of visits)
-            after each episode. Useful to analyze rate of convergence of the estimates.
+            Whether to compute the RMSE of the estimated value function over all states.
+            Useful to analyze rate of convergence of the estimates when the true value function is known.
 
         state_observe: int, optional
             A state index whose RMSE should be observed as the episode progresses.
@@ -491,14 +491,33 @@ class Simulator:
             self.env.setInitialStateDistribution(self._isd_orig)
             self._isd_orig = None
 
-        # Set the value of terminal states to their reward, both the True values and estimated values
-        # (just to make plots of the state value function more understandable, specially in environments > 1D)
-        for s, r in self.env.getTerminalStatesAndRewards():
-            self.agent.getLearner().getV().setWeight(s, r)
-            if self.env.getV() is not None:
-                self.env.getV()[s] = r
+        # TOMOVE: (DM-2022/04/28) This change of the estimated and true value functions should NOT be done
+        # because of the following:
+        # - The value of terminal states is equal to 0 BY DEFINITION (see Sutton 2018, I guess)
+        # - If we change the true value of terminal states here, i.e. at the end of an experiment,
+        # these values are kept for any subsequent experiment we run, thus making the value of the RMSE
+        # computed on those experiments to be WRONG! (This is what made me spend about ONE OR MORE DEBUGGING DAYS
+        # to figure out why the plots of the average RMSE by episode on TD(lambda) experiments run by simu_lambda.py
+        # converged to a very large value (~0.5, when normally the value should converge to 0.1), except for the
+        # very first experiment!
+        # Actually, this change is mostly for an aesthetic reason when plotting the true and estimated value functions,
+        # especially in 2D gridworlds (as opposed to 1D).
+        # MY CONCLUSION is that this type of setup should be done by the PLOTTING FUNCTION itself.
+        #
+        # NOTE ALSO that we should NOT counteract this bad aesthetic plotting effect by setting the estimated value
+        # of terminal states at the end of each episode to the reward received when transitioning to the terminal state,
+        # for reasons explained when computing the true value function in the Gridworld1D environment (essentially
+        # because the TD error observed when reaching the terminal state would count the observed reward as DOUBLE,
+        # one time from R(T) and one time from the terminal state value which we set it equal to R(T) as well!)
+        #
+        ## Set the value of terminal states to their reward, both the True values and estimated values
+        ## (just to make plots of the state value function more understandable, specially in environments > 1D)
+        #for s, r in self.env.getTerminalStatesAndRewards():
+        #    self.agent.getLearner().getV().setWeight(s, r)
+        #    if self.env.getV() is not None:
+        #        self.env.getV()[s] = r
 
-    def simulate(self, nexperiments, nepisodes, start=None, verbose=False, verbose_period=1):
+    def simulate(self, nexperiments, nepisodes, start=None, compute_rmse=False, verbose=False, verbose_period=1, plot=False):
         """Simulates the agent interacting with the environment for a number of experiments and number
         of episodes per experiment.
 
@@ -514,6 +533,10 @@ class Simulator:
             When None, the starting state is picked randomly following the initial state distribution
             of the environment.
 
+        compute_rmse: bool, optional
+            Whether to compute the RMSE of the estimated value function over all states.
+            Useful to analyze rate of convergence of the estimates when the true value function is known.
+
         verbose: bool, optional
             Whether to show the experiment that is being run and the episodes for each experiment.
             default: False
@@ -521,6 +544,9 @@ class Simulator:
         verbose_period: int, optional
             The time step period to be verbose.
             default: 1 => be verbose at every simulation step.
+
+        plot: bool, optional
+            Whether to generate plots by each run of an experiment (by the run() method).
 
         Returns: tuple
             Tuple containing the following elements:
@@ -557,16 +583,20 @@ class Simulator:
                 print("Running experiment {} of {} (#episodes = {})..." \
                       .format(exp+1, nexperiments, nepisodes), end=" ")
             V, N_i, RMSE_by_episodes_i, learning_info = self.run(nepisodes=nepisodes, start=start, seed=None,
-                                                                 compute_rmse=True, plot=False,
+                                                                 compute_rmse=compute_rmse, plot=plot,
                                                                  verbose=verbose, verbose_period=verbose_period)
+            # Number of visits done to each state at the end of the experiment
             N += N_i
             # RMSE at the end of the last episode
             RMSE_i = RMSE_by_episodes_i[-1]
             RMSE += RMSE_i
             RMSE2 += RMSE_i**2
+            # Array containing the RMSE for each episode 1, 2, ..., nepisodes run in the experiment
+            # The RMSE at the first episode is large and at the last episode should be small.
             RMSE_by_episodes += RMSE_by_episodes_i
             RMSE_by_episodes2 += RMSE_by_episodes_i**2
             if verbose:
+                #print("\tRMSE by episode: {}".format(RMSE_by_episodes_i))
                 print("\tRMSE(at end of experiment) = {:.3g}".format(RMSE_i))
 
         N_mean = N / nexperiments

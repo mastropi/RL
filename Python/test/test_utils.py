@@ -150,7 +150,8 @@ def plot_results_2D(V, params, colormap, fontsize=7):
 class EpisodeSimulation:
     
     def plot_results(self, params,
-                     V_estimate, V_true, RMSE_by_episode, alphas_by_episode, y2label="(Average) alpha",
+                     V_estimate, V_true, RMSE_by_episode, alphas_by_episode,
+                     y2label="(Average) alpha", y2lim=None,
                      max_rmse=0.8, color_rmse="black", plotFlag=True):
         """
         Plots the estimated and true state value function.
@@ -202,6 +203,8 @@ class EpisodeSimulation:
             ax2 = ax.twinx()
             ax2.plot(all_episodes, alphas_by_episode, "k:")
             ax2.set_ylabel(y2label)
+            if y2lim is not None:
+                ax2.set_ylim(y2lim)
             ax2.axhline(y=params['alpha_min'], color="gray")
             
             # Go back to the primary axis

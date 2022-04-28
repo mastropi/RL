@@ -56,8 +56,15 @@ class EnvGridworld1D(EnvironmentDiscrete):
         # Note that terminal states have value = 0
         self.V = -1.0 + 2/(nS-1) * np.arange(nS)    # Note that this is the same as np.arange(-(nS-1), nS+1, 2) / (nS-1)
                                                     # (note that stop=nS+1, because the end value is NOT included!)
-        self.V[0] = self.V[nS-1] = 0.0
-        self.Q = None 
+        self.V[0] = self.V[nS-1] = 0.0              # The value of terminal states is defined as 0.0.
+                                                    # This is VERY IMPORTANT, meaning that the estimated value of
+                                                    # terminal states should be ALWAYS 0, o.w. learning diverges...
+                                                    # (in fact, if this were not the case, when transitioning to a
+                                                    # terminal state, the TD error would receive twice the reward, as
+                                                    # it is computed (when gamma = 1) as:
+                                                    # delta(T) = R(T) + V(S(T)) - V(S(T-1)) = 2 R(T) - V(S(T-1)),
+                                                    # where the 2 multiplying R(T) doesn't look right.
+        self.Q = None
 
         # Define the possible actions based on the geometry
         P = {}
