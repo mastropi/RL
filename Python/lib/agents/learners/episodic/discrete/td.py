@@ -6,12 +6,20 @@ Created on Mon Mar 30 19:57:16 2020
 @description: Definition of Temporal Difference algorithms.
 """
 
+
+from enum import Enum, unique
+
 import numpy as np
 from matplotlib import pyplot as plt, cm
 
 from Python.lib.agents.learners.episodic.discrete import Learner, AlphaUpdateType
 from Python.lib.agents.learners.value_functions import ValueFunctionApprox
 import Python.lib.utils.plotting as plotting
+
+@unique  # Unique enumeration values (i.e. on the RHS of the equal sign)
+class AdaptiveLambdaType(Enum):
+    FULL = 1
+    HOMOGENEOUS = 2
 
 
 class LeaTDLambda(Learner):
@@ -139,7 +147,8 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
     def __init__(self, env, alpha=0.1, gamma=1.0, lmbda=0.8,
                  adjust_alpha=False, alpha_update_type=AlphaUpdateType.EVERY_STATE_VISIT,
                  adjust_alpha_by_episode=True, alpha_min=0.,
-                 lambda_min=0., burnin=False, plotwhat="boxplot", fontsize=15, debug=False):
+                 lambda_min=0., lambda_max=0.99, adaptive_type=AdaptiveLambdaType.FULL,
+                 burnin=False, plotwhat="boxplots", fontsize=15, debug=False):
         super().__init__(env, alpha, gamma, lmbda, adjust_alpha, alpha_update_type, adjust_alpha_by_episode, alpha_min, debug)
         
         # List that keeps the history of ALL lambdas used at EVERY TIME STEP
@@ -149,6 +158,10 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
         # Minimum lambda for the adaptive lambda so that there is still some impact
         # in past states at the beginning when all state values are equal and equal to 0
         self.lambda_min = lambda_min
+        # Maximum lambda for the adaptive lambda which guarantees convergence
+        self.lambda_max = lambda_max
+        # Type of adaptive lambda (FULLY adaptive or HOMOGENEOUS)
+        self.adaptive_type = adaptive_type
         # Whether to perform a burn-in learning using a constant lambda
         # at the beginning to accelerate learning
         self.burnin = burnin
@@ -163,6 +176,9 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
         # based on whether the delta information from which the agent learns already contains
         # bootstrapping information about the value function at the next state)  
         self.state_counts_noreset = np.zeros(self.env.getNumStates())
+
+        #-- Variables used in the HOMOGENEOUS adaptive type case
+        self._gradient_V_all = np.zeros((0, self.env.getNumStates()))
 
         #-- Variables for lambda statistics over all episodes
         # List of lists to store the lambdas used for each state in each episode
@@ -195,14 +211,18 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
 
     def _reset_at_start_of_episode(self):
         super()._reset_at_start_of_episode()
+        self._gradient_V_all = np.zeros((0, self.env.getNumStates()))
         self._lambdas = []
         self._lambdas_in_episode = [[] for _ in self.env.all_states]
 
     def setParams(self, alpha=None, gamma=None, lmbda=None, adjust_alpha=None, alpha_update_type=None,
-                  adjust_alpha_by_episode=None, alpha_min=0.,
-                  lambda_min=0., burnin=False):
+                  adjust_alpha_by_episode=None, alpha_min=None,
+                  lambda_min=None, lambda_max=None, adaptive_type=None,
+                  burnin=False):
         super().setParams(alpha, gamma, lmbda, adjust_alpha, alpha_update_type, adjust_alpha_by_episode, alpha_min)
         self.lambda_min = lambda_min if lambda_min is not None else self.lambda_min
+        self.lambda_max = lambda_max if lambda_max is not None else self.lambda_max
+        self.adaptive_type = adaptive_type if adaptive_type is not None else self.adaptive_type
         self.burnin = burnin if burnin is not None else self.burnin
 
     def learn_pred_V(self, t, state, action, next_state, reward, done, info):
@@ -214,8 +234,7 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
 
         # Decide whether we do adaptive or non-adaptive lambda at this point
         # (depending on whether there is bootstrap information available or not)
-        # TODO: (2020/04/21) Adapt the check on whether a value function has been modified at least once
-        # that works also for the case when the initial state value function is not 0 (e.g. it is random).
+        # TODO: (2020/04/21) Adapt the check on whether a value function has been modified at least once that works also for the case when the initial state value function is not 0 (e.g. it is random).
         if not done and self.burnin and self.V.getValue(next_state) == 0: # self.state_counts_noreset[next_state] == 0:
             # The next state is non terminal and there is still no bootstrap information
             # about the state value function coming from the next state
@@ -238,9 +257,8 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
             #delta_relative = np.exp( np.abs(delta) - np.abs(state_value) )
 
             # Compute lambda as a function of delta or relative delta
-            lambda_adaptive = 1 - (1 - self.lambda_min) * np.exp( -np.abs(delta_relative) )
-            #lambda_adaptive = 1 - (1 - self.lambda_min) * np.exp( -np.abs(delta) )
-            #print("episode: {}, t: {}, lambda (adaptive) = {}".format(self.episode, t, lambda_adaptive))
+            lambda_adaptive = min( 1 - (1 - self.lambda_min) * np.exp( -np.abs(delta_relative) ), self.lambda_max )
+            #lambda_adaptive = min( 1 - (1 - self.lambda_min) * np.exp( -np.abs(delta) ), self.lambda_max )
 
         # Keep history of used lambdas
         self._lambdas += [lambda_adaptive]
@@ -253,9 +271,13 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
         # Update the eligibility trace
         self._updateZ(state, lambda_adaptive)
         # Update the weights
-        self._alphas_effective = np.r_[self._alphas_effective, self._alphas[state] * self._z.reshape(1,len(self._z))]
+        self._alphas_effective = np.r_[self._alphas_effective, self._alphas[state] * self._z.reshape(1, len(self._z))]
         if delta != 0.0:
             self.V.setWeights( self.V.getWeights() + self._alphas[state] * delta * self._z )
+            if self.debug:
+                print("episode: {}, t: {}: TD ERROR != 0 => delta = {}, delta_rel = {}, lambda (adaptive) = {}\n" \
+                        "trajectory so far: {}" \
+                        "--> V(s): {}".format(self.episode, t, delta, delta_relative, lambda_adaptive, self._states, self.V.getValues()))
 
         # Update alpha for the next iteration for "by state counts" update
         if not self.adjust_alpha_by_episode:
@@ -286,6 +308,49 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
                 print(pd.DataFrame( np.c_[self._z, self.V.getValues()].T, index=['_z', 'V'] ))
     
             #input("Press Enter...")
+
+    def _updateZ(self, state, lmbda):
+        if self.debug and False:
+            print("")
+            print("state = {}: lambda = {:.2f}".format(state, lmbda))
+        if self.adaptive_type == AdaptiveLambdaType.FULL:
+            super()._updateZ(state, lmbda)
+        else:
+            # In the HOMOGENEOUS adaptive lambda we need to store the HISTORY of the gradient
+            # (because we need to retroactively apply the newly computed lambda to previous eligibility traces)
+            gradient_V = self.V.X[:,state]      # Note: this is returned as a ROW vector, even when we retrieve the `state` COLUMN of matrix X
+            # Use the following calculation of the gradient for FIRST-VISIT TD(lambda)
+            # (i.e. the gradient is set to 0 if the current visit of `state` is not the first one)
+            #gradient_V * (self._state_counts[state] == 1)  # For first-visit TD(lambda)
+            self._gradient_V_all = np.r_[self._gradient_V_all, gradient_V.reshape(1, len(gradient_V))]
+
+            if self.debug and False:
+                print("Gradients:")
+                print(self._gradient_V_all)
+
+            # Compute the exponents of gamma*lambda, which go from n_trace_length-1 down to 0
+            # starting with the oldest gradient.
+            n_trace_length = self._gradient_V_all.shape[0]
+            exponents = np.array( range(n_trace_length-1, -1, -1) ).reshape(n_trace_length, 1)
+                ## The exponents are e.g. (3, 2, 1, 0) when n_trace_length = 4
+                ## Note that we reshape the exponents as a column vector because we need to use it
+                ## as the exponents of gamma*lambda which will multiply the respective row of the historical gradients
+                ## i.e.:
+                ## (gamma*lambda)**exponents[0] multiplies row 0 of the historical gradients
+                ## (gamma*lambda)**exponents[1] multiplies row 1 of the historical gradients
+                ## and so forth...
+
+            # New eligibility trace using the latest computed lambda as weight for ALL past time steps
+            self._z = np.sum( (self.gamma * lmbda)**exponents * self._gradient_V_all, axis=0 )
+            self._z_all = np.r_[self._z_all, self._z.reshape(1, len(self._z))]
+
+            if self.debug and False:
+                print("Exponents: {}".format((self.gamma * lmbda)**exponents))
+
+        if self.debug and False:
+            print("Z's & lambda's by state:")
+            print(self._z_all)
+            print(self._lambdas_in_episode)
 
     def _store_lambdas_in_episode(self):
         #print("lambdas in episode {}:".format(self.episode))

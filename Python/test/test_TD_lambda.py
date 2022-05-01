@@ -227,7 +227,9 @@ class Test_TD_Lambda_GW1D(unittest.TestCase, test_utils.EpisodeSimulation):
         learner_tdlambda_adaptive = td.LeaTDLambdaAdaptive(self.env, alpha=params['alpha'], gamma=params['gamma'],
                                                            alpha_update_type=AlphaUpdateType.EVERY_STATE_VISIT,  # Every-visit is the default
                                                            adjust_alpha=True, adjust_alpha_by_episode=False, alpha_min=params['alpha_min'],
-                                                           lambda_min=params['lambda_min'], burnin=False, debug=False)
+                                                           lambda_min=params['lambda_min'], lambda_max=params['lambda_max'],
+                                                           adaptive_type=td.AdaptiveLambdaType.FULL,
+                                                           burnin=False, debug=False)
         agent_rw_tdlambda_adaptive = agents.GenericAgent(self.policy_rw, learner_tdlambda_adaptive)
 
         # Simulation        
@@ -436,12 +438,14 @@ class Test_TD_Lambda_GW2D(unittest.TestCase, test_utils.EpisodeSimulation):
                        'lambda': np.nan,
                        'alpha_min': 0.0,
                        'lambda_min': 0.0,
+                       'lambda_max': 1.0,
                        'nepisodes': self.nepisodes,
                        })
         learner_tdlambda_adaptive = td.LeaTDLambdaAdaptive(self.env, alpha=params['alpha'], gamma=params['gamma'],
                                                            alpha_update_type=AlphaUpdateType.FIRST_STATE_VISIT,  # Every-visit is the default
                                                            adjust_alpha=True, adjust_alpha_by_episode=False, alpha_min=params['alpha_min'],
-                                                           lambda_min=params['lambda_min'], burnin=False,
+                                                           lambda_min=params['lambda_min'], lambda_max=params['lambda_max'],
+                                                           burnin=False,
                                                            plotwhat="average", fontsize=int(self.fontsize*0.8),
                                                            debug=False)
         agent_rw_tdlambda_adaptive = agents.GenericAgent(self.policy_rw_env, learner_tdlambda_adaptive)
@@ -488,12 +492,14 @@ class Test_TD_Lambda_GW2D(unittest.TestCase, test_utils.EpisodeSimulation):
                        'lambda': np.nan,
                        'alpha_min': 0.0,
                        'lambda_min': 0.0,
+                       'lambda_max': 1.0,
                        'nepisodes': self.nepisodes,
                        })
         learner_tdlambda_adaptive = td.LeaTDLambdaAdaptive(self.env_logn_rewards, alpha=params['alpha'], gamma=params['gamma'],
                                                            alpha_update_type=AlphaUpdateType.FIRST_STATE_VISIT,  # Every-visit is the default
                                                            adjust_alpha=True, adjust_alpha_by_episode=False, alpha_min=params['alpha_min'],
-                                                           lambda_min=params['lambda_min'], burnin=False,
+                                                           lambda_min=params['lambda_min'], lambda_max=params['lambda_max'],
+                                                           burnin=False,
                                                            plotwhat="average", fontsize=int(self.fontsize*0.8),
                                                            debug=False)
         agent_rw_tdlambda_adaptive = agents.GenericAgent(self.policy_rw_envlogn, learner_tdlambda_adaptive)

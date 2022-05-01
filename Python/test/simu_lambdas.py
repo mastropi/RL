@@ -17,84 +17,109 @@ import pickle
 from Python.lib.environments import gridworlds
 from Python.lib.agents import GenericAgent
 from Python.lib.agents.policies import random_walks
-from agents.learners.episodic.discrete import mc, td
-from agents.learners.episodic.discrete import AlphaUpdateType
+from Python.lib.agents.learners.episodic.discrete import mc, td
+from Python.lib.agents.learners.episodic.discrete import AlphaUpdateType
 import Python.lib.simulators as simulators
 
 from test_utils import plot_rmse_by_episode
 
 # Directories
-resultsdir = "../../RL-001-MemoryManagement/results/SimulateTDLambda-DifferenLambdas&Adaptive"
+#resultsdir = "../../RL-001-MemoryManagement/results/SimulateTDLambda-DifferentLambdas&Adaptive"
+resultsdir = "../../RL-001-MemoryManagement/results/SimulateTDLambda-DifferentLambdas&Adaptive-2022"
 
 
 ############################ EXPERIMENT SETUP #################################
 # The environment
-nstates = 19 # Number of states excluding terminal states
+nstates = 7 #19 # Number of states excluding terminal states
 env = gridworlds.EnvGridworld1D(length=nstates+2)
+
+# What experiments to run
+run_mc = False
+run_td = True
+run_td_adap = True
 
 # Simulation setup
 gamma = 1.0
+
+# alpha
+alpha_non_adaptive = 0.1
+alphas_adaptive = [0.1] #[0.1, 0.2, 0.3]
+#alpha_non_adaptive = 1
+#alphas_adaptive = [1] #[1, 3, 5]
+adjust_alpha = False
+adjust_alpha_by_episode = False
+adaptive_type = td.AdaptiveLambdaType.FULL
+
+# lambda
+lambdas = [0.0, 0.4, 0.8, 0.9]
+lambda_min = 0.0
+lambda_max = 0.9
+
 seed = 1717
 nexperiments = 10
-nepisodes = 200
-start = int((nstates - 1) / 2)
+nepisodes = 10
+start = int((nstates + 1) / 2)
 verbose = True
-verbose_period = 100
+verbose_period = int( nepisodes / 10 )
 debug = False
+plot = True
 
 # Possible policies and learners for agents
 pol_rw = random_walks.PolRandomWalkDiscrete(env)
-learner_mc = mc.LeaMCLambda(env, gamma=gamma, adjust_alpha=True, lmbda=1.0, alpha=1.0)
-learner_td = td.LeaTDLambda(env, gamma=gamma, adjust_alpha=True,
+if run_mc:
+    learner_mc = mc.LeaMCLambda(env, gamma=gamma, lmbda=1.0, alpha=1.0, adjust_alpha=adjust_alpha, adjust_alpha_by_episode=adjust_alpha_by_episode)
+learner_td = td.LeaTDLambda(env, gamma=gamma, adjust_alpha=adjust_alpha, adjust_alpha_by_episode=adjust_alpha_by_episode,
                             alpha_update_type=AlphaUpdateType.FIRST_STATE_VISIT)
-learner_td_adap = td.LeaTDLambdaAdaptive(env, gamma=gamma, adjust_alpha=True,
-                                         alpha_update_type=AlphaUpdateType.FIRST_STATE_VISIT)
+learner_td_adap = td.LeaTDLambdaAdaptive(env, gamma=gamma, adjust_alpha=adjust_alpha, adjust_alpha_by_episode=adjust_alpha_by_episode,
+                                         alpha_update_type=AlphaUpdateType.FIRST_STATE_VISIT,
+                                         adaptive_type=adaptive_type)
 
 
 ############################ lambda-return #################################
-# MC (lambda-return)
-adjust_alpha_by_episode = False
-learner_mc.setParams(adjust_alpha_by_episode=adjust_alpha_by_episode)
-agent = GenericAgent(pol_rw, learner_mc)
+if run_mc:
+    # MC (lambda-return)
+    learner_mc.setParams()
+    agent = GenericAgent(pol_rw, learner_mc)
 
-# Run the simulation and store the results
-sim = simulators.Simulator(env, agent, seed=seed, debug=debug)
-N_mean, rmse_mean, rmse_se, RMSE_by_episode_mean, RMSE_by_episode_se, learning_info = \
-                    sim.simulate(nexperiments=nexperiments,
-                                 nepisodes=nepisodes,
-                                 start=start,
-                                 verbose=verbose,
-                                 verbose_period=verbose_period)
-results_mc = [{'lambda': learner_mc.lmbda,
-               'alpha': learner_mc.alpha,
-               'rmse': rmse_mean,
-               'SE': rmse_se,
-               'rmse_by_episode_mean': RMSE_by_episode_mean,
-               'rmse_by_episode_se': RMSE_by_episode_se,
-               'learning_info': learning_info
-               }]
+    # Run the simulation and store the results
+    sim = simulators.Simulator(env, agent, seed=seed, debug=debug)
+    N_mean, rmse_mean, rmse_se, RMSE_by_episode_mean, RMSE_by_episode_se, learning_info = \
+                        sim.simulate(nexperiments=nexperiments,
+                                     nepisodes=nepisodes,
+                                     start=start,
+                                     verbose=verbose,
+                                     verbose_period=verbose_period,
+                                     plot=plot)
+    results_mc = [{'lambda': learner_mc.lmbda,
+                   'alpha': learner_mc.alpha,
+                   'rmse_mean': rmse_mean,                          # Average of "RMSE at LAST episode" over all experiments
+                   'rmse_se': rmse_se,
+                   'rmse_by_episode_mean': RMSE_by_episode_mean,    # Average of "RMSE at EACH episode" over all experiments
+                   'rmse_by_episode_se': RMSE_by_episode_se,
+                   'learning_info': learning_info
+                   }]
 
-# Save
-file = open("mc.pickle", mode="wb")  # "b" means binary mode (needed for pickle.dump())
-pickle.dump(results_mc, file)
-file.close()
+    # Save
+    file = open(resultsdir + "/mc.pickle", mode="wb")  # "b" means binary mode (needed for pickle.dump())
+    pickle.dump(results_mc, file)
+    file.close()
 
-# Distribution of state counts
-plt.figure()
-plt.bar(env.all_states, N_mean, color="red", alpha=0.2)
-ax = plt.gca()
-ax.set_xlabel("states")
-ax.set_ylabel("Distribution over non-terminal states")
-ax.spines['left'].set_color("red")
-ax.tick_params(axis='y', colors="red")
-ax.yaxis.label.set_color("red")
-ax2 = ax.twinx()
-ax2.bar(np.array(env.all_states)[[0,nstates+1]], N_mean[[0,nstates+1]], color="blue")
-ax2.set_ylabel("Distribution over terminal states")
-ax2.spines['right'].set_color("blue")
-ax2.tick_params(axis='y', colors="blue")
-ax2.yaxis.label.set_color("blue")
-ax.set_title("Distribution of state visits in all {} episodes (seed={})".format(nepisodes, seed))
+    # Distribution of state counts
+    plt.figure()
+    plt.bar(env.all_states, N_mean, color="red", alpha=0.2)
+    ax = plt.gca()
+    ax.set_xlabel("states")
+    ax.set_ylabel("Distribution over non-terminal states")
+    ax.spines['left'].set_color("red")
+    ax.tick_params(axis='y', colors="red")
+    ax.yaxis.label.set_color("red")
+    ax2 = ax.twinx()
+    ax2.bar(np.array(env.all_states)[[0,nstates+1]], N_mean[[0,nstates+1]], color="blue")
+    ax2.set_ylabel("Distribution over terminal states")
+    ax2.spines['right'].set_color("blue")
+    ax2.tick_params(axis='y', colors="blue")
+    ax2.yaxis.label.set_color("blue")
+    ax.set_title("Distribution of state visits in all {} episodes (seed={})".format(nepisodes, seed))
 
 
 
@@ -128,51 +153,48 @@ ax.set_title("Distribution of state visits in all {} episodes (seed={})".format(
 # leveraging transient state and steady-state.
 #
 
-results_td = []
-lambdas = [0, 0.4, 0.8, 0.9]
+if run_td:
+    results_td = []
 
-#alphas_td = [8, 7.5, 7, 3, 2, 1]        # 10 times larger than the optimum in constant-alpha case
-alphas_td = np.repeat(1, len(lambdas))
-adjust_alpha_by_episode = False
+    #alphas_td = [8, 7.5, 7, 3, 2, 1]        # 10 times larger than the optimum in constant-alpha case
+    alphas_td = np.repeat(alpha_non_adaptive, len(lambdas))
+    for idx_lambda, lmbda in enumerate(lambdas):
+        print("\n******* lambda {} of {}: {:.2f} ******".format(idx_lambda+1, len(lambdas), lmbda))
 
-#alphas_td = np.repeat(1, len(lambdas))
-#adjust_alpha_by_episode = True
-for idx_lambda, lmbda in enumerate(lambdas):
-    print("\n******* lambda {} of {}: {:.2f} ******".format(idx_lambda+1, len(lambdas), lmbda))
+        # Reset learner and agent (i.e. erase all memory from a previous run!)
+        learner_td.setParams(alpha=alphas_td[idx_lambda], lmbda=lmbda)
+        learner_td.reset(reset_episode=True, reset_value_functions=True)
+        agent = GenericAgent(pol_rw, learner_td)
 
-    # Reset learner and agent (i.e. erase all memory from a previous run!)
-    learner_td.setParams(alpha=alphas_td[idx_lambda], lmbda=lmbda, adjust_alpha_by_episode=adjust_alpha_by_episode)
-    learner_td.reset(reset_episode=True, reset_value_functions=True)
-    agent = GenericAgent(pol_rw, learner_td)
+        # NOTE: Setting the seed here implies that each set of experiments
+        # (i.e. for each combination of alpha and lambda) yields the same outcome in terms
+        # of visited states and actions.
+        # This is DESIRED --as opposed of having different state-action outcomes for different
+        # (alpha, lambda) settings-- as it better isolates the effect of alpha and lambda.
+        # VERIFIED BY RUNNING IN DEBUG MODE!
+        sim = simulators.Simulator(env, agent, seed=seed, debug=debug)
 
-    # NOTE: Setting the seed here implies that each set of experiments
-    # (i.e. for each combination of alpha and lambda) yields the same outcome in terms
-    # of visited states and actions.
-    # This is DESIRED --as opposed of having different state-action outcomes for different
-    # (alpha, lambda) settings-- as it better isolates the effect of alpha and lambda.
-    # VERIFIED BY RUNNING IN DEBUG MODE!
-    sim = simulators.Simulator(env, agent, seed=seed, debug=debug)
-    
-    # Run the simulation and store the results
-    N_mean, rmse_mean, rmse_se, RMSE_by_episode_mean, RMSE_by_episode_se, learning_info = \
-                        sim.simulate(nexperiments=nexperiments,
-                                     nepisodes=nepisodes,
-                                     start=start,
-                                     verbose=verbose,
-                                     verbose_period=verbose_period)
-    results_td += [{'lambda': lmbda,
-                    'alpha': alphas_td[idx_lambda],
-                    'rmse': rmse_mean,
-                    'SE': rmse_se,
-                    'rmse_by_episode_mean': RMSE_by_episode_mean,
-                    'rmse_by_episode_se': RMSE_by_episode_se,
-                    'learning_info': learning_info
-                     }]
+        # Run the simulation and store the results
+        N_mean, rmse_mean, rmse_se, RMSE_by_episode_mean, RMSE_by_episode_se, learning_info = \
+                            sim.simulate(nexperiments=nexperiments,
+                                         nepisodes=nepisodes,
+                                         start=start,
+                                         verbose=verbose,
+                                         verbose_period=verbose_period,
+                                         plot=plot)
+        results_td += [{'lambda': lmbda,
+                        'alpha': alphas_td[idx_lambda],
+                        'rmse_mean': rmse_mean,                         # Average of "RMSE at LAST episode" over all experiments
+                        'rmse_se': rmse_se,
+                        'rmse_by_episode_mean': RMSE_by_episode_mean,   # Average of "RMSE at EACH episode" over all experiments
+                        'rmse_by_episode_se': RMSE_by_episode_se,
+                        'learning_info': learning_info
+                         }]
 
-# Save
-file = open("td.pickle", mode="wb")  # "b" means binary mode (needed for pickle.dump())
-pickle.dump(results_td, file)
-file.close()
+    # Save
+    file = open(resultsdir + "/td.pickle", mode="wb")  # "b" means binary mode (needed for pickle.dump())
+    pickle.dump(results_td, file)
+    file.close()
 
 
 ############################ TD(lambda)-adaptive ##################################
@@ -195,127 +217,123 @@ file.close()
 # ===========
 # Same conclusions as for TD(lambda)
 
+if run_td_adap:
+    results_td_adap = []
+    #alphas_adaptive = alphas_td.copy()
+    #alphas_adaptive.reverse()
+    for idx_alpha, alpha in enumerate(alphas_adaptive):
+        print("\n******* alpha {} of {}: {:.2f} ******".format(idx_alpha+1, len(alphas_adaptive), alpha))
 
-results_td_adap = []
-lambda_min = 0.0
-#alphas_td_adap = alphas_td.copy()
-#alphas_td_adap.reverse()
-#adjust_alpha_by_episode = False
+        # Reset learner and agent (i.e. erase all memory from a previous run!)
+        learner_td_adap.setParams(alpha=alpha,
+                                  lambda_min=lambda_min, lambda_max=lambda_max)
+        learner_td_adap.reset(reset_episode=True, reset_value_functions=True)
+        agent = GenericAgent(pol_rw, learner_td_adap)
 
-alphas_td_adap = [1, 3, 5]
-adjust_alpha_by_episode = False
+        # NOTE: Setting the seed here implies that each set of experiments
+        # (i.e. for each combination of alpha and lambda) yields the same outcome in terms
+        # of visited states and actions.
+        # This is DESIRED --as opposed of having different state-action outcomes for different
+        # (alpha, lambda) settings-- as it better isolates the effect of alpha and lambda.
+        # VERIFIED BY RUNNING IN DEBUG MODE!
+        sim = simulators.Simulator(env, agent, seed=seed, debug=debug)
 
-#alphas_td_adap = [1, 2, 3, 5]
-#adjust_alpha_by_episode = True
-for idx_alpha, alpha in enumerate(alphas_td_adap):
-    print("\n******* alpha {} of {}: {:.2f} ******".format(idx_alpha+1, len(alphas_td_adap), alpha))
+        # Run the simulation and store the results
+        N_mean, rmse_mean, rmse_se, RMSE_by_episode_mean, RMSE_by_episode_se, learning_info = \
+                            sim.simulate(nexperiments=nexperiments,
+                                         nepisodes=nepisodes,
+                                         start=start,
+                                         verbose=verbose,
+                                         verbose_period=verbose_period)
+        results_td_adap += [{'lambda_min': lambda_min,
+                             'alpha': alpha,
+                             'rmse_mean': rmse_mean,                        # Average of "RMSE at LAST episode" over all experiments
+                             'rmse_se': rmse_se,
+                             'rmse_by_episode_mean': RMSE_by_episode_mean,  # Average of "RMSE at EACH episode" over all experiments
+                             'rmse_by_episode_se': RMSE_by_episode_se,
+                             'learning_info': learning_info
+                             }]
 
-    # Reset learner and agent (i.e. erase all memory from a previous run!)
-    learner_td_adap.setParams(alpha=alpha, lambda_min=lambda_min, adjust_alpha_by_episode=adjust_alpha_by_episode)
-    learner_td_adap.reset(reset_episode=True, reset_value_functions=True)
-    agent = GenericAgent(pol_rw, learner_td_adap)
-
-    # NOTE: Setting the seed here implies that each set of experiments
-    # (i.e. for each combination of alpha and lambda) yields the same outcome in terms
-    # of visited states and actions.
-    # This is DESIRED --as opposed of having different state-action outcomes for different
-    # (alpha, lambda) settings-- as it better isolates the effect of alpha and lambda.
-    # VERIFIED BY RUNNING IN DEBUG MODE!
-    sim = simulators.Simulator(env, agent, seed=seed, debug=debug)
-    
-    # Run the simulation and store the results
-    N_mean, rmse_mean, rmse_se, RMSE_by_episode_mean, RMSE_by_episode_se, learning_info = \
-                        sim.simulate(nexperiments=nexperiments,
-                                     nepisodes=nepisodes,
-                                     start=start,
-                                     verbose=verbose,
-                                     verbose_period=verbose_period)
-    results_td_adap += [{'lambda_min': lambda_min,
-                         'alpha': alpha,
-                         'rmse': rmse_mean,
-                         'SE': rmse_se,
-                         'rmse_by_episode_mean': RMSE_by_episode_mean,
-                         'rmse_by_episode_se': RMSE_by_episode_se,
-                         'learning_info': learning_info
-                         }]
-
-file = open("td_adap.pickle", mode="wb")  # "b" means binary mode (needed for pickle.dump())
-pickle.dump(results_td_adap, file)
-file.close()
+    file = open(resultsdir + "/td_adap.pickle", mode="wb")  # "b" means binary mode (needed for pickle.dump())
+    pickle.dump(results_td_adap, file)
+    file.close()
 
 
 
 ################################# Plots #############################
 # Load the data if needed
-adjust_alpha_by_episode = False
+if run_mc:
+    file = open(resultsdir + "/mc_adjust_by_count_first_visit.pickle", mode="rb")
+    pickle.load(file)
+    file.close()
 
-file = open(resultsdir + "/mc_adjust_by_count_first_visit.pickle", mode="rb")
-pickle.load(file)
-file.close()
+if run_td:
+    file = open(resultsdir + "/td.pickle", mode="rb")
+    pickle.load(file)
+    file.close()
 
-file = open(resultsdir + "/td.pickle", mode="rb")
-pickle.load(file)
-file.close()
-
-file = open(resultsdir + "/td_adap.pickle", mode="rb")
-pickle.load(file)
-file.close()
+if run_td_adap:
+    file = open(resultsdir + "/td_adap.pickle", mode="rb")
+    pickle.load(file)
+    file.close()
 
 colormap = cm.get_cmap("jet")
 max_alpha = 1       # max(alpha_td)
 max_rmse = 0.8
 fontsize = 14
 
-# MC
-fig = plot_rmse_by_episode(results_mc[0]['rmse_by_episode_mean'], #results_mc[0]['rmse_by_episode_se'],
-                           max_rmse=max_rmse, color="blue",
-                           alphas=results_mc[0]['learning_info']['alphas_by_episode'],
-                           max_alpha=max_alpha, color_alphas="blue",
-                           fontsize=fontsize)
-fig.suptitle(str(nstates) + "-state environment: Monte Carlo (alpha adjusted by " + ((adjust_alpha_by_episode and "episode") or (not adjust_alpha_by_episode and "state count")) + ")",
-             fontsize=np.round(fontsize*1.5))
+# MC (lambda-return)
+if run_mc:
+    fig = plot_rmse_by_episode(results_mc[0]['rmse_by_episode_mean'], #results_mc[0]['rmse_by_episode_se'],
+                               max_rmse=max_rmse, color="blue",
+                               alphas=results_mc[0]['learning_info']['alphas_by_episode'],
+                               max_alpha=max_alpha, color_alphas="blue",
+                               fontsize=fontsize)
+    fig.suptitle(str(nstates) + "-state environment: Monte Carlo (alpha adjusted by " + ((adjust_alpha_by_episode and "episode") or (not adjust_alpha_by_episode and "state count")) + ")",
+                 fontsize=np.round(fontsize*1.5))
 
 # TD(lambda)
-lambdas = [s['lambda'] for s in results_td]
-alphas = [s['alpha'] for s in results_td]
-fig = None
-legend_label = []
-for idx_lambda, lmbda in enumerate(lambdas):
-    # Map blue to the largest lambda and red to the smallest lambda (most similar to the color scheme used in Sutton, pag. 295)
-    color = colormap( 1 - idx_lambda / max((1, len(lambdas)-1)) )
-    fig = plot_rmse_by_episode(results_td[idx_lambda]['rmse_by_episode_mean'],# results_td[idx_lambda]['rmse_by_episode_se'],
-                               max_rmse=max_rmse, color=color,
-                               alphas=results_td[idx_lambda]['learning_info']['alphas_by_episode'],
-                               max_alpha=max_alpha, color_alphas=color,
-                               fontsize=fontsize, fig=fig)
-    legend_label += ["lambda={:.2g}, alpha={:.2g}".format(lmbda, alphas[idx_lambda])]
-plt.figlegend(legend_label)
-fig.suptitle(str(nstates) + "-state environment: TD(lambda) (alpha adjusted by " + ((adjust_alpha_by_episode and "episode") or (not adjust_alpha_by_episode and "state count")) + ")",
-             fontsize=np.round(fontsize*1.5))
+if run_td:
+    lambdas = [s['lambda'] for s in results_td]
+    alphas = [s['alpha'] for s in results_td]
+    fig = None
+    legend_label = []
+    for idx_lambda, lmbda in enumerate(lambdas):
+        # Map blue to the largest lambda and red to the smallest lambda (most similar to the color scheme used in Sutton, pag. 295)
+        color = colormap( 1 - idx_lambda / max((1, len(lambdas)-1)) )
+        fig = plot_rmse_by_episode(results_td[idx_lambda]['rmse_by_episode_mean'], #results_td[idx_lambda]['rmse_by_episode_se'],
+                                   max_rmse=max_rmse, color=color,
+                                   alphas=results_td[idx_lambda]['learning_info']['alphas_by_episode'],
+                                   max_alpha=max_alpha, color_alphas=color,
+                                   fontsize=fontsize, fig=fig)
+        legend_label += ["lambda={:.2g}, alpha={:.2g}".format(lmbda, alphas[idx_lambda])]
+    plt.figlegend(legend_label)
+    fig.suptitle(str(nstates) + "-state environment: TD(lambda) (alpha " + ((not adjust_alpha and "constant)") or "adjusted by " + ((adjust_alpha_by_episode and "episode") or (not adjust_alpha_by_episode and "state count")) + ")"),
+                 fontsize=np.round(fontsize*1.5))
 
 # TD(lambda)-adaptive
-alphas = [s['alpha'] for s in results_td_adap]
-fig = None
-legend_label = []
-for idx_alpha, alpha in enumerate(alphas):
-    # Map blue to the largest lambda and red to the smallest lambda (most similar to the color scheme used in Sutton, pag. 295)
-    color = colormap( 1 - idx_alpha / max((1, len(alphas)-1)) )
-    fig = plot_rmse_by_episode(results_td_adap[idx_alpha]['rmse_by_episode_mean'],# results_td_adap[idx_alpha]['rmse_by_episode_se'],
-                               max_rmse=max_rmse, color=color,
-                               alphas=results_td_adap[idx_alpha]['learning_info']['alphas_by_episode'],
-                               max_alpha=max_alpha, color_alphas=color,
-                               fontsize=fontsize, fig=fig)
-    legend_label += ["alpha={:.2g}".format(alpha)]
-plt.figlegend(legend_label)
-fig.suptitle(str(nstates) + "-state environment: Adaptive TD(lambda) (alpha adjusted by " \
-                          + ((adjust_alpha_by_episode and "episode") or (not adjust_alpha_by_episode and "state count")) + ", lambda_min=" + str(lambda_min) + ")",
-             fontsize=np.round(fontsize*1.5))
+if run_td_adap:
+    alphas = [s['alpha'] for s in results_td_adap]
+    fig = None
+    legend_label = []
+    for idx_alpha, alpha in enumerate(alphas):
+        # Map blue to the largest lambda and red to the smallest lambda (most similar to the color scheme used in Sutton, pag. 295)
+        color = colormap( 1 - idx_alpha / max((1, len(alphas)-1)) )
+        fig = plot_rmse_by_episode(results_td_adap[idx_alpha]['rmse_by_episode_mean'], #results_td_adap[idx_alpha]['rmse_by_episode_se'],
+                                   max_rmse=max_rmse, color=color,
+                                   alphas=results_td_adap[idx_alpha]['learning_info']['alphas_by_episode'],
+                                   max_alpha=max_alpha, color_alphas=color,
+                                   fontsize=fontsize, fig=fig)
+        legend_label += ["alpha={:.2g}".format(alpha)]
+    plt.figlegend(legend_label)
+    fig.suptitle(str(nstates) + "-state environment: TD(lambda) (alpha " + ((not adjust_alpha and "constant)") or
+                 "adjusted by " + ((adjust_alpha_by_episode and "episode") or (not adjust_alpha_by_episode and "state count")) + \
+                 ", lambda_min=" + str(lambda_min) + ", lambda_max=" + str(lambda_max) + ")"),
+                 fontsize=np.round(fontsize*1.5))
 
 
 
-
-
-
+# To save a figure to a file
 #plt.savefig("{}/{}-v{}-td{}-lr{},tdadap{},adjust_alpha={},alpha_min={},lambda_min={}-Episodes{}.png" \
 #            .format(g_dir_results, g_prefix, version, lambdas_opt['td'], lambdas_opt['mc'], alphas_opt['td_adap'], adjust_alpha, alpha_min, lambda_min, nepisodes))
 #fig, (ax_full, ax_scaled, ax_rmse_by_episode) = plt.subplots(1,3)
