@@ -19,10 +19,17 @@ def plot_rmse_by_episode(rmse_mean_values, rmse_se_values=None, max_rmse=None, c
     """
     Plots the average RMSE values (over states) by episode
     
-    @param rmse_mean_values: numpy array containing the average RMSE value per episode.
-    @param rmse_se_values: (optional) numpy array containing an error measure of the average RMSE, e.g. their standard error.
+    @param rmse_mean_values: numpy array containing the average RMSE value per episode and including the RMSE at the
+    very start of the learning process, i.e. the RMSE computed on the initial guess of the value function.
+    Its length should be equal to the number of episodes run + 1.
+    @param rmse_se_values: (optional) numpy array containing an error measure of the average RMSE, e.g. their standard error,
+    for each episode run, including at the very start of the learning process.
     @param max_mse: (optional) maximum RMSE value to show in the plot (for visual comparison reasons)
-    
+
+    @param alphas: list or array containing the alpha values (their average over all states if alpha depends on the state
+    or is allowed to vary within an episode) used when updating the value function within each episode.
+    Its length should be equal to the number of episodes run.
+
     @param fig: an existing figure where the plot should be added. This would be equivalent of "hold"ing the plot in Matlab.
     
     @return A figure object with the created or updated figure.
@@ -49,9 +56,16 @@ def plot_rmse_by_episode(rmse_mean_values, rmse_se_values=None, max_rmse=None, c
             axis.set_ylim((1E-6, max_alpha))
         axis.legend([legend], loc='upper right', fontsize=fontsize)
 
-    # X-axis (time)
-    nepisodes = len(rmse_mean_values)
-    time = np.arange(nepisodes)+1
+    #----------------------------------- Parse input parameters -------------------------------
+    if alphas is not None and len(alphas) != len(rmse_mean_values) - 1:
+        raise ValueError("The length of the `alphas` array ({}) must be one less the length of the RMSE values given in array `rmse_mean_values` ({})"
+                         .format(len(alphas), len(rmse_mean_values)))
+    nepisodes = len(rmse_mean_values) - 1
+
+    # X-axis (time): goes from 0 to (nepisodes+1), because we need to plot the average RMSE by episode of which we
+    # assume we have information from BEFORE the first episode is run (represented by time = 0 on which the RMSE
+    # is computed from the initial guess of the value function) until AFTER the last episode has finished.
+    time = np.arange(nepisodes+1)   # Array 0, 1, ..., nepisodes
 
     if max_rmse is None:
         max_rmse = np.max(rmse_mean_values)*1.1
@@ -62,6 +76,7 @@ def plot_rmse_by_episode(rmse_mean_values, rmse_se_values=None, max_rmse=None, c
     else:
         fig = plt.figure(figsize=(20,10))
         axes = fig.subplots(1,2)
+    #----------------------------------- Parse input parameters -------------------------------
 
     ax = axes[0]
     ax_tlog = axes[1]
@@ -85,7 +100,7 @@ def plot_rmse_by_episode(rmse_mean_values, rmse_se_values=None, max_rmse=None, c
             ax2 = axes[2]
         else:
             ax2 = ax.twinx()
-        ax2.plot(time, alphas, ':', color=color_alphas, zorder=0)
+        ax2.plot(time[:-1], alphas, ':', color=color_alphas, zorder=0)
         finalize_plot_alpha(ax2)
 
         if fig is not None and len(axes) >= 4:
@@ -93,7 +108,7 @@ def plot_rmse_by_episode(rmse_mean_values, rmse_se_values=None, max_rmse=None, c
             ax2_tlog = axes[3]
         else:
             ax2_tlog = ax_tlog.twinx()
-        ax2_tlog.plot(time, alphas, ':', color=color_alphas, zorder=0)
+        ax2_tlog.plot(time[:-1], alphas, ':', color=color_alphas, zorder=0)
         finalize_plot_alpha(ax2_tlog)
         ax2_tlog.set_xscale('log')
         ax2_tlog.set_yscale('log')
@@ -170,18 +185,24 @@ class EpisodeSimulation:
         V_true: numpy.array of length number of states in the environment
             True state value function.
 
-        RMSE_by_episode: numpy.array of length number of episodes run
-            Root Mean Squared Error of the estimated state value function by episode.
-        
+        RMSE_by_episode: numpy.array
+            Root Mean Squared Error of the estimated state value function by episode, including the very start of the
+            learning process, where the RMSE is computed on the initial guess of the value function.
+            Its length should be equal to the number of episodes run + 1.
+
         alphas_by_episode: list or numpy.array
             Average learning rate by episode.
+            Its length should be equal to the number of episodes run.
         """
         if plotFlag:
             title = "alpha={:.2f}, gamma={:.2f}, lambda={:.2f}, {} episodes" \
                          .format(params['alpha'], params['gamma'], params['lambda'], self.nepisodes)
 
-            all_states = np.arange(self.nS+2)
-            all_episodes = np.arange(self.nepisodes)+1
+            all_states = np.arange(self.nS + 2)
+            all_episodes = np.arange(self.nepisodes + 1)    # This is 0, 1, ..., nepisodes
+                                                            # i.e. it has length nepisodes + 1 so that the very first
+                                                            # RMSE (for the initial guess of the value function)
+                                                            # is included in the plot.
 
             plt.figure()
             plt.plot(all_states, V_true, 'b.-')
@@ -201,7 +222,7 @@ class EpisodeSimulation:
             ax.set_title(title)
             
             ax2 = ax.twinx()
-            ax2.plot(all_episodes, alphas_by_episode, "k:")
+            ax2.plot(all_episodes[:-1], alphas_by_episode, "k:")
             ax2.set_ylabel(y2label)
             if y2lim is not None:
                 ax2.set_ylim(y2lim)

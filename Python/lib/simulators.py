@@ -230,6 +230,7 @@ class Simulator:
 
         state_observe: int, optional
             A state index whose RMSE should be observed as the episode progresses.
+            Only used when compute_rmse = True
 
         verbose: bool, optional
             Whether to show the experiment that is being run and the episodes for each experiment.
@@ -265,15 +266,6 @@ class Simulator:
                     (averaged over visited states in each episode).
         """
         #--- Parse input parameters
-        if plot:
-            fig_V = plt.figure()
-            colors = cm.get_cmap(colormap, lut=nepisodes)
-            if self.env.getDimension() == 1:
-                # Plot the true state value function (to have it as a reference already
-                plt.plot(self.env.all_states, self.env.getV(), '.-', color="blue")
-                if state_observe is not None:
-                    fig_RMSE_state = plt.figure()
-
         # Define initial state
         nS = self.env.getNumStates()
         if start is not None:
@@ -289,13 +281,27 @@ class Simulator:
                 isd[start] = 1.0
                 self.env.setInitialStateDistribution(isd)
 
-        # Check initial state
+        # Check the state to observe
         if state_observe is not None:
-            if not (isinstance(state_observe, int) and 0 <= state_observe and state_observe < nS):
+            if not compute_rmse:
+                warnings.warn("The `state_observe` parameter is not None, but `compute_rmse = False`.\n" \
+                              "A state can only be observed when `compute_rmse = True`. The state to observe will be ignored.")
+                state_observe = None
+            elif not (isinstance(state_observe, int) and 0 <= state_observe and state_observe < nS):
                 warnings.warn("The `state_observe` parameter ({}, type={}) must be an integer number between 0 and {}.\n" \
                               "The state whose index falls in the middle of the state space will be observed." \
                               .format(state_observe, type(state_observe), nS-1))
                 state_observe = int(nS/2)
+
+        # Plotting setup
+        if plot:
+            fig_V = plt.figure()
+            colors = cm.get_cmap(colormap, lut=nepisodes)
+            if self.env.getDimension() == 1:
+                # Plot the true state value function (to have it as a reference already
+                plt.plot(self.env.all_states, self.env.getV(), '.-', color="blue")
+                if state_observe is not None:
+                    fig_RMSE_state = plt.figure()
 
         # Define the policy and the learner
         policy = self.agent.getPolicy()
@@ -308,24 +314,22 @@ class Simulator:
             else:
                 self.env.seed(self.seed)
 
-        RMSE = np.nan*np.zeros(nepisodes) if compute_rmse else None
-        if state_observe is not None:
-            V = [learner.getV().getValue(state_observe)]
-            # Keep track of the number of times the true value function of the state (assumed 0!)
-            # is inside its confidence interval. In practice this only works for the mid state
-            # of the 1D gridworld with the random walk policy.
-            ntimes_inside_ci95 = 0
+        # Store initial values used in the analysis of all the episodes run
+        V, RMSE, ntimes_rmse_inside_ci95 = self.initialize_run_with_learner_status(nepisodes, learner, compute_rmse, state_observe)
 
+        # Iterate on the episodes to run
         if verbose:
             print("Value function at start of experiment: {}".format(learner.getV().getValues()))
         for episode in range(nepisodes):
+            # Reset the environment
             self.env.reset()
             done = False
             if verbose and np.mod(episode, verbose_period) == 0:
                 print("Episode {} of {} running...".format(episode+1, nepisodes), end=" ")
                 print("(agent starts at state: {}".format(self.env.getState()), end=" ")
             if self.debug:
-                print("\n[DEBUG] Starts at state {}".format(self.env.getState()))
+                print("\n[DEBUG] Episode {} of {}:".format(episode+1, nepisodes))
+                print("\t[DEBUG] Starts at state {}".format(self.env.getState()))
                 print("\t[DEBUG] State value function at start of episode:\n\t{}".format(learner.getV().getValues()))
 
             # Time step in the episode (the first time step is t = 0
@@ -341,8 +345,7 @@ class Simulator:
                 #    print("| t: {} ({}) -> {}".format(t, action, next_state), end=" ")
 
                 if self.debug and done:
-                    print("--> [DEBUG] Done [{} iterations] at state {} with reward {}".
-                          format(t+1, self.env.getState(), reward))
+                    print("--> [DEBUG] Done [{} iterations] at state {} with reward {}".format(t+1, self.env.getState(), reward))
                     print("\t[DEBUG] Updating the value function at the end of the episode...")
 
                 # Learn: i.e. update the value function (stored in the learner) with the new observation
@@ -352,14 +355,15 @@ class Simulator:
                     V += [learner.getV().getValue(state_observe)]
 
                 if self.debug:
-                    print("-> [DEBUG] {}".format(self.env.getState()), end=" ")
+                    print("--> [DEBUG] {}".format(self.env.getState()), end=" ")
 
+            #------- EPISODE FINISHED --------#
             if verbose and np.mod(episode, verbose_period) == 0:
                 print(", agent ENDS at state: {})".format(self.env.getState()))
 
             if compute_rmse:
                 if self.env.getV() is not None:
-                    RMSE[episode] = rmse(self.env.getV(), learner.getV().getValues())#, weights=learner.getStateCounts())
+                    RMSE[episode+1] = rmse(self.env.getV(), learner.getV().getValues())#, weights=learner.getStateCounts())
 
             if plot and np.mod(episode, verbose_period) == 0:
                 # Plot the estimated value function at the end of the episode
@@ -401,7 +405,7 @@ class Simulator:
                         # Only count falling inside the CI starting at episode 100 so that
                         # the normal approximation of the SE is more correct.
                         if episode + 1 >= 100:
-                            ntimes_inside_ci95 += (RMSE_state_observe <= se95)
+                            ntimes_rmse_inside_ci95 += (RMSE_state_observe <= se95)
 
                         # Plot of the estimated value of the state
                         plt.plot(episode+1, learner.getV().getValue(state_observe), 'r*-', markersize=3)
@@ -424,14 +428,14 @@ class Simulator:
                         if episode + 1 == nepisodes:
                             # Show the true value function coverage as x-axis label
                             ax.set_xlabel("% Episodes error is inside 95% Confidence Interval (+/- 2*SE) (for episode>=100): {:.1f}%" \
-                                          .format(ntimes_inside_ci95/(episode+1 - 100 + 1)*100))
+                                          .format(ntimes_rmse_inside_ci95/(episode+1 - 100 + 1)*100))
                         plt.legend(['value', '|error|', '2*SE = 2*sqrt(0.5*(1-0.5)/episode)'])
                         plt.draw()
 
             if isinstance(learner, LeaTDLambdaAdaptive) and episode == nepisodes - 1:
                 learner.plot_info(episode, nepisodes)
 
-            # Reset the learner for the next iteration
+            # Reset the learner for the next episode
             # (WITHOUT resetting the value functions nor the episode counter)
             learner.reset(reset_episode=False, reset_value_functions=False)
 
@@ -483,6 +487,51 @@ class Simulator:
                  'alphas_by_episode': learner.alpha_mean_by_episode
                  }
 
+    def initialize_run_with_learner_status(self, nepisodes, learner, compute_rmse, state_observe):
+        """
+        The run is initialized by storing the initial learner status in terms of:
+        - RMSE (if its computation is requested)
+        - Value of the state to observe (if any)
+
+        nepisodes: int
+            Number of episodes to run in the experiment.
+
+        learner: Learner
+            Learner used in the experiment.
+
+        compute_rmse: bool
+            Whether to compute the RMSE of the estimated value function over all states.
+
+        state_observe: int
+            A state index whose RMSE should be observed as the episode progresses.
+            It is assumed that its value was already parsed by the run() method in terms of compatibility with
+            parameter `compute_rmse`.
+
+        Return: tuple
+        Tuple containing the following elements:
+        - Initial list of one element containing the value of the state to observe, or None if state_observe = False.
+        - Array of length nepisodes + 1 where the initial RMSE and the RMSE at the end of each episode will be stored,
+        or None if compute_rmse = False.
+        - 0, which is the initial number of times the RMSE of the state to observe is smaller than the RMSE associated
+        to the 95% confidence interval of the value of the state to observe.
+        """
+        # Store the initial RMSE, i.e. based on the initial state values proposed by the learner
+        if compute_rmse:
+            RMSE = np.nan*np.zeros(nepisodes+1)
+            RMSE[0] = rmse(self.env.getV(), learner.getV().getValues())
+        else:
+            RMSE = None
+        if state_observe is not None:
+            V = [learner.getV().getValue(state_observe)]
+        else:
+            V = None
+        # Keep track of the number of times the true value function of the state (assumed 0!)
+        # is inside its confidence interval. In practice this only works for the mid state
+        # of the 1D gridworld with the random walk policy.
+        ntimes_rmse_inside_ci95 = 0
+
+        return V, RMSE, ntimes_rmse_inside_ci95
+
     def finalize_run(self):
         # Restore the initial state distribution of the environment (for the next simulation)
         # Note that the restore step done in the __exit__() method may NOT be enough, because the Simulator object
@@ -517,7 +566,7 @@ class Simulator:
         #    if self.env.getV() is not None:
         #        self.env.getV()[s] = r
 
-    def simulate(self, nexperiments, nepisodes, start=None, compute_rmse=False, verbose=False, verbose_period=1, plot=False):
+    def simulate(self, nexperiments, nepisodes, start=None, compute_rmse=True, verbose=False, verbose_period=1, plot=False):
         """Simulates the agent interacting with the environment for a number of experiments and number
         of episodes per experiment.
 
@@ -568,10 +617,14 @@ class Simulator:
             raise ValueError("The number of episodes must be a positive integer number ({})".format(nepisodes))
 
         N = 0.      # Average number of visits to each state over all experiments
-        RMSE = 0.   # RMSE at the end of the experiment averaged over all experiments
-        RMSE2 = 0.  # Used to compute the standard error of the RMSE averaged over all experiments
-        RMSE_by_episodes = np.zeros(nepisodes)  # RMSE at each episode averaged over all experiments
-        RMSE_by_episodes2 = np.zeros(nepisodes) # Used to compute the standard error of the RMSE by episode
+        if compute_rmse:
+            RMSE = 0.   # RMSE at the end of the experiment averaged over all experiments
+            RMSE2 = 0.  # Used to compute the standard error of the RMSE averaged over all experiments
+            RMSE_by_episodes = np.zeros(nepisodes+1)  # RMSE at each episode averaged over all experiments
+                                                      # (note `nepisodes+1` because the first stored RMSE value is at episode 0,
+                                                      # i.e. computed on the the initial guess of the value function)
+            RMSE_by_episodes2 = np.zeros(nepisodes+1) # Used to compute the standard error of the RMSE by episode
+                                                      # (same comment as above)
 
         # IMPORTANT: We should use the seed of the environment and NOT another seed setting mechanism
         # (such as np.random.seed()) because the EnvironmentDiscrete class used to simulate the process
@@ -588,25 +641,29 @@ class Simulator:
             # Number of visits done to each state at the end of the experiment
             N += N_i
             # RMSE at the end of the last episode
-            RMSE_i = RMSE_by_episodes_i[-1]
-            RMSE += RMSE_i
-            RMSE2 += RMSE_i**2
-            # Array containing the RMSE for each episode 1, 2, ..., nepisodes run in the experiment
-            # The RMSE at the first episode is large and at the last episode should be small.
-            RMSE_by_episodes += RMSE_by_episodes_i
-            RMSE_by_episodes2 += RMSE_by_episodes_i**2
-            if verbose:
-                #print("\tRMSE by episode: {}".format(RMSE_by_episodes_i))
-                print("\tRMSE(at end of experiment) = {:.3g}".format(RMSE_i))
+            if compute_rmse:
+                RMSE_i = RMSE_by_episodes_i[-1]
+                RMSE += RMSE_i
+                RMSE2 += RMSE_i**2
+                # Array containing the RMSE for each episode 1, 2, ..., nepisodes run in the experiment
+                # The RMSE at the first episode is large and at the last episode should be small.
+                RMSE_by_episodes += RMSE_by_episodes_i
+                RMSE_by_episodes2 += RMSE_by_episodes_i**2
+                if verbose:
+                    #print("\tRMSE by episode: {}".format(RMSE_by_episodes_i))
+                    print("\tRMSE(at end of experiment) = {:.3g}".format(RMSE_i))
 
         N_mean = N / nexperiments
-        RMSE_mean = RMSE / nexperiments
-        RMSE_se = np.sqrt( ( RMSE2 - nexperiments*RMSE_mean**2 ) / (nexperiments - 1) ) \
-                / np.sqrt(nexperiments)
-            ## The above, before taking sqrt is the estimator of the Var(RMSE) = (SS - n*mean^2) / (n-1)))
-        RMSE_by_episodes_mean = RMSE_by_episodes / nexperiments
-        RMSE_by_episodes_se = np.sqrt( ( RMSE_by_episodes2 - nexperiments*RMSE_by_episodes_mean**2 ) / (nexperiments - 1) ) \
-                            / np.sqrt(nexperiments)
+        if compute_rmse:
+            RMSE_mean = RMSE / nexperiments
+            RMSE_se = np.sqrt( ( RMSE2 - nexperiments*RMSE_mean**2 ) / (nexperiments - 1) ) \
+                    / np.sqrt(nexperiments)
+                ## The above, before taking sqrt is the estimator of the Var(RMSE) = (SS - n*mean^2) / (n-1)))
+            RMSE_by_episodes_mean = RMSE_by_episodes / nexperiments
+            RMSE_by_episodes_se = np.sqrt( ( RMSE_by_episodes2 - nexperiments*RMSE_by_episodes_mean**2 ) / (nexperiments - 1) ) \
+                                / np.sqrt(nexperiments)
+        else:
+            RMSE_mean = RMSE_se = RMSE_by_episodes_mean = RMSE_by_episodes_se = None
 
         return N_mean, RMSE_mean, RMSE_se, RMSE_by_episodes_mean, RMSE_by_episodes_se, learning_info
 
@@ -715,7 +772,7 @@ class SimulatorQueue(Simulator):
 
     def run(self, dict_params_simul: dict, dict_params_info: dict={'plot': False, 'log': False}, dict_info: dict={},
             start_state=None,
-            seed=None, state_observe=None,
+            seed=None,
             verbose=False, verbose_period=1,
             colormap="seismic", pause=0):
         """
@@ -761,10 +818,6 @@ class SimulatorQueue(Simulator):
             This is useful if this method is part of a set of experiments run and we want to keep
             the seed setting that had been done at the offset of the set of experiments. Otherwise,
             if we set the seed again now, the experiments would have always the same outcome.
-            default: None
-
-        state_observe: (opt) int
-            A state index whose RMSE should be observed as the episode progresses.
             default: None
 
         verbose: (opt) bool

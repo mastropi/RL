@@ -42,7 +42,7 @@ class Test_TD_Lambda_GW1D(unittest.TestCase, test_utils.EpisodeSimulation):
         self.seed = 1717
         self.nepisodes = 20
         self.start_state = 10
-        self.plot = False
+        self.plot = True
 
     @classmethod
     def setUpClass(cls):    # cls is the class, in this case, class 'Test_TD_Lambda'
@@ -197,7 +197,7 @@ class Test_TD_Lambda_GW1D(unittest.TestCase, test_utils.EpisodeSimulation):
         # alpha = 0.3, gamma = 1.0, lambda = 0.7
         # adjust_alpha = False, adjust_alpha_by_episode = False
         # seed = 1717, nepisodes=20, start_state = 10
-        rmse_expected = 0.20417505
+        rmse_expected = 0.2192614
 
         rmse_observed = np.mean(RMSE_by_episode)
         print("First run: average RMSE over {} episodes: {:.8f}".format(self.nepisodes, rmse_observed))

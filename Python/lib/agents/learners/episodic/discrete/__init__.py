@@ -201,6 +201,8 @@ class Learner:
         #    print("Before updating alpha: episode {}, state {}: state_count={:.0f}, alpha>={}: alpha={}\n{}" \
         #          .format(self.episode, state, self._state_counts_overall[state], self.alpha_min, self._alphas[state], np.array(self._alphas)))
 
+        # NOTE that we store the alpha value BEFORE its update, as this is the value that was used to learn prior to
+        # updating alpha!
         self._alphas_used_in_episode += [self._alphas[state]]
         if self.adjust_alpha:
             if self.adjust_alpha_by_episode:
