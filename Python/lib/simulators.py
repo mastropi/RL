@@ -432,7 +432,7 @@ class Simulator:
                         plt.legend(['value', '|error|', '2*SE = 2*sqrt(0.5*(1-0.5)/episode)'])
                         plt.draw()
 
-            if isinstance(learner, LeaTDLambdaAdaptive) and episode == nepisodes - 1:
+            if plot and isinstance(learner, LeaTDLambdaAdaptive) and episode == nepisodes - 1:
                 learner.plot_info(episode, nepisodes)
 
             # Reset the learner for the next episode
@@ -656,11 +656,15 @@ class Simulator:
         N_mean = N / nexperiments
         if compute_rmse:
             RMSE_mean = RMSE / nexperiments
-            RMSE_se = np.sqrt( ( RMSE2 - nexperiments*RMSE_mean**2 ) / (nexperiments - 1) ) \
+            RMSE_se = np.sqrt( max(0, RMSE2 - nexperiments*RMSE_mean**2) / (nexperiments - 1) ) \
                     / np.sqrt(nexperiments)
                 ## The above, before taking sqrt is the estimator of the Var(RMSE) = (SS - n*mean^2) / (n-1)))
             RMSE_by_episodes_mean = RMSE_by_episodes / nexperiments
-            RMSE_by_episodes_se = np.sqrt( ( RMSE_by_episodes2 - nexperiments*RMSE_by_episodes_mean**2 ) / (nexperiments - 1) ) \
+            #if any(RMSE_by_episodes2 - nexperiments*RMSE_by_episodes_mean**2 < 0):
+            #    print("WARNING!")
+            #    print(RMSE_by_episodes2 - nexperiments*RMSE_by_episodes_mean**2)
+            # Note: below we limit the calculation of RMSE**2 - n*mean(RMSE)**2 because this difference could be slightly negative (e.g. -1E-16)
+            RMSE_by_episodes_se = np.sqrt( np.max( np.c_[ np.repeat(0, nepisodes+1), RMSE_by_episodes2 - nexperiments*RMSE_by_episodes_mean**2 ], axis=1 ) / (nexperiments - 1) ) \
                                 / np.sqrt(nexperiments)
         else:
             RMSE_mean = RMSE_se = RMSE_by_episodes_mean = RMSE_by_episodes_se = None

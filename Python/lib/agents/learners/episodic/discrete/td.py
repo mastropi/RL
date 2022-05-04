@@ -18,8 +18,8 @@ import Python.lib.utils.plotting as plotting
 
 @unique  # Unique enumeration values (i.e. on the RHS of the equal sign)
 class AdaptiveLambdaType(Enum):
-    FULL = 1
-    HOMOGENEOUS = 2
+    ATD = 1     # (full) Adaptive TD(lambda)
+    HATD = 2    # Homogeneously Adaptive TD(lambda)
 
 
 class LeaTDLambda(Learner):
@@ -147,7 +147,7 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
     def __init__(self, env, alpha=0.1, gamma=1.0, lmbda=0.8,
                  adjust_alpha=False, alpha_update_type=AlphaUpdateType.EVERY_STATE_VISIT,
                  adjust_alpha_by_episode=True, alpha_min=0.,
-                 lambda_min=0., lambda_max=0.99, adaptive_type=AdaptiveLambdaType.FULL,
+                 lambda_min=0., lambda_max=0.99, adaptive_type=AdaptiveLambdaType.ATD,
                  burnin=False, plotwhat="boxplots", fontsize=15, debug=False):
         super().__init__(env, alpha, gamma, lmbda, adjust_alpha, alpha_update_type, adjust_alpha_by_episode, alpha_min, debug)
         
@@ -313,7 +313,7 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
         if self.debug and False:
             print("")
             print("state = {}: lambda = {:.2f}".format(state, lmbda))
-        if self.adaptive_type == AdaptiveLambdaType.FULL:
+        if self.adaptive_type == AdaptiveLambdaType.ATD:
             super()._updateZ(state, lmbda)
         else:
             # In the HOMOGENEOUS adaptive lambda we need to store the HISTORY of the gradient

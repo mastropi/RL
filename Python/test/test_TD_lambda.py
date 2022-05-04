@@ -228,7 +228,7 @@ class Test_TD_Lambda_GW1D(unittest.TestCase, test_utils.EpisodeSimulation):
                                                            alpha_update_type=AlphaUpdateType.EVERY_STATE_VISIT,  # Every-visit is the default
                                                            adjust_alpha=True, adjust_alpha_by_episode=False, alpha_min=params['alpha_min'],
                                                            lambda_min=params['lambda_min'], lambda_max=params['lambda_max'],
-                                                           adaptive_type=td.AdaptiveLambdaType.FULL,
+                                                           adaptive_type=td.AdaptiveLambdaType.ATD,
                                                            burnin=False, debug=False)
         agent_rw_tdlambda_adaptive = agents.GenericAgent(self.policy_rw, learner_tdlambda_adaptive)
 

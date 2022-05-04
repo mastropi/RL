@@ -9,9 +9,11 @@ Created on Tue May 19 20:59:47 2020
 import runpy
 runpy.run_path("../../setup.py")
 
+import os
 import numpy as np
 from matplotlib import pyplot as plt, cm
 import pickle
+from timeit import default_timer as timer
 
 #from Python.lib import environments, agents
 from Python.lib.environments import gridworlds
@@ -24,13 +26,15 @@ import Python.lib.simulators as simulators
 from test_utils import plot_rmse_by_episode
 
 # Directories
-#resultsdir = "../../RL-001-MemoryManagement/results/SimulateTDLambda-DifferentLambdas&Adaptive"
-resultsdir = "../../RL-001-MemoryManagement/results/SimulateTDLambda-DifferentLambdas&Adaptive-2022"
+# Use the following directory (relative to the current file's directory) when running the whole script (I think)
+#resultsdir = "../../RL-001-MemoryManagement/results/SimulateTDLambda-DifferentLambdas&Adaptive-2022"
+# Use the following directory (relative to the project's directory) when running chunk by chunk manually
+resultsdir = "./RL-001-MemoryManagement/results/SimulateTDLambda-DifferentLambdas&Adaptive-2022"
 
 
 ############################ EXPERIMENT SETUP #################################
 # The environment
-nstates = 7 #19 # Number of states excluding terminal states
+nstates = 19 # Number of states excluding terminal states
 env = gridworlds.EnvGridworld1D(length=nstates+2)
 
 # What experiments to run
@@ -46,17 +50,19 @@ alpha_non_adaptive = 0.1
 alphas_adaptive = [0.1] #[0.1, 0.2, 0.3]
 #alpha_non_adaptive = 1
 #alphas_adaptive = [1] #[1, 3, 5]
+alphas = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
 adjust_alpha = False
 adjust_alpha_by_episode = False
-adaptive_type = td.AdaptiveLambdaType.FULL
+adaptive_type = td.AdaptiveLambdaType.ATD
 
 # lambda
-lambdas = [0.0, 0.4, 0.8, 0.9]
+#lambdas = [0.0, 0.2, 0.4, 0.5, 0.7, 0.8, 0.9, 0.95]
+lambdas = [0.0, 0.4, 0.8, 0.9, 0.95]
 lambda_min = 0.0
-lambda_max = 0.9
+lambda_max = 0.99
 
 seed = 1717
-nexperiments = 10
+nexperiments = 20
 nepisodes = 10
 start = int((nstates + 1) / 2)
 verbose = True
@@ -338,3 +344,238 @@ if run_td_adap:
 #            .format(g_dir_results, g_prefix, version, lambdas_opt['td'], lambdas_opt['mc'], alphas_opt['td_adap'], adjust_alpha, alpha_min, lambda_min, nepisodes))
 #fig, (ax_full, ax_scaled, ax_rmse_by_episode) = plt.subplots(1,3)
 #fig, (ax_full, ax_scaled) = plt.subplots(1,2)
+
+
+#------------------------------------ ANALYZE RMSE AS A FUNCTION OF ALPHA = FIXED -------------------------------------#
+# Goal: reproduce the plot in Sutton, pag. 295
+if run_td:
+    time_start = timer()
+
+    results_td = []
+
+    for idx_lambda, lmbda in enumerate(lambdas):
+        print("\n******* lambda {} of {}: {:.2f} ******".format(idx_lambda + 1, len(lambdas), lmbda))
+        rmse_last_episode_mean_by_alpha = []
+        rmse_last_episode_se_by_alpha = []
+        rmse_mean_by_alpha = []
+        rmse_se_by_alpha = []
+        for idx_alpha, alpha in enumerate(alphas):
+            print("\n\t******* lambda = {:.2f} ({} of {}): alpha {} of {}: {:.2f} ******".format(lmbda, idx_lambda+1, len(lambdas), idx_alpha+1, len(alphas), alpha))
+
+            # Reset learner and agent (i.e. erase all memory from a previous run!)
+            learner_td.setParams(alpha=alpha, lmbda=lmbda)
+            learner_td.reset(reset_episode=True, reset_value_functions=True)
+            agent = GenericAgent(pol_rw, learner_td)
+
+            # NOTE: Setting the seed here implies that each set of experiments
+            # (i.e. for each combination of alpha and lambda) yields the same outcome in terms
+            # of visited states and actions.
+            # This is DESIRED --as opposed of having different state-action outcomes for different
+            # (alpha, lambda) settings-- as it better isolates the effect of alpha and lambda.
+            # VERIFIED BY RUNNING IN DEBUG MODE!
+            sim = simulators.Simulator(env, agent, seed=seed, debug=debug)
+
+            # Run the simulation and store the results
+            N_mean, rmse_mean, rmse_se, RMSE_by_episode_mean, RMSE_by_episode_se, learning_info = \
+                                sim.simulate(nexperiments=nexperiments,
+                                             nepisodes=nepisodes,
+                                             start=start,
+                                             verbose=verbose,
+                                             verbose_period=verbose_period,
+                                             plot=False)
+
+            # Add the RMSE results to the list of RMSE's by alpha
+            rmse_last_episode_mean_by_alpha += [rmse_mean]
+            rmse_last_episode_se_by_alpha += [rmse_se]
+            # For the computation of the average RMSE over all episodes we exclude the very beginning because
+            # it is not informative about the performance of the learning algorithm, as no learning has yet taken place!
+            rmse_mean_by_alpha += [ np.mean(RMSE_by_episode_mean[1:]) ]
+            rmse_se_by_alpha += [ np.mean(RMSE_by_episode_se[1:]) ]
+
+        results_td += [{'nexperiments': nexperiments,
+                        'nepisodes': nepisodes,
+                        'lambda': lmbda,
+                        'alphas': alphas,
+                        'rmse_mean': rmse_mean_by_alpha,
+                        'rmse_se': rmse_se_by_alpha,
+                        'rmse_n': nexperiments * len( np.mean(RMSE_by_episode_mean[1:]) ),
+                        'rmse_last_episode_mean': rmse_last_episode_mean_by_alpha,
+                        'rmse_last_episode_se': rmse_last_episode_se_by_alpha,
+                        'rmse_last_episode_n': nexperiments,
+                        }]
+
+    time_end = timer()
+    exec_time = time_end - time_start
+    print("Execution time for TD: {:.1f} sec, {:.1f} min".format(exec_time, exec_time / 60))
+
+    # Save
+    file = open(resultsdir + "/td_alpha_const_first_episodes.pickle", mode="wb")  # "b" means binary mode (needed for pickle.dump())
+    pickle.dump(results_td, file)
+    file.close()
+
+if run_td_adap:
+    time_start = timer()
+
+    rmse_last_episode_mean_by_alpha = []
+    rmse_last_episode_se_by_alpha = []
+    rmse_mean_by_alpha = []
+    rmse_se_by_alpha = []
+    for idx_alpha, alpha in enumerate(alphas):
+        print("\n\t******* Adaptive TD(lambda): alpha {} of {}: {:.2f} ******".format(idx_alpha+1, len(alphas), alpha))
+
+        # Reset learner and agent (i.e. erase all memory from a previous run!)
+        learner_td_adap.setParams(alpha=alpha, lambda_min=lambda_min, lambda_max=lambda_max)
+        learner_td_adap.reset(reset_episode=True, reset_value_functions=True)
+        agent = GenericAgent(pol_rw, learner_td_adap)
+
+        # NOTE: Setting the seed here implies that each set of experiments
+        # (i.e. for each combination of alpha and lambda) yields the same outcome in terms
+        # of visited states and actions.
+        # This is DESIRED --as opposed of having different state-action outcomes for different
+        # (alpha, lambda) settings-- as it better isolates the effect of alpha and lambda.
+        # VERIFIED BY RUNNING IN DEBUG MODE!
+        sim = simulators.Simulator(env, agent, seed=seed, debug=debug)
+
+        # Run the simulation and store the results
+        N_mean, rmse_mean, rmse_se, RMSE_by_episode_mean, RMSE_by_episode_se, learning_info = \
+                            sim.simulate(nexperiments=nexperiments,
+                                         nepisodes=nepisodes,
+                                         start=start,
+                                         verbose=verbose,
+                                         verbose_period=verbose_period,
+                                         plot=False)
+
+        # Add the RMSE results to the list of RMSE's by alpha
+        rmse_last_episode_mean_by_alpha += [rmse_mean]
+        rmse_last_episode_se_by_alpha += [rmse_se]
+        # For the computation of the average RMSE over all episodes we exclude the very beginning because
+        # it is not informative about the performance of the learning algorithm, as no learning has yet taken place!
+        rmse_mean_by_alpha += [ np.mean(RMSE_by_episode_mean[1:]) ]
+        rmse_se_by_alpha += [ np.mean(RMSE_by_episode_se[1:]) ]
+
+    results_td_adap = {
+                        'nexperiments': nexperiments,
+                        'nepisodes': nepisodes,
+                        'alphas': alphas,
+                        'rmse_mean': rmse_mean_by_alpha,
+                        'rmse_se': rmse_se_by_alpha,
+                        'rmse_n': nexperiments * len( np.mean(RMSE_by_episode_mean[1:]) ),
+                        'rmse_last_episode_mean': rmse_last_episode_mean_by_alpha,
+                        'rmse_last_episode_se': rmse_last_episode_se_by_alpha,
+                        'rmse_last_episode_n': nexperiments,
+                        }
+
+    time_end = timer()
+    exec_time = time_end - time_start
+    print("Execution time for {}: {:.1f} sec, {:.1f} min".format(adaptive_type.name, exec_time, exec_time / 60))
+
+    # Save
+    file = open(resultsdir + "/td_{}_lambdamax={:.2f}_alpha_const_first_episodes.pickle".format(adaptive_type.name, lambda_max), mode="wb")
+    pickle.dump(results_td_adap, file)
+    file.close()
+
+
+#--------------------- Plot RMSE vs. alpha results -----------------#
+# Load the data
+file = open(resultsdir + "/td_alpha_const_first_episodes.pickle", mode="rb")
+results_td = pickle.load(file)
+file.close()
+
+file = open(resultsdir + "/td_{}_lambdamax={:.2f}_alpha_const_first_episodes.pickle".format(adaptive_type.name, lambda_max), mode="rb")
+results_td_adap = pickle.load(file)
+file.close()
+
+
+#-- When reading both the ATD and HATD results, for better comparison
+# ATD
+lambda_max_ATD = 0.99
+file = open(resultsdir + "/td_ATD_lambdamax={:.2f}_alpha_const_first_episodes.pickle".format(lambda_max_ATD), mode="rb")
+results_td_ATD = pickle.load(file)
+file.close()
+# HATD
+lambda_max_HATD = 0.80
+file = open(resultsdir + "/td_HATD_lambdamax={:.2f}_alpha_const_first_episodes.pickle".format(lambda_max_HATD), mode="rb")
+results_td_HATD = pickle.load(file)
+file.close()
+
+
+savefig = True
+plot_rmse_last_episode = False
+plot_errorbars = True
+plot_td_adap_together = True
+
+if plot_td_adap_together:
+    figfile = os.path.join(resultsdir, "td_ATD({:.2f})_HATD({:.2f})_alpha_const_{}states_{}episodes" \
+                           .format(lambda_max_ATD, lambda_max_HATD, nstates, nepisodes) + (plot_errorbars and "_errors" or "") + ".png")
+else:
+    figfile = os.path.join(resultsdir, "td_{}_alpha_const_lambdamax={:.2f}_{}states_{}episodes" \
+                           .format(adaptive_type.name, lambda_max, nstates, nepisodes) + (plot_errorbars and "_errors" or "") + ".png")
+
+colormap = cm.get_cmap("jet")
+max_rmse = 0.6
+fontsize = 14
+
+ax = plt.figure(figsize=(10,10)).subplots()
+legend_label = []
+
+# TD(lambda)
+for idx_lambda, lmbda in enumerate(lambdas):
+    # Map blue to the largest lambda and red to the smallest lambda (most similar to the color scheme used in Sutton, pag. 295)
+    color = colormap( 1 - idx_lambda / max((1, len(lambdas)-1)) )
+    if plot_rmse_last_episode:
+        ax.plot(results_td[idx_lambda]['alphas'], results_td[idx_lambda]['rmse_last_episode_mean'], '.--', color=color)
+        if plot_errorbars:
+            ax.errorbar(results_td[idx_lambda]['alphas'], results_td[idx_lambda]['rmse_last_episode_mean'], color=color,
+                        yerr=results_td[idx_lambda]['rmse_last_episode_se'], capsize=4, linestyle='dashed')
+        ax.set_ylabel("RMSE at last episode ({}), averaged over {} experiments".format(nepisodes, nexperiments), fontsize=fontsize)
+    else:
+        ax.plot(results_td[idx_lambda]['alphas'], results_td[idx_lambda]['rmse_mean'], '.--', color=color)
+        if plot_errorbars:
+            ax.errorbar(results_td[idx_lambda]['alphas'], results_td[idx_lambda]['rmse_mean'], color=color,
+                        yerr=results_td[idx_lambda]['rmse_se'], capsize=4, linestyle='dashed')
+        ax.set_ylabel("Average RMSE over first {} episodes, averaged over {} experiments".format(nepisodes, nexperiments), fontsize=fontsize)
+    ax.set_ylim((0, max_rmse))
+    ax.set_xlabel(r"$\alpha$", fontsize=fontsize)
+    ax.set_title(r"TD($\lambda$) algorithms on {}-state 1D gridworld".format(nstates), fontsize=fontsize)
+    # Square plot
+    # Ref: https://www.geeksforgeeks.org/how-to-make-a-square-plot-with-equal-axes-in-matplotlib/
+    ax.set_aspect(1. / ax.get_data_ratio(), adjustable='box')
+    legend_label += [r"TD($\lambda$={:.2g})".format(lmbda)]
+
+if plot_td_adap_together:
+    if plot_rmse_last_episode:
+        ax.plot(results_td_ATD['alphas'], results_td_ATD['rmse_last_episode_mean'], 'x-', color="gray")
+        ax.plot(results_td_HATD['alphas'], results_td_HATD['rmse_last_episode_mean'], 'x-', color="black")
+        if plot_errorbars:
+            ax.errorbar(results_td_ATD['alphas'], results_td_ATD['rmse_last_episode_mean'], color="gray",
+                        yerr=results_td_ATD['rmse_last_episode_se'], capsize=4)
+            ax.errorbar(results_td_HATD['alphas'], results_td_HATD['rmse_last_episode_mean'], color="black",
+                        yerr=results_td_HATD['rmse_last_episode_se'], capsize=4)
+    else:
+        ax.plot(results_td_ATD['alphas'], results_td_ATD['rmse_mean'], 'x-', color="gray")
+        ax.plot(results_td_HATD['alphas'], results_td_HATD['rmse_mean'], 'x-', color="black")
+        if plot_errorbars:
+            ax.errorbar(results_td_ATD['alphas'], results_td_ATD['rmse_mean'], color="gray",
+                        yerr=results_td_ATD['rmse_se'], capsize=4)
+            ax.errorbar(results_td_HATD['alphas'], results_td_HATD['rmse_mean'], color="black",
+                        yerr=results_td_HATD['rmse_se'], capsize=4)
+    legend_label += [r"ATD($\lambda_{max}$" + "={:.2f})".format(lambda_max_ATD), r"HATD($\lambda_{max}$" + "={:.2f})".format(lambda_max_HATD)]
+else:
+    if plot_rmse_last_episode:
+        if plot_errorbars:
+            ax.errorbar(results_td_adap['alphas'], results_td_adap['rmse_last_episode_mean'], color="black",
+                        yerr=results_td_adap['rmse_last_episode_se'], capsize=4)
+        else:
+            ax.plot(results_td_adap['alphas'], results_td_adap['rmse_last_episode_mean'], 'x-', color="black")
+    else:
+        if plot_errorbars:
+            ax.errorbar(results_td_adap['alphas'], results_td_adap['rmse_mean'], color="black",
+                        yerr=results_td_adap['rmse_se'], capsize=4)
+        else:
+            ax.plot(results_td_adap['alphas'], results_td_adap['rmse_mean'], 'x-', color="black")
+    legend_label += [adaptive_type.name + r" $\lambda_{max}$" + "={:.2f})".format(lambda_max)]
+plt.legend(legend_label, loc='lower right', fontsize=fontsize)
+
+if savefig:
+    #plt.gcf().subplots_adjust(left=0.15, top=0.75)
+    plt.savefig(figfile)
