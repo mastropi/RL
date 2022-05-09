@@ -542,32 +542,229 @@ class Test_TD_Lambda_GW2D(unittest.TestCase, test_utils.EpisodeSimulation):
     #------------------------------------------- TESTS ----------------------------------------
 
 
+class Test_TD_Lambda_MountainCar(unittest.TestCase, test_utils.EpisodeSimulation):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.seed = 1717
+        self.nepisodes = 10000
+        self.max_time_steps = 500   # Maximum number of steps to run per episode
+        self.start_state = None # (0.0, 0.0)   # Position and velocity
+        self.plot = True
+        self.colormap = cm.get_cmap("rainbow")  # useful colormaps are "jet", "rainbow", seismic"
+
+    @classmethod
+    def setUpClass(cls):  # cls is the class, in this case, class 'Test_TD_Lambda'
+        # IMPORTANT: All attributes defined here can be then be referenced using self!
+        # (i.e. they belong to the "object" instantiated by this class)
+
+        #cls.env = gym.make('MountainCar-v0')   # Here we create in principle a MountainCarEnv environment because this environment is registered with gym.register() or similar.
+        # See also this implementation of the Mountain Car: https://github.com/JJonahJson/MountainCar-v313/blob/master/code/main.py
+
+        # Environment with discretized position and velocity with nx and nv points respectively
+        nx = 100
+        nv = 100
+        cls.env = mountaincars.MountainCarDiscrete(nx, nv)
+
+        # Using the environment:
+        # Ref: https://gym.openai.com/docs/
+        #cls.env.reset()
+        #for i in range(100):
+        #    observation, reward, done, info = cls.env.step(cls.env.action_space.sample())  # take a random action
+        #    print("iteration i={}: obs = {}, reward = {}, done = {}".format(i, observation, reward, done))
+        #    #if np.mod(i, 10):
+        #    #    cls.env.render()
+        #cls.env.close()
+
+        cls.policy_rw = random_walks.PolRandomWalkDiscrete(cls.env)
+
+    def test_environment(self):
+        env = mountaincars.MountainCarDiscrete(10, 10)
+        state = env.reset(seed=1717)
+        print("Environment reset to state: {}".format(state))
+        assert np.allclose(state, np.array([-0.54806077, 0.0]))
+
+        # Accelerate left several times
+        observation_real, observation, reward, done, info = env.step(0, return_continuous_observation=True)
+        print(observation_real, observation, reward, info)
+        assert np.allclose(observation_real, np.array([-0.54887747, -0.0008167]))
+        assert all(observation == np.array([3, 4]))
+
+        observation_real, observation, reward, done, info = env.step(0, return_continuous_observation=True)
+        print(observation_real, observation, reward, info)
+        assert np.allclose(observation_real, np.array([-0.55050476, -0.00162729]))
+        assert all(observation == np.array([3, 4]))
+
+        observation_real, observation, reward, done, info = env.step(0, return_continuous_observation=True)
+        print(observation_real, observation, reward, info)
+        assert np.allclose(observation_real, np.array([-0.55293047, -0.00242572]))
+        assert all(observation == np.array([3, 4]))
+
+        observation_real, observation, reward, done, info = env.step(0, return_continuous_observation=True)
+        print(observation_real, observation, reward, info)
+        assert np.allclose(observation_real, np.array([-0.55613648, -0.00320601]))
+        assert all(observation == np.array([3, 4]))
+
+        # Do not accelerate
+        observation_real, observation, reward, done, info = env.step(1, return_continuous_observation=True)
+        print(observation_real, observation, reward, info)
+        assert np.allclose(observation_real, np.array([-0.55909885, -0.00296237]))
+        assert all(observation == np.array([3, 4]))
+
+        # Accelerate right
+        observation_real, observation, reward, done, info = env.step(2, return_continuous_observation=True)
+        print(observation_real, observation, reward, info)
+        assert np.allclose(observation_real, np.array([-0.56079547, -0.00169662]))
+        assert all(observation == np.array([3, 4]))
+
+    def test_random_walk_onecase(self, params=None):
+        print("\nTesting " + self.id())
+
+        # Learner and agent
+        if params is None:
+            params = dict({'alpha': 0.3,
+                           'gamma': 1.0,
+                           'lambda': 0.0, #0.7,
+                           'alpha_min': 0.0,
+                           'adjust_alpha': False
+                           })
+        learner_tdlambda = td.LeaTDLambda(self.env, alpha=params['alpha'], gamma=params['gamma'],
+                                          lmbda=params['lambda'],
+                                          alpha_update_type=AlphaUpdateType.FIRST_STATE_VISIT, # Every-visit update is the default
+                                          adjust_alpha=params['adjust_alpha'], adjust_alpha_by_episode=False,
+                                          alpha_min=params['alpha_min'],
+                                          debug=False)
+        agent_rw_tdlambda = agents.GenericAgent(self.policy_rw, learner_tdlambda)
+
+        #-- Simulation
+        # Choose the initial state
+        if self.start_state is not None:
+            # A specific initial state
+            idx_start_state = self.env.get_index_from_state(self.start_state)
+        else:
+            # Define a uniform Initial State Distribution in the environment so that the initial state is chosen randomly
+            # in MountainCar.reset(). The Initial State Distribution (ISD) is an attribute of toy_text.discrete environment.
+
+            # First find all the terminal states which should be excluded from the possible initial states!
+            idx_states_non_terminal = self.env.get_indices_for_non_terminal_states()
+            self.env.isd = np.array([1.0 / len(idx_states_non_terminal) if idx in idx_states_non_terminal else 0.0
+                                     for idx in range(self.env.getNumStates())])
+            #print("ISD:", self.env.isd)
+            print("Steps: dx = {:.3f}, dv = {:.3f}".format(self.env.dx, self.env.dv))
+            print("Positions: {}".format(self.env.get_positions()))
+            print("Velocities: {}".format(self.env.get_velocities()))
+            idx_start_state = None
+        sim = simulators.Simulator(self.env, agent_rw_tdlambda, debug=False)
+
+        time_start = timer()
+        _, _, _, state_info = sim.run(nepisodes=self.nepisodes, max_time_steps=self.max_time_steps,
+                                      start=idx_start_state, seed=self.seed,
+                                      compute_rmse=False, state_observe=None,
+                                      verbose=True, verbose_period=int(self.nepisodes/100),
+                                      plot=False, pause=0.001)
+        time_end = timer()
+        exec_time = time_end - time_start
+        print("Execution time: {:.1f} sec, {:.1f} min".format(exec_time, exec_time / 60))
+
+        observed = agent_rw_tdlambda.getLearner().getV().getValues().reshape(self.env.shape)
+        print("\nobserved: {}".format(observed))
+        #print("Average RMSE over {} episodes: {:.3f}".format(self.nepisodes, np.mean(RMSE_by_episode)))
+        if self.plot:
+            # First replace estimated state values with NaN when the number of visits to the state is < 10
+            # so that we don't get a bad idea of what the estimate is, since it is not reliable.
+            state_counts = np.asarray(sim.agent.getLearner().getStateCounts()).reshape(self.env.shape)
+            idx_not_enough_counts_x, idx_not_enough_counts_v = np.where(state_counts < 10)
+            observed_toplot = copy.deepcopy(observed)
+            observed_toplot[idx_not_enough_counts_x, idx_not_enough_counts_v] = np.nan
+
+            import matplotlib.pyplot as plt
+            x = self.env.get_positions()        # x is on the rows of `observed`
+            v = self.env.get_velocities()       # v is on the cols of `observed`
+            assert len(x) == observed_toplot.shape[0]
+            assert len(v) == observed_toplot.shape[1]
+            title_params = "(lambda={:.2f}, alpha={:.1f}, adj={}, episodes={}, max_time={}, density=(x:{}, v:{}) points)" \
+                            .format(params['lambda'], params['alpha'], params['adjust_alpha'], self.nepisodes, self.max_time_steps, self.env.nx, self.env.nv)
+            plt.figure()
+            plt.errorbar(x, np.nanmean(observed_toplot/self.max_time_steps, axis=1),
+                         yerr=np.nanstd(observed_toplot/self.max_time_steps, axis=1)/np.sqrt(self.env.nv),
+                         marker='.', color="red", capsize=4)
+            ax = plt.gca()
+            ax.set_title("Average value of each position\n" + title_params)
+            plt.figure()
+            plt.errorbar(v, np.nanmean(observed_toplot/self.max_time_steps, axis=0),
+                         yerr=np.nanstd(observed_toplot/self.max_time_steps, axis=0)/np.sqrt(self.env.nx),
+                         marker='.', color="blue", capsize=4)
+            ax = plt.gca()
+            ax.set_title("Average value of each velocity\n" + title_params)
+
+            # 2D plots
+            params['nepisodes'] = self.nepisodes    # Needed for the call to plot_results_2D
+            test_utils.plot_results_2D(observed_toplot/self.max_time_steps, params, colormap=self.colormap,
+                                       fontsize=5, title="Value function (normalized by max time per episode: {})".format(self.max_time_steps))
+            test_utils.plot_results_2D(np.log10(1 + state_counts), params, colormap=self.colormap, fontsize=5, title="State visit count (log scale)")
+
+        #assert np.allclose(observed, expected, atol=1E-6)
+
+        return observed, state_counts, params, sim
+
+
 if __name__ == "__main__":
-    #--- 1D tests
-    unittest.main(defaultTest="Test_TD_Lambda_GW1D")
-    #unittest.main(defaultTest="Test_TD_Lambda_GW1D.test_random_walk_onecase")
-    #unittest.main(defaultTest="Test_TD_Lambda_GW1D.test_random_walk_adaptive_onecase")
-    #unittest.getTestCaseNames()
+    test = True
 
-    #--- 2D tests
-    #unittest.main(defaultTest="Test_TD_Lambda_GW2D")
+    if test:
+        #--- 1D tests
+        unittest.main(defaultTest="Test_TD_Lambda_GW1D")
+        #unittest.main(defaultTest="Test_TD_Lambda_GW1D.test_random_walk_onecase")
+        #unittest.main(defaultTest="Test_TD_Lambda_GW1D.test_random_walk_adaptive_onecase")
+        #unittest.getTestCaseNames()
 
-    # Basic environment
-    #unittest.main(defaultTest="Test_TD_Lambda_GW2D.test_random_walk")
-    #unittest.main(defaultTest="Test_TD_Lambda_GW2D.test_random_walk_adaptive")
+        #--- 2D tests
+        #unittest.main(defaultTest="Test_TD_Lambda_GW2D")
 
-    # Log(n)-rewards environment
-    #unittest.main(defaultTest="Test_TD_Lambda_GW2D.test_random_walk_logn_rewards")
-    #unittest.main(defaultTest="Test_TD_Lambda_GW2D.test_random_walk_adaptive_logn_rewards")
-    
+        # Basic environment
+        #unittest.main(defaultTest="Test_TD_Lambda_GW2D.test_random_walk")
+        #unittest.main(defaultTest="Test_TD_Lambda_GW2D.test_random_walk_adaptive")
 
-    # Or we can also use, to run one specific function defined in a TestCase class
-    # Using unittest.TestSuite() to build our set of tests to run!
-    # Ref: https://stackoverflow.com/questions/15971735/running-single-test-from-unittest-testcase-via-command-line
-    #suite = unittest.TestSuite()
-    #suite.addTest(Test_TD_Lambda_GW2D("test_random_walk_logn_rewards"))
-    #suite.addTest(Test_TD_Lambda_GW2D("test_random_walk_adaptive_logn_rewards"))
-    #runner = unittest.TextTestRunner()
-    #runner.run(suite)
-    
+        # Log(n)-rewards environment
+        #unittest.main(defaultTest="Test_TD_Lambda_GW2D.test_random_walk_logn_rewards")
+        #unittest.main(defaultTest="Test_TD_Lambda_GW2D.test_random_walk_adaptive_logn_rewards")
+
+
+        # Or we can also use, to run one specific function defined in a TestCase class
+        # Using unittest.TestSuite() to build our set of tests to run!
+        # Ref: https://stackoverflow.com/questions/15971735/running-single-test-from-unittest-testcase-via-command-line
+        #suite = unittest.TestSuite()
+        #suite.addTest(Test_TD_Lambda_GW2D("test_random_walk_logn_rewards"))
+        #suite.addTest(Test_TD_Lambda_GW2D("test_random_walk_adaptive_logn_rewards"))
+        #runner = unittest.TextTestRunner()
+        #runner.run(suite)
+
+        #--- Mountain Car tests
+        #unittest.main(defaultTest="Test_TD_Lambda_MountainCar")
+    else:
+        resultsdir = "../../RL-001-MemoryManagement/results/MountainCar"
+
+        test_obj = Test_TD_Lambda_MountainCar()
+        nx = 20
+        nv = 20
+        test_obj.env = mountaincars.MountainCarDiscrete(nx, nv)
+        test_obj.policy_rw = random_walks.PolRandomWalkDiscrete(test_obj.env)
+        params = dict({'alpha': 1.0,
+                       'gamma': 1.0,
+                       'lambda': 0.0,
+                       'alpha_min': 0.0,
+                       'adjust_alpha': True
+                       })
+        state_values, state_counts, params, sim_obj = test_obj.test_random_walk_onecase(params=params)
+
+        # Save
+        filename = resultsdir + "/mountaincar_lambda={}_alpha={}_adj={}_episodes={},maxt={},nx={},nv={}.pickle" \
+                    .format(params['lambda'], params['alpha'], params['adjust_alpha'],
+                            test_obj.nepisodes, test_obj.max_time_steps, test_obj.env.nx, test_obj.env.nv)
+        file = open(filename,
+                    mode="wb")  # "b" means binary mode (needed for pickle.dump())
+        pickle.dump(dict({'V': state_values, 'env': test_obj.env, 'params': params}), file)
+        file.close()
+        print("Results saved to:\n{}".format(os.path.abspath(filename)))
+
     pass

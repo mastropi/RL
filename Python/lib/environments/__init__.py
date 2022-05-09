@@ -21,7 +21,9 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
     Constructor parameters:
     - nS: number of possible states
     - nA: number of possible actions
-    - P: probability of each state-action pair
+    - P: 2D dictionary with entries all possible states of the environment and for each state all possible actions
+      for that state. Each dictionary entry value is a list of tuples of the form:
+      (prob_going_to_next_state, next_state, reward(next_state), is_terminal(next_state))
     - isd: initial state distribution
     - dim: environment dimension (e.g. 1D gridworld, 2D gridworld, etc.), which is just informative 
     - terminal_states: set containing the terminal states of the environment

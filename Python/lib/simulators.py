@@ -200,7 +200,7 @@ class Simulator:
             print("\n------> Output file with simulation results created as:")
             print("------> {}".format(self.results_file))
 
-    def run(self, nepisodes, start=None, seed=None, compute_rmse=False, state_observe=None,
+    def run(self, nepisodes, max_time_steps=+np.Inf, start=None, seed=None, compute_rmse=False, state_observe=None,
              verbose=False, verbose_period=1,
              plot=False, colormap="seismic", pause=0):
         # TODO: (2020/04/11) Convert the plotting parameters to a dictionary named plot_options or similar.
@@ -212,6 +212,10 @@ class Simulator:
         Parameters:
         nepisodes: int
             Length of the experiment: number of episodes to run.
+
+        max_time_steps: int
+            Maximum number of steps to run each episode
+            default: np.Inf
 
         start: None or int, optional
             Index in the set of states defined by the environment corresponding to the starting state.
@@ -335,7 +339,7 @@ class Simulator:
 
             # Time step in the episode (the first time step is t = 0
             t = -1
-            while not done:
+            while not done and not t + 1 >= max_time_steps:     # `t+1` because t starts at 0
                 t += 1
 
                 # Current state and action on that state leading to the next state
@@ -360,7 +364,10 @@ class Simulator:
 
             #------- EPISODE FINISHED --------#
             if verbose and np.mod(episode, verbose_period) == 0:
-                print(", agent ENDS at state: {})".format(self.env.getState()))
+                print(", agent ENDS at state: {})".format(self.env.getState()), end=" ")
+                if not done:
+                    print("(MAX TIME STEP = {} REACHED!)".format(max_time_steps))
+                print("")
 
             if compute_rmse:
                 if self.env.getV() is not None:
@@ -375,7 +382,10 @@ class Simulator:
                     terminal_rewards = [r for (_, r) in self.env.getTerminalStatesAndRewards()]
 
                     state_values = np.asarray(learner.getV().getValues()).reshape(shape)
-                    colornorm = plt.Normalize(vmin=np.min(terminal_rewards), vmax=np.max(terminal_rewards))
+                    if len(terminal_rewards) > 0:
+                        colornorm = plt.Normalize(vmin=np.min(terminal_rewards), vmax=np.max(terminal_rewards))
+                    else:
+                        colornorm = None
                     ax_V.imshow(state_values, cmap=colors, norm=colornorm)
 
                     state_counts = np.asarray(learner.getStateCounts()).reshape(shape)
@@ -464,7 +474,7 @@ class Simulator:
                     for y in range(shape[1]):
                         # Recall the x axis corresponds to the columns of the matrix shown in the image
                         # and the y axis corresponds to the rows
-                        plt.text(x, y, "{:.0f}".format(state_counts[y,x]),
+                        plt.text(y, x, "{:.0f}".format(state_counts[x,y]),
                                  fontsize=fontsize*factor_fs, horizontalalignment='center', verticalalignment='center')
 
                 plt.title("State counts by state\n# visits: (min, mean, max) = ({:.0f}, {:.1f}, {:.0f})" \

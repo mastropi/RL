@@ -13,6 +13,7 @@ import pandas as pd
 
 from datetime import datetime
 from timeit import default_timer as timer
+from unittest import TestCase
 
 
 # Decorator to measure execution time
@@ -163,12 +164,15 @@ def index_linear2multi(idx, shape, order='C'):
         fastest up to the LAST index which changes slowest)
         default: 'C'
 
-    Return: int
-    Linear index to access the element of the 2D shape using the given order.
+    Return: tuple of int
+    Duple with the 2D indices to access the element given by the linear index using the given order.
     """
-    # TODO: (2021/12/11) Extend this function to multi-index shapes
+    # TODO: (2021/12/11) Extend this function to multi-index shapes, not only to 2-index shapes (e.g. multi-index of size (3, 2, 4), where len(shape) = 3)
     if len(shape) != 2:
         raise ValueError("The `shape` parameter must be a numpy array of length 2 to indicate a 2D shape ({})".format(shape))
+
+    if idx < 0 or idx >= np.prod(shape):
+        raise ValueError("The linear index 'idx={}' is out of bounds ([0, {}])".format(idx, np.prod(shape)-1))
 
     # Size of each dimension
     n1, n2 = shape
@@ -180,11 +184,11 @@ def index_linear2multi(idx, shape, order='C'):
         # C-like order: by rows
         x1, x2 = int( idx / n2 ), idx % n2
 
-    return x1, x2
+    return int(x1), int(x2)
 
 def index_multi2linear(idx_2d, shape, order='C'):
     """
-    Converts a 2D index into a linear index based on the given shape and order of access as defined in numpy.reshape()"
+    Converts a 2D index into a linear index based on the given shape and order of access as defined in numpy.reshape()
 
     Arguments:
     idx: tuple
@@ -200,12 +204,17 @@ def index_multi2linear(idx_2d, shape, order='C'):
         fastest up to the LAST index which changes slowest)
         default: 'C'
 
-    Return: tuple
-    Duple with the 2D indices to access the element given by the linear index using the given order.
+    Return: int
+    Linear index to access the element of the 2D shape using the given order.
     """
-    # TODO: (2021/12/11) Extend this function to multi-index shapes
+    # TODO: (2021/12/11) Extend this function to multi-index shapes, not only to 2-index shapes (e.g. multi-index of size (3, 2, 4), where len(shape) = 3)
     if len(shape) != 2:
         raise ValueError("The `shape` parameter must be a numpy array of length 2 to indicate a 2D shape ({})".format(shape))
+
+    if idx_2d[0] < 0 or idx_2d[0] >= shape[0]:
+        raise ValueError("The first index in 'idx_2d' (x1={}) is out of bounds ([0, {}])".format(idx_2d[0], shape[0]-1))
+    if idx_2d[1] < 0 or idx_2d[1] >= shape[1]:
+        raise ValueError("The first index in 'idx_2d' (x2={}) is out of bounds ([0, {}])".format(idx_2d[1], shape[1]-1))
 
     # Size of each dimension
     n1, n2 = shape
@@ -220,7 +229,50 @@ def index_multi2linear(idx_2d, shape, order='C'):
         # C-like order: by rows
         idx = x1 * n2 + x2
 
-    return idx
+    return int(idx)
+
+
+def discretize(x, n, xmin, xmax):
+    """
+    Discretizes a real number into one of n equal-sized left-closed intervals in [xmin, xmax].
+    The rightmost interval is right-closed as well, so that xmax is included in the range of possible x values.
+
+    Arguments:
+    x: float
+        Value to discretize.
+
+    n: int
+        Number of equal-sized intervals in which the range [xmin, xmax] is divided into.
+
+    xmin: float
+        Minimum value allowed for the input x when discretizing. It's included in the range.
+
+    xmax: float
+        Maximum value allowed for the input x when discretizing. It's included in the range.
+
+    Return: int between 0 and n-1
+    Value indexing the discretized value of x, which indicates the interval out of the n possible intervals to which x
+    belongs. The index ranges 0 to (n-1), where 0 represents the range [xmin, xmin + dx) and n-1 represents the range
+    [xmax - dx, xmax] where dx = (xmax - xmin) / n.
+    Note that xmax is included on the rightmost interval.
+    """
+    # Make sure x is float
+    x = float(x)
+
+    # Bound x into [xmin, xmax]
+    x_bounded = max( xmin, min(x , xmax) )
+
+    # Interval size
+    dx = (xmax - xmin) / n
+
+    # Discrete value (we consider the special case when x_bounded == xmax so that the value belongs to the rightmost interval)
+    x_discrete = (n - 1) if x_bounded == xmax else int( (x_bounded - xmin) / dx )
+
+    assert isinstance(x_discrete, int), "The discretized value is an integer"
+    assert 0 <= x_discrete < n, "The discretized value is between 0 and n-1={} ({})".format(n-1, x_discrete)
+
+    return x_discrete
+
 
 def array_of_objects(size, value=None, dtype=list):
     """
@@ -634,6 +686,7 @@ def aggregation_bygroups(df, groupvars, analvars,
 
 if __name__ == "__main__":
     #---------------------- parse_dict_params -------------------------#
+    print("\n--- parse_dict_params() ---")
     params = {'a': {'w': -7}, 't_new': -13, 't_new_dict': {'a': 2, 'b': {'c': 5, 'd': None}}}
     params_default =  {'a': {'w': 8, 'z': {'k': 2, 'y': "ok"}},    # nested parameters
                        'x': {'a': 2, 'f': 5},   # 'a' key is repeated in this nested dictionary
@@ -648,20 +701,54 @@ if __name__ == "__main__":
 
 
     #-------- index_multi2linear / index_linear2multi -----------------#
+    print("\n--- index_multi2linear() and index_linear2multi() ---")
     # 2D matrix with linear indices as its values
     M = np.arange(12).reshape([4, 3])
-    assert index_multi2linear([2, 1], M.shape) == 7
+    assert index_multi2linear([2, 1], M.shape) == 7                 # This is the linear index in the by-column numbering of the 2D-cells in matrix M
     assert index_linear2multi(7, M.shape) == (2, 1)
     assert index_linear2multi(6, M.shape) == (2, 0)
 
-    assert index_multi2linear([2, 1], M.shape, order='F') == 6
+    assert index_multi2linear([2, 1], M.shape, order='F') == 6      # This is the linear index in the by-column numbering of the 2D-cells in matrix M
     assert index_linear2multi(6, M.shape, order='F') == (2, 1)
     assert index_linear2multi(7, M.shape, order='F') == (3, 1)
+
+    # Out of range indices
+    # Note that in order to use unittest.TestCase.assertRaises() we need to create an INSTANCE of the TestCase class
+    # Otherwise we get the error "assertRaises() arg 1 must be an exception type or tuple of exception types"
+    # Ref: https://stackoverflow.com/questions/18084476/is-there-a-way-to-use-python-unit-test-assertions-outside-of-a-testcase
+    # which was referenced by Martijn Pieters in https://stackoverflow.com/questions/49369163/custom-exceptions-in-unittests
+    tc = TestCase()
+    tc.assertRaises(ValueError, index_multi2linear, [4, 0], M.shape)
+    tc.assertRaises(ValueError, index_multi2linear, [0, 3], M.shape)
+    tc.assertRaises(ValueError, index_multi2linear, [-1, 2], M.shape)
+    tc.assertRaises(ValueError, index_multi2linear, [0, -1], M.shape)
+    tc.assertRaises(ValueError, index_linear2multi, 12, M.shape)
+    tc.assertRaises(ValueError, index_linear2multi, -1, M.shape)
     #-------- index_multi2linear / index_linear2multi -----------------#
 
 
+    #--------------------------- discretize ---------------------------#
+    print("\n--- discretize() ---")
+    n = 5; xmin = 3.2; xmax = 7.8
+    assert discretize(5.6, n, xmin, xmax) == 2       # Any number
+    assert discretize(xmin, n, xmin, xmax) == 0      # Extremes
+    assert discretize(xmax, n, xmin, xmax) == n-1    # Extremes
+    assert discretize(xmin - 0.16, n, xmin, xmax) == 0      # Out of bounds
+    assert discretize(xmax + 0.23, n, xmin, xmax) == n-1    # Out of bounds
+
+    # Negative min, positive max
+    n = 5; xmin = -5.1; xmax = 7.8
+    assert discretize(5.6, n, xmin, xmax) == 4       # Any number
+    assert discretize(0.0, n, xmin, xmax) == 1       # 0.0
+    assert discretize(xmin, n, xmin, xmax) == 0      # Extremes
+    assert discretize(xmax, n, xmin, xmax) == n-1    # Extremes
+    assert discretize(xmin - 0.16, n, xmin, xmax) == 0      # Out of bounds
+    assert discretize(xmax + 0.23, n, xmin, xmax) == n-1    # Out of bounds
+    #--------------------------- discretize ---------------------------#
+
+
     #----------------- find_first/last_value_in_list ------------------#
-    print("\n--- find_first/last_value_in_list(): Test #1")
+    print("\n--- find_first/last_value_in_list() ---")
     ll = [[1, 3], ['A', 'B'], [3]]
     assert find_first_value_in_list(ll, 3) == 0
     assert find_first_value_in_list(ll, 'B') == 1
@@ -674,7 +761,7 @@ if __name__ == "__main__":
 
     
     #---------------------- list_contains_either  ---------------------#
-    print("\n--- list_contains_either(): Test #1")
+    print("\n--- list_contains_either() ---")
     container = [1, 3, 3]
     content1 = 3
     content2 = 2

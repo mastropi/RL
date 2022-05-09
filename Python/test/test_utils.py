@@ -139,9 +139,12 @@ def plot_rmse_by_episode(rmse_mean_values, rmse_se_values=None, max_rmse=None, c
     return fig
 
 
-def plot_results_2D(V, params, colormap, fontsize=7):
+def plot_results_2D(V, params, colormap, vmin=None, vmax=None, fontsize=7, title=""):
     """
-    Plots a 2D state value function as an image
+    Plots a 2D matrix as an image displaying the matrix values in the same order as they are printed.
+
+    This means that the upper-left corner corresponds to V[0,0] and the lower-right corner to V[nx-1,ny-1],
+    where (nx, ny) = V.shape.
     
     Arguments:
     V: 2D numpy.array
@@ -158,27 +161,47 @@ def plot_results_2D(V, params, colormap, fontsize=7):
     colormap: matplotlib.cm
         Colormap to use in the plot associated to the state values shown in the image.
 
+    vmin, vmax: float values
+        Minimum and maximum V values to plot which is used to generate a normalized colormap with plt.Normalize().
+
     fontsize: int
         Font size to use for the labels showing the state value function at each 2D state.
+
+    title: string
+        Title to add to the plot (execution parameters are added by this function).
     """
 
     plt.figure()
-    title = "alpha={:.2f}>={:.2f}, gamma={:.2f}, lambda={:.2f}, {} episodes" \
+    title = title + "\nalpha={:.2f}>={:.2f}, gamma={:.2f}, lambda={:.2f}, {} episodes" \
                  .format(params['alpha'], params['alpha_min'], params['gamma'], params['lambda'], params['nepisodes'])
-    plt.imshow(V, cmap=colormap)
+    # Since imshow() is assumed to plot a matrix V with the goal of seeing the image as one sees it when PRINTING V,
+    # the upper left corner corresponds to V[0,0] and the lower right corner to V[nx-1, ny-1], where (nx, ny) = V.shape.
+    if vmin is not None and vmax is not None:
+        colornorm = plt.Normalize(vmin=vmin, vmax=vmax)
+    else:
+        colornorm = None
+    plt.imshow(V, cmap=colormap, norm=colornorm)
     (nx, ny) = V.shape
+    # Go over each value in the plotted matrix V
+    # First we go over the rows (y) and then over the columns (x)
     for x in range(nx):
         for y in range(ny):
-            # NOTE that the position coordinates are indicated as (x,y)
-            # (x = horizontal axis, y = vertical axis with origin at the top)
-            # while the matrix indices with the values from V to retrieve are indicated as (i,j)
-            # (i = row index, j = column index)
-            # with the mapping i <-> y, j <-> x
-            # since the image coordinate x corresponds to the COLUMNS of V (j index)
-            # and the image coordinate y corresponds to the ROWS of V (i index)
-            j = x
-            i = y
-            plt.text(x, y, "{:.3f}".format(V[i,j]), fontsize=fontsize, horizontalalignment='center', verticalalignment='center')
+            # NOTE: (2022/05/06) The coordinate where the given text is added by default is in DATA coordinates
+            # (as opposed to in AXIS coordinates, where (0,0) is the lower-left corner and (1,1) is the upper-right corner)
+            # ref: documentation of plt.text()).
+            #
+            # Since imshow() by default places the nx dimension vertically (i.e. each x is a different row in the image)
+            # and the ny dimension horizontally (i.e. each y is a different column in the image), the DATA coordinates imply that
+            # the y values are measured on the horizontal axis of the image, while the x values are measured
+            # on the vertical axis of the image.
+            #
+            # THEREFORE, we need to place the label corresponding to value V[x,y] at position (y,x) in the image
+            # (DATA) axis coordinates.
+            #
+            # The above was deduced by trial and error and then checked by comparing the pixel color in each image pixel
+            # with the text value labels added below (showing the plotted values V) and the layout of the matrix V
+            # when printed, as in e.g. V[:10, :5].
+            plt.text(y, x, "{:.3f}".format(V[x,y]), fontsize=fontsize, horizontalalignment='center', verticalalignment='center')
     plt.title(title)
 
 
