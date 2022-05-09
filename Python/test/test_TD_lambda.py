@@ -9,13 +9,18 @@ Created on Sat Mar  7 13:40:41 2020
 import runpy
 runpy.run_path('../../setup.py')
 
+import os
+import copy
 import numpy as np
 import unittest
 from unittest_data_provider import data_provider
 #from gym.utils import seeding
 from matplotlib import cm
+from timeit import default_timer as timer
 
-from Python.lib.environments import gridworlds
+import pickle
+
+from Python.lib.environments import gridworlds, mountaincars
 import Python.lib.agents as agents
 from Python.lib.agents.policies import random_walks
 import Python.lib.agents.learners.episodic.discrete.td as td
@@ -48,7 +53,6 @@ class Test_TD_Lambda_GW1D(unittest.TestCase, test_utils.EpisodeSimulation):
     def setUpClass(cls):    # cls is the class, in this case, class 'Test_TD_Lambda'
                             # IMPORTANT: All attributes defined here can be then be referenced using self!
                             # (i.e. they belong to the "object" instantiated by this class)
-        cls.plotFlag = True
         cls.max_rmse = 0.8
         cls.color_rmse = "red"
 
@@ -161,7 +165,7 @@ class Test_TD_Lambda_GW1D(unittest.TestCase, test_utils.EpisodeSimulation):
             self.plot_results(params,
                               observed, self.env.getV(), RMSE_by_episode, state_info['alphas_by_episode'],
                               y2lim=(0, 1.0),
-                              max_rmse=self.max_rmse, color_rmse=self.color_rmse, plotFlag=self.plotFlag)
+                              max_rmse=self.max_rmse, color_rmse=self.color_rmse)
 
         assert np.allclose(observed, expected, atol=1E-6)
 
@@ -258,8 +262,7 @@ class Test_TD_Lambda_GW1D(unittest.TestCase, test_utils.EpisodeSimulation):
             (ax, ax2) = self.plot_results(params,
                               observed, self.env.getV(), RMSE_by_episode, state_info['alphas_by_episode'],
                               y2label="(Average) alpha & lambda", y2lim=(0, 1.0),
-                              max_rmse=self.max_rmse, color_rmse=self.color_rmse, plotFlag=self.plotFlag)
-        
+                              max_rmse=self.max_rmse, color_rmse=self.color_rmse)
             ax2.plot(np.arange(self.nepisodes)+1, agent_rw_tdlambda_adaptive.getLearner().lambda_mean_by_episode, color="orange")
 
         #input("Press Enter...")
@@ -283,7 +286,6 @@ class Test_TD_Lambda_GW2D(unittest.TestCase, test_utils.EpisodeSimulation):
     def setUpClass(cls):    # cls is the class, in this case, class 'Test_TD_Lambda'
                             # IMPORTANT: All attributes defined here can be then be referenced using self!
                             # (i.e. they belong to the "object" instantiated by this class)
-        cls.plotFlag = False
         cls.max_rmse = 0.8
         cls.color_rmse = "red"
 

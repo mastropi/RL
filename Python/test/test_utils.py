@@ -14,8 +14,9 @@ def array2str(x, sep=", ", fmt=":.6f"):
     "Converts an array (possibly numeric) to string separated by `sep`"
     return "[" + sep.join( map(lambda s: ("{" + fmt + "}").format(s), x) ) + "]"
 
-def plot_rmse_by_episode(rmse_mean_values, rmse_se_values=None, max_rmse=None, color="black",
-                         alphas=None, alpha_min=0.0, color_alphas='black', max_alpha=None, fig=None, subtitle="", fontsize=12, legend=True):
+def plot_rmse_by_episode(rmse_mean_values, rmse_se_values=None, max_rmse=None, color="black", linestyle='solid',
+                         alphas=None, alpha_min=0.0, color_alphas='black', max_alpha=None, plot_scales="both", fig=None,
+                         subtitle="", legend_rmse=True, legend_alpha=True, fontsize=12):
     """
     Plots the average RMSE values (over states) by episode
     
@@ -44,17 +45,17 @@ def plot_rmse_by_episode(rmse_mean_values, rmse_se_values=None, max_rmse=None, c
         axis.set_xlabel(xlabel, fontsize=fontsize)
         axis.set_ylabel(ylabel, fontsize=fontsize)    
         axis.set_title("Average RMSE by episode {}".format(subtitle), fontsize=fontsize)
-        axis.legend([legend], loc='upper left', fontsize=fontsize)
+        if legend != "":
+            axis.legend([legend], loc='upper left', fontsize=fontsize)
 
-    def finalize_plot_alpha(axis, ylabel="Average alpha in last experiment", legend=r"Average $\alpha$ over states visited in episode"):
+    def finalize_plot_alpha(axis, ylabel=r"Average $\alpha$ in last experiment", legend=r"Average $\alpha$ over states visited in episode"):
         axis.tick_params(axis='both', which='major', labelsize=np.round(fontsize*0.8))
         axis.axhline(y=alpha_min, color='gray')
         axis.set_ylabel(ylabel, fontsize=fontsize)
         if max_alpha is not None:
-            # We use a positive value for the minimum alpha so that the log transform does not complain
-            # when changing the axis to log scale.
-            axis.set_ylim((1E-6, max_alpha))
-        axis.legend([legend], loc='upper right', fontsize=fontsize)
+            axis.set_ylim((0, max_alpha))
+        if legend != "":
+            axis.legend([legend], loc='upper right', fontsize=fontsize)
 
     #----------------------------------- Parse input parameters -------------------------------
     if alphas is not None and len(alphas) != len(rmse_mean_values) - 1:
@@ -70,51 +71,70 @@ def plot_rmse_by_episode(rmse_mean_values, rmse_se_values=None, max_rmse=None, c
     if max_rmse is None:
         max_rmse = np.max(rmse_mean_values)*1.1
 
+    # Prepare the figure, subplots and axes (in original scale and/or log scale)
     if fig is not None:
         # Get the axes from the given figure, which is assumed to have two axes
+        # Secondary axes are assumed to exist in the given figure `fig`
         axes = fig.get_axes()
+        if plot_scales == "both":
+            ax = axes[0]
+            ax_tlog = axes[1]
+            ax2 = axes[2]
+            ax2_tlog = axes[3]
+        elif plot_scales == "log":
+            ax_tlog = axes[0]
+            ax2_tlog = axes[1]
+        else:
+            ax = axes[0]
+            ax2 = axes[1]
     else:
-        fig = plt.figure(figsize=(20,10))
-        axes = fig.subplots(1,2)
+        if plot_scales == "both":
+            fig = plt.figure(figsize=(20, 10))
+            axes = fig.subplots(1, 2)
+            ax = axes[0]
+            ax_tlog = axes[1]
+            ax2 = ax.twinx()
+            ax2_tlog = ax_tlog.twinx()
+        elif plot_scales == "log":
+            fig = plt.figure(figsize=(10, 10))
+            axes = [fig.subplots(1, 1)] # We enclose in list so that we can reference axes[0]
+            ax_tlog = axes[0]
+            ax2_tlog = ax_tlog.twinx()
+        else:
+            fig = plt.figure(figsize=(10, 10))
+            axes = [fig.subplots(1, 1)] # We enclose in list so that we can reference axes[0]
+            ax = axes[0]
+            ax2 = ax.twinx()
     #----------------------------------- Parse input parameters -------------------------------
 
-    ax = axes[0]
-    ax_tlog = axes[1]
-    ax.plot(time, rmse_mean_values, color=color, linewidth=2, zorder=10)
-        ## zorder is used to define layer order (larger values imply going on top)
-        ## Ref: stackoverflow.com/questions/37246941/specifying-the-order-of-matplotlib-layers
-    finalize_plot_rmse(ax)
+    if plot_scales != "log":
+        ax.plot(time, rmse_mean_values, color=color, linewidth=2, linestyle=linestyle, zorder=10)
+            ## zorder is used to define layer order (larger values imply going on top)
+            ## Ref: stackoverflow.com/questions/37246941/specifying-the-order-of-matplotlib-layers
+        finalize_plot_rmse(ax)
 
-    ax_tlog.plot(time, rmse_mean_values, color=color, linewidth=2, zorder=10)
-    # IMPORTANT: We first need to transform the axis to log scale BEFORE applying the axis limits in finalize_plot_rmse()
-    # because otherwise the log-scale transformation screws up the plot and doesn't show anything... the reason is that
-    # the aforementioned function sets the axis minimum value to 0. Note that I don't want to set it to a very small
-    # positive number because if I do so we don't really see much what's going on in the graph.
-    ax_tlog.set_xscale('log')
-    ax_tlog.set_yscale('log')
-    finalize_plot_rmse(ax_tlog, xlabel="Episode (log scale)", ylabel="RMSE (log scale)")
+    if plot_scales == "both" or plot_scales == "log":
+        ax_tlog.plot(time, rmse_mean_values, color=color, linewidth=2, linestyle=linestyle, zorder=10)
+        # IMPORTANT: We use the symmetric log transformation (as opposed to the log transformation) for two reasons:
+        # 1) the horizontal scale with the episode number starts at 0.
+        # 2) the minimum value in the vertical axis is set to 0.
+        finalize_plot_rmse(ax_tlog, xlabel="Episode (log scale)", ylabel="RMSE", legend=legend_rmse and "Average RMSE by episode" or "")
+        ax_tlog.set_xscale('symlog')
+        #ax_tlog.set_yscale('symlog')
 
     if alphas is not None:
-        if fig is not None and len(axes) >= 3:
-            # A secondary axis is assumed to exist in the given figure `fig`
-            ax2 = axes[2]
-        else:
-            ax2 = ax.twinx()
-        ax2.plot(time[:-1], alphas, ':', color=color_alphas, zorder=0)
-        finalize_plot_alpha(ax2)
+        if plot_scales != "log":
+            ax2.plot(time[:-1], alphas, ':', color=color_alphas, zorder=0)
+            finalize_plot_alpha(ax2)
 
-        if fig is not None and len(axes) >= 4:
-            # A secondary log-axis is assumed to exist in the given figure `fig`
-            ax2_tlog = axes[3]
-        else:
-            ax2_tlog = ax_tlog.twinx()
-        ax2_tlog.plot(time[:-1], alphas, ':', color=color_alphas, zorder=0)
-        finalize_plot_alpha(ax2_tlog)
-        ax2_tlog.set_xscale('log')
-        ax2_tlog.set_yscale('log')
+        if plot_scales == "both" or plot_scales == "log":
+            ax2_tlog.plot(time[:-1], alphas, ':', color=color_alphas, zorder=0)
+            finalize_plot_alpha(ax2_tlog, legend=legend_alpha and r"Average $\alpha$ over states visited in episode" or "")
+            ax2_tlog.set_xscale('symlog')
+            #ax2_tlog.set_yscale('symlog')
 
         # Go back to the primary axis of the left subplot
-        plt.sca(ax)
+        plt.sca(axes[0])
 
     return fig
 
@@ -167,7 +187,7 @@ class EpisodeSimulation:
     def plot_results(self, params,
                      V_estimate, V_true, RMSE_by_episode, alphas_by_episode,
                      y2label="(Average) alpha", y2lim=None,
-                     max_rmse=0.8, color_rmse="black", plotFlag=True):
+                     max_rmse=0.8, color_rmse="black"):
         """
         Plots the estimated and true state value function.
         
@@ -194,43 +214,40 @@ class EpisodeSimulation:
             Average learning rate by episode.
             Its length should be equal to the number of episodes run.
         """
-        if plotFlag:
-            title = "alpha={:.2f}, gamma={:.2f}, lambda={:.2f}, {} episodes" \
-                         .format(params['alpha'], params['gamma'], params['lambda'], self.nepisodes)
+        title = "alpha={:.2f}, gamma={:.2f}, lambda={:.2f}, {} episodes" \
+                     .format(params['alpha'], params['gamma'], params['lambda'], self.nepisodes)
 
-            all_states = np.arange(self.nS + 2)
-            all_episodes = np.arange(self.nepisodes + 1)    # This is 0, 1, ..., nepisodes
-                                                            # i.e. it has length nepisodes + 1 so that the very first
-                                                            # RMSE (for the initial guess of the value function)
-                                                            # is included in the plot.
+        all_states = np.arange(self.nS + 2)
+        all_episodes = np.arange(self.nepisodes + 1)    # This is 0, 1, ..., nepisodes
+                                                        # i.e. it has length nepisodes + 1 so that the very first
+                                                        # RMSE (for the initial guess of the value function)
+                                                        # is included in the plot.
 
-            plt.figure()
-            plt.plot(all_states, V_true, 'b.-')
-            plt.plot(all_states, V_estimate, 'r.-')
-            ax = plt.gca()
-            ax.set_xticks(all_states)
-            plt.title(title)
+        plt.figure()
+        plt.plot(all_states, V_true, 'b.-')
+        plt.plot(all_states, V_estimate, 'r.-')
+        ax = plt.gca()
+        ax.set_xticks(all_states)
+        plt.title(title)
 
-            plt.figure()
-            plt.plot(all_episodes, RMSE_by_episode, color=color_rmse)
-            #plt.xticks(np.arange(self.nepisodes)+1)
-            ax = plt.gca()
-            #ax.set_ylim((0, np.max(RMSE_by_episode)))
-            ax.set_ylim((0, max_rmse))
-            ax.set_xlabel("Episode")
-            ax.set_ylabel("RMSE")
-            ax.set_title(title)
-            
-            ax2 = ax.twinx()
-            ax2.plot(all_episodes[:-1], alphas_by_episode, "k:")
-            ax2.set_ylabel(y2label)
-            if y2lim is not None:
-                ax2.set_ylim(y2lim)
-            ax2.axhline(y=params['alpha_min'], color="gray")
-            
-            # Go back to the primary axis
-            plt.sca(ax)
-            
-            return (ax, ax2)
-    
-        return (None, None)
+        plt.figure()
+        plt.plot(all_episodes, RMSE_by_episode, color=color_rmse)
+        #plt.xticks(np.arange(self.nepisodes)+1)
+        ax = plt.gca()
+        #ax.set_ylim((0, np.max(RMSE_by_episode)))
+        ax.set_ylim((0, max_rmse))
+        ax.set_xlabel("Episode")
+        ax.set_ylabel("RMSE")
+        ax.set_title(title)
+
+        ax2 = ax.twinx()
+        ax2.plot(all_episodes[:-1], alphas_by_episode, "k:")
+        ax2.set_ylabel(y2label)
+        if y2lim is not None:
+            ax2.set_ylim(y2lim)
+        ax2.axhline(y=params['alpha_min'], color="gray")
+
+        # Go back to the primary axis
+        plt.sca(ax)
+
+        return (ax, ax2)

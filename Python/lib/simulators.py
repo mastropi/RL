@@ -325,6 +325,7 @@ class Simulator:
             self.env.reset()
             done = False
             if verbose and np.mod(episode, verbose_period) == 0:
+                print("@{}".format(generate_datetime_string(format="%Y-%m-%d %H:%M:%S")))
                 print("Episode {} of {} running...".format(episode+1, nepisodes), end=" ")
                 print("(agent starts at state: {}".format(self.env.getState()), end=" ")
             if self.debug:
@@ -602,8 +603,11 @@ class Simulator:
                 - Avg(N): The average number of visits to each state over all experiments
                 - Avg(RMSE): Root Mean Square Error averaged over all experiments
                 - SE(RMSE): Standard Error of the average RMSE
-                - Episodic RMSE: array containing the Root Mean Square Error by episode averaged
+                - n(RMSE): Number of experiments run leading to the value of Avg(RMSE) and SE(RMSE).
+                - Episodic RMSE Avg: array containing the Root Mean Square Error by episode averaged
                 over all experiments.
+                - Episodic RMSE SE: array containing the standard error of the Root Mean Square Error by episode.
+                - Episodic RMSE n: number of experiments run leading to the episodic RMSE Avg and SE.
                 - a dictionary containing additional relevant information, as follows:
                     - 'alphas_at_episode_end': the value of the learning parameter `alpha` for each state
                     at the end of the last episode in the last experiment.
@@ -658,6 +662,7 @@ class Simulator:
             RMSE_mean = RMSE / nexperiments
             RMSE_se = np.sqrt( max(0, RMSE2 - nexperiments*RMSE_mean**2) / (nexperiments - 1) ) \
                     / np.sqrt(nexperiments)
+            RMSE_n = nexperiments
                 ## The above, before taking sqrt is the estimator of the Var(RMSE) = (SS - n*mean^2) / (n-1)))
             RMSE_by_episodes_mean = RMSE_by_episodes / nexperiments
             #if any(RMSE_by_episodes2 - nexperiments*RMSE_by_episodes_mean**2 < 0):
@@ -666,10 +671,11 @@ class Simulator:
             # Note: below we limit the calculation of RMSE**2 - n*mean(RMSE)**2 because this difference could be slightly negative (e.g. -1E-16)
             RMSE_by_episodes_se = np.sqrt( np.max( np.c_[ np.repeat(0, nepisodes+1), RMSE_by_episodes2 - nexperiments*RMSE_by_episodes_mean**2 ], axis=1 ) / (nexperiments - 1) ) \
                                 / np.sqrt(nexperiments)
+            RMSE_by_episode_n = nexperiments
         else:
-            RMSE_mean = RMSE_se = RMSE_by_episodes_mean = RMSE_by_episodes_se = None
+            RMSE_mean = RMSE_se = RMSE_n = RMSE_by_episodes_mean = RMSE_by_episodes_se = RMSE_by_episode_n = None
 
-        return N_mean, RMSE_mean, RMSE_se, RMSE_by_episodes_mean, RMSE_by_episodes_se, learning_info
+        return N_mean, RMSE_mean, RMSE_se, RMSE_n, RMSE_by_episodes_mean, RMSE_by_episodes_se, RMSE_by_episode_n, learning_info
 
 
 class SimulatorQueue(Simulator):
