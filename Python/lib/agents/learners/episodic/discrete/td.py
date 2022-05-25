@@ -79,7 +79,11 @@ class LeaTDLambda(Learner):
         self._updateZ(state, self.lmbda)
         delta = reward + self.gamma * self.V.getValue(next_state) - self.V.getValue(state)
         #print("episode {}, state {}: count = {}, alpha = {}".format(self.episode, state, self._state_counts_overall[state], self._alphas[state]))
-        self._alphas_effective = np.r_[self._alphas_effective, self._alphas[state] * self._z.reshape(1,len(self._z))]
+        self._alphas_effective = np.r_[self._alphas_effective, (self._alphas * self._z).reshape(1, len(self._z))]
+            ## NOTE: We need to reshape the product alpha*z because _alphas_effective is a 2D array with as many rows as
+            ## the number of episodes run so far and as many columns as the number of states. The length of alpha*z
+            ## is the number of states which should be laid out across the columns when appending a new row to
+            ## _alphas_effective using np.r_[].
         if delta != 0.0:
             # IMPORTANT: (2020/11/11) if we use _alphas[state] as the learning rate alpha in the following update,
             # we are using the SAME learning rate alpha for the update of ALL states, namely the
@@ -87,12 +91,14 @@ class LeaTDLambda(Learner):
             # This is NOT how the alpha value should be updated for each state
             # (as we should apply the alpha associated to the state that decreases with the number of visits
             # to EACH state --which happens differently). However, this seems to give slightly faster convergence
-            # than the theoretical alpha strategy just mentioned.
+            # than the theoretical alpha strategy just mentioned, at least in the gridworld environment!
             # If we wanted to use the strategy that should be applied in theory, we should simply
             # replace `self._alphas[state]` with `self._alphas` in the below expression. 
-            self.V.setWeights( self.V.getWeights() + self._alphas[state] * delta * self._z )
+            #self.V.setWeights( self.V.getWeights() + self._alphas[state] * delta * self._z )
+            self.V.setWeights( self.V.getWeights() + self._alphas * delta * self._z )
 
         # Update alpha for the next iteration for "by state counts" update
+        #print("Learn: state = {}, next_state = {}, done = {}".format(state, next_state, done))
         if not self.adjust_alpha_by_episode:
             self._update_alphas(state)
 
@@ -294,9 +300,13 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
         # Update the eligibility trace
         self._updateZ(state, lambda_adaptive)
         # Update the weights
-        self._alphas_effective = np.r_[self._alphas_effective, self._alphas[state] * self._z.reshape(1, len(self._z))]
+        self._alphas_effective = np.r_[self._alphas_effective, (self._alphas * self._z).reshape(1, len(self._z))]
+            ## NOTE: We need to reshape the product alpha*z because _alphas_effective is a 2D array with as many rows as
+            ## the number of episodes run so far and as many columns as the number of states. The length of alpha*z
+            ## is the number of states which should be laid out across the columns when appending a new row to
+            ## _alphas_effective using np.r_[].
         if delta != 0.0:
-            self.V.setWeights( self.V.getWeights() + self._alphas[state] * delta * self._z )
+            self.V.setWeights( self.V.getWeights() + self._alphas * delta * self._z )
             if self.debug:
                 print("episode: {}, t: {}: TD ERROR != 0 => delta = {}, delta_rel = {}, lambda (adaptive) = {}\n" \
                         "trajectory so far: {}" \

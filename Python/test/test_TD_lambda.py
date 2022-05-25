@@ -100,9 +100,22 @@ class Test_TD_Lambda_GW1D(unittest.TestCase, test_utils.EpisodeSimulation):
                    0.156952, 0.238841, 0.342924, 0.544935, 0.673823, 0.907726, 0.000000],
                 (2.0, 1.0, 0.0), True,  True, 0.0 ),
             ( 6, 'lambda<1, adjusted alpha by state count',
-                  [-0.000000, -0.946909, -0.907296, -0.775429, -0.507633, -0.370504, -0.280516,
-                   -0.210464, -0.131925, -0.069949, 0.005305, 0.067782, 0.116598, 0.165322,
-                   0.247306, 0.315188, 0.428172, 0.604386, 0.732484, 0.908714, 0.000000],
+                  [-0.000000, -0.894306, -0.820482, -0.644328, -0.385795, -0.263782, -0.185667,
+                   -0.132697, -0.077460, -0.038733, 0.001380, 0.036174, 0.065912, 0.097485,
+                    0.160760, 0.230384, 0.327503, 0.483585, 0.640607, 0.862866, 0.000000],
+                  # (2022/05/25) The following commented out expected result is obtained
+                  # when the TD learner of the classes LeaTDLambda and LeaTDLambdaAdaptive
+                  # defined in td.py use the alpha of the *currently visited state* as the learning rate
+                  # for ALL past visited states whose value function is updated when lambda > 0.
+                  # This is conceptually WRONG, although in the 1D gridworld I observed that
+                  # this strategy generated a faster learning (as observed in fact here, where
+                  # the state values are closer to the true values than the above results,
+                  # which are the results of updating the value function of each state with
+                  # their OWN alpha(s) --as opposed to using alpha(s_n) where s_n is the currently
+                  # visited state at time step n)))
+                  #[-0.000000, -0.946909, -0.907296, -0.775429, -0.507633, -0.370504, -0.280516,
+                  # -0.210464, -0.131925, -0.069949, 0.005305, 0.067782, 0.116598, 0.165322,
+                  #  0.247306, 0.315188, 0.428172, 0.604386, 0.732484, 0.908714, 0.000000],
                 (2.0, 1.0, 0.7), True,  False, 0.0 ),
         )
 
@@ -128,7 +141,7 @@ class Test_TD_Lambda_GW1D(unittest.TestCase, test_utils.EpisodeSimulation):
                                                                      verbose=True, verbose_period=100,
                                                                      plot=False, pause=0.1)
         observed = agent_rw_tdlambda.getLearner().getV().getValues()
-        print("\nobserved: " + test_utils.array2str(observed))
+        print("\n" + self.id() + ", observed: " + test_utils.array2str(observed))
         assert np.allclose(observed, expected, atol=1E-6)
 
     def test_random_walk_onecase(self):
@@ -255,13 +268,27 @@ class Test_TD_Lambda_GW1D(unittest.TestCase, test_utils.EpisodeSimulation):
         # adjust_alpha = True, adjust_alpha_by_episode = False
         # seed = 1717, nepisodes=20, start_state = 9
         # lambda as the Boltzmann function of delta(t) / average( abs(V(t)) )
-        expected = np.array([-0.000000, -0.914800, -0.841925, -0.664785, -0.392792,
-                             -0.249244, -0.154211, -0.093055, -0.041201, -0.016698,
-                             -0.006381, -0.005999, -0.009759, -0.013459, -0.009742,
-                              0.012727,  0.100282,  0.307882,  0.419977,  0.775499, 0.000000])
+        expected = np.array([ 0.000000, -0.861562, -0.756466, -0.559433, -0.293604,
+                             -0.162618, -0.085392, -0.045967, -0.016827, -0.004943,
+                              0.000018,  0.004353,  0.011266,  0.023671,  0.065678,
+                              0.125709,  0.230908,  0.391818,  0.551407,  0.826242, 0.000000])
+        # (2022/05/25) The following commented out expected result is obtained
+        # when the TD learner of the classes LeaTDLambda and LeaTDLambdaAdaptive
+        # defined in td.py use the alpha of the *currently visited state* as the learning rate
+        # for ALL past visited states whose value function is updated when lambda > 0.
+        # This is conceptually WRONG, although in the 1D gridworld I observed that
+        # this strategy generated a faster learning (as observed in fact here, where
+        # the state values are closer to the true values than the above results,
+        # which are the results of updating the value function of each state with
+        # their OWN alpha(s) --as opposed to using alpha(s_n) where s_n is the currently
+        # visited state at time step n)))
+        #expected = np.array([-0.000000, -0.914800, -0.841925, -0.664785, -0.392792,
+        #                     -0.249244, -0.154211, -0.093055, -0.041201, -0.016698,
+        #                     -0.006381, -0.005999, -0.009759, -0.013459, -0.009742,
+        #                      0.012727,  0.100282,  0.307882,  0.419977,  0.775499, 0.000000])
 
         observed = agent_rw_tdlambda_adaptive.getLearner().getV().getValues()
-        print("\nobserved: " + test_utils.array2str(observed))
+        print("\n" + self.id() + ", observed: " + test_utils.array2str(observed))
         print("Average RMSE over {} episodes: {:.3f}".format(self.nepisodes, np.mean(RMSE_by_episode)))
         if self.plot:
             (ax, ax2) = self.plot_results(params,
@@ -422,19 +449,34 @@ class Test_TD_Lambda_GW2D(unittest.TestCase, test_utils.EpisodeSimulation):
         # alpha_update_type = AlphaUpdateType.FIRST_STATE_VISIT
         # adjust_alpha = True, adjust_alpha_by_episode = False
         # seed = 1717, nepisodes = 300, start_state = None
-        expected_values = np.array([-0.000000,	-0.600664,	-0.340097,	-0.199044,	-0.109807,
-                                    -0.598136,	-0.440290,	-0.250745,	-0.110556,	-0.009195,
-                                    -0.335323,	-0.245785,	-0.109325,	 0.057424,	 0.185493,
-                                    -0.163590,	-0.082114,	 0.035308,	 0.267254,	 0.538616,
-                                    -0.084325,	-0.000746,	 0.142019,	 0.426486,	 0.000000,
-                                    ])
+        expected_values = np.array([  0.        , -0.54833162, -0.28786602, -0.09861481, -0.00267096,
+                                     -0.54412628, -0.38643206, -0.20172248, -0.01273661,  0.10080109,
+                                     -0.29436269, -0.17989673, -0.03486362,  0.14812270,  0.26957068,
+                                     -0.10406726, -0.01359656,  0.13508918,  0.37341962,  0.58856250,
+                                     -0.04133353,  0.08119520,  0.25379506,  0.53486058,  0.        ])
+        # (2022/05/25) The following commented out expected result is obtained
+        # when the TD learner of the classes LeaTDLambda and LeaTDLambdaAdaptive
+        # defined in td.py use the alpha of the *currently visited state* as the learning rate
+        # for ALL past visited states whose value function is updated when lambda > 0.
+        # This is conceptually WRONG, although in the 1D gridworld I observed that
+        # this strategy generated a faster learning (as observed in fact here, where
+        # the state values are closer to the true values than the above results,
+        # which are the results of updating the value function of each state with
+        # their OWN alpha(s) --as opposed to using alpha(s_n) where s_n is the currently
+        # visited state at time step n)))
+        #expected_values = np.array([-0.000000,	-0.600664,	-0.340097,	-0.199044,	-0.109807,
+        #                            -0.598136,	-0.440290,	-0.250745,	-0.110556,	-0.009195,
+        #                            -0.335323,	-0.245785,	-0.109325,	 0.057424,	 0.185493,
+        #                            -0.163590,	-0.082114,	 0.035308,	 0.267254,	 0.538616,
+        #                            -0.084325,	-0.000746,	 0.142019,	 0.426486,	 0.000000,
+        #                            ])
 
         print("Agent ends at state {}:".format(self.env.getState()))
         self.env._render()
         observed_values = agent_rw_tdlambda.getLearner().getV().getValues()
         #print("\nobserved values: %s" %(test_utils.array2str(observed_values)) )
         observed = np.asarray( observed_values ).reshape(self.ny, self.nx)
-        print("\nobserved: ")
+        print("\n{}, observed: ".format(self.id()))
         print(observed)
         if self.plot:
             ax = plt.figure().subplots(1,1)
@@ -471,19 +513,34 @@ class Test_TD_Lambda_GW2D(unittest.TestCase, test_utils.EpisodeSimulation):
         # alpha_update_type = AlphaUpdateType.FIRST_STATE_VISIT
         # adjust_alpha = True, adjust_alpha_by_episode = False
         # seed = 1717, nepisodes = 300, start_state = None
-        expected_values = np.array([-0.586914,	-0.000000,	-0.275543,	 0.534306,	 0.529651,
-                                    -0.447301,	-0.386761,	 0.160712,	 0.000000,	 0.496648,
-                                    -0.263472,	-0.210891,	-0.001141,	 0.264747,	 0.124014,
-                                    -0.223334,	-0.210347,	-0.169349,	-0.249459,	-0.393667,
-                                    -0.192741,	-0.196232,	-0.272632,	-0.510045,	-0.000000
-                                    ])
+        expected_values = np.array([ -0.77182828,  0.        , -0.27604594,  0.52689398,  0.52734742,
+                                     -0.52284430, -0.39985642,  0.13538644,  0.        ,  0.5737801 ,
+                                     -0.36497345, -0.26899774, -0.04048382,  0.25487455,  0.17131144,
+                                     -0.32290312, -0.27697465, -0.21734447, -0.26036269, -0.44212176,
+                                     -0.31989397, -0.30768536, -0.34226460, -0.53298452,  0.        ])
+        # (2022/05/25) The following commented out expected result is obtained
+        # when the TD learner of the classes LeaTDLambda and LeaTDLambdaAdaptive
+        # defined in td.py use the alpha of the *currently visited state* as the learning rate
+        # for ALL past visited states whose value function is updated when lambda > 0.
+        # This is conceptually WRONG, although in the 1D gridworld I observed that
+        # this strategy generated a faster learning (as observed in fact here, where
+        # the state values are closer to the true values than the above results,
+        # which are the results of updating the value function of each state with
+        # their OWN alpha(s) --as opposed to using alpha(s_n) where s_n is the currently
+        # visited state at time step n)))
+        #expected_values = np.array([-0.586914,	-0.000000,	-0.275543,	 0.534306,	 0.529651,
+        #                            -0.447301,	-0.386761,	 0.160712,	 0.000000,	 0.496648,
+        #                            -0.263472,	-0.210891,	-0.001141,	 0.264747,	 0.124014,
+        #                            -0.223334,	-0.210347,	-0.169349,	-0.249459,	-0.393667,
+        #                            -0.192741,	-0.196232,	-0.272632,	-0.510045,	-0.000000
+        #                            ])
 
         print("Agent ends at state {}:".format(self.env_logn_rewards.getState()))
         self.env_logn_rewards._render()
         observed_values = agent_rw_tdlambda.getLearner().getV().getValues()
         #print("\nobserved values: %s" %(test_utils.array2str(observed_values)) )
         observed = np.asarray( observed_values ).reshape(self.ny, self.nx)
-        print("\nobserved: ")
+        print("\n{}, observed: ".format(self.id()))
         print(observed)
         if self.plot:
             ax = plt.figure().gca()
@@ -529,19 +586,34 @@ class Test_TD_Lambda_GW2D(unittest.TestCase, test_utils.EpisodeSimulation):
         # adjust_alpha = True, adjust_alpha_by_episode = False
         # seed = 1717, nepisodes = 300, start_state = None
         # lambda as the Boltzmann function of delta(t) / average( abs(V(t)) )
-        expected_values = np.array([-0.000000,	-0.621289,	-0.356950,	-0.197688,	-0.095204,
-                                    -0.597418,	-0.449396,	-0.250112,	-0.100089,	 0.021283,
-                                    -0.330550,	-0.235789,	-0.092370,	 0.075680,	 0.224815,
-                                    -0.153306,	-0.058187,	 0.074201,	 0.301015,	 0.564076,
-                                    -0.051561,	 0.038582,	 0.192242,	 0.472891,	 0.000000
-                                    ])
+        expected_values = np.array([ 0.         , -0.59109302, -0.32699058, -0.12929933, -0.00239441,
+                                     -0.57451245, -0.42242940, -0.22250979, -0.01439459,  0.11135646,
+                                     -0.34176244, -0.20932554, -0.04386852,  0.16273871,  0.30397547,
+                                     -0.14068694, -0.03001114,  0.13679581,  0.39306951,  0.61440035,
+                                     -0.04388995,  0.08125758,  0.26239804,  0.55647320,  0.        ])
+        # (2022/05/25) The following commented out expected result is obtained
+        # when the TD learner of the classes LeaTDLambda and LeaTDLambdaAdaptive
+        # defined in td.py use the alpha of the *currently visited state* as the learning rate
+        # for ALL past visited states whose value function is updated when lambda > 0.
+        # This is conceptually WRONG, although in the 1D gridworld I observed that
+        # this strategy generated a faster learning (as observed in fact here, where
+        # the state values are closer to the true values than the above results,
+        # which are the results of updating the value function of each state with
+        # their OWN alpha(s) --as opposed to using alpha(s_n) where s_n is the currently
+        # visited state at time step n)))
+        #expected_values = np.array([-0.000000,	-0.621289,	-0.356950,	-0.197688,	-0.095204,
+        #                            -0.597418,	-0.449396,	-0.250112,	-0.100089,	 0.021283,
+        #                            -0.330550,	-0.235789,	-0.092370,	 0.075680,	 0.224815,
+        #                            -0.153306,	-0.058187,	 0.074201,	 0.301015,	 0.564076,
+        #                            -0.051561,	 0.038582,	 0.192242,	 0.472891,	 0.000000
+        #                            ])
 
         print("Agent ends at state {}:".format(self.env.getState()))
         self.env._render()
         observed_values = agent_rw_tdlambda_adaptive.getLearner().getV().getValues()
         #print("\nobserved values: %s" %(test_utils.array2str(observed_values)) )
         observed = np.asarray( observed_values ).reshape(self.ny, self.nx)
-        print("\nobserved: ")
+        print("\n{}, observed: ".format(self.id()))
         print(observed)
         if self.plot:
             ax = plt.figure().gca()
@@ -584,19 +656,34 @@ class Test_TD_Lambda_GW2D(unittest.TestCase, test_utils.EpisodeSimulation):
         # adjust_alpha = True, adjust_alpha_by_episode = False
         # seed = 1717, nepisodes = 300, start_state = None
         # lambda as the Boltzmann function of delta(t) / average( abs(V(t)) )
-        expected_values = np.array([-0.581206,	-0.000000,	-0.219902,	 0.682737,	 0.615329,
-                                    -0.384120,	-0.365205,	 0.239536,	 0.000000,	 0.514185,
-                                    -0.149668,	-0.120553,	 0.113366,	 0.304064,	 0.135725,
-                                    -0.087527,	-0.083462,	-0.053985,	-0.200866,	-0.354783,
-                                    -0.067125,	-0.107176,	-0.198340,	-0.464890,	-0.000000
-                                    ])
+        expected_values = np.array([ -0.75751082,  0.        , -0.22101245,  0.62302307,  0.54209392,
+                                     -0.46960693, -0.35882616,  0.18873879,  0.        ,  0.55887958,
+                                     -0.27621701, -0.18056934,  0.05215461,  0.29747383,  0.18889241,
+                                     -0.20753015, -0.16433560, -0.12119574, -0.21485266, -0.40461707,
+                                     -0.19083378, -0.19230422, -0.26873757, -0.48753816,  0.        ])
+        # (2022/05/25) The following commented out expected result is obtained
+        # when the TD learner of the classes LeaTDLambda and LeaTDLambdaAdaptive
+        # defined in td.py use the alpha of the *currently visited state* as the learning rate
+        # for ALL past visited states whose value function is updated when lambda > 0.
+        # This is conceptually WRONG, although in the 1D gridworld I observed that
+        # this strategy generated a faster learning (as observed in fact here, where
+        # the state values are closer to the true values than the above results,
+        # which are the results of updating the value function of each state with
+        # their OWN alpha(s) --as opposed to using alpha(s_n) where s_n is the currently
+        # visited state at time step n)))
+        #expected_values = np.array([-0.581206,	-0.000000,	-0.219902,	 0.682737,	 0.615329,
+        #                            -0.384120,	-0.365205,	 0.239536,	 0.000000,	 0.514185,
+        #                            -0.149668,	-0.120553,	 0.113366,	 0.304064,	 0.135725,
+        #                            -0.087527,	-0.083462,	-0.053985,	-0.200866,	-0.354783,
+        #                            -0.067125,	-0.107176,	-0.198340,	-0.464890,	-0.000000
+        #                            ])
 
         print("Agent ends at state {}:".format(self.env_logn_rewards.getState()))
         self.env_logn_rewards._render()
         observed_values = agent_rw_tdlambda_adaptive.getLearner().getV().getValues()
         #print("\nobserved values: %s" %(test_utils.array2str(observed_values)) )
         observed = np.asarray( observed_values ).reshape(self.ny, self.nx)
-        print("\nobserved: ")
+        print("\n{}, observed: ".format(self.id()))
         print(observed)
         if self.plot:
             ax = plt.figure().gca()
