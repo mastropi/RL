@@ -364,6 +364,37 @@ def insort(alist, value, unique=False):
 
     return idx, found
 
+def find_signed_max_value(x):
+    """
+    Finds the maximum value based on all absolute values but includes the sign of the maximum found
+
+    Arguments
+    x: array, list or tuple
+        Values to analyze
+
+    Return: float
+    The maximum absolute value with its original sign, i.e. before taking the absolute value.
+    """
+    # e.g. x = [4, -5, 0, -3]
+    x = np.array(x)
+
+    ind_nonneg = (x >= 0)
+    ind_neg = [not ind for ind in ind_nonneg]
+
+    if sum(ind_nonneg) > 0:
+        x_max_pos = np.max(x[ind_nonneg])  # e.g. +4
+    else:
+        x_max_pos = 0.0
+
+    if sum(ind_neg) > 0:
+        x_max_neg = np.min(x[ind_neg])  # e.g. -5
+    else:
+        x_max_neg = 0.0
+
+    max_signed_deltaV_rel = x_max_neg if np.abs(x_max_neg) > np.abs(x_max_pos) else x_max_pos  # e.g. -5)
+
+    return max_signed_deltaV_rel
+
 def find(alist, value):
     """
     Returns all the indices in `alist` that are equal to `value`.
@@ -747,6 +778,41 @@ if __name__ == "__main__":
     #--------------------------- discretize ---------------------------#
 
 
+    #----------------------- find_signed_max_value --------------------#
+    print("\n--- find_signed_max_value() ---")
+    # Signed max value is negative
+    x = [4, -5, 0, -3]
+    assert find_signed_max_value(x) == -5
+
+    # Signed max value is positive and trying an array
+    x = np.array([4, -5.0, 0, -3, 6.1])
+    assert find_signed_max_value(x) == +6.1
+
+    # Tied negative max and positive max (returns positive)
+    x = [5.0, -5.0, 0, -3]
+    assert find_signed_max_value(x) == +5
+
+    # All negative values
+    x = [-4.8, -5, -0.5, -3]
+    assert find_signed_max_value(x) == -5
+
+    # All positive values
+    x = [4, 5, 0.3, 3]
+    assert find_signed_max_value(x) == 5
+
+    # No zeros
+    x = [4, -5, 0.3, 3]
+    assert find_signed_max_value(x) == -5
+    # ...as array
+    x = np.array([4, -5, 0.3, 3])
+    assert find_signed_max_value(x) == -5
+
+    # All zeros
+    x = [0, 0, 0]
+    assert find_signed_max_value(x) == 0
+    #----------------------- find_signed_max_value --------------------#
+
+    
     #----------------- find_first/last_value_in_list ------------------#
     print("\n--- find_first/last_value_in_list() ---")
     ll = [[1, 3], ['A', 'B'], [3]]
@@ -759,7 +825,7 @@ if __name__ == "__main__":
     assert find_last_value_in_list(ll, 'C') == -1
     #----------------- find_first/last_value_in_list ------------------#
 
-    
+
     #---------------------- list_contains_either  ---------------------#
     print("\n--- list_contains_either() ---")
     container = [1, 3, 3]

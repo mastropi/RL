@@ -9,6 +9,7 @@ Created on Fri Apr 10 10:36:13 2020
 import numpy as np
 import pandas as pd
 
+from Python.lib.agents.learners import ResetMethod
 from Python.lib.agents.learners.episodic.discrete import Learner, AlphaUpdateType
 from Python.lib.agents.learners.value_functions import ValueFunctionApprox
 
@@ -28,8 +29,10 @@ class LeaMCLambda(Learner):
     def __init__(self, env, alpha=0.1, gamma=1.0, lmbda=0.8,
                  adjust_alpha=False, alpha_update_type=AlphaUpdateType.FIRST_STATE_VISIT,
                  adjust_alpha_by_episode=False, alpha_min=0.,
+                 reset_method=ResetMethod.ALLZEROS, reset_params=None, reset_seed=None,
                  debug=False):
-        super().__init__(env, alpha, adjust_alpha, alpha_update_type, adjust_alpha_by_episode, alpha_min)
+        super().__init__(env, alpha, adjust_alpha, alpha_update_type, adjust_alpha_by_episode, alpha_min,
+                         reset_method=reset_method, reset_params=reset_params, reset_seed=reset_seed)
         self.debug = debug
 
         # Attributes that MUST be presented for all MC methods
@@ -65,7 +68,7 @@ class LeaMCLambda(Learner):
         self._Glambda_list = []
 
     def setParams(self, alpha=None, gamma=None, lmbda=None, adjust_alpha=None, alpha_update_type=None,
-                  adjust_alpha_by_episode=None, alpha_min=0.):
+                  adjust_alpha_by_episode=None, alpha_min=None):
         super().setParams(alpha, adjust_alpha, alpha_update_type, adjust_alpha_by_episode, alpha_min)
         self.gamma = gamma if gamma is not None else self.gamma
         self.lmbda = lmbda if lmbda is not None else self.lmbda
@@ -154,7 +157,7 @@ class LeaMCLambda(Learner):
             Length of the episode, i.e. the time step at which the episode ends.
         """
         #-- Compute the observed return for each state in the trajectory for EVERY visit to it
-        # NOTE: we start at the LATEST state (as opposed to the first) so that we don'tt
+        # NOTE: we start at the LATEST state (as opposed to the first) so that we don't
         # need to have a data structure that stores the already visited states in the episode;
         # we trade data structure creation and maintenance with easier algorithmic implementation of
         # first visit that does NOT require a special data structure storage.
@@ -174,7 +177,15 @@ class LeaMCLambda(Learner):
         assert all(nupdates <= 1), "Each state has been updated at most once"
 
     def learn_pred_V(self, t, state, action, next_state, reward, done, info):
-        "Learn the prediction problem: estimate the state value function"
+        """
+        Learn the prediction problem: estimate the state value function.
+
+        This function is expected to be called ONLINE, i.e. at each visit to a state, as opposed to OFFLINE,
+        i.e. at the end of an episode.
+        HOWEVER, learning, i.e. the update of the value function happens ONLY at the end of the episode.
+        This means that every time this function is called before the end of the episode, the value function remains
+        constant.
+        """
         self._update_trajectory(t, state, reward)
         self._updateG(t, state, next_state, reward, done)
 
@@ -200,12 +211,14 @@ class LeaMCLambda(Learner):
         
         self._values_next_state += [Vns]
 
-        
-        assert not done or done and Vns == 0, "Terminal _states have value 0 ({:.2g})".format(Vns)
+        # 2022/05/17: This assertion is no longer valid because we have implemented in the simulator (Simulator.run())
+        # the option that the episode might end because of a maximum number of steps and NOT because a terminal state
+        # has been reached.
+        #assert not done or done and Vns == 0, "Terminal _states have value 0 ({:.2g})".format(Vns)
         fn_delta = lambda n: reward + self.gamma*Vns - (n>0)*Vs
             ## This fn_delta(n) is the change to add to the G value at the previous iteration
             ## for all G's EXCEPT the new one corresponding to G(t:t+1) corresponding to
-            ## the current time t (which does NOT have a previous value).
+            ## the current time t (which does NOT have a previous value, i.e. there is no such thing as G(t:t))
             ## Note that n=1 in the expression G(t:t+1) corresponds to n=0 in the code
             ## (because of how the times_reversed array is defined.
 
@@ -213,16 +226,22 @@ class LeaMCLambda(Learner):
         # of n-step returns and initialize it to 0 (before it is updated with the currently observed reward
         # immediately below)
         self._G_list += [0.0]
-        # Update all the n-step G(tt:tt+n) returns, from time tt = 0, ..., t-1, using the new observed reward.
+        # Update all the n-step G(tt:tt+n) returns, from time tt = 0, ..., t-1, based on the new observed reward.
+        # This follows from the relation:
+        # G(tt:tt+n+1)  = G(tt:tt+n) + gamma**n * [R(tt+n+1) + gamma*V(S(tt+n+1)) - V(S(tt+n))] =
+        #               = G(tt:tt+n) + gamma^n * delta(tt+n+1)
+        # where V(.) is the value function estimated at the end of the previous episode.
+        # This update has to be done for every tt <= t-1
         # The gamma discount on the observed reward is stronger (i.e. more discount) as we move from time
         # t-1 down to time 0, that's why the exponent of gamma (n) reads its value from the array of
         # REVERSED times constructed above.
         # Note that each G is updated using the G(tt:tt+n-1) value from the previous iteration as INPUT
         # and the meaning of the updated G is G(tt:tt+n) for each n=1, .., t-tt+1)
         # This is true for ALL G(tt:tt+n) except for n=1 which does NOT have a previous value for G
-        # (note that in the code the theoretical "n=1" corresponds to n=0, which is why we multiply Vs
-        # with the condition (n>0) in function fn_delta(n)   
-        # (see my hand-written notes for better understanding) 
+        # (i.e. there is no such thing as G(tt:tt))
+        # Note that in the code the theoretical "n=1" corresponds to n=0, which is why we multiply Vs
+        # with the condition (n>0) in function fn_delta(n)
+        # (see my hand-written notes for better understanding).
         self._G_list = [g + self.gamma**n * fn_delta(n) for (g, n) in zip(self._G_list, times_reversed)]
         assert len(self._G_list) == len(times_reversed), \
                 "Length of _G_list ({}) coincides with length of times_reversed ({})" \
@@ -247,13 +266,14 @@ class LeaMCLambda(Learner):
                                   for (glambda, g, n) in zip(self._Glambda_list, self._G_list, times_reversed)]
             if self.debug:
                 print("[DONE] t: {} \tG(t:t+n): {} \n\tG(t,lambda): {}".format(t, self._G_list, self._Glambda_list))
-            if True:
+            if False:
                 # DM-2020/07/20: Check whether the statement in paper "META-Learning state-based eligibility traces
                 # by Zhao et al. (2020) is true, namely that G(t,lambda) can be computed recursively as:
                 #     G(t,lambda) = R(t+1) + gamma * ( (1 - lambda) * V(S(t+1)) + lambda * G(t,lambda) )
                 # AND IT IS VERIFIED!!!
                 # The problem: I don't know how to prove it... I tried it on my A4 sheets when travelling to Valais
                 # on 19-Jul-2020 but did not succeed...
+                # OK, finally I was able to prove it and wrote it down on 31-Jul-2022 in my SPSS notebook.
                 print("[DONE] t={}, Check G(t,lambda): [t, R(t+1), V(t+1), G(t,lambda), check_G(t,lambda), diff]".format(t))
                 check = [R + self.gamma * ( (1 - self.lmbda)*Vns + self.lmbda*G )
                          for (R, Vns, G) in zip(self._rewards[1:-1], self._values_next_state[1:-1], self._Glambda_list[1:])] + [np.nan]
@@ -281,7 +301,7 @@ class LeaMCLambda(Learner):
             state = self._states[tt]
             # First-visit MC: We only update the value function estimation at the first visit of the state
             if self._states_first_visit_time[state] == tt:
-                # Error, where the lambda-return is used as the current value function estimate,
+                # Value of the error (delta) where the lambda-return is used as the current value function estimate,
                 # i.e. as the TARGET value --to which we want to take V(S(t))-- 
                 # which we consider estimated by G(t,lambda)
                 delta = Glambda[tt] - self.V.getValue(state)
@@ -310,8 +330,11 @@ class LeaMCLambdaAdaptive(LeaMCLambda):
     def __init__(self, env, alpha=0.1, gamma=1.0, lmbda=0.8,
                  adjust_alpha=False, alpha_update_type=AlphaUpdateType.FIRST_STATE_VISIT,
                  adjust_alpha_by_episode=True, alpha_min=0.,
+                 reset_method=ResetMethod.ALLZEROS, reset_params=None, reset_seed=None,
                  debug=False):
-        super().__init__(env, alpha, gamma, lmbda, adjust_alpha, alpha_update_type, adjust_alpha_by_episode, alpha_min, debug)
+        super().__init__(env, alpha, gamma, lmbda, adjust_alpha, alpha_update_type, adjust_alpha_by_episode, alpha_min,
+                         reset_method=reset_method, reset_params=reset_params, reset_seed=reset_seed,
+                         debug=debug)
 
         # Arrays that keep track of previous _rewards for each state
         self.all_states = np.arange(self.env.getNumStates())

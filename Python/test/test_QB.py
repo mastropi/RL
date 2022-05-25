@@ -1707,15 +1707,28 @@ def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None, y2=Non
     Arguments:
     df_results:
         
-    x:
+    x: str
+        Name of the variable for the X-axis of the first plot (FV case).
         
     x2: str
         Name of the variable for the X-axis of the second plot (MC case).
 
-    y2: str
-        Name of the variable for the secondary axis of the last variability plots.
+    xlabel: str
+        Label for the X-axis of the first plot.
 
-    Example:
+    xlabel2: str
+        Label for the X-axis of the second plot.
+
+    y2: str
+        Name of the variable for the secondary axis of the last variability plot (plot #6), which is only plotted
+        when y2 is not None.
+        The typical case is to show the complexity of the algorithm by plotting the average number of events seen
+        by the algorithm.
+
+    ylabel2: str
+        Label for the secondary axis of the last variability plot (plot #6), which is ONLY plotted when y2 is not None.
+
+    Example: This example uses a secondary axis on the last variability plot (#6) to show the complexity of the algorithm
     [Aug-2021]
     results['log(n(FV))'] = np.log10(results['n(FV)'])
     df_plotted, axes_error, axes_violin, axes_variability, axes_bias, axes_mse = \
@@ -1795,7 +1808,7 @@ def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None, y2=Non
                                 figsize=figsize, subplots=subplots,
                                 dict_options={'axis': axis_properties,
                                               'multipliers': {'x': 1, 'y': 100, 'error': 2},
-                                              'labels': {'x': xlabel, 'y': "Blocking probability (%)", 'x2': xlabel2},
+                                              'labels': {'x': [xlabel, xlabel2], 'y': "Blocking probability (%)"},
                                               'properties': {'color': "black", 'color_center': colors}})
   
     # 2) Violin plots
@@ -1805,7 +1818,7 @@ def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None, y2=Non
                                  figsize=figsize, subplots=subplots,
                                  dict_options={'axis': axis_properties,
                                                'multipliers': {'x': 1, 'y': 100},
-                                               'labels': {'x': xlabel, 'y': "Blocking probability (%)", 'x2': xlabel2},
+                                               'labels': {'x': [xlabel, xlabel2], 'y': "Blocking probability (%)"},
                                                'properties': {'color': colors, 'color_center': colors}})
 
     #-- Compute variability and bias
@@ -1901,10 +1914,11 @@ def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None, y2=Non
         splines_opt = {}
     axes_variability = plotting.plot(plot_func_summarize,
                                      df2plot, xvars, vars2plot_variability,
+                                     subplots=subplots,
                                      dict_params={'pointlabels': nvars, 'splines': splines_opt},
                                      dict_options={'axis': axis_properties,
                                                    'multipliers': {'x': 1, 'y': 1},
-                                                   'labels': {'x': xlabel, 'y': "CV w.r.t. true Pr(K) (%)", 'x2': xlabel2},
+                                                   'labels': {'x': [xlabel, xlabel2], 'y': "CV w.r.t. true Pr(K) (%)"},
                                                    'properties': points_properties,
                                                    'texts': {'title': "Relative variability of {}".format(y)}
                                                    })
@@ -1916,10 +1930,11 @@ def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None, y2=Non
         splines_opt = {}
     axes_bias = plotting.plot(plot_func_summarize,
                               df2plot, xvars, vars2plot_bias,
+                              subplots=subplots,
                               dict_params={'pointlabels': nvars, 'splines': splines_opt},
                               dict_options={'axis': axis_properties,
                                             'multipliers': {'x': 1, 'y': 1},
-                                            'labels': {'x': xlabel, 'y': "CV w.r.t. true Pr(K) (%)", 'x2': xlabel2},
+                                            'labels': {'x': [xlabel, xlabel2], 'y': "CV w.r.t. true Pr(K) (%)"},
                                             'properties': points_properties,
                                             'texts': {'title': "Relative bias of {}".format(y)}
                                            })
@@ -1930,11 +1945,12 @@ def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None, y2=Non
     else:
         splines_opt = {}
     axes_mse = plotting.plot(plot_func_summarize,
-                              df2plot, xvars, vars2plot_mse,
-                              dict_params={'pointlabels': nvars, 'splines': splines_opt},
-                              dict_options={'axis': axis_properties,
+                             df2plot, xvars, vars2plot_mse,
+                             subplots=subplots,
+                             dict_params={'pointlabels': nvars, 'splines': splines_opt},
+                             dict_options={'axis': axis_properties,
                                             'multipliers': {'x': 1, 'y': 1},
-                                            'labels': {'x': xlabel, 'y': "RMSE", 'x2': xlabel2},
+                                            'labels': {'x': [xlabel, xlabel2], 'y': "RMSE"},
                                             'properties': points_properties,
                                             'texts': {'title': "Root Mean Squared Error of {}".format(y)}
                                            })
@@ -2098,7 +2114,7 @@ if __name__ == "__main__":
                                                                                         #nparticles_min=40, nparticles_max=160,
                                                                                         replications=replications, run_mc=run_mc,
                                                                                         seed=1313)
-    
+
         #results, results_agg, est_fv, est_mc = Test_QB_Particles.test_fv_implementation(nservers=1, K=20, buffer_size_activation=0.25)
         #results, results_agg, est_fv, est_mc = Test_QB_Particles.test_fv_implementation(nservers=1, K=20, buffer_size_activation=0.5)
         #results, results_agg, est_fv, est_mc = Test_QB_Particles.test_fv_implementation(nservers=1, K=20, buffer_size_activation=0.75)

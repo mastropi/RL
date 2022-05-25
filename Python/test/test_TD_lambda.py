@@ -16,6 +16,9 @@ import unittest
 from unittest_data_provider import data_provider
 #from gym.utils import seeding
 from matplotlib import cm
+import matplotlib.pyplot as plt
+from mpl_toolkits import mplot3d    # For 3D plots (using ax = fig.axes(project='3d'), so the module is NOT explicitly mentioned!
+
 from timeit import default_timer as timer
 
 import pickle
@@ -26,6 +29,7 @@ from Python.lib.agents.policies import random_walks
 import Python.lib.agents.learners.episodic.discrete.td as td
 from Python.lib.agents.learners.episodic.discrete import AlphaUpdateType
 import Python.lib.simulators as simulators
+from Python.lib.utils import computing
 
 import test_utils
 
@@ -112,16 +116,17 @@ class Test_TD_Lambda_GW1D(unittest.TestCase, test_utils.EpisodeSimulation):
         learner_tdlambda = td.LeaTDLambda(self.env, alpha=params_alpha_gamma_lambda[0],
                                           gamma=params_alpha_gamma_lambda[1],
                                           lmbda=params_alpha_gamma_lambda[2],
+                                          alpha_update_type=AlphaUpdateType.EVERY_STATE_VISIT,
                                           adjust_alpha=adjust_alpha, adjust_alpha_by_episode=adjust_alpha_by_episode, alpha_min=alpha_min,
                                           debug=False)
         agent_rw_tdlambda = agents.GenericAgent(self.policy_rw, learner_tdlambda)
 
         # Simulation
         sim = simulators.Simulator(self.env, agent_rw_tdlambda, debug=False)
-        _, _, RMSE_by_episode, state_info = sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
-                                                     compute_rmse=True, state_observe=15,
-                                                     verbose=True, verbose_period=100,
-                                                     plot=False, pause=0.1)
+        _, _, RMSE_by_episode, MAPE_by_episode, learning_info = sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
+                                                                     compute_rmse=True, state_observe=15,
+                                                                     verbose=True, verbose_period=100,
+                                                                     plot=False, pause=0.1)
         observed = agent_rw_tdlambda.getLearner().getV().getValues()
         print("\nobserved: " + test_utils.array2str(observed))
         assert np.allclose(observed, expected, atol=1E-6)
@@ -143,10 +148,10 @@ class Test_TD_Lambda_GW1D(unittest.TestCase, test_utils.EpisodeSimulation):
 
         # Simulation
         sim = simulators.Simulator(self.env, agent_rw_tdlambda, debug=False)
-        _, _, RMSE_by_episode, state_info = sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
-                                                     compute_rmse=True, state_observe=19,
-                                                     verbose=True, verbose_period=100,
-                                                     plot=False, pause=0.001)
+        _, _, RMSE_by_episode, MAPE_by_episode, learning_info = sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
+                                                                     compute_rmse=True, state_observe=19,
+                                                                     verbose=True, verbose_period=100,
+                                                                     plot=False, pause=0.001)
 
         # Expected values with the close to optimum values (for minimum RMSE) shown in Sutton:
         # 19-size gridworld
@@ -163,7 +168,7 @@ class Test_TD_Lambda_GW1D(unittest.TestCase, test_utils.EpisodeSimulation):
         print("Average RMSE over {} episodes: {:.3f}".format(self.nepisodes, np.mean(RMSE_by_episode)))
         if self.plot:
             self.plot_results(params,
-                              observed, self.env.getV(), RMSE_by_episode, state_info['alphas_by_episode'],
+                              observed, self.env.getV(), RMSE_by_episode, learning_info['alpha_mean'],
                               y2lim=(0, 1.0),
                               max_rmse=self.max_rmse, color_rmse=self.color_rmse)
 
@@ -191,10 +196,10 @@ class Test_TD_Lambda_GW1D(unittest.TestCase, test_utils.EpisodeSimulation):
         sim = simulators.Simulator(self.env, agent_rw_tdlambda, debug=False)
 
         # First run
-        _, _, RMSE_by_episode, _ = sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
-                                                    compute_rmse=True, state_observe=19,
-                                                    verbose=True, verbose_period=100,
-                                                    plot=False, pause=0.001)
+        _, _, RMSE_by_episode, MAPE_by_episode, _ = sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
+                                                            compute_rmse=True, state_observe=19,
+                                                            verbose=True, verbose_period=100,
+                                                            plot=False, pause=0.001)
 
         # Expected RMSE with the following settings:
         # 19-size gridworld
@@ -208,10 +213,10 @@ class Test_TD_Lambda_GW1D(unittest.TestCase, test_utils.EpisodeSimulation):
         assert np.allclose(rmse_observed, rmse_expected, atol=1E-6)
 
         # Second run
-        _, _, RMSE_by_episode, _ = sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
-                                                    compute_rmse=True, state_observe=19,
-                                                    verbose=True, verbose_period=100,
-                                                    plot=False, pause=0.001)
+        _, _, RMSE_by_episode, MAPE_by_episode, _ = sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
+                                                            compute_rmse=True, state_observe=19,
+                                                            verbose=True, verbose_period=100,
+                                                            plot=False, pause=0.001)
         rmse_observed = np.mean(RMSE_by_episode)
         print("Second run: average RMSE over {} episodes: {:.8f}".format(self.nepisodes, rmse_observed))
         assert np.allclose(rmse_observed, rmse_expected, atol=1E-6)
@@ -238,10 +243,10 @@ class Test_TD_Lambda_GW1D(unittest.TestCase, test_utils.EpisodeSimulation):
 
         # Simulation        
         sim = simulators.Simulator(self.env, agent_rw_tdlambda_adaptive, debug=False)
-        _, _, RMSE_by_episode, state_info = sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
-                                                     compute_rmse=True,
-                                                     verbose=True, verbose_period=100,
-                                                     plot=False, pause=0.001)
+        _, _, RMSE_by_episode, MAPE_by_episode, learning_info = sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
+                                                                     compute_rmse=True,
+                                                                     verbose=True, verbose_period=100,
+                                                                     plot=False, pause=0.001)
 
         # Expected values with: (we use the same parameters as with the above test case in dataprovider using lambda = 0.7)
         # 19-size gridworld
@@ -260,7 +265,7 @@ class Test_TD_Lambda_GW1D(unittest.TestCase, test_utils.EpisodeSimulation):
         print("Average RMSE over {} episodes: {:.3f}".format(self.nepisodes, np.mean(RMSE_by_episode)))
         if self.plot:
             (ax, ax2) = self.plot_results(params,
-                              observed, self.env.getV(), RMSE_by_episode, state_info['alphas_by_episode'],
+                              observed, self.env.getV(), RMSE_by_episode, learning_info['alpha_mean'],
                               y2label="(Average) alpha & lambda", y2lim=(0, 1.0),
                               max_rmse=self.max_rmse, color_rmse=self.color_rmse)
             ax2.plot(np.arange(self.nepisodes)+1, agent_rw_tdlambda_adaptive.getLearner().lambda_mean_by_episode, color="orange")
@@ -269,6 +274,62 @@ class Test_TD_Lambda_GW1D(unittest.TestCase, test_utils.EpisodeSimulation):
 
         assert np.allclose(observed, expected, atol=1E-6)
     #------------------------------------------- TESTS ----------------------------------------
+
+
+class Test_TD_Lambda_GW1D_OneTerminalState(unittest.TestCase, test_utils.EpisodeSimulation):
+
+    def __init__(self, *args, **kwargs):
+        self.seed = kwargs.pop('seed', 1717)
+        self.nepisodes = kwargs.pop('nepisodes', 20)
+        self.start_state = kwargs.pop('start_state', 0)
+        self.plot = kwargs.pop('plot', False)
+        super().__init__(*args, **kwargs)
+
+    @classmethod
+    def setUpClass(cls):  # cls is the class, in this case, class 'Test_TD_Lambda'
+        # IMPORTANT: All attributes defined here can be then be referenced using self!
+        # (i.e. they belong to the "object" instantiated by this class)
+        cls.max_rmse = 0.8
+        cls.color_rmse = "red"
+
+        # Environment: 1D gridworld
+        cls.nS = 19  # Number of non-terminal states in the 1D gridworld
+        cls.env = gridworlds.EnvGridworld1D_OneTerminalState(length=cls.nS + 1)  # nS states plus one terminal state
+
+        # Random walk policy on the above environment
+        cls.policy_rw = random_walks.PolRandomWalkDiscrete(cls.env)
+
+    def run_random_walk_adaptive_onecase(self):
+        print("\nTesting " + self.id())
+
+        # Learner and agent
+        # (we use the same parameters as for the test case in dataprovider with labmda = 0.7
+        params = dict({'alpha': 1.0,
+                       'gamma': 1.0,
+                       'lambda': np.nan,
+                       'alpha_min': 0.0,
+                       'lambda_min': 0.0,
+                       'lambda_max': 1.0
+                       })
+        learner_tdlambda_adaptive = td.LeaTDLambdaAdaptive(self.env, alpha=params['alpha'], gamma=params['gamma'],
+                                                           alpha_update_type=AlphaUpdateType.EVERY_STATE_VISIT,  # Every-visit is the default
+                                                           adjust_alpha=True, adjust_alpha_by_episode=False, alpha_min=params['alpha_min'],
+                                                           lambda_min=params['lambda_min'], lambda_max=params['lambda_max'],
+                                                           adaptive_type=td.AdaptiveLambdaType.ATD,
+                                                           burnin=False, debug=False)
+        agent_rw_tdlambda_adaptive = agents.GenericAgent(self.policy_rw, learner_tdlambda_adaptive)
+
+        # Simulation
+        sim = simulators.Simulator(self.env, agent_rw_tdlambda_adaptive, debug=False)
+        _, _, _, _, learning_info = sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
+                                                                     compute_rmse=False,
+                                                                     verbose=True, verbose_period=100,
+                                                                     plot=False, pause=0.001)
+
+        observed = agent_rw_tdlambda_adaptive.getLearner().getV().getValues()
+        print("\n" + self.id() + ", observed: " + test_utils.array2str(observed))
+
+        return learning_info
 
 
 class Test_TD_Lambda_GW2D(unittest.TestCase, test_utils.EpisodeSimulation):
@@ -280,7 +341,7 @@ class Test_TD_Lambda_GW2D(unittest.TestCase, test_utils.EpisodeSimulation):
         self.start_state = None
         self.colormap = cm.get_cmap("rainbow")  # useful colormaps are "jet", "rainbow", seismic"
         self.pause = 0.001
-        self.plot = True
+        self.plot = False
 
     @classmethod
     def setUpClass(cls):    # cls is the class, in this case, class 'Test_TD_Lambda'
@@ -350,10 +411,10 @@ class Test_TD_Lambda_GW2D(unittest.TestCase, test_utils.EpisodeSimulation):
 
         # Simulation
         sim = simulators.Simulator(self.env, agent_rw_tdlambda, debug=False)
-        _, _, RMSE_by_episode, state_info = sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
-                                                     compute_rmse=False, state_observe=0,
-                                                     verbose=True, verbose_period=int(self.nepisodes/10),
-                                                     plot=True, colormap=self.colormap, pause=self.pause)
+        _, _, _, _, learning_info = sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
+                                         compute_rmse=False, state_observe=0,
+                                         verbose=True, verbose_period=max(1, int(self.nepisodes/10)),
+                                         plot=self.plot, colormap=self.colormap, pause=self.pause)
 
         # Expected 2D state value function given as 1D array with:
         # 2D grid = 5 x 5
@@ -376,7 +437,8 @@ class Test_TD_Lambda_GW2D(unittest.TestCase, test_utils.EpisodeSimulation):
         print("\nobserved: ")
         print(observed)
         if self.plot:
-            test_utils.plot_results_2D(observed, params, colormap=self.colormap, fontsize=self.fontsize)
+            ax = plt.figure().subplots(1,1)
+            test_utils.plot_results_2D(ax, observed, params, colormap=self.colormap, fontsize=self.fontsize)
 
         assert np.allclose(observed_values, expected_values, atol=1E-6)
 
@@ -398,10 +460,10 @@ class Test_TD_Lambda_GW2D(unittest.TestCase, test_utils.EpisodeSimulation):
 
         # Simulation
         sim = simulators.Simulator(self.env_logn_rewards, agent_rw_tdlambda, debug=False)
-        _, _, RMSE_by_episode, state_info = sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
-                                                     compute_rmse=False, state_observe=0,
-                                                     verbose=True, verbose_period=int(self.nepisodes/10),
-                                                     plot=True, colormap=self.colormap, pause=self.pause)
+        _, _, _, _, learning_info = sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
+                                         compute_rmse=False, state_observe=0,
+                                         verbose=True, verbose_period=max(1, int(self.nepisodes/10)),
+                                         plot=self.plot, colormap=self.colormap, pause=self.pause)
 
         # Expected 2D state value function given as 1D array with:
         # 2D grid = 5 x 5
@@ -424,7 +486,8 @@ class Test_TD_Lambda_GW2D(unittest.TestCase, test_utils.EpisodeSimulation):
         print("\nobserved: ")
         print(observed)
         if self.plot:
-            test_utils.plot_results_2D(observed, params, colormap=self.colormap, fontsize=self.fontsize)
+            ax = plt.figure().gca()
+            test_utils.plot_results_2D(ax, observed, params, colormap=self.colormap, fontsize=self.fontsize)
 
         assert np.allclose(observed_values, expected_values, atol=1E-6)
     ####################### TD(lambda) #######################
@@ -454,10 +517,10 @@ class Test_TD_Lambda_GW2D(unittest.TestCase, test_utils.EpisodeSimulation):
 
         # Simulation        
         sim = simulators.Simulator(self.env, agent_rw_tdlambda_adaptive, debug=False)
-        _, _, RMSE_by_episode, state_info = sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
-                                                     compute_rmse=False,
-                                                     verbose=True, verbose_period=int(self.nepisodes/10),
-                                                     plot=True, colormap=self.colormap, pause=self.pause)
+        _, _, _, _, learning_info = sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
+                                         compute_rmse=False,
+                                         verbose=True, verbose_period=max(1, int(self.nepisodes/10)),
+                                         plot=self.plot, colormap=self.colormap, pause=self.pause)
 
         # Expected 2D state value function given as 1D array with:
         # 2D grid = 5 x 5
@@ -481,7 +544,8 @@ class Test_TD_Lambda_GW2D(unittest.TestCase, test_utils.EpisodeSimulation):
         print("\nobserved: ")
         print(observed)
         if self.plot:
-            test_utils.plot_results_2D(observed, params, colormap=self.colormap, fontsize=self.fontsize)
+            ax = plt.figure().gca()
+            test_utils.plot_results_2D(ax, observed, params, colormap=self.colormap, fontsize=self.fontsize)
 
         assert np.allclose(observed_values, expected_values, atol=1E-6)
 
@@ -508,10 +572,10 @@ class Test_TD_Lambda_GW2D(unittest.TestCase, test_utils.EpisodeSimulation):
 
         # Simulation        
         sim = simulators.Simulator(self.env_logn_rewards, agent_rw_tdlambda_adaptive, debug=False)
-        _, _, RMSE_by_episode, state_info = sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
-                                                     compute_rmse=False,
-                                                     verbose=True, verbose_period=int(self.nepisodes/10),
-                                                     plot=False, colormap=self.colormap, pause=self.pause)
+        _, _, _, _, learning_info = sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
+                                         compute_rmse=False,
+                                         verbose=True, verbose_period=max(1, int(self.nepisodes/10)),
+                                         plot=self.plot, colormap=self.colormap, pause=self.pause)
 
         # Expected 2D state value function given as 1D array with:
         # 2D grid = 5 x 5
@@ -535,7 +599,8 @@ class Test_TD_Lambda_GW2D(unittest.TestCase, test_utils.EpisodeSimulation):
         print("\nobserved: ")
         print(observed)
         if self.plot:
-            test_utils.plot_results_2D(observed, params, colormap=self.colormap, fontsize=self.fontsize)
+            ax = plt.figure().gca()
+            test_utils.plot_results_2D(ax, observed, params, colormap=self.colormap, fontsize=self.fontsize)
 
         assert np.allclose(observed_values, expected_values, atol=1E-6)
     ####################### ADAPTIVE TD(lambda) #######################
@@ -545,13 +610,14 @@ class Test_TD_Lambda_GW2D(unittest.TestCase, test_utils.EpisodeSimulation):
 class Test_TD_Lambda_MountainCar(unittest.TestCase, test_utils.EpisodeSimulation):
 
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.seed = 1717
-        self.nepisodes = 10000
-        self.max_time_steps = 500   # Maximum number of steps to run per episode
-        self.start_state = None # (0.0, 0.0)   # Position and velocity
-        self.plot = True
+        self.seed = kwargs.pop('seed', None)
+        self.nepisodes = kwargs.pop('nepisodes', 10)
+        self.max_time_steps = kwargs.pop('max_time_steps', 500)  # Maximum number of steps to run per episode
+        self.normalizer = kwargs.pop('normalizer', 1)            # Normalize for the plots: Set it to max_time_steps when the rewards are NOT sparse (i.e. are -1 every where except at terminal states), o.w. set it to 1 (when rewards are sparse, i.e. they occur at terminal states)
+        self.start_state = kwargs.pop('start_state', None)       # Position and velocity
+        self.plot = kwargs.pop('plot', False)
         self.colormap = cm.get_cmap("rainbow")  # useful colormaps are "jet", "rainbow", seismic"
+        super().__init__(*args, **kwargs)
 
     @classmethod
     def setUpClass(cls):  # cls is the class, in this case, class 'Test_TD_Lambda'
@@ -577,6 +643,49 @@ class Test_TD_Lambda_MountainCar(unittest.TestCase, test_utils.EpisodeSimulation
         #cls.env.close()
 
         cls.policy_rw = random_walks.PolRandomWalkDiscrete(cls.env)
+
+    def plot_results(self, values_2d, state_counts):
+        # First replace estimated state values with NaN when the number of visits to the state is < 10
+        # so that we don't get a bad idea of what the estimate is, since it is not reliable.
+        idx_not_enough_counts_x, idx_not_enough_counts_v = np.where(state_counts < 10)
+        values_2d_toplot = copy.deepcopy(values_2d)
+        values_2d_toplot[idx_not_enough_counts_x, idx_not_enough_counts_v] = np.nan
+
+        import matplotlib.pyplot as plt
+        x = self.env.get_positions()  # x is on the rows of `values_2d`
+        v = self.env.get_velocities()  # v is on the cols of `values_2d`
+        assert len(x) == values_2d_toplot.shape[0]
+        assert len(v) == values_2d_toplot.shape[1]
+        title_params = "(lambda={:.2f}, alpha={:.1f}, adj={}, episodes={}, max_time={}, density=(x:{}, v:{}) points)" \
+            .format(params['lambda'], params['alpha'], params['adjust_alpha'], self.nepisodes, self.max_time_steps,
+                    self.env.nx, self.env.nv)
+        plt.figure()
+        plt.errorbar(x, np.nanmean(values_2d_toplot / self.normalizer, axis=1),
+                     yerr=np.nanstd(values_2d_toplot / self.normalizer, axis=1) / np.sqrt(self.env.nv),
+                     marker='.', color="red", capsize=4)
+        ax = plt.gca()
+        ax.set_title("Average value of each position\n" + title_params)
+
+        plt.figure()
+        plt.errorbar(v, np.nanmean(values_2d_toplot / self.normalizer, axis=0),
+                     yerr=np.nanstd(values_2d_toplot / self.normalizer, axis=0) / np.sqrt(self.env.nx),
+                     marker='.', color="blue", capsize=4)
+        ax = plt.gca()
+        ax.set_title("Average value of each velocity\n" + title_params)
+
+        # 2D plots
+        params['nepisodes'] = self.nepisodes  # Needed for the call to plot_results_2D
+        fig = plt.figure()
+        axes = fig.subplots(1,3)
+        test_utils.plot_results_2D(axes[0], values_2d_toplot / self.normalizer, params, colormap=self.colormap,
+                                   fontsize=5, title="Value function (normalized by {})".format(
+                self.normalizer))
+        test_utils.plot_results_2D(axes[1], state_counts, params, colormap=cm.get_cmap("Blues"), fontsize=5, format_labels=".0f",
+                                   title="State visit count")
+        test_utils.plot_results_2D(axes[2], np.log10(1 + state_counts), params, colormap=cm.get_cmap("Blues"), fontsize=5, format_labels=".0f",
+                                   title="State visit count (log scale)")
+
+        return fig
 
     def test_environment(self):
         env = mountaincars.MountainCarDiscrete(10, 10)
@@ -617,23 +726,36 @@ class Test_TD_Lambda_MountainCar(unittest.TestCase, test_utils.EpisodeSimulation
         assert np.allclose(observation_real, np.array([-0.56079547, -0.00169662]))
         assert all(observation == np.array([3, 4]))
 
-    def test_random_walk_onecase(self, params=None):
+    def run_random_walk_onecase(self, params=None, adaptive=False, verbose_convergence=False):
         print("\nTesting " + self.id())
 
         # Learner and agent
         if params is None:
-            params = dict({'alpha': 0.3,
-                           'gamma': 1.0,
-                           'lambda': 0.0, #0.7,
-                           'alpha_min': 0.0,
-                           'adjust_alpha': False
+            params = dict({ 'alpha': 1.0,
+                            'gamma': 1.0,
+                            'lambda': 0.0,
+                            'lambda_min': 0.0,
+                            'lambda_max': 0.99,
+                            'alpha_min': 0.0,
+                            'adjust_alpha': False,
+                            'alpha_update_type': AlphaUpdateType.FIRST_STATE_VISIT,
+                            'adaptive_type': td.AdaptiveLambdaType.ATD,
                            })
-        learner_tdlambda = td.LeaTDLambda(self.env, alpha=params['alpha'], gamma=params['gamma'],
-                                          lmbda=params['lambda'],
-                                          alpha_update_type=AlphaUpdateType.FIRST_STATE_VISIT, # Every-visit update is the default
-                                          adjust_alpha=params['adjust_alpha'], adjust_alpha_by_episode=False,
-                                          alpha_min=params['alpha_min'],
-                                          debug=False)
+        if not adaptive:
+            learner_tdlambda = td.LeaTDLambda(self.env, alpha=params['alpha'], gamma=params['gamma'],
+                                              lmbda=params['lambda'],
+                                              alpha_update_type=params['alpha_update_type'], # Every-visit update is the default
+                                              adjust_alpha=params['adjust_alpha'], adjust_alpha_by_episode=False,
+                                              alpha_min=params['alpha_min'],
+                                              debug=False)
+        else:
+            learner_tdlambda = td.LeaTDLambdaAdaptive(self.env, alpha=params['alpha'], gamma=params['gamma'],
+                                                      alpha_update_type=params['alpha_update_type'],
+                                                      adjust_alpha=params['adjust_alpha'], adjust_alpha_by_episode=False,
+                                                      alpha_min=params['alpha_min'],
+                                                      lambda_min=params['lambda_min'], lambda_max=params['lambda_max'],
+                                                      adaptive_type=params['adaptive_type'],
+                                                      debug=False)
         agent_rw_tdlambda = agents.GenericAgent(self.policy_rw, learner_tdlambda)
 
         #-- Simulation
@@ -657,59 +779,33 @@ class Test_TD_Lambda_MountainCar(unittest.TestCase, test_utils.EpisodeSimulation
         sim = simulators.Simulator(self.env, agent_rw_tdlambda, debug=False)
 
         time_start = timer()
-        _, _, _, state_info = sim.run(nepisodes=self.nepisodes, max_time_steps=self.max_time_steps,
-                                      start=idx_start_state, seed=self.seed,
-                                      compute_rmse=False, state_observe=None,
-                                      verbose=True, verbose_period=int(self.nepisodes/100),
-                                      plot=False, pause=0.001)
+        _, _, _, _, learning_info = sim.run(nepisodes=self.nepisodes, max_time_steps=self.max_time_steps,
+                                        start=idx_start_state, seed=self.seed,
+                                        compute_rmse=False, state_observe=None,
+                                        verbose=True, verbose_period=max(1, int(self.nepisodes/10)),
+                                        verbose_convergence=verbose_convergence,
+                                        plot=False, pause=0.001)
         time_end = timer()
         exec_time = time_end - time_start
         print("Execution time: {:.1f} sec, {:.1f} min".format(exec_time, exec_time / 60))
 
-        observed = agent_rw_tdlambda.getLearner().getV().getValues().reshape(self.env.shape)
-        print("\nobserved: {}".format(observed))
+        observed = self.env.reshape_from_1d_to_2d(agent_rw_tdlambda.getLearner().getV().getValues())
+        state_counts = self.env.reshape_from_1d_to_2d(np.asarray(sim.agent.getLearner().getStateCounts()))
+        print("\n{}, observed: ".format(self.id(), observed))
         #print("Average RMSE over {} episodes: {:.3f}".format(self.nepisodes, np.mean(RMSE_by_episode)))
         if self.plot:
-            # First replace estimated state values with NaN when the number of visits to the state is < 10
-            # so that we don't get a bad idea of what the estimate is, since it is not reliable.
-            state_counts = np.asarray(sim.agent.getLearner().getStateCounts()).reshape(self.env.shape)
-            idx_not_enough_counts_x, idx_not_enough_counts_v = np.where(state_counts < 10)
-            observed_toplot = copy.deepcopy(observed)
-            observed_toplot[idx_not_enough_counts_x, idx_not_enough_counts_v] = np.nan
-
-            import matplotlib.pyplot as plt
-            x = self.env.get_positions()        # x is on the rows of `observed`
-            v = self.env.get_velocities()       # v is on the cols of `observed`
-            assert len(x) == observed_toplot.shape[0]
-            assert len(v) == observed_toplot.shape[1]
-            title_params = "(lambda={:.2f}, alpha={:.1f}, adj={}, episodes={}, max_time={}, density=(x:{}, v:{}) points)" \
-                            .format(params['lambda'], params['alpha'], params['adjust_alpha'], self.nepisodes, self.max_time_steps, self.env.nx, self.env.nv)
-            plt.figure()
-            plt.errorbar(x, np.nanmean(observed_toplot/self.max_time_steps, axis=1),
-                         yerr=np.nanstd(observed_toplot/self.max_time_steps, axis=1)/np.sqrt(self.env.nv),
-                         marker='.', color="red", capsize=4)
-            ax = plt.gca()
-            ax.set_title("Average value of each position\n" + title_params)
-            plt.figure()
-            plt.errorbar(v, np.nanmean(observed_toplot/self.max_time_steps, axis=0),
-                         yerr=np.nanstd(observed_toplot/self.max_time_steps, axis=0)/np.sqrt(self.env.nx),
-                         marker='.', color="blue", capsize=4)
-            ax = plt.gca()
-            ax.set_title("Average value of each velocity\n" + title_params)
-
-            # 2D plots
-            params['nepisodes'] = self.nepisodes    # Needed for the call to plot_results_2D
-            test_utils.plot_results_2D(observed_toplot/self.max_time_steps, params, colormap=self.colormap,
-                                       fontsize=5, title="Value function (normalized by max time per episode: {})".format(self.max_time_steps))
-            test_utils.plot_results_2D(np.log10(1 + state_counts), params, colormap=self.colormap, fontsize=5, title="State visit count (log scale)")
-
+            self.plot_results(observed, state_counts)
         #assert np.allclose(observed, expected, atol=1E-6)
 
-        return observed, state_counts, params, sim
+        return observed, state_counts, params, sim, learning_info
 
 
 if __name__ == "__main__":
-    test = True
+    test = False
+
+    if not test:
+        test_env_name = "MountainCar"
+        test_env_name = "GW1D_OneTerminalState"
 
     if test:
         #--- 1D tests
@@ -719,7 +815,7 @@ if __name__ == "__main__":
         #unittest.getTestCaseNames()
 
         #--- 2D tests
-        #unittest.main(defaultTest="Test_TD_Lambda_GW2D")
+        unittest.main(defaultTest="Test_TD_Lambda_GW2D")
 
         # Basic environment
         #unittest.main(defaultTest="Test_TD_Lambda_GW2D.test_random_walk")
@@ -741,30 +837,293 @@ if __name__ == "__main__":
 
         #--- Mountain Car tests
         #unittest.main(defaultTest="Test_TD_Lambda_MountainCar")
-    else:
-        resultsdir = "../../RL-001-MemoryManagement/results/MountainCar"
+    elif test_env_name == "GW1D_OneTerminalState":
+        # Prepare environment
+        nstates = 19
+        nepisodes = 500
+        plot = True
+        test_obj = Test_TD_Lambda_GW1D_OneTerminalState(seed=1717, nepisodes=nepisodes, start_state=0, plot=plot)
+        test_obj.env = gridworlds.EnvGridworld1D_OneTerminalState(nstates+1)    # +1 terminal state
+        test_obj.policy_rw = random_walks.PolRandomWalkDiscrete(test_obj.env)
 
-        test_obj = Test_TD_Lambda_MountainCar()
+        learning_info = test_obj.run_random_walk_adaptive_onecase()
+        if plot:
+            plt.plot(range(nepisodes), learning_info['lambda_mean'])
+            ax = plt.gca()
+            ax.set_xlabel("Episode")
+            ax.set_ylabel("Average lambda over states")
+    elif test_env_name == "MountainCar":
+        import os
+        resultsdir = os.path.abspath("../../RL-001-MemoryManagement/results/MountainCar")
+        save = False
+        plot = True
+        verbose_convergence = True
+        gamma = 1.0
+        alpha_update_type = AlphaUpdateType.EVERY_STATE_VISIT
+        nepisodes_benchmark = 30000
+        max_time_steps_benchmark = 500
+        normalizer = 1 #max_time_steps_benchmark    # Normalize by max_time_steps when rewards are NOT sparse, o.w. use 1
+            ## nepisodes=30000, max_time=500 => 2+ hours with MC (TD(1))
+        # Case to run
+        case = 'benchmark'
+        case = 'td'
+        case = 'atd'
+        case = 'hatd'
+
+        # Prepare environment
+        test_obj = Test_TD_Lambda_MountainCar(seed=1717, start_state=None, normalizer=normalizer, plot=plot)
         nx = 20
         nv = 20
         test_obj.env = mountaincars.MountainCarDiscrete(nx, nv)
         test_obj.policy_rw = random_walks.PolRandomWalkDiscrete(test_obj.env)
-        params = dict({'alpha': 1.0,
-                       'gamma': 1.0,
-                       'lambda': 0.0,
-                       'alpha_min': 0.0,
-                       'adjust_alpha': True
-                       })
-        state_values, state_counts, params, sim_obj = test_obj.test_random_walk_onecase(params=params)
 
-        # Save
-        filename = resultsdir + "/mountaincar_lambda={}_alpha={}_adj={}_episodes={},maxt={},nx={},nv={}.pickle" \
-                    .format(params['lambda'], params['alpha'], params['adjust_alpha'],
+        # Prepare agent's learner
+        if case == 'benchmark':
+            # Execution to get the benchmark, i.e. the estimated state value function V that will be considered as the true value function
+            adaptive = False
+            test_obj.nepisodes = nepisodes_benchmark #10000
+            test_obj.max_time_steps = max_time_steps_benchmark
+            params = dict({'alpha': 1.0,
+                           'gamma': gamma,
+                           'lambda': 1.0,
+                           'lambda_min': 0.0,
+                           'lambda_max': 0.99,
+                           'alpha_min': 0.0,
+                           'adjust_alpha': True,
+                           'alpha_update_type': AlphaUpdateType.EVERY_STATE_VISIT,  # We use FIRST_STATE_VISIT as opposed to EVERY_STATE_VISIT because the latter gives too slow learning (mean|V| reaches 0.02 instead of 0.06 after 5000 episodes)
+                           'adaptive_type': None
+                           })
+        elif case == 'td':
+            adaptive = False
+            test_obj.nepisodes = 200 #1000
+            test_obj.max_time_steps = max_time_steps_benchmark
+            params = dict({'alpha': 1.0,
+                           'gamma': gamma,
+                           'lambda': 0.9,
+                           'lambda_min': 0.0,
+                           'lambda_max': 0.99,
+                           'alpha_min': 0.0,
+                           'adjust_alpha': True,
+                           'alpha_update_type': alpha_update_type,
+                           'adaptive_type': None
+                           })
+        elif case == 'atd':
+            adaptive = True
+            test_obj.nepisodes = 200
+            test_obj.max_time_steps = max_time_steps_benchmark
+            params = dict({'alpha': 1.0,
+                           'gamma': gamma,
+                           'lambda': 0.0,
+                           'lambda_min': 0.0,
+                           'lambda_max': 0.99,
+                           'alpha_min': 0.0,
+                           'adjust_alpha': True,
+                           'alpha_update_type': alpha_update_type,
+                           'adaptive_type': td.AdaptiveLambdaType.ATD
+                           })
+        elif case == 'hatd':
+            adaptive = True
+            test_obj.nepisodes = 200
+            test_obj.max_time_steps = max_time_steps_benchmark
+            params = dict({'alpha': 1.0,
+                           'gamma': gamma,
+                           'lambda': 0.0,
+                           'lambda_min': 0.0,
+                           'lambda_max': 0.99, #0.80,
+                           'alpha_min': 0.0,
+                           'adjust_alpha': True,
+                           'alpha_update_type': alpha_update_type,
+                           'adaptive_type': td.AdaptiveLambdaType.HATD
+                           })
+
+        # Run the estimation process
+        state_values, state_counts, params, sim_obj, learning_info = \
+            test_obj.run_random_walk_onecase(params=params, adaptive=adaptive, verbose_convergence=verbose_convergence)
+
+        if case == "benchmark":
+            if save:
+                filename = resultsdir + "/mountaincar_BENCHMARK_gamma={:.2f}_lambda={}_alpha={}_adj={}_episodes={},maxt={},nx={},nv={}.pickle" \
+                    .format(params['gamma'], params['lambda'], params['alpha'], params['adjust_alpha'],
                             test_obj.nepisodes, test_obj.max_time_steps, test_obj.env.nx, test_obj.env.nv)
-        file = open(filename,
-                    mode="wb")  # "b" means binary mode (needed for pickle.dump())
-        pickle.dump(dict({'V': state_values, 'env': test_obj.env, 'params': params}), file)
-        file.close()
-        print("Results saved to:\n{}".format(os.path.abspath(filename)))
+                file = open(filename, mode="wb")  # "b" means binary mode (needed for pickle.dump())
+                pickle.dump(dict({'V': state_values, 'counts': state_counts,
+                                  'env': test_obj.env, 'policy': test_obj.policy_rw,
+                                  'simulator': sim_obj, 'learning_info': learning_info,
+                                  'params_test': {'nepisodes': test_obj.nepisodes,
+                                                  'max_time_steps': test_obj.max_time_steps},
+                                  'params': params}), file)
+                ## NOTE: The simulator object is quite large... ~ 1 MB. Otherwise, the output file only occupies ~ 20 kB
+                ## ALSO NOTE: It is not possible to save the `test_obj` per se... as I get the error:
+                ##  "Can't pickle <class '__main__.Test_TD_Lambda_MountainCar'>: attribute lookup Test_TD_Lambda_MountainCar on __main__ failed"
+                ## Reason explained here: https://stackoverflow.com/questions/48615601/cant-pickle-class-a-class-attribute-lookup-inner-class-on-a-class-failed
+                ## Essentially, the reason is that the test class does not belong to a module.
+                file.close()
+                print("Results saved to:\n{}".format(os.path.abspath(filename)))
+        else:
+            # 3D plot of the estimation error
+            # Load the benchmark (Vtrue)
+            try:
+                import pickle
+                filename_benchmark = "mountaincar_BENCHMARK_gamma={:.2f}_lambda=0.0_alpha=1.0_adj=True_episodes={},maxt=500,nx=20,nv=20 (FIRST_STATE_VISIT).pickle" \
+                    .format(params['gamma'], nepisodes_benchmark)
+                file = open(resultsdir + "/" + filename_benchmark, mode="rb")
+                dict_benchmark = pickle.load(file)
+                file.close()
+
+                # Create the environment on which tests will be run
+                # Currently (2022/05/01) we need to do this just because the MountainCarDiscrete environment has changed definition
+                # w.r.t. to the MountainCarDiscrete environment saved in the pickle file, e.g. there are new methods defined such as setV().
+                # If the definition of the saved environment (in dict_benchmark['env']) is the same as the current definition of the
+                # MountainCarDiscrete environment, then we can just use the saved environment as environment on which test are run.
+                env_mountain = mountaincars.MountainCarDiscrete(dict_benchmark['env'].nx, dict_benchmark['env'].nv)
+                max_time_steps = test_obj.max_time_steps
+                state_counts_benchmark = dict_benchmark['counts']
+
+                # Compute the error
+                Vtrue = dict_benchmark['V']
+                Vest = state_values
+                Verror = (Vest - Vtrue)
+                #Verror = (Vest - Vtrue) / abs(Vtrue)
+                rmse = computing.rmse(Vtrue, Vest, weights=state_counts_benchmark)
+                mape = computing.mape(Vtrue, Vest, weights=state_counts_benchmark)
+
+                # 2D image plots of the error and the state counts observed during estimation
+                algorithm_name = params['adaptive_type'] is not None and params['adaptive_type'].name or "TD({:.2f})".format(params['lambda'])
+                fig = test_obj.plot_results(Verror, state_counts)
+                fig.suptitle(algorithm_name)
+
+                # Plot
+                zlim = None
+                #zlim = (-0.5, 0.5)
+                x = test_obj.env.get_positions()
+                v = test_obj.env.get_velocities()
+                xx, vv = np.meshgrid(x, v)
+                fig = plt.figure()
+                # When there is only one subplot we can use plt.axes() to create the 3D axes
+                #ax = plt.axes(projection='3d')
+                # Otherwise, when there are several subplots in the same figure
+                # Ref: https://matplotlib.org/stable/gallery/mplot3d/mixed_subplots.html
+                ax1 = fig.add_subplot(1, 2, 1, projection='3d')
+                ax2 = fig.add_subplot(1, 2, 2, projection='3d')
+
+                # Surface plot of the error
+                surf = ax1.plot_surface(xx, vv, Verror)
+                #ax1.contourf(xx, vv, state_counts, offset=0) #zlim[0])
+                # Contour plot
+                #cf = ax1.contourf(xx, vv, Verror)
+                #plt.colorbar(cf)
+                if zlim is not None:
+                    ax1.set_zlim(zlim)
+                ax1.set_xlabel("Position")
+                ax1.set_ylabel("Velocity")
+                ax1.set_zlabel("Relative error of V(x,v)")
+                ax1.set_title("Estimation error for {} (Weighted RMSE = {:.2f}, Weighted MAPE = {:.2f}%)".format(algorithm_name, rmse, mape*100))
+
+                # Surface plot of the state counts
+                ax2.plot_surface(xx, vv, state_counts)
+                ax2.set_xlabel("Position")
+                ax2.set_ylabel("Velocity")
+                ax2.set_zlabel("State count")
+                ax2.set_title("State count for {}".format(algorithm_name))
+            except:
+                print("WARNING: Plots of estimation error skipped because BENCHMARK file not found:\n{}".format(filename_benchmark))
+
+        #-- Plot convergence analysis
+        # Parameters used below
+        nepisodes = test_obj.nepisodes
+        max_time_steps = test_obj.max_time_steps
+        normalizer = test_obj.normalizer
+        env = test_obj.env
+        gamma = params['gamma']
+        alpha = params['alpha']
+        alpha_update_type = params['alpha_update_type']
+        lmbda = params['lambda']
+        adaptive_type = params['adaptive_type']
+        # If plotting the results saved in the benchmark read above
+        #nepisodes = dict_benchmark['params_test']['nepisodes']
+        #max_time_steps = dict_benchmark['params_test']['max_time_steps']
+        #env = dict_benchmark['env']
+        #gamma = dict_benchmark['params']['gamma']
+        #alpha = dict_benchmark['params']['alpha']
+        #alpha_update_type = dict_benchmark['params']['alpha_update_type']
+        #lmbda = dict_benchmark['params']['lambda']
+        #adaptive_type = dict_benchmark['params']['adaptive_type']
+
+        #-- What to plot
+        # Use this when rewards are SPARSE (e.g. +1 at the terminal states)
+        deltaV_abs_name = "deltaV_abs_mean"
+        deltaV_max_name = "deltaV_max_signed"
+        # Use this when rewards are NOT sparse
+        #deltaV_abs_name = "deltaV_rel_abs_mean"
+        #deltaV_max_name = "deltaV_rel_max_signed"
+
+        # Compute moving average of the error for easier visualization
+        import numpy as np
+        import matplotlib.pyplot as plt
+        window_size = max(1, int(test_obj.nepisodes/100)) #dict_benchmark['params']['nepisodes']/100)) (when reading the #episodes from the benchmark file)
+        deltaV_max_smooth = computing.smooth(learning_info[deltaV_max_name], window_size=window_size)
+        alpha_mean_smooth = computing.smooth(learning_info['alpha_mean'], window_size=window_size)
+
+        # Plot
+        fig = plt.figure()
+        ax, ax_n = fig.subplots(1,2)
+
+        legend_ax = []
+        ax.plot(np.arange(nepisodes+1), learning_info['V_abs_mean'] / normalizer, 'b-')
+        legend_ax += ["Normalized mean|V|"]
+        ax.plot(np.arange(nepisodes+1), learning_info['V_abs_median'] / normalizer, 'b--')
+        legend_ax += ["Normalized median|V|"]
+        # This may be very noisy...
+        #ax.plot(np.arange(nepisodes+1), learning_info['V_abs_min'] / normalizer, color='blue', linestyle='dotted', linewidth=0.5)
+        #legend_ax += ["Normalized min|V| for non-zero change states"]
+        ax.set_xlabel("Episode number")
+        ax.set_ylabel("|V| normalized by dividing by {}".format(normalizer))
+        ax.legend(legend_ax, loc='upper left')
+
+        ax2 = ax.twinx()
+        legend_ax2 = []
+        #ax2.plot(np.arange(nepisodes+1), learning_info[deltaV_max_name]*100, 'r-', linewidth=1)
+        #legend_ax2 += ["max|relative change| with sign"]
+        ax2.plot(np.arange(nepisodes+1), deltaV_max_smooth, 'r-', linewidth=1)
+        legend_ax2 += ["max|relative change| with sign ({}-tap-smoothed)".format(window_size)]
+        ax2.plot(np.arange(nepisodes+1), learning_info[deltaV_abs_name]*100, 'r--', linewidth=0.5)
+        legend_ax2 += ["mean|relative change|"]
+        ax2.axhline(0.0, color='gray', linewidth=0.5)
+        ## The median values are 0.0 for ALL episodes... interesting!
+        ax2.set_yscale('symlog')
+        ax2.set_ylim( -max(ax2.get_ylim()), +max(ax2.get_ylim()) )
+        ax2.set_ylabel("mean |relative delta(V)| (%) (log scale)")
+        ax2.legend(legend_ax2, loc='upper right')
+        #ax2.legend(["mean|relative change|", "weighted mean|relative change|"])
+        ax.set_title("Value function estimation and relative change")
+
+        # Number of states used in the computation of the summary statistics at each episode
+        ax_n.plot(np.arange(nepisodes+1), learning_info['V_abs_n'] / env.getNumStates() * 100, 'g-')
+        ax_n.set_xlabel("Episode number")
+        ax_n.set_ylabel("% states")
+        ax_n.set_ylim((0,100))
+        ax_n.legend(["% states"], loc='upper left')
+        ax_n2 = ax_n.twinx()
+        legend_ax_n2 = []
+        #ax_n2.plot(np.arange(nepisodes), learning_info['alpha_mean'], 'k-', linestyle='dotted', linewidth=0.5)
+        #legend_ax_n2 += ["average alpha over visited states"]
+        ax_n2.plot(np.arange(nepisodes), alpha_mean_smooth, 'k-', linestyle='dotted', linewidth=0.5)
+        legend_ax_n2 += ["average alpha over visited states ({}-tap smoothed)".format(window_size)]
+        ax_n2.set_yscale('log')
+        ax_n2.set_ylabel("alpha")
+        ax_n2.set_ylim((0,1))
+        ax_n2.legend(legend_ax_n2, loc='upper right')
+        ax_n.set_title("% states in summary statistics (num states = {}) and average alpha".format(env.getNumStates()))
+
+        fig.suptitle("Convergence of the estimated value function V (" + \
+                  (adaptive_type is not None and adaptive_type.name or "TD({:.2g})".format(lmbda)) + \
+                  ", gamma={:.2f}, alpha={:.2f}, {})".format(gamma, alpha, alpha_update_type.name))
+
+        if save:
+            figfile = resultsdir + "/mountaincar_BENCHMARK_CV_gamma={:.2f}_lambda={}_alpha={}_adj={}_episodes={},maxt={},nx={},nv={}.png" \
+                        .format(params['gamma'], params['lambda'], params['alpha'], params['adjust_alpha'],
+                                test_obj.nepisodes, test_obj.max_time_steps, test_obj.env.nx, test_obj.env.nv)
+            plt.savefig(figfile)
+            print("Plot saved to:\n{}".format(os.path.abspath(figfile)))
 
     pass

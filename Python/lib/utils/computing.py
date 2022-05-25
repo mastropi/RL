@@ -7,9 +7,11 @@ Created on Thu Jun 04 22:15:48 2020
 """
 
 import warnings
+import copy
+from unittest import TestCase
 
 import numpy as np
-import copy
+import pandas as pd
 
 from Python.lib.utils.basic import as_array
 
@@ -34,6 +36,119 @@ def mad(x):
     x_mad = np.median( np.abs( x_dev ) )
     
     return x_mad
+
+def rmse(Vtrue: np.ndarray, Vest: np.ndarray, weights: np.ndarray=None):
+    """Root Mean Square Error (RMSE) between Vtrue and Vest, optionally weighted
+
+    All weights are assumed to be non-negative.
+
+    Arguments:
+    Vtrue: np.ndarray of any shape (the same shape as Vest and weights)
+        True Value function.
+
+    Vest: np.ndarray of any shape (the same shape as Vtrue and weights)
+        Estimated Value function.
+
+    weights: np.ndarray of any shape (the same shape as Vtrue and Vest)
+        Weights to use in the computation of the MAPE.
+        Ex: Number of visits associated to each estimated value.
+
+    Return: float
+    For the weighted version:
+        sqrt( sum( weight * (Vest - Vtrue)**2 ) / sum(weight) )
+    For the unweighted version:
+        sqrt( mean( (Vest - Vtrue)**2 ) )
+    """
+    if type(Vtrue) != np.ndarray or type(Vest) != np.ndarray or (weights is not None and type(weights) != np.ndarray):
+        raise ValueError("The first three input parameters must be numpy arrays (`weights` can be None)")
+    if Vtrue.shape != Vest.shape or (weights is not None and Vest.shape != weights.shape):
+        raise ValueError("The first three input parameters have the same shape({}, {}, {})" \
+                         .format(Vtrue.shape, Vest.shape, weights and weights.shape or ""))
+
+    if np.sum(weights) == 0:
+        raise Warning("The weights sum up to zero. They will not be used to compute the RMSE.")
+        weights = None
+
+    if weights is not None:
+        mse = np.sum( weights * (Vest - Vtrue)**2 ) / np.sum(weights)
+    else:
+        mse = np.mean( (Vest - Vtrue)**2 )
+
+    return np.sqrt(mse)
+
+def mape(Vtrue: np.ndarray, Vest: np.ndarray, weights: np.ndarray=None):
+    """Mean Absolute Percent Error (MAPE) between Vtrue and Vest, weighted or not weighted by weights.
+
+    All weights are assumed to be non-negative.
+
+    Arguments:
+    Vtrue: np.ndarray of any shape (the same shape as Vest and weights)
+        True Value function.
+
+    Vest: np.ndarray of any shape (the same shape as Vtrue and weights)
+        Estimated Value function.
+
+    weights: np.ndarray of any shape (the same shape as Vtrue and Vest)
+        Weights to use in the computation of the MAPE.
+        Ex: Number of visits associated to each estimated value.
+
+    Return: float
+    The error in each element is set to 0.0 when the two compared values Vtrue and Vest are equal to 0.0
+    (so that we avoid a NaN when doing (0.0 - 0.0) / 0.0).
+
+    So, excluding these values, the returned value is computed as follows:
+    - for the weighted version:
+        sum( weight * abs(Vest - Vtrue) / abs(Vtrue) ) / sum(weight)
+    - for the unweighted version:
+        mean( abs(Vest - Vtrue) / abs(Vtrue) )
+    If any value in Vtrue is 0.0 and the corresponding estimated value Vest is not 0.0,
+    NaN is returned for the MAPE.
+    """
+    if type(Vtrue) != np.ndarray or type(Vest) != np.ndarray or (weights is not None and type(weights) != np.ndarray):
+        raise ValueError("The first three input parameters must be numpy arrays (`weights` can be None)")
+    if Vtrue.shape != Vest.shape or (weights is not None and Vest.shape != weights.shape):
+        raise ValueError("The first three input parameters have the same shape({}, {}, {})" \
+                        .format(Vtrue.shape, Vest.shape, weights and weights.shape or ""))
+
+    if np.sum(weights) == 0:
+        raise Warning("The weights sum up to zero. They will not be used to compute the RMSE.")
+        weights = None
+
+    # Convert all arrays to a 1D array to avoid problems when zip()-ing them in the list below
+    nobs = np.prod(Vtrue.shape)
+    Vtrue_1d = np.squeeze(Vtrue.reshape(1, nobs))
+    Vest_1d = np.squeeze(Vest.reshape(1, nobs))
+    if weights is not None:
+        weights_1d = np.squeeze(weights.reshape(1, nobs))
+
+    if weights is not None:
+        weighted_error_rel = [0.0   if x_true == x_est == 0.0 or w == 0.0
+                                    else w * np.abs(x_est - x_true) / np.abs(x_true)
+                                    for x_true, x_est, w in zip(Vtrue_1d, Vest_1d, weights_1d)]
+        MAPE = np.sum( weighted_error_rel ) / np.sum(weights[:])
+    else:
+        error_rel = [0.0    if x_true == x_est == 0.0
+                            else np.Inf if x_true == 0.0
+                                        else np.abs(x_true - x_est) / np.abs(x_true)
+                            for x_true, x_est in zip(Vtrue_1d, Vest_1d)]
+        MAPE = np.mean(error_rel)
+
+    return MAPE
+
+def smooth(x, window_size):
+    "Smooth a signal by moving average"
+    # Ref: https://www.geeksforgeeks.org/how-to-calculate-moving-averages-in-python/
+    if window_size <= 1:
+        return x
+    else:
+        # Convert to a pandas series
+        x_series = pd.Series(x)
+        # Get the window of series of observations till the current time
+        windows = x_series.rolling(window_size)
+        # Smooth!
+        x_smooth = windows.mean()
+
+        return x_smooth
 
 def comb(n,k):
     """
@@ -421,30 +536,6 @@ def stationary_distribution_birth_death_process_at_capacity_unnormalized(nserver
 
     return x, dist
 
-def rmse(Vtrue, Vest, weights=None):
-    """Root Mean Square Error (RMSE) between Vtrue and Vest, weighted or not weighted by weights.
-    @param Vtrue: True Value function.
-    @param Vest: Estimated value function.
-    @param weights: Number of visits for each value.
-    """
-
-    assert type(Vtrue) == np.ndarray and type(Vest) == np.ndarray and (weights is None or type(weights) == np.ndarray), \
-            "The first three input parameters are numpy arrays"
-    assert Vtrue.shape == Vest.shape and (weights is None or Vest.shape == weights.shape), \
-            "The first three input parameters have the same shape({}, {}, {})" \
-            .format(Vtrue.shape, Vest.shape, weights and weights.shape or "")
-
-    if np.sum(weights) == 0:
-        raise Warning("The weights sum up to zero. They will not be used to compute the RMSE.")
-        weights = None
-
-    if weights is not None:
-        mse = np.sum( weights * (Vtrue - Vest)**2 ) / np.sum(weights)
-    else:
-        mse = np.mean( (Vtrue - Vest)**2 )
-
-    return np.sqrt(mse)
-
 def all_combos_with_sum(R, C):
     """
     Returns a generator of all possible integer-valued arrays whose elements sum to a fixed number.
@@ -489,8 +580,60 @@ def all_combos_with_sum(R, C):
 
 # Tests
 if __name__ == "__main__":
+    #----------------- rmse() and mape() --------------------#
+    print("\n--- Testing rmse() and mape():")
+
+    # Test of one difference 0.0 with true value 0.0. The APE for that value should be 0.0 and the MAPE should NOT be NaN
+    x = np.array([3, 2, 0.0, -1.0])
+    assert np.abs(rmse(2*x, x) - 1.8708287) < 1E-6
+    assert np.abs(mape(2*x, x) - 0.375) < 1E-6
+
+    # Test that when there is at least one division by 0, the MAPE yields Inf
+    x = np.array([3, 2, 0.0, -1.0])
+    assert np.abs(rmse(x, x + 1) - 1.0) < 1E-6
+    assert mape(x, x + 1) == np.Inf
+
+    # Test that when there is at least one NaN the RMSE and MAPE yield NaN
+    x = np.array([3, 2, 0.0, np.nan])
+    y = np.array([3, 5.1, 0.0, 2.1])
+    assert np.isnan(rmse(x, y))
+    assert np.isnan(mape(x, y))
+    assert np.isnan(rmse(y, x))
+    assert np.isnan(mape(y, x))
+
+    # Test 2D arrays
+    # These results were verified in Excel
+    x_2d = np.array([[3, 2, 0.0, -1.0],
+                     [4, 8, -9.1, 4.0]])
+    y_2d = np.array([[3.2, 1.8, 0.0, 4.5],
+                    [4.5, 6.8, -5.4, 2.1]])
+    assert np.abs(rmse(x_2d, y_2d) - 2.4829418) < 1E-6
+    assert np.abs(mape(x_2d, y_2d) - 0.8529075) < 1E-6
+
+    # Test weighted versions
+    # These results were verified in Excel
+    weights_2d = np.array([[1.0, 3.2, 0.5, 0.0],
+                           [2.1, 5.1, 0.8, 0.7]])
+    assert np.abs(rmse(x_2d, y_2d, weights=weights_2d) - 1.2671509) < 1E-6
+    assert np.abs(mape(x_2d, y_2d, weights=weights_2d) - 0.1546224) < 1E-6
+
+    # Test error when different shapes given
+    # Note that in order to use unittest.TestCase.assertRaises() we need to create an INSTANCE of the TestCase class
+    # Otherwise we get the error "assertRaises() arg 1 must be an exception type or tuple of exception types"
+    # Ref: https://stackoverflow.com/questions/18084476/is-there-a-way-to-use-python-unit-test-assertions-outside-of-a-testcase
+    # which was referenced by Martijn Pieters in https://stackoverflow.com/questions/49369163/custom-exceptions-in-unittests
+    x_2d = np.array([[3, 2, 0.0],
+                     [4, 8, -9.1]])
+    y_2d = np.array([[3.2, 1.8, 0.0, 4.5],
+                    [4.5, 6.8, -5.4, 2.1]])
+    tc = TestCase()
+    tc.assertRaises(ValueError, rmse, x_2d, y_2d)
+    tc.assertRaises(ValueError, mape, x_2d, y_2d)
+    #----------------- rmse() and mape() --------------------#
+
+
     #---------- generate_min_exponential_time() -------------#
-    print("Testing generate_min_exponential_time(rates):")
+    print("\n--- Testing generate_min_exponential_time(rates):")
     #-- Normal scenario
     np.random.seed(1717)
     rates = [0.2, 0.5, 0.7]
@@ -530,7 +673,7 @@ if __name__ == "__main__":
 
 
     #-------- compute_nparticles_and_nsteps_for_fv_process & compute_rel_errors_for_fv_process() --------------#
-    print("\nTesting compute_nparticles_and_nsteps_for_fv_process() and its inverse compute_rel_errors_for_fv_process():")
+    print("\n--- Testing compute_nparticles_and_nsteps_for_fv_process() and its inverse compute_rel_errors_for_fv_process():")
     rhos = [0.7]
     K = 20
     J_factor = 0.3
@@ -552,7 +695,7 @@ if __name__ == "__main__":
 
 
     #------------------- comb(n,k) -------------------------#
-    print("\nTesting comb(n,k):")
+    print("\n--- Testing comb(n,k):")
     count = 0
     # Extreme cases
     assert comb(0,0) == 1; print(".", end=""); count += 1
@@ -580,7 +723,7 @@ if __name__ == "__main__":
 
 
     #------------ all_combos_with_sum(R,C) -----------------#
-    print("\nTesting all_combos_with_sum(R,C):")
+    print("\n--- Testing all_combos_with_sum(R,C):")
     R = 3
     C = 20
     expected_count = comb(C+R-1,C)
@@ -616,7 +759,7 @@ if __name__ == "__main__":
 
     #------------ stationary_distribution_birth_death_process --------------#
     import matplotlib.pyplot as plt
-    print("\nTesting stationary_distribution_birth_death_process(nservers, capacity, rhos):")
+    print("\n--- Testing stationary_distribution_birth_death_process(nservers, capacity, rhos):")
     R = 3
     C = 3
     n_expected = [

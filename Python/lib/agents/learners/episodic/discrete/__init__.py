@@ -30,6 +30,7 @@ from enum import Enum, unique
 import numpy as np
 
 from Python.lib.environments import EnvironmentDiscrete
+from Python.lib.agents.learners import ResetMethod
 
 MIN_COUNT = 1  # Minimum state count to start shrinking alpha
 MIN_EPISODE = 1  # Minimum episode count to start shrinking alpha
@@ -43,6 +44,7 @@ class AlphaUpdateType(Enum):
 
 
 class Learner:
+    # TODO: (2021/12/20) Try to make this class Learner inherit from the GenericLearner which has methods defined for ANY learner, not only learners for a discrete episodic task which is the case here.
     """
     Class defining methods that are generic to ALL learners.
 
@@ -54,11 +56,10 @@ class Learner:
     and once prior to the first simulation, making e.g. the episode method be equal to 2 at
     the first simulation as opposed to the correct value 1.
     """
-    # TODO: (2021/12/20) Try to make this class Learner inherit from the GenericLearner which has methods defined for ANY learner, not only learners for a discrete episodic task which is the case here.
-
     def __init__(self, env, alpha,
                  adjust_alpha=False, alpha_update_type=AlphaUpdateType.FIRST_STATE_VISIT, adjust_alpha_by_episode=False,
-                 alpha_min=0.):
+                 alpha_min=0.,
+                 reset_method=ResetMethod.ALLZEROS, reset_params=None, reset_seed=None):
         """
         Parameters:
         env: EnvironmentDiscrete
@@ -75,6 +76,16 @@ class Learner:
             This value defines the denominator when updating alpha for each state as alpha/n, where alpha
             is the initial learning rate (passed as parameter alpha) and n is the number of FIRST or EVERY visit
             to the state, depending on the value of the alpha_update_type parameter.
+
+        reset_method: (opt) ResetMethod
+            Method to use to reset the value function at the beginning of the experiment.
+
+        reset_params: (opt) dict
+            Dictionary defining the parameters to use by the pseudo-random number generator to reset the value function
+            at the beginning of the experiment.
+
+        reset_seed: (opt) int
+            Seed to use for the random reinitialization of the value function (if reset_method so specifies it).
         """
         #        if not isinstance(env, EnvironmentDiscrete):
         #            raise TypeError("The environment must be of type {} from the {} module ({})" \
@@ -109,6 +120,11 @@ class Learner:
         self._state_counts_overall = np.zeros(self.env.getNumStates())
         self._state_counts_first_visit_overall = np.zeros(self.env.getNumStates())
 
+        # Instructions for resetting the value function
+        self.reset_method = reset_method
+        self.reset_params = reset_params
+        self.reset_seed = reset_seed
+
     def reset(self, reset_episode=False, reset_value_functions=False):
         """
         Resets the variables that store information about the episode
@@ -141,7 +157,7 @@ class Learner:
         # Only reset the initial estimates of the value functions at the very first episode
         # (since each episode should leverage what the agent learned so far!)
         if self.episode == 1 or reset_value_functions:
-            self.V.reset()
+            self.V.reset(method=self.reset_method, params_random=self.reset_params, seed=self.reset_seed)
 
     def setParams(self, alpha, adjust_alpha, alpha_update_type, adjust_alpha_by_episode, alpha_min):
         self.alpha = alpha if alpha is not None else self.alpha

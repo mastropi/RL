@@ -7,19 +7,22 @@ Created on Thu Apr 30 13:16:50 2020
 """
 
 import numpy as np
+import matplotlib
 import matplotlib.pyplot as plt
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 
 def array2str(x, sep=", ", fmt=":.6f"):
     "Converts an array (possibly numeric) to string separated by `sep`"
     return "[" + sep.join( map(lambda s: ("{" + fmt + "}").format(s), x) ) + "]"
 
-def plot_rmse_by_episode(rmse_mean_values, rmse_se_values=None, max_rmse=None, color="black", linestyle='solid',
+def plot_rmse_by_episode(rmse_mean_values, rmse_se_values=None, min_rmse=None, max_rmse=None, kpi_name="RMSE",
+                         color="black", linestyle='solid',
                          alphas=None, alpha_min=0.0, color_alphas='black', max_alpha=None, plot_scales="both", fig=None,
                          subtitle="", legend_rmse=True, legend_alpha=True, fontsize=12):
     """
-    Plots the average RMSE values (over states) by episode
-    
+    Plots the average RMSE values (or MAPE values, depending on `kpi_name`) (over states) by episode
+
     @param rmse_mean_values: numpy array containing the average RMSE value per episode and including the RMSE at the
     very start of the learning process, i.e. the RMSE computed on the initial guess of the value function.
     Its length should be equal to the number of episodes run + 1.
@@ -32,23 +35,32 @@ def plot_rmse_by_episode(rmse_mean_values, rmse_se_values=None, max_rmse=None, c
     Its length should be equal to the number of episodes run.
 
     @param fig: an existing figure where the plot should be added. This would be equivalent of "hold"ing the plot in Matlab.
-    
+
     @return A figure object with the created or updated figure.
     """
-    
-    def finalize_plot_rmse(axis, xlabel="Episode", ylabel="RMSE", legend="RMSE"):
+
+    def finalize_plot_rmse(axis, min_rmse=None, max_rmse=None, xlabel="Episode", ylabel="RMSE", legend="RMSE"):
         if rmse_se_values is not None:
             axis.errorbar(time, rmse_mean_values, yerr=rmse_se_values, capsize=4, color=color)
         #axis.set_xticks(np.arange(nepisodes)+1)
         axis.tick_params(axis='both', which='major', labelsize=np.round(fontsize*0.8))
-        axis.set_ylim((0, max_rmse))
+
+        # Set the axis limits
+        # NOTE that we need to make sure that the new plotted values fit in the possibly existing axis
+        # (which may have already set min and max values), that's why we compute the min/max
+        # between the current axis min/max and the min/max in the data being plotted now.
+        if min_rmse is None:
+            min_rmse = min(axis.get_ylim()[0], np.min(rmse_mean_values)*0.9)
+        if max_rmse is None:
+            max_rmse = max(axis.get_ylim()[1], np.max(rmse_mean_values)*1.1)
+        axis.set_ylim((min_rmse, max_rmse))
         axis.set_xlabel(xlabel, fontsize=fontsize)
-        axis.set_ylabel(ylabel, fontsize=fontsize)    
-        axis.set_title("Average RMSE by episode {}".format(subtitle), fontsize=fontsize)
+        axis.set_ylabel(ylabel, fontsize=fontsize)
+        axis.set_title("Average {} by episode {}".format(ylabel, subtitle), fontsize=fontsize)
         if legend != "":
             axis.legend([legend], loc='upper left', fontsize=fontsize)
 
-    def finalize_plot_alpha(axis, ylabel=r"Average $\alpha$ in last experiment", legend=r"Average $\alpha$ over states visited in episode"):
+    def finalize_plot_alpha(axis, ylabel=r"Average $\alpha$ over visited states", legend=r"Average $\alpha$ over states visited in episode"):
         axis.tick_params(axis='both', which='major', labelsize=np.round(fontsize*0.8))
         axis.axhline(y=alpha_min, color='gray')
         axis.set_ylabel(ylabel, fontsize=fontsize)
@@ -68,9 +80,6 @@ def plot_rmse_by_episode(rmse_mean_values, rmse_se_values=None, max_rmse=None, c
     # is computed from the initial guess of the value function) until AFTER the last episode has finished.
     time = np.arange(nepisodes+1)   # Array 0, 1, ..., nepisodes
 
-    if max_rmse is None:
-        max_rmse = np.max(rmse_mean_values)*1.1
-
     # Prepare the figure, subplots and axes (in original scale and/or log scale)
     if fig is not None:
         # Get the axes from the given figure, which is assumed to have two axes
@@ -79,46 +88,52 @@ def plot_rmse_by_episode(rmse_mean_values, rmse_se_values=None, max_rmse=None, c
         if plot_scales == "both":
             ax = axes[0]
             ax_tlog = axes[1]
-            ax2 = axes[2]
-            ax2_tlog = axes[3]
+            if alphas is not None:
+                ax2 = axes[2]
+                ax2_tlog = axes[3]
         elif plot_scales == "log":
             ax_tlog = axes[0]
-            ax2_tlog = axes[1]
+            if alphas is not None:
+                ax2_tlog = axes[1]
         else:
             ax = axes[0]
-            ax2 = axes[1]
+            if alphas is not None:
+                ax2 = axes[1]
     else:
         if plot_scales == "both":
             fig = plt.figure(figsize=(20, 10))
             axes = fig.subplots(1, 2)
             ax = axes[0]
             ax_tlog = axes[1]
-            ax2 = ax.twinx()
-            ax2_tlog = ax_tlog.twinx()
+            if alphas is not None:
+                ax2 = ax.twinx()
+                ax2_tlog = ax_tlog.twinx()
         elif plot_scales == "log":
             fig = plt.figure(figsize=(10, 10))
             axes = [fig.subplots(1, 1)] # We enclose in list so that we can reference axes[0]
             ax_tlog = axes[0]
-            ax2_tlog = ax_tlog.twinx()
+            if alphas is not None:
+                ax2_tlog = ax_tlog.twinx()
         else:
             fig = plt.figure(figsize=(10, 10))
             axes = [fig.subplots(1, 1)] # We enclose in list so that we can reference axes[0]
             ax = axes[0]
-            ax2 = ax.twinx()
+            if alphas is not None:
+                ax2 = ax.twinx()
     #----------------------------------- Parse input parameters -------------------------------
 
     if plot_scales != "log":
         ax.plot(time, rmse_mean_values, color=color, linewidth=2, linestyle=linestyle, zorder=10)
             ## zorder is used to define layer order (larger values imply going on top)
             ## Ref: stackoverflow.com/questions/37246941/specifying-the-order-of-matplotlib-layers
-        finalize_plot_rmse(ax)
+        finalize_plot_rmse(ax, min_rmse=min_rmse, max_rmse=max_rmse, xlabel="Episode", ylabel=kpi_name, legend=legend_rmse and "Average {} by episode".format(kpi_name) or "")
 
     if plot_scales == "both" or plot_scales == "log":
         ax_tlog.plot(time, rmse_mean_values, color=color, linewidth=2, linestyle=linestyle, zorder=10)
         # IMPORTANT: We use the symmetric log transformation (as opposed to the log transformation) for two reasons:
         # 1) the horizontal scale with the episode number starts at 0.
         # 2) the minimum value in the vertical axis is set to 0.
-        finalize_plot_rmse(ax_tlog, xlabel="Episode (log scale)", ylabel="RMSE", legend=legend_rmse and "Average RMSE by episode" or "")
+        finalize_plot_rmse(ax_tlog, min_rmse=min_rmse, max_rmse=max_rmse, xlabel="Episode (log scale)", ylabel=kpi_name, legend=legend_rmse and "Average {} by episode".format(kpi_name) or "")
         ax_tlog.set_xscale('symlog')
         #ax_tlog.set_yscale('symlog')
 
@@ -139,7 +154,7 @@ def plot_rmse_by_episode(rmse_mean_values, rmse_se_values=None, max_rmse=None, c
     return fig
 
 
-def plot_results_2D(V, params, colormap, vmin=None, vmax=None, fontsize=7, title=""):
+def plot_results_2D(ax, V, params, colormap, vmin=None, vmax=None, format_labels=".3f", fontsize=7, title=""):
     """
     Plots a 2D matrix as an image displaying the matrix values in the same order as they are printed.
 
@@ -147,6 +162,10 @@ def plot_results_2D(V, params, colormap, vmin=None, vmax=None, fontsize=7, title
     where (nx, ny) = V.shape.
     
     Arguments:
+    ax: matplotlib.axes._subplots.AxesSubplot
+        Axis where the plot should be created, typically created by either `plt.figure().gca()` or `plt.figure().subplots(1,1)`
+        Note that this parameter should be a scalar, NOT an array of axis handles.
+
     V: 2D numpy.array
         State value function for each 2D state.
 
@@ -161,17 +180,21 @@ def plot_results_2D(V, params, colormap, vmin=None, vmax=None, fontsize=7, title
     colormap: matplotlib.cm
         Colormap to use in the plot associated to the state values shown in the image.
 
-    vmin, vmax: float values
+    vmin, vmax: (opt) float values
         Minimum and maximum V values to plot which is used to generate a normalized colormap with plt.Normalize().
 
-    fontsize: int
+    fontsize: (opt) int
         Font size to use for the labels showing the state value function at each 2D state.
 
-    title: string
+    title: (opt) string
         Title to add to the plot (execution parameters are added by this function).
-    """
 
-    plt.figure()
+    Return: matplotlib.axes._subplots.AxesSubplot
+    The input axis object is returned.
+    """
+    if not isinstance(ax, matplotlib.axes._subplots.Subplot):
+        raise ValueError("The 'ax' parameter must be an instance of matplotlib.axes._subplots.AxesSubplot")
+
     title = title + "\nalpha={:.2f}>={:.2f}, gamma={:.2f}, lambda={:.2f}, {} episodes" \
                  .format(params['alpha'], params['alpha_min'], params['gamma'], params['lambda'], params['nepisodes'])
     # Since imshow() is assumed to plot a matrix V with the goal of seeing the image as one sees it when PRINTING V,
@@ -180,7 +203,20 @@ def plot_results_2D(V, params, colormap, vmin=None, vmax=None, fontsize=7, title
         colornorm = plt.Normalize(vmin=vmin, vmax=vmax)
     else:
         colornorm = None
-    plt.imshow(V, cmap=colormap, norm=colornorm)
+    img = ax.imshow(V, cmap=colormap, norm=colornorm)
+
+    # Add the colorbar on the right
+    # VERY COMPLICATED!! (because the ax object does NOT have a colobar() method as matplotlib.pyplot does)
+    # Ref: https://stackoverflow.com/questions/23876588/matplotlib-colorbar-in-each-subplot
+    # Note that another option would be to use the much simpler one-liner:
+    #   plt.colorbar(img, ax=ax)
+    # BUT this generates colorbars that occupy the whole vertical space and overlap with the vertical axis values...
+    # Also see: https://matplotlib.org/2.0.2/examples/pylab_examples/custom_cmap.html
+    divider = make_axes_locatable(ax)
+    fig = plt.gcf()
+    cax = divider.append_axes('right', size='5%', pad=0.05)
+    fig.colorbar(img, cax=cax, orientation='vertical');
+
     (nx, ny) = V.shape
     # Go over each value in the plotted matrix V
     # First we go over the rows (y) and then over the columns (x)
@@ -188,7 +224,7 @@ def plot_results_2D(V, params, colormap, vmin=None, vmax=None, fontsize=7, title
         for y in range(ny):
             # NOTE: (2022/05/06) The coordinate where the given text is added by default is in DATA coordinates
             # (as opposed to in AXIS coordinates, where (0,0) is the lower-left corner and (1,1) is the upper-right corner)
-            # ref: documentation of plt.text()).
+            # ref: documentation of ax.text()).
             #
             # Since imshow() by default places the nx dimension vertically (i.e. each x is a different row in the image)
             # and the ny dimension horizontally (i.e. each y is a different column in the image), the DATA coordinates imply that
@@ -201,9 +237,10 @@ def plot_results_2D(V, params, colormap, vmin=None, vmax=None, fontsize=7, title
             # The above was deduced by trial and error and then checked by comparing the pixel color in each image pixel
             # with the text value labels added below (showing the plotted values V) and the layout of the matrix V
             # when printed, as in e.g. V[:10, :5].
-            plt.text(y, x, "{:.3f}".format(V[x,y]), fontsize=fontsize, horizontalalignment='center', verticalalignment='center')
-    plt.title(title)
+            ax.text(y, x, "{:{format_labels}}".format(V[x,y], format_labels=format_labels), fontsize=fontsize, horizontalalignment='center', verticalalignment='center')
+    ax.set_title(title)
 
+    return ax
 
 class EpisodeSimulation:
     

@@ -39,6 +39,7 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
         # All states
         self.all_states = list( range(self.getNumStates()) )
         self.terminal_states = terminal_states
+        self.non_terminal_states = set(self.all_states).difference( set( self.terminal_states ) )
         if len(terminal_rewards) != len(terminal_states):
             warnings.warn("The number of rewards given for the terminal states ({}) is" \
                           " different than the number of terminal states ({}). The rewards are left undefined." \
@@ -70,13 +71,15 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
         return self.nS
 
     def getTerminalStates(self):
-        return self.terminal_states
+        "Returns the list of terminal states"
+        return list(self.terminal_states)
 
     def getTerminalStatesAndRewards(self):
         return zip( self.terminal_states, self.terminal_rewards )
 
     def getNonTerminalStates(self):
-        return set(self.all_states).difference( set( self.terminal_states ) )
+        "Returns the list of non terminal states"
+        return list(self.non_terminal_states)
 
     def isTerminalState(self, state):
         return set([state]).issubset( set(self.terminal_states) )

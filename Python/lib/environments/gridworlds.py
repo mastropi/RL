@@ -52,8 +52,9 @@ class EnvGridworld1D(EnvironmentDiscrete):
         terminal_states = set([0, nS-1])
         rewards_dict = dict({0: -1.0, nS-1: +1.0})
 
-        # True value functions (for algorithm evaluation purposes)
-        # Note that terminal states have value = 0
+        #-- True value functions (for algorithm evaluation purposes)
+        #-- Note that terminal states have value = 0
+        # Value functions for the random walk policy
         self.V = -1.0 + 2/(nS-1) * np.arange(nS)    # Note that this is the same as np.arange(-(nS-1), nS+1, 2) / (nS-1)
                                                     # (note that stop=nS+1, because the end value is NOT included!)
         self.V[0] = self.V[nS-1] = 0.0              # The value of terminal states is defined as 0.0.
@@ -89,6 +90,7 @@ class EnvGridworld1D(EnvironmentDiscrete):
 
             if is_terminal(s):
                 # Terminal states are assigned value 0 (i.e. they receive 0 reward by convention)
+                # Also, with probability 1 the next state is the same state `s`.
                 P[s][LEFT] = [(1.0, s, 0.0, True)]
                 P[s][RIGHT] = [(1.0, s, 0.0, True)]
             else:
@@ -118,11 +120,116 @@ class EnvGridworld1D(EnvironmentDiscrete):
                                              terminal_rewards=[reward(s) for s in terminal_states])
 
     def getV(self):
-        "Returns the true state value function"
+        "Returns the true state value function for a particular policy (not explicitly informed)"
         return self.V
     
     def getQ(self):
-        "Returns the true state-action value function"
+        "Returns the true state-action value function for a particular policy (not explicitly informed)"
+        return self.Q
+
+
+class EnvGridworld1D_OneTerminalState(EnvironmentDiscrete):
+    """
+    1D Grid World environment with one terminal state (right one) and one transient state (left one).
+    The goal is to analyze the conjecture that lambda should start near 1 and decrease towards 0 as more reliable
+    estimates of the value function are obtained, in particular to see if this happens in our adaptive TD(lambda)
+    algorithm.
+
+    This example is mentioned in Bertsekas, pag. 200-201 and, similar to this also in Sutton,
+    chapter 7 when analyzing the advantages of TD(0) (more model-based) over Monte Carlo (more experience-based).
+
+    For example, a 10-long grid looks as follows:
+    t  o  o  o  o  x  o  o  o  T
+    where t = "transient, T = "Terminal", and "x" is the current state of the environment.
+    """
+
+    def __init__(self, length=21):
+        if length < 3:
+            raise ValueError('the length of the grid must be at least 3')
+
+        nS = length
+        nA = 2
+
+        # Possible actions (i.e. we simply NAME the action values (indices) by defining constants)
+        LEFT = 0
+        RIGHT = 1
+
+        # We substract 1 because the state are base 0 (i.e. they represent indices)
+        MAX_S = nS - 1
+
+        # Terminal states
+        terminal_states = set([nS - 1])
+        rewards_dict = dict({nS - 1: +1.0})
+
+        # -- True value functions (for algorithm evaluation purposes)
+        # -- Note that terminal states have value = 0
+        self.V = None
+        self.Q = None
+
+        # Define the possible actions based on the geometry
+        P = {}
+        grid = np.arange(nS)
+        it = np.nditer(grid)
+
+        # Function that checks whether we arrived at a terminal state
+        num_nonterminal_states = nS - len(terminal_states)
+        is_terminal = lambda s: s in terminal_states
+        reward = lambda s: rewards_dict[s] if s in rewards_dict.keys() else 0.0
+
+        while not it.finished:
+            s = it.iterindex
+
+            # P[s][a] = (prob, next_state, reward, is_terminal)
+            # Given that we are state 's' and take action 'a':
+            # prob: probability of going to state 'next_state'
+            # next_state: a possible next_state when taking action 'a'
+            # reward: reward received when going to state 'next_state'
+            # is_terminal: whether 'next_state' is a terminal state
+            P[s] = {a: [] for a in range(nA)}
+
+            if is_terminal(s):
+                # Terminal states are assigned value 0 (i.e. they receive 0 reward by convention)
+                # Also, with probability 1 the next state is the same state `s`.
+                P[s][LEFT] = [(1.0, s, 0.0, True)]
+                P[s][RIGHT] = [(1.0, s, 0.0, True)]
+            else:
+                if s > 0:
+                    # Not a terminal state, nor the transient state
+                    # ns = Next State!
+                    ns_left = np.max([0, s - 1])
+                    ns_right = np.min([s + 1, MAX_S])
+                    P[s][LEFT] = [(1.0, ns_left, reward(ns_left), is_terminal(ns_left))]
+                    P[s][RIGHT] = [(1.0, ns_right, reward(ns_right), is_terminal(ns_right))]
+                else:
+                    # Transient state: the state transitions to the right with probability 1
+                    # i.e. the LEFT action is not possible (transition probability = 0.0)
+                    P[s][LEFT] = [(0.0, 0, 0.0, False)]
+                    P[s][RIGHT] = [(1.0, 1, 0.0, False)]
+
+            it.iternext()
+
+        # Initial state distribution: the environment always starts at the transient state
+        isd = np.zeros(nS)
+        isd[0] = 1.0
+        assert np.isclose(np.sum(isd), 1.0), \
+            "The initial state probabilities sum up to 1 ({})".format(np.sum(isd))
+
+        self.P = P
+        # print("P")
+        # print(P)
+
+        super(EnvGridworld1D_OneTerminalState, self).__init__(nS, nA, P, isd,
+                                                             dim=1,
+                                                             terminal_states=set(
+                                                                 [i for i, s in enumerate(range(nS)) if is_terminal(s)]),
+                                                             terminal_rewards=[reward(s) for s in terminal_states])
+
+    def getV(self):
+        "Returns the true state value function for a particular policy (not explicitly informed)"
+        return self.V
+
+    def getQ(self):
+        "Returns the true state-action value function for a particular policy (not explicitly informed)"
         return self.Q
 
 

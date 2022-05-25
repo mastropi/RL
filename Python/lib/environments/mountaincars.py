@@ -32,14 +32,6 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
 
     def __init__(self, nx, nv):
         super().__init__()
-        # Attributes defined in super classes
-        self.dim = 2                    # From my EnvironmentDiscrete: dimension of the environment
-                                        # In principle this is used only for plotting purposes, e.g. when plotting
-                                        # the estimated value function as a 2D image for `dim = 2` environments.
-        self.isd = None                 # From my EnvironmentDiscrete class which in turn is inherited from the discrete environment in toy_text
-        self.terminal_states = set()    # TDOO-2022/05/06 From my EnvironmentDiscrete class
-        self.terminal_rewards = []      # TDOO-2022/05/06 From my EnvironmentDiscrete class
-
         # Shape information of the 2D state information
         self.nx = nx
         self.nv = nv
@@ -47,7 +39,6 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
                                             # We put the positions on the rows because the state returned by the MountainCarEnv is (x, v),
                                             # i.e. the first dimension is the position, so that we do a direct mapping
                                             # from "first dimension" to "row" in the 2D shape.
-
         # Minimum and maximum values for the position and velocity
         # Note: In the documentation of the source code in GitHub (mentioned above) it says that:
         # -1.2 <= x <= 0.6
@@ -74,6 +65,20 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
         # self.all_states_2d = np.arange(self.nS).reshape(self.nx, self.nv)
         # In case we need to iterate on all possible states
         #it = np.nditer(states2d, flags=['multi_index'])             # Retrieve the original 2D layout with `x, v = it.multi_index` when iterating with `while not it.finished`.
+
+        # Attributes defined in super classes
+        self.dim = 2                    # From my EnvironmentDiscrete: dimension of the environment
+                                        # In principle this is used only for plotting purposes, e.g. when plotting
+                                        # the estimated value function as a 2D image for `dim = 2` environments.
+        self.isd = None                 # From my EnvironmentDiscrete class which in turn is inherited from the discrete environment in toy_text
+
+        self.non_terminal_states = set(self.get_indices_for_non_terminal_states())
+        self.terminal_states = set(self.all_states).difference( set( self.non_terminal_states ) )
+        self.terminal_rewards = []      # TDOO-2022/05/06 From my EnvironmentDiscrete class
+
+        #-- True value functions (for algorithm evaluation purposes)
+        #-- Note that terminal states have value = 0
+        self.V = None
 
     # (2022/05/05) In the current version gym-0.12.1 that I have installed, the MountainCarEnv environment does not accept
     # a seed when resetting the environment. I should update the gym installation.
@@ -125,7 +130,7 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
         if return_continuous_observation:
             return observation, observation_discrete, reward, done, info
         else:
-            idx_state = self.getState()
+            idx_state = self.get_index_from_state_discrete(observation_discrete)
             return idx_state, reward, done, info
 
     def discretize(self, state):
@@ -165,16 +170,40 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
         """
         return np.array([self.xmin + state_discrete[0] * self.dx, self.vmin + state_discrete[1] * self.dv])
 
+    def reshape_from_2d_to_1d(self, values_2d):
+        """
+        Converts a 2D representation of the states to a 1D representation
+
+        The 2D representation is swept by column during the conversion to 1D representation, i.e. order='F' is used
+        in the call to reshape().
+        """
+        return np.squeeze( values_2d.reshape(1, np.prod(values_2d.shape), order='F') )
+
+    def reshape_from_1d_to_2d(self, values_1d):
+        """
+        Converts a 1D representation of the states to a 2D representation
+
+        The values laid out in the 1D representation are arranged in the 2D representation by column first,
+        i.e. order='F' is used in the call to reshape().
+        """
+        return values_1d.reshape(self.nx, self.nv, order='F')
+
     def get_index_from_state(self, state):
         "Returns the 0, ..., nS-1 index corresponding to the given continuous-valued state"
         state_discrete = self.discretize(state)
-        idx_state = index_multi2linear(state_discrete, self.shape, order='F')
+        idx_state = self.get_index_from_state_discrete(state_discrete)
         return idx_state
 
+    def get_index_from_state_discrete(self, state_discrete):
+        return index_multi2linear(state_discrete, self.shape, order='F')     # order='F' means sweep the 2D matrix by column
+
     def get_state_from_index(self, idx_state: int):
-        idx_position, idx_velocity = index_linear2multi(idx_state, self.shape, order='F')   # order='F' means sweep the 2D matrix by column
-        state = self.undiscretize(np.array([idx_position, idx_velocity]))
+        state_discrete = self.get_state_discrete_from_index(idx_state)
+        state = self.undiscretize(state_discrete)
         return state
+
+    def get_state_discrete_from_index(self, idx_state: int):
+        return index_linear2multi(idx_state, self.shape, order='F')   # order='F' means sweep the 2D matrix by column
 
     def get_positions(self):
         "Returns the left bound of all discretizing intervals of the car's position"
@@ -198,6 +227,9 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
     def getShape(self):
         return self.shape
 
+    def getV(self):
+        return self.V
+
     def getState(self):
         """
         Returns the state index associated to the current environment observation
@@ -205,12 +237,7 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
         Return: int
         Index between 0 and nS-1, where nS is the number of states in the environment.
         """
-        state_discrete = self.discretize(np.array(self.state))
-            ## WARNING: The `state` attribute is stored as a tuple inside the MountainCarEnv environment,
-            ## but returned as numpy array by the reset() method and by the step() method!!
-            ## So, here we should convert self.state to a numpy array, otherwise we get the error in our discretize()
-            ## method that tuple values cannot be updated (when trying to set the value of state_discrete)
-        idx_state = index_multi2linear(state_discrete, self.shape, order='F')
+        idx_state = self.get_index_from_state(self.state)
         assert 0 <= idx_state < self.nS, "The current state index is between 0 and nS-1 = {} ({})".format(self.nS-1, idx_state)
         return idx_state
 
@@ -224,3 +251,7 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
     def setState(self, state):
         "The state should be a duple (x, v) with the car's position and velocity to set"
         self.env.state = state
+
+    def setV(self, state_values: np.ndarray(1)):
+        "Sets the state value function for a particular policy (not shown explicitly)"
+        self.V = state_values

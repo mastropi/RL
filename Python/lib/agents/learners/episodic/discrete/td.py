@@ -12,6 +12,7 @@ from enum import Enum, unique
 import numpy as np
 from matplotlib import pyplot as plt, cm
 
+from Python.lib.agents.learners import ResetMethod
 from Python.lib.agents.learners.episodic.discrete import Learner, AlphaUpdateType
 from Python.lib.agents.learners.value_functions import ValueFunctionApprox
 import Python.lib.utils.plotting as plotting
@@ -35,11 +36,13 @@ class LeaTDLambda(Learner):
     def __init__(self, env, alpha=0.1, gamma=1.0, lmbda=0.8,
                  adjust_alpha=False, alpha_update_type=AlphaUpdateType.EVERY_STATE_VISIT,
                  adjust_alpha_by_episode=False, alpha_min=0.,
+                 reset_method=ResetMethod.ALLZEROS, reset_params=None, reset_seed=None,
                  debug=False):
-        super().__init__(env, alpha, adjust_alpha, alpha_update_type, adjust_alpha_by_episode, alpha_min)
+        super().__init__(env, alpha, adjust_alpha, alpha_update_type, adjust_alpha_by_episode, alpha_min,
+                         reset_method=reset_method, reset_params=reset_params, reset_seed=reset_seed)
         self.debug = debug
 
-        # Attributes that MUST be presented for all TD methods
+        # Attributes that MUST be present for all TD methods
         self.V = ValueFunctionApprox(self.env.getNumStates())
         self.Q = None
         self.alpha = alpha
@@ -55,6 +58,7 @@ class LeaTDLambda(Learner):
         # which gives the EFFECTIVE alpha value of the Stochastic Approximation algorithm
         # Goal: Compare the rate of convergence of the non-adaptive vs. the adaptive TD(lambda)
         # by keeping track of the effective alpha as a FUNCTION of the episode number for EACH STATE
+        # Each episode is a different row of the _alphas_effective array and the states are across the columns.
         self._times_nonzero_update = [[] for _ in self.env.all_states]
         self._alphas_effective = np.zeros((0, self.env.getNumStates()))
 
@@ -118,29 +122,45 @@ class LeaTDLambda(Learner):
         self._z_all = np.r_[self._z_all, self._z.reshape(1, len(self._z))]
 
     def _plotZ(self):
+        states2plot = self._choose_states2plot()
         plt.figure()
-        plt.plot(self._z_all[:,9:12], '.-')
-        plt.legend(np.arange(9,12,1))
+        plt.plot(self._z_all[:,states2plot], '.-')
+        plt.legend(states2plot)
         ax = plt.gca()
         ax.set_xlabel("time step")
         ax.set_ylabel("z")
-        ax.set_title("Eligibility trace by time step (Episode {})".format(self.episode))
+        start_state = self._states[0]
+        ax.set_title("Eligibility trace by time step (Episode {} - start state = {})".format(self.episode, start_state))
 
     def _plotAlphasEffective(self):
+        states2plot = self._choose_states2plot()
         plt.figure()
-        #plt.plot(self._times_nonzero_update[9], self._alphas_effective[9], '.-')
-        #plt.plot(self._times_nonzero_update[10], self._alphas_effective[10], '.-')
-        #plt.plot(self._times_nonzero_update[11], self._alphas_effective[11], '.-')
+        #for s in states2plot:
+        #   plt.plot(self._times_nonzero_update[s], self._alphas_effective[s], '.-')
         #plt.plot(self._times_nonzero_update[self.env.getNumStates()-1], self._alphas_effective[self.env.getNumStates()-1], '.-')
-        plt.plot(self._alphas_effective[:,9:12], '.-')
-        plt.legend(np.arange(9,12,1))
+        plt.plot(self._alphas_effective[:,states2plot], '.-')
+        plt.legend(states2plot)
         ax = plt.gca()
         #ax.set_xlim([0,len(self._states)-1])
         ax.set_ylim([0,1])
         ax.set_xlabel("time step")
         ax.set_ylabel("alpha*z")
-        ax.set_title("Effective learning rate (alpha*z) by time step (Episode {})".format(self.episode))
+        start_state = self._states[0]
+        ax.set_title("Effective learning rate (alpha*z) by time step (Episode {} - start state = {})".format(self.episode, start_state))
 
+    def _choose_states2plot(self):
+        from Python.lib.environments.gridworlds import EnvGridworld1D
+        from Python.lib.environments.mountaincars import MountainCarDiscrete
+        if isinstance(self.env, EnvGridworld1D):
+            states2plot = list(range(9,12))
+        elif isinstance(self.env, MountainCarDiscrete):
+            # Assuming MountainCar environment
+            states2plot = list(range(100, 104))
+        else:
+            # Choose the states around the middle state
+            states2plot = list(range(int(self.nS/2)-1, int(self.nS/2)+2))
+
+        return states2plot
 
 class LeaTDLambdaAdaptive(LeaTDLambda):
     
@@ -148,8 +168,11 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
                  adjust_alpha=False, alpha_update_type=AlphaUpdateType.EVERY_STATE_VISIT,
                  adjust_alpha_by_episode=True, alpha_min=0.,
                  lambda_min=0., lambda_max=0.99, adaptive_type=AdaptiveLambdaType.ATD,
+                 reset_method=ResetMethod.ALLZEROS, reset_params=None, reset_seed=None,
                  burnin=False, plotwhat="boxplots", fontsize=15, debug=False):
-        super().__init__(env, alpha, gamma, lmbda, adjust_alpha, alpha_update_type, adjust_alpha_by_episode, alpha_min, debug)
+        super().__init__(env, alpha, gamma, lmbda, adjust_alpha, alpha_update_type, adjust_alpha_by_episode, alpha_min,
+                         reset_method=reset_method, reset_params=reset_params, reset_seed=reset_seed,
+                         debug=debug)
         
         # List that keeps the history of ALL lambdas used at EVERY TIME STEP
         # (i.e. all states are mixed up here and if we want to identify which state the lambda corresponds to

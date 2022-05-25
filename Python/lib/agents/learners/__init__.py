@@ -23,6 +23,12 @@ MIN_COUNT = 1  # Minimum state count to start shrinking alpha
 
 
 @unique  # Unique enumeration values (i.e. on the RHS of the equal sign)
+class ResetMethod(Enum):
+    ALLZEROS = 1
+    RANDOM_UNIFORM = 2
+    RANDOM_NORMAL = 3
+
+@unique  # Unique enumeration values (i.e. on the RHS of the equal sign)
 class AlphaUpdateType(Enum):
     FIRST_STATE_VISIT = 1
     EVERY_STATE_VISIT = 2

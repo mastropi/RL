@@ -98,11 +98,11 @@ class Test_MC_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
                                           debug=False)
         agent_rw_mc = agents.GenericAgent(self.policy_rw, learner_mclambda)
         sim = simulators.Simulator(self.env, agent_rw_mc, debug=False)
-        _, _, RMSE_by_episode, state_info = \
+        _, _, RMSE_by_episode, MAPE_by_episode, learning_info = \
                                             sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
-                                                     compute_rmse=True, state_observe=10,
-                                                     verbose=True, verbose_period=100,
-                                                     plot=False, pause=0.1)
+                                                    compute_rmse=True, state_observe=10,
+                                                    verbose=True, verbose_period=100,
+                                                    plot=False, pause=0.1)
         observed = agent_rw_mc.getLearner().getV().getValues()
         print("\nobserved: " + test_utils.array2str(observed))
         assert np.allclose(observed, expected, atol=1E-6)
@@ -125,11 +125,11 @@ class Test_MC_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
 
         # Simulation
         sim = simulators.Simulator(self.env, agent_rw_mclambda, debug=False)
-        _, _, RMSE_by_episode, state_info = \
+        _, _, RMSE_by_episode, MAPE_by_episode, learning_info = \
                                             sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
-                                                     compute_rmse=True, state_observe=10,
-                                                     verbose=True, verbose_period=100,
-                                                     plot=False, pause=0.1)
+                                                    compute_rmse=True, state_observe=10,
+                                                    verbose=True, verbose_period=100,
+                                                    plot=False, pause=0.1)
 
         expected = np.array([ 0.000000, -0.471314, -0.150874, -0.044135, -0.021683,
                              -0.007209, -0.000881, -0.000375, -0.000158, -0.000065,
@@ -139,14 +139,14 @@ class Test_MC_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
         print("\nobserved: " + test_utils.array2str(observed))
         if self.plot:
             self.plot_results(params,
-                              observed, self.V_true, RMSE_by_episode, state_info['alphas_by_episode'],
+                              observed, self.V_true, RMSE_by_episode, learning_info['alpha_mean'],
                               max_rmse=self.max_rmse, color_rmse=self.color_rmse)
         assert np.allclose(observed, expected, atol=1E-6)
 
     def fails_test_random_walk_adaptive_result(self):
         # NOTE: (2021/10/16) This test currently fails for two reasons:
         # - the `observed` array is an array of all -1.0 followed by all +1.0 (i.e. a step function)
-        # - the self.plot_results() call at the end fails because the alphas_by_episode variable used when calling
+        # - the self.plot_results() call at the end fails because the alpha_mean_by_episode_mean variable used when calling
         # plt.plot() inside self.plot_results() has zero length.
         # So, it seems that nothing is really done or learned by the learner_mclambda_adaptive object.
         print("\nTesting " + self.id())
@@ -162,10 +162,10 @@ class Test_MC_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
 
         # Simulation
         sim = simulators.Simulator(self.env, agent_rw_mclambda_adaptive, debug=False)
-        _, _, RMSE_by_episode, state_info = sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
-                                                     compute_rmse=True, state_observe=10,
-                                                     verbose=True, verbose_period=100,
-                                                     plot=False, pause=0.1)
+        _, _, RMSE_by_episode, MAPE_by_episode, learning_info = sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
+                                                                     compute_rmse=True, state_observe=10,
+                                                                     verbose=True, verbose_period=100,
+                                                                     plot=False, pause=0.1)
 
         # Expected state values with alpha = 0.2, gamma = 0.9, lambda = 0.8
         # seed = 1717, nepisodes=20, start_state = 9
@@ -177,7 +177,7 @@ class Test_MC_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
         print("\nobserved: " + test_utils.array2str(observed))
         if self.plot:
             self.plot_results(params,
-                              observed, self.V_true, RMSE_by_episode, state_info['alphas_by_episode'],
+                              observed, self.V_true, RMSE_by_episode, learning_info['alpha_mean_by_episode_mean'],
                               max_rmse=self.max_rmse, color_rmse=self.color_rmse)
 
         assert np.allclose(observed, expected, atol=1E-6)
