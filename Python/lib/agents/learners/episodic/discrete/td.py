@@ -278,7 +278,8 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
             #-- Adaptive lambda
             # Define the relative target error delta by dividing delta to a reference value defined below
             #ref_value = state_value        # reference value is the value of the current state
-            ref_value = np.mean( np.abs(self.V.getValues()) )   # reference value is the average value over all states
+            #ref_value = np.mean( np.abs(self.V.getValues()) )   # reference value is the average value over all states
+            ref_value = np.mean( np.abs(self.V.getValues()[self.env.getNonTerminalStates()]) )   # reference value is the average value over NON-TERMINAL states (whose value is always 0, so they should no te included in the average
             delta_relative = delta / ref_value if ref_value != 0 \
                                                else 0. if delta == 0. \
                                                else np.Inf
