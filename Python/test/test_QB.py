@@ -52,12 +52,12 @@ class Process(Enum):
 
 class Test_QB_Particles(unittest.TestCase):
 
-    def __init__(self, nservers=1, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, *args, **kwargs):
         self.log = False
         self.capacity = 5
         self.rate_birth = 0.7
-        self.nservers = nservers
+        self.nservers = kwargs.pop('nservers', 1)
+        super().__init__(*args, **kwargs)
 
         if self.nservers == 1:
             # One server
@@ -2052,12 +2052,12 @@ if __name__ == "__main__":
     print("User arguments: {}".format(sys.argv))
     if len(sys.argv) == 1:    # Only the execution file name is contained in sys.argv
         sys.argv += [1]       # Number of servers in the system to simulate
-        sys.argv += ["J"]     # Either "N" for number of particles or "J" for buffer size"
-        sys.argv += [8]       # Number of replications
-        sys.argv += [10]       # Number of the test to run: only one is accepted
-    if len(sys.argv) == 5:    # Only the 4 required arguments are given by the user
-        sys.argv += [1]       # Number of methods to run: 1 (only FV), 2 (FV & MC)
-        sys.argv += ["save"]  # Either "nosave" or anything else for saving the results and log
+        sys.argv += ["N"]     # Either "N" for number of particles or "J" for buffer size"
+        sys.argv += [4]       # Number of replications
+        sys.argv += [4]       # Test number to run: only one is accepted, used only when the second argument is "J", not when it's "N".
+    if len(sys.argv) == 5:    # Only the 4 required arguments are given by the user (recall that the first argument is the program name)
+        sys.argv += [2]       # Number of methods to run: 1 (only FV), 2 (FV & MC)
+        sys.argv += ["nosave"]  # Either "nosave" or anything else for saving the results and log
     print("Parsed user arguments: {}".format(sys.argv))
     print("")
 

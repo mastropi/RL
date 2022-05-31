@@ -2,7 +2,7 @@
 """
 Created on 19 Oct 2021
 
-@author: Daniel Mastropetro
+@author: Daniel Mastropietro
 @description: Definition of an assignment policy of jobs to servers to be used in queues
 """
 

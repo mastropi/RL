@@ -35,6 +35,15 @@ class LeaPolicyGradient(GenericLearner):
         Whether to use a fixed window to estimate the return G(t) for the update of parameter theta.
         In that case G(t) is estimated for t=0, 1, ..., int(T/2) (or similar).
         default: False
+
+    clipping: (opt) bool
+        Whether to clip the absolute change of the delta parameter at each learning step to a specified maximum.
+        default: False
+
+    clipping_value: (opt) float
+        Maximum absolute change of the delta parameter at each learning step.
+        Only used when clipping = True.
+        default: +1.0
     """
 
     def __init__(self, env, policy, learnerV, alpha=1.0,
@@ -44,11 +53,14 @@ class LeaPolicyGradient(GenericLearner):
                  min_time_to_update_alpha=0,
                  alpha_min=0.,
                  fixed_window=False,
+                 clipping=False, clipping_value=+1.0,
                  debug=False):
         super().__init__(env, alpha, adjust_alpha, func_adjust_alpha, min_count_to_update_alpha, min_time_to_update_alpha, alpha_min)
         self.debug = debug
 
         self.fixed_window = fixed_window is None and False or fixed_window
+        self.clipping = clipping
+        self.clipping_value = clipping_value
 
         self.policy = policy
         self.learnerV = learnerV
@@ -300,8 +312,8 @@ class LeaPolicyGradient(GenericLearner):
         # Note that we bound the delta theta to avoid too large changes!
         # We use "strange" numbers to avoid having theta fall always on the same distance from an integer (e.g. 4.1, 5.1, etc.)
         # The lower and upper bounds are asymmetric (larger lower bound) so that a large negative reward can lead to a large reduction of theta.
-        bound_delta_theta_upper = +np.Inf   #+1.131
-        bound_delta_theta_lower = -np.Inf   #-1.131 #-5.312314 #-1.0
+        bound_delta_theta_upper = +np.Inf if not self.clipping else self.clipping_value  #+1.131
+        bound_delta_theta_lower = -np.Inf if not self.clipping else self.clipping_value  #-1.131 #-5.312314 #-1.0
         delta_theta = np.max([ bound_delta_theta_lower, np.min([self.getLearningRate() * gradV, bound_delta_theta_upper]) ])
         print("Estimated grad(V(theta)) = {}".format(gradV))
         print("Delta(theta) = alpha * grad(V) = {}".format(delta_theta))
@@ -423,8 +435,8 @@ class LeaPolicyGradient(GenericLearner):
 
                     # Note that we bound the delta theta to avoid too large changes!
                     #theta += self.getLearningRate() * delta * self.policy.getGradientLog(action, state)
-                    bound_delta_theta_upper = +np.Inf   #+1.131
-                    bound_delta_theta_lower = -np.Inf   #-1.131
+                    bound_delta_theta_upper = +np.Inf if not self.clipping else self.clipping_value  #+1.131
+                    bound_delta_theta_lower = -np.Inf if not self.clipping else self.clipping_value  #-1.131
                     delta_theta = np.max([ bound_delta_theta_lower, np.min([alpha * gradV, bound_delta_theta_upper]) ])
                     print("\tt={}: delta(theta) = {}".format(t, delta_theta))
 
@@ -452,7 +464,7 @@ class LeaPolicyGradient(GenericLearner):
     def learn_linear_theoretical(self, T):
         """
         Learns the policy by updating the theta parameter using gradient ascent and estimating the gradient
-        from the theoretical expression of the gradient in the linear step policy (only applies here!), namely:
+        from the theoretical expression of the gradient in the linear step policy (only applies for this case!), namely:
         
         grad(V) = Pr(K-1) * ( Q(K-1,1) - Q(K-1,0) )
 
@@ -525,8 +537,8 @@ class LeaPolicyGradient(GenericLearner):
         # Note that we bound the delta theta to avoid too large changes!
         # We use "strange" numbers to avoid having theta fall always on the same distance from an integer (e.g. 4.1, 5.1, etc.)
         # The lower and upper bounds are asymmetric (larger lower bound) so that a large negative reward can lead to a large reduction of theta.
-        bound_delta_theta_upper = +2.131 #+1.131
-        bound_delta_theta_lower = -5.3123 #-1.131 #-5.312314 #-1.0
+        bound_delta_theta_upper = +np.Inf if not self.clipping else self.clipping_value #+2.131 #+1.131
+        bound_delta_theta_lower = -np.Inf if not self.clipping else self.clipping_value #-5.3123 #-1.131 #-5.312314 #-1.0
         delta_theta = np.max([ bound_delta_theta_lower, np.min([self.getLearningRate() * gradV, bound_delta_theta_upper]) ])
         print("Estimated grad(V(theta)) = {}".format(gradV))
         print("Delta(theta) = alpha * grad(V) = {}".format(delta_theta))
@@ -542,11 +554,14 @@ class LeaPolicyGradient(GenericLearner):
     def learn_linear_theoretical_from_estimated_values(self, T, proba_stationary, Q_values):
         """
         Learns the policy by updating the theta parameter using gradient ascent and estimating the gradient
-        from the theoretical expression of the gradient in the linear step policy (only applies here!), namely:
+        from the theoretical expression of the gradient in the linear step policy (only applies for this case!), namely:
 
         grad(V) = Pr(K-1) * ( Q(K-1,1) - Q(K-1,0) )
 
         where Pr(K-1) is the stationary distribution for the buffer size K-1.
+
+        The difference with the learn_linear_theoretical() method is that the current method receives the estimated
+        values of Pr(K-1) and of Q(K-1,1), Q(K-1,0) as input parameters, while the other method computes their estimates.
 
         Arguments:
         proba_stationary: float between 0 and 1
@@ -591,8 +606,9 @@ class LeaPolicyGradient(GenericLearner):
             # Note that we bound the delta theta to avoid too large changes!
             # We use "strange" numbers to avoid having theta fall always on the same distance from an integer (e.g. 4.1, 5.1, etc.)
             # The lower and upper bounds are asymmetric (larger lower bound) so that a large negative reward can lead to a large reduction of theta.
-            bound_delta_theta_upper = +np.Inf #+1.1234 #+np.Inf #+2.1310  # +1.131
-            bound_delta_theta_lower = -np.Inf #-1.1234 #-np.Inf #-5.3123  # -1.131 #-5.312314 #-1.0
+            # Use +1.0 and -1.0 respectively for CLIPPING delta(theta) to +/- 1.
+            bound_delta_theta_upper = +np.Inf if not self.clipping else self.clipping_value #+1.0 #+np.Inf #+1.1234 #+np.Inf #+2.1310  # +1.131
+            bound_delta_theta_lower = -np.Inf if not self.clipping else self.clipping_value #-1.0 #-np.Inf #-1.1234 #-np.Inf #-5.3123  # -1.131 #-5.312314 #-1.0
 
             #alpha = self.getLearningRate()
             # DM-2021/12/24: An attempt to make alpha proportional to the INVERSE of the second derivative of V,

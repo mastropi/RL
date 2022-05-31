@@ -38,7 +38,6 @@ from Python.lib.agents.policies.parameterized import PolQueueTwoActionsLinearSte
 from Python.lib.agents.queues import PolicyTypes
 from Python.lib.environments.mountaincars import MountainCarDiscrete
 from Python.lib.environments.queues import rewardOnJobRejection_ExponentialCost, Actions, COST_EXP_BUFFER_SIZE_REF
-from Python.lib.estimators import estimate_proba_survival_and_expected_absorption_time_mc
 import Python.lib.queues as queues
 from Python.lib.queues import Event
 
@@ -1702,7 +1701,9 @@ class SimulatorQueue(Simulator):
 
     def run_simulation_2_until_mixing(self, t_learn, buffer_size, t_sim_max, verbose=False, verbose_period=1):
         """
-        Runs the simulation using Monte-Carlo
+        Runs the two simulations of the queue starting at the given buffer size, one with first action Reject,
+        and the other with first action Accept, until the two trajectories mix or the given maximum simulation time
+        is achieved.
 
         Arguments:
         t_learn: int
@@ -2345,6 +2346,8 @@ def compute_reward_for_buffer_size(env, bs):
 
 def step(t, env, agent, policy_type):
     """
+    The given agent performs an action on the given environment out of the possible actions defined in the given policy
+
     Arguments:
     t: int
         Current queue transition associated to the current step.
@@ -2853,9 +2856,12 @@ def estimate_stationary_probability_mc(env, agent, start_state):
     simulation time (sum of sojourn times).
 
     Arguments:
-    env:
+    env: environment
+        The queue environment where the agent acts.
 
-    agent:
+    agent: Agent
+        The agent interacting with the environment.
+        It should have a learner of the value function V and a learner of the policy P defined.
 
     start_state: int or list or numpy array
         State of the queue environment at which the Monte-Carlo simulation started.
@@ -3695,7 +3701,7 @@ if __name__ == "__main__":
         phat = 1.0 * n_events_by_rate / N
         se_phat = np.sqrt(p * (1 - p) / N)
         print("EXPECTED / OBSERVED / SE proportions of events by rate on N={}:\n{}".format(N, np.c_[p, phat, se_phat]))
-        print("NOTE: If the test fails, run it again, because it maybe just for chance because of the random seed chosen when running the test.")
+        print("NOTE: If the test fails, run it again, because it may have failed just by chance due to the random seed chosen when running the test.")
         assert np.allclose(phat, p, atol=3 * se_phat)  # true probabilities should be contained in +/- 3 SE(phat) from phat
         # ---------------- generate_event() in SimulatorQueue --------------------- #
 
@@ -4135,6 +4141,60 @@ if __name__ == "__main__":
 
     if not test and True:
         # --- Test the SimulatorQueue class ---#
+        # Default execution arguments when no arguments are given
+        # Example of execution from the command line:
+        # python simulators.py 50 FV False 1.0 23.0 33.9 0.5 1.0 1.0
+        print("User arguments: {}".format(sys.argv))
+        if len(sys.argv) == 1:  # Only the execution file name is contained in sys.argv
+            sys.argv += [50]    # t_learn: Number of learning steps
+            sys.argv += ["FV"]  # learning_method: estimation method: "FV" or "MC";
+                                # when learning_method = "MC", we expect there exists a benchmark file called benchmark_fv.csv
+                                # that defines how many events were observed during the equivalent FV learning method
+                                # (for fair comparison). If one does not exist, the Monte-Carlo simulation wil be run
+                                # no its own and no comparison is expected to be carried out with a previously FV simulation.
+            sys.argv += [False] # clipping: whether to use clipping: False or True
+            sys.argv += [1.0]   # clipping_value: clipping value when clipping = True
+        if len(sys.argv) == 5:  # Only the 4 required arguments are given by the user (recall that the first argument is the program name)
+            # Note that, if the user didn't pass any arguments, i.e. len(sys.argv) == 1 above, at this stage sys.argv has length 5
+            # because the first 4 required parameters were just defined.
+            # There is NO check that the user didn't pass the full set of 4 required parameters, i.e. if they pass 2 parameters
+            # the parameter parsing process will fail because not all arguments are defined in sys.argv.
+            sys.argv += [23.0]  # theta_true: true theta (only one value is allowed)
+            sys.argv += [3.9]   # theta_start: non-integral initial theta value for the learning process (only one value is allowed)
+            sys.argv += [0.5]   # J_factor: fraction J/K to use in the FV learning method
+            sys.argv += [1.0]   # error_rel_phi: expected relative error for the estimation of Phi(t,K) in the FV learning method (1.0 means 100%) --> it defines the number of particles to use
+            sys.argv += [1.0]   # error_rel_phi: expected relative error for the estimation of E(T) in the FV learning method (1.0 means 100%) --> it defines the number of arrival events to observe in the MC-based simulation to estimate E(T)
+            sys.argv += ["nosave"]# Either "nosave" or anything else for saving the results and log
+        print("Parsed user arguments: {}".format(sys.argv))
+        print("")
+        assert len(sys.argv) == 11, "The number of parsed arguments is 11 ({})".format(len(sys.argv))
+
+        # -- Parse user arguments
+        t_learn = int(sys.argv[1])
+        learning_method = LearningMethod.FV if sys.argv[2] == "FV" else LearningMethod.MC
+        clipping = sys.argv[3] == 'True'
+        clipping_value = float(sys.argv[4])
+        theta_true = float(sys.argv[5])
+        theta_start = float(sys.argv[6])
+        J_factor = float(sys.argv[7])
+        error_rel_phi = float(sys.argv[8])
+        error_rel_et = float(sys.argv[9])
+        create_log = sys.argv[10] != "nosave"
+        save_results = sys.argv[10] != "nosave"
+
+        print("Execution parameters:")
+        print("t_learn={}".format(t_learn))
+        print("learning_method={}".format(learning_method.name))
+        print("clipping={}".format(clipping))
+        print("clipping_value={}".format(clipping_value))
+        print("theta_true={}".format(theta_true))
+        print("theta_start={}".format(theta_start))
+        print("J_factor={}".format(J_factor))
+        print("error_rel_phi={}".format(error_rel_phi))
+        print("error_rel_et={}".format(error_rel_et))
+        print("create_log={}".format(create_log))
+        print("save_results={}".format(save_results))
+
 
         # ---------------------------- Auxiliary functions ---------------------------#
         def define_queue_environment_and_agent(dict_params: dict):
@@ -4228,13 +4288,15 @@ if __name__ == "__main__":
             learnerV = dict_params_learners['V']['learner'](env_queue_mm, gamma=dict_params_learners['V']['params'].get('gamma'))
             learnerQ = None
             learnerP = dict_params_learners['P']['learner'](env_queue_mm, policies[PolicyTypes.ACCEPT],
-                                                learnerV,
-                                                alpha=dict_params_learners['P']['params'].get('alpha_start'),
-                                                adjust_alpha=dict_params_learners['P']['params'].get('adjust_alpha'),
-                                                func_adjust_alpha=dict_params_learners['P']['params'].get('func_adjust_alpha'),
-                                                min_time_to_update_alpha=dict_params_learners['P']['params'].get('min_time_to_update_alpha'),
-                                                alpha_min=dict_params_learners['P']['params'].get('alpha_min'),
-                                                fixed_window=dict_params_learners['P']['params'].get('fixed_window'))
+                                                            learnerV,
+                                                            alpha=dict_params_learners['P']['params'].get('alpha_start'),
+                                                            adjust_alpha=dict_params_learners['P']['params'].get('adjust_alpha'),
+                                                            func_adjust_alpha=dict_params_learners['P']['params'].get('func_adjust_alpha'),
+                                                            min_time_to_update_alpha=dict_params_learners['P']['params'].get('min_time_to_update_alpha'),
+                                                            alpha_min=dict_params_learners['P']['params'].get('alpha_min'),
+                                                            fixed_window=dict_params_learners['P']['params'].get('fixed_window'),
+                                                            clipping=dict_params_learners['P']['params'].get('clipping'),
+                                                            clipping_value=dict_params_learners['P']['params'].get('clipping_value'))
 
             # TODO: (2022/01/17) Can we add the following assertion at some point?
             #from Python.lib.agents.learners import GenericLearner
@@ -4285,9 +4347,10 @@ if __name__ == "__main__":
                 '1(b)-System-JobClassRates': simul.getEnv().getJobClassRates(),
                 '1(c)-System-ServiceRates': simul.getEnv().getServiceRates(),
                 '1(d)-System-TrueTheta': dict_params_simul['theta_true'],
+                '1(e)-System-TrueK': dict_info['K_true'],
                 '2(a)-Learning-Method': dict_info['learning_method'],
-                '2(b)-Learning-Method#Particles (% Rel Error Phi)': (dict_params_simul['nparticles'], dict_info['error_rel_phi'] * 100),
-                '2(c)-Learning-Method#TimeSteps (% Rel Error E(T))': (dict_params_simul['t_sim'], dict_info['error_rel_et'] * 100),
+                '2(b)-Learning-Method#Particles and % Rel Error Phi': (dict_params_simul['nparticles'], dict_info['error_rel_phi'] * 100),
+                '2(c)-Learning-Method#TimeSteps and % Rel Error E(T)': (dict_params_simul['t_sim'], dict_info['error_rel_et'] * 100),
                 '2(d)-Learning-LearningMode': simul.dict_learning_params['mode'].name,
                 '2(e)-Learning-ThetaStart': dict_params_simul['theta_start'],
                 '2(f)-Learning-#Steps': simul.getNumLearningSteps(),
@@ -4320,26 +4383,31 @@ if __name__ == "__main__":
         from Python.lib.agents.learners.policies import LeaPolicyGradient
 
         # ---------------------- OUTPUT FILES --------------------#
-        create_log = True; logsdir = "../../RL-002-QueueBlocking/logs/RL/single-server"
-        save_results = True; resultsdir = "../../RL-002-QueueBlocking/results/RL/single-server"
+        #create_log = False;    # In case we need to override the parameter received as argument to the script
+        logsdir = "../../RL-002-QueueBlocking/logs/RL/single-server"
+        #save_results = True;   # In case we need to override the parameter received as argument to the script
+        resultsdir = "../../RL-002-QueueBlocking/results/RL/single-server"
         # ---------------------- OUTPUT FILES --------------------#
 
         # -- Parameters defining the environment, policies, learners and agent
-        # Learning parameter for the value function V
+        # Learning parameters for the value function V
         gamma = 1.0
 
         # Learning parameters for the policy P
-        # MC (with no benchmark)
-        #learning_method = LearningMethod.MC; plot_trajectories = False; symbol = 'b.-'; benchmark_file = None
-        # MC (with benchmark)
-        #learning_method = LearningMethod.MC; plot_trajectories = False; symbol = 'b.-'; benchmark_file = os.path.join(os.path.abspath(resultsdir), "benchmark_fv.csv")
-        # FV
-        learning_method = LearningMethod.FV; plot_trajectories = False; symbol = 'g.-'; benchmark_file = None
         if learning_method == LearningMethod.FV:
             learnerV = LeaFV
+            benchmark_file = None
+            plot_trajectories = False
+            symbol = 'g-'
         else:
             # Monte-Carlo learner is the default
             learnerV = LeaMC
+            benchmark_file = os.path.join(os.path.abspath(resultsdir), "benchmark_fv.csv")
+            if not os.path.exists(benchmark_file):
+                warnings.warn("Benchmark file 'benchmark_fv.csv' does not exist. The Monte-Carlo simulation will run without any reference to a previously run Fleming-Viot simulation")
+                benchmark_file = None
+            plot_trajectories = False
+            symbol = 'g-'
         fixed_window = False
         alpha_start = 10.0  # / t_sim  # Use `/ t_sim` when using update of theta at each simulation step (i.e. LeaPolicyGradient.learn_TR() is called instead of LeaPolicyGradient.learn())
         adjust_alpha = False #True
@@ -4369,7 +4437,9 @@ if __name__ == "__main__":
                                                                 'func_adjust_alpha': func_adjust_alpha,
                                                                 'min_time_to_update_alpha': min_time_to_update_alpha,
                                                                 'alpha_min': alpha_min,
-                                                                'fixed_window': fixed_window
+                                                                'fixed_window': fixed_window,
+                                                                'clipping': clipping,
+                                                                'clipping_value': clipping_value,
                                                                 }
                                                 }
                                         },
@@ -4378,9 +4448,10 @@ if __name__ == "__main__":
         env_queue_mm, rhos, agent = define_queue_environment_and_agent(dict_params)
 
         # -- Simulation parameters that are common for ALL parameter settings
+        # t_learn is now defined as input parameter passed to the script
         # 2022/01/14: t_learn = 10 times the optimum true theta so that we are supposed to reach that optimum under the REINFORCE_TRUE learning mode with decreasing alpha
-        t_learn = 200 #100 #198 - 91 #198 #250 #50
-        seed = 1313  #1859 (for learning step 53+91=144) #1769 (for learning step 53, NOT 52 because it took too long) #1717
+        #t_learn = 800 #100 #800 #100 #198 - 91 #198 #250 #50
+        seed = 1313 #1317 #1717 #1313  #1859 (for learning step 53+91=144) #1769 (for learning step 53, NOT 52 because it took too long) #1717
         verbose = False
         dict_learning_params = dict({'mode': LearningMode.REINFORCE_TRUE, 't_learn': t_learn})
         dict_params_info = dict({'plot': False, 'log': False})
@@ -4398,13 +4469,20 @@ if __name__ == "__main__":
         if benchmark_file is None:
             # -- Iterate on each set of parameters defined here
             # theta_true_values = np.linspace(start=1.0, stop=20.0, num=20)
-            theta_true_values = [10.0 - 1]  # [32.0-1, 34.0-1, 36.0-1] #[10.0-1, 15.0-1, 20.0-1, 25.0-1, 30.0-1]  # 39.0
-            theta_start_values = [19.0] #[20.0 - 1, 25.0 - 1]
-            J_factor_values = [0.2] #[0.2, 0.3, 0.5]  # [0.2, 0.3, 0.5, 0.7]
+            # When defining the theta values we specify the blocking size K and we substract 1. Recall that K = ceiling(theta+1)
+            # So, if we want K = 35, we can set theta somewhere between 33+ and 34, so we define e.g. theta = 34.9 - 1
+            # Note that the list of theta values can contain more than one value, in which case a simulation will be run for each of them
+            theta_true_values = [theta_true] #[24.0 - 1] #[20.0 - 1]  # [32.0-1, 34.0-1, 36.0-1] #[10.0-1, 15.0-1, 20.0-1, 25.0-1, 30.0-1]  # 39.0
+            theta_start_values = [theta_start] #[34.9 - 1] #[30.0 - 1] #[20.0 - 1, 25.0 - 1]
+            assert len(theta_true_values) == len(theta_start_values), \
+                "The number of true theta values ({}) and start theta values ({}) should be the same" \
+                .format(len(theta_true_values), len(theta_start_values))
+            J_factor_values = [0.3] #[0.2, 0.3, 0.5]  # [0.2, 0.3, 0.5, 0.7]
             NT_exponents = [0] #[-2, -1, 0, 1]  # Exponents to consider for different N and T values as in exp(exponent)*N0, where N0 is the reference value to achieve a pre-specified relative error
             # Accepted relative errors for the estimation of Phi and of E(T_A)
-            error_rel_phi = [0.13] #0.5
-            error_rel_et = [0.3] #0.5
+            # They define respectively the number of particles N and the number of arrival events T to observe in each learning step.
+            error_rel_phi = [error_rel_phi] #[1.0] #0.5
+            error_rel_et = [error_rel_et] #[1.0] #0.5
 
             # Output variables of the simulation
             case = 0
@@ -4627,11 +4705,13 @@ if __name__ == "__main__":
 
             # Plot evolution of theta
             if is_scalar(t_sim):
-                title = "Method: {}, Optimum Theta = {}, Theta start = {}, t_sim = {:.0f}, t_learn = {:.0f}, fixed_window={}" \
-                          .format(learning_method.name, theta_true, theta_start, t_sim, t_learn, fixed_window)
+                title = "Method: {}, Optimum Theta = {}, Theta start = {}, t_sim = {:.0f}, t_learn = {:.0f}, fixed_window={}, clipping={}" \
+                        .format(learning_method.name, theta_true, theta_start, t_sim, t_learn, fixed_window, clipping) + \
+                        (clipping and ", clipping_value={}".format(clipping_value) or "")
             else:
-                title = "Method: {}, Optimum Theta = {}, Theta start = {}, t_learn = {:.0f}, fixed_window={}" \
-                    .format(learning_method.name, theta_true, theta_start, t_learn, fixed_window)
+                title = "Method: {}, Optimum Theta = {}, Theta start = {}, t_learn = {:.0f}, fixed_window={}, clipping={}" \
+                        .format(learning_method.name, theta_true, theta_start, t_learn, fixed_window, clipping) + \
+                        (clipping and ", clipping_value={}".format(clipping_value) or "")
             if PLOT_TRAJECTORY and plot_trajectories:
                 assert N == 1, "The simulated system has only one particle (N={})".format(N)
                 # NOTE: (2021/11/27) I verified that the values of learnerP.getRewards() for the last learning step
@@ -4777,7 +4857,9 @@ if __name__ == "__main__":
         results_file_mc2 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_200859_MC-K0=20-K=30-J=0.5-E1.0-AlphaConst(B=5).csv")
         results_file_fv3 = os.path.join(os.path.abspath(resultsdir), ".csv")
         results_file_mc3 = os.path.join(os.path.abspath(resultsdir), ".csv")
-        K_true = 19 # Optimum blocking size, the integer-valued K at which the expected cost is minimum
+        K_true = 19 # Optimum blocking size, the integer-valued K at which the expected cost is minimum.
+                    # NOTE: K_true is NOT exactly theta_true + 1 because theta_true defines xref (if I recall correctly)
+                    # and the minimum of the expected cost function of K is not always xref + 1, although it is close to it.
 
         # J/K = 0.5, K0 = 25
         # These only simulates for 300 learning steps
@@ -4804,7 +4886,9 @@ if __name__ == "__main__":
         results_file_fv1 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220126_135652_FV-K0=20-K=30-J=0.3-E1.5-AlphaConst(B=5).csv")
         results_file_mc1 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220126_193306_MC-K0=20-K=30-J=0.3-E1.5-AlphaConst(B=5).csv")
         results_file_fv2 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220126_135719_FV-K0=20-K=30-J=0.3-E1.0-AlphaConst(B=5).csv")
+        results_file_fv2 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220519_165242_FV-K0=20-K=30-J=0.3-E0.5-AlphaConst(B=5)_seed1313.csv")
         results_file_mc2 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220126_193252_MC-K0=20-K=30-J=0.3-E1.0-AlphaConst(B=5).csv")
+        results_file_mc2 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220519_203152_MC-K0=20-K=30-J=0.3-E0.5-AlphaConst(B=5)_seed1313.csv")
         K_true = 19 # Optimum blocking size, the integer-valued K at which the expected cost is minimum
 
         theta_update_strategy = "normal"
@@ -4914,7 +4998,7 @@ if __name__ == "__main__":
                 T = T_values[idx_case]
                 n_events_et = all_cases['n_events_mc']['mean'].iloc[idx_case]
                 n_events_fv = all_cases['n_events_fv']['mean'].iloc[idx_case]
-                #n_events_mean = n_events_by_case.iloc[idx_case]['n_events_mc']['mean']
+                n_events_mean = n_events_by_case.iloc[idx_case]['n_events_mc']['mean']
 
                 # The data to plot
                 ind = results_fv['case'] == case

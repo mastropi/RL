@@ -2,7 +2,7 @@
 """
 Created on 22 Mar 2021
 
-@author: Daniel Mastropetro
+@author: Daniel Mastropietro
 @description: Definition of policy for queues in terms of acceptance of new job of a given class
 """
 

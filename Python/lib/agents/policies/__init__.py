@@ -2,7 +2,7 @@
 """
 Created on 09 Oct 2021
 
-@author: Daniel Mastropetro
+@author: Daniel Mastropietro
 @description: Definition of the attributes and methods that are needed for any parameterized policy with two possible actions
 """
 
