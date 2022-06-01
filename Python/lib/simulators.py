@@ -2330,7 +2330,12 @@ def update_trajectory(agent, t_total, t_sim, state, action, reward):
 
 
 def compute_reward_for_buffer_size(env, bs):
-    "Computes the reward given by the environment when blocking at the given buffer size bs"
+    """
+    Computes the reward given by the environment when blocking at the given buffer size bs
+
+    If the environment does not have a reward function defined, the returned reward is 1.0, so that the expected reward
+    is equal to the probability of being at the given buffer size.
+    """
     # *** We assume that the state of the environment is a duple: (list with server queue sizes, job class of latest arriving job) ***
     state = ([0] * env.getNumServers(), None)
     # We set the first server to have occupancy equal to the buffer size of interest
@@ -2338,8 +2343,11 @@ def compute_reward_for_buffer_size(env, bs):
     # of the multi-server system.
     state[0][0] = bs
     reward_func = env.getRewardFunction()
-    params_reward_func = env.getParamsRewardFunc()
-    reward = reward_func(env, state, Actions.REJECT, state, dict_params=params_reward_func)
+    if reward_func is not None:
+        params_reward_func = env.getParamsRewardFunc()
+        reward = reward_func(env, state, Actions.REJECT, state, dict_params=params_reward_func)
+    else:
+        reward = 1.0
 
     return reward
 
