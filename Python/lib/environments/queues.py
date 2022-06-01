@@ -154,8 +154,9 @@ class EnvQueueSingleBufferWithJobClasses(gym.Env):
     queue: QueueMM
         The queue object that governs the dynamics of the environment through the definition of a server system.
 
-    job_class_rates: list
-        A list containing the arriving job rates for each valid job class.
+    job_class_rates: list or numpy array
+        A list or array containing the arriving job rates for each valid job class.
+        It is always stored in the object as a list.
 
     reward_func: function
         Function returning the reward received after taking action A(t) at state S(t) and making the environment
@@ -177,7 +178,9 @@ class EnvQueueSingleBufferWithJobClasses(gym.Env):
         #-- Environment
         self.queue = queue
         self.job_class = None
-        self.job_class_rates = job_class_rates
+        if not isinstance(job_class_rates, (list, np.ndarray)):
+            raise ValueError("Input parameter `job_class_rates` must be a list or an array ({})".format(type(job_class_rates)))
+        self.job_class_rates = list(job_class_rates)
 
         #-- Rewards
         self.reward_func = reward_func

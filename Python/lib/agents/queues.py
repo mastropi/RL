@@ -34,6 +34,16 @@ class AgeQueue(GenericAgent):
     Agent that acts on a queue environment
 
     Arguments:
+    env: environment
+        Queue environment defining the characteristics of the environment on which the agent acts.
+        Note that this object is NOT stored as part of the object's attributes, and the reason is that we may want
+        the agent to act on any given number of *different* environments having the same characteristics
+        (e.g. Fleming-Viot learning, where there are N copies of the same environment on which the same type of agent
+        interacts --by e.g. accepting or rejecting incoming jobs).
+        Here the queue environment is only used to retrieve the number of servers in the system and the arrival rates
+        of the different arriving job classes, in order to define the job assignment policy
+        (of an incoming job of a given class to a server in the queue system).
+
     policies: dict
         Dictionary of policies followed by the agent, with the following elements:
         - PolicyTypes.ACCEPT: Policy object defining the acceptance policy of an incoming job.
@@ -55,8 +65,7 @@ class AgeQueue(GenericAgent):
         if self.getAssignmentPolicy() is None:
             # No assignment policy is given
             # # => Define it as a policy with uniform probability over servers for each job class
-            self.setAssignmentPolicy( PolJobAssignmentProbabilistic(
-                [[1.0 / env.getNumServers()] * env.getNumServers()] * len(env.getJobClassRates()) ) )
+            self.setAssignmentPolicy( PolJobAssignmentProbabilistic([[1.0 / env.getNumServers()] * env.getNumServers()] * len(env.getJobClassRates()) ) )
 
     def act(self, env, policy_type):
         """
@@ -65,7 +74,7 @@ class AgeQueue(GenericAgent):
 
         Arguments:
         env: Queue environment (normally defined in environments/queues.py)
-            The queue environment where the agent performs its action.
+            The queue environment on which the agent acts.
 
         policy_type: PolicyTypes
             Type of policy on which the agent acts on the queue, one of:

@@ -2733,7 +2733,7 @@ def run_simulation_mc(env, agent, t_learn, start_state, t_sim_max,
         time, event, job_class_or_server, _ = generate_event([env])
         time_abs += time
         if False: #DEBUG_TRAJECTORIES:
-            print("Time step t = {}: Exponential time generated: {:.3f} --> ABS time = {:.3f}".format(t, time, time_abs))
+            print("[MC] Time step t = {}: Exponential time generated: {:.3f} --> ABS time = {:.3f}".format(t, time, time_abs))
 
         # Analyze the event
         if event == Event.BIRTH:
@@ -2749,7 +2749,7 @@ def run_simulation_mc(env, agent, t_learn, start_state, t_sim_max,
             if track_survival and buffer_size == buffer_size_start + 1:
                 time_last_activation = time_abs
                 if DEBUG_ESTIMATORS:
-                    print("--> ACTIVATION @time = {:.3f}".format(time_abs))
+                    print("[MC] --> ACTIVATION @time = {:.3f}".format(time_abs))
 
             if DEBUG_ESTIMATORS:
                 jobs_arrival += [job_class_or_server]
@@ -2775,8 +2775,8 @@ def run_simulation_mc(env, agent, t_learn, start_state, t_sim_max,
                 if track_survival and time_last_activation is not None:
                     time_to_absorption = time_abs - time_last_activation
                     if DEBUG_ESTIMATORS:
-                        print("--> ABSORPTION @time = {:.3f}".format(time_abs))
-                        print("\tACTIVATION time = {:.3f} --> time to absorption = {:.3f}" \
+                        print("[MC] --> ABSORPTION @time = {:.3f}".format(time_abs))
+                        print("[MC] \tACTIVATION time = {:.3f} --> time to absorption = {:.3f}" \
                               .format(time_last_activation, time_to_absorption))
                     assert time_to_absorption > 0
                     insort(survival_times, time_to_absorption, unique=False)
@@ -2812,7 +2812,7 @@ def run_simulation_mc(env, agent, t_learn, start_state, t_sim_max,
             time_last_return = time_abs
 
         if DEBUG_TRAJECTORIES:
-            print("{} | t={}: time={:.3f}, event={}, action={} -> state={}, reward={:.3f}" \
+            print("[MC] {} | t={}: time={:.3f}, event={}, action={} -> state={}, reward={:.3f}" \
                   .format(state, t, time_abs, event, action, next_state, reward), end="\n")
 
         if track_absorptions:
@@ -2827,7 +2827,7 @@ def run_simulation_mc(env, agent, t_learn, start_state, t_sim_max,
 
     # DONE
     if show_messages(verbose, verbose_period, t_learn):
-        print("==> agent ENDS at time t={} at state {} coming from state = {}, action = {}, reward = {}, gradient = {})" \
+        print("[MC] ==> agent ENDS at time t={} at state {} coming from state = {}, action = {}, reward = {}, gradient = {})" \
               .format(t, env.getState(), state, action, reward, gradient_for_action))
 
     if DEBUG_ESTIMATORS:
@@ -2947,9 +2947,17 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info):
 
     dict_params_simul: dict
         Dictionary containing the simulation parameters.
+        It should contain at least the following keys:
+        - buffer_size_activation: the overall system's buffer size for activation (J, where J-1 is the absorption buffer size).
+        - T:
+        - seed: the seed to use for the pseudo-random number generation.
 
     dict_params_info: dict
         Dictionary containing information to display or parameters to deal with the information to display.
+        Accepted keys are:
+        - verbose: whether to be verbose during the simulation.
+        - verbose_period: the number of iterations (of what?) at which to be verbose.
+        - t_learn: the number of learning steps, when FV is used in the context of FVRL, i.e. to learn an optimum policy.
 
     Return: tuple
     Tuple with the following elements:
@@ -3117,8 +3125,7 @@ def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption, proba_surv, 
         Return: bool
         Whether any of the newly computed Phi values (for each buffer size of interest) is non-zero.
         This can be used to decide whether we need to compute the integral that gives rise to the Fleming-Viot estimate
-        of the stationary probability, or we already know that the integral is already 0 because ALL the Phi(t) values
-        are 0.
+        of the stationary probability, or we already know that the integral is 0 because ALL the Phi(t) values are 0.
         """
         any_new_value_gt_0 = False
         for bs in phi.keys():
@@ -3127,7 +3134,7 @@ def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption, proba_surv, 
                 any_new_value_gt_0 = True
         return any_new_value_gt_0
 
-    def empirical_mean(envs, buffer_size):
+    def empirical_mean(envs: list, buffer_size: int):
         "Compute the proportion of environments/particles at the given buffer size"
         return np.mean([int(bs == buffer_size) for bs in [env.getBufferSize() for env in envs]])
 
@@ -3228,8 +3235,7 @@ def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption, proba_surv, 
         buffer_sizes_of_interest = sorted( list(phi.keys()) )
         for bs in buffer_sizes_of_interest:
             df_phi[bs] = phi[bs]
-        df_phi.columns = pd.MultiIndex.from_arrays(
-            [['t'] + ['Phi'] * len(buffer_sizes_of_interest), [''] + buffer_sizes_of_interest])
+        df_phi.columns = pd.MultiIndex.from_arrays([['t'] + ['Phi'] * len(buffer_sizes_of_interest), [''] + buffer_sizes_of_interest])
 
         # Merge the times where Phi(t,bs) and P(T>t) are measured
         df_proba_surv_phi = merge_proba_survival_and_phi(proba_surv, df_phi)
@@ -3251,7 +3257,7 @@ def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption, proba_surv, 
 
     def merge_proba_survival_and_phi(proba_surv, df_phi):
         """
-        Merges the the survival probability and the empirical distribution of buffer sizes of interest
+        Merges the survival probability and the empirical distribution of buffer sizes of interest
         on a common set of time values into a data frame.
 
         Arguments:
@@ -3271,8 +3277,12 @@ def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption, proba_surv, 
         phi_by_t = dict()
         buffer_sizes_of_interest = list(df_phi['Phi'].columns)
         for bs in buffer_sizes_of_interest:
-            # Merge the time values at which the survival probability is measured (changes) with the time values
-            # at which the empirical distribution Phi is measured for each buffer size of interest.
+            # Merge the time values at which the survival probability is measured (i.e. where it changes)
+            # with the time values at which the empirical distribution Phi is measured for each buffer size of interest.
+            # IMPORTANT: the time values at which Phi is measured is EVERY TIME at which any of the particles
+            # in the system changes state, even though the value of Phi itself might not change...
+            # This might not be very inefficient, so we should improve this as follows:
+            # TODO: (2022/06/01) Keep in df_phi ONLY the records at which there is a change in df_phi['Phi'][bs]
             t, proba_surv_by_t, phi_by_t[bs] = merge_values_in_time(list(proba_surv['t']), list(proba_surv['P(T>t)']),
                                                                     list(df_phi['t']), list(df_phi['Phi'][bs]),
                                                                     unique=False)
@@ -3409,9 +3419,9 @@ def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption, proba_surv, 
     done = False
     t = 0
     maxtime = proba_surv['t'].iloc[-1]
-    ## maxtime: it's useless to go with the FV simulation beyond the maximum observed survival time
-    ## because the contribution to the integral used in the estimation of the average reward is 0.0 after that.
-    is_any_phi_value_gt_0 = False
+        ## maxtime: it's useless to go with the FV simulation beyond the maximum observed survival time
+        ## because the contribution to the integral used in the estimation of the average reward is 0.0 after that.
+    is_any_phi_value_gt_0 = False   # This is used to decide whether the integral should be computed or not (when all values of Phi are 0, then the integral is 0, no need to compute it)
     idx_reactivate = None
     if plot:
         # Initialize the plot
@@ -3452,7 +3462,7 @@ def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption, proba_surv, 
         # Store the absolute event time
         event_times += [event_times[-1] + time]
 
-        # Get the current state of the selected particle because that's the one whose state we are going to possibly change
+        # Get the current state of the selected particle because that's the one whose state we are going to (possibly) change
         state = envs[idx_particle].getState()
         if event == Event.BIRTH:
             # The event is an incoming job class
@@ -3483,6 +3493,7 @@ def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption, proba_surv, 
                     # Show the absorption before reactivation takes place
                     y = envs[idx_particle].getBufferSize()
                     J = buffer_size_absorption + 1
+                    print("* Particle {} ABSORBED! (at time = {:.3f}, buffer size = {})".format(idx_particle, event_times[-1], y))
                     plot_update_trajectory( ax, idx_particle, N, K, J,
                                             time0[idx_particle], y0[idx_particle], event_times[-1], y)
                     # Update the coordinates of the latest plotted point for this particle, for the next iteration
@@ -3492,7 +3503,7 @@ def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption, proba_surv, 
                 next_state = envs[idx_particle].getState()
                 assert envs[idx_particle].getBufferSize() > buffer_size_absorption
                 if DEBUG_TRAJECTORIES:
-                    print("*** Particle {} REACTIVATED to particle {}".format(idx_particle, idx_reactivate))
+                    print("*** Particle {} REACTIVATED to particle {} at position {}".format(idx_particle, idx_reactivate, envs[idx_reactivate].getBufferSize()))
 
             # This should come AFTER the possible reactivation, because the next state will never be 0
             # when reactivation takes place.
@@ -3509,7 +3520,7 @@ def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption, proba_surv, 
                     times_last_service[idx_particle] = event_times[-1]
 
         if DEBUG_TRAJECTORIES:
-            print("P=P{}: {} | t={}: time={}, event={}, action={} -> state={}, reward={}" \
+            print("P={}: {} | t={}: time={}, event={}, action={} -> state={}, reward={}" \
                   .format(idx_particle, state, t, event_times[-1], event, action, next_state, reward), end="\n")
 
         is_any_phi_value_gt_0 = max([is_any_phi_value_gt_0, update_phi(envs, phi)])
@@ -3527,6 +3538,10 @@ def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption, proba_surv, 
             y0[idx_particle] = y
 
         idx_reactivate = None
+
+        if DEBUG_ESTIMATORS or DEBUG_TRAJECTORIES:
+            # New line to separate from next iteration
+            print("")
 
         # Stop when we reached the maxtime, which is set above to the maximum observed survival time
         # (since going beyond does not contribute to the integral used in the FV estimator)
@@ -3580,7 +3595,7 @@ def plot_update_trajectory(ax, p, N, K, J, x0, y0, x1, y1, marker='-', r=None):
         c = p
     color = colormap((c + 1) / N)
     # Non-overlapping step plots at vertical positions (K+1)*p
-    print("Updating TRAJECTORY of particle {} (K={}, J={}): [{}, {}] -> [{}, {}]".format(p, K, J, x0, y0, x1, y1))
+    print("Updating TRAJECTORY of particle {} (K={}, J={}): [t={:.3f}, y={}] -> [t={:.3f}, y={}]".format(p, K, J, x0, y0, x1, y1))
     ax.step([x0, x1], [(K + 1) * p + y0, (K + 1) * p + y1], marker, where='post', color=color, markersize=3)
 
     # Reference lines
@@ -3600,6 +3615,7 @@ def plot_trajectory(env, agent, J):
     """
     Plots the buffer sizes of the system as a function of time observed during simulation.
     We assume there is only one queue to be plotted.
+    This is used to plot the single queue simulated to estimate the quantities wth Monte-Carlo (e.g. P(T>t) and E(T)).
     """
     assert agent.getLearnerV() is not None
     if agent.getLearnerP() is not None:
@@ -3618,7 +3634,7 @@ def plot_trajectory(env, agent, J):
     ax.axhline(0, color="gray")
     ax.axhline(J-1, color="red", linestyle="dashed")
     ax.axhline(K, color='gray', linestyle='dashed')
-    ax.set_title("Evolution of buffer size of the system: K = {}, J = {}".format(K, J))
+    ax.set_title("[MC] Evolution of the system's buffer size used to estimate P(T>t) and E(T): K = {}, J = {}".format(K, J))
 
     return ax
 

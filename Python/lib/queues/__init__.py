@@ -33,7 +33,7 @@ class Event(Enum):
 
 class GenericQueue:
     """
-    Class that holds information that is present in all queues
+    Class that holds information that is present in all queue classes
     
     Arguments:
     capacity: positive int or np.Inf
@@ -173,8 +173,12 @@ class GenericQueue:
 
 
 class QueueMM(GenericQueue):
+    """
+    Class defining a server system with specified arrival and service rates (one for each server),
+    and a given overall capacity (i.e. the capacity is defined for the whole system, not for each server).
+    """
 
-    def __init__(self, rates_birth, rates_death, nservers: int, capacity: int, origin: float=0.0):
+    def __init__(self, rates_birth: float or list, rates_death: float or list, nservers: int, capacity: int, origin: float=0.0):
         super().__init__(capacity, nservers=nservers, size=0, origin=origin)
         is_rates_birth_scalar = not isinstance(rates_birth, (list, tuple, np.ndarray))
         is_rates_death_scalar = not isinstance(rates_death, (list, tuple, np.ndarray))
