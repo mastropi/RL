@@ -3146,7 +3146,7 @@ def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption, proba_surv, 
         "Compute the proportion of environments/particles at the given buffer size"
         return np.mean([int(bs == buffer_size) for bs in [env.getBufferSize() for env in envs]])
 
-    def reactivate_particle(envs, idx_particle):
+    def reactivate_particle(envs: list, idx_particle: int, K: int):
         """
         Reactivates a particle that has been absorbed
 
@@ -3159,29 +3159,38 @@ def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption, proba_surv, 
         idx_particle: int
             The index of the particle to be reactivated.
 
+        K: int
+            Queue's capacity.
+
         Return: int
         The index of the particle to which it is reactivated.
         """
         # Select a reactivation particle out of the other N-1 particles
         N = len(envs)
         assert N > 1, "There is more than one particle in the system (N={})".format(N)
-        idx_reactivate = choose_particle(idx_particle, N, ReactivateMethod.RANDOM)
+        idx_reactivate = choose_particle(envs, idx_particle, N, K, ReactivateMethod.RANDOM) #, ReactivateMethod.VALUE_FUNCTION) #, ReactivateMethod.RANDOM)
 
         # Update the state of the reactivated particle to the reactivation state
         envs[idx_particle].setState(envs[idx_reactivate].getState())
 
         return idx_reactivate
 
-    def choose_particle(idx_particle: int, N: int, method: ReactivateMethod):
+    def choose_particle(envs: list, idx_particle: int, N: int, K: int, method: ReactivateMethod):
         """
         Chooses a particle among N-1 possible particles using the given method
 
         Arguments:
+        envs: list
+            List of queue environments used to run the FV process.
+
         idx_particle: int
             The index of the particle to be reactivated.
 
         N: int
             Number of particles in the Fleming-Viot system.
+
+        K: int
+            Queue's capacity.
 
         method: ReactivateMethod
             Reactivation method to use which defines how the particle is chosen
@@ -3191,23 +3200,34 @@ def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption, proba_surv, 
         Return: int
         The index of the chosen particle.
         """
-        if method == ReactivateMethod.RANDOM:
-            idx_reactivate = np.random.randint(0, N - 1)
-            if idx_reactivate >= idx_particle:
-                # The chosen particle is beyond the particle to reactivate
-                # => increase the index of the particle by 1 so that we choose the correct particle
-                idx_reactivate += 1
-        elif method == ReactivateMethod.VALUE_FUNCTION:
+        if method == ReactivateMethod.VALUE_FUNCTION:
             # TODO: (2022/03/10) Inquiry the value function of each of the N-1 particles based on their state and use a probability distribution that is proportional to it.
-            # To begin with, consider an increasing linear function of the buffer size, and then estimate the value function
+            # To begin with, consider an increasing linear function of the buffer size, and on a next step estimate the value function
             # appropriately based on the queue's dynamics.
             # Note: the value function should be defined as part of the learner in self.learnerV attribute of the SimulatorQueue object.
-            idx_reactivate = -1
 
+            # The value function is a linear function of the buffer size
+            # Note that the length of `values` is equal to the number of particles in the system minus 1, N-1
+            values = [envs[idx].getBufferSize() / K for idx in list(range(idx_particle)) + list(range(idx_particle+1, N))]
+            assert len(values) == N - 1
+            prob_values = [v / np.sum(values) for v in values]
+            #print(np.c_[range(N-1), [envs[idx].getBufferSize() for idx in range(N-1)], [envs[idx].getBufferSize() / K for idx in range(N-1)], prob_values])
+            idx_reactivate = np.random.choice(N-1, p=prob_values)
+        else:
+            # Random selection of active particles by default
+            idx_reactivate = np.random.randint(0, N - 1)
+
+        if idx_reactivate >= idx_particle:
+            # The chosen particle is beyond the particle to reactivate
+            # => increase the index of the particle by 1 so that we choose the correct particle
+            idx_reactivate += 1
         assert 0 <= idx_reactivate < N, "The reactivation particle ID ({}) is between 0 and N (={}) for particle with ID = {}" \
             .format(idx_reactivate, N, idx_particle)
         assert idx_reactivate != idx_particle, "The particle chosen for reactivation ({}) is different from the particle being reactivated ({})" \
             .format(idx_reactivate, idx_particle)
+
+        #print("Reactivated particle ID for particle `{}` and its buffer size: {}, {} (particles @: {})"
+        #      .format(idx_particle, idx_reactivate, envs[idx_reactivate].getBufferSize(), [env.getBufferSize() for env in envs]))
 
         return idx_reactivate
 
@@ -3507,7 +3527,7 @@ def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption, proba_surv, 
                     # Update the coordinates of the latest plotted point for this particle, for the next iteration
                     time0[idx_particle] = event_times[-1]
                     y0[idx_particle] = y
-                idx_reactivate = reactivate_particle(envs, idx_particle)
+                idx_reactivate = reactivate_particle(envs, idx_particle, buffer_sizes_of_interest[-1])
                 next_state = envs[idx_particle].getState()
                 assert envs[idx_particle].getBufferSize() > buffer_size_absorption
                 if DEBUG_TRAJECTORIES:
