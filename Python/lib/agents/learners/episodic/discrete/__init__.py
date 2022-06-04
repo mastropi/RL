@@ -18,7 +18,7 @@ All learners are assumed to have the following methods defined:
         (e.g. all the estimates of the value functions are reset to 0)
     - setParams() --> set the parameters of the learner (if any)
     - learn_pred_V() --> prediction problem: learns the state value function under the current policy (V(s))
-    - learn_pred_Q() --> prediction problem: learns the action-value function under the currenty policy (Q(s,a))
+    - learn_pred_Q() --> prediction problem: learns the action-value function under the current policy (Q(s,a))
     - learn_ctrl_policy() --> control problem: learns the optimal policy
     - getStateCounts(first_visit) --> returns the state counts over all run episodes, optionally the first visit counts.
     - getV() --> returns the state value function

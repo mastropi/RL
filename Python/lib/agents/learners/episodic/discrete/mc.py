@@ -3,9 +3,21 @@
 Created on Fri Apr 10 10:36:13 2020
 
 @author: Daniel Mastropietro
-@description: Definition of Monte Carlo algorithms
+@description: Definition of Monte Carlo algorithms that are allowed to depend on the lambda parameter of lambda-returns.
+                Here we use Monte Carlo to mean that the update of the value functions is done AT THE END OF THE EPISODE,
+                i.e. OFFLINE, as opposed to at every step of the trajectory (or nearly), i.e. ONLINE, which would be
+                the case for the TD(0) algorithm or an n-step TD algorithm.
+                The classes defined here contain for instance:
+                - an implementation of traditional Monte Carlo, where the target value function in the TD error (V_hat(s))
+                is the observed return for the visited state at which the TD error is calculated.
+                In this update strategy, there is NO mention to lambda whatsoever:
+                See methods learn_pred_V_mc() and learn_mc() in LeaMCLambda.
+                - an implementation of generalized Monte Carlo, which we call MC(lambda), where the target value function
+                in the TD error (V_hat(s)) is equal to the lambda-return, for ANY value of lambda between 0 and 1.
+                See methods learn_pred_V_lambda() and learn_lambda_return() in LeaMCLambda.
 """
 
+from enum import Enum, unique
 import numpy as np
 import pandas as pd
 
@@ -15,6 +27,12 @@ from Python.lib.agents.learners.value_functions import ValueFunctionApprox
 
 DEFAULT_NUMPY_PRECISION = np.get_printoptions().get('precision')
 DEFAULT_NUMPY_SUPPRESS = np.get_printoptions().get('suppress')
+
+
+@unique
+class LearnerType(Enum):
+    MC = 1
+    LAMBDA_RETURN = 2
 
 
 class LeaMCLambda(Learner):
@@ -30,6 +48,7 @@ class LeaMCLambda(Learner):
                  adjust_alpha=False, alpha_update_type=AlphaUpdateType.FIRST_STATE_VISIT,
                  adjust_alpha_by_episode=False, alpha_min=0.,
                  reset_method=ResetMethod.ALLZEROS, reset_params=None, reset_seed=None,
+                 learner_type=LearnerType.MC,
                  debug=False):
         super().__init__(env, alpha, adjust_alpha, alpha_update_type, adjust_alpha_by_episode, alpha_min,
                          reset_method=reset_method, reset_params=reset_params, reset_seed=reset_seed)
@@ -41,8 +60,15 @@ class LeaMCLambda(Learner):
         self.alpha = alpha
         self.gamma = gamma
         
-        # Attributes specific to the current MC method
-        self.lmbda = lmbda
+        #-- Attributes specific to the current MC method
+        # Type of learner, whether use the traditional MC or the lambda-return leading to the MC(Lambda) learner,
+        # which should be equivalent to MC as long as all episodes reach the terminal state.
+        self.learner_type = learner_type
+        # Value of lambda in the MC(lambda) learner
+        if self.learner_type == LearnerType.LAMBDA_RETURN:
+            self.lmbda = lmbda
+        else:
+            self.lmbda = None
 
     def _reset_at_start_of_episode(self):
         """
@@ -73,13 +99,29 @@ class LeaMCLambda(Learner):
         self.gamma = gamma if gamma is not None else self.gamma
         self.lmbda = lmbda if lmbda is not None else self.lmbda
 
-    def learn_pred_V_slow(self, t, state, action, next_state, reward, done, info):
+
+    #------------- Method that is called by the outside world to learn V(s) ----------------------#
+    # Here we choose what method of this class to call internally
+    def learn_pred_V(self, t, state, action, next_state, reward, done, info):
+        if self.learner_type == LearnerType.LAMBDA_RETURN:
+            self.learn_pred_V_lambda_return(t, state, action, next_state, reward, done, info)
+        else:
+            self.learn_pred_V_mc(t, state, action, next_state, reward, done, info)
+    #------------- Method that is called by the outside world to learn V(s) ----------------------#
+
+
+    #--------------------- MC(lambda): lambda-return Monte Carlo (SLOW) --------------------------#
+    # NOTE: This is a slow implementation of MC(lambda) because it does not take advantage of the recursive
+    # calculation of the return as G(t) = R(t+1) + G(t+1).
+    # This piece of code was initially taken from MJeremy's GitHub.
+    # For more information, see the entry on 13-Apr-2022 in my Tasks-Projects.xlsx file.
+    def deprecated_learn_pred_V_slow(self, t, state, action, next_state, reward, done, info):
         # This learner updates the estimate of the value function V ONLY at the end of the episode
         self._update_trajectory(t, state, reward)
         if done:
             # Store the trajectory and rewards
             self.store_trajectory(next_state)
-            self._update_state_counts(t+1, next_state)            
+            self._update_state_counts(t+1, next_state)
 
             # Terminal time
             T = t + 1
@@ -94,16 +136,16 @@ class LeaMCLambda(Learner):
                 gtlambda = 0.
                 for n in range(1, T - t):
                     # Compute G(t:t+n)
-                    gttn = self.gt2tn(t, t + n)
+                    gttn = self.deprecated_gt2tn(t, t + n)
                     lambda_power = self.lmbda**(n - 1)
                     # Update G(t,lambda)
                     gtlambda += lambda_power * gttn
                     #if lambda_power < self.rate_truncate:
                     #    break
-    
+
                 # ARE WE MISSING THE LAST TERM IN G(t,lambda)??
-                #gtlambda *= 1 - self.lmbda 
-                gtlambda = (1 - self.lmbda) * gtlambda + self.lmbda**(T - t - 1) * self.gt2tn(t, T)
+                #gtlambda *= 1 - self.lmbda
+                gtlambda = (1 - self.lmbda) * gtlambda + self.lmbda**(T - t - 1) * self.deprecated_gt2tn(t, T)
                 #if lambda_power >= self.rate_truncate:
                 #    gtlambda += lambda_power * self.reward
 
@@ -112,7 +154,7 @@ class LeaMCLambda(Learner):
 
             self.final_report(t)
 
-    def gt2tn(self, start, end):
+    def deprecated_gt2tn(self, start, end):
         """
         @param start:       start time, t
         @param end:         end time, t+n
@@ -123,14 +165,17 @@ class LeaMCLambda(Learner):
             reward = self._rewards[t+1]  # t+1 is fine because `reward` has one more element than `_states`
             G += self.gamma**(t - start) * reward
 
-        if end < len(self._states): 
+        if end < len(self._states):
             # The end time is NOT the end of the episode
             # => Add all return coming after the final time considered here (`end`) as the current estimate of
             # the value function at the end state.
             G += self.gamma**(end - start) * self.getV().getValue(self._states[end])
 
         return G
+    #--------------------- MC(lambda): lambda-return Monte Carlo (SLOW) --------------------------#
 
+
+    #----------------------------- Traditional Monte Carlo ---------------------------------------#
     def learn_pred_V_mc(self, t, state, action, next_state, reward, done, info):
         "Learn the prediction problem (estimate the state value function) using explicitly MC"
         self._update_trajectory(t, state, reward)
@@ -152,19 +197,23 @@ class LeaMCLambda(Learner):
         Updates the value function based on a new observed EPISODE using first-visit Monte Carlo.
         That is, this function is expected to be called when the episode ends.
 
+        This is the straight implementation of first-visit Monte Carlo, i.e. it does NOT use the equivalence of
+        Monte Carlo with the lambda-return with lambda = 1, which is what method learn_lambda_return() does.
+        In fact, in this function there is not evene mention to lambda. 
+
         Arguments:
         T: int
             Length of the episode, i.e. the time step at which the episode ends.
         """
         #-- Compute the observed return for each state in the trajectory for EVERY visit to it
-        # NOTE: we start at the LATEST state (as opposed to the first) so that we don't
-        # need to have a data structure that stores the already visited states in the episode;
-        # we trade data structure creation and maintenance with easier algorithmic implementation of
-        # first visit that does NOT require a special data structure storage.
         G = 0
         # Keep track of the number of updates to the value function at each state
         # so that we can assert that there is at most one update for the first-visit MC algorithm
         nupdates = np.zeros(self.env.getNumStates())
+        # NOTE: we start at the LATEST state (as opposed to the first) so that we don't
+        # need to have a data structure that stores the already visited states in the episode;
+        # we trade data structure creation and maintenance with easier algorithmic implementation of
+        # first visit that does NOT require a special data structure storage.
         for tt in np.arange(T,0,-1) - 1:     # This is T-1, T-2, ..., 0
             state = self._states[tt]
             G = self.gamma*G + self._rewards[tt+1]
@@ -175,8 +224,11 @@ class LeaMCLambda(Learner):
                 nupdates[state] += 1
 
         assert all(nupdates <= 1), "Each state has been updated at most once"
+    #----------------------------- Traditional Monte Carlo -----------------------------------------#
 
-    def learn_pred_V(self, t, state, action, next_state, reward, done, info):
+
+    #---------------------- MC(lambda): lambda-return Monte Carlo ----------------------------------#
+    def learn_pred_V_lambda_return(self, t, state, action, next_state, reward, done, info):
         """
         Learn the prediction problem: estimate the state value function.
 
@@ -190,6 +242,7 @@ class LeaMCLambda(Learner):
         self._updateG(t, state, next_state, reward, done)
 
         if done:
+            #-- Learn the new value of the state value function
             # Store the trajectory and rewards
             self.store_trajectory(next_state)
             self._update_state_counts(t+1, next_state)            
@@ -197,7 +250,7 @@ class LeaMCLambda(Learner):
             # This means t+1 is the terminal time T
             # (recall we WERE in time t and we STEPPED INTO time t+1, so T = t+1)
             T = t + 1
-            self.learn(T)
+            self.learn_lambda_return(T)
 
             self.final_report(T)
 
@@ -216,11 +269,13 @@ class LeaMCLambda(Learner):
         # has been reached.
         #assert not done or done and Vns == 0, "Terminal _states have value 0 ({:.2g})".format(Vns)
         fn_delta = lambda n: reward + self.gamma*Vns - (n>0)*Vs
-            ## This fn_delta(n) is the change to add to the G value at the previous iteration
-            ## for all G's EXCEPT the new one corresponding to G(t:t+1) corresponding to
-            ## the current time t (which does NOT have a previous value, i.e. there is no such thing as G(t:t))
-            ## Note that n=1 in the expression G(t:t+1) corresponds to n=0 in the code
-            ## (because of how the times_reversed array is defined.
+            ## This fn_delta(n) is the change to add to G(tt:tt+n) (actually we add fn_delta(n) *multiplied* by gamma^n)
+            ## to construct G(tt:tt+n+1) (see the recursive updating expression in a comment below).
+            ## Note that we need to remove `Vs` when n=0 (i.e. we have `(n>0)*Vs` because for n=0, G(tt:tt+n)
+            ## degenerates to G(tt:tt), but this does NOT mean anything, i.e. when deriving the recursive expression
+            ## that gives the computation of G(tt:tt+n) recursively, we must define G(tt:tt) = 0.
+            ## And this definition implies that the substraction of `Vs` above should NOT be part of fn_delta(n)
+            ## when n=0.
 
         # Add the latest available return G(t:t+1), corresponding to the current time t, to the list
         # of n-step returns and initialize it to 0 (before it is updated with the currently observed reward
@@ -282,10 +337,16 @@ class LeaMCLambda(Learner):
                 print(np.c_[np.arange(t+1), self._rewards[1:], self._values_next_state[1:], self._Glambda_list, check, diff])
                 np.set_printoptions(precision=DEFAULT_NUMPY_PRECISION, suppress=DEFAULT_NUMPY_SUPPRESS)
 
-    def learn(self, T):
+    def learn_lambda_return(self, T):
         """
-        Updates the value function based on a new observed EPISODE using first-visit Monte Carlo.
+        Updates the value function based on a new observed EPISODE using first-visit Monte Carlo on any value of lambda.
         That is, this function is expected to be called when the episode ends.
+
+        It differs from learn_mc() in that this method:
+        - uses the lambda return values G(t,lambda) stored in the object, self._Glambda_list,
+        which is a list because there is an entry for each time step in the trajectory.
+        - can handle any value of lambda, not only lambda = 1, which is the actual definition of Monte Carlo update,
+        strictly speaking. 
 
         Arguments:
         T: int
@@ -310,7 +371,10 @@ class LeaMCLambda(Learner):
                           .format(tt, Glambda[tt], state, self.V.getValue(state), delta))
 
                 self.updateV(state, delta)
+    #---------------------- MC(lambda): lambda-return Monte Carlo --------------------------------#
 
+
+    #------------------- Auxiliary function: value function udpate -------------------------------#
     def updateV(self, state, delta):
         # Gradient of V: it must have the same size as the weights
         # In the linear case the gradient is equal to the feature associated to state s,
@@ -323,6 +387,7 @@ class LeaMCLambda(Learner):
 
         # Update alpha for the next iteration, once we have already updated the value function for the current state
         self._update_alphas(state)
+    #------------------- Auxiliary function: value function udpate -------------------------------#
 
 
 class LeaMCLambdaAdaptive(LeaMCLambda):

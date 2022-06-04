@@ -27,6 +27,22 @@ import test_utils
 #reload(Python.lib.agents.learners.episodic.discrete)
 
 
+# Expected results of tests that need to be the same in different tests
+# (typically when checking that the result of running MC is the same as running
+# MC(lambda=1.0))
+# The numbers at the end of the name correspond to the case numbers in the 
+# data provider lambda functions where the respective expected values are used.
+EXPECTED_TEST_RANDOM_WALK_1 = [-0.000000, -0.683051, -0.683051, -0.583526, -0.555566, -0.555566, -0.555566,
+                               -0.400009, -0.358463, -0.319735, -0.187761, -0.102375, -0.056671, -0.005888,
+                               0.125041, 0.125041, 0.207823, 0.207823, 0.343522, 0.569533, 0.000000]
+EXPECTED_TEST_RANDOM_WALK_2 = [-0.000000, -0.846154, -0.846154, -0.714286, -0.600000, -0.600000, -0.600000,
+                               -0.500000, -0.411765, -0.263158, -0.200000, -0.058824, -0.000000, 0.066667,
+                               0.230769, 0.230769, 0.333333, 0.333333, 0.600000, 1.000000, 0.000000]
+EXPECTED_TEST_RANDOM_WALK_3 = [-0.000000, -0.702381, -0.702381, -0.611111, -0.518519, -0.518519, -0.518519,
+                               -0.438596, -0.368421, -0.263158, -0.200000, 0.043590, 0.113889, 0.196970,
+                               0.361176, 0.361176, 0.437451, 0.437451, 0.776471, 1.000000, 0.000000]
+
+
 class Test_MC_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
 
     def __init__(self, *args, **kwargs):
@@ -54,47 +70,33 @@ class Test_MC_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
         # Random walk policy on the above environment
         cls.policy_rw = random_walks.PolRandomWalkDiscrete(cls.env)
 
-    #-------------------------------------- DATA FOR TESTS ------------------------------------
+    #--------------------- TESTS OF MC: traditional MC (no lambda involved) ----------------------#
+    #-------- DATA -------
     # Case number, description, expected value, parameters
-    data_test_random_walk = lambda: (
+    # These are the same tests 1, 2 and 3 from data_test_lambda_return_random_walk
+    data_test_mc_random_walk = lambda: (
             ( 1, 'MC, no alpha adjustment',
-                 [-0.000000, -0.683051, -0.683051, -0.583526, -0.555566, -0.555566, -0.555566,
-                  -0.400009, -0.358463, -0.319735, -0.187761, -0.102375, -0.056671, -0.005888,
-                  0.125041, 0.125041, 0.207823, 0.207823, 0.343522, 0.569533, 0.000000],
-                (0.1, 1.0, 1.0), False, False, 0.0 ),
-            ( 2, 'L-return (lambda<1), no alpha adjustment',
-                 [-0.000000, -0.648738, -0.440867, -0.228680, -0.172241, -0.093122, -0.023765,
-                  -0.016186, -0.012195, -0.007552, 0.002211, 0.006526, 0.009155, 0.015080,
-                  0.035585, 0.049038, 0.071389, 0.111463, 0.213302, 0.552812, 0.000000],
-                (0.2, 1.0, 0.7), False, False, 0.0 ),
-            ( 3, 'MC, adjusted alpha by state count (good results if run for 200 episodes)',
-                 [-0.000000, -0.846154, -0.846154, -0.714286, -0.600000, -0.600000, -0.600000,
-               -0.500000, -0.411765, -0.263158, -0.200000, -0.058824, -0.000000, 0.066667,
-               0.230769, 0.230769, 0.333333, 0.333333, 0.600000, 1.000000, 0.000000],
-                (1.0, 1.0, 1.0), True, False, 0.0 ),
-            ( 4, 'MC, adjusted alpha by episode',
-              [-0.000000, -0.702381, -0.702381, -0.611111, -0.518519, -0.518519, -0.518519,
-               -0.438596, -0.368421, -0.263158, -0.200000, 0.043590, 0.113889, 0.196970,
-               0.361176, 0.361176, 0.437451, 0.437451, 0.776471, 1.000000, 0.000000],
-                (1.0, 1.0, 1.0), True,  True, 0.0 ),
-            ( 5, 'L-return (lambda<1), adjusted alpha by state count',
-              [-0.000000, -0.622132, -0.413372, -0.199682, -0.128330, -0.055435, -0.017840,
-               -0.010864, -0.006091, -0.003125, 0.000993, 0.003451, 0.005608, 0.012755,
-               0.028038, 0.039561, 0.058164, 0.104930, 0.264852, 0.694180, 0.000000],
-                (1.0, 1.0, 0.7), True,  False, 0.0 ),
+                 EXPECTED_TEST_RANDOM_WALK_1,
+                 (0.1, 1.0), False, False, 0.0 ),
+            ( 2, 'MC, adjusted alpha by state count (good results if run for 200 episodes)',
+                 EXPECTED_TEST_RANDOM_WALK_2,
+                 (1.0, 1.0), True, False, 0.0 ),
+            ( 3, 'MC, adjusted alpha by episode',
+                 EXPECTED_TEST_RANDOM_WALK_3,
+                 (1.0, 1.0), True,  True, 0.0 ),
         )
+    #-------- DATA -------
 
-    #------------------------------------------- TESTS ----------------------------------------
-    @data_provider(data_test_random_walk)
-    def test_random_walk(self, casenum, desc, expected, params_alpha_gamma_lambda,
-                                                        adjust_alpha, adjust_alpha_by_episode, alpha_min):
+    @data_provider(data_test_mc_random_walk)
+    def test_mc_random_walk(self, casenum, desc, expected, params_alpha_gamma,
+                                       adjust_alpha, adjust_alpha_by_episode, alpha_min):
         # All tests are run using seed = 1717, nepisodes = 20, start_state = 10
         print("\n*** Testing {0}, case number {1} ***".format(self.id(), casenum))
-        learner_mclambda = mc.LeaMCLambda(self.env, alpha=params_alpha_gamma_lambda[0],
-                                          gamma=params_alpha_gamma_lambda[1],
-                                          lmbda=params_alpha_gamma_lambda[2],
+        learner_mclambda = mc.LeaMCLambda(self.env, alpha=params_alpha_gamma[0],
+                                          gamma=params_alpha_gamma[1],
                                           adjust_alpha=adjust_alpha, adjust_alpha_by_episode=adjust_alpha_by_episode,
                                           alpha_min=alpha_min,
+                                          learner_type=mc.LearnerType.MC,
                                           debug=False)
         agent_rw_mc = agents.GenericAgent(self.policy_rw, learner_mclambda)
         sim = simulators.Simulator(self.env, agent_rw_mc, debug=False)
@@ -107,7 +109,140 @@ class Test_MC_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
         print("\nobserved: " + test_utils.array2str(observed))
         assert np.allclose(observed, expected, atol=1E-6)
                                             
-    def test_random_walk_onecase(self):
+    def test_mc_random_walk_gamma_not_1(self):
+        #-- All tests are run using seed = 1717, nepisodes = 20, start_state = 10
+        print("\n*** Testing " + self.id() + " ***")
+
+        # Learner and agent definition
+        params = dict({'alpha': 1.0,
+                       'gamma': 0.7,
+                       'alpha_min': 0.0,
+                       })
+        learner_mclambda = mc.LeaMCLambda(self.env, alpha=params['alpha'], gamma=params['gamma'],
+                                          alpha_update_type=AlphaUpdateType.FIRST_STATE_VISIT,  # First-visit is the default
+                                          adjust_alpha=True, adjust_alpha_by_episode=False, alpha_min=params['alpha_min'],
+                                          learner_type=mc.LearnerType.MC,
+                                          debug=False)
+        agent_rw_mclambda = agents.GenericAgent(self.policy_rw, learner_mclambda)
+
+        # Simulation
+        sim = simulators.Simulator(self.env, agent_rw_mclambda, debug=False)
+        _, _, RMSE_by_episode, MAPE_by_episode, learning_info = \
+                                            sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
+                                                    compute_rmse=True, state_observe=10,
+                                                    verbose=True, verbose_period=100,
+                                                    plot=False, pause=0.1)
+
+        expected = np.array([ 0.000000, -0.496388, -0.197257, -0.077399, -0.043423, -0.016056, -0.000258,
+                             -0.000125, -0.000079, -0.000045,  0.000455,  0.000814,  0.001235,  0.001883,
+                              0.006338,  0.009091,  0.014105,  0.035182,  0.137579,  0.640122,  0.000000])
+        observed = agent_rw_mclambda.getLearner().getV().getValues()
+        print("\nobserved: " + test_utils.array2str(observed))
+        if self.plot:
+            # Add the lambda parameter in the params dictionary which is required by plot_results()
+            params['lambda'] = 1.0
+            self.plot_results(params,
+                              observed, self.V_true, RMSE_by_episode, learning_info['alpha_mean'],
+                              max_rmse=self.max_rmse, color_rmse=self.color_rmse)
+        assert np.allclose(observed, expected, atol=1E-6)
+
+    def test_mc_random_walk_rmse_twice(self):
+        #-- All tests are run using seed = 1717, nepisodes = 20, start_state = 10
+        print("\n*** Testing " + self.id() + " ***")
+
+        # Learner and agent
+        params = dict({'alpha': 0.3,
+                       'gamma': 1.0,
+                       'alpha_min': 0.0,
+                       })
+        learner_mclambda = mc.LeaMCLambda(self.env, alpha=params['alpha'], gamma=params['gamma'],
+                                          alpha_update_type=AlphaUpdateType.FIRST_STATE_VISIT,  # First-visit is the default
+                                          adjust_alpha=True, adjust_alpha_by_episode=False, alpha_min=params['alpha_min'],
+                                          learner_type=mc.LearnerType.MC,
+                                          debug=False)
+        agent_rw_mclambda = agents.GenericAgent(self.policy_rw, learner_mclambda)
+
+        # Simulation
+        sim = simulators.Simulator(self.env, agent_rw_mclambda, debug=False)
+
+        # First run
+        _, _, RMSE_by_episode, MAPE_by_episode, _ = sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
+                                                            compute_rmse=True, state_observe=19,
+                                                            verbose=True, verbose_period=100,
+                                                            plot=False, pause=0.001)
+
+        # Expected RMSE with the following settings:
+        # 19-size gridworld
+        # alpha = 0.3, gamma = 1.0
+        # adjust_alpha = True, adjust_alpha_by_episode = False, alpha_min = 0.0
+        # seed = 1717, nepisodes=20, start_state = 10
+        rmse_expected = 0.29397963
+
+        rmse_observed = np.mean(RMSE_by_episode)
+        print("First run: average RMSE over {} episodes: {:.8f}".format(self.nepisodes, rmse_observed))
+        assert np.allclose(rmse_observed, rmse_expected, atol=1E-6)
+
+        # Second run
+        _, _, RMSE_by_episode, MAPE_by_episode, _ = sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
+                                                            compute_rmse=True, state_observe=19,
+                                                            verbose=True, verbose_period=100,
+                                                            plot=False, pause=0.001)
+        rmse_observed = np.mean(RMSE_by_episode)
+        print("Second run: average RMSE over {} episodes: {:.8f}".format(self.nepisodes, rmse_observed))
+        assert np.allclose(rmse_observed, rmse_expected, atol=1E-6)
+    #--------------------- TESTS OF MC: traditional MC (no lambda involved) ----------------------#
+
+
+    #------------------------ TESTS OF MC(LAMBDA): MC as lambda-return ---------------------------#
+    #-------- DATA -------
+    # Case number, description, expected value, parameters
+    data_test_lambda_return_random_walk = lambda: (
+            ( 1, 'MC, no alpha adjustment',
+                 EXPECTED_TEST_RANDOM_WALK_1,
+                (0.1, 1.0, 1.0), False, False, 0.0 ),
+            ( 2, 'MC, adjusted alpha by state count (good results if run for 200 episodes)',
+                 EXPECTED_TEST_RANDOM_WALK_2,
+                (1.0, 1.0, 1.0), True, False, 0.0 ),
+            ( 3, 'MC, adjusted alpha by episode',
+                 EXPECTED_TEST_RANDOM_WALK_3,
+                (1.0, 1.0, 1.0), True,  True, 0.0 ),
+            ( 4, 'L-return (lambda<1), no alpha adjustment',
+                 [-0.000000, -0.648738, -0.440867, -0.228680, -0.172241, -0.093122, -0.023765,
+                  -0.016186, -0.012195, -0.007552, 0.002211, 0.006526, 0.009155, 0.015080,
+                  0.035585, 0.049038, 0.071389, 0.111463, 0.213302, 0.552812, 0.000000],
+                (0.2, 1.0, 0.7), False, False, 0.0 ),
+            ( 5, 'L-return (lambda<1), adjusted alpha by state count',
+              [-0.000000, -0.622132, -0.413372, -0.199682, -0.128330, -0.055435, -0.017840,
+               -0.010864, -0.006091, -0.003125, 0.000993, 0.003451, 0.005608, 0.012755,
+               0.028038, 0.039561, 0.058164, 0.104930, 0.264852, 0.694180, 0.000000],
+                (1.0, 1.0, 0.7), True,  False, 0.0 ),
+        )
+    #-------- DATA -------
+
+    @data_provider(data_test_lambda_return_random_walk)
+    def test_lambda_return_random_walk(self, casenum, desc, expected, params_alpha_gamma_lambda,
+                                                        adjust_alpha, adjust_alpha_by_episode, alpha_min):
+        # All tests are run using seed = 1717, nepisodes = 20, start_state = 10
+        print("\n*** Testing {0}, case number {1} ***".format(self.id(), casenum))
+        learner_mclambda = mc.LeaMCLambda(self.env, alpha=params_alpha_gamma_lambda[0],
+                                          gamma=params_alpha_gamma_lambda[1],
+                                          lmbda=params_alpha_gamma_lambda[2],
+                                          adjust_alpha=adjust_alpha, adjust_alpha_by_episode=adjust_alpha_by_episode,
+                                          alpha_min=alpha_min,
+                                          learner_type=mc.LearnerType.LAMBDA_RETURN,
+                                          debug=False)
+        agent_rw_mc = agents.GenericAgent(self.policy_rw, learner_mclambda)
+        sim = simulators.Simulator(self.env, agent_rw_mc, debug=False)
+        _, _, RMSE_by_episode, MAPE_by_episode, learning_info = \
+                                            sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
+                                                    compute_rmse=True, state_observe=10,
+                                                    verbose=True, verbose_period=100,
+                                                    plot=False, pause=0.1)
+        observed = agent_rw_mc.getLearner().getV().getValues()
+        print("\nobserved: " + test_utils.array2str(observed))
+        assert np.allclose(observed, expected, atol=1E-6)
+                                            
+    def test_lambda_return_random_walk_gamma_not_1(self):
         #-- All tests are run using seed = 1717, nepisodes = 20, start_state = 10
         print("\n*** Testing " + self.id() + " ***")
 
@@ -120,6 +255,7 @@ class Test_MC_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
         learner_mclambda = mc.LeaMCLambda(self.env, alpha=params['alpha'], gamma=params['gamma'], lmbda=params['lambda'],
                                           alpha_update_type=AlphaUpdateType.FIRST_STATE_VISIT,  # First-visit is the default
                                           adjust_alpha=True, adjust_alpha_by_episode=False, alpha_min=params['alpha_min'],
+                                          learner_type=mc.LearnerType.LAMBDA_RETURN,
                                           debug=False)
         agent_rw_mclambda = agents.GenericAgent(self.policy_rw, learner_mclambda)
 
@@ -143,7 +279,7 @@ class Test_MC_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
                               max_rmse=self.max_rmse, color_rmse=self.color_rmse)
         assert np.allclose(observed, expected, atol=1E-6)
 
-    def fails_test_random_walk_adaptive_result(self):
+    def fails_test_lambda_return_random_walk_adaptive_result(self):
         # NOTE: (2021/10/16) This test currently fails for two reasons:
         # - the `observed` array is an array of all -1.0 followed by all +1.0 (i.e. a step function)
         # - the self.plot_results() call at the end fails because the alpha_mean_by_episode_mean variable used when calling
@@ -181,7 +317,7 @@ class Test_MC_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
                               max_rmse=self.max_rmse, color_rmse=self.color_rmse)
 
         assert np.allclose(observed, expected, atol=1E-6)
-    #------------------------------------------- TESTS ----------------------------------------
+    #------------------------ TESTS OF MC(LAMBDA): MC as lambda-return ---------------------------#
 
 
 if __name__ == "__main__":
