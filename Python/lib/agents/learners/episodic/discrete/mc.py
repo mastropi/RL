@@ -207,16 +207,22 @@ class LeaMCLambda(Learner):
             Length of the episode, i.e. the time step at which the episode ends.
         """
         #-- Compute the observed return for each state in the trajectory for EVERY visit to it
-        G = 0
+        # Initialize the observed return to the value of the end state
+        # (in case it is not a terminal state which has value 0 --this would happen if the episode is terminated early)
+        # Note that we don't affect the initial G with gamma, because gamma comes into play in the recursive formula
+        # used below to compute the final G)
+        G = self.V.getValue(self.states[-1])
+
         # Keep track of the number of updates to the value function at each state
         # so that we can assert that there is at most one update for the first-visit MC algorithm
         nupdates = np.zeros(self.env.getNumStates())
+
         # NOTE: we start at the LATEST state (as opposed to the first) so that we don't
         # need to have a data structure that stores the already visited states in the episode;
         # we trade data structure creation and maintenance with easier algorithmic implementation of
         # first visit that does NOT require a special data structure storage.
         for tt in np.arange(T,0,-1) - 1:     # This is T-1, T-2, ..., 0
-            state = self._states[tt]
+            state = self.states[tt]
             G = self.gamma*G + self._rewards[tt+1]
             # First-visit MC: We only update the value function estimation at the first visit of the state
             if self._states_first_visit_time[state] == tt:
@@ -268,7 +274,7 @@ class LeaMCLambda(Learner):
         # 2022/05/17: This assertion is no longer valid because we have implemented in the simulator (Simulator.run())
         # the option that the episode might end because of a maximum number of steps and NOT because a terminal state
         # has been reached.
-        #assert not done or done and Vns == 0, "Terminal _states have value 0 ({:.2g})".format(Vns)
+        #assert not done or done and Vns == 0, "Terminal states have value 0 ({:.2g})".format(Vns)
         fn_delta = lambda n: reward + self.gamma*Vns - (n>0)*Vs
             ## This fn_delta(n) is the change to add to G(tt:tt+n) (actually we add fn_delta(n) *multiplied* by gamma^n)
             ## to construct G(tt:tt+n+1) (see the recursive updating expression in a comment below).
@@ -360,7 +366,7 @@ class LeaMCLambda(Learner):
         if self.debug:
             print("DONE:")
         for tt in np.arange(T):
-            state = self._states[tt]
+            state = self.states[tt]
             # First-visit MC: We only update the value function estimation at the first visit of the state
             if self._states_first_visit_time[state] == tt:
                 # Value of the error (delta) where the lambda-return is used as the current value function estimate,
@@ -447,7 +453,7 @@ class LeaMCLambdaAdaptive(LeaMCLambda):
 
     def _computeStateRewards(self, terminal_state):
         # Length of the episode
-        T = len(self._states)
+        T = len(self.states)
         
         # Reset the state rewards and the state counts to 0
         # so that we can compute them fresh for the current episode
@@ -458,12 +464,12 @@ class LeaMCLambdaAdaptive(LeaMCLambda):
         # (iteratively from the end of the episode to its beginning) 
         next_state = terminal_state     # Recall that the state reward for the terminal state is defined as 0
         for t in np.arange(T, 0, -1) - 1: # this is T-1, T-2, ..., 0 (the first element is included, the last one is not)
-            state = self._states[t]
+            state = self.states[t]
 
             # In the computation of the discounted reward for the current state
             # we use _rewards[t+1] and this is ok even for t = T-1 because we have constructed
-            # the _rewards array to have one more element than the _states array.
-            discounted_reward_for_state = self._rewards[t+1] + self.gamma * self.state_rewards[next_state]
+            # the rewards array to have one more element than the states array.
+            discounted_reward_for_state = self.rewards[t+1] + self.gamma * self.state_rewards[next_state]
 
             # Update the stored state _rewards which is set to the average discounted _rewards
             self._updateStateRewards(state, discounted_reward_for_state)
