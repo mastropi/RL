@@ -382,6 +382,7 @@ class Simulator:
 
         # Average state values and average change of V by episode for plotting purposes
         V_abs_mean = np.nan*np.ones(nepisodes+1)
+        V_abs_mean_weighted = np.nan*np.ones(nepisodes+1)   # mean|V| weighted by the state count
         V_abs_min = np.nan*np.ones(nepisodes+1)             # To evaluate the smallest divisor when computing the relative change in V
         deltaV_abs_mean = np.nan*np.ones(nepisodes+1)
         deltaV_max_signed = np.nan*np.ones(nepisodes+1)     # Maximum change with sign! To evaluate if the maximum change is oscillating around 0 suggesting convergence
@@ -393,6 +394,9 @@ class Simulator:
         V_abs_median = np.nan*np.ones(nepisodes+1)
         deltaV_abs_median = np.nan*np.ones(nepisodes+1)
         deltaV_rel_abs_median = np.nan*np.ones(nepisodes+1)
+        prop_states_deltaV_relevant = np.nan*np.ones(nepisodes+1)     # Proportion of states for which the change in V is relevant w.r.t. previous value (e.g. > 1%)
+
+        # Initialize a few that make sense to initialize
         V_abs_n = np.zeros(nepisodes+1)
         V_abs_mean[0] = np.mean(np.abs(V))
         V_abs_median[0] = np.median(np.abs(V))
@@ -465,8 +469,8 @@ class Simulator:
                 ## of the initial guess for the value function.
 
             # Update historical information
-            state_counts = learner.getStateCounts()
-            states_visited_so_far = [s for s in range(self.env.getNumStates()) if state_counts[s] > 0]
+            arr_state_counts = learner.getStateCounts()
+            states_visited_so_far = [s for s in range(self.env.getNumStates()) if arr_state_counts[s] > 0]
             states_visited_with_positive_deltaV_rel_abs = [s for s in states_visited_so_far if np.abs(deltaV_rel[s]) > 0]
                 ## The above is used to find the minimum |V| value that plays a role in the computation of deltaV_rel
                 ## so that we can evaluate how big this relative change could be, just because of a very small |V| value.
@@ -476,9 +480,9 @@ class Simulator:
                 # Check the min(|V|) because it is often 0.0 even when the count for the state > 0
                 # This minimum = 0.0 should come from the terminal states which have value 0.
                 #if episode == 1:
-                #    print(np.c_[V, state_counts])
+                #    print(np.c_[V, arr_state_counts])
                 #if np.min(np.abs(V[states_visited_so_far])) > 0.0:
-                #    print(np.c_[V, state_counts])
+                #    print(np.c_[V, arr_state_counts])
                 #    import sys
                 #    sys.exit()
                 if isinstance(self.env, MountainCarDiscrete):
@@ -499,26 +503,28 @@ class Simulator:
                 except:
                     print("WARNING - states_visited_with_positive_deltaV_rel_abs is empty.\n")
                     #print("Count of states visited so far: {}, {}, {}" \
-                    #      .format(state_counts, states_visited_so_far, states_visited_with_positive_deltaV_rel_abs))
+                    #      .format(arr_state_counts, states_visited_so_far, states_visited_with_positive_deltaV_rel_abs))
                     pass
 
             V = learner.getV().getValues()
             V_abs_mean[episode+1] = np.mean(np.abs(V[states_visited_so_far]))
+            V_abs_mean_weighted[episode+1] = np.sum(arr_state_counts * np.abs(V)) / np.sum(arr_state_counts)
             if len(states_visited_with_positive_deltaV_rel_abs) > 0:
                 V_abs_min[episode+1] = np.min(np.abs(V[states_visited_with_positive_deltaV_rel_abs]))
             deltaV_abs_mean[episode+1] = np.mean(np.abs(deltaV[states_visited_so_far]))
             deltaV_max_signed[episode+1] = max_signed_deltaV
             deltaV_rel_abs_mean[episode+1] = np.mean(np.abs(deltaV_rel[states_visited_so_far]))
             deltaV_rel_abs_mean_weighted[episode+1] = \
-                np.sum( np.array(state_counts[states_visited_so_far]) * np.abs(deltaV_rel[states_visited_so_far]) ) / np.sum(np.array(state_counts[states_visited_so_far]))
+                np.sum( arr_state_counts[states_visited_so_far] * np.abs(deltaV_rel[states_visited_so_far]) ) / np.sum(arr_state_counts[states_visited_so_far])
             deltaV_rel_abs_max[episode+1] = np.max(np.abs(deltaV_rel[states_visited_so_far]))
             deltaV_rel_abs_max_weighted[episode+1] = \
-                np.max( np.array(state_counts[states_visited_so_far]) * np.abs(deltaV_rel[states_visited_so_far]) / np.sum(np.array(state_counts[states_visited_so_far])) )
+                np.max( arr_state_counts[states_visited_so_far] * np.abs(deltaV_rel[states_visited_so_far]) / np.sum(arr_state_counts[states_visited_so_far]) )
             deltaV_rel_max_signed[episode+1] = max_signed_deltaV_rel
             V_abs_median[episode+1] = np.median(np.abs(V[states_visited_so_far]))
             deltaV_abs_median[episode+1] = np.median(np.abs(deltaV[states_visited_so_far]))
             deltaV_rel_abs_median[episode+1] = np.median(np.abs(deltaV_rel[states_visited_so_far]))
             V_abs_n[episode+1] = len(states_visited_so_far)
+            prop_states_deltaV_relevant[episode+1] = np.sum( np.abs(deltaV_rel) > 0.01 ) / self.env.getNumStates()
 
             if compute_rmse:
                 if self.env.getV() is not None:
@@ -542,10 +548,10 @@ class Simulator:
                         colornorm = None
                     ax_V.imshow(state_values, cmap=colors, norm=colornorm)
 
-                    state_counts = np.asarray(learner.getStateCounts()).reshape(shape)
+                    arr_state_counts = learner.getStateCounts().reshape(shape)
                     colors_count = cm.get_cmap("Blues")
-                    colornorm = plt.Normalize(vmin=0, vmax=np.max(state_counts))
-                    ax_C.imshow(state_counts, cmap=colors_count, norm=colornorm)
+                    colornorm = plt.Normalize(vmin=0, vmax=np.max(arr_state_counts))
+                    ax_C.imshow(arr_state_counts, cmap=colors_count, norm=colornorm)
 
                     fig_V.suptitle("Episode {} of {}".format(episode, nepisodes))
                     if pause > 0:
@@ -617,10 +623,10 @@ class Simulator:
                 state_counts_max = np.max( learner.getStateCounts() )
 
                 shape = self.env.getShape()
-                state_counts = np.asarray(learner.getStateCounts()).reshape(shape)
+                arr_state_counts = learner.getStateCounts().reshape(shape)
                 colors_count = cm.get_cmap("Blues")
-                colornorm = plt.Normalize(vmin=0, vmax=np.max(state_counts))
-                plt.imshow(state_counts, cmap=colors_count, norm=colornorm)
+                colornorm = plt.Normalize(vmin=0, vmax=np.max(arr_state_counts))
+                plt.imshow(arr_state_counts, cmap=colors_count, norm=colornorm)
                 # Font size factor
                 fontsize = 14
                 factor_fs = np.min((5/shape[0], 5/shape[1]))
@@ -628,7 +634,7 @@ class Simulator:
                     for y in range(shape[1]):
                         # Recall the x axis corresponds to the columns of the matrix shown in the image
                         # and the y axis corresponds to the rows
-                        plt.text(y, x, "{:.0f}".format(state_counts[x,y]),
+                        plt.text(y, x, "{:.0f}".format(arr_state_counts[x,y]),
                                  fontsize=fontsize*factor_fs, horizontalalignment='center', verticalalignment='center')
 
                 plt.title("State counts by state\n# visits: (min, mean, max) = ({:.0f}, {:.1f}, {:.0f})" \
@@ -655,6 +661,7 @@ class Simulator:
                     'alpha_mean': learner.alpha_mean_by_episode,
                     'lambda_mean': learner.lambda_mean_by_episode if isinstance(learner, LeaTDLambdaAdaptive) else None,
                     'V_abs_mean': V_abs_mean,
+                    'V_abs_mean_weighted': V_abs_mean_weighted,
                     'V_abs_min': V_abs_min,       # min|V| on states with a non-zero relative change in order to evaluate the impact of |V| when dividing to compute the relative change
                     'deltaV_max_signed': deltaV_max_signed,  # maximum change of V keeping the sign! Goal: understand whether the maximum change oscillates suggesting that it is converging fine
                     'deltaV_rel_max_signed': deltaV_rel_max_signed,  # maximum relative change of V keeping the sign! Goal: understand whether the maximum change oscillates suggesting that it is converging fine
@@ -667,6 +674,7 @@ class Simulator:
                     'deltaV_abs_median': deltaV_abs_median,
                     'deltaV_rel_abs_median': deltaV_rel_abs_median,
                     'V_abs_n': V_abs_n,
+                    'prop_states_deltaV_relevant': prop_states_deltaV_relevant,
                     'prop_episodes_max_steps_reached': nepisodes_max_steps_reached / nepisodes,
                 }
 
@@ -1682,7 +1690,7 @@ class SimulatorQueue(Simulator):
         n = 0           # Number of times Q0 and Q1 can be estimated from mixing trajectories (out of N)
         max_t_mix = 0.0 # Maximum discrete mixing time observed over the n pair of trajectories that mix
         for i in range(N):
-            if False:
+            if True:
                 print("Estimating Qdiff... {} out of {} replications".format(i, N))
             _, Q0_, Q1_, t_mix = self.run_simulation_2_until_mixing(t_learn, buffer_size, t_sim_max, \
                                                                     verbose=verbose, verbose_period=verbose_period)
@@ -4049,7 +4057,7 @@ if __name__ == "__main__":
 
         # Simulation setup
         seed = 1717
-        nexperiments = 1
+        nexperiments = 3 #1
         nepisodes = 10
         start = None
         useGrid = False
@@ -4057,7 +4065,7 @@ if __name__ == "__main__":
         debug = False
 
         # Define hyperparameter values
-        gamma = 0.8
+        gamma = 1.0 #0.8
         if useGrid:
             n_lambdas = 10
             n_alphas = 10
@@ -4067,7 +4075,7 @@ if __name__ == "__main__":
             lambdas = [0, 0.4, 0.8, 0.9, 0.95, 0.99, 1]
             alphas = np.linspace(0.1, 0.9, 8)
             lambdas = [0, 0.4, 0.7, 0.8, 0.9]
-            #alphas = [0.41]
+            alphas = [0.41]
             n_lambdas = len(lambdas)
             n_alphas = len(alphas)
         n_simul = n_lambdas*n_alphas
@@ -4109,7 +4117,7 @@ if __name__ == "__main__":
                 sim = Simulator(env, agent, seed=seed, debug=debug)
 
                 # Run the simulation and store the results
-                N_mean, rmse_mean, rmse_se, rmse_episodes, _, learning_info = \
+                N_mean, rmse_mean, rmse_se, rmse_n, rmse_episodes, _, mape_episodes, _, _, learning_info = \
                                     sim.simulate(nexperiments=nexperiments,
                                                  nepisodes=nepisodes,
                                                  start=start,
