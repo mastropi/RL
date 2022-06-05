@@ -43,7 +43,7 @@ class LeaTDLambda(Learner):
         self.debug = debug
 
         # Attributes that MUST be present for all TD methods
-        self.V = ValueFunctionApprox(self.env.getNumStates())
+        self.V = ValueFunctionApprox(self.env.getNumStates(), self.env.getTerminalStates())
         self.Q = None
         self.alpha = alpha
         self.gamma = gamma

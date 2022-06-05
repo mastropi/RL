@@ -3,7 +3,8 @@
 Created on Fri Apr 10 10:15:04 2020
 
 @author: Daniel Mastropietro
-@description: Definition of classes that are common to all learners.
+@description: Definition of classes that are common to all episodic discrete learners,
+                i.e. all learners on episodic tasks on environments with discrete states and accepted actions.
 
 All learner classes defined in the current package should:
 a) Implement the following attributes:
@@ -293,6 +294,7 @@ class Learner:
         plt.sca(ax)  # Go back to the primary axis
 
     def getStateCounts(self, first_visit=False):
+        "Returns the array of state counts, either the first-visit state counts or the every-visit state counts"
         if first_visit:
             return self._state_counts_first_visit_overall
         else:

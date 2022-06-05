@@ -32,11 +32,23 @@ from Python.lib.agents.learners import ResetMethod
 # - the dimension of the weights
 # - the features x that are affected by the weights (possibly in a linear manner or perhaps in a nonlinear manner as well!)
 class ValueFunctionApprox:
-    "Class that contains information about the estimation of the state value function"
+    """
+    Class that contains information about the estimation of the state value function
 
-    def __init__(self, nS: int):
+    Arguments:
+    nS: int
+        Number of states on which the value function is defined.
+
+    terminal_states: list
+        List containing the indices of the terminal states, whose value should always be 0.
+        This is used by the reset() method which can reset the value function to different initial guesses
+        (e.g. random values), so that the value of terminal states is always reset to 0.
+    """
+
+    def __init__(self, nS: int, terminal_states: list):
         "nS is the number of states"
         self.nS = nS
+        self.terminal_states = terminal_states
         self.weights = np.zeros(nS)
         # Here we implement the tabular value function, where the features x(s) of each state s
         # are dummy or indicator variables, i.e. all equal to 0 except at the coordinate corresponding to state s.
@@ -95,6 +107,10 @@ class ValueFunctionApprox:
                 self.weights[:] = np.random.normal(loc, scale, size=self.nS)
             else:
                 self.weights[:] = np.random.rand(size=self.nS)
+
+            # Set the value of terminal states to 0 (this is the definition of the value of terminal states)
+            for s in self.terminal_states:
+                self.setValue(s, 0.0)
 
     #--- GETTERS
     def getWeights(self):
