@@ -9,17 +9,21 @@ Created on Sat Apr  11 15:11:21 2020
 import runpy
 runpy.run_path('../../setup.py')
 
+from timeit import default_timer as timer
 import numpy as np
+import matplotlib.pyplot as plt
 import unittest
 from unittest_data_provider import data_provider
 #from gym.utils import seeding
 
-from Python.lib.environments import gridworlds
+from Python.lib.environments import gridworlds, mountaincars
 from Python.lib.agents.policies import random_walks
 import Python.lib.agents as agents
+from Python.lib.agents.learners import ResetMethod
 from Python.lib.agents.learners.episodic.discrete import mc
 from Python.lib.agents.learners.episodic.discrete import AlphaUpdateType
 import Python.lib.simulators as simulators
+from Python.lib.utils import computing
 
 import test_utils
 
@@ -43,7 +47,7 @@ EXPECTED_TEST_RANDOM_WALK_3 = [-0.000000, -0.702381, -0.702381, -0.611111, -0.51
                                0.361176, 0.361176, 0.437451, 0.437451, 0.776471, 1.000000, 0.000000]
 
 
-class Test_MC_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
+class Test_MC_Lambda_1DGridworld(unittest.TestCase, test_utils.EpisodeSimulation):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -320,5 +324,265 @@ class Test_MC_Lambda(unittest.TestCase, test_utils.EpisodeSimulation):
     #------------------------ TESTS OF MC(LAMBDA): MC as lambda-return ---------------------------#
 
 
+class Test_MC_Lambda_MountainCar(unittest.TestCase, test_utils.EpisodeSimulation):
+
+    def __init__(self, *args, **kwargs):
+        self.seed = kwargs.pop('seed', 1717)
+        self.nepisodes = kwargs.pop('nepisodes', 30) #100000) #30000) #200) #2000)
+        self.max_time_steps = kwargs.pop('max_time_steps', 500)  # Maximum number of steps to run per episode
+        self.normalizer = kwargs.pop('normalizer', 1)            # Normalize for the plots: Set it to max_time_steps when the rewards are NOT sparse (i.e. are -1 every where except at terminal states), o.w. set it to 1 (when rewards are sparse, i.e. they occur at terminal states)
+        self.start_state = kwargs.pop('start_state', None)       # Position and velocity
+        self.plot = kwargs.pop('plot', True)
+        super().__init__(*args, **kwargs)
+
+    @classmethod
+    def setUpClass(cls):  # cls is the class, in this case, class 'Test_TD_Lambda'
+        # IMPORTANT: All attributes defined here can be then be referenced using self!
+        # (i.e. they belong to the "object" instantiated by this class)
+
+        #cls.env = gym.make('MountainCar-v0')   # Here we create in principle a MountainCarEnv environment because this environment is registered with gym.register() or similar.
+        # See also this implementation of the Mountain Car: https://github.com/JJonahJson/MountainCar-v313/blob/master/code/main.py
+
+        # Environment with discretized position and velocity with nx and nv points respectively
+        nx = 5  #20
+        nv = 5  #20
+        cls.env = mountaincars.MountainCarDiscrete(nx, nv)
+
+        cls.policy_rw = random_walks.PolRandomWalkDiscrete(cls.env)
+
+    def no_test_mc_random_walk_onecase(self, params=None, verbose_convergence=False):
+        print("\nTesting " + self.id())
+
+        # Learner and agent
+        if params is None:
+            params = dict({ 'alpha': 1.0,
+                            'gamma': 1.0,
+                            'lambda': 1.0,
+                            'alpha_min': 0.0,
+                            'adjust_alpha': True,
+                            'alpha_update_type': AlphaUpdateType.EVERY_STATE_VISIT,
+                            'learner_type': mc.LearnerType.MC, #mc.LearnerType.LAMBDA_RETURN,
+                            'reset_method': ResetMethod.ALLZEROS, #ResetMethod.RANDOM_NORMAL, #ResetMethod.ALLZEROS,
+                            'reset_params': dict({'loc': -500, 'scale': 10}),
+                           })
+        learner_mc = mc.LeaMCLambda(  self.env, alpha=params['alpha'], gamma=params['gamma'],
+                                      alpha_update_type=params['alpha_update_type'],
+                                      adjust_alpha=params['adjust_alpha'], adjust_alpha_by_episode=False,
+                                      alpha_min=params['alpha_min'],
+                                      lmbda=params['lambda'],
+                                      learner_type=params['learner_type'],
+                                      reset_method=params['reset_method'], reset_params=params['reset_params'], reset_seed=self.seed,
+                                      debug=False)
+        agent_rw_mc = agents.GenericAgent(self.policy_rw, learner_mc)
+
+        #-- Simulation
+        # Choose the initial state
+        if self.start_state is not None:
+            # A specific initial state
+            idx_start_state = self.env.get_index_from_state(self.start_state)
+        else:
+            # Define a uniform Initial State Distribution in the environment so that the initial state is chosen randomly
+            # in MountainCar.reset(). The Initial State Distribution (ISD) is an attribute of toy_text.discrete environment.
+
+            # First find all the terminal states which should be excluded from the possible initial states!
+            idx_states_non_terminal = self.env.get_indices_for_non_terminal_states()
+            self.env.isd = np.array([1.0 / len(idx_states_non_terminal) if idx in idx_states_non_terminal else 0.0
+                                     for idx in range(self.env.getNumStates())])
+            #print("ISD:", self.env.isd)
+            print("Steps: dx = {:.3f}, dv = {:.3f}".format(self.env.dx, self.env.dv))
+            print("Positions: {}".format(self.env.get_positions()))
+            print("Velocities: {}".format(self.env.get_velocities()))
+            idx_start_state = None
+        sim = simulators.Simulator(self.env, agent_rw_mc, debug=False)
+
+        time_start = timer()
+        _, _, _, _, learning_info = sim.run(nepisodes=self.nepisodes, max_time_steps=self.max_time_steps,
+                                        start=idx_start_state, seed=self.seed,
+                                        compute_rmse=False, state_observe=None,
+                                        verbose=True, verbose_period=max(1, int(self.nepisodes/10)),
+                                        verbose_convergence=verbose_convergence,
+                                        plot=False, pause=0.001)
+        time_end = timer()
+        exec_time = time_end - time_start
+        print("Execution time: {:.1f} sec, {:.1f} min".format(exec_time, exec_time / 60))
+
+        observed = self.env.reshape_from_1d_to_2d(agent_rw_mc.getLearner().getV().getValues())
+        state_counts = self.env.reshape_from_1d_to_2d(np.asarray(sim.agent.getLearner().getStateCounts()))
+        print("\n{}, observed: ".format(self.id(), observed))
+        #assert np.allclose(observed, expected, atol=1E-6)
+
+        if self.plot:
+            window_size = max(1, int(self.nepisodes/100))
+            deltaV_rel_max_smooth = computing.smooth(learning_info['deltaV_rel_max_signed'], window_size=window_size)
+            
+            fig = plt.figure(figsize=(20,10))
+            ax, ax_n = fig.subplots(1,2)
+    
+            legend_ax = []
+            ax.plot(np.arange(self.nepisodes+1), learning_info['V_abs_mean'] / self.normalizer, 'b--')
+            ax.plot(np.arange(self.nepisodes+1), learning_info['V_abs_mean_weighted'] / self.normalizer, 'b-')
+            legend_ax += ["Average |V|", "Average |V| (weighted by state count)"]
+            ax.set_ylim((0, ax.get_ylim()[1]))
+            ax.set_xlabel("Episode number")
+            ax.set_ylabel("Average |V|" + (self.normalizer != 1.0 and " normalized by dividing by {}" or "").format(self.normalizer))
+            ax.legend(legend_ax, loc='upper left')
+    
+            ax2 = ax.twinx()
+            legend_ax2 = []
+            ax2.plot(np.arange(self.nepisodes+1), deltaV_rel_max_smooth*100, 'r-', linewidth=1)
+            ax2.plot(np.arange(self.nepisodes+1), learning_info['deltaV_rel_abs_mean']*100, 'r--', linewidth=0.5)
+            ax2.plot(np.arange(self.nepisodes+1), learning_info['prop_states_deltaV_relevant']*100, 'k--', linewidth=0.5)
+            legend_ax2 += ["max|relative change| with sign ({}-tap-smoothed)".format(window_size),
+                           "mean|relative change|",
+                           "proportion states with |rel change| > 1%"]
+            ax2.axhline(0.0, color='gray', linewidth=0.5)
+            ax2.set_yscale('symlog')
+            ax2.set_ylabel("|relative delta(V)| % (log scale)")
+            ax2.set_ylim( -max(ax2.get_ylim()), +max(ax2.get_ylim()) )
+            ax2.legend(legend_ax2, loc='upper right')
+
+            # Number of states used in the computation of the summary statistics at each episode
+            ax_n.plot(np.arange(self.nepisodes+1), learning_info['V_abs_n'] / self.env.getNumStates() * 100, 'g-')
+            ax_n.set_xlabel("Episode number")
+            ax_n.set_ylabel("% states")
+            ax_n.set_ylim((0,100))
+            ax_n.legend(["% states"], loc='upper left')
+            ax_n.set_title("% states used for summary statistics (num states = {}) (average is computed on states with visit count > 0)".format(self.env.getNumStates()))
+    
+            fig.suptitle("Convergence of the estimated value function V (gamma={:.2f}, lambda={:.2f}, alpha={:.2f}, {})" \
+                        .format(params['gamma'], params['lambda'], params['alpha'], params['alpha_update_type'].name))
+
+
+            fig = plt.figure(figsize=(20,10))
+            ax, ax2 = fig.subplots(1,2)
+
+            #ax.plot(self.env.reshape_from_2d_to_1d(state_counts))
+            #for x in range(0, np.prod(self.env.shape), self.env.shape[0]):
+            #    ax.axvline(x, color="gray")
+            #ax.axhline(0, color="gray")
+            #ax.set_xlabel("linear state index (grouped by {})".format(self.env.getShapeNames()[1]))
+            #ax.set_ylabel("Visit count")
+            #ax.set_title("State visit count (grouped by {})".format(self.env.getShapeNames()[1]))
+
+            values = agent_rw_mc.getLearner().getV().getValues()
+            ax.hist(values, bins=30, weights=np.repeat(1/len(values), len(values))*100)
+            ax.set_ylim((0,100))
+            ax.set_xlabel("Value function")
+            ax.set_ylabel("Percent count")
+            ax.set_title("Distribution of V(s) values")
+
+            positions, velocities = self.env.get_positions(), self.env.get_velocities() 
+            ax2.plot(positions, np.sum(state_counts, axis=self.env.getVelocityDimension()), '.-', color=self.env.getPositionColor()) # Sum along the different velocities
+            ax2.plot(velocities, np.sum(state_counts, axis=self.env.getPositionDimension()), '.-', color=self.env.getVelocityColor()) # Sum along the different positions
+            ax2.legend(["Visit count on positions", "Visit count on velocities"])
+            ax2.set_xlabel("Position / Velocity")
+            ax2.set_ylabel("Visit count")
+            ax2.set_title("Visit counts by dimension (position / velocity)")
+
+        return observed, state_counts, params, sim, learning_info
+
+    def test_mc_vs_lambda_return_random_walk_onecase(self, verbose_convergence=False):
+        print("\nTesting " + self.id())
+
+        # Learner and agent
+        params = dict({ 'alpha': 1.0,
+                        'gamma': 1.0,
+                        'lambda': 1.0,
+                        'alpha_min': 0.0,
+                        'adjust_alpha': True,
+                        'alpha_update_type': AlphaUpdateType.EVERY_STATE_VISIT,
+                       })
+
+        learner_mc = mc.LeaMCLambda(  self.env, alpha=params['alpha'], gamma=params['gamma'],
+                                      alpha_update_type=params['alpha_update_type'],
+                                      adjust_alpha=params['adjust_alpha'], adjust_alpha_by_episode=False,
+                                      alpha_min=params['alpha_min'],
+                                      lmbda=params['lambda'],
+                                      learner_type=mc.LearnerType.MC,
+                                      reset_method=ResetMethod.ALLZEROS,
+                                      debug=False)
+        learner_lambda_return = mc.LeaMCLambda(  self.env, alpha=params['alpha'], gamma=params['gamma'],
+                                      alpha_update_type=params['alpha_update_type'],
+                                      adjust_alpha=params['adjust_alpha'], adjust_alpha_by_episode=False,
+                                      alpha_min=params['alpha_min'],
+                                      lmbda=params['lambda'],
+                                      learner_type=mc.LearnerType.LAMBDA_RETURN,
+                                      reset_method=ResetMethod.ALLZEROS,
+                                      debug=False)
+        agent_rw_mc = agents.GenericAgent(self.policy_rw, learner_mc)
+        agent_rw_lambda_return = agents.GenericAgent(self.policy_rw, learner_lambda_return)
+
+        #-- Simulation
+        # Choose the initial state
+        if self.start_state is not None:
+            # A specific initial state
+            idx_start_state = self.env.get_index_from_state(self.start_state)
+        else:
+            # Define a uniform Initial State Distribution in the environment so that the initial state is chosen randomly
+            # in MountainCar.reset(). The Initial State Distribution (ISD) is an attribute of toy_text.discrete environment.
+
+            # First find all the terminal states which should be excluded from the possible initial states!
+            idx_states_non_terminal = self.env.get_indices_for_non_terminal_states()
+            self.env.isd = np.array([1.0 / len(idx_states_non_terminal) if idx in idx_states_non_terminal else 0.0
+                                     for idx in range(self.env.getNumStates())])
+            #print("ISD:", self.env.isd)
+            print("Steps: dx = {:.3f}, dv = {:.3f}".format(self.env.dx, self.env.dv))
+            print("Positions: {}".format(self.env.get_positions()))
+            print("Velocities: {}".format(self.env.get_velocities()))
+            idx_start_state = None
+        sim_mc = simulators.Simulator(self.env, agent_rw_mc, debug=False)
+        sim_lambda_return = simulators.Simulator(self.env, agent_rw_lambda_return, debug=False)
+
+        # MC execution
+        time_start = timer()
+        _, _, _, _, learning_info = sim_mc.run(nepisodes=self.nepisodes, max_time_steps=self.max_time_steps,
+                                        start=idx_start_state, seed=self.seed,
+                                        compute_rmse=False, state_observe=None,
+                                        verbose=True, verbose_period=max(1, int(self.nepisodes/10)),
+                                        verbose_convergence=verbose_convergence,
+                                        plot=False, pause=0.001)
+        time_end = timer()
+        exec_time = time_end - time_start
+        print("[MC] Execution time: {:.1f} sec, {:.1f} min".format(exec_time, exec_time / 60))
+
+        # Lambda-Return
+        time_start = timer()
+        _, _, _, _, learning_info = sim_lambda_return.run(nepisodes=self.nepisodes, max_time_steps=self.max_time_steps,
+                                        start=idx_start_state, seed=self.seed,
+                                        compute_rmse=False, state_observe=None,
+                                        verbose=True, verbose_period=max(1, int(self.nepisodes/10)),
+                                        verbose_convergence=verbose_convergence,
+                                        plot=False, pause=0.001)
+        time_end = timer()
+        exec_time = time_end - time_start
+        print("[Lambda-Return] Execution time: {:.1f} sec, {:.1f} min".format(exec_time, exec_time / 60))
+
+        print("Observed estimataed value functions (MC / Lambda-Return):")
+        print(np.c_[agent_rw_mc.getLearner().getV().getValues(), agent_rw_lambda_return.getLearner().getV().getValues(),
+                    agent_rw_lambda_return.getLearner().getV().getValues() - agent_rw_mc.getLearner().getV().getValues()])
+
+        # Plots
+        plt.figure()
+        plt.hist(np.c_[agent_rw_mc.getLearner().getV().getValues(), agent_rw_lambda_return.getLearner().getV().getValues()])
+        plt.title("V(s) by each method")
+        plt.legend(["MC", "Lambda-Return"])
+
+        plt.figure()
+        plt.hist(agent_rw_lambda_return.getLearner().getV().getValues() - agent_rw_mc.getLearner().getV().getValues())
+        plt.title("Difference in V(s) between the two methods (Lambda-Return - MC)")
+
+        assert np.allclose(agent_rw_mc.getLearner().getV().getValues(), agent_rw_lambda_return.getLearner().getV().getValues())
+
+
 if __name__ == "__main__":
-    unittest.main()
+    test = True
+
+    if test:
+        #unittest.main()
+        unittest.main(defaultTest="Test_MC_Lambda_1DGridworld")
+        unittest.main(defaultTest="Test_MC_Lambda_MountainCar")
+
+    else:
+        test_obj = Test_MC_Lambda_MountainCar()
+        test_obj.setUpClass()
+        state_values, state_counts, params, sim, learning_info = test_obj.test_mc_random_walk_onecase()

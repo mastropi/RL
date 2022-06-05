@@ -7,6 +7,7 @@ Created on Wed May 4 19:35
 inheriting from the environment defined in the gym package by openAI.
 Ref: https://gym.openai.com/docs/
 Source code and description of environment: https://github.com/openai/gym/blob/master/gym/envs/classic_control/mountain_car.py
+Example of use on the mountain car environment: https://mpatacchiola.github.io/blog/2017/08/14/dissecting-reinforcement-learning-6.html
 """
 
 import copy
@@ -35,16 +36,18 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
         # Shape information of the 2D state information
         self.nx = nx
         self.nv = nv
-        self.shape = (self.nx, self.nv)     # Number of rows x number of columns
-                                            # We put the positions on the rows because the state returned by the MountainCarEnv is (x, v),
-                                            # i.e. the first dimension is the position, so that we do a direct mapping
-                                            # from "first dimension" to "row" in the 2D shape.
+        self.shape = (self.nx, self.nv)     # Number of rows * number of columns
+                                            # We put the positions on the rows because the state returned
+                                            # by the MountainCarEnv is the tuple (x, v)
+                                            # (i.e. the first dimension is the position),
+                                            # and by doing so we do a direct and natural mapping
+                                            # from "first dimension" of the tuple to "row" in the 2D shape.
+        self.shape_names = ("position", "velocity")
         # Minimum and maximum values for the position and velocity
         # Note: In the documentation of the source code in GitHub (mentioned above) it says that:
         # -1.2 <= x <= 0.6
         # -0.07 <= v <= 0.07
-        # that's why we set xmin to -2*self.max_position, because self.max_position = 0.6
-        self.xmin, self.xmax = -2.0 * self.max_position, self.max_position
+        self.xmin, self.xmax = self.min_position, self.max_position
         self.vmin, self.vmax = -self.max_speed, self.max_speed
 
         # Discretization sizes
@@ -121,7 +124,26 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
             "continuous observation", "discretized observation", reward, done, info
         """
         observation, reward, done, info = super().step(action)
-        #print("\nStep: action = {} -> observation = {}, done = {}".format(action, observation, done))
+        if done:
+            # Fix the reward when the car reaches the goal!
+            # In the original implementation (see gym/envs/classic_control/mountain_car.py) the reward is ALWAYS -1.0!!
+            # (although the documentation reads:
+            # "The goal is to reach the flag placed on top of the right hill as quickly as possible,
+            # as such the agent is penalised with a reward of -1 for each timestep it isn't at the goal and
+            # is not penalised (reward = 0) for when it reaches the goal."
+            # IN ANY CASE, THIS "bug" IS NOT A BIG DEAL, because the total reward observed when the car reaches the goal
+            # no longer increases (negatively) making the rewards closer to the goal more valuable. So, it's ok.
+            reward = 0.0
+            #print("\nStep: action = {} -> observation = {}, reward = {}, done = {}".format(action, observation, reward, done))
+
+        # Reduce the reward amplitude, just to try whether smaller rewards make TD algorithms converge faster
+        # when the initial value function guess is all zeros
+        #reward = reward / 1000
+
+        # Make the environment work as in gridworld, i.e. a non-zero reward is received at the terminal states
+        # In the original MountainCar environment, all rewards are -1.0 except at the terminal state which is 0,
+        # therefore we reverse these rewards here.
+        #reward = 1.0 + reward
 
         # Discretize position and velocity
         # These are integer values in [0, nx-1] and [0, nv-1] respectively for position and velocity
@@ -133,6 +155,9 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
             idx_state = self.get_index_from_state_discrete(observation_discrete)
             return idx_state, reward, done, info
 
+    # NOTE: There is a numpy function to discretize called numpy.digitize()
+    # See https://mpatacchiola.github.io/blog/2017/08/14/dissecting-reinforcement-learning-6.html
+    # for an example of use in the Mountain Car environment.
     def discretize(self, state):
         """
         Discretizes the given environment state using the discretization parameters defined in the object
@@ -174,8 +199,13 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
         """
         Converts a 2D representation of the states to a 1D representation
 
-        The 2D representation is swept by column during the conversion to 1D representation, i.e. order='F' is used
-        in the call to reshape().
+        The 2D representation is swept by column during the conversion to 1D representation,
+        i.e. we fix the column of the 2D representation, we sweep the rows, we change the column, we seep the rows, etc.,
+        which is what is done by order='F' (Fortran-like) in the call to reshape().
+
+        In terms of the mountain car states, each row represents a fixed position, and each column a fixed velocity,
+        which means that in the 1D representation we will see first the different positions for the smallest velocity,
+        up to the different positions for the largest velocity.
         """
         return np.squeeze( values_2d.reshape(1, np.prod(values_2d.shape), order='F') )
 
@@ -184,7 +214,10 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
         Converts a 1D representation of the states to a 2D representation
 
         The values laid out in the 1D representation are arranged in the 2D representation by column first,
-        i.e. order='F' is used in the call to reshape().
+        i.e. we fix the column, we fill the rows, we change the column, we fill the rows, etc.,
+        which is what is done by order='F' (Fortran-like) in the call to reshape().
+
+        In terms of the mountain car states, each row represents a fixed position, and each column a fixed velocity.
         """
         return values_1d.reshape(self.nx, self.nv, order='F')
 
@@ -195,12 +228,34 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
         return idx_state
 
     def get_index_from_state_discrete(self, state_discrete):
+        """
+        Returns the 1D state index from the 2D state indices
+
+        Arguments:
+        state_discrete: list, tuple or numpy array
+            2D indices of the state.
+
+        Return: int
+        1D index of the state in the 1D representation of the 2D shape indexing the states.
+        Different positions come first in the 1D representation of the states for the smallest velocity.
+        """
         return index_multi2linear(state_discrete, self.shape, order='F')     # order='F' means sweep the 2D matrix by column
 
     def get_state_from_index(self, idx_state: int):
+        """
+        Returns the continuous-valued position and velocity from the given 1D state index.
+        The conversion to continuous values is done by the undiscretize() method.
+        """
         state_discrete = self.get_state_discrete_from_index(idx_state)
         state = self.undiscretize(state_discrete)
         return state
+
+    def get_state_from_discrete_state(self, state_discrete):
+        """
+        Returns the continuous-valued position and velocity from the given 2D state indices.
+        This is an alias for the undiscretize() method.
+        """
+        return self.undiscretize(state_discrete)
 
     def get_state_discrete_from_index(self, idx_state: int):
         return index_linear2multi(idx_state, self.shape, order='F')   # order='F' means sweep the 2D matrix by column
@@ -226,6 +281,33 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
     #--- Getters
     def getShape(self):
         return self.shape
+
+    def getShapeNames(self):
+        """
+        Returns the names of the measures stored in each dimension of the 2D representation of the states
+
+        Return: tuple
+        Duple with the following elements:
+        - name of the row labels of the 2D shape storing the states (e.g. "position")
+        - name of the column labels of the 2D shape storing the states (e.g. "velocity")
+        """
+        return self.shape_names
+
+    def getPositionDimension(self):
+        "Returns the dimension in the 2D shape of states along which the different positions are stored"
+        return self.shape_names.index("position")
+
+    def getVelocityDimension(self):
+        "Returns the dimension in the 2D shape of states along which the different velocities are stored"
+        return self.shape_names.index("velocity")
+
+    def getPositionColor(self):
+        "Returns the color to use in plots about the position"
+        return "red"
+
+    def getVelocityColor(self):
+        "Returns the color to use in plots about the velocity"
+        return "blue"
 
     def getV(self):
         return self.V

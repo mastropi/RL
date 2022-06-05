@@ -739,24 +739,24 @@ class Test_TD_Lambda_MountainCar(unittest.TestCase, test_utils.EpisodeSimulation
         values_2d_toplot[idx_not_enough_counts_x, idx_not_enough_counts_v] = np.nan
 
         import matplotlib.pyplot as plt
-        x = self.env.get_positions()  # x is on the rows of `values_2d`
-        v = self.env.get_velocities()  # v is on the cols of `values_2d`
+        x, dim_x, color_x = self.env.get_positions(), self.env.getPositionDimension(), self.env.getPositionColor()  # normally x is on the rows of `values_2d`
+        v, dim_v, color_v = self.env.get_velocities(), self.env.getVelocityDimension(), self.env.getVelocityColor() # normally v is on the cols of `values_2d`
         assert len(x) == values_2d_toplot.shape[0]
         assert len(v) == values_2d_toplot.shape[1]
         title_params = "(lambda={:.2f}, alpha={:.1f}, adj={}, episodes={}, max_time={}, density=(x:{}, v:{}) points)" \
             .format(params['lambda'], params['alpha'], params['adjust_alpha'], self.nepisodes, self.max_time_steps,
                     self.env.nx, self.env.nv)
         plt.figure()
-        plt.errorbar(x, np.nanmean(values_2d_toplot / self.normalizer, axis=1),
-                     yerr=np.nanstd(values_2d_toplot / self.normalizer, axis=1) / np.sqrt(self.env.nv),
-                     marker='.', color="red", capsize=4)
+        plt.errorbar(x, np.nanmean(values_2d_toplot / self.normalizer, axis=dim_v),
+                     yerr=np.nanstd(values_2d_toplot / self.normalizer, axis=dim_v) / np.sqrt(self.env.nv),
+                     marker='.', color=color_x, capsize=4)
         ax = plt.gca()
         ax.set_title("Average value of each position\n" + title_params)
 
         plt.figure()
-        plt.errorbar(v, np.nanmean(values_2d_toplot / self.normalizer, axis=0),
-                     yerr=np.nanstd(values_2d_toplot / self.normalizer, axis=0) / np.sqrt(self.env.nx),
-                     marker='.', color="blue", capsize=4)
+        plt.errorbar(v, np.nanmean(values_2d_toplot / self.normalizer, axis=dim_x),
+                     yerr=np.nanstd(values_2d_toplot / self.normalizer, axis=dim_x) / np.sqrt(self.env.nx),
+                     marker='.', color=color_v, capsize=4)
         ax = plt.gca()
         ax.set_title("Average value of each velocity\n" + title_params)
 
@@ -888,7 +888,7 @@ class Test_TD_Lambda_MountainCar(unittest.TestCase, test_utils.EpisodeSimulation
 
 
 if __name__ == "__main__":
-    test = False
+    test = True
 
     if not test:
         test_env_name = "MountainCar"
@@ -1138,11 +1138,11 @@ if __name__ == "__main__":
 
         #-- What to plot
         # Use this when rewards are SPARSE (e.g. +1 at the terminal states)
-        deltaV_abs_name = "deltaV_abs_mean"
-        deltaV_max_name = "deltaV_max_signed"
+        #deltaV_abs_name = "deltaV_abs_mean"
+        #deltaV_max_name = "deltaV_max_signed"
         # Use this when rewards are NOT sparse
-        #deltaV_abs_name = "deltaV_rel_abs_mean"
-        #deltaV_max_name = "deltaV_rel_max_signed"
+        deltaV_abs_name = "deltaV_rel_abs_mean"
+        deltaV_max_name = "deltaV_rel_max_signed"
 
         # Compute moving average of the error for easier visualization
         import numpy as np
@@ -1173,13 +1173,13 @@ if __name__ == "__main__":
         #legend_ax2 += ["max|relative change| with sign"]
         ax2.plot(np.arange(nepisodes+1), deltaV_max_smooth, 'r-', linewidth=1)
         legend_ax2 += ["max|relative change| with sign ({}-tap-smoothed)".format(window_size)]
-        ax2.plot(np.arange(nepisodes+1), learning_info[deltaV_abs_name]*100, 'r--', linewidth=0.5)
+        ax2.plot(np.arange(nepisodes+1), learning_info[deltaV_abs_name], 'r--', linewidth=0.5)
         legend_ax2 += ["mean|relative change|"]
         ax2.axhline(0.0, color='gray', linewidth=0.5)
         ## The median values are 0.0 for ALL episodes... interesting!
         ax2.set_yscale('symlog')
         ax2.set_ylim( -max(ax2.get_ylim()), +max(ax2.get_ylim()) )
-        ax2.set_ylabel("mean |relative delta(V)| (%) (log scale)")
+        ax2.set_ylabel("mean |relative delta(V)| (log scale)")
         ax2.legend(legend_ax2, loc='upper right')
         #ax2.legend(["mean|relative change|", "weighted mean|relative change|"])
         ax.set_title("Value function estimation and relative change")
