@@ -184,13 +184,6 @@ class Simulator:
         # Reset the learner to the first episode state
         self.agent.getLearner().reset(reset_episode=reset_episode, reset_value_functions=reset_value_functions)
 
-    def getCase(self):
-        return self.case
-
-    def setCase(self, case):
-        "Sets the simulation case, identifying a common set of simulations performed by a certain criterion"
-        self.case = case
-
     def close(self):
         if self.fh_log is not None:
             self.fh_log.close()
@@ -435,9 +428,9 @@ class Simulator:
                     nepisodes_max_steps_reached += 1
                     done = True
                     if self.debug:
-                        print("(MAX TIME STEP = {} REACHED!)".format(max_time_steps))
-                #if self.debug:
-                #    print("| t: {} ({}) -> {}".format(t, action, next_state), end=" ")
+                        print("[DEBUG] (MAX TIME STEP = {} REACHED!)".format(max_time_steps))
+                if self.debug:
+                    print("t: {}, s={}, a={} -> ns={}, r={}".format(t, state, action, next_state, reward))
 
                 if self.debug and done:
                     print("--> [DEBUG] Done [{} iterations] at state {} with reward {}".format(t+1, self.env.getState(), reward))
@@ -448,9 +441,6 @@ class Simulator:
                 if state_observe is not None:
                     # Store the value function of the state just estimated
                     V_state_observe += [learner.getV().getValue(state_observe)]
-
-                if self.debug:
-                    print("--> [DEBUG] {}".format(self.env.getState()), end=" ")
 
             #------- EPISODE FINISHED --------#
             if verbose and np.mod(episode, verbose_period) == 0:
@@ -1018,6 +1008,20 @@ class Simulator:
                RMSE_by_episode_mean, RMSE_by_episode_se, \
                MAPE_by_episode_mean, MAPE_by_episode_se, RMSE_by_episode_n, \
                learning_info_over_experiments
+
+    #--- Getters and Setters
+    def getEnv(self):
+        return self.env
+
+    def getAgent(self):
+        return self.agent
+
+    def getCase(self):
+        return self.case
+
+    def setCase(self, case):
+        "Sets the simulation case, identifying a common set of simulations performed by a certain criterion"
+        self.case = case
 
 
 class SimulatorQueue(Simulator):
@@ -2094,12 +2098,6 @@ class SimulatorQueue(Simulator):
                                             ))
 
     # ------ GETTERS ------#
-    def getEnv(self):
-        return self.env
-
-    def getAgent(self):
-        return self.agent
-
     def getJobRatesByServer(self):
         return self.job_rates_by_server
 
