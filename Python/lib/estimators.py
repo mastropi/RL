@@ -27,6 +27,8 @@ if __name__ == "__main__":
     runpy.run_path('../../setup.py')
 
 from Python.lib.environments.queues import EnvQueueSingleBufferWithJobClasses, rewardOnJobClassAcceptance, ActionTypes
+from Python.lib.agents.learners import ResetMethod
+from Python.lib.agents.learners.value_functions import ValueFunctionApprox
 from Python.lib.agents.queues import AgeQueue, PolicyTypes as QueuePolicyTypes
 from Python.lib.agents.policies.job_assignment import PolJobAssignmentProbabilistic
 from Python.lib.agents.policies.parameterized import PolQueueTwoActionsLinearStepOnJobClasses, PolQueueTwoActionsLinearStep
@@ -40,6 +42,7 @@ from Python.lib.utils.computing import get_server_loads, compute_job_rates_by_se
     stationary_distribution_birth_death_process, \
     stationary_distribution_birth_death_process_at_capacity_unnormalized
 
+DEBUG_ESTIMATORS = False
 DEBUG_TIME_GENERATION = False
 DEBUG_SPECIAL_EVENTS = False
 DEBUG_TRAJECTORIES = False
@@ -91,6 +94,133 @@ class FinalizeCondition(Enum):
     ACTIVE = 1                          # The particle is still active, i.e. it has not been absorbed. To be used in the FV process.
     NOT_ABSORBED_STATES_BOUNDARY = 2    # The particle is not at the boundary of the set of absorbed states. To be used to estimate E(T).
     NOT_START_POSITION = 3              # The particle is not at the buffer size position where it started. To be used in the MC estimation.
+
+
+class EstimatorValueFunctionOfflineDeterministicNextState:
+    """
+    Offline estimator of the value function on a discrete-state / discrete-action environment where the next state
+    given an action is deterministic.
+
+    ASSUMPTIONS:
+    - All possible actions are the same for each state and equal to the number of actions in the environment.
+    - All possible actions are equally likely (random walk policy).
+
+    The offline estimator consists in traversing all possible states and actions in the environment and updating
+    the value function recursively using the Bellman equation on the state value function.
+
+    This estimator is useful when there is no theoretical expression for the state value function.
+
+    Arguments:
+    env: EnvironmentDiscrete
+        Discrete-state and discrete-action environment on which the state value function is estimated.
+
+    gamma: float
+        Discount parameter when learning the state value function. This is used in the Bellman equation.
+    """
+    def __init__(self, env, gamma=1.0):
+        self.env = env
+        self.gamma = gamma
+        self.V = ValueFunctionApprox(self.env.getNumStates(), self.env.getTerminalStates())
+
+    def reset(self, reset_method, reset_params, reset_seed):
+        self.env.reset()
+        self.V.reset(method=reset_method, params_random=reset_params, seed=reset_seed)
+
+    def estimate_state_values_random_walk(self, synchronous=True,
+                                          max_delta=np.nan, max_delta_rel=1E-3, max_iter=1000, verbose=True, verbose_period=None,
+                                          reset_method=ResetMethod.ALLZEROS, reset_params=None, reset_seed=1713):
+        "Estimates the value function under the random walk policy"
+        self.reset(reset_method, reset_params, reset_seed)
+
+        if verbose_period is None:
+            verbose_period = max_iter / 10
+
+        print("Terminal states ({} out of {}): {}".format(len(self.env.getTerminalStates()), self.env.getNumStates(), self.env.getTerminalStates()))
+        # WARNING: Only valid for MountainCarDiscrete environment
+        #print("Positions: {}".format(self.env.get_positions()))
+        #print("Velocities: {}".format(self.env.get_velocities()))
+        # WARNING: Only valid for MountainCarDiscrete environment
+        print("Initial V(s) estimate: {}".format(self.V.getValues()))
+
+        max_deltaV_abs = np.Inf
+        max_deltaV_rel_abs = np.Inf
+        iter = 0
+        while iter < max_iter and \
+                (np.isnan(max_delta_rel) and max_deltaV_abs > max_delta or \
+                 np.isnan(max_delta) and max_deltaV_rel_abs > max_delta_rel or \
+                 not np.isnan(max_delta) and not np.isnan(max_delta_rel) and max_deltaV_abs > max_delta and max_deltaV_rel_abs > max_delta_rel):
+            iter += 1
+            values_prev = self.V.getValues()
+            for s in self.env.getNonTerminalStates():
+                #print("** state: {}".format(s))
+                self.env.setState(s)
+                n_actions_so_far = 0
+                # Initialize the average observed value over all possible actions, whose value will be the updated V(s) value
+                # once all actions have been taken
+                V_mean_over_actions = 0.0
+                for a in range(self.env.getNumActions()):
+                    assert self.env.getState() == s, "getState(): {}, s: {}".format(self.env.getState(), s)
+                    ns, reward, done, info = self.env.step(a)   # ns = next state
+
+                    # NOTE 1: (2022/06/05) THIS ASSUMES THAT THE VALUE FUNCTION APPROXIMATION IS TABULAR!!
+                    # In fact, I don't know how to write the Bellman equation in function approximation context
+                    # (See chapter 9 in Sutton but I don't think it talks about this... it only talks about how to update
+                    # the weights at each iteration, using Stochastic Gradient Descent (SGD).
+                    # However, it does talk about the fixed point of this SGD algorithm, which is w = A^-1 * b
+                    # where A and b are given in that chapter (pag. 206).
+
+                    # NOTE 2: At first we should perhaps update V(s) synchronosly, i.e. keep the same V(s) on the RHS
+                    # until ALL states are updated.
+                    # However, it seems that the asynchronous update done here works fine as well (recall class by Matt at UBA)
+                    # and it even converges faster!
+                    if DEBUG_ESTIMATORS:
+                        print("state: {}, action: {} => next state = {}, reward = {} (done? {})".format(s, a, ns, reward, done))
+                        # WARNING: Only valid for MountainCarDiscrete environment (because of call to self.env.get_state_from_index()
+                        #print("state: {} ({}), action: {} => next state = {} ({}), reward = {} (done? {})" \
+                        #      .format(s, self.env.get_state_from_index(s), a, ns, self.env.get_state_from_index(ns), reward, done))
+                        # WARNING: Only valid for MountainCarDiscrete environment
+
+                    # The new V(s) value is the average over all possible actions (since we are considering a random walk)
+                    if synchronous:
+                        # Use the state value computed at the PREVIOUS iteration as currently known value of the next state, V(ns)
+                        V_observed = reward + self.gamma * values_prev[ns]
+                    else:
+                        # Use the CURRENT value of the next state, V(ns), even if it has been updated already in this iteration
+                        # (i.e. without waiting for the value of all other states to be updated)
+                        V_observed = reward + self.gamma * self.V.getValue(ns)
+                    V_mean_over_actions = (n_actions_so_far * V_mean_over_actions + V_observed) / (n_actions_so_far + 1)
+
+                    n_actions_so_far += 1
+
+                    # Reset the state to the original state before the transition, so that the next action is applied to the same state
+                    self.env.setState(s)
+                # Update the state value of the currently analyzed state, V(s)
+                self.V.setWeight(s, V_mean_over_actions)
+                if DEBUG_ESTIMATORS:
+                    if reward != 0:
+                        print("--> New value for state s={} after taking all {} actions: {}".format(s, self.env.getNumStates(), self.V.getValue(s)))
+
+            deltaV = (self.V.getValues() - values_prev)
+            deltaV_rel = np.array([0.0  if dV == 0
+                                        else dV / abs(V) if V != 0
+                                                         else np.Inf
+                                    for dV, V in zip(deltaV, values_prev)])
+            max_deltaV_abs = np.max( np.abs(deltaV) )
+            max_deltaV_rel_abs = np.max( np.abs(deltaV_rel) )
+            if DEBUG_ESTIMATORS or verbose and (iter-1) % verbose_period == 0:
+                print("Iteration {}: mean(|V_prev|) = {}, mean(|V|) = {}, max|delta(V)| = {}, max|delta_rel(V)| = {}" \
+                      .format(iter, np.mean(np.abs(values_prev)), np.mean(np.abs(self.V.getValues())), max(np.abs(deltaV)), max_deltaV_rel_abs))
+
+        if max_deltaV_rel_abs > max_delta_rel:
+            warnings.warn("The estimation of the value function may not be accurate as the maximum relative absolute" \
+                          " change in the last iteration #{} ({}) is larger than the maximum allowed ({})" \
+                          .format(iter, max_deltaV_rel_abs, max_delta_rel))
+
+        return iter, max_deltaV_abs, max_deltaV_rel_abs
+
+    def getV(self):
+        return self.V
+
 
 class EstimatorQueueBlockingFlemingViot:
     """
@@ -4350,6 +4480,9 @@ class EstimatorQueueBlockingFlemingViot:
         ax.vlines(xaxis_max, 0, (K+1)*self.N, color='red', linestyles='dashed')
         for p in particle_numbers:
             color = colormap( (p+1) / self.N )
+            # DM-2022/04/04: Correction done for the central color so that the trajectory is more clearly seen for the presentation at STORE (06-Apr-2022)
+            #if p + 1 == 3 and self.N == 5:
+            #    color = colormap( 0.5 )
             # Non-overlapping step plots at vertical positions (K+1)*p
             plt.step(self.all_times_buffer[p], [(K+1)*p + pos for pos in self.all_positions_buffer[p]], '-', #'x-',
                      where='post', color=color, markersize=3)

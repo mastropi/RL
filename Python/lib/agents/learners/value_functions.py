@@ -61,7 +61,7 @@ class ValueFunctionApprox:
         # the X matrix is a diagonal matrix.
         self.X = np.eye(self.nS)
 
-    def reset(self, method=ResetMethod.ALLZEROS, params_random :dict=dict(), seed :int=None):
+    def reset(self, method=ResetMethod.ALLZEROS, params_random: dict=dict(), seed: int=None):
         """
         Resets the weights using the specified reset method
 
