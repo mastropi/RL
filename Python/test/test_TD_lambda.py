@@ -715,9 +715,9 @@ class Test_TD_Lambda_MountainCar(unittest.TestCase, test_utils.EpisodeSimulation
         # See also this implementation of the Mountain Car: https://github.com/JJonahJson/MountainCar-v313/blob/master/code/main.py
 
         # Environment with discretized position and velocity with nx and nv points respectively
-        nx = 100
-        nv = 100
-        cls.env = mountaincars.MountainCarDiscrete(nx, nv)
+        #nx = 100
+        nv = 10
+        cls.env = mountaincars.MountainCarDiscrete(nv)
 
         # Using the environment:
         # Ref: https://gym.openai.com/docs/
@@ -775,43 +775,62 @@ class Test_TD_Lambda_MountainCar(unittest.TestCase, test_utils.EpisodeSimulation
         return fig
 
     def test_environment(self):
-        env = mountaincars.MountainCarDiscrete(10, 10)
+        env = mountaincars.MountainCarDiscrete(10)
         state = env.reset(seed=1717)
         print("Environment reset to state: {}".format(state))
         assert np.allclose(state, np.array([-0.54806077, 0.0]))
 
         # Accelerate left several times
-        observation_real, observation, reward, done, info = env.step(0, return_continuous_observation=True)
+        observation_real, observation, reward, done, info = env.step(0, return_continuous_state=True)
         print(observation_real, observation, reward, info)
-        assert np.allclose(observation_real, np.array([-0.54887747, -0.0008167]))
-        assert all(observation == np.array([3, 4]))
+        # when force and gravity are the original ones
+        #assert np.allclose(observation_real, np.array([-0.54887747, -0.0008167]))
+        #assert all(observation == np.array([3, 4]))
+        # when force and gravity are 20-times the original ones
+        assert np.allclose(observation_real, np.array([-0.56439476, -0.01633399]))
+        assert all(observation == np.array([39, 3]))
+        
+        observation_real, observation, reward, done, info = env.step(0, return_continuous_state=True)
+        print(observation_real, observation, reward, info)
+        # when force and gravity are the original ones
+        #assert np.allclose(observation_real, np.array([-0.55050476, -0.00162729]))
+        #assert all(observation == np.array([3, 4]))
+        assert np.allclose(observation_real, np.array([-0.61427392, -0.04050249]))
+        assert all(observation == np.array([36, 2]))
 
-        observation_real, observation, reward, done, info = env.step(0, return_continuous_observation=True)
+        observation_real, observation, reward, done, info = env.step(0, return_continuous_state=True)
         print(observation_real, observation, reward, info)
-        assert np.allclose(observation_real, np.array([-0.55050476, -0.00162729]))
-        assert all(observation == np.array([3, 4]))
+        # when force and gravity are the original ones
+        #assert np.allclose(observation_real, np.array([-0.55293047, -0.00242572]))
+        #assert all(observation == np.array([3, 4]))
+        assert np.allclose(observation_real, np.array([-0.66940432, -0.04746146]))
+        assert all(observation == np.array([33, 1]))
 
-        observation_real, observation, reward, done, info = env.step(0, return_continuous_observation=True)
+        observation_real, observation, reward, done, info = env.step(0, return_continuous_state=True)
         print(observation_real, observation, reward, info)
-        assert np.allclose(observation_real, np.array([-0.55293047, -0.00242572]))
-        assert all(observation == np.array([3, 4]))
-
-        observation_real, observation, reward, done, info = env.step(0, return_continuous_observation=True)
-        print(observation_real, observation, reward, info)
-        assert np.allclose(observation_real, np.array([-0.55613648, -0.00320601]))
-        assert all(observation == np.array([3, 4]))
+        # when force and gravity are the original ones
+        #assert np.allclose(observation_real, np.array([-0.55613648, -0.00320601]))
+        #assert all(observation == np.array([3, 4]))
+        assert np.allclose(observation_real, np.array([-0.72483783, -0.05472354]))
+        assert all(observation == np.array([29, 1]))
 
         # Do not accelerate
-        observation_real, observation, reward, done, info = env.step(1, return_continuous_observation=True)
+        observation_real, observation, reward, done, info = env.step(1, return_continuous_state=True)
         print(observation_real, observation, reward, info)
-        assert np.allclose(observation_real, np.array([-0.55909885, -0.00296237]))
-        assert all(observation == np.array([3, 4]))
+        # when force and gravity are the original ones
+        #assert np.allclose(observation_real, np.array([-0.55909885, -0.00296237]))
+        #assert all(observation == np.array([3, 4]))
+        assert np.allclose(observation_real, np.array([-0.76079551, -0.02645265]))
+        assert all(observation == np.array([27, 3]))
 
         # Accelerate right
-        observation_real, observation, reward, done, info = env.step(2, return_continuous_observation=True)
+        observation_real, observation, reward, done, info = env.step(2, return_continuous_state=True)
         print(observation_real, observation, reward, info)
-        assert np.allclose(observation_real, np.array([-0.56079547, -0.00169662]))
-        assert all(observation == np.array([3, 4]))
+        # when force and gravity are the original ones
+        #assert np.allclose(observation_real, np.array([-0.56079547, -0.00169662]))
+        #assert all(observation == np.array([3, 4]))
+        assert np.allclose(observation_real, np.array([-0.74116678, 0.02529036]))
+        assert all(observation == np.array([28, 6]))
 
     def run_random_walk_onecase(self, params=None, adaptive=False, verbose_convergence=False):
         print("\nTesting " + self.id())
@@ -923,7 +942,7 @@ if __name__ == "__main__":
         #runner.run(suite)
 
         #--- Mountain Car tests
-        #unittest.main(defaultTest="Test_TD_Lambda_MountainCar")
+        unittest.main(defaultTest="Test_TD_Lambda_MountainCar")
     elif test_env_name == "GW1D_OneTerminalState":
         # Prepare environment
         nstates = 19
@@ -959,9 +978,9 @@ if __name__ == "__main__":
 
         # Prepare environment
         test_obj = Test_TD_Lambda_MountainCar(seed=1717, start_state=None, normalizer=normalizer, plot=plot)
-        nx = 20
-        nv = 20
-        test_obj.env = mountaincars.MountainCarDiscrete(nx, nv)
+        #nx = 20
+        nv = 10
+        test_obj.env = mountaincars.MountainCarDiscrete(nv)
         test_obj.policy_rw = random_walks.PolRandomWalkDiscrete(test_obj.env)
 
         # Prepare agent's learner
@@ -1062,7 +1081,7 @@ if __name__ == "__main__":
                 # w.r.t. to the MountainCarDiscrete environment saved in the pickle file, e.g. there are new methods defined such as setV().
                 # If the definition of the saved environment (in dict_benchmark['env']) is the same as the current definition of the
                 # MountainCarDiscrete environment, then we can just use the saved environment as environment on which test are run.
-                env_mountain = mountaincars.MountainCarDiscrete(dict_benchmark['env'].nx, dict_benchmark['env'].nv)
+                env_mountain = mountaincars.MountainCarDiscrete(dict_benchmark['env'].nv)
                 max_time_steps = test_obj.max_time_steps
                 state_counts_benchmark = dict_benchmark['counts']
 

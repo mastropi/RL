@@ -328,10 +328,10 @@ class Test_MC_Lambda_MountainCar(unittest.TestCase, test_utils.EpisodeSimulation
 
     def __init__(self, *args, **kwargs):
         self.seed = kwargs.pop('seed', 1717)
-        self.nepisodes = kwargs.pop('nepisodes', 30) #100000) #30000) #200) #2000)
+        self.nepisodes = kwargs.pop('nepisodes', 30) #20000) #100000) #30000) #200) #2000)
         self.max_time_steps = kwargs.pop('max_time_steps', 500)  # Maximum number of steps to run per episode
         self.normalizer = kwargs.pop('normalizer', 1)            # Normalize for the plots: Set it to max_time_steps when the rewards are NOT sparse (i.e. are -1 every where except at terminal states), o.w. set it to 1 (when rewards are sparse, i.e. they occur at terminal states)
-        self.start_state = kwargs.pop('start_state', None)       # Position and velocity
+        self.start_state = kwargs.pop('start_state', None) #(0.4, 0.07)) #None) #(0.4, 0.07))       # Position and velocity
         self.plot = kwargs.pop('plot', True)
         super().__init__(*args, **kwargs)
 
@@ -344,9 +344,9 @@ class Test_MC_Lambda_MountainCar(unittest.TestCase, test_utils.EpisodeSimulation
         # See also this implementation of the Mountain Car: https://github.com/JJonahJson/MountainCar-v313/blob/master/code/main.py
 
         # Environment with discretized position and velocity with nx and nv points respectively
-        nx = 5  #20
-        nv = 5  #20
-        cls.env = mountaincars.MountainCarDiscrete(nx, nv)
+        #nx = 20  #20
+        nv = 5 #20
+        cls.env = mountaincars.MountainCarDiscrete(nv)
 
         cls.policy_rw = random_walks.PolRandomWalkDiscrete(cls.env)
 
@@ -390,8 +390,9 @@ class Test_MC_Lambda_MountainCar(unittest.TestCase, test_utils.EpisodeSimulation
                                      for idx in range(self.env.getNumStates())])
             #print("ISD:", self.env.isd)
             print("Steps: dx = {:.3f}, dv = {:.3f}".format(self.env.dx, self.env.dv))
-            print("Positions: {}".format(self.env.get_positions()))
-            print("Velocities: {}".format(self.env.get_velocities()))
+            print("Positions ({}): {}".format(len(self.env.get_positions()), self.env.get_positions()))
+            print("Velocities ({}): {}".format(len(self.env.get_velocities()), self.env.get_velocities()))
+            print("Goal is reached at position: {}".format(self.env.goal_position))
             idx_start_state = None
         sim = simulators.Simulator(self.env, agent_rw_mc, debug=False)
 
@@ -449,8 +450,8 @@ class Test_MC_Lambda_MountainCar(unittest.TestCase, test_utils.EpisodeSimulation
             ax_n.legend(["% states"], loc='upper left')
             ax_n.set_title("% states used for summary statistics (num states = {}) (average is computed on states with visit count > 0)".format(self.env.getNumStates()))
     
-            fig.suptitle("Convergence of the estimated value function V (gamma={:.2f}, lambda={:.2f}, alpha={:.2f}, {})" \
-                        .format(params['gamma'], params['lambda'], params['alpha'], params['alpha_update_type'].name))
+            fig.suptitle("Convergence of the estimated value function V (gamma={:.2f}, lambda={:.2f}, alpha={:.2f}, {}, max #steps = {})" \
+                        .format(params['gamma'], params['lambda'], params['alpha'], params['alpha_update_type'].name, self.max_time_steps))
 
 
             fig = plt.figure(figsize=(20,10))

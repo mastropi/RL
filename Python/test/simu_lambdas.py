@@ -196,7 +196,7 @@ print("True value function read from '{}'".format(filename))
 # w.r.t. to the MountainCarDiscrete environment saved in the pickle file, e.g. there are new methods defined such as setV().
 # If the definition of the saved environment (in dict_benchmark['env']) is the same as the current definition of the
 # MountainCarDiscrete environment, then we can just use the saved environment as environment on which test are run.
-env_mountain = mountaincars.MountainCarDiscrete(dict_benchmark['env'].nx, dict_benchmark['env'].nv)
+env_mountain = mountaincars.MountainCarDiscrete(dict_benchmark['env'].nv)
 max_time_steps = dict_benchmark['params_test']['max_time_steps']    # Use this when the test_obj is saved as part of the pickle file read above
 start_state = None  # Initial state chosen at random at the start of each episode
 nstates = np.prod(env_mountain.shape)

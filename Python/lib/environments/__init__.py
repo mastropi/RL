@@ -3,7 +3,16 @@
 Created on Mon Apr  6 15:35:13 2020
 
 @author: Daniel Mastropietro
-@description: Definition of classes that are common to all environments.
+@description: Definition of classes that are common to all discrete-state / discrete-action environments.
+
+This class inherits from the discrete.DiscreteEnv class, where the state and action spaces are defined as discrete
+spaces by:
+    self.action_space = spaces.Discrete(self.nA)
+    self.observation_space = spaces.Discrete(self.nS)
+The state is stored in attribute:
+    self.s
+
+See more details in gym/envs/toy_text/discrete.py.
 """
 
 import warnings
@@ -13,6 +22,7 @@ import numpy as np
 from gym.envs.toy_text import discrete
 
 #__all__ = [ 'EnvironmentDiscrete' ]
+
 
 class EnvironmentDiscrete(discrete.DiscreteEnv):
     """
@@ -87,3 +97,6 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
     #--- Setters
     def setInitialStateDistribution(self, isd):
         self.isd = isd
+
+    def setState(self, s):
+        self.s = s
