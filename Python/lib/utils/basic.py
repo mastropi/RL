@@ -233,7 +233,51 @@ def index_multi2linear(idx_2d, shape, order='C'):
 
 
 def discretize(x, n, xmin, xmax):
+    """    Discretizes a real number into one of n equal-sized left-closed intervals in [xmin, xmax].
+    The rightmost interval is right-closed as well, so that xmax is included in the range of possible x values.
+
+    Arguments:
+    x: float
+        Value to discretize.
+
+    n: int
+        Number of equal-sized intervals in which the range [xmin, xmax] is divided into.
+
+    xmin: float
+        Minimum value allowed for the input x when discretizing. It's included in the range.
+
+    xmax: float
+        Maximum value allowed for the input x when discretizing. It's included in the range.
+
+    Return: int between 0 and n-1
+    Value indexing the discretized value of x, which indicates the interval out of the n possible intervals to which x
+    belongs. The index ranges 0 to (n-1), where 0 represents the range [xmin, xmin + dx) and n-1 represents the range
+    [xmax - dx, xmax] where dx = (xmax - xmin) / n.
+    Note that xmax is included on the rightmost interval.
+    The index value is obtained by calling np.digitize() which is more robust (and possibly faster) than my method
+    in border-line situations (such as when x is exactly equal to the left bound of an interval).
+    For implementation details of np.digitize() see:
+    https://numpy.org/doc/stable/reference/generated/numpy.digitize.html
+    where we see that a binary search is carried out in order to find the correct interval.
     """
+    # Bound x into [xmin, xmax]
+    x_bounded = max(xmin, min(x, xmax))
+
+    # IMPORTANT: np.digitize() returns a value between 1 and the length of bins (second parameter), not between 0 and len-1!!!!!!
+    return np.digitize(x_bounded, np.linspace(xmin, xmax, n, endpoint=False), right=False) - 1
+
+
+def deprecated_discretize(x, n, xmin, xmax):
+    """
+    WARNING: (2022/06/06) I observed problems of correct discretization due most likely to some precision issues
+    (i.e. the calculation done below to find the interval index on which x falls, `int( (x_bounded - xmin) / dx )`
+    may not yield the desired result (it happened in the Moutain Car discrete environment with x = -1.02 when -1.02
+    was the left bound of the interval with index 1)
+    Better use np.digitize() instead: see the new version of discretize() for the implementation.
+    For implementation details of np.digitize() see:
+    https://numpy.org/doc/stable/reference/generated/numpy.digitize.html
+    where we see that a binary search is carried out in order to find the correct interval.
+
     Discretizes a real number into one of n equal-sized left-closed intervals in [xmin, xmax].
     The rightmost interval is right-closed as well, so that xmax is included in the range of possible x values.
 
@@ -760,21 +804,25 @@ if __name__ == "__main__":
 
     #--------------------------- discretize ---------------------------#
     print("\n--- discretize() ---")
-    n = 5; xmin = 3.2; xmax = 7.8
+    n = 5; xmin = 3.2; xmax = 7.8                    # This gives the following intervals: [3.2 , 4.12, 5.04, 5.96, 6.88] (obtained with np.linspace(3.2, 7.8, 5, endpoint=False) --note `endpoint=False`)
     assert discretize(5.6, n, xmin, xmax) == 2       # Any number
     assert discretize(xmin, n, xmin, xmax) == 0      # Extremes
     assert discretize(xmax, n, xmin, xmax) == n-1    # Extremes
     assert discretize(xmin - 0.16, n, xmin, xmax) == 0      # Out of bounds
     assert discretize(xmax + 0.23, n, xmin, xmax) == n-1    # Out of bounds
+    assert discretize(4.12, n, xmin, xmax) == 1       # Left bound of an interval
+    assert discretize(4.11999999, n, xmin, xmax) == 0 # Close to right bound of an interval
 
     # Negative min, positive max
-    n = 5; xmin = -5.1; xmax = 7.8
+    n = 5; xmin = -5.1; xmax = 7.8                   # This gives the following intervals: [-5.1, -2.52, 0.06, 2.64, 5.22] (obtained with np.linspace(-5.1, 7.8, 5, endpoint=False) --note `endpoint=False`)
     assert discretize(5.6, n, xmin, xmax) == 4       # Any number
     assert discretize(0.0, n, xmin, xmax) == 1       # 0.0
     assert discretize(xmin, n, xmin, xmax) == 0      # Extremes
     assert discretize(xmax, n, xmin, xmax) == n-1    # Extremes
     assert discretize(xmin - 0.16, n, xmin, xmax) == 0      # Out of bounds
     assert discretize(xmax + 0.23, n, xmin, xmax) == n-1    # Out of bounds
+    assert discretize(-2.52, n, xmin, xmax) == 1            # Left bound of an interval
+    assert discretize(-2.5200000001, n, xmin, xmax) == 0    # Close to right bound of an interval
     #--------------------------- discretize ---------------------------#
 
 
