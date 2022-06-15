@@ -29,6 +29,7 @@ class Test_EstimatorValueFunctionOfflineDeterministicNextState(unittest.TestCase
     @classmethod
     def setUpClass(cls):
         cls.env_grid = gridworlds.EnvGridworld1D(length=19+2)
+        cls.env_grid_oneterminal = gridworlds.EnvGridworld1D_OneTerminalState(length=100)
         cls.env_mountain = mountaincars.MountainCarDiscrete(5)
             ## Note: we use more density to discretize the positions because we need to make sure that the car reaches the terminal state
             ## and this is not given if the discretization on the right side of the ramp is not dense enough because
@@ -38,28 +39,50 @@ class Test_EstimatorValueFunctionOfflineDeterministicNextState(unittest.TestCase
     def test_estimator_gridworld_random_walk_onecase(self):
         max_iter = 1000
         estimator = estimators.EstimatorValueFunctionOfflineDeterministicNextState(self.env_grid, gamma=1.0)
-        niter, max_deltaV_abs, max_deltaV_rel_abs = estimator.estimate_state_values_random_walk(synchronous=True, max_delta=1E-6, max_delta_rel=np.nan, max_iter=max_iter)
+        niter, mean_deltaV_abs, max_deltaV_abs, max_deltaV_rel_abs = estimator.estimate_state_values_random_walk(synchronous=True, max_delta=1E-6, max_delta_rel=np.nan, max_iter=max_iter)
 
         state_values = estimator.getV().getValues()
-        print("Estimated state values on {}-state 1D gridworld environment after {} iterations out of {}, with max|delta(V)| = {}, max|delta_rel(V)| = {}:\n{}" \
-              .format(self.env_grid.getNumStates(), niter, max_iter, max_deltaV_abs, max_deltaV_rel_abs, estimator.getV().getValues()))
+        print("\n***** Estimated state values on {}-state '1D gridworld environment' after {} iterations out of {}, with:\n" \
+              .format(self.env_grid.getNumStates(), niter, max_iter) + \
+                "mean|delta(V)| = {}, max|delta(V)| = {}, max|delta_rel(V)| = {}:\n{}" \
+              .format(mean_deltaV_abs, max_deltaV_abs, max_deltaV_rel_abs, estimator.getV().getValues()))
         print("Average V = {}, Average |V| = {}".format(np.mean(state_values), np.mean(np.abs(state_values))))
+
+        plt.figure()
         plt.plot(state_values, 'r.-')
-        plt.title("Estimated value function V(s)")
+        plt.title("1D gridworld: Estimated value function V(s)")
+
+    def test_estimator_gridworld_oneterminal_random_walk_onecase(self):
+        max_iter = 10000
+        estimator = estimators.EstimatorValueFunctionOfflineDeterministicNextState(self.env_grid_oneterminal, gamma=1.0)
+        niter, mean_deltaV_abs, max_deltaV_abs, max_deltaV_rel_abs = estimator.estimate_state_values_random_walk(synchronous=True, max_delta=1E-1, max_delta_rel=np.nan, max_iter=max_iter)
+
+        state_values = estimator.getV().getValues()
+        print("\n***** Estimated state values on {}-state '1D gridworld environment with left transient state and left terminal state' after {} iterations out of {}, with:\n" \
+              .format(self.env_grid.getNumStates(), niter, max_iter) + \
+                "mean|delta(V)| = {}, max|delta(V)| = {}, max|delta_rel(V)| = {}:\n{}" \
+              .format(mean_deltaV_abs, max_deltaV_abs, max_deltaV_rel_abs, estimator.getV().getValues()))
+        print("Average V = {}, Average |V| = {}".format(np.mean(state_values), np.mean(np.abs(state_values))))
+
+        plt.figure()
+        plt.plot(state_values, 'r.-')
+        plt.title("1D-gridworld with one terminal state: Estimated value function V(s)")
 
     def test_estimator_mountaincar_random_walk_onecase(self):
-        max_iter = 100
+        max_iter = 10000
         estimator = estimators.EstimatorValueFunctionOfflineDeterministicNextState(self.env_mountain, gamma=1.0)
-        niter, max_deltaV_abs, max_deltaV_rel_abs = estimator.estimate_state_values_random_walk(synchronous=True, max_delta=np.nan, max_delta_rel=1E-5, max_iter=max_iter,
-                                                            reset_method=ResetMethod.ALLZEROS, reset_params=dict({'min': 0.2, 'max': 0.8}), reset_seed=1713)
+        niter, mean_deltaV_abs, max_deltaV_abs, max_deltaV_rel_abs = \
+            estimator.estimate_state_values_random_walk(synchronous=True, max_delta=np.nan, max_delta_rel=1E-5, max_iter=max_iter,
+                                                        reset_method=ResetMethod.ALLZEROS, reset_params=dict({'min': 0.2, 'max': 0.8}), reset_seed=1713)
 
         state_values = estimator.getV().getValues()
         state_values_2d = self.env_mountain.reshape_from_1d_to_2d(state_values)
         non_terminal_states = np.array(self.env_mountain.getNonTerminalStates())
         min_state_value_non_terminal, max_state_value_non_terminal =  np.min(state_values[non_terminal_states]), np.max(state_values[non_terminal_states])
 
-        print("Estimated state values on {}-state Mountain Car environment after {} iterations out of {}, with max|delta(V)| = {}, max|delta_rel(V)| = {} (mean(V) = {:.6f}, mean|V| = {:.6f}):\n{}" \
-              .format(self.env_mountain.getNumStates(), niter, max_iter, max_deltaV_abs, max_deltaV_rel_abs, np.mean(state_values), np.mean(np.abs(state_values)), state_values))
+        print("\n***** Estimated state values on {}-state Mountain Car environment after {} iterations out of {}, with:\n" \
+                "mean|delta(V)| = {}, max|delta(V)| = {}, max|delta_rel(V)| = {} (mean(V) = {:.6f}, mean|V| = {:.6f}):\n{}" \
+              .format(self.env_mountain.getNumStates(), niter, max_iter, mean_deltaV_abs, max_deltaV_abs, max_deltaV_rel_abs, np.mean(state_values), np.mean(np.abs(state_values)), state_values))
 
         plt.figure(figsize=(20,10))
         plt.plot(state_values, 'r.-')
@@ -227,9 +250,9 @@ if __name__ == '__main__':
     # Reference for creating test suites:
     # https://stackoverflow.com/questions/15971735/running-single-test-from-unittest-testcase-via-command-line
 
-    #tests2run = ["value_function"]
+    tests2run = ["value_function"]
     #tests2run = ["value_function", "fv"]
-    tests2run = ["fv"]
+    #tests2run = ["fv"]
 
     runner = unittest.TextTestRunner()
 
@@ -239,7 +262,8 @@ if __name__ == '__main__':
     # Create a test suite for the value function estimator
     suite_value_function = unittest.TestSuite()
     suite_value_function.addTest(Test_EstimatorValueFunctionOfflineDeterministicNextState("test_estimator_gridworld_random_walk_onecase"))
-    suite_value_function.addTest(Test_EstimatorValueFunctionOfflineDeterministicNextState("test_estimator_mountaincar_random_walk_onecase"))
+    suite_value_function.addTest(Test_EstimatorValueFunctionOfflineDeterministicNextState("test_estimator_gridworld_oneterminal_random_walk_onecase"))
+    #suite_value_function.addTest(Test_EstimatorValueFunctionOfflineDeterministicNextState("test_estimator_mountaincar_random_walk_onecase"))
 
     # Create a test suite for the FV estimator
     # Ref: https://stackoverflow.com/questions/15971735/running-single-test-from-unittest-testcase-via-command-line

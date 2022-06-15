@@ -159,7 +159,7 @@ class EnvGridworld1D_OneTerminalState(EnvironmentDiscrete):
 
         # Terminal states
         terminal_states = set([nS - 1])
-        rewards_dict = dict({nS - 1: +1.0})
+        rewards_dict = dict({nS - 1: 0.0})
 
         # -- True value functions (for algorithm evaluation purposes)
         # -- Note that terminal states have value = 0
@@ -174,7 +174,7 @@ class EnvGridworld1D_OneTerminalState(EnvironmentDiscrete):
         # Function that checks whether we arrived at a terminal state
         num_nonterminal_states = nS - len(terminal_states)
         is_terminal = lambda s: s in terminal_states
-        reward = lambda s: rewards_dict[s] if s in rewards_dict.keys() else 0.0
+        reward = lambda s: rewards_dict[s] if s in rewards_dict.keys() else +1.0
 
         while not it.finished:
             s = it.iterindex

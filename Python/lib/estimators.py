@@ -135,7 +135,7 @@ class EstimatorValueFunctionOfflineDeterministicNextState:
         if verbose_period is None:
             verbose_period = max_iter / 10
 
-        print("Terminal states ({} out of {}): {}".format(len(self.env.getTerminalStates()), self.env.getNumStates(), self.env.getTerminalStates()))
+        print("\n\nTerminal states ({} out of {}): {}".format(len(self.env.getTerminalStates()), self.env.getNumStates(), self.env.getTerminalStates()))
         # WARNING: Only valid for MountainCarDiscrete environment
         #print("Positions: {}".format(self.env.get_positions()))
         #print("Velocities: {}".format(self.env.get_velocities()))
@@ -205,18 +205,21 @@ class EstimatorValueFunctionOfflineDeterministicNextState:
                                         else dV / abs(V) if V != 0
                                                          else np.Inf
                                     for dV, V in zip(deltaV, values_prev)])
-            max_deltaV_abs = np.max( np.abs(deltaV) )
-            max_deltaV_rel_abs = np.max( np.abs(deltaV_rel) )
+            mean_deltaV_abs = np.mean(np.abs(deltaV))
+            max_deltaV_abs = np.max(np.abs(deltaV))
+            max_deltaV_rel_abs = np.max(np.abs(deltaV_rel))
             if DEBUG_ESTIMATORS or verbose and (iter-1) % verbose_period == 0:
-                print("Iteration {}: mean(|V_prev|) = {}, mean(|V|) = {}, max|delta(V)| = {}, max|delta_rel(V)| = {}" \
-                      .format(iter, np.mean(np.abs(values_prev)), np.mean(np.abs(self.V.getValues())), max(np.abs(deltaV)), max_deltaV_rel_abs))
+                print("Iteration {}: mean(|V_prev|) = {:.3f}, mean(|V|) = {:.3f}, mean|delta(V)| = {:.3f}, max|delta(V)| = {:.3f}, max|delta_rel(V)| = {:.7f}" \
+                      .format(iter, np.mean(np.abs(values_prev)), np.mean(np.abs(self.V.getValues())), mean_deltaV_abs, max_deltaV_abs, max_deltaV_rel_abs))
 
-        if max_deltaV_rel_abs > max_delta_rel:
+        if  not np.isnan(max_delta) and max_deltaV_abs > max_delta or \
+            not np.isnan(max_delta_rel) and max_deltaV_rel_abs > max_delta_rel or \
+            not np.isnan(max_delta) and not np.isnan(max_delta_rel) and (max_deltaV_abs > max_delta or max_deltaV_rel_abs > max_delta_rel):
             warnings.warn("The estimation of the value function may not be accurate as the maximum relative absolute" \
                           " change in the last iteration #{} ({}) is larger than the maximum allowed ({})" \
                           .format(iter, max_deltaV_rel_abs, max_delta_rel))
 
-        return iter, max_deltaV_abs, max_deltaV_rel_abs
+        return iter, mean_deltaV_abs, max_deltaV_abs, max_deltaV_rel_abs
 
     def getV(self):
         return self.V
