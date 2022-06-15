@@ -467,7 +467,7 @@ class Test_QB_Particles(unittest.TestCase):
                                run_mc=True,
                                seed=1717):
         """
-        2021/04/19: Analyze convergence of the FV algorithm as number of particles N increases
+        2021/04/19: Analyze convergence of the FV algorithm as the number of particles N increases
 
         Arguments:
         estimation_process: (opt) Process
@@ -613,7 +613,7 @@ class Test_QB_Particles(unittest.TestCase):
                             est_fv, est_abs, dict_stats_fv = estimators.estimate_blocking_fv(env_queue, agent,
                                                                                              dict_params_simul,
                                                                                              dict_params_info=dict_params_info)
-                    time_fv = dict_stats_fv['time']
+                    time_end_simulation_fv = dict_stats_fv['time']
                     n_events_fv = dict_stats_fv['nevents']  # TOTAL number of events: _abs + (properly) _fv
                     max_survival_time = dict_stats_fv['time_max_survival']
                 elif estimation_process == Process.Simulators:
@@ -621,11 +621,10 @@ class Test_QB_Particles(unittest.TestCase):
                     dict_params_simul['T'] = dict_params_simul['nmeantimes']
                     proba_blocking_fv, expected_reward, probas_stationary, \
                         expected_absorption_time, n_absorption_time_observations, \
-                            time_last_absorption, time_end_simulation_et, max_survival_time, \
+                            time_last_absorption, time_end_simulation_et, max_survival_time, time_end_simulation_fv, \
                                 n_events_et, n_events_fv_only = simulators.estimate_blocking_fv(envs_queue, agent,
                                                                                                 dict_params_simul, dict_params_info)
                     integral = np.nan
-                    time_fv = np.nan
                     n_events_fv = n_events_et + n_events_fv_only
                     n_survival_curve_observations = n_absorption_time_observations
 
@@ -646,8 +645,7 @@ class Test_QB_Particles(unittest.TestCase):
                         proba_blocking_mc, expected_reward_mc, probas_stationary, \
                             expected_return_time_mc, n_return_observations, \
                                 n_events_mc = simulators.estimate_blocking_mc(env_queue, agent, dict_params_simul, dict_params_info=dict_params_info)
-                        time_mc = 0.0
-                    max_survival_time = 0.0
+                        time_mc = np.nan
 
                     # Check comparability in terms of # events in each simulation (MC vs. FV)
                     if n_events_mc != n_events_fv:
@@ -711,7 +709,7 @@ class Test_QB_Particles(unittest.TestCase):
                                            n_absorption_time_observations,
                                            max_survival_time,
                                            proba_blocking_fv,
-                                           time_fv,
+                                           time_end_simulation_fv,
                                            n_events_fv,
                                            n_survival_curve_observations,
                                            proba_blocking_true,

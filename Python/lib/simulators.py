@@ -1320,7 +1320,7 @@ class SimulatorQueue(Simulator):
                 #n_cycles = n_absorption_time_observations
 
                 proba_blocking_fv, expected_reward, probas_stationary, \
-                    expected_cycle_time, n_cycles, time_last_absorption, time_end_simulation_et, max_survival_time, \
+                    expected_cycle_time, n_cycles, time_last_absorption, time_end_simulation_et, max_survival_time, time_end_simulation_fv, \
                         n_events_mc, n_events_fv = estimate_blocking_fv(self.envs, self.agent, dict_params_simul, dict_params_info)
                 # Equivalent (discrete) simulation time, as if it were a Monte-Carlo simulation
                 t = n_events_mc + n_events_fv
@@ -2984,6 +2984,8 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info):
     - n_cycles: number of cycles observed to estimate E(T_A).
     - time_last_absorption: continuous time of the last absorption observed, used in the estimation of E(T_A).
     - time_end_simulation_et: continuous time of the end of the simulation run to estimate E(T_A) and P(T>t).
+    - max_survival_time: maximum survival time observed when estimating P(T>t).
+    - time_end_simulation_fv: continuous time at which the FV simulation on the N particles end.
     - n_events_et: number of events observed during the simulation of the single queue used to estimate E(T_A) and P(T>t).
     - n_events_fv: number of events observed during the FV simulation that estimates Phi(t).
     """
@@ -3046,6 +3048,7 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info):
                                         .format(t, len(event_times))
         ## We subtract 1 to len(event_times) because the first event time is 0.0 which is NOT an event time
     n_events_fv = t
+    time_end_simulation_fv = event_times[-1]
 
     proba_blocking = compute_proba_blocking(agent, probas_stationary)
     expected_reward = estimate_expected_reward(envs[0], agent, probas_stationary)
@@ -3061,7 +3064,7 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info):
         print("Expected reward = {}".format(expected_reward))
 
     return proba_blocking, expected_reward, probas_stationary, expected_absorption_time, n_cycles, \
-           time_last_absorption, time_end_simulation_et, max_survival_time, \
+           time_last_absorption, time_end_simulation_et, max_survival_time, time_end_simulation_fv, \
            n_events_et, n_events_fv
 
 
