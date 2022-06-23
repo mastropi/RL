@@ -184,8 +184,9 @@ def generate_min_exponential_time(rates):
 
     Return: tuple
     Tuple with the following elements:
-    - time: realization of the minimum time among the exponential distributions of the given rates
-    - idx: index indicating which exponential rate the generated time should be associated with
+    - time: realization of the minimum time among the exponential distributions of the given rates.
+    - idx: index indicating which exponential rate the generated time should be associated with, which is chosen
+    randomly out of all valid rates given (where a valid rate means that it's a non-negative real number).
     """
     # Check the rates
     rates = as_array(rates)

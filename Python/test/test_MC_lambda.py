@@ -95,7 +95,7 @@ class Test_MC_Lambda_1DGridworld(unittest.TestCase, test_utils.EpisodeSimulation
     def test_mc_random_walk(self, casenum, desc, expected, params_alpha_gamma,
                                        adjust_alpha, adjust_alpha_by_episode, alpha_min):
         # All tests are run using seed = 1717, nepisodes = 20, start_state = 10
-        print("\n*** Testing {0}, case number {1} ***".format(self.id(), casenum))
+        print("\n*** Testing {0}, case number {1} '{2}' ***".format(self.id(), casenum, desc))
         learner_mclambda = mc.LeaMCLambda(self.env, alpha=params_alpha_gamma[0],
                                           gamma=params_alpha_gamma[1],
                                           adjust_alpha=adjust_alpha, adjust_alpha_by_episode=adjust_alpha_by_episode,
