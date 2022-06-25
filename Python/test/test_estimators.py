@@ -23,7 +23,7 @@ from Python.lib.agents.learners.continuing.fv import LeaFV
 from Python.lib.agents.policies.parameterized import PolQueueTwoActionsLinearStep
 from Python.lib.agents.queues import AgeQueue, PolicyTypes as QueuePolicyTypes, LearnerTypes
 from Python.lib.environments import gridworlds, mountaincars, queues
-from Python.lib.utils.basic import measure_exec_time
+from Python.lib.utils.basic import get_current_datetime_as_string, measure_exec_time
 
 
 class Test_EstimatorValueFunctionOfflineDeterministicNextState(unittest.TestCase):
@@ -191,13 +191,13 @@ class Test_EstimatorQueueBlockingFlemingViot(unittest.TestCase):
     # Case number, description, expected value, parameters
     # These are the same tests 1, 2 and 3 from data_test_lambda_return_random_walk
     data_test_fv_implementation_single_server = lambda: (
-            (1, 'Small K',
+            (1, True, 'Small K',
                 {'K': 5, 'J': 2, 'N': 5, 'T': 20},
                 {'Pr(FV)': 0.0598497, 'E(T)': 5.70, '#E(T)': 8, 'Tmax': 45.6, 'Tend': 50.3, 'Smax': 5.6, '#events_ET': 40, '#events_FV': 47}),
-            (2, 'Moderate K',
+            (2, True, 'Moderate K',
                 {'K': 20, 'J': 10, 'N': 100, 'T': 2000},
                 {'Pr(FV)': 0.00040698, 'E(T)': 40.14, '#E(T)': 70, 'Tmax': 2809.5, 'Tend': 2840.9, 'Smax': 37.1, '#events_ET': 4003, '#events_FV': 6370}),
-            (3, 'Large K',
+            (3, True, 'Large K',
                 {'K': 40, 'J': 35, 'N': 400, 'T': 2000},
                 {'Pr(FV)': 0.0059430, 'E(T)': 6.09, '#E(T)': 1, 'Tmax': 6.1, 'Tend': 2849.5, 'Smax': 3.2,
                  '#events_ET': 4033, '#events_FV': 2239}),
@@ -205,67 +205,69 @@ class Test_EstimatorQueueBlockingFlemingViot(unittest.TestCase):
     #-------- DATA -------
 
     @data_provider(data_test_fv_implementation_single_server)
-    def test_fv_implementation_single_server(self, casenum, desc, dict_params, dict_expected):
+    def test_fv_implementation_single_server(self, casenum, run, desc, dict_params, dict_expected):
         "Test the Fleming-Viot implementation of the blocking probability of a single-server queue system"
-        print("\n*** Testing {}, case number {}: '{}' ***".format(self.id(), casenum, desc))
-        K = dict_params['K']
-        nservers = self.dict_env_queue_mm_single_server[K].getNumServers()
-        rates_job = self.dict_env_queue_mm_single_server[K].getJobClassRates()
-        rates_service = self.dict_env_queue_mm_single_server[K].getServiceRates()
-        #K = self.env_queue_mm_single_server.getCapacity()
-        #J = self.exec_params['J']
-        #N = self.exec_params['N']
-        #T = self.exec_params['T']
-        proba_blocking_fv, expected_reward, probas_stationary, \
-            expected_absorption_time, n_absorption_time_observations, \
-                time_last_absorption, time_end_simulation_et, max_survival_time, time_end_simulation_fv, \
-                    n_events_et, n_events_fv_only = self.run_fv_estimation(self.dict_env_queue_mm_single_server[K],
-                                                                           dict_params['K'],
-                                                                           dict_params['J'],
-                                                                           dict_params['N'],
-                                                                           dict_params['T'],
-                                                                           seed=1313)
+        if run:
+            print("\n*** Testing {}, case number {}: '{}' ***".format(self.id(), casenum, desc))
+            K = dict_params['K']
+            nservers = self.dict_env_queue_mm_single_server[K].getNumServers()
+            rates_job = self.dict_env_queue_mm_single_server[K].getJobClassRates()
+            rates_service = self.dict_env_queue_mm_single_server[K].getServiceRates()
+            #K = self.env_queue_mm_single_server.getCapacity()
+            #J = self.exec_params['J']
+            #N = self.exec_params['N']
+            #T = self.exec_params['T']
+            proba_blocking_fv, expected_reward, probas_stationary, \
+                expected_absorption_time, n_absorption_time_observations, \
+                    time_last_absorption, time_end_simulation_et, max_survival_time, time_end_simulation_fv, \
+                        n_events_et, n_events_fv_only = self.run_fv_estimation(self.dict_env_queue_mm_single_server[K],
+                                                                               dict_params['K'],
+                                                                               dict_params['J'],
+                                                                               dict_params['N'],
+                                                                               dict_params['T'],
+                                                                               seed=1313)
 
-        print("EXECUTION PARAMETERS:")
-        print("- # servers: {}".format(nservers))
-        print("- job arrival rates at servers: {}".format(rates_job))
-        print("- service rates: {}".format(rates_service))
-        print("- capacity: {}".format(K))
-        print("- absorption set size: {}".format(dict_params['J']))
-        print("- # particles: {}".format(dict_params['N']))
-        print("- # arrival time steps: {}".format(dict_params['T']))
-        print("")
+            print(get_current_datetime_as_string())
+            print("EXECUTION PARAMETERS:")
+            print("- # servers: {}".format(nservers))
+            print("- job arrival rates at servers: {}".format(rates_job))
+            print("- service rates: {}".format(rates_service))
+            print("- capacity: {}".format(K))
+            print("- absorption set size: {}".format(dict_params['J']))
+            print("- # particles: {}".format(dict_params['N']))
+            print("- # arrival time steps: {}".format(dict_params['T']))
+            print("")
 
-        print("ESTIMATION RESULTS:")
-        print("- Blocking probability Pr(K={}) = {}".format(K, proba_blocking_fv))
-        print("- Stationary probability Pr(K={}) = {}".format(K, probas_stationary[K]))
-        self.assertAlmostEqual(proba_blocking_fv, probas_stationary[K])
-        print("- Expected re-absorption time E(T) = {}".format(expected_absorption_time))
-        print("- Number of re-absorption cycles = {}".format(n_absorption_time_observations))
-        print("- Time of last absorption = {:.1f}".format(time_last_absorption))
-        print("- Last observed time of the MC simulation for E(T) = {:.1f}".format(time_end_simulation_et))
-        print("- Max observed survival time = {:.1f}".format(max_survival_time))
-        print("- Time FV simulation ends = {:.1f}".format(time_end_simulation_fv))
-        print("- Number of events in MC simulation for E(T) = {}".format(n_events_et))
-        print("- Number of events in FV simulation for Phi(t) = {}".format(n_events_fv_only))
+            print("ESTIMATION RESULTS:")
+            print("- Blocking probability Pr(K={}) = {}".format(K, proba_blocking_fv))
+            print("- Stationary probability Pr(K={}) = {}".format(K, probas_stationary[K]))
+            self.assertAlmostEqual(proba_blocking_fv, probas_stationary[K])
+            print("- Expected re-absorption time E(T) = {}".format(expected_absorption_time))
+            print("- Number of re-absorption cycles = {}".format(n_absorption_time_observations))
+            print("- Time of last absorption = {:.1f}".format(time_last_absorption))
+            print("- Last observed time of the MC simulation for E(T) = {:.1f}".format(time_end_simulation_et))
+            print("- Max observed survival time = {:.1f}".format(max_survival_time))
+            print("- Time FV simulation ends = {:.1f}".format(time_end_simulation_fv))
+            print("- Number of events in MC simulation for E(T) = {}".format(n_events_et))
+            print("- Number of events in FV simulation for Phi(t) = {}".format(n_events_fv_only))
 
-        # Check system setup is the one required to obtain the expected results
-        assert nservers == 1, "Number of servers is 1"
-        assert rates_job == [0.7], "Arrival rate is 0.7"
-        assert rates_service == [1.0], "Service rate is 1.0"
+            # Check system setup is the one required to obtain the expected results
+            assert nservers == 1, "Number of servers is 1"
+            assert rates_job == [0.7], "Arrival rate is 0.7"
+            assert rates_service == [1.0], "Service rate is 1.0"
 
-        # Assertions
-        self.assertAlmostEqual(proba_blocking_fv, dict_expected['Pr(FV)'])
-        self.assertAlmostEqual(expected_absorption_time, dict_expected['E(T)'], places=2)  # places = decimal places
-        self.assertEqual(n_absorption_time_observations, dict_expected['#E(T)'])
-        self.assertAlmostEqual(time_last_absorption, dict_expected['Tmax'], places=1)
-        self.assertAlmostEqual(time_end_simulation_et, dict_expected['Tend'], places=1)
-        self.assertAlmostEqual(max_survival_time, dict_expected['Smax'], places=1)
-        self.assertEqual(n_events_et, dict_expected['#events_ET'], 40)
-        self.assertEqual(n_events_fv_only, dict_expected['#events_FV'], 47)
-        # Consistency assertions
-        self.assertAlmostEqual(proba_blocking_fv, probas_stationary[K])
-        self.assertAlmostEqual(time_end_simulation_fv, max_survival_time, places=1)
+            # Assertions
+            self.assertAlmostEqual(proba_blocking_fv, dict_expected['Pr(FV)'])
+            self.assertAlmostEqual(expected_absorption_time, dict_expected['E(T)'], places=2)  # places = decimal places
+            self.assertEqual(n_absorption_time_observations, dict_expected['#E(T)'])
+            self.assertAlmostEqual(time_last_absorption, dict_expected['Tmax'], places=1)
+            self.assertAlmostEqual(time_end_simulation_et, dict_expected['Tend'], places=1)
+            self.assertAlmostEqual(max_survival_time, dict_expected['Smax'], places=1)
+            self.assertEqual(n_events_et, dict_expected['#events_ET'], 40)
+            self.assertEqual(n_events_fv_only, dict_expected['#events_FV'], 47)
+            # Consistency assertions
+            self.assertAlmostEqual(proba_blocking_fv, probas_stationary[K])
+            self.assertAlmostEqual(time_end_simulation_fv, max_survival_time, places=1)
 
 
 if __name__ == '__main__':

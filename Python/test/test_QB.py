@@ -575,7 +575,9 @@ class Test_QB_Particles(unittest.TestCase):
                                            '#Samples(S(t))',
                                            'Pr(K)',
                                            'seed',
-                                           'exec_time'])
+                                           'exec_time_mc(sec)',
+                                           'exec_time_fv(sec)',
+                                           'exec_time(sec)'])
         #ncases = int( np.log(nparticles_max / nparticles_min) / np.log(1 + nparticles_step_prop)) + 1
         ncases = len(nparticles_list)
 
@@ -600,9 +602,9 @@ class Test_QB_Particles(unittest.TestCase):
                     ## two consecutive replications to assign to the different FV steps
                     ## (est_surv, est_abs, est_fv)
 
-                time_start = timer()
+                time_start_fv = timer()
 
-                print("\n\t--> Running Fleming-Viot estimation...")
+                print("\n\t--> Running Fleming-Viot estimation... {}".format(get_current_datetime_as_string()))
                 dict_params_simul['maxevents'] = np.Inf
                 dict_params_simul['seed'] = seed_rep
                 if estimation_process == Process.Estimators:
@@ -626,8 +628,11 @@ class Test_QB_Particles(unittest.TestCase):
                     n_events_fv = n_events_et + n_events_fv_only
                     n_survival_curve_observations = n_absorption_time_observations
 
+                exec_time_fv = timer() - time_start_fv
+
                 if run_mc:
-                    print("\t--> Running Monte-Carlo estimation...")
+                    time_start_mc = timer()
+                    print("\t--> Running Monte-Carlo estimation... {}".format(get_current_datetime_as_string()))
                     dict_params_simul['maxevents'] = n_events_fv
                     dict_params_simul['seed'] = seed_rep + 2  # This is the same seed used in the FV simulation in estimate_blocking_fv(), so we can compare better
                     if estimation_process == Process.Estimators:
@@ -650,16 +655,22 @@ class Test_QB_Particles(unittest.TestCase):
                         message = "!!!! #events(MC) != #events(FV) ({}, {}) !!!!".format(n_events_mc, n_events_fv)
                         print(message)  # Shown in the log
                         warn(message)   # Shown in the console
+
+                    exec_time_mc = timer() - time_start_mc
                 else:
                     proba_blocking_mc, expected_return_time_mc, n_return_observations, est_mc, dict_stats_mc = np.nan, None, None, None, {}
                     time_mc = 0.0
                     n_events_mc = 0
+                    exec_time_mc = 0.0
 
-                time_end = timer()
-                exec_time = time_end - time_start
-                print("execution time MC + FV: {:.1f} sec, {:.1f} min".format(exec_time, exec_time/60))
+                exec_time = exec_time_fv + exec_time_mc
 
-                if case+1 == 1 and r == 1:
+                if run_mc:
+                    print("Total execution time FV & MC: {:.1f} sec, {:.1f} min".format(exec_time, exec_time/60))
+                else:
+                    print("Total execution time FV: {:.1f} sec, {:.1f} min".format(exec_time, exec_time/60))
+
+                if case + 1 == 1 and r == 1:
                     # Compute the true blocking probability only ONCE, namely for the first replication of the first N value case
                     rhos = [l / m for l, m in zip(job_rates_by_server, env_queue.getServiceRates())]
                     print("Computing TRUE blocking probability for nservers={}, K={}, rhos={}...".format(nservers, K, rhos))
@@ -677,14 +688,14 @@ class Test_QB_Particles(unittest.TestCase):
 
                 # FV results
                 if estimation_process == Process.Estimators:
-                    print("\tP(K) estimated by FV: {:.6f}%, E(T) = {:.1f} (simulation time for E(T) = {:.1f} ({} steps) (complete cycles span {:.1f}%),"
+                    print("\tP(K) by FV: {:.6f}%, E(T) = {:.1f} (simulation time for E(T) = {:.1f} ({} steps) (complete cycles span {:.1f}%),"
                             " max survival time = {:.1f}, #events = {} (ET) + {} (FV) = {})" \
                           .format(  proba_blocking_fv*100, expected_absorption_time, dict_stats_fv['time_abs'], dict_stats_fv['nevents_abs'],
                                     expected_absorption_time*n_absorption_time_observations / dict_stats_fv['time_abs']*100,
                                     dict_stats_fv['time_max_survival'],
                                     dict_stats_fv['nevents_abs'], dict_stats_fv['nevents_fv'], dict_stats_fv['nevents']))
                 elif estimation_process == Process.Simulators:
-                    print("\tP(K) estimated by FV: {:.6f}%, E(T) = {:.1f} (simulation time for E(T) = {:.1f} ({} steps) (complete cycles span {:.1f}%),"
+                    print("\tP(K) by FV: {:.6f}%, E(T) = {:.1f} (simulation time for E(T) = {:.1f} ({} steps) (complete cycles span {:.1f}%),"
                             " max survival time = {:.1f}, #events = {} (ET) + {} (FV) = {})" \
                           .format(  proba_blocking_fv * 100, expected_absorption_time, time_end_simulation_et, n_events_et,
                                     time_last_absorption/time_end_simulation_et*100,
@@ -712,6 +723,8 @@ class Test_QB_Particles(unittest.TestCase):
                                            n_survival_curve_observations,
                                            proba_blocking_true,
                                            dict_params_simul['seed'],
+                                           exec_time_mc,
+                                           exec_time_fv,
                                            exec_time]],
                                          columns=df_results.columns, index=[case+1])
                 df_results = df_results.append(df_append)
@@ -866,7 +879,7 @@ class Test_QB_Particles(unittest.TestCase):
                     # Show estimations
                     if run_mc:
                         print("\t\tP(K) by MC: {:.6f}%".format(proba_blocking_mc*100))
-                    print("\t\tP(K) estimated by FV (integral={:g} (n={}), E(T)={:.1f} (n={})): {:.6f}%".format(integral, n_survival_curve_observations, expected_absorption_time, n_absorption_time_observations, proba_blocking_fv*100))
+                    print("\t\tP(K) by FV (integral={:g} (n={}), E(T)={:.1f} (n={})): {:.6f}%".format(integral, n_survival_curve_observations, expected_absorption_time, n_absorption_time_observations, proba_blocking_fv*100))
                     print("\t\tTrue P(K): {:.6f}%".format(proba_blocking_true*100))
 
                     # Analyze the fairness of the comparison of results based on simulation time number of observed events
@@ -2050,12 +2063,12 @@ if __name__ == "__main__":
         sys.argv += [1]       # Number of servers in the system to simulate
         sys.argv += ["N"]     # Type of analysis: either "N" for the impact of number of particles or "J" for the impact of buffer size"
         sys.argv += [40]      # K: capacity of the system
-        sys.argv += [800]     # N: number of particles in the FV system.
+        sys.argv += [400]     # N: number of particles in the FV system.
         sys.argv += [0.5]     # J factor: factor such that J = factor*K.
-        sys.argv += [8]       # Number of replications
+        sys.argv += [2]       # Number of replications
         sys.argv += [1]       # Test number to run: only one is accepted
     if len(sys.argv) == 8:    # Only the 6 required arguments are given by the user (recall that the first argument is the program name)
-        sys.argv += ['None']  # T: number of arrival events to consider in the estimation of Pr(T>t) and E(T) in the FV approach. When 'None' it is chosen as 50*N.
+        sys.argv += ['None']  # T: number of arrival events to consider in the estimation of Pr(T>t) and E(T) in the FV approach. When 'None' it is chosen as 200*N.
         sys.argv += [2]       # Number of methods to run: 1 (only FV), 2 (FV & MC)
         sys.argv += ["nosave"]  # Either "nosave" or anything else for saving the results and log
     print("Parsed user arguments: {}".format(sys.argv))
@@ -2079,6 +2092,7 @@ if __name__ == "__main__":
         print("No tests have been specified to run. Please specify the test number as argument 4.")
         sys.exit()
 
+    print(get_current_datetime_as_string())
     print("Execution parameters:")
     print("nservers={}".format(nservers))
     print("Type of analysis: analysis_type={}".format(analysis_type))
