@@ -38,71 +38,34 @@ def measure_exec_time(func):
         end = timer()
         exec_time = end - start
         #if "{:.1f}".format(exec_time) != "0.0":
-        if exec_time > 1:
-            print("+++ Execution time for {}: {:.1f} sec".format(func.__name__, exec_time))
+        if exec_time > 0: #> 1
+            print("+++ Execution time for {}: {:.1f} sec, {:.2f} msec".format(func.__name__, exec_time, exec_time*1000))
         return results
     return func_decorated
 
-def is_scalar(x):
-    "Returns whether the input parameter is a scalar (i.e. either int, np.int32, np.int64, float, np.float32, np.float64)"
-    return isinstance(x, (int, np.int32, np.int64, float, np.float32, np.float64))
-
-def as_array(x):
-    "Converts a scalar or list of values to a numpy array"
-    if is_scalar(x):
-        x = np.array([x])
-    else:
-        if not isinstance(x, (list, np.ndarray)):
-            raise ValueError("Parameter x must be a scalar, list, or numpy array ({})".format(type(x)))
-        x = np.array(x)
-
-    return x
-
-def parse_dict_params(dict_params, dict_params_default):
+def get_current_datetime_as_string(format=None):
     """
-    Parses a set of user parameters given as a dictionary by
-    by matching them with a set of default parameter values,
-    completing any missing key with their default value.
+    Returns the current time as a datetime string using datetime.today().strftime()
 
-    The parsing process accepts nested dictionaries.
-
-    The input dictionary with the user parameters is updated
-    by including all keys in the default parameters dictionary
-    that are not present in the user parameters dictionary. 
-    
     Arguments:
-    dict_params: dict
-        Dictionary containing user parameter values.
+    format: str or None
+        Format hint for the output datetime string.
+        When "suffix" a datetime string suitable for a filename suffix is generated in the form "YYYYMMDD_HHMMSS".
+        Otherwise the following format is used: "%Y-%m-%d %H:%M:%S".
 
-    dict_params_default: dict
-        Dictionary containing the default values for parameters.
-        Any parameters not included in this dictionary but given in `dict_params` are also taken.
-
-    Example:
-    >>> params = {'a': {'w': -7}, 't_new': -13}
-    >>> params_default =  {'a': {'w': 8, 'z': {'k': 2, 'y': "ok"}}, 'y': 3}
-    >>> parse_dict_params(params, params_default)
-    >>> params
-    {'a': {'w': -7, 'z': {'k': 2, 'y': "ok"}}, 'y': 3, 't_new': -13}  
+    Return: str
+    Current datetime as a string.
     """
-    dict_params_keys = dict_params.keys() 
-    # Go over all keys in the default params dictionary
-    # and recursively retrieve their value when the value is in turn a dictionary
-    for key, value in dict_params_default.items():
-        if isinstance(value, dict) and key in dict_params_keys:
-            parse_dict_params(dict_params[key], dict_params_default[key])
-        else:
-            # Get the key from the user parameters and if not given, assign its default value 
-            dict_params[key] = dict_params.get(key, dict_params_default[key])
+    if format is "suffix":
+        format_strftime = "%Y%m%d_%H%M%S"
+    else:
+        format_strftime = "%Y-%m-%d %H:%M:%S"
 
-def show_exec_params(dict_params):
-    "Shows the values of a set of parameters given in a dictionary, in alphabetical order of the keys"
-    print("**************** Execution parameters ***********************")
-    keys = dict_params.keys()
-    keys = sorted(keys)
-    for key in keys:
-        print("{}: {}".format(key, dict_params[key]))
-    print("**************** Execution parameters ***********************")
+    return generate_datetime_string(format=format_strftime)
+
+def get_datetime_from_string(dt, format="%Y-%m-%d %H:%M:%S"):
+    "Returns the datetime associated to a string in the given format"
+    return datetime.strptime(dt, format)
 
 def generate_datetime_string(dt_str=None, format="%Y%m%d_%H%M%S", prefix="", suffix="", extension="", sep="_"):
     """
@@ -145,6 +108,67 @@ def generate_datetime_string(dt_str=None, format="%Y%m%d_%H%M%S", prefix="", suf
     dt_str = dt_str + extension
 
     return dt_str
+
+def is_scalar(x):
+    "Returns whether the input parameter is a scalar (i.e. either int, np.int32, np.int64, float, np.float32, np.float64)"
+    return isinstance(x, (int, np.int32, np.int64, float, np.float32, np.float64))
+
+def as_array(x):
+    "Converts a scalar or list of values to a numpy array"
+    if is_scalar(x):
+        x = np.array([x])
+    else:
+        if not isinstance(x, (list, np.ndarray)):
+            raise ValueError("Parameter x must be a scalar, list, or numpy array ({})".format(type(x)))
+        x = np.array(x)
+
+    return x
+
+def parse_dict_params(dict_params, dict_params_default):
+    """
+    Parses a set of user parameters given as a dictionary by
+    by matching them with a set of default parameter values,
+    completing any missing key with their default value.
+
+    The parsing process accepts nested dictionaries.
+
+    The input dictionary with the user parameters is updated
+    by including all keys in the default parameters dictionary
+    that are not present in the user parameters dictionary. 
+    
+    Arguments:
+    dict_params: dict
+        Dictionary containing user parameter values.
+
+    dict_params_default: dict
+        Dictionary containing the default values for parameters.
+        Any parameters not included in this dictionary but given in `dict_params` are also taken.
+
+    Example:
+    params = {'a': {'w': -7}, 't_new': -13}
+    params_default =  {'a': {'w': 8, 'z': {'k': 2, 'y': "ok"}}, 'y': 3}
+    parse_dict_params(params, params_default)
+    params
+    {'a': {'w': -7, 'z': {'k': 2, 'y': "ok"}}, 'y': 3, 't_new': -13}  
+    """
+    dict_params_keys = dict_params.keys() 
+    # Go over all keys in the default params dictionary
+    # and recursively retrieve their value when the value is in turn a dictionary
+    for key, value in dict_params_default.items():
+        if isinstance(value, dict) and key in dict_params_keys:
+            parse_dict_params(dict_params[key], dict_params_default[key])
+        else:
+            # Get the key from the user parameters and if not given, assign its default value 
+            dict_params[key] = dict_params.get(key, dict_params_default[key])
+
+def show_exec_params(dict_params):
+    "Shows the values of a set of parameters given in a dictionary, in alphabetical order of the keys"
+    print("**************** Execution parameters ***********************")
+    keys = dict_params.keys()
+    keys = sorted(keys)
+    for key in keys:
+        print("{}: {}".format(key, dict_params[key]))
+    print("**************** Execution parameters ***********************")
 
 def index_linear2multi(idx, shape, order='C'):
     """

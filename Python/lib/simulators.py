@@ -27,7 +27,6 @@ import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt, cm  # cm is for colormaps (e.g. cm.get_cmap())
 from matplotlib.ticker import MaxNLocator
-from datetime import datetime
 from timeit import default_timer as timer
 import tracemalloc
 
@@ -41,7 +40,8 @@ from Python.lib.environments.queues import rewardOnJobRejection_ExponentialCost,
 import Python.lib.queues as queues
 from Python.lib.queues import Event
 
-from Python.lib.utils.basic import is_scalar, merge_values_in_time, index_linear2multi, measure_exec_time, \
+from Python.lib.utils.basic import is_scalar, get_current_datetime_as_string, get_datetime_from_string,\
+    merge_values_in_time, index_linear2multi, measure_exec_time, \
     show_exec_params, generate_datetime_string, find_signed_max_value, find_last, insort, aggregation_bygroups
 from Python.lib.utils.computing import rmse, mape, compute_job_rates_by_server, compute_nparticles_and_nsteps_for_fv_process,\
     compute_rel_errors_for_fv_process, generate_min_exponential_time, stationary_distribution_birth_death_process
@@ -69,7 +69,7 @@ DEBUG_ESTIMATORS = False
 DEBUG_TRAJECTORIES = False
 
 
-# TODO: (2020/05) Rename this class to SimulatorDiscreteEpisodic as it simulates on a discrete (in what sense?) environment running on episodes
+# TODO: (2020/05) Rename this class to SimulatorDiscreteEpisodic as it simulates on an environment defined in EnvironmentDiscrete running on episodes
 class Simulator:
     """
     Simulator class that runs a Reinforcement Learning simulation on a discrete environment
@@ -402,7 +402,7 @@ class Simulator:
             self.env.reset()
             done = False
             if verbose and np.mod(episode, verbose_period) == 0:
-                print("@{}".format(generate_datetime_string(format="%Y-%m-%d %H:%M:%S")))
+                print("@{}".format(get_current_datetime_as_string()))
                 print("Episode {} of {} running...".format(episode+1, nepisodes), end=" ")
                 print("(agent starts at state: {}".format(self.env.getState()), end=" ")
             if self.debug:
@@ -1251,7 +1251,7 @@ class SimulatorQueue(Simulator):
                 self.env.set_seed(self.seed)
         # -- Parse input parameters
 
-        dt_start = datetime.today().strftime("%Y-%m-%d %H:%M:%S")
+        dt_start = get_current_datetime_as_string()
         print("Simulation starts at: {}".format(dt_start))
 
         # -- Reset the learners
@@ -1442,9 +1442,9 @@ class SimulatorQueue(Simulator):
                                             ('n_trajectories_Q', self.n_trajectories_Q)
                                                 ])
 
-        dt_end = datetime.today().strftime("%Y-%m-%d %H:%M:%S")
+        dt_end = get_current_datetime_as_string()
         print("Simulation ends at: {}".format(dt_end))
-        datetime_diff = datetime.strptime(dt_end, "%Y-%m-%d %H:%M:%S") - datetime.strptime(dt_start, "%Y-%m-%d %H:%M:%S")
+        datetime_diff = get_datetime_from_string(dt_end) - get_datetime_from_string(dt_start)
         time_elapsed = datetime_diff.total_seconds()
         print("Execution time: {:.1f} min, {:.1f} hours".format(time_elapsed / 60, time_elapsed / 3600))
 

@@ -20,12 +20,11 @@ from enum import Enum, unique
 
 from warnings import warn
 from timeit import default_timer as timer
-from datetime import datetime
 import unittest
 import matplotlib
 from matplotlib import pyplot as plt, cm, ticker as mtick
 
-from Python.lib.utils.basic import aggregation_bygroups, is_scalar
+from Python.lib.utils.basic import aggregation_bygroups, is_scalar, get_current_datetime_as_string, get_datetime_from_string
 import Python.lib.utils.plotting as plotting
 
 from Python.lib.agents.learners.continuing.fv import LeaFV
@@ -389,7 +388,6 @@ class Test_QB_Particles(unittest.TestCase):
         #with np.printoptions(precision=3, suppress=True):
         #    print(df_proba_survival_and_blocking_conditional_BF)
 
-        # TODO: (2020/06/14) Move the call to compute_counts() inside estimate_proba_blocking()
         print("\nESTIMATIONS *** METHOD 2: FROM observed TIMES ***:")
 
         ##### IMPORTANT: THE FOLLOWING RECOMPUTATION OF COUNTS SHOULD ALWAYS BE DONE WHEN finalize_type = REMOVE!!
@@ -1996,8 +1994,8 @@ def createLogFileHandleAndResultsFileNames(path="../../RL-002-QueueBlocking", pr
     Ref: https://www.stackabuse.com/writing-to-a-file-with-pythons-print-function/
     """
 
-    dt_start = datetime.today().strftime("%Y-%m-%d %H:%M:%S")
-    dt_suffix = datetime.today().strftime("%Y%m%d_%H%M%S")
+    dt_start = get_current_datetime_as_string()
+    dt_suffix = get_current_datetime_as_string(format="suffix")
     logfile = "{}/logs/{}_{}.log".format(path, prefix, dt_suffix)
     resultsfile = "{}/results/{}_{}_results.csv".format(path, prefix, dt_suffix)
     resultsfile_agg = "{}/results/{}_{}_results_agg.csv".format(path, prefix, dt_suffix)
@@ -2015,9 +2013,9 @@ def createLogFileHandleAndResultsFileNames(path="../../RL-002-QueueBlocking", pr
     return dt_start, stdout_sys, fh_log, logfile, resultsfile, resultsfile_agg, proba_functions_file, figfile
 
 def closeLogFile(fh_log, stdout_sys, dt_start):
-    dt_end = datetime.today().strftime("%Y-%m-%d %H:%M:%S")
+    dt_end = get_current_datetime_as_string()
     print("Ended at: {}".format(dt_end))
-    datetime_diff = datetime.strptime(dt_end, "%Y-%m-%d %H:%M:%S") - datetime.strptime(dt_start, "%Y-%m-%d %H:%M:%S")
+    datetime_diff = get_datetime_from_string(dt_end) - get_datetime_from_string(dt_start)
     time_elapsed = datetime_diff.total_seconds()
     print("Execution time: {:.1f} min, {:.1f} hours".format(time_elapsed / 60, time_elapsed / 3600))
 

@@ -16,7 +16,6 @@ import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt, cm    # cm is for colormaps (e.g. cm.get_cmap())
 from timeit import default_timer as timer
-from datetime import datetime
 
 DEFAULT_NUMPY_PRECISION = np.get_printoptions().get('precision')
 DEFAULT_NUMPY_SUPPRESS = np.get_printoptions().get('suppress')
@@ -5854,7 +5853,7 @@ if __name__ == "__main__":
         time_start = timer()
         proba_blocking_fv, _, expected_absorption_time, _, n_expected_absorption_time, _, _, _, dict_stats = estimate_blocking_fv_AllInOne(env_queue, agent, dict_params_simul, dict_params_info=dict_params_info)
         time_end = timer()
-        dt_end = datetime.today().strftime("%Y-%m-%d %H:%M:%S")
+        dt_end = get_current_datetime_as_string()
         print("[test_QB] Ended at: {}".format(dt_end))
         print("[test_QB] Execution time: {:.1f} min, {:.1f} hours".format((time_end - time_start) / 60, (time_end - time_start) / 3600))
 
