@@ -1313,7 +1313,7 @@ class SimulatorQueue(Simulator):
                     print("Running Monte-Carlo simulation on one particle starting at an absorption state with buffer size = {}..." \
                           .format(dict_params_simul['buffer_size_activation'] - 1))
                 #est_mc, expected_cycle_time, n_absorption_time_observations, \
-                #proba_surv, n_survival_curve_observations = \
+                #df_proba_surv, n_survival_curve_observations = \
                 #    estimate_proba_survival_and_expected_absorption_time_mc(self.env, self.agent, dict_params_simul,
                 #                                                            dict_params_info)
                 #n_events_mc = est_mc.nevents
@@ -1544,7 +1544,7 @@ class SimulatorQueue(Simulator):
 
         return t
 
-    def estimate_stationary_probability_mc_DT(self):
+    def estimate_stationary_probabilities_mc_DT(self):
         """
         Monte-Carlo estimation of the stationary probability of K-1 and K based on the observed trajectory
         in discrete-time, i.e. where only incoming jobs trigger a time step.
@@ -2606,7 +2606,7 @@ def estimate_blocking_mc(env, agent, dict_params_simul, dict_params_info):
                               seed=dict_params_simul['seed'],
                               verbose=dict_params_info.get('verbose', False), verbose_period=dict_params_info.get('verbose_period', 1))
     probas_stationary, time_step_last_return, last_time_at_start_buffer_size = \
-                                                        estimate_stationary_probability_mc(env, agent, start_state)
+                                                        estimate_stationary_probabilities_mc(env, agent, start_state)
     n_events = t
     assert n_events == dict_params_simul['T']
 
@@ -2861,7 +2861,7 @@ def run_simulation_mc(env, agent, t_learn, start_state, t_sim_max,
     return t, time_abs
 
 
-def estimate_stationary_probability_mc(env, agent, start_state):
+def estimate_stationary_probabilities_mc(env, agent, start_state):
     """
     Monte-Carlo estimation of the stationary probability of buffer sizes K-1 and K based on the observed trajectory
     in continuous-time.
@@ -3011,17 +3011,17 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info):
     max_survival_time = survival_times[-1]
 
     # Estimate P(T>t) and E(T_A)
-    proba_surv = compute_survival_probability(survival_times)
+    df_proba_surv = compute_survival_probability(survival_times)
     expected_absorption_time = estimate_expected_cycle_time(n_cycles, time_end_last_cycle, time_end_simulation)
 
     if DEBUG_ESTIMATORS or show_messages(dict_params_info.get('verbose', False), dict_params_info.get('verbose_period', 1), dict_params_info.get('t_learn', 0)):
         print("\n*** RESULTS OF MC ESTIMATION OF P(T>t) and E(T) on {} events ***".format(n_events_et))
         max_rows = pd.get_option('display.max_rows')
         pd.set_option('display.max_rows', None)
-        print("P(T>t):\n{}".format(proba_surv))
+        print("P(T>t):\n{}".format(df_proba_surv))
         pd.set_option('display.max_rows', max_rows)
         print("E(T) = {:.1f} ({} cycles, last absorption at {:.3f}), Max observed survival time = {:.1f}" \
-              .format(expected_absorption_time, n_cycles, time_end_last_cycle, proba_surv['t'].iloc[-1]))
+              .format(expected_absorption_time, n_cycles, time_end_last_cycle, df_proba_surv['t'].iloc[-1]))
 
     if DEBUG_TRAJECTORIES:
         ax0 = plot_trajectory(envs[0], agent, dict_params_simul['buffer_size_activation'])
@@ -3041,7 +3041,7 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info):
         run_simulation_fv(  dict_params_info.get('t_learn', 0), envs, agent,
                             dict_params_simul['buffer_size_activation'] - 1,
                             # We pass the absorption size to this function
-                            proba_surv, expected_absorption_time,
+                            df_proba_surv, expected_absorption_time,
                             verbose=dict_params_info.get('verbose', False), verbose_period=dict_params_info.get('verbose_period', 1),
                             plot=DEBUG_TRAJECTORIES)
     assert t == len(event_times) - 1, "The last time step of the simulation ({}) coincides with the number of events observed ({})" \
@@ -3069,7 +3069,7 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info):
 
 
 @measure_exec_time
-def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption, proba_surv, expected_absorption_time,
+def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption, df_proba_surv, expected_absorption_time,
                       verbose=False, verbose_period=1, plot=False):
     """
     Runs the Fleming-Viot simulation of the particle system and estimates the expected reward
@@ -3089,7 +3089,7 @@ def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption, proba_surv, 
     buffer_size_absorption: non-negative int
         Buffer size at which the particle is absorbed.
 
-    proba_surv: pandas data frame
+    df_proba_surv: pandas data frame
         Probability of survival given the process started at the activation set, Pr(T>t / s in activation set),
         used to estimate the blocking probability for each blocking buffer size.
         Typically this estimation is obtained by running a Monte-Carlo simulation of the queue.
@@ -3118,14 +3118,14 @@ def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption, proba_surv, 
     (below, K is determined by the parameterized acceptance policy as the smallest buffer size with deterministic rejection)
     - t: the last time step (integer-valued) of the simulation process.
     - event_times: list of times at which an event occurred during the simulation.
-    - phi: dictionary of lists with the empirical distribution of the buffer sizes of interest, namely K-1 and K,
+    - dict_phi: dictionary of lists with the empirical distribution of the buffer sizes of interest, namely K-1 and K,
     which are an estimate of the probability of those buffer sizes conditional to survival (not absorption).
     - probas_stationary: dictionary of floats indexed by the buffer sizes of interest, namely K-1 and K, containing
     the estimated stationary probability at those buffer sizes.
     """
 
     # ---------------------------------- Auxiliary functions ------------------------------#
-    def update_phi(envs, phi):
+    def update_phi(envs, t, dict_phi):
         """
         Updates the conditional probability of each buffer size of interest, which are given by the keys
         of the dictionary of the input parameter phi, which is updated.
@@ -3134,22 +3134,24 @@ def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption, proba_surv, 
         envs: list
             List of queue environments used to run the FV process.
 
-        phi: dict
-            Dictionary of lists, where the list for each entry (the buffer size of interest)
-            contains the empirical distribution at each time when a change happens.
-            This input parameter is updated by the function.
+        dict_phi: dict
+            Dictionary, indexed by the buffer sizes of interest, of data frames containing the times 't' and
+            the empirical distribution 'Phi' at which the latter changes.
+            IMPORTANT: this input parameter is updated by the function with a new row whenever the value of Phi(t,bs)
+            changes w.r.t. to the last stored value at the buffer size bs.
 
-        Return: bool
-        Whether any of the newly computed Phi values (for each buffer size of interest) is non-zero.
-        This can be used to decide whether we need to compute the integral that gives rise to the Fleming-Viot estimate
-        of the stationary probability, or we already know that the integral is 0 because ALL the Phi(t) values are 0.
+        Return: dict
+        The updated input dictionary which contains a new row for each buffer size for which the value Phi(t,bs) changes
+        w.r.t. the last value stored in the data frame for that buffer size.
         """
-        any_new_value_gt_0 = False
-        for bs in phi.keys():
-            phi[bs] += [empirical_mean(envs, bs)]
-            if phi[bs][-1] > 0.0:
-                any_new_value_gt_0 = True
-        return any_new_value_gt_0
+        for bs in dict_phi.keys():
+            phi_new = empirical_mean(envs, bs)
+            if dict_phi[bs].shape[0] == 0 or not np.isclose(dict_phi[bs]['Phi'].iloc[-1], phi_new):
+                # This is the first time we add an entry to the data frame or Phi(t) changed at t
+                # => add a new entry to the data frame containing Phi(t,bs)
+                dict_phi[bs] = pd.concat([dict_phi[bs], pd.DataFrame({'t': [t], 'Phi': [phi_new]})], axis=0)
+
+        return dict_phi
 
     def empirical_mean(envs: list, buffer_size: int):
         "Compute the proportion of environments/particles at the given buffer size"
@@ -3240,19 +3242,18 @@ def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption, proba_surv, 
 
         return idx_reactivate
 
-    def estimate_stationary_probability(t, phi, proba_surv, expected_absorption_time):
+    @measure_exec_time
+    def estimate_stationary_probabilities(dict_phi, df_proba_surv, expected_absorption_time):
         """
         Estimates the stationary probability for each buffer size of interest in phi using the Fleming-Viot estimator
 
         Arguments:
-        t: list
-            Times at which the empirical distribution phi is measured.
-
-        phi: dict of lists
+        dict_phi: dict of data frames
             Empirical distribution of buffer sizes of interest which are the keys of the dictionary.
-            The list in each dictionary entry should have the same length as `t`.
+            Each data frame contains the times 't' and Phi values 'Phi' containing the empirical distribution at the
+            buffer size indicated by the dictionary's key.
 
-        proba_surv: pandas data frame
+        df_proba_surv: pandas data frame
             Data frame with at least the following two columns:
             - 't': times at which the survival probability is estimated
             - 'P(T>t)': the survival probability estimate for the corresponding 't' value given the process
@@ -3264,91 +3265,72 @@ def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption, proba_surv, 
 
         Return: tuple of dict
         Duple with two dictionaries indexed by the buffer sizes (bs) of interest with the following content:
-        - the stationary distribution
+        - the stationary probability of buffer size bs
         - the value of the integral P(T>t)*Phi(t,bs)
        """
-        # Create a data frame from t and phi where each buffer size in which phi is measured is a different column
-        df_phi = pd.DataFrame({'t': t})
-        buffer_sizes_of_interest = sorted( list(phi.keys()) )
+        buffer_sizes_of_interest = sorted( list(dict_phi.keys()) )
+        probas_stationary = dict()
+        integrals = dict()
         for bs in buffer_sizes_of_interest:
-            df_phi[bs] = phi[bs]
-        df_phi.columns = pd.MultiIndex.from_arrays([['t'] + ['Phi'] * len(buffer_sizes_of_interest), [''] + buffer_sizes_of_interest])
+            if dict_phi[bs].shape[0] == 1 and dict_phi[bs]['Phi'].iloc[-1] == 0.0:
+                # Buffer size bs was never observed during the simulation
+                probas_stationary[bs] = 0.0
+                integrals[bs] = 0.0
+            else:
+                # Merge the times where (T>t) and Phi(t) are measured
+                df_phi_proba_surv = merge_proba_survival_and_phi(df_proba_surv, dict_phi[bs])
 
-        # Merge the times where Phi(t,bs) and P(T>t) are measured
-        df_proba_surv_phi = merge_proba_survival_and_phi(proba_surv, df_phi)
+                if DEBUG_ESTIMATORS:
+                    plt.figure()
+                    plt.step(df_phi_proba_surv['t'], df_phi_proba_surv['P(T>t)'], color="blue", where='post')
+                    plt.step(df_phi_proba_surv['t'], df_phi_proba_surv['Phi'], color="red", where='post')
+                    plt.step(df_phi_proba_surv['t'], df_phi_proba_surv['Phi']*df_phi_proba_surv['P(T>t)'], color="green", where='post')
+                    plt.title("P(T>t) (blue) and Phi(t,bs) (red) and their product (green) for bs = {}".format(bs))
 
-        if DEBUG_ESTIMATORS:
-            plt.figure()
-            plt.step(df_proba_surv_phi['t'], df_proba_surv_phi['P(T>t)'], 'b-', where='post')
-            colors = ['green', 'red']
-            #for idx, bs in enumerate(buffer_sizes_of_interest):
-            #    plt.step(df_proba_surv_phi['t'], df_proba_surv_phi['Phi'][bs], color=colors[idx], where='post')
-            K = buffer_sizes_of_interest[-1]
-            plt.step(df_proba_surv_phi['t'], df_proba_surv_phi['Phi'][K], color="red", where='post')
-            plt.step(df_proba_surv_phi['t'], df_proba_surv_phi['Phi'][K]*df_proba_surv_phi['P(T>t)'], color="green", where='post')
-
-        # Stationary probability for each buffer size of interest
-        probas_stationary, integrals = estimate_proba_stationary(df_proba_surv_phi, expected_absorption_time)
+                # Stationary probability for each buffer size of interest
+                probas_stationary[bs], integrals[bs] = estimate_proba_stationary(df_phi_proba_surv, expected_absorption_time)
 
         return probas_stationary, integrals
 
-    def merge_proba_survival_and_phi(proba_surv, df_phi):
+    @measure_exec_time
+    def merge_proba_survival_and_phi(df_proba_surv, df_phi):
         """
-        Merges the survival probability and the empirical distribution of buffer sizes of interest
-        on a common set of time values into a data frame.
+        Merges the survival probability and the empirical distribution of the particle system at a particular
+        buffer size of interest, on a common set of time values into a data frame.
 
         Arguments:
-        proba_surv: pandas data frame
-            Data frame containing the time and P(T>t) survival probability given activation.
+        df_proba_surv: pandas data frame
+            Data frame containing the time 't' and the P(T>t) survival probability 'P(T>t)' given activation.
 
         df_phi: pandas data frame
-            Data frame containing the time and the Phi(t,bs) value for each buffer size of interest bs.
+            Data frame containing the time 't' and the Phi(t) value 'Phi' for a buffer size of interest.
 
         return: pandas data frame
         Data frame with the following columns:
         - 't': time at which a change in any of the input quantities happens
         - 'P(T>t)': survival probability given the process started at the stationary activation distribution of states.
-        - 'Phi(t,bs)': empirical distribution for each buffer size of interest given the process started
+        - 'Phi': empirical distribution at the buffer size of interest given the process started
         at the stationary activation distribution of states.
         """
-        phi_by_t = dict()
-        buffer_sizes_of_interest = list(df_phi['Phi'].columns)
-        for bs in buffer_sizes_of_interest:
-            # Merge the time values at which the survival probability is measured (i.e. where it changes)
-            # with the time values at which the empirical distribution Phi is measured for each buffer size of interest.
-            # IMPORTANT: the time values at which Phi is measured is EVERY TIME at which any of the particles
-            # in the system changes state, even though the value of Phi itself might not change...
-            # This might not be very inefficient, so we should improve this as follows:
-            # TODO: (2022/06/01) Keep in df_phi ONLY the records at which there is a change in df_phi['Phi'][bs]
-            t, proba_surv_by_t, phi_by_t[bs] = merge_values_in_time(list(proba_surv['t']), list(proba_surv['P(T>t)']),
-                                                                    list(df_phi['t']), list(df_phi['Phi'][bs]),
-                                                                    unique=False)
+        # Merge the time values at which the survival probability is measured (i.e. where it changes)
+        # with the time values at which the empirical distribution Phi is measured for each buffer size of interest.
+        t, proba_surv_by_t, phi_by_t = merge_values_in_time(list(df_proba_surv['t']), list(df_proba_surv['P(T>t)']),
+                                                                list(df_phi['t']), list(df_phi['Phi']),
+                                                                unique=False)
 
         # -- Merged data frame
-        # Initialize with P(T>t)
-        # Note: We construct the data frame one column at a time because when defining both columns together
-        # in a single call to pd.DataFrame() the order of the columns is not guaranteed!
-        df_merged = pd.DataFrame({'t': t})
-        df_merged = pd.concat([df_merged, pd.DataFrame({'P(T>t)': proba_surv_by_t})], axis=1)
-
-        # Append Phi for each buffer size of interest
-        for bs in buffer_sizes_of_interest:
-            df_merged = pd.concat([df_merged, pd.DataFrame({bs: phi_by_t[bs]})], axis=1)
-
-        # Create hierarchical indexing in the columns so that we can access each Phi(t,bs) as df_merged['Phi'][bs][t]
-        df_merged.columns = pd.MultiIndex.from_arrays(
-            [list(df_merged.columns[:2]) + ['Phi'] * len(buffer_sizes_of_interest),
-             ['', ''] + buffer_sizes_of_interest])
+        df_merged = pd.DataFrame(np.c_[t, proba_surv_by_t, phi_by_t], columns=['t', 'P(T>t)', 'Phi'])
 
         if DEBUG_ESTIMATORS:
-            print("Survival Probability and Empirical Distribution for each buffer size of interest :")
+            print("Survival Probability and Empirical Distribution for a buffer size of interest:")
             print(df_merged)
 
         return df_merged
 
+    @measure_exec_time
     def estimate_proba_stationary(df_phi_proba_surv, expected_absorption_time):
         """
-        Computes the stationary probability for each buffer size of interest via Approximation 1 in Matt's draft"
+        Computes the stationary probability for a buffer size of interest via Approximation 1 in Matt's draft
 
         Arguments:
         df_phi_proba_surv: pandas data frame
@@ -3359,10 +3341,10 @@ def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption, proba_surv, 
         expected_absorption_time: float
             Estimated expected absorption cycle time.
 
-        Return: tuple of dict
-        Duple with two dictionaries indexed by the buffer sizes (bs) of interest with the following content:
-        - the stationary distribution
-        - the value of the integral P(T>t)*Phi(t,bs)
+        Return: tuple
+        Duple with the following content:
+        - the estimated stationary probability
+        - the value of the integral P(T>t)*Phi(t)
         """
         if tracemalloc.is_tracing():
             mem_usage = tracemalloc.get_traced_memory()
@@ -3373,22 +3355,19 @@ def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption, proba_surv, 
         if expected_absorption_time <= 0.0 or np.isnan(expected_absorption_time) or expected_absorption_time is None:
             raise ValueError("The expected absorption time must be a positive float ({})".format(expected_absorption_time))
 
-        probas_stationary = dict()
-        integrals = dict()
-        for bs in df_phi_proba_surv['Phi'].columns:
-            # Integrate => Multiply the survival, the empirical distribution Phi, delta(t) and SUM
-            integrals[bs] = 0.0
-            if False: #DEBUG_ESTIMATORS:
-                max_rows = pd.get_option('display.max_rows')
-                pd.set_option('display.max_rows', None)
-                print("Data for integral for bs = {}:\n{}".format(bs, df_phi_proba_surv))
-                pd.set_option('display.max_rows', max_rows)
-            for i in range(0, df_phi_proba_surv.shape[0] - 1):
-                integrals[bs] += (df_phi_proba_surv['P(T>t)'].iloc[i] * df_phi_proba_surv['Phi'][bs].iloc[i]) * \
-                                 (df_phi_proba_surv['t'].iloc[i+1] - df_phi_proba_surv['t'].iloc[i])
-            if DEBUG_ESTIMATORS or show_messages(verbose, verbose_period, t_learn):
-                print("integrals[{}] = {:.3f}, E(T) = {:.3f}".format(bs, integrals[bs], expected_absorption_time))
-            probas_stationary[bs] = integrals[bs] / expected_absorption_time
+        # Integrate => Multiply the survival density function, the empirical distribution Phi, delta(t) and SUM
+        integral = 0.0
+        if DEBUG_ESTIMATORS:
+            max_rows = pd.get_option('display.max_rows')
+            pd.set_option('display.max_rows', None)
+            print("Data for integral:\n{}".format(df_phi_proba_surv))
+            pd.set_option('display.max_rows', max_rows)
+        for i in range(0, df_phi_proba_surv.shape[0] - 1):
+            integral += (df_phi_proba_surv['P(T>t)'].iloc[i] * df_phi_proba_surv['Phi'].iloc[i]) * \
+                        (df_phi_proba_surv['t'].iloc[i+1] - df_phi_proba_surv['t'].iloc[i])
+        if DEBUG_ESTIMATORS or show_messages(verbose, verbose_period, t_learn):
+            print("integral = {:.3f}, E(T) = {:.3f}".format(integral, expected_absorption_time))
+        proba_stationary = integral / expected_absorption_time
 
         if tracemalloc.is_tracing():
             mem_snapshot_2 = tracemalloc.take_snapshot()
@@ -3400,7 +3379,7 @@ def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption, proba_surv, 
                     # if stat.size / stat.count > 1E6:   # To print the events with largest memory consumption for EACH of their occurrence
                     print(stat)
 
-        return probas_stationary, integrals
+        return proba_stationary, integral
 
     # ---------------------------------- Auxiliary functions ------------------------------#
 
@@ -3411,19 +3390,19 @@ def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption, proba_surv, 
         raise ValueError("The buffer size for absorption must be integer and >= 0 ({})".format(buffer_size_absorption))
 
     # Check the survival probability values
-    if proba_surv is None and not isinstance(proba_surv, pd.core.frame.DataFrame):
+    if df_proba_surv is None and not isinstance(df_proba_surv, pd.core.frame.DataFrame):
         raise ValueError("The survival probability estimate must be given and be a DataFrame")
-    if 't' not in proba_surv.columns or 'P(T>t)' not in proba_surv.columns:
+    if 't' not in df_proba_surv.columns or 'P(T>t)' not in df_proba_surv.columns:
         raise ValueError(
             "The data frame with the estimated survival probability must contain at least columns 't' and 'P(T>t)' (columns: {})" \
-            .format(proba_surv.columns))
-    if proba_surv['P(T>t)'].iloc[0] != 1.0:
+            .format(df_proba_surv.columns))
+    if df_proba_surv['P(T>t)'].iloc[0] != 1.0:
         raise ValueError(
-            "The first value of the survival function must be 1.0 ({:.3f})".format(proba_surv['P(T>t)'].iloc[0]))
-    if proba_surv['P(T>t)'].iloc[-1] not in [1.0, 0.0]:
+            "The first value of the survival function must be 1.0 ({:.3f})".format(df_proba_surv['P(T>t)'].iloc[0]))
+    if df_proba_surv['P(T>t)'].iloc[-1] not in [1.0, 0.0]:
         raise ValueError("The survival function at the last measured time is either 1.0 "
                          "(when no particles have been absorbed) or 0.0 "
-                         "(when at least one particle has been absorbed) ({})".format(proba_surv['P(T>t)'].iloc[-1]))
+                         "(when at least one particle has been absorbed) ({})".format(df_proba_surv['P(T>t)'].iloc[-1]))
     # ---------------------------- Check input parameters ---------------------------------#
 
     # -- Parse input parameters
@@ -3448,18 +3427,19 @@ def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption, proba_surv, 
 
     # Phi(t, bs): Empirical probability of the buffer sizes of interest (bs)
     # at each time when an event happens (ANY event, both arriving job or completed service)
-    phi = dict()
+    dict_phi = dict()
     for bs in buffer_sizes_of_interest:
-        phi[bs] = [empirical_mean(envs, bs)]
+        dict_phi[bs] = pd.DataFrame([], columns=['t', 'Phi'])
+    # Add the initial time of measurement, which is normally 0.0
+    dict_phi = update_phi(envs, event_times[-1], dict_phi)
 
     # Time step in the queue trajectory (the first time step is t = 0)
     done = False
     t = 0
-    maxtime = proba_surv['t'].iloc[-1]
+    maxtime = df_proba_surv['t'].iloc[-1]
         ## maxtime: it's useless to go with the FV simulation beyond the maximum observed survival time
         ## because the contribution to the integral used in the estimation of the average reward is 0.0 after that.
-    is_any_phi_value_gt_0 = False   # This is used to decide whether the integral should be computed or not (when all values of Phi are 0, then the integral is 0, no need to compute it)
-    idx_reactivate = None
+    idx_reactivate = None   # This is only needed when we want to plot a vertical line in the particle evolution plot with the color of the particle to which an absorbed particle is reactivated
     if plot:
         # Initialize the plot
         ax = plt.figure().subplots(1,1)
@@ -3560,7 +3540,7 @@ def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption, proba_surv, 
             print("P={}: {} | t={}: time={}, event={}, action={} -> state={}, reward={}" \
                   .format(idx_particle, state, t, event_times[-1], event, action, next_state, reward), end="\n")
 
-        is_any_phi_value_gt_0 = max([is_any_phi_value_gt_0, update_phi(envs, phi)])
+        dict_phi = update_phi(envs, event_times[-1], dict_phi)
 
         if plot:
             y = envs[0].getBufferSizeFromState(next_state)
@@ -3570,13 +3550,13 @@ def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption, proba_surv, 
             J = buffer_size_absorption + 1
             plot_update_trajectory( ax, idx_particle, N, K, J,
                                     time0[idx_particle], y0[idx_particle], event_times[-1], y,
-                                    r=None) #idx_reactivate)
+                                    r=None) #idx_reactivate)    # Use idx_reactivate if we want to see a vertical line at the time of absorption with the color of the activated particle
             time0[idx_particle] = event_times[-1]
             y0[idx_particle] = y
 
         idx_reactivate = None
 
-        if DEBUG_ESTIMATORS or DEBUG_TRAJECTORIES:
+        if DEBUG_TRAJECTORIES:
             # New line to separate from next iteration
             print("")
 
@@ -3588,12 +3568,7 @@ def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption, proba_surv, 
     if show_messages(verbose, verbose_period, t_learn):
         print(
             "==> agent ENDS at discrete time t={} (continuous time = {:.1f}, compared to maximum observed time for P(T>t) = {:.1f}) at state {} coming from state = {}, action = {}, reward = {})" \
-            .format(t, event_times[-1], proba_surv['t'].iloc[-1], envs[idx_particle].getState(), state, action, reward))
-    # Assertion
-    for bs in phi.keys():
-        assert len(event_times) == len(phi[bs]), \
-            "The length of the event times where phi is measured ({}) coincides with the length of phi ({})" \
-            .format(len(event_times), len(phi))
+            .format(t, event_times[-1], df_proba_surv['t'].iloc[-1], envs[idx_particle].getState(), state, action, reward))
 
     if DEBUG_ESTIMATORS:
         # NOTE: It is assumed that the job arrival rates and service rates are the same for ALL N environments
@@ -3604,17 +3579,11 @@ def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption, proba_surv, 
         plotting.plot_event_times(job_rates_by_server, times_inter_arrival, jobs_arrival, class_name="Job class")
         plotting.plot_event_times(envs[0].getServiceRates(), times_service, servers_service, class_name="Server")
 
-    if is_any_phi_value_gt_0:
-        # Compute the stationary probability of each buffer size bs in Phi(t,bs) using Phi(t,bs), P(T>t) and E(T_A)
-        probas_stationary, integrals = estimate_stationary_probability(event_times, phi, proba_surv,
-                                                                       expected_absorption_time)
-    else:
-        probas_stationary = dict()
-        integrals = dict()
-        for bs in phi.keys():
-            probas_stationary[bs] = integrals[bs] = 0.0
+    # Compute the stationary probability of each buffer size bs in Phi(t,bs) using Phi(t,bs), P(T>t) and E(T_A)
+    probas_stationary, integrals = estimate_stationary_probabilities(dict_phi, df_proba_surv,
+                                                                     expected_absorption_time)
 
-    return t, event_times, phi, probas_stationary
+    return t, event_times, dict_phi, probas_stationary
 
 
 def show_messages(verbose, verbose_period, t_learn):
@@ -4193,7 +4162,7 @@ if __name__ == "__main__":
                      .format(learner.__class__, gamma, nexperiments, nepisodes))
 
     if not test and True:
-        # --- Test the SimulatorQueue class ---#
+        # --- Test the SimulatorQueue class for the FVRL policy-gradient algorithm ---#
         # Default execution arguments when no arguments are given
         # Example of execution from the command line:
         # python simulators.py 50 FV False 1.0 23.0 33.9 0.5 1.0 1.0
