@@ -3125,14 +3125,47 @@ def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption, df_proba_sur
     """
 
     # ---------------------------------- Auxiliary functions ------------------------------#
-    def update_phi(envs, t, dict_phi):
+    def initialize_phi(envs, t: float, buffer_sizes: list):
+        """
+        Initializes the conditional probability of each buffer size of interest, which are given by the keys
+        of the dictionary of the input parameter dict_phi, which is updated.
+
+        Arguments:
+        envs: list
+            List of queue environments used to run the FV process.
+
+        t: float
+
+        buffer_sizes: list of int
+            Buffer sizes at which the Phi dictionary should be initialized.
+
+        Return: dict
+            Dictionary, indexed by the given buffer sizes, of data frames that will be used to store
+            the times 't' and the empirical distribution 'Phi' at which the latter changes.
+            Each entry of the dictionary is initialized with a data frame with just one row containing the
+            first time of measurement of Phi and the empirical distribution of the particles at the respective
+            buffer size (indexing the dictionary).
+        """
+        dict_phi = dict()
+        for bs in buffer_sizes:
+            dict_phi[bs] = pd.DataFrame([[t, empirical_mean(envs, bs)]], columns=['t', 'Phi'])
+        return dict_phi
+
+    def empirical_mean(envs: list, buffer_size: int):
+        "Compute the proportion of environments/particles at the given buffer size"
+        return np.mean([int(bs == buffer_size) for bs in [env.getBufferSize() for env in envs]])
+
+    def update_phi(N: int, t: float, dict_phi: dict, buffer_size_prev: int, buffer_size_cur: int):
         """
         Updates the conditional probability of each buffer size of interest, which are given by the keys
         of the dictionary of the input parameter phi, which is updated.
 
         Arguments:
-        envs: list
-            List of queue environments used to run the FV process.
+        N: int
+            Number of particles in the Fleming-Viot system.
+
+        t: float
+            Continuous-valued time at which the latest change of a particle's state happened.
 
         dict_phi: dict
             Dictionary, indexed by the buffer sizes of interest, of data frames containing the times 't' and
@@ -3140,22 +3173,54 @@ def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption, df_proba_sur
             IMPORTANT: this input parameter is updated by the function with a new row whenever the value of Phi(t,bs)
             changes w.r.t. to the last stored value at the buffer size bs.
 
+        buffer_size_prev: int
+            The previous buffer size of the particle that just changed state on which basis Phi(t,bs) is updated.
+
+        buffer_size_cur: int
+            The current buffer size of the particle that just changed state on which basis Phi(t,bs) is updated.
+
         Return: dict
         The updated input dictionary which contains a new row for each buffer size for which the value Phi(t,bs) changes
         w.r.t. the last value stored in the data frame for that buffer size.
         """
         for bs in dict_phi.keys():
-            phi_new = empirical_mean(envs, bs)
-            if dict_phi[bs].shape[0] == 0 or not np.isclose(dict_phi[bs]['Phi'].iloc[-1], phi_new):
-                # This is the first time we add an entry to the data frame or Phi(t) changed at t
+            assert dict_phi[bs].shape[0] > 0, "The Phi data frame has been initialized for buffer size = {}".format(bs)
+            phi_cur = dict_phi[bs]['Phi'].iloc[-1]
+            phi_new = empirical_mean_update(phi_cur, bs, buffer_size_prev, buffer_size_cur, N)
+            if not np.isclose(phi_new, phi_cur):
+                # Phi(t) changed at t
                 # => add a new entry to the data frame containing Phi(t,bs)
+                # (o.w. it's no use to store it because we only store the times at which Phi changes)
                 dict_phi[bs] = pd.concat([dict_phi[bs], pd.DataFrame({'t': [t], 'Phi': [phi_new]})], axis=0)
 
         return dict_phi
 
-    def empirical_mean(envs: list, buffer_size: int):
-        "Compute the proportion of environments/particles at the given buffer size"
-        return np.mean([int(bs == buffer_size) for bs in [env.getBufferSize() for env in envs]])
+    def empirical_mean_update(mean_value: float, buffer_size: int, buffer_size_prev: int, buffer_size_cur: int, N: int):
+        """
+        Update the proportion of environments/particles at the given buffer size based on the previous and current
+        position (buffer size) of the particle
+
+        Arguments:
+        mean_value: float
+            The current mean value to be updated.
+
+        buffer_size: int
+            The buffer size at which the empirical mean should be updated.
+
+        buffer_size_prev: int
+            The previous buffer size of the particle that just changed state.
+
+        buffer_size_cur: int
+            The current buffer size of the particle that just changed state.
+
+        N: int
+            Number of particles in the Fleming-Viot system.
+
+        Return: float
+            The updated empirical mean at the given buffer size, following the change of buffer size from
+            `buffer_size_prev` to `buffer_size_cur`.
+        """
+        return mean_value + (int(buffer_size_cur == buffer_size) - int(buffer_size_prev == buffer_size)) / N
 
     def reactivate_particle(envs: list, idx_particle: int, K: int):
         """
@@ -3427,11 +3492,7 @@ def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption, df_proba_sur
 
     # Phi(t, bs): Empirical probability of the buffer sizes of interest (bs)
     # at each time when an event happens (ANY event, both arriving job or completed service)
-    dict_phi = dict()
-    for bs in buffer_sizes_of_interest:
-        dict_phi[bs] = pd.DataFrame([], columns=['t', 'Phi'])
-    # Add the initial time of measurement, which is normally 0.0
-    dict_phi = update_phi(envs, event_times[-1], dict_phi)
+    dict_phi = initialize_phi(envs, event_times[-1], buffer_sizes_of_interest)
 
     # Time step in the queue trajectory (the first time step is t = 0)
     done = False
@@ -3540,7 +3601,10 @@ def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption, df_proba_sur
             print("P={}: {} | t={}: time={}, event={}, action={} -> state={}, reward={}" \
                   .format(idx_particle, state, t, event_times[-1], event, action, next_state, reward), end="\n")
 
-        dict_phi = update_phi(envs, event_times[-1], dict_phi)
+        # Update Phi based on the new state of the changed particle
+        buffer_size_prev = envs[0].getBufferSizeFromState(state)
+        buffer_size = envs[0].getBufferSizeFromState(next_state)
+        dict_phi = update_phi(len(envs), event_times[-1], dict_phi, buffer_size_prev, buffer_size)
 
         if plot:
             y = envs[0].getBufferSizeFromState(next_state)
