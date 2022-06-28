@@ -3383,8 +3383,8 @@ def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption, df_proba_sur
                                                                 list(df_phi['t']), list(df_phi['Phi']),
                                                                 unique=False)
 
-        # -- Merged data frame
-        df_merged = pd.DataFrame(np.c_[t, proba_surv_by_t, phi_by_t], columns=['t', 'P(T>t)', 'Phi'])
+        # -- Merged data frame, where we add the dt, used in the computation of the integral
+        df_merged = pd.DataFrame(np.c_[t, proba_surv_by_t, phi_by_t, np.r_[np.diff(t), 0.0]], columns=['t', 'P(T>t)', 'Phi', 'dt'])
 
         if DEBUG_ESTIMATORS:
             print("Survival Probability and Empirical Distribution for a buffer size of interest:")
@@ -3421,17 +3421,18 @@ def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption, df_proba_sur
             raise ValueError("The expected absorption time must be a positive float ({})".format(expected_absorption_time))
 
         # Integrate => Multiply the survival density function, the empirical distribution Phi, delta(t) and SUM
-        integral = 0.0
         if DEBUG_ESTIMATORS:
             max_rows = pd.get_option('display.max_rows')
             pd.set_option('display.max_rows', None)
             print("Data for integral:\n{}".format(df_phi_proba_surv))
             pd.set_option('display.max_rows', max_rows)
-        for i in range(0, df_phi_proba_surv.shape[0] - 1):
-            integral += (df_phi_proba_surv['P(T>t)'].iloc[i] * df_phi_proba_surv['Phi'].iloc[i]) * \
-                        (df_phi_proba_surv['t'].iloc[i+1] - df_phi_proba_surv['t'].iloc[i])
+
+        df_phi_proba_surv_Phi_gt0 = df_phi_proba_surv.loc[ df_phi_proba_surv['Phi'] > 0, ]
+        integral = np.sum( df_phi_proba_surv_Phi_gt0['P(T>t)'] * df_phi_proba_surv_Phi_gt0['Phi'] * df_phi_proba_surv_Phi_gt0['dt'] )
+
         if DEBUG_ESTIMATORS or show_messages(verbose, verbose_period, t_learn):
             print("integral = {:.3f}, E(T) = {:.3f}".format(integral, expected_absorption_time))
+
         proba_stationary = integral / expected_absorption_time
 
         if tracemalloc.is_tracing():
