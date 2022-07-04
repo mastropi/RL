@@ -11,3 +11,4 @@ Python/lib/GitHub/
 *.synctex*
 *.bbl
 *.blg
+*results/
