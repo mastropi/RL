@@ -571,6 +571,8 @@ class Test_QB_Particles(unittest.TestCase):
                                            'MaxSurvTime',
                                            'Pr(FV)',
                                            'Time(FV)',          # Last continuous time value observed in the FV simulation
+                                           '#Events(ET)',
+                                           '#Events(FV-Only)',
                                            '#Events(FV)',
                                            '#Samples(S(t))',
                                            'Pr(K)',
@@ -719,6 +721,8 @@ class Test_QB_Particles(unittest.TestCase):
                                            max_survival_time,
                                            proba_blocking_fv,
                                            time_end_simulation_fv,
+                                           n_events_et,
+                                           n_events_fv_only,
                                            n_events_fv,
                                            n_survival_curve_observations,
                                            proba_blocking_true,
