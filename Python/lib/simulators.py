@@ -4296,7 +4296,7 @@ if __name__ == "__main__":
         # -- Parse user arguments
         t_learn = int(sys.argv[1])
         learning_method = LearningMethod.FV if sys.argv[2] == "FV" else LearningMethod.MC
-        clipping = sys.argv[3] == 'True'
+        clipping = bool(sys.argv[3]) == True
         clipping_value = float(sys.argv[4])
         theta_true = float(sys.argv[5])
         theta_start = float(sys.argv[6])

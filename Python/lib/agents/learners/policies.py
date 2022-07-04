@@ -313,7 +313,7 @@ class LeaPolicyGradient(GenericLearner):
         # We use "strange" numbers to avoid having theta fall always on the same distance from an integer (e.g. 4.1, 5.1, etc.)
         # The lower and upper bounds are asymmetric (larger lower bound) so that a large negative reward can lead to a large reduction of theta.
         bound_delta_theta_upper = +np.Inf if not self.clipping else self.clipping_value  #+1.131
-        bound_delta_theta_lower = -np.Inf if not self.clipping else self.clipping_value  #-1.131 #-5.312314 #-1.0
+        bound_delta_theta_lower = -np.Inf if not self.clipping else -self.clipping_value  #-1.131 #-5.312314 #-1.0
         delta_theta = np.max([ bound_delta_theta_lower, np.min([self.getLearningRate() * gradV, bound_delta_theta_upper]) ])
         print("Estimated grad(V(theta)) = {}".format(gradV))
         print("Delta(theta) = alpha * grad(V) = {}".format(delta_theta))
@@ -436,7 +436,7 @@ class LeaPolicyGradient(GenericLearner):
                     # Note that we bound the delta theta to avoid too large changes!
                     #theta += self.getLearningRate() * delta * self.policy.getGradientLog(action, state)
                     bound_delta_theta_upper = +np.Inf if not self.clipping else self.clipping_value  #+1.131
-                    bound_delta_theta_lower = -np.Inf if not self.clipping else self.clipping_value  #-1.131
+                    bound_delta_theta_lower = -np.Inf if not self.clipping else -self.clipping_value  #-1.131
                     delta_theta = np.max([ bound_delta_theta_lower, np.min([alpha * gradV, bound_delta_theta_upper]) ])
                     print("\tt={}: delta(theta) = {}".format(t, delta_theta))
 
@@ -538,7 +538,7 @@ class LeaPolicyGradient(GenericLearner):
         # We use "strange" numbers to avoid having theta fall always on the same distance from an integer (e.g. 4.1, 5.1, etc.)
         # The lower and upper bounds are asymmetric (larger lower bound) so that a large negative reward can lead to a large reduction of theta.
         bound_delta_theta_upper = +np.Inf if not self.clipping else self.clipping_value #+2.131 #+1.131
-        bound_delta_theta_lower = -np.Inf if not self.clipping else self.clipping_value #-5.3123 #-1.131 #-5.312314 #-1.0
+        bound_delta_theta_lower = -np.Inf if not self.clipping else -self.clipping_value #-5.3123 #-1.131 #-5.312314 #-1.0
         delta_theta = np.max([ bound_delta_theta_lower, np.min([self.getLearningRate() * gradV, bound_delta_theta_upper]) ])
         print("Estimated grad(V(theta)) = {}".format(gradV))
         print("Delta(theta) = alpha * grad(V) = {}".format(delta_theta))
@@ -608,7 +608,7 @@ class LeaPolicyGradient(GenericLearner):
             # The lower and upper bounds are asymmetric (larger lower bound) so that a large negative reward can lead to a large reduction of theta.
             # Use +1.0 and -1.0 respectively for CLIPPING delta(theta) to +/- 1.
             bound_delta_theta_upper = +np.Inf if not self.clipping else self.clipping_value #+1.0 #+np.Inf #+1.1234 #+np.Inf #+2.1310  # +1.131
-            bound_delta_theta_lower = -np.Inf if not self.clipping else self.clipping_value #-1.0 #-np.Inf #-1.1234 #-np.Inf #-5.3123  # -1.131 #-5.312314 #-1.0
+            bound_delta_theta_lower = -np.Inf if not self.clipping else -self.clipping_value #-1.0 #-np.Inf #-1.1234 #-np.Inf #-5.3123  # -1.131 #-5.312314 #-1.0
 
             #alpha = self.getLearningRate()
             # DM-2021/12/24: An attempt to make alpha proportional to the INVERSE of the second derivative of V,

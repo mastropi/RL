@@ -176,18 +176,24 @@ class PolQueueTwoActionsLinearStep(GenericParameterizedPolicyTwoActions):
 
     def getPolicyForAction(self, action, state, buffer_size=None):
         """
-        Returns the value of the policy for the given action when the environment is at the given state
+        Returns the value of the policy for the given action when the queue environment is at the given state
+        or at the given buffer size, whichever is not None. If both are not None, the buffer size value is
+        overwritten with the buffer size associated to the given state.
+
+        The value of the policy is a function of the queue's buffer size, which is either given or computed
+        from the given state.
 
         action: Actions
             Accept or Reject action at which the policy is evaluated.
 
         state: Environment dependent
             State of the environment at which the policy is evaluated.
-            The queue's buffer size is computed from the state using the getBufferSizeFromState() method
+            If not None, the queue's buffer size is computed from the state using the getBufferSizeFromState() method
             defined in the environment object.
+            If None, the buffer_size parameter must not be None.
 
         buffer_size: (opt) int
-            Buffer size triggering the action.
+            Buffer size at which the policy of the given action is requested.
             default: None, in which case the buffer size is computed from the given state.
 
         Return: float
