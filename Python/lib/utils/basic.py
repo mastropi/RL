@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 
 from datetime import datetime
+from time import process_time
 from timeit import default_timer as timer
 from unittest import TestCase
 
@@ -33,13 +34,18 @@ def measure_exec_time(func):
     results = fun() # This will print the execution time of the function in the standard output.
     """
     def func_decorated(*args, **kwargs):
-        start = timer()
+        start_time = timer()
+        start_cpu = process_time()
         results = func(*args, **kwargs)
-        end = timer()
-        exec_time = end - start
+        end_time = timer()
+        end_cpu = process_time()
+        exec_time = end_time - start_time
+        cpu_time = end_cpu - start_cpu
         #if "{:.1f}".format(exec_time) != "0.0":
         if exec_time > 0: #> 1
-            print("+++ Execution time for {}: {:.1f} sec, {:.2f} msec".format(func.__name__, exec_time, exec_time*1000))
+            print("+++ Execution time for {}: {:.1f} hs = {:.1f} min = {:.1f} sec = {:.2f} msec (CPU: {:.1f} hs, {:.1f} min, {:.1f} sec, {:.2f} msec)" \
+                  .format(func.__name__, exec_time/3600, exec_time/60, exec_time, exec_time*1000,
+                          cpu_time/3600,cpu_time/60, cpu_time, cpu_time*1000))
         return results
     return func_decorated
 
