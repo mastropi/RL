@@ -1347,56 +1347,71 @@ class SimulatorQueue(Simulator):
                 n_events_fv = 0  # This information is output to the results file and therefore we set it to 0 here as we are in the MC approach
                 max_survival_time = 0.0
 
-            if probas_stationary[K-1] > 0.0:
+            # Compute the state-action values (Q(s,a)) for buffer size = K-1
+            if probas_stationary.get(K-1, 0.0) == 0.0:
+                Q0_Km1 = 0.0
+                Q1_Km1 = 0.0
+                n_Km1 = 0
+                if True or DEBUG_ESTIMATORS or show_messages(verbose, verbose_period, t_learn):
+                    print("Estimation of Q_diff(K-1) skipped because the stationary probability Pr(K-1) is {}".format(probas_stationary.get(K-1)))
+                # Set Pr(K-1) to 0 in case it was not computed, so that learns the policy below (`learn()`)
+                # receives the input parameters as expected (e.g. probas_stationary should have 2 keys: K-1 and K
+                probas_stationary[K - 1] = 0.0
+            else:
                 # When the parameterized policy is a linear step linear function with only one buffer size where its
                 # derivative is non-zero, only the DIFFERENCE of two state-action values impacts the gradient, namely:
                 # Q(K-1, a=1) - Q(K-1, a=0)
                 if DEBUG_ESTIMATORS or show_messages(verbose, verbose_period, t_learn):
                     print("\nEstimating the difference of the state-action values when the initial buffer size is K-1={}...".format(K-1))
-                N = 100; t_sim_max = 250
+                N = 100;
+                t_sim_max = 250
                 K, Q0_Km1, Q1_Km1, n_Km1, max_t_Km1 = \
-                    self.estimate_Q_values_until_mixing(t_learn, K-1, t_sim_max=t_sim_max, N=N, \
-                                                        seed=dict_params_simul['seed']*100, verbose=verbose, verbose_period=verbose_period)
-                #K, Q0_Km1, Q1_Km1, n, max_t = self.estimate_Q_values_until_stationarity(t_learn, t_sim_max=50, N=N, verbose=verbose, verbose_period=verbose_period)
+                    self.estimate_Q_values_until_mixing(t_learn, K - 1, t_sim_max=t_sim_max, N=N, \
+                                                        seed=dict_params_simul['seed'] * 100, verbose=verbose,
+                                                        verbose_period=verbose_period)
+                # K, Q0_Km1, Q1_Km1, n, max_t = self.estimate_Q_values_until_stationarity(t_learn, t_sim_max=50, N=N, verbose=verbose, verbose_period=verbose_period)
                 if True or DEBUG_ESTIMATORS or show_messages(verbose, verbose_period, t_learn):
                     print("--> Estimated state-action values on n={} realizations out of {} with max simulation time = {:.1f} out of {:.1f}:\nQ(K-1={}, a=1) = {}\nQ(K-1={}, a=0) = {}\nQ_diff = Q(K-1,1) - Q(K-1,0) = {}" \
-                          .format(n_Km1, N, max_t_Km1, t_sim_max, K-1, Q1_Km1, K-1, Q0_Km1, Q1_Km1 - Q0_Km1))
-            else:
-                Q0_Km1 = 0.0
-                Q1_Km1 = 0.0
-                n_Km1 = 0
-                if DEBUG_ESTIMATORS or show_messages(verbose, verbose_period, t_learn):
-                    print("Estimation of Q_diff(K-1) skipped because the estimated stationary probability Pr(K-1) = 0.")
+                        .format(n_Km1, N, max_t_Km1, t_sim_max, K-1, Q1_Km1, K-1, Q0_Km1, Q1_Km1 - Q0_Km1))
             if True or DEBUG_ESTIMATORS or show_messages(verbose, verbose_period, t_learn):
-                print("--> Estimated stationary probability: Pr(K-1={}) = {}".format(K-1, probas_stationary[K - 1]))
+                print("--> Estimated stationary probability: Pr(K-1={}) = {}".format(K-1, probas_stationary[K-1]))
 
-            if probas_stationary[K] > 0.0:
-                # Same as above, but for buffer size = K
-                if DEBUG_ESTIMATORS or show_messages(verbose, verbose_period, t_learn):
-                    print("\nEstimating the difference of the state-action values when the initial buffer size is K={}...".format(K))
-                N = 100; t_sim_max = 250
-                K, Q0_K, Q1_K, n_K, max_t_K = \
-                    self.estimate_Q_values_until_mixing(t_learn, K, t_sim_max=t_sim_max, N=N, \
-                                                        seed=dict_params_simul['seed']*100 + 1, verbose=verbose, verbose_period=verbose_period)
-                #K, Q0_K, Q1_K, n_K, max_t_K = self.estimate_Q_values_until_stationarity(t_learn, t_sim_max=50, N=N, verbose=verbose, verbose_period=verbose_period)
-                if DEBUG_ESTIMATORS or show_messages(verbose, verbose_period, t_learn):
-                    print("--> Estimated state-action values on n={} realizations out of {} with max simulation time = {:.1f} out of {:.1f}:\nQ(K={}, a=1) = {}\nQ(K={}, a=0) = {}\nQ_diff = Q(K,1) - Q(K,0) = {}" \
-                          .format(n_K, N, max_t_K, t_sim_max, K, Q1_K, K, Q0_K, Q1_K - Q0_K))
-            else:
+            # Compute the state-action values (Q(s,a)) for buffer size = K
+            # This is needed ONLY when the policy learning methodology is IGA (Integer Gradient Ascent, presented in Massaro's paper (2019)
+            if self.dict_learning_params['mode'] != LearningMode.IGA or probas_stationary.get(K, 0.0) == 0.0:
+                # We set all the values to 0 so that the learn() method called below doesn't fail, as it assumes that
+                # the values possibly involved with learning (which depend on the learning method) have a real value.
                 Q0_K = 0.0
                 Q1_K = 0.0
                 n_K = 0
                 if DEBUG_ESTIMATORS or show_messages(verbose, verbose_period, t_learn):
-                    print("Estimation of Q_diff(K) skipped because the estimated stationary probability Pr(K) = 0.")
+                    print("Estimation of Q_diff(K) skipped because the stationary probability Pr(K) is {}".format(probas_stationary.get(K-1)))
+                # Set Pr(K) to 0 in case it was not computed, so that learns the policy below (`learn()`)
+                # receives the input parameters as expected (e.g. probas_stationary should have 2 keys: K-1 and K
+                probas_stationary[K] = 0.0
+            else:
+                # Same as above, but for buffer size = K
+                if DEBUG_ESTIMATORS or show_messages(verbose, verbose_period, t_learn):
+                    print("\nEstimating the difference of the state-action values when the initial buffer size is K={}...".format(K))
+                N = 100;
+                t_sim_max = 250
+                K, Q0_K, Q1_K, n_K, max_t_K = \
+                    self.estimate_Q_values_until_mixing(t_learn, K, t_sim_max=t_sim_max, N=N, \
+                                                        seed=dict_params_simul['seed'] * 100 + 1, verbose=verbose,
+                                                        verbose_period=verbose_period)
+                # K, Q0_K, Q1_K, n_K, max_t_K = self.estimate_Q_values_until_stationarity(t_learn, t_sim_max=50, N=N, verbose=verbose, verbose_period=verbose_period)
+                if show_messages(verbose, verbose_period, t_learn):
+                    print("--> Estimated state-action values on n={} realizations out of {} with max simulation time = {:.1f} out of {:.1f}:\nQ(K={}, a=1) = {}\nQ(K={}, a=0) = {}\nQ_diff = Q(K,1) - Q(K,0) = {}" \
+                        .format(n_K, N, max_t_K, t_sim_max, K, Q1_K, K, Q0_K, Q1_K - Q0_K))
             if show_messages(verbose, verbose_period, t_learn):
                 print("--> Estimated stationary probability: Pr(K={}) = {}".format(K, probas_stationary[K]))
 
             # Learn the value function and the policy
             theta_prev = self.getLearnerP().getPolicy().getThetaParameter()
 
-            # Use this when using REINFORCE to learn theta
+            # Use this when using REINFORCE to learn theta: LearningMode.REINFORCE_RETURN
             #self.learn(self.agent, t)
-            # Use this when estimating the theoretical grad(V)
+            # Use this when estimating the theoretical grad(V): LearningMode.REINFORCE_TRUE or LearningMode.IGA
             err_phi, err_et = compute_rel_errors_for_fv_process(rhos, K, self.N, dict_params_simul['T'], dict_params_simul['buffer_size_activation_factor'])
             self.learn(self.agent, t,
                        probas_stationary=probas_stationary,
@@ -2002,17 +2017,22 @@ class SimulatorQueue(Simulator):
             if self.getLearnerP() is not None:
                 assert self.agent.getAcceptancePolicy().getThetaParameter() == self.getLearnerP().getPolicy().getThetaParameter()
             K = agent.getAcceptancePolicy().getBufferSizeForDeterministicBlocking()
-            keys_probas = probas_stationary.keys()
-            keys_Q_values = Q_values.keys()
-            assert [K-1, K] == sorted(keys_probas) and [K-1, K] == sorted(keys_Q_values), \
-                "Keys K-1={} and K={} are present in the dictionaries containing the stationary probability estimations ({}) and the Q values ({})" \
-                .format(K-1, K, probas_stationary, Q_values)
-
             if self.dict_learning_params['mode'] == LearningMode.REINFORCE_TRUE:
                 # Regular gradient ascent based on grad(V)
+                # Only information about the buffer size K-1 is used to learn,
+                # as long as the gradient of the parameterized policy is not 0
+                # (which happens when the theta parameter of the policy is not integer.
+                assert K-1 in probas_stationary.keys() and K-1 in Q_values.keys(), \
+                    "Key K-1={} is present in the dictionaries containing the stationary probability estimation ({}) and the Q values ({})" \
+                        .format(K-1, probas_stationary, Q_values)
                 theta_prev, theta, V, gradV, G = agent.getLearnerP().learn_linear_theoretical_from_estimated_values(t, probas_stationary[K-1], Q_values[K-1])
             elif self.dict_learning_params['mode'] == LearningMode.IGA:
                 # IGA: Integer Gradient Ascent (only the signs of the Q differences are of interest here)
+                keys_probas = probas_stationary.keys()
+                keys_Q_values = Q_values.keys()
+                assert [K-1, K] == sorted(keys_probas) and [K-1, K] == sorted(keys_Q_values), \
+                    "Keys K-1={} and K={} are present in the dictionaries containing the stationary probability estimations ({}) and the Q values ({})" \
+                        .format(K-1, K, probas_stationary, Q_values)
                 theta_prev, theta, V, gradV, G = agent.getLearnerP().learn_linear_theoretical_from_estimated_values_IGA(t, probas_stationary, Q_values)
 
         if simul_info is not None:
@@ -2053,7 +2073,7 @@ class SimulatorQueue(Simulator):
         self.alphas += [agent.getLearnerP().getLearningRate()]
         self.thetas += [theta_prev]
         self.thetas_updated += [theta]
-        self.proba_stationary += [[probas_stationary[K-1], probas_stationary[K]]]
+        self.proba_stationary += [[probas_stationary[K-1], probas_stationary.get(K)]]
         self.Q_diff += [[Q_values[K-1][1] - Q_values[K-1][0], Q_values[K][1] - Q_values[K][0]]]
         self.V += [V]               # NOTE: This is NOT always the average value, rho... for instance, NOT when linear_theoretical_from_estimated_values() is called above
         self.gradV += [gradV]
@@ -2443,11 +2463,18 @@ def choose_state_for_buffer_size(env, buffer_size):
 
 
 def get_blocking_buffer_sizes(agent):
-    # TODO: (2021/12/08) These buffer sizes should be derived from the buffer sizes where the rejection probability is > 0
+    assert agent is not None
     if agent.getLearnerP() is not None:
-        assert agent.getAcceptancePolicy().getThetaParameter() == agent.getLearnerP().getPolicy().getThetaParameter()
+        assert agent.getAcceptancePolicy().getThetaParameter() == agent.getLearnerP().getPolicy().getThetaParameter(), \
+                "The theta parameter of the agent's acceptance policy ({}) coincides with the theta parameter" \
+                .format(agent.getAcceptancePolicy().getThetaParameter()) + \
+                " of the policy learner ({})" \
+                .format(agent.getLearnerP().getPolicy().getThetaParameter())
     K = agent.getAcceptancePolicy().getBufferSizeForDeterministicBlocking()
-    return [K - 1, K]
+    blocking_buffer_sizes = [k for k in range(0, K+1)
+                             if agent.getAcceptancePolicy().getPolicyForAction(Actions.REJECT, None, buffer_size=k) > 0]
+
+    return blocking_buffer_sizes
 
 
 def compute_proba_blocking(agent, probas_stationary):
@@ -2473,8 +2500,8 @@ def compute_proba_blocking(agent, probas_stationary):
     proba_blocking = 0.0
     buffer_sizes_of_interest = get_blocking_buffer_sizes(agent)
     assert len(probas_stationary) == len(buffer_sizes_of_interest), \
-        "The length of the probas_stationary dictionary is the same as the number of buffer sizes of interest ({}):\n{}" \
-            .format(buffer_sizes_of_interest, probas_stationary)
+        "The length of the probas_stationary dictionary ({}) is the same as the number of buffer sizes of interest ({})" \
+            .format(probas_stationary, buffer_sizes_of_interest)
     for bs in buffer_sizes_of_interest:
         if False:
             print("---> Computing blocking probability...")
@@ -2863,8 +2890,8 @@ def run_simulation_mc(env, agent, t_learn, start_state, t_sim_max,
 
 def estimate_stationary_probabilities_mc(env, agent, start_state):
     """
-    Monte-Carlo estimation of the stationary probability of buffer sizes K-1 and K based on the observed trajectory
-    in continuous-time.
+    Monte-Carlo estimation of the stationary probability at the buffer sizes of interest
+    (defined by the agent's job acceptance policy) from the observed trajectory in continuous-time.
 
     The stationary probability is estimated as the fraction of time spent at each buffer size over the total
     simulation time (sum of sojourn times).
@@ -2874,21 +2901,23 @@ def estimate_stationary_probabilities_mc(env, agent, start_state):
         The queue environment where the agent acts.
 
     agent: Agent
-        The agent interacting with the environment.
+        The agent interacting with the environment in terms of job acceptance/rejection.
         It should have a learner of the value function V and a learner of the policy P defined.
 
     start_state: int or list or numpy array
         State of the queue environment at which the Monte-Carlo simulation started.
-        This is used to check that the initial state actually stored in the trajectory is this state
-        and that therefore we are doing the correct computation to estimate the stationary probability
-        of the buffer sizes of interest.
+        This is used to check that the initial state actually stored in the trajectory has a buffer size that
+        is equal to the buffer size of this state, and that therefore we are doing the correct computation to
+        estimate the stationary probability of the buffer sizes of interest (which is based on trajectory cycles
+        that come back to the initial buffer size).
 
     Return: tuple
     Tuple with the following elements:
-    - probas_stationary: Dictionary with the estimated stationary probability for buffer sizes K-1 and K, where K is the first integer
-    larger than or equal to theta + 1  --theta being the parameter of the linear step acceptance policy.
+    - probas_stationary: Dictionary with the estimated stationary probability for the buffer sizes of interest,
+    typically those where blocking may occur according to the agent's job acceptance policy.
     - last_t_to_initial_position: time step at which the system returned to the initial buffer size for the last time.
-    - last_time_to_initial_position: continuous time at which the system returned to the initial buffer size for the last time.
+    - last_time_to_initial_position: continuous time at which the system returned to the initial buffer size
+    for the last time.
     """
     # Event times
     times = agent.getLearnerV().getTimes()
@@ -2908,16 +2937,24 @@ def estimate_stationary_probabilities_mc(env, agent, start_state):
             "The buffer size of the first state stored in the chain trajectory ({})" \
             " equals the buffer size of the state at which the simulation started ({})" \
             .format(buffer_sizes[0], buffer_size_start)
-
-    # Compute the stationary probabilities of the buffer sizes of interest by Find the last time the chain visited the starting position
-    if agent.getLearnerP() is not None:
-        assert agent.getAcceptancePolicy().getThetaParameter() == agent.getLearnerP().getPolicy().getThetaParameter()
-    K = agent.getAcceptancePolicy().getBufferSizeForDeterministicBlocking()
-    probas_stationary = dict({K-1: np.nan, K: np.nan})
     idx_last_visit_to_initial_position = find_last(buffer_sizes, buffer_sizes[0])
     assert idx_last_visit_to_initial_position >= 0, \
         "The return time to the initial buffer size is always observed, as the first value is always the value searched for ({}):\n{}".format(buffer_sizes[0], np.c_[buffer_sizes, times])
-    if idx_last_visit_to_initial_position > 0:
+
+    # Compute the stationary probabilities of the buffer sizes of interest by Find the last time the chain visited the starting position
+    buffer_sizes_of_interest = get_blocking_buffer_sizes(agent)
+    probas_stationary = dict()
+    if idx_last_visit_to_initial_position == 0:
+        # The system never returned to the initial buffer size
+        # => We set the stationary probability to 0.0 (and NOT to NaN) in order to avoid an assertion error in
+        # the policy learner dealing with stationary probabilities that require that they are between 0 and 1.
+        # (e.g. see agents/learners/policies.py)
+        warnings.warn("The Markov Chain never returned to the initial position/buffer-size ({})."
+                      "\nThe estimated stationary probabilities will be set to 0.0.".format(buffer_sizes[0]))
+        last_time_at_start_buffer_size = 0.0
+        for bs in buffer_sizes_of_interest:
+            probas_stationary[bs] = 0.0
+    else:
         last_time_at_start_buffer_size = times[idx_last_visit_to_initial_position-1]
             ## we subtract -1 to the index because the times list contains the times at which the Markov Chain
             ## STOPS visiting the state in states.
@@ -2925,25 +2962,13 @@ def estimate_stationary_probabilities_mc(env, agent, start_state):
         # Compute the total sojourn time at each buffer size of interest
         # IMPORTANT: we need to limit this computation to the moment we observe the last return time to the
         # initial buffer size! (o.w. we could be overestimating the probability and even estimate it larger than 1)
-        sojourn_times_by_buffer_size = \
-            dict({K-1: np.sum([st for bs, st in zip(buffer_sizes[:idx_last_visit_to_initial_position], sojourn_times[:idx_last_visit_to_initial_position]) if bs == K-1]),
-                    K: np.sum([st for bs, st in zip(buffer_sizes[:idx_last_visit_to_initial_position], sojourn_times[:idx_last_visit_to_initial_position]) if bs == K])})
-
-        for k in [K-1, K]:
-            assert sojourn_times_by_buffer_size[k] <= last_time_at_start_buffer_size, \
-                "The total sojourn time at position of interest (e.g. blocking) s={} ({}) is at most equal to the last time of return to the buffer size ({})" \
-                .format(k, sojourn_times_by_buffer_size[k], last_time_at_start_buffer_size)
-            probas_stationary[k] = sojourn_times_by_buffer_size[k] / last_time_at_start_buffer_size
-    else:
-        # The system never returned to the initial buffer size
-        # => We set the stationary probability to 0.0 (and NOT to NaN) in order to avoid an assertion error in
-        # the policy learner dealing with stationary probabilities that require that they are between 0 and 1.
-        # (e.g. see agents/learners/policies.py)
-        warnings.warn("The Markov Chain never returned to the initial position/buffer-size ({})."
-                        "\nThe estimated stationary probabilities will be set to 0.0.".format(buffer_sizes[0]))
-        last_time_at_start_buffer_size = 0.0
-        for k in [K-1, K]:
-            probas_stationary[k] = 0.0
+        for bs in buffer_sizes_of_interest:
+            sojourn_times_at_bs = np.sum([st for k, st in zip(buffer_sizes[:idx_last_visit_to_initial_position], sojourn_times[:idx_last_visit_to_initial_position]) if k == bs])
+            assert sojourn_times_at_bs <= last_time_at_start_buffer_size, \
+                "The total sojourn time at the buffer size of interest (e.g. blocking) bs={} ({})" \
+                " is at most equal to the last time of return to the buffer size ({})" \
+                .format(bs, sojourn_times_at_bs, last_time_at_start_buffer_size)
+            probas_stationary[bs] = sojourn_times_at_bs / last_time_at_start_buffer_size
 
     return probas_stationary, idx_last_visit_to_initial_position, last_time_at_start_buffer_size
 
