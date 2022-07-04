@@ -2820,10 +2820,11 @@ def run_simulation_mc(env, agent, t_learn, start_state, t_sim_max,
                         print("[MC] \tACTIVATION time = {:.3f} --> time to absorption = {:.3f}" \
                               .format(time_last_activation, time_to_absorption))
                     assert time_to_absorption > 0
-                    insort(survival_times, time_to_absorption, unique=False)
-                    ## NOTE: We use unique=False because it happened already that the inserted time is very
-                    ## close to a time already existing in the list of survival times and an assertion inside
-                    ## insort() failed! (although that should never happen... the set of time coincidences has measure 0)
+                    # We sort the survival times at the end of the process, as it might be faster than inserting
+                    # the value in order at every time being observed (although the difference apparently is just
+                    # in the constant of proportionality of the O(N*log(N)) complexity.
+                    # Ref: https://stackoverflow.com/questions/168891/is-it-faster-to-sort-a-list-after-inserting-items-or-adding-them-to-a-sorted-lis
+                    survival_times += [time_to_absorption]
 
                     # Reset the time of last activation to None so that we are now alert to setting it again
                     # the next time it occurs
@@ -2882,7 +2883,7 @@ def run_simulation_mc(env, agent, t_learn, start_state, t_sim_max,
         return t, time_abs, n_cycles_return, time_last_return
     if track_absorptions:
         if track_survival:
-            return t, time_abs, n_cycles_absorption, time_last_absorption, survival_times
+            return t, time_abs, n_cycles_absorption, time_last_absorption, sorted(survival_times)
         else:
             return t, time_abs, n_cycles_absorption, time_last_absorption
     return t, time_abs
