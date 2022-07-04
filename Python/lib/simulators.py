@@ -1166,6 +1166,7 @@ class SimulatorQueue(Simulator):
 
         start_state: (opt) int or list or numpy array
             State at which the queue environment starts.
+            Its type depends on how the queue environment defines the state of the system.
             default: None, in which case the start state is defined by the simulation process, based on the learning requirements
 
         seed: (opt) None or float
@@ -1477,6 +1478,7 @@ class SimulatorQueue(Simulator):
 
         start_state: int or list or numpy array
             State at which the queue environment starts for the simulation.
+            Its type depends on how the queue environment defines the state of the system.
 
         t_sim_max: int
             Maximum discrete simulation time steps allowed for the simulation. Time steps are defined
@@ -2584,7 +2586,7 @@ def compute_survival_probability(survival_times):
                                     ('P(T>t)', proba_surv)])
 
 
-def estimate_blocking_mc(env, agent, dict_params_simul, dict_params_info):
+def estimate_blocking_mc(env, agent, dict_params_simul, dict_params_info, start_state=None):
     """
     Estimates the blocking probability using Monte-Carlo
 
@@ -2603,6 +2605,12 @@ def estimate_blocking_mc(env, agent, dict_params_simul, dict_params_info):
 
     dict_params_info: dict
         Dictionary containing information to display or parameters to deal with the information to display.
+
+    start_state: (opt) int or list or numpy array
+        State at which the queue environment starts for the simulation.
+        Its type depends on how the queue environment defines the state of the system.
+        default: None, in which case the start state is defined as state whose buffer size coincides with
+        dict_params_simul['buffer_size_activation'] - 1.
 
     Return: tuple
     Tuple with the following elements:
@@ -2627,7 +2635,8 @@ def estimate_blocking_mc(env, agent, dict_params_simul, dict_params_info):
     # start_state = choose_state_for_buffer_size(simul.env, K)
     # Selection of the start state as one having buffer size = J-1, in order to have a fair comparison with the FV method
     # where particles are reactivated when they reach J-1.
-    start_state = choose_state_for_buffer_size(env, dict_params_simul['buffer_size_activation'] - 1)
+    if start_state is None:
+        start_state = choose_state_for_buffer_size(env, dict_params_simul['buffer_size_activation'] - 1)
     t, time_last_event, n_cycles, time_last_return = \
             run_simulation_mc(env, agent, dict_params_info.get('t_learn', 0), start_state, dict_params_simul['T'],
                               track_return_cycles=True,
@@ -2667,6 +2676,7 @@ def run_simulation_mc(env, agent, t_learn, start_state, t_sim_max,
 
     start_state: int or list or numpy array
         State at which the queue environment starts for the simulation.
+        Its type depends on how the queue environment defines the state of the system.
 
     t_sim_max: int
         Maximum simulation time steps allowed for the simulation.
