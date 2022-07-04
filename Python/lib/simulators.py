@@ -63,6 +63,7 @@ class LearningMode(Enum):
 class ReactivateMethod(Enum):
     RANDOM = 1                  # Random choice of the reactivation particle among the N-1 other non-absorbed particles
     VALUE_FUNCTION = 2          # Choice of the reactivation particle based on the value function of each state at which the other N-1 particles are located
+    ROBINS = 3
 
 
 DEBUG_ESTIMATORS = False
@@ -3248,7 +3249,7 @@ def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption, df_proba_sur
         """
         return mean_value + (int(buffer_size_cur == buffer_size) - int(buffer_size_prev == buffer_size)) / N
 
-    def reactivate_particle(envs: list, idx_particle: int, K: int):
+    def reactivate_particle(envs: list, idx_particle: int, K: int, absorption_number=None):
         """
         Reactivates a particle that has been absorbed
 
@@ -3271,13 +3272,14 @@ def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption, df_proba_sur
         N = len(envs)
         assert N > 1, "There is more than one particle in the system (N={})".format(N)
         idx_reactivate = choose_particle(envs, idx_particle, N, K, ReactivateMethod.RANDOM) #, ReactivateMethod.VALUE_FUNCTION) #, ReactivateMethod.RANDOM)
+        #idx_reactivate = choose_particle(envs, idx_particle, N, K, ReactivateMethod.ROBINS, absorption_number=absorption_number) #, ReactivateMethod.VALUE_FUNCTION) #, ReactivateMethod.RANDOM)
 
         # Update the state of the reactivated particle to the reactivation state
         envs[idx_particle].setState(envs[idx_reactivate].getState())
 
         return idx_reactivate
 
-    def choose_particle(envs: list, idx_particle: int, N: int, K: int, method: ReactivateMethod):
+    def choose_particle(envs: list, idx_particle: int, N: int, K: int, method: ReactivateMethod, absorption_number=None):
         """
         Chooses a particle among N-1 possible particles using the given method
 
@@ -3315,9 +3317,14 @@ def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption, df_proba_sur
             prob_values = [v / np.sum(values) for v in values]
             #print(np.c_[range(N-1), [envs[idx].getBufferSize() for idx in range(N-1)], [envs[idx].getBufferSize() / K for idx in range(N-1)], prob_values])
             idx_reactivate = np.random.choice(N-1, p=prob_values)
+        elif method == ReactivateMethod.ROBINS:
+            # Deterministic choice of the particle
+            assert absorption_number is not None
+            assert 0 <= absorption_number < N-1, "The absorption number is between 0 and N-2 = {} ({})".format(N-2, absorption_number)
+            idx_reactivate = absorption_number
         else:
             # Random selection of active particles by default
-            idx_reactivate = np.random.randint(0, N - 1)
+            idx_reactivate = np.random.randint(0, N-1)  # The upper value is NOT included in the possible set of integers
 
         if idx_reactivate >= idx_particle:
             # The chosen particle is beyond the particle to reactivate
@@ -3472,7 +3479,6 @@ def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption, df_proba_sur
                     print(stat)
 
         return proba_stationary, integral
-
     # ---------------------------------- Auxiliary functions ------------------------------#
 
     # ---------------------------- Check input parameters ---------------------------------#
@@ -3559,6 +3565,11 @@ def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption, df_proba_sur
         times_service = []
     while not done:
         t += 1
+        # We count the absorption number, an integer between 0 and N-2 which is used to deterministically choose
+        # the reativation particle, in order to save time by not having to generate a uniform random number.
+        # Note that the range from 0 to N-2 allows us to choose one of the N-1 particles to which the absorbed particle
+        # can be reactivated into.
+        absorption_number = t % (N - 1)
 
         # Generate an event over all possible event types and particles
         # Note: this function takes care of NOT generating a service event when a server is empty.
@@ -3604,7 +3615,7 @@ def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption, df_proba_sur
                     # Update the coordinates of the latest plotted point for this particle, for the next iteration
                     time0[idx_particle] = event_times[-1]
                     y0[idx_particle] = y
-                idx_reactivate = reactivate_particle(envs, idx_particle, buffer_sizes_of_interest[-1])
+                idx_reactivate = reactivate_particle(envs, idx_particle, buffer_sizes_of_interest[-1], absorption_number=absorption_number)
                 next_state = envs[idx_particle].getState()
                 assert envs[idx_particle].getBufferSize() > buffer_size_absorption
                 if DEBUG_TRAJECTORIES:
