@@ -28,7 +28,8 @@ if __name__ == "__main__":
 from Python.lib.environments.queues import EnvQueueSingleBufferWithJobClasses, rewardOnJobClassAcceptance, ActionTypes
 from Python.lib.agents.learners import ResetMethod
 from Python.lib.agents.learners.value_functions import ValueFunctionApprox
-from Python.lib.agents.queues import AgeQueue, PolicyTypes as QueuePolicyTypes
+from Python.lib.agents.queues import AgeQueue
+from Python.lib.agents.policies import PolicyTypes
 from Python.lib.agents.policies.job_assignment import PolJobAssignmentProbabilistic
 from Python.lib.agents.policies.parameterized import PolQueueTwoActionsLinearStepOnJobClasses, PolQueueTwoActionsLinearStep
 import Python.lib.queues as queues  # The keyword `queues` is used in test code
@@ -5829,7 +5830,7 @@ if __name__ == "__main__":
         env_queue = EnvQueueSingleBufferWithJobClasses(queue, job_class_rates=job_class_rates, reward_func=rewardOnJobClassAcceptance, rewards_accept_by_job_class=[1])
 
         # Define the agent acting on the queue environment
-        policies = dict({QueuePolicyTypes.ACCEPT: None, QueuePolicyTypes.ASSIGN: policy_assign})
+        policies = dict({PolicyTypes.ACCEPT: None, PolicyTypes.ASSIGN: policy_assign})
         learners = None
         agent = AgeQueue(queue, policies, learners)
 

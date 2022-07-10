@@ -6,9 +6,17 @@ Created on 09 Oct 2021
 @description: Definition of the attributes and methods that are needed for any parameterized policy with two possible actions
 """
 
+from enum import Enum, unique
+
 import numpy as np
 
 from Python.lib.utils.basic import as_array
+
+
+@unique
+class PolicyTypes(Enum):
+    ACCEPT = 'accept'
+    ASSIGN = 'assign'
 
 
 class GenericParameterizedPolicyTwoActions:

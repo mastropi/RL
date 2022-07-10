@@ -37,6 +37,7 @@ def mad(x):
     
     return x_mad
 
+
 def rmse(Vtrue: np.ndarray, Vest: np.ndarray, weights: np.ndarray=None):
     """Root Mean Square Error (RMSE) between Vtrue and Vest, optionally weighted
 
@@ -75,6 +76,7 @@ def rmse(Vtrue: np.ndarray, Vest: np.ndarray, weights: np.ndarray=None):
         mse = np.mean( (Vest - Vtrue)**2 )
 
     return np.sqrt(mse)
+
 
 def mape(Vtrue: np.ndarray, Vest: np.ndarray, weights: np.ndarray=None):
     """Mean Absolute Percent Error (MAPE) between Vtrue and Vest, weighted or not weighted by weights.
@@ -135,6 +137,7 @@ def mape(Vtrue: np.ndarray, Vest: np.ndarray, weights: np.ndarray=None):
 
     return MAPE
 
+
 def smooth(x, window_size):
     "Smooth a signal by moving average"
     # Ref: https://www.geeksforgeeks.org/how-to-calculate-moving-averages-in-python/
@@ -149,6 +152,7 @@ def smooth(x, window_size):
         x_smooth = windows.mean()
 
         return x_smooth
+
 
 def comb(n,k):
     """
@@ -171,6 +175,50 @@ def comb(n,k):
         den *= i + 1
         
     return int( num / den )
+
+
+def all_combos_with_sum(R, C):
+    """
+    Returns a generator of all possible integer-valued arrays whose elements sum to a fixed number.
+
+    Arguments:
+    R: int
+        Dimension of the integer-valued array to generate.
+
+    C: int
+        Sum of the elements of the integer-valued array.
+    """
+
+    # Note: documentation on the `yield` expression: https://docs.python.org/3/reference/expressions.html#yieldexpr
+
+    def all_combos_with_subsum(v, level):
+        # print("\nlevel={}:".format(level))
+        r = level
+        # Sum over the indices of v to the left of r
+        # which determrine the new capacity to satisfy on the indices from r to the right
+        vleft = sum(v[0:r])
+        if r < R - 1:
+            for k in range(C - vleft, -1, -1):
+                # print("\tFOR k ({} downto 0): level: {}, k={}".format(C-vleft, r, k))
+                # print("\tv before={}".format(v))
+                v[r] = k
+                # print("\tv={}".format(v))
+                # print("new call: (offset={})".format(r+1))
+                # NOTE THE USE OF `yield from` in order to get an yield value from a recursive call!
+                yield from all_combos_with_subsum(v, r + 1)
+        else:
+            # No degrees of freedom left for the last level (right-most index)
+            # print("\tv before={}".format(v))
+            v[r] = C - vleft
+            # print("\tv={}".format(v))
+            # print("yield v! {}".format(v))
+            assert sum(v) == C, "The elements of v sum to C={} (v={})".format(C, v)
+            yield v
+
+    v = [0] * R
+    gen = all_combos_with_subsum(v, 0)
+    return gen
+
 
 def generate_min_exponential_time(rates):
     """
@@ -215,6 +263,24 @@ def generate_min_exponential_time(rates):
 
     return event_time, idx_event
 
+
+def compute_survival_probability(survival_times):
+    assert survival_times[0] == 0.0
+    # Number of observed death events used to measure survival times
+    N = len(survival_times) - 1
+
+    if N > 0:
+        proba_surv = [n / N for n in
+                      range(N, -1, -1)]  # This is N downto 0 (i.e. N+1 elements as there are in survival_times)
+        assert proba_surv[-1] == 0.0
+    else:
+        proba_surv = [1.0]
+
+    assert proba_surv[0] == 1.0
+    return pd.DataFrame.from_items([('t', survival_times),
+                                    ('P(T>t)', proba_surv)])
+
+
 def get_server_loads(job_rates, service_rates):
     """
     Returns the server loads (rhos) for a queue system from the job arrival rates and the service rates"
@@ -232,118 +298,6 @@ def get_server_loads(job_rates, service_rates):
     """
     return [b/d for b, d in zip(job_rates, service_rates)]
 
-def compute_nparticles_and_nsteps_for_fv_process(rhos: list, capacity: int, buffer_size_activation_factor: float=1/3, error_rel_phi=0.50, error_rel_et=0.50):
-    """
-    Computes the minimum number of particles and number of discrete steps to use in the FV process
-    for maximum relative errors in the estimation of Phi(t, K) and of E(T_A) where K is the capacity of the queue.
-
-    Arguments:
-    rhos: list
-        List of the server intensities: lambda / mu for each server in the system, where lambda is the job
-        arrival rate and mu is the service rate.
-
-    capacity: int
-        Capacity of the system: maximum size of the buffer placed at the entrance of the system.
-
-    buffer_size_activation_factor: (opt) float
-        Buffer size activation factor J/K based on which the activation set of states is defined as
-        J = int( round( factor*K ) ), such as J-1 defines the absorption set of states.
-        default: 1/3, which is the optimum in the sense that the algorithm complexity to estimate Phi(t, K) and E(T_A)
-        in the Fleming-Viot estimation is the same.
-
-    error_rel_phi: (opt) float
-        Maximum relative error for the estimation of Phi(t, K).
-        This is the relative error incurred in the estimation of a binomial probability based on N trials,
-        which is equal to sqrt((1-p)/p) / sqrt(N)
-        default: 0.50
-
-    error_rel_et: (opt) float
-        Maximum relative error for the estimation of the expected absorption cycle time E(T_A).
-        The calculation of the number of cycles needed assumes that the standard deviation of the estimation of E(T_A)
-        is proportional to E(T_A), which gives a relative error equal to 1/sqrt(M) where M is the number of
-        reabsorption cycles.
-        (Note that from simulations of the FV estimation for different J/K values, it was found that
-        the standard deviation is proportional to E(T_A)^1.6, more precisely Std(T_A) = 0.01 * E(T_A)^1.6)
-        The number of discrete steps is then computed as M/p, where p is the blocking probability of the given
-        queue system.
-        default: 0.50
-
-    Return: Tuple
-    Duple with the following elements:
-    - N: number of particles needed for the given relative error for Phi(t, K), error_rel_phi.
-    - T: Number of discrete time steps for the given relative error for E(T_A), error_rel_et.
-    """
-    K = capacity
-    J = int( np.round(buffer_size_activation_factor * K) )
-
-    # -- Blocking probability
-    # This is the equivalent of a queue that has the blocking probability observed under the Fleming-Viot process
-    capacity_effective = int( np.ceil((K-J)/2) )
-    pK = compute_blocking_probability_birth_death_process(rhos, capacity_effective)
-
-    # Expected return time to J (under stationarity), which is what mostly defines the magnitude of E(T_A) = E(T1+T2)
-    pJ = compute_blocking_probability_birth_death_process(rhos, J)
-
-    N = int(np.ceil( (1 - pK) / pK / error_rel_phi**2 ))
-    #M = int(np.ceil( 1 / error_rel_et**2 ))
-    T = int(np.ceil( 1 / error_rel_et**2 / pJ ))
-
-    return N, T
-
-def compute_rel_errors_for_fv_process(rhos: list, capacity: int, N: int, T: int, buffer_size_activation_factor: float=1/3):
-    """
-    Computes the minimum number of particles and number of discrete steps to use in the FV process
-    for maximum relative errors in the estimation of Phi(t, K) and of E(T_A) where K is the capacity of the queue.
-
-    Arguments:
-    rhos: list
-        List of the server intensities: lambda / mu for each server in the system, where lambda is the job
-        arrival rate and mu is the service rate.
-
-    capacity: int
-        Capacity of the system: maximum size of the buffer placed at the entrance of the system.
-
-    N: int
-        Number of particles used in the FV process.
-
-    T: int
-        Number of discrete time steps used in the estimation of P(T>t) and E(T_A).
-
-    buffer_size_activation_factor: (opt) float
-        Buffer size activation factor J/K based on which the activation set of states is defined as
-        J = int( round( factor*K ) ), such as J-1 defines the absorption set of states.
-        default: 1/3, which is the optimum in the sense that the algorithm complexity to estimate Phi(t, K) and E(T_A)
-        in the Fleming-Viot estimation is the same.
-
-    Return: tuple
-    Duple with the following elements:
-    - error_rel_phi: relative error expected for the estimation of Phi(t, K) given N.
-        This is the relative error incurred in the estimation of a binomial probability based on N trials,
-        which is equal to sqrt((1-p)/p) / sqrt(N)
-    - error_rel_et: relative error expected for the estimation of the expected absorption cycle time E(T_A).
-        This calculation assumes that the standard deviation of the estimation of E(T_A)
-        is proportional to E(T_A), which gives a relative error equal to 1/sqrt(M) where M is the number of
-        reabsorption cycles.
-        (Note that from simulations of the FV estimation for different J/K values, it was found that
-        the standard deviation is proportional to E(T_A)^1.6, more precisely Std(T_A) = 0.01 * E(T_A)^1.6)
-        The number of discrete steps is then computed as M/p, where p is the blocking probability of the given
-        queue system.
-    """
-    K = capacity
-    J = int( np.round(buffer_size_activation_factor * K) )
-
-    # -- Blocking probability
-    # This is the equivalent of a queue that has the blocking probability observed under the Fleming-Viot process
-    capacity_effective = int( np.ceil((K-J)/2) )
-    pK = compute_blocking_probability_birth_death_process(rhos, capacity_effective)
-
-    # Expected return time to J (under stationarity), which is what mostly defines the magnitude of E(T_A) = E(T1+T2)
-    pJ = compute_blocking_probability_birth_death_process(rhos, J)
-
-    error_rel_phi = np.sqrt( (1 - pK) / pK / N )
-    error_rel_et  = np.sqrt( 1 / T / pJ )
-
-    return error_rel_phi, error_rel_et
 
 def compute_job_rates_by_server(job_class_rates, nservers, policy_assign_map):
     """
@@ -378,6 +332,7 @@ def compute_job_rates_by_server(job_class_rates, nservers, policy_assign_map):
             job_rates_by_server[r] += policy_assign_map[c][r] * job_class_rates[c]
 
     return job_rates_by_server
+
 
 def compute_blocking_probability_birth_death_process(rhos: list, capacity: int):
     """
@@ -428,6 +383,7 @@ def compute_blocking_probability_birth_death_process(rhos: list, capacity: int):
         proba_blocking = prod[C] / const
 
     return proba_blocking       
+
 
 def stationary_distribution_birth_death_process(nservers: int, capacity: int, rhos: list):
     """
@@ -488,6 +444,7 @@ def stationary_distribution_birth_death_process(nservers: int, capacity: int, rh
 
     return x, dist
 
+
 def stationary_distribution_birth_death_process_at_capacity_unnormalized(nservers: int, capacity: int, rhos: list, ncases_expected=None):
     """
     Computes the UNNORMALIZED stationary distribution of a birth-death process for the state subspace
@@ -536,47 +493,6 @@ def stationary_distribution_birth_death_process_at_capacity_unnormalized(nserver
     assert ncases == ncases_expected, "The number of generated combinations for R={}, C={} ({}) is equal to the expected number of combinations ({})".format(R, C, ncases, ncases_expected)
 
     return x, dist
-
-def all_combos_with_sum(R, C):
-    """
-    Returns a generator of all possible integer-valued arrays whose elements sum to a fixed number.
-    
-    Arguments:
-    R: int
-        Dimension of the integer-valued array to generate.
-    
-    C: int
-        Sum of the elements of the integer-valued array.
-    """
-    # Note: documentation on the `yield` expression: https://docs.python.org/3/reference/expressions.html#yieldexpr
-
-    def all_combos_with_subsum(v, level):
-        #print("\nlevel={}:".format(level))
-        r = level
-        # Sum over the indices of v to the left of r
-        # which determrine the new capacity to satisfy on the indices from r to the right 
-        vleft = sum(v[0:r])
-        if r < R - 1:
-            for k in range(C - vleft, -1, -1):
-                #print("\tFOR k ({} downto 0): level: {}, k={}".format(C-vleft, r, k))
-                #print("\tv before={}".format(v))
-                v[r] = k
-                #print("\tv={}".format(v))
-                #print("new call: (offset={})".format(r+1))
-                # NOTE THE USE OF `yield from` in order to get an yield value from a recursive call!
-                yield from all_combos_with_subsum(v, r+1)
-        else:
-            # No degrees of freedom left for the last level (right-most index)
-            #print("\tv before={}".format(v))
-            v[r] = C - vleft
-            #print("\tv={}".format(v))
-            #print("yield v! {}".format(v))
-            assert sum(v) == C, "The elements of v sum to C={} (v={})".format(C,v)
-            yield v
-
-    v = [0]*R
-    gen = all_combos_with_subsum(v, 0)
-    return gen
 
 
 # Tests

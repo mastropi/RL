@@ -5,9 +5,6 @@ Created on Mon Dec 06 23:31:27 2021
 @author: Daniel Mastropietro
 @description: Fleming-Viot learners on continuing tasks
 """
-import copy
-
-import numpy as np
 
 from .. import AlphaUpdateType
 from .mc import LeaMC

@@ -36,6 +36,9 @@ class GenericAgent:
         self.learner = learner
         self.action = None
 
+    def act(self, env, policy_types):
+        raise NotImplementedError
+
     #----- GETTERS -----#
     def getPolicy(self):
         return self.policy

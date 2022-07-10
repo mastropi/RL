@@ -3,7 +3,7 @@
 Created on Thu Jun  4 19:16:02 2020
 
 @author: Daniel Mastropietro
-@description: Estimators are defined for problems of interest in Reinforcement Learning.
+@description: Test the blocking probability estimation in queues.
 """
 
 import runpy
@@ -27,16 +27,24 @@ from matplotlib import pyplot as plt, cm, ticker as mtick
 from Python.lib.utils.basic import aggregation_bygroups, is_scalar, get_current_datetime_as_string, get_datetime_from_string
 import Python.lib.utils.plotting as plotting
 
+from Python.lib.agents.learners import LearnerTypes
 from Python.lib.agents.learners.continuing.fv import LeaFV
-from Python.lib.agents.queues import AgeQueue, PolicyTypes as QueuePolicyTypes, LearnerTypes
+
+from Python.lib.agents.policies import PolicyTypes
 from Python.lib.agents.policies.job_assignment import PolJobAssignmentProbabilistic
 from Python.lib.agents.policies.parameterized import PolQueueTwoActionsLinearStep
-import Python.lib.estimators as estimators
-import Python.lib.simulators as simulators
+
+from Python.lib.agents.queues import AgeQueue
+
 import Python.lib.queues as queues  # The keyword `queues` is used in the code
 from Python.lib.queues import Event
 from Python.lib.environments.queues import EnvQueueSingleBufferWithJobClasses, rewardOnJobRejection_ExponentialCost
+
+import Python.lib.estimators as estimators
 from Python.lib.estimators import FinalizeType, plot_curve_estimates
+
+from Python.lib.simulators.queues import estimate_blocking_fv, estimate_blocking_mc
+
 from Python.lib.utils.computing import get_server_loads, compute_job_rates_by_server, compute_blocking_probability_birth_death_process
 
 DEFAULT_NUMPY_PRECISION = np.get_printoptions().get('precision')
@@ -470,7 +478,8 @@ class Test_QB_Particles(unittest.TestCase):
         Arguments:
         estimation_process: (opt) Process
             The estimation process that should be used to estimate the blocking probability, whether the estimator
-            defined in estimators.py (Process.Estimators) or the estimator defined in simulators.py (Process.Simulators).
+            defined in estimators.py (Process.Estimators) or the estimator defined in simulators/queues.py
+            (Process.Simulators).
             default: Process.Estimators
 
         nparticles: (opt) list
@@ -511,7 +520,7 @@ class Test_QB_Particles(unittest.TestCase):
                                                        reward_func=rewardOnJobRejection_ExponentialCost,
                                                        rewards_accept_by_job_class=rewards_accept_by_job_class)
         # Define the agent acting on the queue environment
-        policies = dict({QueuePolicyTypes.ACCEPT: PolQueueTwoActionsLinearStep(env_queue, float(K-1)), QueuePolicyTypes.ASSIGN: policy_assign})
+        policies = dict({PolicyTypes.ACCEPT: PolQueueTwoActionsLinearStep(env_queue, float(K-1)), PolicyTypes.ASSIGN: policy_assign})
         learners = dict({LearnerTypes.V: LeaFV(env_queue, gamma=1.0),
                          LearnerTypes.Q: None,
                          LearnerTypes.P: None})
@@ -624,7 +633,7 @@ class Test_QB_Particles(unittest.TestCase):
                     proba_blocking_fv, expected_reward, probas_stationary, \
                         expected_absorption_time, n_absorption_time_observations, \
                             time_last_absorption, time_end_simulation_et, max_survival_time, time_end_simulation_fv, \
-                                n_events_et, n_events_fv_only = simulators.estimate_blocking_fv(envs_queue, agent,
+                                n_events_et, n_events_fv_only = estimate_blocking_fv(envs_queue, agent,
                                                                                                 dict_params_simul, dict_params_info)
                     integral = np.nan
                     n_events_fv = n_events_et + n_events_fv_only
@@ -649,7 +658,7 @@ class Test_QB_Particles(unittest.TestCase):
                         dict_params_simul['T'] = n_events_fv
                         proba_blocking_mc, expected_reward_mc, probas_stationary, \
                             expected_return_time_mc, n_return_observations, \
-                                n_events_mc = simulators.estimate_blocking_mc(env_queue, agent, dict_params_simul, dict_params_info=dict_params_info)
+                                n_events_mc = estimate_blocking_mc(env_queue, agent, dict_params_simul, dict_params_info=dict_params_info)
                         time_mc = np.nan
 
                     # Check comparability in terms of # events in each simulation (MC vs. FV)
@@ -815,7 +824,7 @@ class Test_QB_Particles(unittest.TestCase):
             # Create the queue environment that is simulated below
             env_queue = EnvQueueSingleBufferWithJobClasses(queue, job_class_rates=self.job_class_rates, reward_func=rewardOnJobRejection_ExponentialCost, rewards_accept_by_job_class=None) #[1] * len(self.job_class_rates))
             # Define the agent acting on the queue environment
-            policies = dict({QueuePolicyTypes.ACCEPT: None, QueuePolicyTypes.ASSIGN: self.policy_assign})
+            policies = dict({PolicyTypes.ACCEPT: None, PolicyTypes.ASSIGN: self.policy_assign})
             learners = None
             agent = AgeQueue(queue, policies, learners)
 
@@ -1279,7 +1288,7 @@ def test_mc_implementation(nservers, K, paramsfile, nmeantimes=None, repmax=None
                                                    reward_func=rewardOnJobRejection_ExponentialCost,
                                                    rewards_accept_by_job_class=rewards_accept_by_job_class)
     # Define the agent acting on the queue environment
-    policies = dict({QueuePolicyTypes.ACCEPT: None, QueuePolicyTypes.ASSIGN: policy_assign})
+    policies = dict({PolicyTypes.ACCEPT: None, PolicyTypes.ASSIGN: policy_assign})
     learners = None
     agent = AgeQueue(queue, policies, learners)
 
@@ -2072,7 +2081,7 @@ if __name__ == "__main__":
         sys.argv += [2]       # Number of replications
         sys.argv += [1]       # Test number to run: only one is accepted
     if len(sys.argv) == 8:    # Only the 6 required arguments are given by the user (recall that the first argument is the program name)
-        sys.argv += ['None']  # T: number of arrival events to consider in the estimation of Pr(T>t) and E(T) in the FV approach. When 'None' it is chosen as 200*N.
+        sys.argv += ['None']  # T: number of arrival events to consider in the estimation of Pr(T>t) and E(T) in the FV approach. When 'None' it is chosen as 50*N.
         sys.argv += [2]       # Number of methods to run: 1 (only FV), 2 (FV & MC)
         sys.argv += ["nosave"]  # Either "nosave" or anything else for saving the results and log
     print("Parsed user arguments: {}".format(sys.argv))
@@ -2088,7 +2097,7 @@ if __name__ == "__main__":
     tests2run = [int(v) for v in [sys.argv[7]]] # NOTE: It's important to enclose sys.argv[5] in brackets because o.w., from the command line, a number with more than one digit is interpreted as a multi-element list!! (e.g. 10 is interpreted as a list with elements [1, 0])
     T = sys.argv[8]
     if T.lower() == 'none':
-        T = 200 * N
+        T = 50 * N
     run_mc = int(sys.argv[9]) == 2
     save_results = sys.argv[10] != "nosave"
 

@@ -28,13 +28,21 @@ class ResetMethod(Enum):
     RANDOM_UNIFORM = 2
     RANDOM_NORMAL = 3
 
-@unique  # Unique enumeration values (i.e. on the RHS of the equal sign)
+@unique
 class AlphaUpdateType(Enum):
     FIRST_STATE_VISIT = 1
     EVERY_STATE_VISIT = 2
 
+@unique
+class LearnerTypes(Enum):
+    "Types of learners that can be defined in learner classes"
+    V = 'state_value'
+    Q = 'state_action_value'
+    P = 'policy'
+
 # Identity function: used to define the default transformation function of the counter (n) that adjusts alpha
 identity = lambda x: x
+
 
 class GenericLearner:
     """

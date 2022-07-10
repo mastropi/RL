@@ -9,12 +9,10 @@ Created on Sat Mar  7 13:40:41 2020
 import runpy
 runpy.run_path('../../setup.py')
 
-import os
 import copy
 import numpy as np
 import unittest
 from unittest_data_provider import data_provider
-#from gym.utils import seeding
 from matplotlib import cm
 import matplotlib.pyplot as plt
 from mpl_toolkits import mplot3d    # For 3D plots (using ax = fig.axes(project='3d'), so the module is NOT explicitly mentioned!
@@ -28,7 +26,7 @@ import Python.lib.agents as agents
 from Python.lib.agents.policies import random_walks
 import Python.lib.agents.learners.episodic.discrete.td as td
 from Python.lib.agents.learners.episodic.discrete import AlphaUpdateType
-import Python.lib.simulators as simulators
+from Python.lib.simulators.discrete import Simulator as DiscreteSimulator
 from Python.lib.utils import computing
 
 import test_utils
@@ -43,6 +41,7 @@ import test_utils
 #from Python.lib.agents.policies.random_walks import PolRandomWalkDiscrete
 
 from Python.lib.environments import EnvironmentDiscrete
+
 
 class Test_TD_Lambda_GW1D(unittest.TestCase, test_utils.EpisodeSimulation):
 
@@ -135,7 +134,7 @@ class Test_TD_Lambda_GW1D(unittest.TestCase, test_utils.EpisodeSimulation):
         agent_rw_tdlambda = agents.GenericAgent(self.policy_rw, learner_tdlambda)
 
         # Simulation
-        sim = simulators.Simulator(self.env, agent_rw_tdlambda, debug=False)
+        sim = DiscreteSimulator(self.env, agent_rw_tdlambda, debug=False)
         _, _, RMSE_by_episode, MAPE_by_episode, learning_info = sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
                                                                      compute_rmse=True, state_observe=15,
                                                                      verbose=True, verbose_period=100,
@@ -160,7 +159,7 @@ class Test_TD_Lambda_GW1D(unittest.TestCase, test_utils.EpisodeSimulation):
         agent_rw_tdlambda = agents.GenericAgent(self.policy_rw, learner_tdlambda)
 
         # Simulation
-        sim = simulators.Simulator(self.env, agent_rw_tdlambda, debug=False)
+        sim = DiscreteSimulator(self.env, agent_rw_tdlambda, debug=False)
         _, _, RMSE_by_episode, MAPE_by_episode, learning_info = sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
                                                                      compute_rmse=True, state_observe=19,
                                                                      verbose=True, verbose_period=100,
@@ -206,7 +205,7 @@ class Test_TD_Lambda_GW1D(unittest.TestCase, test_utils.EpisodeSimulation):
         agent_rw_tdlambda = agents.GenericAgent(self.policy_rw, learner_tdlambda)
 
         # Simulation
-        sim = simulators.Simulator(self.env, agent_rw_tdlambda, debug=False)
+        sim = DiscreteSimulator(self.env, agent_rw_tdlambda, debug=False)
 
         # First run
         _, _, RMSE_by_episode, MAPE_by_episode, _ = sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
@@ -255,7 +254,7 @@ class Test_TD_Lambda_GW1D(unittest.TestCase, test_utils.EpisodeSimulation):
         agent_rw_tdlambda_adaptive = agents.GenericAgent(self.policy_rw, learner_tdlambda_adaptive)
 
         # Simulation        
-        sim = simulators.Simulator(self.env, agent_rw_tdlambda_adaptive, debug=False)
+        sim = DiscreteSimulator(self.env, agent_rw_tdlambda_adaptive, debug=False)
         _, _, RMSE_by_episode, MAPE_by_episode, learning_info = sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
                                                                      compute_rmse=True,
                                                                      verbose=True, verbose_period=100,
@@ -347,7 +346,7 @@ class Test_TD_Lambda_GW1D_OneTerminalState(unittest.TestCase, test_utils.Episode
         agent_rw_tdlambda_adaptive = agents.GenericAgent(self.policy_rw, learner_tdlambda_adaptive)
 
         # Simulation
-        sim = simulators.Simulator(self.env, agent_rw_tdlambda_adaptive, debug=False)
+        sim = DiscreteSimulator(self.env, agent_rw_tdlambda_adaptive, debug=False)
         _, _, _, _, learning_info = sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
                                                                      compute_rmse=False,
                                                                      verbose=True, verbose_period=100,
@@ -437,7 +436,7 @@ class Test_TD_Lambda_GW2D(unittest.TestCase, test_utils.EpisodeSimulation):
         agent_rw_tdlambda = agents.GenericAgent(self.policy_rw_env, learner_tdlambda)
 
         # Simulation
-        sim = simulators.Simulator(self.env, agent_rw_tdlambda, debug=False)
+        sim = DiscreteSimulator(self.env, agent_rw_tdlambda, debug=False)
         _, _, _, _, learning_info = sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
                                          compute_rmse=False, state_observe=0,
                                          verbose=True, verbose_period=max(1, int(self.nepisodes/10)),
@@ -501,7 +500,7 @@ class Test_TD_Lambda_GW2D(unittest.TestCase, test_utils.EpisodeSimulation):
         agent_rw_tdlambda = agents.GenericAgent(self.policy_rw_envlogn, learner_tdlambda)
 
         # Simulation
-        sim = simulators.Simulator(self.env_logn_rewards, agent_rw_tdlambda, debug=False)
+        sim = DiscreteSimulator(self.env_logn_rewards, agent_rw_tdlambda, debug=False)
         _, _, _, _, learning_info = sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
                                          compute_rmse=False, state_observe=0,
                                          verbose=True, verbose_period=max(1, int(self.nepisodes/10)),
@@ -573,7 +572,7 @@ class Test_TD_Lambda_GW2D(unittest.TestCase, test_utils.EpisodeSimulation):
         agent_rw_tdlambda_adaptive = agents.GenericAgent(self.policy_rw_env, learner_tdlambda_adaptive)
 
         # Simulation        
-        sim = simulators.Simulator(self.env, agent_rw_tdlambda_adaptive, debug=False)
+        sim = DiscreteSimulator(self.env, agent_rw_tdlambda_adaptive, debug=False)
         _, _, _, _, learning_info = sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
                                          compute_rmse=False,
                                          verbose=True, verbose_period=max(1, int(self.nepisodes/10)),
@@ -643,7 +642,7 @@ class Test_TD_Lambda_GW2D(unittest.TestCase, test_utils.EpisodeSimulation):
         agent_rw_tdlambda_adaptive = agents.GenericAgent(self.policy_rw_envlogn, learner_tdlambda_adaptive)
 
         # Simulation        
-        sim = simulators.Simulator(self.env_logn_rewards, agent_rw_tdlambda_adaptive, debug=False)
+        sim = DiscreteSimulator(self.env_logn_rewards, agent_rw_tdlambda_adaptive, debug=False)
         _, _, _, _, learning_info = sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
                                          compute_rmse=False,
                                          verbose=True, verbose_period=max(1, int(self.nepisodes/10)),
@@ -882,7 +881,7 @@ class Test_TD_Lambda_MountainCar(unittest.TestCase, test_utils.EpisodeSimulation
             print("Positions: {}".format(self.env.get_positions()))
             print("Velocities: {}".format(self.env.get_velocities()))
             idx_start_state = None
-        sim = simulators.Simulator(self.env, agent_rw_tdlambda, debug=False)
+        sim = DiscreteSimulator(self.env, agent_rw_tdlambda, debug=False)
 
         time_start = timer()
         _, _, _, _, learning_info = sim.run(nepisodes=self.nepisodes, max_time_steps=self.max_time_steps,

@@ -14,19 +14,9 @@ if __name__ == "__main__":
 
 from Python.lib.environments.queues import ActionTypes
 from Python.lib.agents import GenericAgent
+from Python.lib.agents.learners import LearnerTypes
+from Python.lib.agents.policies import PolicyTypes
 from Python.lib.agents.policies.job_assignment import PolJobAssignmentProbabilistic
-
-
-@unique
-class PolicyTypes(Enum):
-    ACCEPT = 'accept'
-    ASSIGN = 'assign'
-
-@unique
-class LearnerTypes(Enum):
-    V = 'state_value'
-    Q = 'state_action_value'
-    P = 'policy'
 
 
 class AgeQueue(GenericAgent):

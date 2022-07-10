@@ -17,11 +17,12 @@ import unittest
 from unittest_data_provider import data_provider
 
 from Python.lib import estimators
-from Python.lib import simulators
-from Python.lib.agents.learners import ResetMethod
+from Python.lib.simulators.queues import estimate_blocking_fv
+from Python.lib.agents.learners import LearnerTypes, ResetMethod
 from Python.lib.agents.learners.continuing.fv import LeaFV
+from Python.lib.agents.policies import PolicyTypes
 from Python.lib.agents.policies.parameterized import PolQueueTwoActionsLinearStep
-from Python.lib.agents.queues import AgeQueue, PolicyTypes as QueuePolicyTypes, LearnerTypes
+from Python.lib.agents.queues import AgeQueue
 from Python.lib.environments import gridworlds, mountaincars, queues
 from Python.lib.utils.basic import get_current_datetime_as_string, measure_exec_time
 
@@ -54,7 +55,7 @@ class Test_EstimatorValueFunctionOfflineDeterministicNextState(unittest.TestCase
         plt.title("1D gridworld: Estimated value function V(s)")
 
     def test_estimator_gridworld_oneterminal_random_walk_onecase(self):
-        max_iter = 10000
+        max_iter = 100
         estimator = estimators.EstimatorValueFunctionOfflineDeterministicNextState(self.env_grid_oneterminal, gamma=1.0)
         niter, mean_deltaV_abs, max_deltaV_abs, max_deltaV_rel_abs = estimator.estimate_state_values_random_walk(synchronous=True, max_delta=1E-1, max_delta_rel=np.nan, max_iter=max_iter)
 
@@ -70,7 +71,7 @@ class Test_EstimatorValueFunctionOfflineDeterministicNextState(unittest.TestCase
         plt.title("1D-gridworld with one terminal state: Estimated value function V(s)")
 
     def test_estimator_mountaincar_random_walk_onecase(self):
-        max_iter = 10000
+        max_iter = 100
         estimator = estimators.EstimatorValueFunctionOfflineDeterministicNextState(self.env_mountain, gamma=1.0)
         niter, mean_deltaV_abs, max_deltaV_abs, max_deltaV_rel_abs = \
             estimator.estimate_state_values_random_walk(synchronous=True, max_delta=np.nan, max_delta_rel=1E-5, max_iter=max_iter,
@@ -168,9 +169,9 @@ class Test_EstimatorQueueBlockingFlemingViot(unittest.TestCase):
         # The agent blocks an incoming job when the buffer size of the queue is at its capacity K.
         # This is achieved by setting the parameter theta of the parameterized linear step acceptance policy
         # to the integer value K-1.
-        policies = dict({QueuePolicyTypes.ACCEPT: PolQueueTwoActionsLinearStep(env_queue,
+        policies = dict({PolicyTypes.ACCEPT: PolQueueTwoActionsLinearStep(env_queue,
                                                                                float(K-1)),
-                         QueuePolicyTypes.ASSIGN: None})
+                         PolicyTypes.ASSIGN: None})
         learners = dict({LearnerTypes.V: LeaFV(env_queue, gamma=1.0),
                          LearnerTypes.Q: None,
                          LearnerTypes.P: None})
@@ -183,8 +184,8 @@ class Test_EstimatorQueueBlockingFlemingViot(unittest.TestCase):
         dict_params_info = dict()
 
         # Run the simulation!
-        return simulators.estimate_blocking_fv( envs_queue, agent_accept_reject,
-                                                dict_params_simul, dict_params_info)
+        return estimate_blocking_fv(envs_queue, agent_accept_reject,
+                                    dict_params_simul, dict_params_info)
 
     #--------------------- TESTS OF MC: traditional MC (no lambda involved) ----------------------#
     #-------- DATA -------

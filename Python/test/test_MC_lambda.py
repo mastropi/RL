@@ -22,7 +22,7 @@ import Python.lib.agents as agents
 from Python.lib.agents.learners import ResetMethod
 from Python.lib.agents.learners.episodic.discrete import mc
 from Python.lib.agents.learners.episodic.discrete import AlphaUpdateType
-import Python.lib.simulators as simulators
+from Python.lib.simulators.discrete import Simulator as DiscreteSimulator
 from Python.lib.utils import computing
 
 import test_utils
@@ -103,7 +103,7 @@ class Test_MC_Lambda_1DGridworld(unittest.TestCase, test_utils.EpisodeSimulation
                                           learner_type=mc.LearnerType.MC,
                                           debug=False)
         agent_rw_mc = agents.GenericAgent(self.policy_rw, learner_mclambda)
-        sim = simulators.Simulator(self.env, agent_rw_mc, debug=False)
+        sim = DiscreteSimulator(self.env, agent_rw_mc, debug=False)
         _, _, RMSE_by_episode, MAPE_by_episode, learning_info = \
                                             sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
                                                     compute_rmse=True, state_observe=10,
@@ -130,7 +130,7 @@ class Test_MC_Lambda_1DGridworld(unittest.TestCase, test_utils.EpisodeSimulation
         agent_rw_mclambda = agents.GenericAgent(self.policy_rw, learner_mclambda)
 
         # Simulation
-        sim = simulators.Simulator(self.env, agent_rw_mclambda, debug=False)
+        sim = DiscreteSimulator(self.env, agent_rw_mclambda, debug=False)
         _, _, RMSE_by_episode, MAPE_by_episode, learning_info = \
                                             sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
                                                     compute_rmse=True, state_observe=10,
@@ -167,7 +167,7 @@ class Test_MC_Lambda_1DGridworld(unittest.TestCase, test_utils.EpisodeSimulation
         agent_rw_mclambda = agents.GenericAgent(self.policy_rw, learner_mclambda)
 
         # Simulation
-        sim = simulators.Simulator(self.env, agent_rw_mclambda, debug=False)
+        sim = DiscreteSimulator(self.env, agent_rw_mclambda, debug=False)
 
         # First run
         _, _, RMSE_by_episode, MAPE_by_episode, _ = sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
@@ -236,7 +236,7 @@ class Test_MC_Lambda_1DGridworld(unittest.TestCase, test_utils.EpisodeSimulation
                                           learner_type=mc.LearnerType.LAMBDA_RETURN,
                                           debug=False)
         agent_rw_mc = agents.GenericAgent(self.policy_rw, learner_mclambda)
-        sim = simulators.Simulator(self.env, agent_rw_mc, debug=False)
+        sim = DiscreteSimulator(self.env, agent_rw_mc, debug=False)
         _, _, RMSE_by_episode, MAPE_by_episode, learning_info = \
                                             sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
                                                     compute_rmse=True, state_observe=10,
@@ -264,7 +264,7 @@ class Test_MC_Lambda_1DGridworld(unittest.TestCase, test_utils.EpisodeSimulation
         agent_rw_mclambda = agents.GenericAgent(self.policy_rw, learner_mclambda)
 
         # Simulation
-        sim = simulators.Simulator(self.env, agent_rw_mclambda, debug=False)
+        sim = DiscreteSimulator(self.env, agent_rw_mclambda, debug=False)
         _, _, RMSE_by_episode, MAPE_by_episode, learning_info = \
                                             sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
                                                     compute_rmse=True, state_observe=10,
@@ -301,7 +301,7 @@ class Test_MC_Lambda_1DGridworld(unittest.TestCase, test_utils.EpisodeSimulation
         agent_rw_mclambda_adaptive = agents.GenericAgent(self.policy_rw, learner_mclambda_adaptive)
 
         # Simulation
-        sim = simulators.Simulator(self.env, agent_rw_mclambda_adaptive, debug=False)
+        sim = DiscreteSimulator(self.env, agent_rw_mclambda_adaptive, debug=False)
         _, _, RMSE_by_episode, MAPE_by_episode, learning_info = sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
                                                                      compute_rmse=True, state_observe=10,
                                                                      verbose=True, verbose_period=100,
@@ -394,7 +394,7 @@ class Test_MC_Lambda_MountainCar(unittest.TestCase, test_utils.EpisodeSimulation
             print("Velocities ({}): {}".format(len(self.env.get_velocities()), self.env.get_velocities()))
             print("Goal is reached at position: {}".format(self.env.goal_position))
             idx_start_state = None
-        sim = simulators.Simulator(self.env, agent_rw_mc, debug=False)
+        sim = DiscreteSimulator(self.env, agent_rw_mc, debug=False)
 
         time_start = timer()
         _, _, _, _, learning_info = sim.run(nepisodes=self.nepisodes, max_time_steps=self.max_time_steps,
@@ -531,8 +531,8 @@ class Test_MC_Lambda_MountainCar(unittest.TestCase, test_utils.EpisodeSimulation
             print("Positions: {}".format(self.env.get_positions()))
             print("Velocities: {}".format(self.env.get_velocities()))
             idx_start_state = None
-        sim_mc = simulators.Simulator(self.env, agent_rw_mc, debug=False)
-        sim_lambda_return = simulators.Simulator(self.env, agent_rw_lambda_return, debug=False)
+        sim_mc = DiscreteSimulator(self.env, agent_rw_mc, debug=False)
+        sim_lambda_return = DiscreteSimulator(self.env, agent_rw_lambda_return, debug=False)
 
         # MC execution
         time_start = timer()

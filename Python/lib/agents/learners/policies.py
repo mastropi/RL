@@ -743,10 +743,12 @@ class LeaPolicyGradient(GenericLearner):
 
 if __name__ == "__main__":
     from Python.lib.environments.queues import EnvQueueSingleBufferWithJobClasses, rewardOnJobRejection_ExponentialCost
+    from Python.lib.agents.learners import LearnerTypes
     from Python.lib.agents.learners.continuing.mc import LeaMC
     from Python.lib.agents.learners.policies import LeaPolicyGradient
+    from Python.lib.agents.policies import PolicyTypes
     from Python.lib.agents.policies.parameterized import PolQueueTwoActionsLinearStep
-    from Python.lib.agents.queues import AgeQueue, PolicyTypes, LearnerTypes
+    from Python.lib.agents.queues import AgeQueue
     from Python.lib.queues import QueueMM
     from Python.lib.simulators import SimulatorQueue
 
