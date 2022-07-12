@@ -1,0 +1,31 @@
+Performance analysis of Fleming-Viot estimation of blocking probability
+-----------------------------------------------------------------------
+Created: 01-Jun-2022
+Author: Daniel Mastropietro
+
+
+Based on simulators.py
+======================
+Possible places that could be time consuming:
+(They are numbered as I thought of them)
+P1) merge_proba_survival_and_phi(): Each column of the data frame being merged (e.g. 'P(T>t)') is converted to a list. This conversion might take time.
+Solution: create or modify the merge functions (e.g. merge_values_in_time()) to work on data frame columns directly.
+
+P2) basic.merge_values_in_time() could be taking more time than it should...
+
+P3) Assertions spread here and there? Ex: basic.merge_values_in_time() has one assertion at the end that compares two lists! (this may take long)
+
+P4) [DONE-2022/07/01 (around) The implementation was changed so that times are stored as they are observed and sorted only at the end of the function that stores the survival probabilities.] basic.insort() could be time consuming because it inserts a value in the middle of a list.
+
+P5) SimulatorQueue: a copy of N queue environments (self.envs) is created and stored in the object. Could this create inefficiencies because of too much memory used?
+R: I don't think this is a problem.
+
+
+Possible improvements:
+1) [DONE-2022/07/01 (around)] merge_proba_survival_and_phi(): before merging Phi(t, bs) with P(T>t) filter the Phi(t, bs) column to the records where there is a change in Phi(t, bs). Currently, this column has one record per time at which there is a change in the state of ANY particle. But most of the time, a change in one of the particle will NOT change the value of Phi(t, bs) (because the latter only changes when the number of particles at buffer size = bs changes! (probably this is an important difference with the implementation in estimators.py...?
+IN FACT, this should be the case, as in estimators.py we see the following call to merge_values_in_time() in estimate_proba_survival_and_blocking_conditional():
+	merge_values_in_time(
+		list(self.proba_survival_given_activation['t']),
+		list(self.proba_survival_given_activation['P(T>t)']),
+		self.sbu, self.counts_blocked, unique=False)
+THAT IS, the information on Phi(t,K) is stored in the self.sbu and self.counts_blocked lists whose length is equal to the moments where there is a change in the number of blocked particles!

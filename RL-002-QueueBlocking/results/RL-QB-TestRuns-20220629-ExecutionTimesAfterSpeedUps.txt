@@ -1,0 +1,433 @@
+Monitoring the execution times of the FV vs. MC estimation of the blocking probability after different speed ups performed on the estimation code defined at simulators.py
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+DM-2022/06/29
+
+The speed ups performed are the following:
+- SPEED UP #1: [BIG IMPACT] Reduce the number of time steps stored in Phi(t,bs), from ALL time steps down to just those time steps where Phi(t,bs) changes.
+- SPEED UP #2: [SOME IMPACT] Compute the empirical mean giving Phi(t,bs) as a recursive UPDATE of the previous empirical mean value.
+- SPEED UP #3: [ALMOST NO IMPACT] Compute the integral from np.sum() instead of FOR loop.
+- SPEED UP #4: [SOME IMPACT] Estimate only the blocking probability Pr(K), NOT Pr(K-1) as well. This affects both the FV and the MC estimation.
+
+IMPORTANT: Execution times are measured by simply the difference between the end time and the start time. This may NOT be the best way to measure execution times as it may depend on other resources used by the computer. We should measure the CPU time, perhaps using time.process_time: https://docs.python.org/3/library/time.html#time.process_time
+
+
+
+NO SPEED UP (2022/06/25)
+===========
+170 sec vs. 35 sec => 5x
+
+
+2022-06-25 16:18:13
+Execution parameters:
+nservers=1
+Type of analysis: analysis_type=N
+Capacity K=40
+# particles N=400
+Activation size J=20
+Replications=2
+tests2run=[1]
+# arrival events T=80000
+run_mc=True
+save_results=False
+System: # servers=1, K=40, rhos=[0.7], buffer_size_activation=20, #burn-in absorption cycles=5
+
+*** Running simulation for nparticles=400 (1 of 1) on 2 replications...
+	Replication 1 of 2...
+	--> Running Fleming-Viot estimation... 2022-06-25 16:18:13
++++ Execution time for run_simulation_mc: 30.4 sec, 30408.02 msec
++++ Execution time for merge_proba_survival_and_phi: 0.0 sec, 42.83 msec
++++ Execution time for estimate_proba_stationary: 43.7 sec, 43667.64 msec
++++ Execution time for estimate_stationary_probability: 43.7 sec, 43715.80 msec
++++ Execution time for run_simulation_fv: 142.2 sec, 142203.35 msec
+	--> Running Monte-Carlo estimation... 2022-06-25 16:21:06
++++ Execution time for run_simulation_mc: 34.3 sec, 34317.30 msec
+Total execution time FV & MC: 207.6 sec, 3.5 min
+Computing TRUE blocking probability for nservers=1, K=40, rhos=[0.7]...
+	P(K) by MC: 0.000000% (#events 174630)
+	P(K) by FV: 0.000003%, E(T) = 3719.5 (simulation time for E(T) = 115098.9 (160016 steps) (complete cycles span 71.1%), max survival time = 21.9, #events = 160016 (ET) + 14614 (FV) = 174630)
+	True P(K): 0.000019%
+	Replication 2 of 2...
+	--> Running Fleming-Viot estimation... 2022-06-25 16:21:41
++++ Execution time for run_simulation_mc: 31.3 sec, 31334.92 msec
++++ Execution time for run_simulation_fv: 75.3 sec, 75314.21 msec
+	--> Running Monte-Carlo estimation... 2022-06-25 16:23:28
++++ Execution time for run_simulation_mc: 33.1 sec, 33068.61 msec
+Total execution time FV & MC: 140.4 sec, 2.3 min
+	P(K) by MC: 0.000000% (#events 172153)
+	P(K) by FV: 0.000000%, E(T) = 2827.0 (simulation time for E(T) = 114862.4 (160012 steps) (complete cycles span 88.6%), max survival time = 17.6, #events = 160012 (ET) + 12141 (FV) = 172153)
+	True P(K): 0.000019%
+
+
+
+
+AFTER SPEED UP #1
+=================
+120 sec vs. 35 sec => 3.5x
+
+2022-06-25 16:44:05
+Execution parameters:
+nservers=1
+Type of analysis: analysis_type=N
+Capacity K=40
+# particles N=400
+Activation size J=20
+Replications=2
+tests2run=[1]
+# arrival events T=80000
+run_mc=True
+save_results=False
+System: # servers=1, K=40, rhos=[0.7], buffer_size_activation=20, #burn-in absorption cycles=5
+
+*** Running simulation for nparticles=400 (1 of 1) on 2 replications...
+	Replication 1 of 2...
+	--> Running Fleming-Viot estimation... 2022-06-25 16:44:05
++++ Execution time for run_simulation_mc: 31.9 sec, 31877.49 msec
++++ Execution time for merge_proba_survival_and_phi: 0.0 sec, 0.48 msec
++++ Execution time for estimate_proba_stationary: 0.0 sec, 1.56 msec
++++ Execution time for merge_proba_survival_and_phi: 0.0 sec, 0.36 msec
++++ Execution time for estimate_proba_stationary: 0.0 sec, 1.36 msec
++++ Execution time for estimate_stationary_probability: 0.0 sec, 3.92 msec
++++ Execution time for run_simulation_fv: 93.6 sec, 93604.08 msec
+	--> Running Monte-Carlo estimation... 2022-06-25 16:46:10
++++ Execution time for run_simulation_mc: 34.8 sec, 34780.17 msec
+Total execution time FV & MC: 160.9 sec, 2.7 min
+Computing TRUE blocking probability for nservers=1, K=40, rhos=[0.7]...
+	P(K) by MC: 0.000000% (#events 174630)
+	P(K) by FV: 0.000003%, E(T) = 3719.5 (simulation time for E(T) = 115098.9 (160016 steps) (complete cycles span 71.1%), max survival time = 21.9, #events = 160016 (ET) + 14614 (FV) = 174630)
+	True P(K): 0.000019%
+	Replication 2 of 2...
+	--> Running Fleming-Viot estimation... 2022-06-25 16:46:46
++++ Execution time for run_simulation_mc: 32.5 sec, 32493.73 msec
++++ Execution time for estimate_stationary_probability: 0.0 sec, 0.06 msec
++++ Execution time for run_simulation_fv: 88.4 sec, 88416.48 msec
+	--> Running Monte-Carlo estimation... 2022-06-25 16:48:47
++++ Execution time for run_simulation_mc: 34.2 sec, 34186.51 msec
+Total execution time FV & MC: 155.7 sec, 2.6 min
+	P(K) by MC: 0.000000% (#events 172153)
+	P(K) by FV: 0.000000%, E(T) = 2827.0 (simulation time for E(T) = 114862.4 (160012 steps) (complete cycles span 88.6%), max survival time = 17.6, #events = 160012 (ET) + 12141 (FV) = 172153)
+	True P(K): 0.000019%
+
+
+
+AFTER SPEED UP #2 (2022/06/27)
+=================
+140 sec vs. 50 sec => 3x
+
+2022-06-27 23:14:23
+Execution parameters:
+nservers=1
+Type of analysis: analysis_type=N
+Capacity K=40
+# particles N=400
+Activation size J=20
+Replications=2
+tests2run=[1]
+# arrival events T=80000
+run_mc=True
+save_results=False
+System: # servers=1, K=40, rhos=[0.7], buffer_size_activation=20, #burn-in absorption cycles=5
+
+*** Running simulation for nparticles=400 (1 of 1) on 2 replications...
+	Replication 1 of 2...
+	--> Running Fleming-Viot estimation... 2022-06-27 23:14:23
++++ Execution time for run_simulation_mc: 49.0 sec, 49004.86 msec
++++ Execution time for merge_proba_survival_and_phi: 0.0 sec, 0.49 msec
++++ Execution time for estimate_proba_stationary: 0.0 sec, 1.58 msec
++++ Execution time for merge_proba_survival_and_phi: 0.0 sec, 0.46 msec
++++ Execution time for estimate_proba_stationary: 0.0 sec, 1.38 msec
++++ Execution time for estimate_stationary_probabilities: 0.0 sec, 4.10 msec
++++ Execution time for run_simulation_fv: 90.0 sec, 90034.20 msec
+	--> Running Monte-Carlo estimation... 2022-06-27 23:16:42
++++ Execution time for run_simulation_mc: 50.6 sec, 50585.58 msec
+Total execution time FV & MC: 190.8 sec, 3.2 min
+Computing TRUE blocking probability for nservers=1, K=40, rhos=[0.7]...
+	P(K) by MC: 0.000000% (#events 174630)
+	P(K) by FV: 0.000003%, E(T) = 3719.5 (simulation time for E(T) = 115098.9 (160016 steps) (complete cycles span 71.1%), max survival time = 21.9, #events = 160016 (ET) + 14614 (FV) = 174630)
+	True P(K): 0.000019%
+	Replication 2 of 2...
+	--> Running Fleming-Viot estimation... 2022-06-27 23:17:34
++++ Execution time for run_simulation_mc: 43.3 sec, 43320.97 msec
++++ Execution time for estimate_stationary_probabilities: 0.0 sec, 0.05 msec
++++ Execution time for run_simulation_fv: 67.6 sec, 67573.36 msec
+	--> Running Monte-Carlo estimation... 2022-06-27 23:19:25
++++ Execution time for run_simulation_mc: 44.1 sec, 44105.40 msec
+Total execution time FV & MC: 155.9 sec, 2.6 min
+	P(K) by MC: 0.000000% (#events 172153)
+	P(K) by FV: 0.000000%, E(T) = 2827.0 (simulation time for E(T) = 114862.4 (160012 steps) (complete cycles span 88.6%), max survival time = 17.6, #events = 160012 (ET) + 12141 (FV) = 172153)
+	True P(K): 0.000019%
+	
+
+
+AFTER SPEED UP #3 (2022/06/27)
+=================
+140 sec vs. 50 sec => 3x
+
+2022-06-27 23:58:57
+Execution parameters:
+nservers=1
+Type of analysis: analysis_type=N
+Capacity K=40
+# particles N=400
+Activation size J=20
+Replications=2
+tests2run=[1]
+# arrival events T=80000
+run_mc=True
+save_results=False
+System: # servers=1, K=40, rhos=[0.7], buffer_size_activation=20, #burn-in absorption cycles=5
+
+*** Running simulation for nparticles=400 (1 of 1) on 2 replications...
+	Replication 1 of 2...
+	--> Running Fleming-Viot estimation... 2022-06-27 23:58:57
++++ Execution time for run_simulation_mc: 58.5 sec, 58544.65 msec
++++ Execution time for merge_proba_survival_and_phi: 0.0 sec, 0.66 msec
++++ Execution time for estimate_proba_stationary: 0.1 sec, 61.30 msec
++++ Execution time for merge_proba_survival_and_phi: 0.0 sec, 0.46 msec
++++ Execution time for estimate_proba_stationary: 0.0 sec, 0.91 msec
++++ Execution time for estimate_stationary_probabilities: 0.1 sec, 63.53 msec
++++ Execution time for run_simulation_fv: 79.7 sec, 79659.40 msec
+	--> Running Monte-Carlo estimation... 2022-06-28 00:01:15
++++ Execution time for run_simulation_mc: 51.8 sec, 51791.01 msec
+Total execution time FV & MC: 190.9 sec, 3.2 min
+Computing TRUE blocking probability for nservers=1, K=40, rhos=[0.7]...
+	P(K) by MC: 0.000000% (#events 174630)
+	P(K) by FV: 0.000003%, E(T) = 3719.5 (simulation time for E(T) = 115098.9 (160016 steps) (complete cycles span 71.1%), max survival time = 21.9, #events = 160016 (ET) + 14614 (FV) = 174630)
+	True P(K): 0.000019%
+	Replication 2 of 2...
+	--> Running Fleming-Viot estimation... 2022-06-28 00:02:08
++++ Execution time for run_simulation_mc: 48.7 sec, 48688.62 msec
++++ Execution time for estimate_stationary_probabilities: 0.0 sec, 0.06 msec
++++ Execution time for run_simulation_fv: 75.7 sec, 75730.78 msec
+	--> Running Monte-Carlo estimation... 2022-06-28 00:04:12
++++ Execution time for run_simulation_mc: 48.3 sec, 48261.93 msec
+Total execution time FV & MC: 173.5 sec, 2.9 min
+	P(K) by MC: 0.000000% (#events 172153)
+	P(K) by FV: 0.000000%, E(T) = 2827.0 (simulation time for E(T) = 114862.4 (160012 steps) (complete cycles span 88.6%), max survival time = 17.6, #events = 160012 (ET) + 12141 (FV) = 172153)
+	True P(K): 0.000019%
+
+
+
+AFTER SPEED UP #4 (2022/06/29)
+=================
+Removed the computation of Pr(K) when not needed (i.e. when theta is integer)
+100 sec vs. 40 sec => 2.5x
+
+2022-06-29 16:57:56
+Execution parameters:
+nservers=1
+Type of analysis: analysis_type=N
+Capacity K=40
+# particles N=400
+Activation size J=20
+Replications=2
+tests2run=[1]
+# arrival events T=80000
+run_mc=True
+save_results=False
+System: # servers=1, K=40, rhos=[0.7], buffer_size_activation=20, #burn-in absorption cycles=5
+
+	--> Running Fleming-Viot estimation... 2022-06-29 16:57:56
++++ Execution time for run_simulation_mc: 0.0 hs = 0.6 min = 36.4 sec = 36446.06 msec
++++ Execution time for merge_proba_survival_and_phi: 0.0 hs = 0.0 min = 0.0 sec = 0.52 msec
++++ Execution time for estimate_proba_stationary: 0.0 hs = 0.0 min = 0.1 sec = 51.90 msec
++++ Execution time for estimate_stationary_probabilities: 0.0 hs = 0.0 min = 0.1 sec = 52.54 msec
++++ Execution time for run_simulation_fv: 0.0 hs = 1.1 min = 65.0 sec = 64982.46 msec
+	--> Running Monte-Carlo estimation... 2022-06-29 16:59:37
++++ Execution time for run_simulation_mc: 0.0 hs = 0.7 min = 42.5 sec = 42544.60 msec
+Total execution time FV & MC: 144.7 sec, 2.4 min
+Computing TRUE blocking probability for nservers=1, K=40, rhos=[0.7]...
+	P(K) by MC: 0.000000% (#events 174630)
+	P(K) by FV: 0.000003%, E(T) = 3719.5 (simulation time for E(T) = 115098.9 (160016 steps) (complete cycles span 71.1%), max survival time = 21.9, #events = 160016 (ET) + 14614 (FV) = 174630)
+	True P(K): 0.000019%
+	--> Running Fleming-Viot estimation... 2022-06-29 17:00:20
++++ Execution time for run_simulation_mc: 0.0 hs = 0.6 min = 37.8 sec = 37752.58 msec
++++ Execution time for estimate_stationary_probabilities: 0.0 hs = 0.0 min = 0.0 sec = 0.04 msec
++++ Execution time for run_simulation_fv: 0.0 hs = 0.8 min = 51.0 sec = 50994.15 msec
+	--> Running Monte-Carlo estimation... 2022-06-29 17:01:49
++++ Execution time for run_simulation_mc: 0.0 hs = 0.7 min = 40.9 sec = 40857.14 msec
+Total execution time FV & MC: 130.2 sec, 2.2 min
+	P(K) by MC: 0.000000% (#events 172153)
+	P(K) by FV: 0.000000%, E(T) = 2827.0 (simulation time for E(T) = 114862.4 (160012 steps) (complete cycles span 88.6%), max survival time = 17.6, #events = 160012 (ET) + 12141 (FV) = 172153)
+	True P(K): 0.000019%
+
+
+
+
+2022-06-29 18:21:43
+Execution parameters:
+nservers=1
+Type of analysis: analysis_type=N
+Capacity K=40
+# particles N=400
+Activation size J=20
+Replications=2
+tests2run=[1]
+# arrival events T=80000
+run_mc=True
+save_results=False
+System: # servers=1, K=40, rhos=[0.7], buffer_size_activation=20, #burn-in absorption cycles=5
+*** Running simulation for nparticles=400 (1 of 1) on 2 replications...
+	Replication 1 of 2...
+	--> Running Fleming-Viot estimation... 2022-06-29 18:21:43
++++ Execution time for run_simulation_mc: 0.0 hs = 0.6 min = 35.3 sec = 35265.62 msec
++++ Execution time for estimate_proba_stationary: 0.0 hs = 0.0 min = 0.0 sec = 46.88 msec
++++ Execution time for estimate_stationary_probabilities: 0.0 hs = 0.0 min = 0.0 sec = 46.88 msec
++++ Execution time for run_simulation_fv: 0.0 hs = 1.0 min = 59.5 sec = 59531.25 msec
+	--> Running Monte-Carlo estimation... 2022-06-29 18:23:19
++++ Execution time for run_simulation_mc: 0.0 hs = 0.7 min = 40.8 sec = 40828.12 msec
+Total execution time FV & MC: 138.1 sec, 2.3 min
+Computing TRUE blocking probability for nservers=1, K=40, rhos=[0.7]...
+	P(K) by MC: 0.000000% (#events 174630)
+	P(K) by FV: 0.000003%, E(T) = 3719.5 (simulation time for E(T) = 115098.9 (160016 steps) (complete cycles span 71.1%), max survival time = 21.9, #events = 160016 (ET) + 14614 (FV) = 174630)
+	True P(K): 0.000019%
+	Replication 2 of 2...
+	--> Running Fleming-Viot estimation... 2022-06-29 18:24:01
++++ Execution time for run_simulation_mc: 0.0 hs = 0.6 min = 35.2 sec = 35171.88 msec
++++ Execution time for run_simulation_fv: 0.0 hs = 0.9 min = 51.0 sec = 51046.88 msec
+	--> Running Monte-Carlo estimation... 2022-06-29 18:25:29
++++ Execution time for run_simulation_mc: 0.0 hs = 0.7 min = 39.4 sec = 39421.88 msec
+Total execution time FV & MC: 127.9 sec, 2.1 min
+	P(K) by MC: 0.000000% (#events 172153)
+	P(K) by FV: 0.000000%, E(T) = 2827.0 (simulation time for E(T) = 114862.4 (160012 steps) (complete cycles span 88.6%), max survival time = 17.6, #events = 160012 (ET) + 12141 (FV) = 172153)
+	True P(K): 0.000019%
+
+
+*********** N = 800
+7 min vs. 1.3 min => 5x (based on second simulation where the estimated probability by FV is > 0)
+
+2022-06-29 17:03:24
+Execution parameters:
+nservers=1
+Type of analysis: analysis_type=N
+Capacity K=40
+# particles N=800
+Activation size J=20
+Replications=2
+tests2run=[1]
+# arrival events T=160000
+run_mc=True
+save_results=False
+System: # servers=1, K=40, rhos=[0.7], buffer_size_activation=20, #burn-in absorption cycles=5
+*** Running simulation for nparticles=800 (1 of 1) on 2 replications...
+	Replication 1 of 2...
+	--> Running Fleming-Viot estimation... 2022-06-29 17:03:24
++++ Execution time for run_simulation_mc: 0.0 hs = 1.2 min = 73.8 sec = 73806.12 msec
++++ Execution time for estimate_stationary_probabilities: 0.0 hs = 0.0 min = 0.0 sec = 0.04 msec
++++ Execution time for run_simulation_fv: 0.1 hs = 4.5 min = 268.0 sec = 268016.85 msec
+	--> Running Monte-Carlo estimation... 2022-06-29 17:09:06
++++ Execution time for run_simulation_mc: 0.0 hs = 1.5 min = 89.5 sec = 89506.59 msec
+Total execution time FV & MC: 432.7 sec, 7.2 min
+Computing TRUE blocking probability for nservers=1, K=40, rhos=[0.7]...
+	P(K) by MC: 0.000000% (#events 349813)
+	P(K) by FV: 0.000000%, E(T) = 4834.6 (simulation time for E(T) = 229414.8 (320017 steps) (complete cycles span 90.6%), max survival time = 21.9, #events = 320017 (ET) + 29796 (FV) = 349813)
+	True P(K): 0.000019%
+	Replication 2 of 2...
+	--> Running Fleming-Viot estimation... 2022-06-29 17:10:37
++++ Execution time for run_simulation_mc: 0.0 hs = 1.2 min = 71.7 sec = 71728.25 msec
++++ Execution time for merge_proba_survival_and_phi: 0.0 hs = 0.0 min = 0.0 sec = 0.57 msec
++++ Execution time for estimate_proba_stationary: 0.0 hs = 0.0 min = 0.0 sec = 47.57 msec
++++ Execution time for estimate_stationary_probabilities: 0.0 hs = 0.0 min = 0.0 sec = 48.25 msec
++++ Execution time for run_simulation_fv: 0.1 hs = 5.8 min = 346.6 sec = 346603.68 msec
+	--> Running Monte-Carlo estimation... 2022-06-29 17:17:35
++++ Execution time for run_simulation_mc: 0.0 hs = 1.3 min = 78.3 sec = 78306.36 msec
+Total execution time FV & MC: 498.2 sec, 8.3 min
+	P(K) by MC: 0.000000% (#events 364249)
+	P(K) by FV: 0.000004%, E(T) = 3318.7 (simulation time for E(T) = 229169.5 (320018 steps) (complete cycles span 91.2%), max survival time = 32.6, #events = 320018 (ET) + 44231 (FV) = 364249)
+	True P(K): 0.000019%
+
+
+
+
+
+USING time.process_time() (i.e. CPU time):
+7.2 min vs 1.7 min => 4x
+
+2022-06-29 17:51:03
+Execution parameters:
+nservers=1
+Type of analysis: analysis_type=N
+Capacity K=40
+# particles N=800
+Activation size J=20
+Replications=2
+tests2run=[1]
+# arrival events T=160000
+run_mc=True
+save_results=False
+System: # servers=1, K=40, rhos=[0.7], buffer_size_activation=20, #burn-in absorption cycles=5
+*** Running simulation for nparticles=800 (1 of 1) on 2 replications...
+	Replication 1 of 2...
+	--> Running Fleming-Viot estimation... 2022-06-29 17:51:03
++++ Execution time for run_simulation_mc: 0.0 hs = 1.3 min = 76.1 sec = 76140.62 msec
++++ Execution time for run_simulation_fv: 0.1 hs = 4.1 min = 244.2 sec = 244156.25 msec
+	--> Running Monte-Carlo estimation... 2022-06-29 17:56:29
++++ Execution time for run_simulation_mc: 0.0 hs = 1.2 min = 72.5 sec = 72531.25 msec
+Total execution time FV & MC: 400.1 sec, 6.7 min
+Computing TRUE blocking probability for nservers=1, K=40, rhos=[0.7]...
+	P(K) by MC: 0.000000% (#events 349813)
+	P(K) by FV: 0.000000%, E(T) = 4834.6 (simulation time for E(T) = 229414.8 (320017 steps) (complete cycles span 90.6%), max survival time = 21.9, #events = 320017 (ET) + 29796 (FV) = 349813)
+	True P(K): 0.000019%
+	Replication 2 of 2...
+	--> Running Fleming-Viot estimation... 2022-06-29 17:57:43
++++ Execution time for run_simulation_mc: 0.0 hs = 1.1 min = 68.9 sec = 68875.00 msec
++++ Execution time for merge_proba_survival_and_phi: 0.0 hs = 0.0 min = 0.0 sec = 15.62 msec
++++ Execution time for estimate_proba_stationary: 0.0 hs = 0.0 min = 0.1 sec = 62.50 msec
++++ Execution time for estimate_stationary_probabilities: 0.0 hs = 0.0 min = 0.1 sec = 78.12 msec
++++ Execution time for run_simulation_fv: 0.1 hs = 6.1 min = 368.9 sec = 368859.38 msec
+	--> Running Monte-Carlo estimation... 2022-06-29 18:05:07
++++ Execution time for run_simulation_mc: 0.0 hs = 1.7 min = 100.0 sec = 100000.00 msec
+Total execution time FV & MC: 547.1 sec, 9.1 min
+	P(K) by MC: 0.000000% (#events 364249)
+	P(K) by FV: 0.000004%, E(T) = 3318.7 (simulation time for E(T) = 229169.5 (320018 steps) (complete cycles span 91.2%), max survival time = 32.6, #events = 320018 (ET) + 44231 (FV) = 364249)
+	True P(K): 0.000019%
+
+
+
+
+
+
+
+AFTER SPEED UP #5 (2022/07/01)
+=================
+Survival times are added WITHOUT sorting them. They are sorted at the end.
+95 sec vs. 40 sec => 2.4x
+
+2022-07-01 12:28:24
+Execution parameters:
+nservers=1
+Type of analysis: analysis_type=N
+Capacity K=40
+# particles N=400
+Activation size J=20
+Replications=2
+tests2run=[1]
+# arrival events T=80000
+run_mc=True
+save_results=False
+System: # servers=1, K=40, rhos=[0.7], buffer_size_activation=20, #burn-in absorption cycles=5
+*** Running simulation for nparticles=400 (1 of 1) on 2 replications...
+	Replication 1 of 2...
+	--> Running Fleming-Viot estimation... 2022-07-01 12:28:24
++++ Execution time for run_simulation_mc: 0.0 hs = 0.6 min = 39.0 sec = 38981.48 msec (CPU: 0.0 hs, 0.6 min, 35.1 sec, 35140.62 msec
++++ Execution time for merge_proba_survival_and_phi: 0.0 hs = 0.0 min = 0.0 sec = 0.52 msec (CPU: 0.0 hs, 0.0 min, 0.0 sec, 0.00 msec
++++ Execution time for estimate_proba_stationary: 0.0 hs = 0.0 min = 0.1 sec = 54.77 msec (CPU: 0.0 hs, 0.0 min, 0.1 sec, 62.50 msec
++++ Execution time for estimate_stationary_probabilities: 0.0 hs = 0.0 min = 0.1 sec = 55.44 msec (CPU: 0.0 hs, 0.0 min, 0.1 sec, 62.50 msec
++++ Execution time for run_simulation_fv: 0.0 hs = 1.1 min = 64.2 sec = 64249.08 msec (CPU: 0.0 hs, 1.0 min, 60.3 sec, 60265.62 msec
+	--> Running Monte-Carlo estimation... 2022-07-01 12:30:07
++++ Execution time for run_simulation_mc: 0.0 hs = 0.6 min = 38.9 sec = 38938.52 msec (CPU: 0.0 hs, 0.6 min, 38.6 sec, 38562.50 msec
+Total execution time FV & MC: 142.9 sec, 2.4 min
+Computing TRUE blocking probability for nservers=1, K=40, rhos=[0.7]...
+	P(K) by MC: 0.000000% (#events 174630)
+	P(K) by FV: 0.000003%, E(T) = 3719.5 (simulation time for E(T) = 115098.9 (160016 steps) (complete cycles span 71.1%), max survival time = 21.9, #events = 160016 (ET) + 14614 (FV) = 174630)
+	True P(K): 0.000019%
+	Replication 2 of 2...
+	--> Running Fleming-Viot estimation... 2022-07-01 12:30:47
++++ Execution time for run_simulation_mc: 0.0 hs = 0.6 min = 35.7 sec = 35669.96 msec (CPU: 0.0 hs, 0.6 min, 35.3 sec, 35343.75 msec
++++ Execution time for estimate_stationary_probabilities: 0.0 hs = 0.0 min = 0.0 sec = 0.04 msec (CPU: 0.0 hs, 0.0 min, 0.0 sec, 0.00 msec
++++ Execution time for run_simulation_fv: 0.0 hs = 0.9 min = 53.3 sec = 53259.12 msec (CPU: 0.0 hs, 0.9 min, 51.9 sec, 51890.62 msec
+	--> Running Monte-Carlo estimation... 2022-07-01 12:32:16
++++ Execution time for run_simulation_mc: 0.0 hs = 0.7 min = 40.0 sec = 40011.15 msec (CPU: 0.0 hs, 0.6 min, 38.6 sec, 38625.00 msec
+Total execution time FV & MC: 129.7 sec, 2.2 min
+	P(K) by MC: 0.000000% (#events 172153)
+	P(K) by FV: 0.000000%, E(T) = 2827.0 (simulation time for E(T) = 114862.4 (160012 steps) (complete cycles span 88.6%), max survival time = 17.6, #events = 160012 (ET) + 12141 (FV) = 172153)
+	True P(K): 0.000019%

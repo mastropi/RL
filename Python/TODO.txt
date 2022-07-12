@@ -1,0 +1,33 @@
+TODO tasks for improving the RL library
+---------------------------------------
+Created: 01-Jun-2022
+Author: Daniel Mastropietro
+
+
+lib/queues/:
+Q1) [2022/06/01] Move the definition of the QueueMM class to its own file: queuemm.py.
+Goal: Keep in __init__.py only the definition of the generic queue class.
+Challenge: How to keep naming the class QueueMM? I.e. how do we name the file where we define the class QueueMM and then intuitively import it?
+(e.g. if we call the file queuemm.py then it is nonsense that we call the class defined therein QueueMM --as we would need to import it by doing `from queues.queuemm import QueueMM`;
+on the other hand, we could call the file queues.py and then define the class MM therein, but this would imply that we would need to import it by doing `from queues.queues import MM`, still ridiculous the mention to `queues.queues`!)
+
+
+lib/simulators.py:
+S1) [DONE-2022/07/04] get_blocking_buffer_sizes() should compute the buffer sizes as the buffer sizes where the rejection probability is > 0. Currently the returned buffer sizes are K-1 and K where K is the buffer size at which blocking occurs with probability 1.
+
+
+lib/environments/:
+E1) Rename the getState() and setState() methods in the GenericEnv class defined in __init__.py to:
+getStateIndex()
+setStateIndex()
+so that we reserve the `State` name to the actual (more complex) state defined in specific environments (e.g. 2D position in 2D gridworld, 2D (x, v) values in Mountain Car, etc.).
+
+
+lib/:
+L1) Move the estimators.py file to a new folder called "estimators".
+Goal: Leave the root directory clean, with only the __init__.py file, the requirements.txt file, and any file that is used to run the process (e.g. run_FVRL.py).
+
+
+test/:
+T1) Remove any "runners" from the test files since test files should only be devoted to running UNIT tests.
+Place runners in the root directory under file names called "run_...", e.g. run_FVRL.py.
