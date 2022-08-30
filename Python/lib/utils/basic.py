@@ -654,9 +654,9 @@ def merge_values_in_time(t1, y1, t2, y2, unique=False):
             "The length of the first pair of merged lists is the same" \
             " as that of the second pair of merged lists ({}, {}, {}, {})" \
             .format(len(t1_merged), len(y1_merged), len(t2_merged), len(y2_merged))
-    assert t1_merged == t2_merged, \
-            "The times lists resulting from the merge are the same ({}, {})" \
-            .format(t1_merged, t2_merged)
+    #assert t1_merged == t2_merged, \
+    #        "The times lists resulting from the merge are the same ({}, {})" \
+    #        .format(t1_merged, t2_merged)
 
     return t1_merged, y1_merged, y2_merged
 

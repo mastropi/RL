@@ -1,3 +1,10 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Sun Jul 10 12:21:54 2022
+
+@author: Daniel Mastropietro
+@description: Definition of functions and classes used for the simulation of discrete-time MDPs.
+"""
 
 import os
 import sys

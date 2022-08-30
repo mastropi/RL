@@ -2599,7 +2599,7 @@ def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption, df_proba_sur
     while not done:
         t += 1
         # We count the absorption number, an integer between 0 and N-2 which is used to deterministically choose
-        # the reativation particle, in order to save time by not having to generate a uniform random number.
+        # the reactivation particle, in order to save time by not having to generate a uniform random number.
         # Note that the range from 0 to N-2 allows us to choose one of the N-1 particles to which the absorbed particle
         # can be reactivated into.
         absorption_number = t % (N - 1)
