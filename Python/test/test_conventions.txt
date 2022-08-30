@@ -1,0 +1,81 @@
+30-Aug-2022
+Organization and naming convention for units tests of the RL application.
+
+Goal: Make tests meaningful in terms of the RL estimation context.
+
+We define different naming conventions for the following two types of tests:
+A) Tests of the functionality of RL estimation processes (i.e. value functions, policies)
+B) Tests of functions and methods that support the RL processes.
+
+
+A) Tests of the functionality of RL estimation processes
+--------------------------------------------------------
+The file defining the unit tests should be named according to the following convention:
+
+	test_<estimators|optimizers>_<continuous|discrete>time.py
+
+which distinguishes:
+- whether we are testing estimators (of value functions such as V(s), Q(s,a), average V, etc.)
+- or optimizing (e.g. finding the optimum policy for a task).
+
+Use the following convention:
+
+1) Test classes
+
+	Test_Est<what-is-estimated>[_Met<method-used-to-estimate>]_Env<environment-where-estimation-takes-place>
+
+For <what-is-estimated> we use:
+    - "StateValueV" for V(s)
+    - "ActionValueQ" for Q(s,a)
+    - "AverageValueV" for Average V
+    - "AverageValueQ" for Average Q(a) --> is this correctly defined? Is it Q(a) or Q (i.e. NOT a function of the action)?
+    - "Policy" for the policy Pi
+
+For the optional [_Met<method-used-to-estimate>] we can use an estimation method when the method applies to ALL unit tests. Ex: `_MetOffline` used below or `_MetTDLambda` if we are running tests that use purely the TD(lambda) estimator.
+
+For <environment-where-estimation-takes-place> we could either write something that embraces a large set of environment types (e.g. Gridworlds) or a specific environment type (e.g. Gridworld1D).
+Using a more general or less general environment specification depends on how difficult it is to setup the environment in the setUpClass() method defined in the test class. That is, if the setup of the environment is easy (short), then we could setup different environments (e.g. EnvGridworld1D, EnvGridworld2D), called differently (e.g. env1d, env2d), and run tests on the different environments defined.
+If, on the contrary, setting up the environment is quite involved (e.g. the queue environment on which FVRL is run, which requires lots of different parameters), then we would include the specific environment used for testing our method in the test CLASS name (as opposed to including it in the test METHOD --which is part of the test class-- name) (e.g. QueueSingleServer vs. QueueMultiServer).
+    Ex:
+    - Test_EstStateValueV_EnvGridworlds
+    - Test_EstStateValueV_EnvAny  -> "EnvAny" means that the environments on which we test do not fall into any particular category
+    - Test_EstAverageValueV_EnvQueueSingleServer
+    - Test_EstAverageValueV_EnvQueueMultiServer
+    - Test_EstPolicy_EnvGridworlds
+    - Test_EstPolicy_EnvQueueSingleServer
+    - Test_EstStateValueV_MetOffline_EnvDeterministicNextState
+
+2) Test methods
+	a) For the value FUNCTION ESTIMATIONS:
+	
+		test_Env<environment-desc>_Pol<policy-desc>_Met<estimation-method>_Test<how-is-test-performed-or-what-is-tested>
+		
+    Ex:
+    Inside the test class Test_EstStateValueV_EnvGridworlds (so we need to specify the specific environment in the test name):
+    - test_EnvGridworld1D_PolRandomWalk_MetTDLambda_TestOneCase
+    - test_EnvGridworld1D_PolRandomWalk_MetMC_TestDataProvider
+    Inside the test class Test_EstStateValueV_MetOffline_EnvDeterministicNextState (so we do NOT need to specify the method in the test name):
+	- test_EnvGridworld1D_PolRandomWalk_Met_TestOneCase
+
+	b) For the POLICY OPTIMIZATIONS:
+		test_Env[<environment-desc>]_Met<method-desc>_Test<how-is-test-performed-or-what-is-tested>
+
+	Note that the Env part is optional, i.e. depending on what environment has been listed at the test CLASS name: if such environment is very specific we can leave its value empty, and just use `Env_`.
+    Ex:
+    Inside the test class Test_EstPolicy_EnvQueueSingleServer (so we do not need to specify the environment in the test name):
+    - test_Env_MetFVRLwithIGA_TestOneCase
+    - test_Env_MetFVRLwithReinforceTrue_TestDataProvider
+    Inside the test class Test_EstPolicy_EnvGridworlds (so we need to specify the specific environment in the test name):
+    - test_EnvGridworld1D_MetMC_TestDataProvider
+    - test_EnvGridworld2D_MetTDLambda_TestDataProvider
+
+B) Tests of functions and methods that support the RL estimation processes
+--------------------------------------------------------------------------
+The file defining the 
+
+1) Test classes: Test_Support_Env<environment-where-tests-are-run>
+	Ex: Test_Support_EnvQueueMultiServer
+
+2) Test methods: test_<function|method>_<name-of-function-or-method-being-tested>
+	Ex: test_function_generate_event
+

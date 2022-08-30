@@ -3,19 +3,17 @@
 Created on Sun Jul 10 15:26:38 2022
 
 @author: Daniel Mastropietro
-@description: Test of classes defined in the `simulators` module.
+@description: Unit tests for optimizers (e.g. optimum policy) on continuous-time MDPs.
+@details: Naming conventions follow the instructions given in test_conventions.txt.
 """
 import unittest
 
 import numpy as np
 import pandas as pd
-from matplotlib import pyplot as plt, cm
 
-from Python.lib.agents import GenericAgent
 from Python.lib.agents.learners import LearnerTypes
 from Python.lib.agents.learners.continuing.fv import LeaFV
 from Python.lib.agents.learners.continuing.mc import LeaMC
-from Python.lib.agents.learners.episodic.discrete import td
 from Python.lib.agents.learners.policies import LeaPolicyGradient
 
 from Python.lib.agents.policies import PolicyTypes, random_walks
@@ -24,188 +22,17 @@ from Python.lib.agents.policies.parameterized import PolQueueTwoActionsLinearSte
 
 from Python.lib.agents.queues import AgeQueue
 
-from Python.lib.environments import gridworlds
 from Python.lib.environments.queues import EnvQueueSingleBufferWithJobClasses, rewardOnJobRejection_ExponentialCost
 import Python.lib.queues as queues
 from Python.lib.queues import Event
 
 from Python.lib.simulators import LearningMethod
-from Python.lib.simulators.discrete import Simulator as DiscreteSimulator
 from Python.lib.simulators.queues import compute_job_rates_by_server, generate_event, LearningMode, SimulatorQueue
 
 from Python.lib.utils.basic import show_exec_params
 
 
-class Test_Simulator(unittest.TestCase):
-    # Note: nice explanation about the three types of methods that can be defined in Python: instance, class, static
-    # https://stackoverflow.com/questions/54264073/what-is-the-use-and-when-to-use-classmethod-in-python
-    # See the only answer by Navy Cheng.
-
-    @classmethod
-    def setUpClass(cls):
-        # The environment
-        cls.env = gridworlds.EnvGridworld1D(length=21)
-
-        # Plotting parameters
-        cls.colormap = cm.get_cmap("jet")
-
-    def test_Gridworld1D_TDLambda_random_walk(self):
-        """This test intends to reproduce the results in Sutton 2018 on the TD(lambda) algorithm applied to learn
-        the state value function in a 1D gridworld
-        """
-        print("\n")
-        print("Running test {}...".format(self.id()))
-
-        # Possible policies and learners for agents
-        pol_rw = random_walks.PolRandomWalkDiscrete(self.env)
-        lea_td = td.LeaTDLambda(self.env)
-
-        # Policy and learner to be used in the simulation
-        policy = pol_rw
-        learner = lea_td
-
-        # Simulation setup
-        seed = 1717
-        nexperiments = 3
-        nepisodes = 10
-        start = None
-        useGrid = False
-        verbose = True
-        debug = False
-
-        # Define hyperparameter values
-        gamma = 1.0
-        if useGrid:
-            n_lambdas = 11
-            n_alphas = 10
-            lambdas = np.linspace(0, 1, n_lambdas)
-            alphas = np.linspace(0.1, 0.7, n_alphas)
-        else:
-            lambdas = [0, 0.4, 0.7, 0.8]
-            alphas = [0.2, 0.4, 0.8]
-            n_lambdas = len(lambdas)
-            n_alphas = len(alphas)
-        n_simul = n_lambdas*n_alphas
-
-        # Create the figure where the plots will be added
-        max_alpha = 1   # Scale for horizontal axes in RMSE vs. alpha plots
-        max_rmse = 0.5  # Scale for vertical axes in RMSE vs. alpha plots
-        fig, (ax_full, ax_scaled, ax_rmse_by_episode) = plt.subplots(1,3)
-
-        # List of dictionaries, each containing the characteristic of each parameterization considered
-        results_list = []
-        legend_label = []
-
-        # Average RMSE obtained at the LAST episode run for each parameter set and their standard error
-        rmse_mean_values_at_end = np.nan*np.zeros((n_lambdas, n_alphas))
-        rmse_se_values_at_end = np.nan*np.zeros((n_lambdas, n_alphas))
-        # Average RMSE over all the episodes run for each parameter set
-        rmse_episodes_mean = np.nan*np.zeros((n_lambdas, n_alphas))
-        rmse_episodes_se = np.nan*np.zeros((n_lambdas, n_alphas))
-        # RMSE over the episodes averaged over ALL parameter sets {alpha, lambda} run
-        rmse_episodes_values = np.zeros(nepisodes+1)
-        idx_simul = -1
-        for idx_lmbda, lmbda in enumerate(lambdas):
-            rmse_mean_lambda = []
-            rmse_se_lambda = []
-            rmse_episodes_mean_lambda = []
-            rmse_episodes_se_lambda = []
-            for alpha in alphas:
-                idx_simul += 1
-                if verbose:
-                    print("\nParameter set {} of {}: lambda = {:.2g}, alpha = {:.2g}" \
-                          .format(idx_simul, n_simul, lmbda, alpha))
-
-                # Reset learner and agent (i.e. erase all memory from a previous run!)
-                learner.setParams(alpha=alpha, gamma=gamma, lmbda=lmbda)
-                learner.reset(reset_episode=True, reset_value_functions=True)
-                agent = GenericAgent(policy, learner)
-
-                # Simulator object
-                sim = DiscreteSimulator(self.env, agent, seed=seed, debug=debug)
-                ## NOTE: Setting the seed here implies that each set of experiments
-                ## (i.e. for each combination of alpha and lambda) yields the same outcome in terms
-                ## of visited states and actions.
-                ## This is DESIRED --as opposed of having different state-action outcomes for different
-                ## (alpha, lambda) settings-- as it better isolates the effect of alpha and lambda.
-                ## VERIFIED BY RUNNING IN DEBUG MODE!
-
-                # Run the simulation and store the results
-                N_mean, rmse_mean, rmse_se, rmse_n, rmse_episodes, _, mape_episodes, _, _, learning_info = \
-                                    sim.simulate(nexperiments=nexperiments,
-                                                 nepisodes=nepisodes,
-                                                 start=start,
-                                                 verbose=verbose)
-                results_list += [{'lmbda': lmbda,
-                                  'alpha': alpha,
-                                  'rmse': rmse_mean,
-                                  'SE': rmse_se
-                                 }]
-                rmse_mean_lambda += [rmse_mean]
-                rmse_se_lambda += [rmse_se]
-                rmse_episodes_mean_lambda += [np.mean(rmse_episodes)]
-                rmse_episodes_se_lambda += [np.std(rmse_episodes) / np.sqrt(nepisodes)]
-                rmse_episodes_values += rmse_episodes
-
-                if verbose:
-                    print("\tRMSE = {:.3g} ({:.3g})".format(rmse_mean, rmse_se))
-
-            rmse_mean_values_at_end[idx_lmbda] = np.array(rmse_mean_lambda)
-            rmse_se_values_at_end[idx_lmbda] = np.array(rmse_se_lambda)
-            rmse_episodes_mean[idx_lmbda] = np.array(rmse_episodes_mean_lambda)
-            rmse_episodes_se[idx_lmbda] = np.array(rmse_episodes_se_lambda)
-
-            # Plot the average RMSE for the current lambda as a function of alpha
-            rmse2plot = rmse_episodes_mean_lambda
-            rmse2plot_error = rmse_episodes_se_lambda
-            ylabel = "Average RMSE over all {} states, first {} episodes, and {} experiments".format(self.env.getNumStates(), nepisodes, nexperiments)
-
-            # Map blue to the largest lambda and red to the smallest lambda (most similar to the color scheme used in Sutton, pag. 295)
-            color = self.colormap( 1 - idx_lmbda / np.max((1, n_lambdas-1)) )
-            ax_full.plot(alphas, rmse2plot, '.', color=color)
-            ax_full.errorbar(alphas, rmse2plot, yerr=rmse2plot_error, capsize=4, color=color)
-            ax_full.set_xlabel("alpha")
-            ax_full.set_ylabel(ylabel)
-            legend_label += ["lam={:.2g}".format(lmbda)]
-
-        # Average RMSE by episode for convergence analysis
-        rmse_episodes_values /= n_simul
-
-        # Scaled plot (for comparison purposes)
-        for idx_lmbda, lmbda in enumerate(lambdas):
-            rmse2plot = rmse_episodes_mean[idx_lmbda]
-            rmse2plot_error = rmse_episodes_se[idx_lmbda]
-            color = self.colormap( 1 - idx_lmbda / np.max((1, n_lambdas-1)) )
-            ax_scaled.plot(alphas, rmse2plot, '.-', color=color)
-            ax_scaled.errorbar(alphas, rmse2plot, yerr=rmse2plot_error, capsize=4, color=color)
-            ax_scaled.set_xlim((0, max_alpha))
-            ax_scaled.set_ylim((0, max_rmse))
-            ax_scaled.set_xlabel("alpha")
-            ax_scaled.set_ylabel(ylabel)
-
-        # Episodic RMSE
-        ax_rmse_by_episode.plot(np.arange(nepisodes+1), rmse_episodes_values, color="black")
-        ax_rmse_by_episode.set_ylim((0, max_rmse))
-        ax_rmse_by_episode.set_xlabel("Episode")
-        ax_rmse_by_episode.set_ylabel("RMSE")
-        ax_rmse_by_episode.set_title("Average RMSE by episode over ALL experiments")
-
-        plt.figlegend(legend_label)
-        fig.suptitle("{}: gamma = {:.2g}, #experiments = {}, #episodes = {}"\
-                     .format(learner.__class__.__name__, gamma, nexperiments, nepisodes))
-
-        print("Average RMSE and its standard error at last episode by lambda:\n{}".format(np.c_[rmse_episodes_mean, rmse_episodes_se]))
-        assert np.allclose(rmse_episodes_mean, [[0.45592716, 0.40840256, 0.36065968],
-                                                [0.42083822, 0.35093946, 0.29653623],
-                                                [0.35946782, 0.28547410, 0.32950694],
-                                                [0.32520426, 0.28876721, 0.45260387]])
-        assert np.allclose(rmse_episodes_se,   [[0.01244143, 0.02139052, 0.02996329],
-                                                [0.01891116, 0.03116384, 0.03592948],
-                                                [0.02941829, 0.03871512, 0.02411244],
-                                                [0.03452769, 0.03385807, 0.02151384]])
-
-
-class Test_SimulatorQueue(unittest.TestCase):
+class Test_EstPolicy_EnvQueueSingleServer(unittest.TestCase):
     # Note: nice explanation about the three types of methods that can be defined in Python: instance, class, static
     # https://stackoverflow.com/questions/54264073/what-is-the-use-and-when-to-use-classmethod-in-python
     # See the only answer by Navy Cheng.
@@ -335,7 +162,7 @@ class Test_SimulatorQueue(unittest.TestCase):
         assert np.allclose(phat, p, atol=3 * se_phat)  # true probabilities should be contained in +/- 3 SE(phat) from phat
         # ---------------- generate_event() in simulators.queues ----------------- #
 
-    def test_FVRL_single_server_IGA(self):
+    def test_Env_MetFVRLwithIGA_TestOneCase(self):
         unittest.skip("The current implementation (11-Jul-2022) is NOT prepared for IGA because integer theta values make Pr(K-1) be equal to None.\n" \
                 "Correcting this is not so easy and we are not interested in evaluating IGA right now")
         print("\n")
@@ -382,7 +209,7 @@ class Test_SimulatorQueue(unittest.TestCase):
                                                 ])
         assert np.allclose(df_learning, df_learning_expected, atol=1E-6)
 
-    def test_FVRL_single_server_REINFORCE_TRUE(self):
+    def test_Env_MetFVRLwithReinforceTrue(self):
         print("\n")
         print("".join(np.repeat("*", 20)))
         print("Testing the FVRL algorithm on a single server system using the REINFORCE_TRUE learning strategy...")
@@ -425,7 +252,7 @@ class Test_SimulatorQueue(unittest.TestCase):
                                                 ])
         assert np.allclose(df_learning, df_learning_expected, atol=1E-6)
 
-    def test_MC_single_server_IGA(self):
+    def test_Env_MetMCwithIGA(self):
         unittest.skip("The current implementation (11-Jul-2022) is NOT prepared for IGA because integer theta values make Pr(K-1) be equal to None.\n" \
                 "Correcting this is not so easy and we are not interested in evaluating IGA right now")
         print("\n")
@@ -470,7 +297,7 @@ class Test_SimulatorQueue(unittest.TestCase):
                                                 ])
         assert np.allclose(df_learning, df_learning_expected, atol=1E-6)
 
-    def test_MC_single_server_REINFORCE_TRUE(self):
+    def test_Env_MetMCwithReinforceTrue(self):
         print("\n")
         print("".join(np.repeat("*", 20)))
         print("Testing the MC algorithm on a single server system using the REINFORCE_TRUE learning strategy...")
@@ -522,21 +349,17 @@ if __name__ == "__main__":
     # Run all tests
     # unittest.main()
 
-    # Create the test suite
+    # Create the test suites
+    # Single-server tests
     # NOTE: IGA tests are skipped because the code is currently (11-Jul-2022) not prepared to properly handle the case
     # with integer-valued theta, and preparing it would introduce a little bit of noise in the definition of functions
     # (e.g. passing the learning mode (e.g. IGA or REINFORCE_TRUE) to functions such as
     # estimate_blocking_probability_fv() and similar.
-    test_suite_simulator = unittest.TestSuite()
-    test_suite_simulator.addTest(Test_Simulator("test_Gridworld1D_TDLambda_random_walk"))
-
-    test_suite_simulator_queue = unittest.TestSuite()
-    test_suite_simulator_queue.addTest(Test_SimulatorQueue("test_generate_event"))
-    #test_suite_simulator_queue.addTest(Test_SimulatorQueue("test_FVRL_single_server_IGA"))
-    test_suite_simulator_queue.addTest(Test_SimulatorQueue("test_FVRL_single_server_REINFORCE_TRUE"))
-    #test_suite_simulator_queue.addTest(Test_SimulatorQueue("test_MC_single_server_IGA"))
-    test_suite_simulator_queue.addTest(Test_SimulatorQueue("test_MC_single_server_REINFORCE_TRUE"))
+    test_suite_singleserver = unittest.TestSuite()
+    #test_suite_singleserver.addTest(Test_EstPolicy_EnvQueueSingleServer("test_Env_MetFVRLwithIGA_TestOneCase"))
+    test_suite_singleserver.addTest(Test_EstPolicy_EnvQueueSingleServer("test_Env_MetFVRLwithReinforceTrue"))
+    #test_suite_singleserver.addTest(Test_EstPolicy_EnvQueueSingleServer("test_Env_MetMCwithIGA"))
+    test_suite_singleserver.addTest(Test_EstPolicy_EnvQueueSingleServer("test_Env_MetMCwithReinforceTrue"))
 
     # Run the test suites
-    runner.run(test_suite_simulator)
-    runner.run(test_suite_simulator_queue)
+    runner.run(test_suite_singleserver)
