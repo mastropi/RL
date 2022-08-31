@@ -31,23 +31,21 @@ import test_utils
 #reload(Python.lib.agents.learners.episodic.discrete)
 
 
-# Expected results of tests that need to be the same in different tests
-# (typically when checking that the result of running MC is the same as running
-# MC(lambda=1.0))
-# The numbers at the end of the name correspond to the case numbers in the 
-# data provider lambda functions where the respective expected values are used.
-EXPECTED_TEST_RANDOM_WALK_1 = [-0.000000, -0.683051, -0.683051, -0.583526, -0.555566, -0.555566, -0.555566,
-                               -0.400009, -0.358463, -0.319735, -0.187761, -0.102375, -0.056671, -0.005888,
-                               0.125041, 0.125041, 0.207823, 0.207823, 0.343522, 0.569533, 0.000000]
-EXPECTED_TEST_RANDOM_WALK_2 = [-0.000000, -0.846154, -0.846154, -0.714286, -0.600000, -0.600000, -0.600000,
-                               -0.500000, -0.411765, -0.263158, -0.200000, -0.058824, -0.000000, 0.066667,
-                               0.230769, 0.230769, 0.333333, 0.333333, 0.600000, 1.000000, 0.000000]
-EXPECTED_TEST_RANDOM_WALK_3 = [-0.000000, -0.702381, -0.702381, -0.611111, -0.518519, -0.518519, -0.518519,
-                               -0.438596, -0.368421, -0.263158, -0.200000, 0.043590, 0.113889, 0.196970,
-                               0.361176, 0.361176, 0.437451, 0.437451, 0.776471, 1.000000, 0.000000]
-
-
-class Test_MC_Lambda_1DGridworld(unittest.TestCase, test_utils.EpisodeSimulation):
+class Test_EstValueFunctionV_MetMCLambda_EnvGridworld1D(unittest.TestCase, test_utils.EpisodeSimulation):
+    # Expected results of tests that need to be the same in different tests
+    # (typically when checking that the result of running MC is the same as running
+    # MC(lambda=1.0))
+    # The numbers at the end of the name correspond to the case numbers in the
+    # data provider lambda functions where the respective expected values are used.
+    EXPECTED_TEST_RANDOM_WALK_1 = [-0.000000, -0.683051, -0.683051, -0.583526, -0.555566, -0.555566, -0.555566,
+                                   -0.400009, -0.358463, -0.319735, -0.187761, -0.102375, -0.056671, -0.005888,
+                                   0.125041, 0.125041, 0.207823, 0.207823, 0.343522, 0.569533, 0.000000]
+    EXPECTED_TEST_RANDOM_WALK_2 = [-0.000000, -0.846154, -0.846154, -0.714286, -0.600000, -0.600000, -0.600000,
+                                   -0.500000, -0.411765, -0.263158, -0.200000, -0.058824, -0.000000, 0.066667,
+                                   0.230769, 0.230769, 0.333333, 0.333333, 0.600000, 1.000000, 0.000000]
+    EXPECTED_TEST_RANDOM_WALK_3 = [-0.000000, -0.702381, -0.702381, -0.611111, -0.518519, -0.518519, -0.518519,
+                                   -0.438596, -0.368421, -0.263158, -0.200000, 0.043590, 0.113889, 0.196970,
+                                   0.361176, 0.361176, 0.437451, 0.437451, 0.776471, 1.000000, 0.000000]
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -78,22 +76,22 @@ class Test_MC_Lambda_1DGridworld(unittest.TestCase, test_utils.EpisodeSimulation
     #-------- DATA -------
     # Case number, description, expected value, parameters
     # These are the same tests 1, 2 and 3 from data_test_lambda_return_random_walk
-    data_test_mc_random_walk = lambda: (
+    data_test_Env_PolRandomWalk_MetMC_TestSeveralAlphasAndAlphaAdjustments = lambda: (
             ( 1, 'MC, no alpha adjustment',
-                 EXPECTED_TEST_RANDOM_WALK_1,
+                 Test_EstValueFunctionV_MetMCLambda_EnvGridworld1D.EXPECTED_TEST_RANDOM_WALK_1,
                  (0.1, 1.0), False, False, 0.0 ),
             ( 2, 'MC, adjusted alpha by state count (good results if run for 200 episodes)',
-                 EXPECTED_TEST_RANDOM_WALK_2,
+                 Test_EstValueFunctionV_MetMCLambda_EnvGridworld1D.EXPECTED_TEST_RANDOM_WALK_2,
                  (1.0, 1.0), True, False, 0.0 ),
             ( 3, 'MC, adjusted alpha by episode',
-                 EXPECTED_TEST_RANDOM_WALK_3,
+                 Test_EstValueFunctionV_MetMCLambda_EnvGridworld1D.EXPECTED_TEST_RANDOM_WALK_3,
                  (1.0, 1.0), True,  True, 0.0 ),
         )
     #-------- DATA -------
 
-    @data_provider(data_test_mc_random_walk)
-    def test_mc_random_walk(self, casenum, desc, expected, params_alpha_gamma,
-                                       adjust_alpha, adjust_alpha_by_episode, alpha_min):
+    @data_provider(data_test_Env_PolRandomWalk_MetMC_TestSeveralAlphasAndAlphaAdjustments)
+    def test_Env_PolRandomWalk_Met_TestSeveralAlphasAndAlphaAdjustments(self, casenum, desc, expected, params_alpha_gamma,
+                                                                        adjust_alpha, adjust_alpha_by_episode, alpha_min):
         # All tests are run using seed = 1717, nepisodes = 20, start_state = 10
         print("\n*** Testing {0}, case number {1} '{2}' ***".format(self.id(), casenum, desc))
         learner_mclambda = mc.LeaMCLambda(self.env, alpha=params_alpha_gamma[0],
@@ -113,7 +111,7 @@ class Test_MC_Lambda_1DGridworld(unittest.TestCase, test_utils.EpisodeSimulation
         print("\nobserved: " + test_utils.array2str(observed))
         assert np.allclose(observed, expected, atol=1E-6)
                                             
-    def test_mc_random_walk_gamma_not_1(self):
+    def test_Env_PolRandomWalk_Met_TestGammaSmallerThan1(self):
         #-- All tests are run using seed = 1717, nepisodes = 20, start_state = 10
         print("\n*** Testing " + self.id() + " ***")
 
@@ -150,7 +148,7 @@ class Test_MC_Lambda_1DGridworld(unittest.TestCase, test_utils.EpisodeSimulation
                               max_rmse=self.max_rmse, color_rmse=self.color_rmse)
         assert np.allclose(observed, expected, atol=1E-6)
 
-    def test_mc_random_walk_rmse_twice(self):
+    def test_Env_PolRandomWalk_MetMC_TestRMSETwice(self):
         #-- All tests are run using seed = 1717, nepisodes = 20, start_state = 10
         print("\n*** Testing " + self.id() + " ***")
 
@@ -200,15 +198,15 @@ class Test_MC_Lambda_1DGridworld(unittest.TestCase, test_utils.EpisodeSimulation
     #------------------------ TESTS OF MC(LAMBDA): MC as lambda-return ---------------------------#
     #-------- DATA -------
     # Case number, description, expected value, parameters
-    data_test_lambda_return_random_walk = lambda: (
+    data_test_Env_PolRandomWalk_MetLambdaReturn_TestSeveralAlphasLambdasAlphaAdjustments = lambda: (
             ( 1, 'MC, no alpha adjustment',
-                 EXPECTED_TEST_RANDOM_WALK_1,
+                 Test_EstValueFunctionV_MetMCLambda_EnvGridworld1D.EXPECTED_TEST_RANDOM_WALK_1,
                 (0.1, 1.0, 1.0), False, False, 0.0 ),
             ( 2, 'MC, adjusted alpha by state count (good results if run for 200 episodes)',
-                 EXPECTED_TEST_RANDOM_WALK_2,
+                 Test_EstValueFunctionV_MetMCLambda_EnvGridworld1D.EXPECTED_TEST_RANDOM_WALK_2,
                 (1.0, 1.0, 1.0), True, False, 0.0 ),
             ( 3, 'MC, adjusted alpha by episode',
-                 EXPECTED_TEST_RANDOM_WALK_3,
+                 Test_EstValueFunctionV_MetMCLambda_EnvGridworld1D.EXPECTED_TEST_RANDOM_WALK_3,
                 (1.0, 1.0, 1.0), True,  True, 0.0 ),
             ( 4, 'L-return (lambda<1), no alpha adjustment',
                  [-0.000000, -0.648738, -0.440867, -0.228680, -0.172241, -0.093122, -0.023765,
@@ -223,9 +221,9 @@ class Test_MC_Lambda_1DGridworld(unittest.TestCase, test_utils.EpisodeSimulation
         )
     #-------- DATA -------
 
-    @data_provider(data_test_lambda_return_random_walk)
-    def test_lambda_return_random_walk(self, casenum, desc, expected, params_alpha_gamma_lambda,
-                                                        adjust_alpha, adjust_alpha_by_episode, alpha_min):
+    @data_provider(data_test_Env_PolRandomWalk_MetLambdaReturn_TestSeveralAlphasLambdasAlphaAdjustments)
+    def test_Env_PolRandomWalk_MetLambdaReturn_TestSeveralAlphasLambdasAlphaAdjustments(self, casenum, desc, expected, params_alpha_gamma_lambda,
+                                                                                        adjust_alpha, adjust_alpha_by_episode, alpha_min):
         # All tests are run using seed = 1717, nepisodes = 20, start_state = 10
         print("\n*** Testing {0}, case number {1} ***".format(self.id(), casenum))
         learner_mclambda = mc.LeaMCLambda(self.env, alpha=params_alpha_gamma_lambda[0],
@@ -246,7 +244,7 @@ class Test_MC_Lambda_1DGridworld(unittest.TestCase, test_utils.EpisodeSimulation
         print("\nobserved: " + test_utils.array2str(observed))
         assert np.allclose(observed, expected, atol=1E-6)
                                             
-    def test_lambda_return_random_walk_gamma_not_1(self):
+    def test_Env_PolRandomWalk_MetLambdaReturn_TestGammaLessThan1(self):
         #-- All tests are run using seed = 1717, nepisodes = 20, start_state = 10
         print("\n*** Testing " + self.id() + " ***")
 
@@ -283,7 +281,7 @@ class Test_MC_Lambda_1DGridworld(unittest.TestCase, test_utils.EpisodeSimulation
                               max_rmse=self.max_rmse, color_rmse=self.color_rmse)
         assert np.allclose(observed, expected, atol=1E-6)
 
-    def fails_test_lambda_return_random_walk_adaptive_result(self):
+    def fails_test_Env_PolRandomWalk_MetLambdaReturnAdaptive_TestOneCase(self):
         # NOTE: (2021/10/16) This test currently fails for two reasons:
         # - the `observed` array is an array of all -1.0 followed by all +1.0 (i.e. a step function)
         # - the self.plot_results() call at the end fails because the alpha_mean_by_episode_mean variable used when calling
@@ -324,7 +322,7 @@ class Test_MC_Lambda_1DGridworld(unittest.TestCase, test_utils.EpisodeSimulation
     #------------------------ TESTS OF MC(LAMBDA): MC as lambda-return ---------------------------#
 
 
-class Test_MC_Lambda_MountainCar(unittest.TestCase, test_utils.EpisodeSimulation):
+class Test_EstValueFunctionV_MetMCLambda_EnvMountainCar(unittest.TestCase, test_utils.EpisodeSimulation):
 
     def __init__(self, *args, **kwargs):
         self.seed = kwargs.pop('seed', 1717)
@@ -350,7 +348,7 @@ class Test_MC_Lambda_MountainCar(unittest.TestCase, test_utils.EpisodeSimulation
 
         cls.policy_rw = random_walks.PolRandomWalkDiscrete(cls.env)
 
-    def no_test_mc_random_walk_onecase(self, params=None, verbose_convergence=False):
+    def no_test_Env_PolRandomWalk_MetMC_TestOneCase(self, params=None, verbose_convergence=False):
         print("\nTesting " + self.id())
 
         # Learner and agent
@@ -482,7 +480,7 @@ class Test_MC_Lambda_MountainCar(unittest.TestCase, test_utils.EpisodeSimulation
 
         return observed, state_counts, params, sim, learning_info
 
-    def test_mc_vs_lambda_return_random_walk_onecase(self, verbose_convergence=False):
+    def test_Env_PolRandomWalk_MetMCLambdaReturn_TestMCvsLambdaReturn(self, verbose_convergence=False):
         print("\nTesting " + self.id())
 
         # Learner and agent
@@ -576,14 +574,30 @@ class Test_MC_Lambda_MountainCar(unittest.TestCase, test_utils.EpisodeSimulation
 
 
 if __name__ == "__main__":
-    test = True
+    test = True     # Use test=False when we want to recover the output of the test in the Python session and analyze it
 
     if test:
-        #unittest.main()
-        unittest.main(defaultTest="Test_MC_Lambda_1DGridworld")
-        unittest.main(defaultTest="Test_MC_Lambda_MountainCar")
+        runner = unittest.TextTestRunner()
 
+        #unittest.getTestCaseNames()
+
+        #--- Gridworld tests
+        suite_gw1d = unittest.TestSuite()
+        suite_gw1d.addTest(Test_EstValueFunctionV_MetMCLambda_EnvGridworld1D("test_Env_PolRandomWalk_Met_TestSeveralAlphasAndAlphaAdjustments"))
+        suite_gw1d.addTest(Test_EstValueFunctionV_MetMCLambda_EnvGridworld1D("test_Env_PolRandomWalk_Met_TestGammaSmallerThan1"))
+        suite_gw1d.addTest(Test_EstValueFunctionV_MetMCLambda_EnvGridworld1D("test_Env_PolRandomWalk_MetMC_TestRMSETwice"))
+        suite_gw1d.addTest(Test_EstValueFunctionV_MetMCLambda_EnvGridworld1D("test_Env_PolRandomWalk_MetLambdaReturn_TestSeveralAlphasLambdasAlphaAdjustments"))
+        suite_gw1d.addTest(Test_EstValueFunctionV_MetMCLambda_EnvGridworld1D("test_Env_PolRandomWalk_MetLambdaReturn_TestGammaLessThan1"))
+
+        #--- Mountain Car tests
+        suite_mountain = unittest.TestSuite()
+        suite_mountain.addTest(Test_EstValueFunctionV_MetMCLambda_EnvMountainCar("test_Env_PolRandomWalk_MetMCLambdaReturn_TestMCvsLambdaReturn"))
+
+        #--- Run the tests
+        runner.run(suite_gw1d)
+        runner.run(suite_mountain)
     else:
-        test_obj = Test_MC_Lambda_MountainCar()
+        # Use this when we want to recover the output of the test in the Python session and analyze it
+        test_obj = Test_EstValueFunctionV_MetMCLambda_EnvMountainCar()
         test_obj.setUpClass()
-        state_values, state_counts, params, sim, learning_info = test_obj.test_mc_random_walk_onecase()
+        state_values, state_counts, params, sim, learning_info = test_obj.no_test_Env_PolRandomWalk_MetMC_TestOneCase()

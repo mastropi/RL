@@ -15,7 +15,7 @@ import unittest
 from unittest_data_provider import data_provider
 from matplotlib import cm
 import matplotlib.pyplot as plt
-from mpl_toolkits import mplot3d    # For 3D plots (using ax = fig.axes(project='3d'), so the module is NOT explicitly mentioned!
+from mpl_toolkits import mplot3d    # For 3D plots (using ax = plt.axes(projection='3d'), so the module is NOT explicitly mentioned!
 
 from timeit import default_timer as timer
 
@@ -43,7 +43,7 @@ import test_utils
 from Python.lib.environments import EnvironmentDiscrete
 
 
-class Test_TD_Lambda_GW1D(unittest.TestCase, test_utils.EpisodeSimulation):
+class Test_EstStateValueV_MetTDLambda_EnvGridworld1D(unittest.TestCase, test_utils.EpisodeSimulation):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -72,7 +72,7 @@ class Test_TD_Lambda_GW1D(unittest.TestCase, test_utils.EpisodeSimulation):
 
     #-------------------------------------- DATA FOR TESTS ------------------------------------
     # Case number, description, expected value, parameters
-    data_test_random_walk = lambda: (
+    data_test_EnvTwoRewards_PolRandomWalk_Met_TestSeveralLambdasAndAlphaAdjustments = lambda: (
             ( 1, 'TD(0), no alpha adjustment',
                  [-0.000000, -0.987504, -0.941069, -0.900173, -0.805758, -0.613337, -0.407574,
                   -0.298142, -0.221312, -0.149854, -0.051759, 0.001865, 0.052824, 0.128984,
@@ -119,9 +119,9 @@ class Test_TD_Lambda_GW1D(unittest.TestCase, test_utils.EpisodeSimulation):
         )
 
     #------------------------------------------- TESTS ----------------------------------------
-    @data_provider(data_test_random_walk)
-    def test_random_walk(self, casenum, desc, expected, params_alpha_gamma_lambda,
-                                                        adjust_alpha, adjust_alpha_by_episode, alpha_min):
+    @data_provider(data_test_EnvTwoRewards_PolRandomWalk_Met_TestSeveralLambdasAndAlphaAdjustments)
+    def test_EnvTwoRewards_PolRandomWalk_Met_TestSeveralLambdasAndAlphaAdjustments(self, casenum, desc, expected, params_alpha_gamma_lambda,
+                                                                                   adjust_alpha, adjust_alpha_by_episode, alpha_min):
         print("\nTesting " + self.id())
 
         # Learner and agent
@@ -143,7 +143,7 @@ class Test_TD_Lambda_GW1D(unittest.TestCase, test_utils.EpisodeSimulation):
         print("\n" + self.id() + ", observed: " + test_utils.array2str(observed))
         assert np.allclose(observed, expected, atol=1E-6)
 
-    def test_random_walk_onecase(self):
+    def test_EnvTwoRewards_PolRandomWalk_Met_TestOneCase(self):
         print("\nTesting " + self.id())
  
         # Learner and agent
@@ -186,7 +186,7 @@ class Test_TD_Lambda_GW1D(unittest.TestCase, test_utils.EpisodeSimulation):
 
         assert np.allclose(observed, expected, atol=1E-6)
 
-    def test_random_walk_rmse_twice(self):
+    def test_EnvTwoRewards_PolRandomWalk_Met_TestRMSETwice(self):
         print("\nTesting " + self.id())
 
         # Learner and agent
@@ -233,7 +233,7 @@ class Test_TD_Lambda_GW1D(unittest.TestCase, test_utils.EpisodeSimulation):
         print("Second run: average RMSE over {} episodes: {:.8f}".format(self.nepisodes, rmse_observed))
         assert np.allclose(rmse_observed, rmse_expected, atol=1E-6)
 
-    def test_random_walk_adaptive_onecase(self):
+    def test_EnvTwoRewards_PolRandomWalk_MetAdaptive_TestOneCase(self):
         print("\nTesting " + self.id())
 
         # Learner and agent
@@ -302,7 +302,7 @@ class Test_TD_Lambda_GW1D(unittest.TestCase, test_utils.EpisodeSimulation):
     #------------------------------------------- TESTS ----------------------------------------
 
 
-class Test_TD_Lambda_GW1D_OneTerminalState(unittest.TestCase, test_utils.EpisodeSimulation):
+class Test_EstStateValueV_MetTDLambda_EnvGridworld1DOneTerminal(unittest.TestCase, test_utils.EpisodeSimulation):
 
     def __init__(self, *args, **kwargs):
         self.seed = kwargs.pop('seed', 1717)
@@ -358,7 +358,7 @@ class Test_TD_Lambda_GW1D_OneTerminalState(unittest.TestCase, test_utils.Episode
         return learning_info
 
 
-class Test_TD_Lambda_GW2D(unittest.TestCase, test_utils.EpisodeSimulation):
+class Test_EstStateValueV_MetTDLambda_EnvGridworld2D(unittest.TestCase, test_utils.EpisodeSimulation):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -419,7 +419,7 @@ class Test_TD_Lambda_GW2D(unittest.TestCase, test_utils.EpisodeSimulation):
         # Random walk policy on the above environment
         cls.policy_rw_envlogn = random_walks.PolRandomWalkDiscrete(cls.env_logn_rewards)
 
-    def test_random_walk(self):
+    def test_EnvTwoRewards_PolRandomWalk_Met_TestOneCase(self):
         print("\nTesting " + self.id())
  
         # Learner and agent
@@ -483,7 +483,7 @@ class Test_TD_Lambda_GW2D(unittest.TestCase, test_utils.EpisodeSimulation):
 
         assert np.allclose(observed_values, expected_values, atol=1E-6)
 
-    def test_random_walk_logn_rewards(self):
+    def test_EnvLognRewards_PolRandomWalk_Met_TestOneCase(self):
         print("\nTesting " + self.id())
  
         # Learner and agent
@@ -550,7 +550,7 @@ class Test_TD_Lambda_GW2D(unittest.TestCase, test_utils.EpisodeSimulation):
 
 
     ####################### ADAPTIVE TD(lambda) #######################
-    def test_random_walk_adaptive(self):
+    def test_EnvTwoRewards_PolRandomWalk_MetAdaptive_TestOneCase(self):
         print("\nTesting " + self.id())
 
         # Learner and agent
@@ -620,7 +620,7 @@ class Test_TD_Lambda_GW2D(unittest.TestCase, test_utils.EpisodeSimulation):
 
         assert np.allclose(observed_values, expected_values, atol=1E-6)
 
-    def test_random_walk_adaptive_logn_rewards(self):
+    def test_EnvLognRewards_PolRandomWalk_MetAdaptive_TestOneCase(self):
         print("\nTesting " + self.id())
 
         # Learner and agent
@@ -774,6 +774,8 @@ class Test_TD_Lambda_MountainCar(unittest.TestCase, test_utils.EpisodeSimulation
         return fig
 
     def test_environment(self):
+        print("\nTesting " + self.id())
+
         env = mountaincars.MountainCarDiscrete(10)
         state = env.reset(seed=1717)
         print("Environment reset to state: {}".format(state))
@@ -906,48 +908,46 @@ class Test_TD_Lambda_MountainCar(unittest.TestCase, test_utils.EpisodeSimulation
 
 
 if __name__ == "__main__":
-    test = True
+    test = True     # Use test=False when we want to recover the output of the test in the Python session and analyze it
 
     if not test:
         test_env_name = "MountainCar"
         test_env_name = "GW1D_OneTerminalState"
 
     if test:
-        #--- 1D tests
-        unittest.main(defaultTest="Test_TD_Lambda_GW1D")
-        #unittest.main(defaultTest="Test_TD_Lambda_GW1D.test_random_walk_onecase")
-        #unittest.main(defaultTest="Test_TD_Lambda_GW1D.test_random_walk_adaptive_onecase")
-        #unittest.getTestCaseNames()
-
-        #--- 2D tests
-        unittest.main(defaultTest="Test_TD_Lambda_GW2D")
-
-        # Basic environment
-        #unittest.main(defaultTest="Test_TD_Lambda_GW2D.test_random_walk")
-        #unittest.main(defaultTest="Test_TD_Lambda_GW2D.test_random_walk_adaptive")
-
-        # Log(n)-rewards environment
-        #unittest.main(defaultTest="Test_TD_Lambda_GW2D.test_random_walk_logn_rewards")
-        #unittest.main(defaultTest="Test_TD_Lambda_GW2D.test_random_walk_adaptive_logn_rewards")
-
-
-        # Or we can also use, to run one specific function defined in a TestCase class
         # Using unittest.TestSuite() to build our set of tests to run!
         # Ref: https://stackoverflow.com/questions/15971735/running-single-test-from-unittest-testcase-via-command-line
-        #suite = unittest.TestSuite()
-        #suite.addTest(Test_TD_Lambda_GW2D("test_random_walk_logn_rewards"))
-        #suite.addTest(Test_TD_Lambda_GW2D("test_random_walk_adaptive_logn_rewards"))
-        #runner = unittest.TextTestRunner()
-        #runner.run(suite)
+        runner = unittest.TextTestRunner()
+
+        #unittest.getTestCaseNames()
+
+        #--- 1D tests
+        suite_gw1d = unittest.TestSuite()
+        suite_gw1d.addTest(Test_EstStateValueV_MetTDLambda_EnvGridworld1D("test_EnvTwoRewards_PolRandomWalk_Met_TestSeveralLambdasAndAlphaAdjustments"))
+        suite_gw1d.addTest(Test_EstStateValueV_MetTDLambda_EnvGridworld1D("test_EnvTwoRewards_PolRandomWalk_Met_TestRMSETwice"))
+        suite_gw1d.addTest(Test_EstStateValueV_MetTDLambda_EnvGridworld1D("test_EnvTwoRewards_PolRandomWalk_Met_TestOneCase"))
+        suite_gw1d.addTest(Test_EstStateValueV_MetTDLambda_EnvGridworld1D("test_EnvTwoRewards_PolRandomWalk_MetAdaptive_TestOneCase"))
+
+        #--- 2D tests
+        suite_gw2d = unittest.TestSuite()
+        suite_gw2d.addTest(Test_EstStateValueV_MetTDLambda_EnvGridworld2D("test_EnvTwoRewards_PolRandomWalk_Met_TestOneCase"))
+        suite_gw2d.addTest(Test_EstStateValueV_MetTDLambda_EnvGridworld2D("test_EnvLognRewards_PolRandomWalk_Met_TestOneCase"))
+        suite_gw2d.addTest(Test_EstStateValueV_MetTDLambda_EnvGridworld2D("test_EnvTwoRewards_PolRandomWalk_MetAdaptive_TestOneCase"))
+        suite_gw2d.addTest(Test_EstStateValueV_MetTDLambda_EnvGridworld2D("test_EnvLognRewards_PolRandomWalk_MetAdaptive_TestOneCase"))
 
         #--- Mountain Car tests
-        unittest.main(defaultTest="Test_TD_Lambda_MountainCar")
+        suite_mountain = unittest.TestSuite()
+        suite_mountain.addTest(Test_TD_Lambda_MountainCar("test_environment"))
+
+        runner.run(suite_gw1d)
+        runner.run(suite_gw2d)
+        runner.run(suite_mountain)
     elif test_env_name == "GW1D_OneTerminalState":
         # Prepare environment
         nstates = 19
         nepisodes = 500
         plot = True
-        test_obj = Test_TD_Lambda_GW1D_OneTerminalState(seed=1717, nepisodes=nepisodes, start_state=0, plot=plot)
+        test_obj = Test_EstStateValueV_MetTDLambda_EnvGridworld1DOneTerminal(seed=1717, nepisodes=nepisodes, start_state=0, plot=plot)
         test_obj.env = gridworlds.EnvGridworld1D_OneTerminalState(nstates+1)    # +1 terminal state
         test_obj.policy_rw = random_walks.PolRandomWalkDiscrete(test_obj.env)
 
