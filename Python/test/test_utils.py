@@ -243,8 +243,8 @@ def plot_results_2D(ax, V, params, colormap, vmin=None, vmax=None, format_labels
     return ax
 
 class EpisodeSimulation:
-    
-    def plot_results(self, params,
+
+    def plot_results(self, params, nepisodes,
                      V_estimate, V_true, RMSE_by_episode, alphas_by_episode,
                      y2label="(Average) alpha", y2lim=None,
                      max_rmse=0.8, color_rmse="black"):
@@ -258,6 +258,9 @@ class EpisodeSimulation:
             - 'gamma': discount factor of the environment
             - 'lambda': lambda parameter in TD(lambda)
             - 'alpha_min': lower bound for the learning rate used when running the simulation       
+
+        nepisodes: int
+            Number of episodes used when running the simulation generating the results that are plotted.
 
         V_estimate: numpy.array of length number of states in the environment
             Estimated state value function.
@@ -275,13 +278,13 @@ class EpisodeSimulation:
             Its length should be equal to the number of episodes run.
         """
         title = "alpha={:.2f}, gamma={:.2f}, lambda={:.2f}, {} episodes" \
-                     .format(params['alpha'], params['gamma'], params['lambda'], self.nepisodes)
+                     .format(params['alpha'], params['gamma'], params['lambda'], nepisodes)
 
         all_states = np.arange(self.nS + 2)
-        all_episodes = np.arange(self.nepisodes + 1)    # This is 0, 1, ..., nepisodes
-                                                        # i.e. it has length nepisodes + 1 so that the very first
-                                                        # RMSE (for the initial guess of the value function)
-                                                        # is included in the plot.
+        all_episodes = np.arange(nepisodes + 1)    # This is 0, 1, ..., nepisodes
+                                                   # i.e. it has length nepisodes + 1 so that the very first
+                                                   # RMSE (for the initial guess of the value function)
+                                                   # is included in the plot.
 
         plt.figure()
         plt.plot(all_states, V_true, 'b.-')
@@ -292,7 +295,7 @@ class EpisodeSimulation:
 
         plt.figure()
         plt.plot(all_episodes, RMSE_by_episode, color=color_rmse)
-        #plt.xticks(np.arange(self.nepisodes)+1)
+        #plt.xticks(np.arange(nepisodes)+1)
         ax = plt.gca()
         #ax.set_ylim((0, np.max(RMSE_by_episode)))
         ax.set_ylim((0, max_rmse))

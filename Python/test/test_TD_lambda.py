@@ -179,7 +179,7 @@ class Test_EstStateValueV_MetTDLambda_EnvGridworld1D(unittest.TestCase, test_uti
         print("\nobserved: " + test_utils.array2str(observed))
         print("Average RMSE over {} episodes: {:.3f}".format(self.nepisodes, np.mean(RMSE_by_episode)))
         if self.plot:
-            self.plot_results(params,
+            self.plot_results(params, self.nepisodes,
                               observed, self.env.getV(), RMSE_by_episode, learning_info['alpha_mean'],
                               y2lim=(0, 1.0),
                               max_rmse=self.max_rmse, color_rmse=self.color_rmse)
@@ -290,7 +290,7 @@ class Test_EstStateValueV_MetTDLambda_EnvGridworld1D(unittest.TestCase, test_uti
         print("\n" + self.id() + ", observed: " + test_utils.array2str(observed))
         print("Average RMSE over {} episodes: {:.3f}".format(self.nepisodes, np.mean(RMSE_by_episode)))
         if self.plot:
-            (ax, ax2) = self.plot_results(params,
+            (ax, ax2) = self.plot_results(params, self.nepisodes,
                               observed, self.env.getV(), RMSE_by_episode, learning_info['alpha_mean'],
                               y2label="(Average) alpha & lambda", y2lim=(0, 1.0),
                               max_rmse=self.max_rmse, color_rmse=self.color_rmse)

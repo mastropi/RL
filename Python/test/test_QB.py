@@ -7,7 +7,6 @@ Created on Thu Jun  4 19:16:02 2020
 """
 
 import runpy
-
 runpy.run_path('../../setup.py')
 
 import os
@@ -106,10 +105,10 @@ class Test_QB_Particles(unittest.TestCase):
         self.queue.add()
         assert self.queue.size == self.capacity
 
-    def test_simulation_of_events_on_a_system_with_one_particle(self):
+    def deprecated_test_simulation_of_events_on_a_system_with_one_particle(self):
         print("\nRunning test " + self.id())
         nmeantimes = 100
-        est = estimators.EstimatorQueueBlockingFlemingViot(1, self.queue, 0.5,
+        est = estimators.EstimatorQueueBlockingFlemingViot(1, self.queue, [0.5],
                                                            nmeantimes=nmeantimes,
                                                            reactivate=False)
         
@@ -157,7 +156,7 @@ class Test_QB_Particles(unittest.TestCase):
                                         nmeantimes=20,
                                         seed=1713,
                                         log=False): 
-        est = estimators.EstimatorQueueBlockingFlemingViot(nparticles, self.queue, 0.5,
+        est = estimators.EstimatorQueueBlockingFlemingViot(nparticles, self.queue, [0.5],
                                                            nmeantimes=nmeantimes,
                                                            reactivate=reactivate,
                                                            finalize_type=finalize_type,
@@ -249,7 +248,7 @@ class Test_QB_Particles(unittest.TestCase):
         #finalize_type = FinalizeType.ABSORB_CENSORED
         #finalize_type = FinalizeType.REMOVE_CENSORED
         #seed = 1713
-        est = estimators.EstimatorQueueBlockingFlemingViot(nparticles, self.queue, 0.5,
+        est = estimators.EstimatorQueueBlockingFlemingViot(nparticles, self.queue, [0.5],
                                                            nmeantimes=nmeantimes,
                                                            reactivate=reactivate,
                                                            finalize_type=finalize_type,
@@ -625,7 +624,9 @@ class Test_QB_Particles(unittest.TestCase):
                                                                                              dict_params_simul,
                                                                                              dict_params_info=dict_params_info)
                     time_end_simulation_fv = dict_stats_fv['time']
-                    n_events_fv = dict_stats_fv['nevents']  # TOTAL number of events: _abs + (properly) _fv
+                    n_events_fv_only = dict_stats_fv['nevents']  # TOTAL number of events: _abs + (properly) _fv
+                    n_events_et = dict_stats_fv['nevents_abs']
+                    n_events_fv = n_events_et + n_events_fv_only
                     max_survival_time = dict_stats_fv['time_max_survival']
                 elif estimation_process == Process.Simulators:
                     envs_queue = [env_queue if i == 0 else copy.deepcopy(env_queue) for i in range(nparticles)]
@@ -1264,7 +1265,7 @@ class Test_QB_Particles(unittest.TestCase):
         plot(df_byiter, grp_K, grp_time, legend, se_mult=2)
 
 #------------------- Functions --------------------
-def test_mc_implementation(nservers, K, paramsfile, nmeantimes=None, repmax=None, figfile=None):
+def deprecated_test_mc_implementation(nservers, K, paramsfile, nmeantimes=None, repmax=None, figfile=None):
     "2021/05/14: Run the MC simulation with simulation parameters read from a CSV file"
 
     #--- Test one server
@@ -1435,7 +1436,7 @@ def test_mc_implementation(nservers, K, paramsfile, nmeantimes=None, repmax=None
         
     return df_results, df_results_agg_by_N, est_mc 
 
-def compute_errors(df_results,
+def deprecated_compute_errors(df_results,
                    y_mc="Pr(MC)", y_fv="Pr(FV)", y_true="Pr(K)"):
     """
     Computes estimation errors on a set of results w.r.t. to a true value
@@ -2076,7 +2077,7 @@ if __name__ == "__main__":
         sys.argv += [1]       # Number of servers in the system to simulate
         sys.argv += ["N"]     # Type of analysis: either "N" for the impact of number of particles or "J" for the impact of buffer size"
         sys.argv += [40]      # K: capacity of the system
-        sys.argv += [400]     # N: number of particles in the FV system.
+        sys.argv += [200]     # N: number of particles in the FV system.
         sys.argv += [0.5]     # J factor: factor such that J = factor*K.
         sys.argv += [2]       # Number of replications
         sys.argv += [1]       # Test number to run: only one is accepted

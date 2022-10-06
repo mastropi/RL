@@ -6,6 +6,10 @@ Created on Tue Aug 30 12:18:27 2022
 @description: Unit tests for estimators (V, Q) on continuous-time MDPs.
 @details: Naming conventions follow the instructions given in test_conventions.txt.
 """
+
+import runpy
+runpy.run_path('../../setup.py')
+
 import unittest
 from unittest_data_provider import data_provider
 

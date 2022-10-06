@@ -6,6 +6,10 @@ Created on Sun Jul 10 15:26:38 2022
 @description: Unit tests for optimizers (e.g. optimum policy) on continuous-time MDPs.
 @details: Naming conventions follow the instructions given in test_conventions.txt.
 """
+
+import runpy
+runpy.run_path('../../setup.py')
+
 import unittest
 
 import numpy as np
@@ -162,7 +166,7 @@ class Test_EstPolicy_EnvQueueSingleServer(unittest.TestCase):
         assert np.allclose(phat, p, atol=3 * se_phat)  # true probabilities should be contained in +/- 3 SE(phat) from phat
         # ---------------- generate_event() in simulators.queues ----------------- #
 
-    def test_Env_MetFVRLwithIGA_TestOneCase(self):
+    def no_test_Env_MetFVRLwithIGA_TestOneCase(self):
         unittest.skip("The current implementation (11-Jul-2022) is NOT prepared for IGA because integer theta values make Pr(K-1) be equal to None.\n" \
                 "Correcting this is not so easy and we are not interested in evaluating IGA right now")
         print("\n")
@@ -183,6 +187,12 @@ class Test_EstPolicy_EnvQueueSingleServer(unittest.TestCase):
             't_sim': 50,
             'buffer_size_activation_factor': 0.3
             })
+        # Make a copy of the seed used to run the process (for the assertion below),
+        # because the key in dict_params_simul is changed by the process
+        # as we need to consider different seeds for the different simulation parts and this seed is passed to each
+        # simulator through the dict_params_simul dictionary and is used to store its value in the output files
+        # to allow repeatability.
+        seed = dict_params_simul['seed']
 
         # Agent interacting with the environment
         agent_gradient = self.createAgentWithPolicyGradientLearner(learning_method, dict_params_simul)
@@ -207,6 +217,15 @@ class Test_EstPolicy_EnvQueueSingleServer(unittest.TestCase):
                                                 ('n_events_fv', [470, 409, 729, 416, 804]),
                                                 ('n_trajectories_Q', [100.0]*5)
                                                 ])
+
+        assert  dict_params_learn['mode'] == LearningMode.IGA and \
+                dict_params_learn['t_learn'] == 5
+        assert  seed == 1717 and \
+                dict_params_simul['theta_true'] == 19 and \
+                dict_params_simul['theta_start'] == 1.0 and \
+                dict_params_simul['nparticles'] == 30 and \
+                dict_params_simul['t_sim'] == 50 and \
+                dict_params_simul['buffer_size_activation_factor'] == 0.3
         assert np.allclose(df_learning, df_learning_expected, atol=1E-6)
 
     def test_Env_MetFVRLwithReinforceTrue(self):
@@ -228,6 +247,12 @@ class Test_EstPolicy_EnvQueueSingleServer(unittest.TestCase):
             't_sim': 50,
             'buffer_size_activation_factor': 0.3
             })
+        # Make a copy of the seed used to run the process (for the assertion below),
+        # because the key in dict_params_simul is changed by the process
+        # as we need to consider different seeds for the different simulation parts and this seed is passed to each
+        # simulator through the dict_params_simul dictionary and is used to store its value in the output files
+        # to allow repeatability.
+        seed = dict_params_simul['seed']
 
         # Agent interacting with the environment
         agent_gradient = self.createAgentWithPolicyGradientLearner(learning_method, dict_params_simul)
@@ -250,9 +275,18 @@ class Test_EstPolicy_EnvQueueSingleServer(unittest.TestCase):
                                                 ('n_events_fv', [179, 235, 300, 454, 674]),
                                                 ('n_trajectories_Q', [100.0]*5)
                                                 ])
+
+        assert  dict_params_learn['mode'] == LearningMode.REINFORCE_TRUE and \
+                dict_params_learn['t_learn'] == 5
+        assert  seed == 1717 and \
+                dict_params_simul['theta_true'] == 19 and \
+                dict_params_simul['theta_start'] == 1.1 and \
+                dict_params_simul['nparticles'] == 30 and \
+                dict_params_simul['t_sim'] == 50 and \
+                dict_params_simul['buffer_size_activation_factor'] == 0.3
         assert np.allclose(df_learning, df_learning_expected, atol=1E-6)
 
-    def test_Env_MetMCwithIGA(self):
+    def no_test_Env_MetMCwithIGA(self):
         unittest.skip("The current implementation (11-Jul-2022) is NOT prepared for IGA because integer theta values make Pr(K-1) be equal to None.\n" \
                 "Correcting this is not so easy and we are not interested in evaluating IGA right now")
         print("\n")
@@ -264,7 +298,7 @@ class Test_EstPolicy_EnvQueueSingleServer(unittest.TestCase):
 
         # Simulation parameters
         learning_method = LearningMethod.MC
-        dict_params_learn = dict({'mode': LearningMode.REINFORCE_TRUE, 't_learn': 5})
+        dict_params_learn = dict({'mode': LearningMode.IGA, 't_learn': 5})
         dict_params_simul = dict({
             'seed': 1717,
             'theta_true': 19,
@@ -273,6 +307,12 @@ class Test_EstPolicy_EnvQueueSingleServer(unittest.TestCase):
             't_sim': 30 * 50,
             'buffer_size_activation_factor': 0.3
             })
+        # Make a copy of the seed used to run the process (for the assertion below),
+        # because the key in dict_params_simul is changed by the process
+        # as we need to consider different seeds for the different simulation parts and this seed is passed to each
+        # simulator through the dict_params_simul dictionary and is used to store its value in the output files
+        # to allow repeatability.
+        seed = dict_params_simul['seed']
 
         # Agent interacting with the environment
         agent_gradient = self.createAgentWithPolicyGradientLearner(learning_method, dict_params_simul)
@@ -295,6 +335,15 @@ class Test_EstPolicy_EnvQueueSingleServer(unittest.TestCase):
                                                 ('n_events_fv', [0]*5),
                                                 ('n_trajectories_Q', [100.0]*5)
                                                 ])
+
+        assert  dict_params_learn['mode'] == LearningMode.IGA and \
+                dict_params_learn['t_learn'] == 5
+        assert  seed == 1717 and \
+                dict_params_simul['theta_true'] == 19 and \
+                dict_params_simul['theta_start'] == 1.0 and \
+                dict_params_simul['nparticles'] == 1 and \
+                dict_params_simul['t_sim'] == 30 * 50 and \
+                dict_params_simul['buffer_size_activation_factor'] == 0.3
         assert np.allclose(df_learning, df_learning_expected, atol=1E-6)
 
     def test_Env_MetMCwithReinforceTrue(self):
@@ -316,6 +365,12 @@ class Test_EstPolicy_EnvQueueSingleServer(unittest.TestCase):
             't_sim': 30 * 50,
             'buffer_size_activation_factor': 0.3
             })
+        # Make a copy of the seed used to run the process (for the assertion below),
+        # because the key in dict_params_simul is changed by the process
+        # as we need to consider different seeds for the different simulation parts and this seed is passed to each
+        # simulator through the dict_params_simul dictionary and is used to store its value in the output files
+        # to allow repeatability.
+        seed = dict_params_simul['seed']
 
         # Agent interacting with the environment
         agent_gradient = self.createAgentWithPolicyGradientLearner(learning_method, dict_params_simul)
@@ -338,6 +393,15 @@ class Test_EstPolicy_EnvQueueSingleServer(unittest.TestCase):
                                                 ('n_events_fv', [0]*5),
                                                 ('n_trajectories_Q', [100.0]*5)
                                                 ])
+
+        assert  dict_params_learn['mode'] == LearningMode.REINFORCE_TRUE and \
+                dict_params_learn['t_learn'] == 5
+        assert  seed == 1717 and \
+                dict_params_simul['theta_true'] == 19 and \
+                dict_params_simul['theta_start'] == 1.1 and \
+                dict_params_simul['nparticles'] == 1 and \
+                dict_params_simul['t_sim'] == 30 * 50 and \
+                dict_params_simul['buffer_size_activation_factor'] == 0.3
         assert np.allclose(df_learning, df_learning_expected, atol=1E-6)
 
 

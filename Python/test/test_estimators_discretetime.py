@@ -6,6 +6,10 @@ Created on Wed Jun  1 16:19:38 2022
 @description: Unit tests for estimators (V, Q) on discrete-time MDPs.
 @details: Naming conventions follow the instructions given in test_conventions.txt.
 """
+
+import runpy
+runpy.run_path('../../setup.py')
+
 import unittest
 from unittest_data_provider import data_provider
 
@@ -205,10 +209,14 @@ class Test_EstStateValueV_EnvGridworlds(unittest.TestCase, test_utils.EpisodeSim
                     plot=False, pause=0.1)
         observed = agent_rw_mc.getLearner().getV().getValues()
         print("\nobserved: " + test_utils.array2str(observed))
+
+        assert self.nS == 19 and \
+               seed == 1717 and \
+               nepisodes == 20 and \
+               start_state == 10
         assert np.allclose(observed, expected, atol=1E-6)
 
     def test_EnvGridworld1D_PolRandomWalk_MetMC_TestGammaSmallerThan1(self):
-        # -- All tests are run using seed = 1717, nepisodes = 20, start_state = 10
         print("\n*** Testing " + self.id() + " ***")
 
         # Simulation setup
@@ -247,9 +255,16 @@ class Test_EstStateValueV_EnvGridworlds(unittest.TestCase, test_utils.EpisodeSim
         if plot:
             # Add the lambda parameter in the params dictionary which is required by plot_results()
             params['lambda'] = 1.0
-            self.plot_results(params,
+            self.plot_results(params, nepisodes,
                               observed, self.V_true, RMSE_by_episode, learning_info['alpha_mean'],
                               max_rmse=self.max_rmse, color_rmse=self.color_rmse)
+        assert self.nS == 19 and \
+               seed == 1717 and \
+               nepisodes == 20 and \
+               start_state == 10 and \
+               params['alpha'] == 1.0 and \
+               params['gamma'] == 0.7 and \
+               params['alpha_min'] == 0.0
         assert np.allclose(observed, expected, atol=1E-6)
 
     def test_EnvGridworld1D_PolRandomWalk_MetMC_TestRMSETwice(self):
@@ -287,10 +302,15 @@ class Test_EstStateValueV_EnvGridworlds(unittest.TestCase, test_utils.EpisodeSim
                                                             plot=False, pause=0.001)
 
         # Expected RMSE with the following settings:
-        # 19-size gridworld
-        # alpha = 0.3, gamma = 1.0
-        # adjust_alpha = True, adjust_alpha_by_episode = False, alpha_min = 0.0
-        # seed = 1717, nepisodes=20, start_state = 10
+        # alpha_update_Type = AlphaUpdateType.FIRST_STATE_VISIT, adjust_alpha = True, adjust_alpha_by_episode = False
+        # + the settings specified in the assertion
+        assert self.nS == 19 and \
+               seed == 1717 and \
+               nepisodes == 20 and \
+               start_state == 10 and \
+               params['alpha'] == 0.3 and \
+               params['gamma'] == 1.0 and \
+               params['alpha_min'] == 0.0
         rmse_expected = 0.29397963
 
         rmse_observed = np.mean(RMSE_by_episode)
@@ -367,6 +387,11 @@ class Test_EstStateValueV_EnvGridworlds(unittest.TestCase, test_utils.EpisodeSim
                     plot=False, pause=0.1)
         observed = agent_rw_mc.getLearner().getV().getValues()
         print("\nobserved: " + test_utils.array2str(observed))
+
+        assert self.nS == 19 and \
+               seed == 1717 and \
+               nepisodes == 20 and \
+               start_state == 10
         assert np.allclose(observed, expected, atol=1E-6)
 
     def test_EnvGridworld1D_PolRandomWalk_MetLambdaReturn_TestGammaLessThan1(self):
@@ -403,6 +428,14 @@ class Test_EstStateValueV_EnvGridworlds(unittest.TestCase, test_utils.EpisodeSim
                     verbose=True, verbose_period=100,
                     plot=False, pause=0.1)
 
+        assert self.nS == 19 and \
+               seed == 1717 and \
+               nepisodes == 20 and \
+               start_state == 10 and \
+               params['alpha'] == 1.0 and \
+               params['gamma'] == 0.7 and \
+               params['lambda'] == 0.8 and \
+               params['alpha_min'] == 0.0
         expected = np.array([0.000000, -0.471314, -0.150874, -0.044135, -0.021683,
                              -0.007209, -0.000881, -0.000375, -0.000158, -0.000065,
                              0.000034, 0.000097, 0.000210, 0.000553, 0.002688,
@@ -410,7 +443,7 @@ class Test_EstStateValueV_EnvGridworlds(unittest.TestCase, test_utils.EpisodeSim
         observed = agent_rw_mclambda.getLearner().getV().getValues()
         print("\nobserved: " + test_utils.array2str(observed))
         if plot:
-            self.plot_results(params,
+            self.plot_results(params, nepisodes,
                               observed, self.V_true, RMSE_by_episode, learning_info['alpha_mean'],
                               max_rmse=self.max_rmse, color_rmse=self.color_rmse)
         assert np.allclose(observed, expected, atol=1E-6)
@@ -448,7 +481,14 @@ class Test_EstStateValueV_EnvGridworlds(unittest.TestCase, test_utils.EpisodeSim
                                                                         plot=False, pause=0.1)
 
         # Expected state values with alpha = 0.2, gamma = 0.9, lambda = 0.8
-        # seed = 1717, nepisodes=20, start_state = 9
+        assert self.nS == 19 and \
+               seed == 1717 and \
+               nepisodes == 20 and \
+               start_state == 10 and \
+               params['alpha'] == 1.0 and \
+               params['gamma'] == 1.0 and \
+               params['lambda'] == 1.0 and \
+               params['alpha_min'] == 0.0
         expected = np.array([-0.0, -0.94788777, -0.93485068, -0.77635209, -0.66915289, -0.67045823,
                              -0.6319687, -0.52116762, -0.44295159, -0.20887109, -0.1027944, -0.03800919,
                              -0.03668617, 0.06142266, 0.27410733, 0.42610526, 0.50467228, 0.63018903,
@@ -456,7 +496,7 @@ class Test_EstStateValueV_EnvGridworlds(unittest.TestCase, test_utils.EpisodeSim
         observed = learner_mclambda_adaptive.getV().getValues()
         print("\nobserved: " + test_utils.array2str(observed))
         if plot:
-            self.plot_results(params,
+            self.plot_results(params, nepisodes,
                               observed, self.V_true, RMSE_by_episode, learning_info['alpha_mean_by_episode_mean'],
                               max_rmse=self.max_rmse, color_rmse=self.color_rmse)
 
@@ -608,15 +648,28 @@ class Test_EstStateValueV_EnvGridworlds(unittest.TestCase, test_utils.EpisodeSim
         fig.suptitle("{}: gamma = {:.2g}, #experiments = {}, #episodes = {}"\
                      .format(learner.__class__.__name__, gamma, nexperiments, nepisodes))
 
-        print("Average RMSE and its standard error at last episode by lambda:\n{}".format(np.c_[rmse_episodes_mean, rmse_episodes_se]))
-        assert np.allclose(rmse_episodes_mean, [[0.45592716, 0.40840256, 0.36065968],
-                                                [0.42083822, 0.35093946, 0.29653623],
-                                                [0.35946782, 0.28547410, 0.32950694],
-                                                [0.32520426, 0.28876721, 0.45260387]])
-        assert np.allclose(rmse_episodes_se,   [[0.01244143, 0.02139052, 0.02996329],
-                                                [0.01891116, 0.03116384, 0.03592948],
-                                                [0.02941829, 0.03871512, 0.02411244],
-                                                [0.03452769, 0.03385807, 0.02151384]])
+        # The following results are for the following setup:
+        # - seed = 1717
+        # - nepisodes = 10
+        # -
+        print("Average RMSE and its standard error at last episode by lambda (rows) and alpha (columns):\n{}".format(np.c_[rmse_episodes_mean, rmse_episodes_se]))
+        assert self.nS == 19 and \
+               seed == 1717 and \
+               nexperiments == 3 and \
+               nepisodes == 10 and \
+               start is None and \
+               useGrid == False and \
+               gamma == 1.0 and \
+               lambdas == [0, 0.4, 0.7, 0.8] and \
+               alphas == [0.2, 0.4, 0.8]
+        assert np.allclose(rmse_episodes_mean, [[0.45538468, 0.40588784, 0.35134918],
+                                                [0.41605814, 0.33990824, 0.30015009],
+                                                [0.34587065, 0.28262690, 0.37674099],
+                                                [0.30984734, 0.30718626, 0.46807331]])
+        assert np.allclose(rmse_episodes_se,   [[0.01260557, 0.02211615, 0.03213792],
+                                                [0.02009345, 0.03399665, 0.03352152],
+                                                [0.03244298, 0.0368028 , 0.02015556],
+                                                [0.03680285, 0.02787032, 0.01874832]])
 
 
 class Test_EstValueFunctionV_MetMCLambda_EnvMountainCar(unittest.TestCase, test_utils.EpisodeSimulation):

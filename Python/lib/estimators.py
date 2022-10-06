@@ -8,8 +8,9 @@ Created on Thu Jun  4 19:12:23 2020
 
 from enum import Enum, unique
 import warnings
+import sys      # Used at least for sys.exit()
 
-import copy     # Used to generate different instances of the queue under analysis
+import copy     # Used at least to generate different instances of the queue under analysis
 import bisect
 
 import numpy as np
@@ -427,11 +428,13 @@ class EstimatorQueueBlockingFlemingViot:
         #--------------------------------- Parse input parameters -----------------------------
         if reactivate and nparticles < 2:
             raise ValueError("The number of particles must be at least 2 when reactivate=True ({})".format(nparticles))
-            import sys
             sys.exit(-1)
         self.N = int( nparticles )                              # Make sure the number of particles is of int type
         self.queue = copy.deepcopy(queue)                       # We copy the queue so that we do NOT change the `queue` object calling this function
-        self.job_class_rates = job_class_rates                  # This should be a list of arrival rates for each job class (which are the indices of this list
+        if not isinstance(job_class_rates, list):
+            raise ValueError("Parameter `job_class_rates` must be a list of rates ({})".format(job_class_rates))
+            sys.exit(-1)
+        self.job_class_rates = job_class_rates
         self.nservers = self.queue.getNServers()
         self.buffer_size_activation = buffer_size_activation    # Buffer size defining the ACTIVATION set of server sizes (n1, n2, ..., nR)
 
@@ -465,6 +468,9 @@ class EstimatorQueueBlockingFlemingViot:
         equivalent_birth_rates = compute_job_rates_by_server(self.job_class_rates, self.nservers, self.policy_assign.getProbabilisticMap())
         self.queue.setBirthRates(equivalent_birth_rates)
         if service_rates is not None:
+            if not isinstance(service_rates, list):
+                raise ValueError("Parameter `service_rates` must be a list of rates ({})".format(service_rates))
+                sys.exit(-1)
             self.queue.setDeathRates(service_rates)
 
         # Finalize info
@@ -4813,7 +4819,7 @@ def estimate_blocking_mc(env_queue :EnvQueueSingleBufferWithJobClasses, agent, d
     time_start = timer()
     # Object that is used to estimate the blocking probability via Monte-Carlo as "total blocking time" / "total return time" 
     est_mc = EstimatorQueueBlockingFlemingViot(1, env_queue.queue, env_queue.getJobClassRates(),
-                                               service_rates=env_queue.getServiceRates(),
+                                               service_rates=list(env_queue.getServiceRates()),
                                                buffer_size_activation=dict_params_simul['buffer_size_activation'],
                                                positions_observe=dict_params_simul['buffer_size_activation'],
                                                nmeantimes=nmeantimes,
@@ -4901,8 +4907,8 @@ def estimate_blocking_fv_AllInOne(  env_queue: EnvQueueSingleBufferWithJobClasse
     """
     # Include this portion of code in case we want to compare the estimation of P(T>t)
     # obtained in the FV simulation called below with an estimation obtained from a separate simulation.
-    est_surv = EstimatorQueueBlockingFlemingViot(dict_params_simul['nparticles'], env_queue.queue, env_queue.getJobClassRates(),
-                                               service_rates=env_queue.getServiceRates(),
+    est_surv = EstimatorQueueBlockingFlemingViot(dict_params_simul['nparticles'], env_queue.queue, list(env_queue.getJobClassRates()),
+                                               service_rates=list(env_queue.getServiceRates()),
                                                buffer_size_activation=dict_params_simul['buffer_size_activation'],
                                                nmeantimes=dict_params_simul['nparticles'] * dict_params_simul['nmeantimes'],
                                                policy_assign=env_queue.getAssignPolicy(),
@@ -4928,8 +4934,8 @@ def estimate_blocking_fv_AllInOne(  env_queue: EnvQueueSingleBufferWithJobClasse
     if dict_params_info['log']:
         print("\tRunning Fleming-Viot simulation using an ABSORPTION start state to estimate the blocking probability (seed={})..." \
               .format(dict_params_simul['seed']))
-    est_fv = EstimatorQueueBlockingFlemingViot(dict_params_simul['nparticles'], env_queue.queue, env_queue.getJobClassRates(),
-                                               service_rates=env_queue.getServiceRates(),
+    est_fv = EstimatorQueueBlockingFlemingViot(dict_params_simul['nparticles'], env_queue.queue, list(env_queue.getJobClassRates()),
+                                               service_rates=list(env_queue.getServiceRates()),
                                                buffer_size_activation=dict_params_simul['buffer_size_activation'],
                                                nmeantimes=dict_params_simul['nmeantimes'],
                                                burnin_cycles_absorption=dict_params_simul['burnin_cycles_absorption'],
@@ -5080,8 +5086,8 @@ def estimate_blocking_fv(   env_queue: EnvQueueSingleBufferWithJobClasses,
     if dict_params_info['log']:
         print("\tStep 2 of 2: Running Fleming-Viot simulation using an ACTIVATION start state to estimate blocking probability using E(T) = {:.1f} (out of simul time={:.1f}) (seed={})..." \
               .format(expected_absorption_time, est_abs.maxtime, seed))
-    est_fv = EstimatorQueueBlockingFlemingViot(dict_params_simul['nparticles'], env_queue.queue, env_queue.getJobClassRates(),
-                                               service_rates=env_queue.getServiceRates(),
+    est_fv = EstimatorQueueBlockingFlemingViot(dict_params_simul['nparticles'], env_queue.queue, list(env_queue.getJobClassRates()),
+                                               service_rates=list(env_queue.getServiceRates()),
                                                buffer_size_activation=dict_params_simul['buffer_size_activation'],
                                                nmeantimes=None,
                                                policy_assign=agent.getAssignmentPolicy(),
@@ -5201,8 +5207,8 @@ def estimate_proba_survival_and_expected_absorption_time_mc(env_queue, agent, di
     dict_params_simul, dict_params_info = estimate_parse_input_parameters(dict_params_simul, dict_params_info)
 
     # Run the Monte-Carlo simulation on one particle
-    est_mc = EstimatorQueueBlockingFlemingViot(1, env_queue.queue, env_queue.getJobClassRates(),
-                                                service_rates=env_queue.getServiceRates(),
+    est_mc = EstimatorQueueBlockingFlemingViot(1, env_queue.queue, list(env_queue.getJobClassRates()),
+                                                service_rates=list(env_queue.getServiceRates()),
                                                 buffer_size_activation=dict_params_simul['buffer_size_activation'],
                                                 positions_observe=dict_params_simul['buffer_size_activation'] - 1,
                                                 nmeantimes=dict_params_simul['nmeantimes'],
@@ -5754,16 +5760,16 @@ if __name__ == "__main__":
         # Check E(T)
         nET, ET, ET_expected = plot_event_times_dist(est_mc, EventType.ABSORPTION)
 
-        print("\n[test_QB] Computing observed lambda and mu...")
-        print("[test_QB] Observed lambda={:.3f} (n={})".format(lmbda, nlambda))
-        print("[test_QB] Expected lambda={:.3f}".format(est_mc.queue.getBirthRates()[0]))
-        print("[test_QB] Observed mu={:.3f} (n={})".format(mu, nmu))
-        print("[test_QB] Expected mu={:.3f}".format(est_mc.queue.getDeathRates()[0]))
-        print("[test_QB] Observed rho={:.3f}".format(lmbda/ mu))
-        print("[test_QB] Expected rho={}".format(est_mc.rhos[0]))
-        print("[test_QB] Estimated expected absorption cycle time={:.3f}".format(expected_absorption_time))
-        print("[test_QB] Observed E(T)={:.3f} (n={}) (should be the same as 'estimatd expected absorption cycle time')".format(ET, nET))
-        print("[test_QB] Expected E(T)={:.3f}".format(ET_expected))
+        print("\n[estimators] Computing observed lambda and mu...")
+        print("[estimators] Observed lambda={:.3f} (n={})".format(lmbda, nlambda))
+        print("[estimators] Expected lambda={:.3f}".format(est_mc.queue.getBirthRates()[0]))
+        print("[estimators] Observed mu={:.3f} (n={})".format(mu, nmu))
+        print("[estimators] Expected mu={:.3f}".format(est_mc.queue.getDeathRates()[0]))
+        print("[estimators] Observed rho={:.3f}".format(lmbda/ mu))
+        print("[estimators] Expected rho={}".format(est_mc.rhos[0]))
+        print("[estimators] Estimated expected absorption cycle time={:.3f}".format(expected_absorption_time))
+        print("[estimators] Observed E(T)={:.3f} (n={}) (should be the same as 'estimated expected absorption cycle time')".format(ET, nET))
+        print("[estimators] Expected E(T)={:.3f}".format(ET_expected))
         assert "{:.3f} (n={})".format(lmbda, nlambda) == "0.474 (n=568)"
         assert "{:.3f} (n={})".format(mu, nmu) == "0.972 (n=563)"
         assert "{:.3f}".format(lmbda/ mu) == "0.488"
@@ -5771,7 +5777,7 @@ if __name__ == "__main__":
         assert np.abs(ET - expected_absorption_time) < 1E-6
 
         # b) Fleming-Viot
-        print("\n[test_QB] Running Fleming-Viot simulation on {} particles and T={}x...".format(nparticles, nmeantimes))
+        print("\n[estimators] Running Fleming-Viot simulation on {} particles and T={}x...".format(nparticles, nmeantimes))
         est_fv = EstimatorQueueBlockingFlemingViot(nparticles, queue, job_class_rates,
                                                    service_rates=None,
                                                    buffer_size_activation=1,
@@ -5806,13 +5812,13 @@ if __name__ == "__main__":
                             })
 
         time_end = timer()
-        print("[test_QB] Execution time: {:.1f} min".format((time_end - time_start) / 60))
+        print("[estimators] Execution time: {:.1f} min".format((time_end - time_start) / 60))
 
         # c) Assertions
-        print("[test_QB] P(K) true: {:.6f}%".format(proba_blocking_K*100))    # K=5: 1.587302%
-        print("[test_QB] P(K) by MC: {:.6f}% (#events={})".format(proba_blocking_mc*100, est_mc.nevents))
-        print("[test_QB] P(K) estimated by FV: {:.6f}% (#events={})".format(proba_blocking_fv*100, est_fv.nevents))
-        print("[test_QB] E(T) estimated by FV: {:.1f} (n={})".format(expected_absorption_time, n_expected_absorption_time))
+        print("[estimators] P(K) true: {:.6f}%".format(proba_blocking_K*100))    # K=5: 1.587302%
+        print("[estimators] P(K) by MC: {:.6f}% (#events={})".format(proba_blocking_mc*100, est_mc.nevents))
+        print("[estimators] P(K) estimated by FV: {:.6f}% (#events={})".format(proba_blocking_fv*100, est_fv.nevents))
+        print("[estimators] E(T) estimated by FV: {:.1f} (n={})".format(expected_absorption_time, n_expected_absorption_time))
         assert "{:.6f}% (#events={})".format(proba_blocking_mc*100, est_mc.nevents) == "1.065424% (#events=1131)"
         assert "{:.6f}% (#events={})".format(proba_blocking_fv*100, est_fv.nevents) == "0.320571% (#events=484)"
         assert "{:.1f} (n={})".format(expected_absorption_time, n_expected_absorption_time) == "3.2 (n=20)"
@@ -5846,21 +5852,21 @@ if __name__ == "__main__":
         # Info parameters 
         dict_params_info = {'plot': True, 'log': False}
 
-        print("[test_QB] Computing TRUE blocking probability...")
+        print("[estimators] Computing TRUE blocking probability...")
         proba_blocking_K = compute_blocking_probability_birth_death_process([rate_birth / rate_death[0]], K)
 
         # Run!
-        print("[test_QB] Running Fleming-Viot estimation procedure: K={}, BSA={}, N={}, T={}x...".format(K, dict_params_simul['buffer_size_activation'], dict_params_simul['nparticles'], dict_params_simul['nmeantimes']))
+        print("[estimators] Running Fleming-Viot estimation procedure: K={}, BSA={}, N={}, T={}x...".format(K, dict_params_simul['buffer_size_activation'], dict_params_simul['nparticles'], dict_params_simul['nmeantimes']))
         time_start = timer()
         proba_blocking_fv, _, expected_absorption_time, _, n_expected_absorption_time, _, _, _, dict_stats = estimate_blocking_fv_AllInOne(env_queue, agent, dict_params_simul, dict_params_info=dict_params_info)
         time_end = timer()
         dt_end = get_current_datetime_as_string()
-        print("[test_QB] Ended at: {}".format(dt_end))
-        print("[test_QB] Execution time: {:.1f} min, {:.1f} hours".format((time_end - time_start) / 60, (time_end - time_start) / 3600))
+        print("[estimators] Ended at: {}".format(dt_end))
+        print("[estimators] Execution time: {:.1f} min, {:.1f} hours".format((time_end - time_start) / 60, (time_end - time_start) / 3600))
 
-        print("\n[test_QB] True blocking probability: Pr(K)={:.6f}%".format(proba_blocking_K*100))    # K=5: 1.587302%
-        print("[test_QB] Estimated blocking probability: Pr(FV)={:.6f}% (#events={})".format(proba_blocking_fv*100, dict_stats['nevents']))
-        print("[test_QB] E(T) estimated by FV: {:.1f} (n={})".format(expected_absorption_time, n_expected_absorption_time))
+        print("\n[estimators] True blocking probability: Pr(K)={:.6f}%".format(proba_blocking_K*100))    # K=5: 1.587302%
+        print("[estimators] Estimated blocking probability: Pr(FV)={:.6f}% (#events={})".format(proba_blocking_fv*100, dict_stats['nevents']))
+        print("[estimators] E(T) estimated by FV: {:.1f} (n={})".format(expected_absorption_time, n_expected_absorption_time))
         assert "{:.6f}% (#events={})".format(proba_blocking_fv*100, dict_stats['nevents']) == "1.758346% (#events=1168)"
         assert "{:.1f} (n={})".format(expected_absorption_time, n_expected_absorption_time) == "7.7 (n=20)"
 
@@ -5881,7 +5887,7 @@ if __name__ == "__main__":
         # K=5, rhos=[0.4, 0.75, 0.35]: E(T) = 8.1
         # K=20, rhos=[0.4, 0.75, 0.35]: E(T) = 10.4
 
-        print("[test_QB] Computing TRUE blocking probability...")
+        print("[estimators] Computing TRUE blocking probability...")
         job_rates_by_server = compute_job_rates_by_server(job_class_rates, nservers, policy_assign.getProbabilisticMap())
         proba_blocking_K = compute_blocking_probability_birth_death_process(get_server_loads(job_rates_by_server, rate_death), K)
 
@@ -5892,9 +5898,9 @@ if __name__ == "__main__":
         finalize_type = FinalizeType.ABSORB_CENSORED
 
         # a) Monte-Carlo (to estimate expected absorption cycle time)
-        print("[test_QB] Running Monte-Carlo simulation on 1 particle, K={}, T={}x...".format(K, nparticles*nmeantimes))
+        print("[estimators] Running Monte-Carlo simulation on 1 particle, K={}, T={}x...".format(K, nparticles*nmeantimes))
         est_mc = EstimatorQueueBlockingFlemingViot(1, queue, job_class_rates,
-                                                   service_rates=env_queue.getServiceRates(),
+                                                   service_rates=list(env_queue.getServiceRates()),
                                                    buffer_size_activation=3,
                                                    positions_observe=3,
                                                    nmeantimes=nparticles*nmeantimes,
@@ -5924,14 +5930,14 @@ if __name__ == "__main__":
             print("Computing observed lambda and mu for server {}...".format(server))
             df[server] = pd.DataFrame({'t': est_mc.all_times_by_server[0][server], 'x': est_mc.all_positions_by_server[0][server]})
             lambdas[server], nlambdas[server], mus[server], nmus[server] = compute_observed_rates(df[server])
-        print("\n[test_QB] Computing observed lambda and mu...")
-        print("[test_QB] Observed lambdas={} (n={})".format(lambdas, nlambdas))
-        print("[test_QB] Expected lambda={}".format(est_mc.queue.getBirthRates()))
-        print("[test_QB] Observed mu={} (n={})".format(mus, nmus))
-        print("[test_QB] Expected mu={}".format(est_mc.queue.getDeathRates()))
-        print("[test_QB] Observed rhos={}".format([l/m for l, m in zip(lambdas, mus)]))
-        print("[test_QB] Expected rhos={}".format(est_mc.rhos))
-        print("[test_QB] Observed E(T)={:.3f} (n={})".format(ET, nET))    # Note: Expected E(T) is None
+        print("\n[estimators] Computing observed lambda and mu...")
+        print("[estimators] Observed lambdas={} (n={})".format(lambdas, nlambdas))
+        print("[estimators] Expected lambda={}".format(est_mc.queue.getBirthRates()))
+        print("[estimators] Observed mu={} (n={})".format(mus, nmus))
+        print("[estimators] Expected mu={}".format(est_mc.queue.getDeathRates()))
+        print("[estimators] Observed rhos={}".format([l/m for l, m in zip(lambdas, mus)]))
+        print("[estimators] Expected rhos={}".format(est_mc.rhos))
+        print("[estimators] Observed E(T)={:.3f} (n={})".format(ET, nET))    # Note: Expected E(T) is None
         # Assertions when assigning arriving jobs directly to servers
         # (i.e. function self._generate_birth_times_from_equivalent_rates() is used
         # instead of function self._generate_birth_times())
@@ -5948,9 +5954,9 @@ if __name__ == "__main__":
         #assert "{:.3f} (n={})".format(ET, nET) == "3.615 (n=314)"
 
         # b) Fleming-Viot
-        print("\n[test_QB] Running Fleming-Viot simulation on {} particles, K={}, T={}x...".format(nparticles, K, nmeantimes))
+        print("\n[estimators] Running Fleming-Viot simulation on {} particles, K={}, T={}x...".format(nparticles, K, nmeantimes))
         est_fv = EstimatorQueueBlockingFlemingViot(nparticles, queue, job_class_rates,
-                                                   service_rates=env_queue.getServiceRates(),
+                                                   service_rates=list(env_queue.getServiceRates()),
                                                    buffer_size_activation=buffer_size_activation,
                                                    nmeantimes=nmeantimes,
                                                    burnin_cycles_absorption=3,
@@ -5988,13 +5994,13 @@ if __name__ == "__main__":
         assert est_fv.nevents >= est_fv.get_number_events_from_latest_reset(), "nevents={}, get_number={}".format(est_fv.nevents, est_fv.get_number_events_from_latest_reset())
 
         time_end = timer()
-        print("[test_QB] Execution time: {:.1f} min".format((time_end - time_start) / 60))
+        print("[estimators] Execution time: {:.1f} min".format((time_end - time_start) / 60))
 
         # c) Assertions
-        print("[test_QB] P(K) true: {:.6f}%".format(proba_blocking_K*100))    # K=5: 11.98%
-        print("[test_QB] P(K) by MC: {:.6f}% (#events={})".format(proba_blocking_mc*100, est_mc.nevents))
-        print("[test_QB] P(K) estimated by FV: {:.6f}% (#events={})".format(proba_blocking_fv*100, est_fv.nevents))
-        print("[test_QB] E(T) estimated by FV: {:.1f} (n={})".format(expected_absorption_time, n_expected_absorption_time))
+        print("[estimators] P(K) true: {:.6f}%".format(proba_blocking_K*100))    # K=5: 11.98%
+        print("[estimators] P(K) by MC: {:.6f}% (#events={})".format(proba_blocking_mc*100, est_mc.nevents))
+        print("[estimators] P(K) estimated by FV: {:.6f}% (#events={})".format(proba_blocking_fv*100, est_fv.nevents))
+        print("[estimators] E(T) estimated by FV: {:.1f} (n={})".format(expected_absorption_time, n_expected_absorption_time))
         # Assertions for seed=1717, nservers=3, K=5, BSA=3 (both MC and FV), N=20, nmeantimes=5
         # Assertions when assigning arriving jobs directly to servers
         # (i.e. function self._generate_birth_times_from_equivalent_rates() is used
