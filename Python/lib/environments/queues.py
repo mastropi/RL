@@ -392,6 +392,9 @@ class EnvQueueSingleBufferWithJobClasses(gym.Env):
         return self.dict_params_reward_func
 
     #------ SETTERS ------#
+    def setCapacity(self, capacity):
+        self.queue.setCapacity(capacity)
+
     def setParamsRewardFunc(self, dict_params):
         self.dict_params_reward_func = dict_params
 

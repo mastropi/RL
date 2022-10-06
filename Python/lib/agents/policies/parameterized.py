@@ -39,7 +39,8 @@ class PolQueueTwoActionsLogit(GenericParameterizedPolicyTwoActions):
             raise ValueError("The theta parameter must be a float number ({})".format(theta))
         super().__init__(env, theta)
 
-        assert theta < self.env.getCapacity(), "The value of theta is smaller than the queue capacity"
+        if self.env.getCapacity() < np.Inf: # When capacity is Inf, theta is also allowed to be Inf
+            assert theta < self.env.getCapacity(), "The value of theta is smaller than the queue capacity"
 
         self.beta = beta
 
@@ -141,7 +142,8 @@ class PolQueueTwoActionsLinearStep(GenericParameterizedPolicyTwoActions):
             raise ValueError("The theta parameter must be a float number ({})".format(theta))
         super().__init__(env, theta)
 
-        assert theta < self.env.getCapacity(), "The value of theta is smaller than the queue capacity"
+        if self.env.getCapacity() < np.Inf: # When capacity is Inf, theta is also allowed to be Inf
+            assert theta < self.env.getCapacity(), "The value of theta is smaller than the queue capacity"
 
     def getGradient(self, action, state):
         """

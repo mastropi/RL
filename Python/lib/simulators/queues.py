@@ -387,10 +387,10 @@ class SimulatorQueue(Simulator):
                 # Q(K-1, a=1) - Q(K-1, a=0)
                 if DEBUG_ESTIMATORS or show_messages(verbose, verbose_period, t_learn):
                     print("\nEstimating the difference of the state-action values when the initial buffer size is K-1={}...".format(K-1))
-                N = 100;
+                N = 100
                 t_sim_max = 250
                 K, Q0_Km1, Q1_Km1, n_Km1, max_t_Km1 = \
-                    self.estimate_Q_values_until_mixing(t_learn, K - 1, t_sim_max=t_sim_max, N=N, \
+                    self.estimate_Q_values_until_mixing(t_learn, K - 1, t_sim_max=t_sim_max, N=N,
                                                         seed=dict_params_simul['seed'] * 100, verbose=verbose,
                                                         verbose_period=verbose_period)
                 # K, Q0_Km1, Q1_Km1, n, max_t = self.estimate_Q_values_until_stationarity(t_learn, t_sim_max=50, N=N, verbose=verbose, verbose_period=verbose_period)
@@ -417,10 +417,10 @@ class SimulatorQueue(Simulator):
                 # Same as above, but for buffer size = K
                 if DEBUG_ESTIMATORS or show_messages(verbose, verbose_period, t_learn):
                     print("\nEstimating the difference of the state-action values when the initial buffer size is K={}...".format(K))
-                N = 100;
+                N = 100
                 t_sim_max = 250
                 K, Q0_K, Q1_K, n_K, max_t_K = \
-                    self.estimate_Q_values_until_mixing(t_learn, K, t_sim_max=t_sim_max, N=N, \
+                    self.estimate_Q_values_until_mixing(t_learn, K, t_sim_max=t_sim_max, N=N,
                                                         seed=dict_params_simul['seed'] * 100 + 1, verbose=verbose,
                                                         verbose_period=verbose_period)
                 # K, Q0_K, Q1_K, n_K, max_t_K = self.estimate_Q_values_until_stationarity(t_learn, t_sim_max=50, N=N, verbose=verbose, verbose_period=verbose_period)
@@ -736,7 +736,7 @@ class SimulatorQueue(Simulator):
         for i in range(N):
             if True:
                 print("Estimating Qdiff for buffer size bs={}... {} out of {} replications".format(buffer_size, i, N))
-            _, Q0_, Q1_, t_mix = self.run_simulation_2_until_mixing(t_learn, buffer_size, t_sim_max, \
+            _, Q0_, Q1_, t_mix = self.run_simulation_2_until_mixing(t_learn, buffer_size, t_sim_max,
                                                                     verbose=verbose, verbose_period=verbose_period)
             if not np.isnan(Q0_) and not np.isnan(Q1_):
                 Q0 += Q0_
@@ -897,9 +897,13 @@ class SimulatorQueue(Simulator):
         # Time step in the queue trajectory (the first time step is t = 0)
         done = False
         t = 0                   # We start at 0 because we have already stored the state for t=0 above
-        t0 = 0; t1 = 0;         # We keep track of the time step of each queue which only changes
-                                # when there is an incoming job, and thus we can compare their state at the same
-                                # discrete time value.
+        t0 = 0; t1 = 0;         # We keep track of the discrete-time step of EACH queue which increases by +1
+                                # ONLY when a new job arrives to the respective queue
+                                # (as this is the only moment when an action is applied by the MDP,
+                                # which is either accept or reject the incoming job).
+                                # Thus, we can compare the states of each of the two queues simulated
+                                # (the one starting with action a=0 and the one starting with action a=1)
+                                # at the same discrete time value, and check if the two queues mixed.
         maxtime = t_sim_max     # Max discrete time, in case there is no mixing of trajectories
         # Initialize the state-action values with the first observed reward (at t=0)
         Q0 = rewards[0][0]
@@ -907,7 +911,8 @@ class SimulatorQueue(Simulator):
         if False:
             print("--> First reward Q(s={},a=1)={:.1f}, Q(s={},a=0)={:.1f}".format(buffer_size, Q1, buffer_size, Q0))
         while not done:
-            # Generate events for each queue environment until the discrete time changes,
+            # Generate events for each queue environment until the respective discrete time changes
+            # (i.e. until a new job arrives),
             # so that we can compare their state-action at the same discrete time value and find the mixing time.
             # Note: the generate_events() function takes care of NOT generating a service event when a server is empty.
             while t0 == t:
@@ -1335,6 +1340,7 @@ def choose_state_for_buffer_size(env, buffer_size):
 
 
 def get_blocking_buffer_sizes(agent):
+    "Returns the buffer sizes where the job acceptance policy of the given agent blocks an incoming job"
     assert agent is not None
     if agent.getLearnerP() is not None:
         assert agent.getAcceptancePolicy().getThetaParameter() == agent.getLearnerP().getPolicy().getThetaParameter(), \

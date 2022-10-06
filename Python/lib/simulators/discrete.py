@@ -125,7 +125,7 @@ class Simulator:
         # Restore the initial state distribution array in case it has been possibly changed
         # (e.g. when we want to define a specific initial state)
         if self._isd_orig is not None:
-            self.setInitialStateDistribution(self._isd_orig)
+            self.env.setInitialStateDistribution(self._isd_orig)
 
     def reset(self, reset_episode=True, reset_value_functions=True):
         "Resets the simulator"

@@ -16,8 +16,9 @@ from Python.lib.environments.queues import EnvQueueSingleBufferWithJobClasses
 import Python.lib.queues as queues
 from Python.lib.queues import Event
 
-from Python.lib.simulators.queues import compute_job_rates_by_server, generate_event, SimulatorQueue
+from Python.lib.simulators.queues import generate_event, SimulatorQueue
 
+from Python.lib.utils.computing import compute_job_rates_by_server
 
 class Test_Support_EnvQueueMultiServer(unittest.TestCase):
 

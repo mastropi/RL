@@ -17,22 +17,18 @@ from matplotlib import pyplot as plt
 from matplotlib.ticker import MaxNLocator
 from timeit import default_timer as timer
 
-from Python.lib.agents.learners import LearnerTypes
 from Python.lib.agents.learners.continuing.fv import LeaFV
 from Python.lib.agents.learners.continuing.mc import LeaMC
 from Python.lib.agents.learners.policies import LeaPolicyGradient
 
-from Python.lib.agents.policies import PolicyTypes
-from Python.lib.agents.policies.job_assignment import PolJobAssignmentProbabilistic
 from Python.lib.agents.policies.parameterized import PolQueueTwoActionsLinearStep
 
 from Python.lib.agents.queues import AgeQueue
 
-from Python.lib.environments.queues import Actions, EnvQueueSingleBufferWithJobClasses, rewardOnJobRejection_ExponentialCost
-import Python.lib.queues as queues
+from Python.lib.environments.queues import Actions, rewardOnJobRejection_ExponentialCost
 
-from Python.lib.simulators import LearningMethod
-from Python.lib.simulators.queues import compute_job_rates_by_server, compute_nparticles_and_nsteps_for_fv_process, \
+from Python.lib.simulators import LearningMethod, define_queue_environment_and_agent
+from Python.lib.simulators.queues import compute_nparticles_and_nsteps_for_fv_process, \
     compute_rel_errors_for_fv_process, LearningMode, SimulatorQueue
 
 from Python.lib.utils.basic import aggregation_bygroups, is_scalar, show_exec_params
@@ -49,128 +45,6 @@ PLOT_RESULTS_PAPER = False              # Whether to generate the plots with the
 
 
 # ---------------------------- Auxiliary functions ---------------------------#
-def define_queue_environment_and_agent(dict_params: dict):
-    """
-    Define the queue environment on which the simulation will take place
-
-    Arguments:
-    capacity: int
-        Capacity of the queue
-
-    nservers: int
-        Number of servers in the queue system.
-
-    job_class_rates: list
-        Job arrival rates by job class.
-
-    service_rates: list
-        Service rates of the servers in the queue system.
-
-    policy_assignment_probabilities: list of lists
-
-    reward_func: function
-        Function returning the reward given by the environment for each state and action.
-
-    rewards_accept_by_job_class: list
-        List of rewards for the acceptance of the different job classes whose rate is given in job_class_rates.
-
-    Return: Tuple
-    Duple containing:
-    - the queue environment created from the input parameters
-    - the intensities of each server in the queue system, computed from the job class arrival rates
-    and the given assignment probabilities.
-    """
-    set_entries_params = {'environment', 'policy', 'learners', 'agent'}
-    if not set_entries_params.issubset(dict_params.keys()):
-        raise ValueError("Missing entries in the dict_params dictionary: {}" \
-                         .format(set_entries_params.difference(dict_params.keys())))
-
-    # Environment
-    set_entries_params_environment = {'capacity', 'nservers', 'job_class_rates', 'service_rates',
-                                      'policy_assignment_probabilities', 'reward_func',
-                                      'rewards_accept_by_job_class'}
-    if not set_entries_params_environment.issubset(dict_params['environment'].keys()):
-        raise ValueError("Missing entries in the dict_params['environment'] dictionary: {}" \
-                         .format(set_entries_params_environment.difference(dict_params['environment'].keys())))
-
-    # Policy (Job Acceptance)
-    set_entries_params_policy = {'parameterized_policy', 'theta'}
-    if not set_entries_params_policy.issubset(dict_params['policy'].keys()):
-        raise ValueError("Missing entries in the dict_params['policy'] dictionary: {}" \
-                         .format(set_entries_params_policy.difference(dict_params['policy'].keys())))
-
-    # Learners (of V, Q, and P)
-    set_entries_params_learners = {'V', 'Q', 'P'}
-    if not set_entries_params_learners.issubset(dict_params['learners'].keys()):
-        raise ValueError("Missing entries in the dict_params['learners'] dictionary: {}" \
-                         .format(set_entries_params_learners.difference(dict_params['learners'].keys())))
-
-    # Agent
-    set_entries_params_agent = {'agent'}
-    if not set_entries_params_agent.issubset(dict_params['agent'].keys()):
-        raise ValueError("Missing entries in the dict_params['agent'] dictionary: {}" \
-                         .format(set_entries_params_agent.difference(dict_params['agent'].keys())))
-
-    # Store the parameters into different dictionaries, for easier handling below
-    dict_params_env = dict_params['environment']
-    dict_params_policy = dict_params['policy']
-    dict_params_learners = dict_params['learners']
-    dict_params_agent = dict_params['agent']
-
-    # Queue
-    policy_assign = PolJobAssignmentProbabilistic(dict_params_env['policy_assignment_probabilities'])
-    job_rates_by_server = compute_job_rates_by_server(dict_params_env['job_class_rates'],
-                                                      dict_params_env['nservers'],
-                                                      policy_assign.getProbabilisticMap())
-    # Queue M/M/c/K
-    queue = queues.QueueMM(job_rates_by_server, dict_params_env['service_rates'],
-                           dict_params_env['nservers'], dict_params_env['capacity'])
-
-    # Queue environment
-    env_queue_mm = EnvQueueSingleBufferWithJobClasses(queue, dict_params_env['job_class_rates'],
-                                                      dict_params_env['reward_func'],
-                                                      dict_params_env['rewards_accept_by_job_class'])
-    rhos = [l / m for l, m in zip(job_rates_by_server, dict_params_env['service_rates'])]
-
-    # Acceptance and assignment policies
-    policies = dict({PolicyTypes.ACCEPT: dict_params_policy['parameterized_policy'](env_queue_mm,
-                                                                                    theta=dict_params_policy['theta']),
-                     PolicyTypes.ASSIGN: policy_assign})
-
-    # Learners (for V, Q, and P)
-    learnerV = dict_params_learners['V']['learner'](env_queue_mm,
-                                                    gamma=dict_params_learners['V']['params'].get('gamma'))
-    learnerQ = None
-    learnerP = dict_params_learners['P']['learner'](env_queue_mm, policies[PolicyTypes.ACCEPT],
-                                                    learnerV,
-                                                    alpha=dict_params_learners['P']['params'].get('alpha_start'),
-                                                    adjust_alpha=dict_params_learners['P']['params'].get(
-                                                        'adjust_alpha'),
-                                                    func_adjust_alpha=dict_params_learners['P']['params'].get(
-                                                        'func_adjust_alpha'),
-                                                    min_time_to_update_alpha=dict_params_learners['P']['params'].get(
-                                                        'min_time_to_update_alpha'),
-                                                    alpha_min=dict_params_learners['P']['params'].get('alpha_min'),
-                                                    fixed_window=dict_params_learners['P']['params'].get(
-                                                        'fixed_window'),
-                                                    clipping=dict_params_learners['P']['params'].get('clipping'),
-                                                    clipping_value=dict_params_learners['P']['params'].get(
-                                                        'clipping_value'))
-
-    # TODO: (2022/01/17) Can we add the following assertion at some point?
-    # from Python.lib.agents.learners import GenericLearner
-    # assert isinstance(learnerV, GenericLearner)
-    learners = dict({LearnerTypes.V: learnerV,
-                     LearnerTypes.Q: learnerQ,
-                     LearnerTypes.P: learnerP
-                     })
-
-    # Agent operating on the given policies and learners
-    agent = dict_params_agent['agent'](env_queue_mm, policies, learners)
-
-    return env_queue_mm, rhos, agent
-
-
 def run_simulation_policy_learning(simul, dict_params_simul, dict_info,
                                    dict_params_info: dict = {'plot': False, 'log': False},
                                    params_read_from_benchmark_file=False, seed=None, verbose=False):
@@ -359,7 +233,7 @@ dict_params = dict({'environment': {'capacity': np.Inf,
                                  },
                     'agent': {'agent': AgeQueue}
                     })
-env_queue_mm, rhos, agent = define_queue_environment_and_agent(dict_params)
+env_queue, rhos, agent = define_queue_environment_and_agent(dict_params)
 
 # -- Simulation parameters that are common for ALL parameter settings
 # t_learn is now defined as input parameter passed to the script
@@ -371,7 +245,7 @@ dict_learning_params = dict({'mode': LearningMode.REINFORCE_TRUE, 't_learn': t_l
 dict_params_info = dict({'plot': False, 'log': False})
 
 # Simulator object
-simul = SimulatorQueue(env_queue_mm, agent, dict_learning_params,
+simul = SimulatorQueue(env_queue, agent, dict_learning_params,
                        log=create_log, save=save_results, logsdir=logsdir, resultsdir=resultsdir, debug=False)
 
 # Open the file to store the results
@@ -564,7 +438,7 @@ if len(theta_true_values) == 1:
         # will occur at K; if theta is 3.9, the probability of blocking at 4 (= K-1)
         # i.e. we compute at K-1 and NOT at K because we want to compare the true value function
         # with the *estimated* value function when the policy starts blocking at buffer size = theta
-        # Vtrue = np.array([rewardOnJobRejection_ExponentialCost(env_queue_mm, (K, None), Actions.REJECT, (K, None)) * pK for K, pK in zip(Ks, pblock_K)])
+        # Vtrue = np.array([rewardOnJobRejection_ExponentialCost(env_queue, (K, None), Actions.REJECT, (K, None)) * pK for K, pK in zip(Ks, pblock_K)])
 
         # ACTUAL true value function, which takes into account the probability of blocking at K-1 as well, where the policy is non-deterministic (for non-integer theta)
         # The problem with this approach is that the stationary distribution of the chain is NOT the same as with chain
@@ -573,14 +447,14 @@ if len(theta_true_values) == 1:
         # Qualitatively, the stationary probability of K would be reduced and the stationary probability of K-1 would be
         # increased by the same amount.
         Vtrue = np.array(
-            [rewardOnJobRejection_ExponentialCost(env_queue_mm, (K, None), Actions.REJECT, (K, None)) * pK +
-             rewardOnJobRejection_ExponentialCost(env_queue_mm, (K-1, None), Actions.REJECT, (K-1, None)) * (K-1-theta) * pKm1
+            [rewardOnJobRejection_ExponentialCost(env_queue, (K, None), Actions.REJECT, (K, None)) * pK +
+             rewardOnJobRejection_ExponentialCost(env_queue, (K-1, None), Actions.REJECT, (K-1, None)) * (K-1-theta) * pKm1
              for K, theta, pK, pKm1 in zip(Ks, df_learning['theta'], pblock_K_adj, pblock_Km1_adj)])
 
         # True grad(V)
         # Ref: my hand-written notes in Letter-size block of paper with my notes on the general environment - agent setup
         gradVtrue = [
-            -rewardOnJobRejection_ExponentialCost(env_queue_mm, (K-1, None), Actions.REJECT, (K-1, None)) * pKm1 for
+            -rewardOnJobRejection_ExponentialCost(env_queue, (K-1, None), Actions.REJECT, (K-1, None)) * pKm1 for
             K, pKm1 in zip(Ks, pblock_Km1)]
 
         ord = np.argsort(Ks)
@@ -654,7 +528,7 @@ if len(theta_true_values) == 1:
             ax.axvline(t, color='lightgray', linestyle='dashed')
 
         # Buffer sizes
-        buffer_sizes = [env_queue_mm.getBufferSizeFromState(s) for s in simul.getLearnerP().getStates()]
+        buffer_sizes = [env_queue.getBufferSizeFromState(s) for s in simul.getLearnerP().getStates()]
         ax.plot(times, buffer_sizes, 'g.', markersize=3)
         # Mark the start of each queue simulation
         # DM-2021/11/28: No longer feasible (or easy to do) because the states are recorded twice for the same time step (namely at the first DEATH after a BIRTH event)

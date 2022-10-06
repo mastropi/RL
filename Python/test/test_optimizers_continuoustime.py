@@ -31,9 +31,10 @@ import Python.lib.queues as queues
 from Python.lib.queues import Event
 
 from Python.lib.simulators import LearningMethod
-from Python.lib.simulators.queues import compute_job_rates_by_server, generate_event, LearningMode, SimulatorQueue
+from Python.lib.simulators.queues import generate_event, LearningMode, SimulatorQueue
 
 from Python.lib.utils.basic import show_exec_params
+from Python.lib.utils.computing import compute_job_rates_by_server
 
 
 class Test_EstPolicy_EnvQueueSingleServer(unittest.TestCase):

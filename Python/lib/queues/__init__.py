@@ -161,6 +161,9 @@ class GenericQueue:
         return np.sum(self.size)
 
     # SETTERS
+    def setCapacity(self, capacity):
+        self.K = capacity
+
     def setOrigin(self, time_origin):
         self.origin = time_origin
 
