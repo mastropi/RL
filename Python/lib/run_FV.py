@@ -23,6 +23,8 @@ from Python.lib.agents.learners.continuing.fv import LeaFV
 from Python.lib.agents.policies.parameterized import PolQueueTwoActionsLinearStep
 from Python.lib.agents.queues import AgeQueue
 
+from Python.lib.environments.queues import rewardOnJobRejection_Constant
+
 import Python.lib.estimators as estimators
 
 from Python.lib.simulators.queues import estimate_blocking_fv, estimate_blocking_mc
@@ -40,12 +42,9 @@ class Process(Enum):
 
 
 #------------------- Functions --------------------
-from agents.policies import PolicyTypes
-from environments.queues import EnvQueueSingleBufferWithJobClasses
-
-
 def analyze_convergence(estimation_process=Process.Estimators,
-                        nservers=1, K=5, buffer_size_activation=1, burnin_cycles_absorption=5,
+                        nservers=1, K=5, buffer_size_activation=1,
+                        burnin_time_steps=20, burnin_cycles_absorption=5,
                         nparticles=[],
                         nparticles_min=40, nparticles_max=80, nparticles_step_prop=1,
                         nmeantimes=500,
@@ -56,6 +55,18 @@ def analyze_convergence(estimation_process=Process.Estimators,
     2021/04/19: Analyze convergence of the FV algorithm as the number of particles N increases
 
     Arguments:
+    burnin_time_steps: (int)
+        Number of burn-in time steps to consider before a return cycle and a reabsorption cycle qualifies for
+        the estimation of expectations. This is used when the estimation is performed by the estimators
+        defined in simulators.queues (NEW implementation) (e.g. estimate_blocking_mc() and estimate_blocking_fv()).
+        default: 20
+
+    burnin_cycles_absorption: (int)
+        Number of burn-in absorption cycles to consider before an absorption cycle qualifies for the estimation of
+        expectations. This is used when the estimation is performed by the estimator EstimatorQueueBlockingFlemingViot
+        (OLD implementation).
+        default: 5
+
     estimation_process: (opt) Process
         The estimation process that should be used to estimate the blocking probability, whether the estimator
         defined in estimators.py (Process.Estimators) or the estimator defined in simulators/queues.py
@@ -85,9 +96,12 @@ def analyze_convergence(estimation_process=Process.Estimators,
                                         'job_class_rates': [0.7],  # [0.8, 0.7]
                                         'service_rates': [1.0],  # [1.0, 1.0, 1.0]
                                         'policy_assignment_probabilities': [[1.0]], # [[0.5, 0.5, 0.0], [0.0, 0.5, 0.5]] )
-                                        'reward_func': None, # Note: we should normally define a reward function when going from state S(t) -> S(t+1) by taking action A(t),
-                                                             # but here we avoid defining it because we directly estimate the blocking probability,
-                                                             # which is tantamount to receiving reward +1 when blocking.
+                                        'reward_func': rewardOnJobRejection_Constant,
+                                            # Note: this reward function is defined here just for informational purposes
+                                            # (e.g. when showing debug messages when DEBUG_ESTIMATORS = True in the simulator class)
+                                            # but the process actually simply estimates the blocking probability,
+                                            # i.e. it does NOT estimate the average reward (although with this definition
+                                            # of reward, it could).
                                         'rewards_accept_by_job_class': None
                                         },
                         'policy': {'parameterized_policy': PolQueueTwoActionsLinearStep,
@@ -143,9 +157,18 @@ def analyze_convergence(estimation_process=Process.Estimators,
     # Info parameters
     dict_params_info = {'plot': True, 'log': False}
 
+    # Modify pandas display options so that data frames are not truncated
+    pd_display_width = pd.get_option('display.width')
+    pd_display_max_columns = pd.get_option('display.max_columns')
+    pd_display_max_rows = pd.get_option('display.max_rows')
+    pd.set_option('display.width', None)
+    pd.set_option('display.max_columns', None)
+    pd.set_option('display.max_rows', None)
+
     df_results = pd.DataFrame(columns=['K',
                                        'BSA',
                                        'N',
+                                       'burnin_time_steps',
                                        'burnin_cycles',
                                        'replication',
                                        'Pr(MC)',
@@ -174,8 +197,8 @@ def analyze_convergence(estimation_process=Process.Estimators,
     print("Computing TRUE blocking probability for nservers={}, K={}, rhos={}...".format(nservers, K, rhos))
     proba_blocking_true = compute_blocking_probability_birth_death_process(rhos, K)
 
-    print("System: # servers={}, K={}, rhos={}, buffer_size_activation={}, #burn-in absorption cycles={}" \
-          .format(nservers, K, rhos, buffer_size_activation_value, burnin_cycles_absorption))
+    print("System: # servers={}, K={}, rhos={}, buffer_size_activation={}, #burn-in time steps={}, #burn-in absorption cycles={}" \
+          .format(nservers, K, rhos, buffer_size_activation_value, burnin_time_steps, burnin_cycles_absorption))
     time_start_all = timer()
     for case, (nparticles, nmeantimes) in enumerate(zip(nparticles_list, nmeantimes_list)):
         print("\n*** Running simulation for nparticles={} ({} of {}) on {} replications...".format(nparticles, case+1, ncases, replications))
@@ -184,7 +207,8 @@ def analyze_convergence(estimation_process=Process.Estimators,
             'nparticles': nparticles,
             'nmeantimes': nmeantimes,
             'buffer_size_activation': buffer_size_activation_value,
-            'burnin_cycles_absorption': burnin_cycles_absorption,
+            'burnin_time_steps': burnin_time_steps,                 # Used in the simulators.queues simulator
+            'burnin_cycles_absorption': burnin_cycles_absorption,   # Used in the estimators.py simulator
             'seed': seed,
                 }
 
@@ -296,6 +320,7 @@ def analyze_convergence(estimation_process=Process.Estimators,
             df_append = pd.DataFrame([[K,
                                        buffer_size_activation_value,
                                        nparticles,
+                                       burnin_time_steps,
                                        burnin_cycles_absorption,
                                        r,
                                        proba_blocking_mc,
@@ -339,6 +364,11 @@ def analyze_convergence(estimation_process=Process.Estimators,
     print("Aggregated results by N:")
     print(df_results_agg_by_N)
 
+    # Reset pandas display options modified above
+    pd.set_option('display.width', pd_display_width)
+    pd.set_option('display.max_columns', pd_display_max_columns)
+    pd.set_option('display.max_rows', pd_display_max_rows)
+
     # Add back the average of # events to the full data frame
     df_results = pd.merge(df_results, df_results_agg_by_N.xs('mean', axis=1, level=1)[['#Events(MC)', '#Cycles(MC)', '#Events(FV)']],
                           left_on='N', right_index=True, suffixes=["", "_mean"])
@@ -353,6 +383,7 @@ def analyze_convergence(estimation_process=Process.Estimators,
     else:
         return df_results, df_results_agg_by_N, None, None
 
+# TODO: (2022/10/17) Adapt the process to the new (simpler) implementation of the FV estimator done in simulators.queues
 def analyze_absorption_size(nservers=1,
                             replications=5,
                             K_values=[10, 20, 30, 40],
@@ -377,9 +408,12 @@ def analyze_absorption_size(nservers=1,
                                         'job_class_rates': [0.7],  # [0.8, 0.7]
                                         'service_rates': [1.0],  # [1.0, 1.0, 1.0]
                                         'policy_assignment_probabilities': [[1.0]], # [[0.5, 0.5, 0.0], [0.0, 0.5, 0.5]] )
-                                        'reward_func': None, # Note: we should normally define a reward function when going from state S(t) -> S(t+1) by taking action A(t),
-                                                             # but here we avoid defining it because we directly estimate the blocking probability,
-                                                             # which is tantamount to receiving reward +1 when blocking.
+                                        'reward_func': rewardOnJobRejection_Constant,
+                                            # Note: this reward function is defined here just for informational purposes
+                                            # (e.g. when showing debug messages when DEBUG_ESTIMATORS = True in the simulator class)
+                                            # but the process actually simply estimates the blocking probability,
+                                            # i.e. it does NOT estimate the average reward (although with this definition
+                                            # of reward, it could).
                                         'rewards_accept_by_job_class': None
                                         },
                         'policy': {'parameterized_policy': PolQueueTwoActionsLinearStep,
@@ -998,13 +1032,14 @@ print("User arguments: {}".format(sys.argv))
 if len(sys.argv) == 1:    # Only the execution file name is contained in sys.argv
     sys.argv += [1]       # Number of servers in the system to simulate
     sys.argv += ["N"]     # Type of analysis: either "N" for the impact of number of particles or "J" for the impact of buffer size"
-    sys.argv += [40]      # K: capacity of the system
-    sys.argv += [200]     # N: number of particles in the FV system.
+    sys.argv += [20]      # K: capacity of the system
+    sys.argv += [100]     # N: number of particles in the FV system. This must be only ONE. If we want to simulate on more than one value of N, set their values when calling analyze_convergence()
     sys.argv += [0.5]     # J factor: factor such that J = factor*K.
     sys.argv += [3]       # Number of replications
     sys.argv += [1]       # Test number to run: only one is accepted
-if len(sys.argv) == 8:    # Only the 6 required arguments are given by the user (recall that the first argument is the program name)
-    sys.argv += ['None']  # T: number of arrival events to consider in the estimation of Pr(T>t) and E(T) in the FV approach. When 'None' it is chosen as 50*N.
+if len(sys.argv) == 8:    # Only the 7 required arguments are given by the user (recall that the first argument is the program name)
+    sys.argv += [100]    # T: number of arrival events to consider in the estimation of E(T) in the FV approach. When 'None' it is chosen as 100*J, i.e. it increases as J increases (independently of K, as K doesn't play any role in the magnitude of the return cycle time to J-1.
+    sys.argv += [4]      # BITS: Burn-in time steps to consider until stationarity can be assumed for the estimation of expectations (e.g. E(T) (return cycle time) in Monte-Carlo, E(T_A) (reabsorption cycle time) in Fleming-Viot)
     sys.argv += [2]       # Number of methods to run: 1 (only FV), 2 (FV & MC)
     sys.argv += ["nosave"]# Either "nosave" or anything else for saving the results and log
 print("Parsed user arguments: {}".format(sys.argv))
@@ -1017,13 +1052,17 @@ K = int(sys.argv[3])
 N = int(sys.argv[4])
 J = int(np.round(sys.argv[5] * K))
 replications = int(sys.argv[6])
-tests2run = [int(v) for v in [sys.argv[
-                                  7]]]  # NOTE: It's important to enclose sys.argv[5] in brackets because o.w., from the command line, a number with more than one digit is interpreted as a multi-element list!! (e.g. 10 is interpreted as a list with elements [1, 0])
+tests2run = [int(v) for v in [sys.argv[7]]]  # NOTE: It's important to enclose sys.argv[7] in brackets because o.w.,
+                                             # from the command line, a number with more than one digit is interpreted
+                                             # as a multi-element list!! (e.g. 10 is interpreted as a list with elements [1, 0])
 T = sys.argv[8]
-if T.lower() == 'none':
-    T = 50 * N
-run_mc = int(sys.argv[9]) == 2
-save_results = sys.argv[10] != "nosave"
+if isinstance(T, str) and T.lower() == 'none':
+    T = 100 * J
+else:
+    T = int(T)
+burnin_time_steps = int(sys.argv[9])
+run_mc = int(sys.argv[10]) == 2
+save_results = sys.argv[11] != "nosave"
 
 if len(tests2run) == 0:
     print("No tests have been specified to run. Please specify the test number as argument 4.")
@@ -1036,6 +1075,7 @@ print("Type of analysis: analysis_type={}".format(analysis_type))
 print("Capacity K={}".format(K))
 print("# particles N={}".format(N))
 print("Activation size J={}".format(J))
+print("Burn-in time steps (BITS)={}".format(burnin_time_steps))
 print("Replications={}".format(replications))
 print("tests2run={}".format(tests2run))
 print("# arrival events T={}".format(T))
@@ -1054,18 +1094,15 @@ if save_results:
     dt_start, stdout_sys, fh_log, logfile, resultsfile, resultsfile_agg, proba_functions_file, figfile = \
         createLogFileHandleAndResultsFileNames(prefix=resultsfile_prefix)
 else:
-    fh_log = None;
-    resultsfile = None;
-    resultsfile_agg = None;
-    proba_functions_file = None;
-    figfile = None
+    fh_log = None; resultsfile = None; resultsfile_agg = None; proba_functions_file = None; figfile = None
 
 if analysis_type == "N":
     # -- Single-server
     results, results_agg, est_fv, est_mc = analyze_convergence(
                                                 estimation_process=Process.Simulators,
-                                                nservers=nservers, K=40, buffer_size_activation=J,
-                                                nparticles=[N],  # [800, 1600, 3200], #[10, 20, 40], #[24, 66, 179],
+                                                nservers=nservers, K=K, buffer_size_activation=J,
+                                                burnin_time_steps=burnin_time_steps,
+                                                nparticles=[N, 2*N, 4*N], #2*N, 4*N, 8*N, 16*N],  # [800, 1600, 3200], #[10, 20, 40], #[24, 66, 179],
                                                 nmeantimes=T,  # 50, #[170, 463, 1259],
                                                 replications=replications, run_mc=run_mc,
                                                 seed=1313)

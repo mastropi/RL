@@ -48,6 +48,8 @@ PLOT_RESULTS_PAPER = False              # Whether to generate the plots with the
 def run_simulation_policy_learning(simul, dict_params_simul, dict_info,
                                    dict_params_info: dict = {'plot': False, 'log': False},
                                    params_read_from_benchmark_file=False, seed=None, verbose=False):
+    set_required_entries_simul = {'theta_true', 'theta_start', 'buffer_size_activation_factor', 'nparticles', 't_sim',
+                                  'burnin_time_steps'}
     set_required_entries_info = {'case', 'ncases', 'learning_method', 'exponent',
                                  'rhos', 'K_true', 'K', 'error_rel_phi', 'error_rel_et',
                                  'alpha_start', 'adjust_alpha', 'min_time_to_update_alpha', 'alpha_min'}
@@ -60,8 +62,7 @@ def run_simulation_policy_learning(simul, dict_params_simul, dict_info,
                                                                                   dict_info['K'],
                                                                                   dict_params_simul['nparticles'],
                                                                                   dict_params_simul['t_sim'],
-                                                                                  dict_params_simul[
-                                                                                      'buffer_size_activation_factor'])
+                                                                                  dict_params_simul['buffer_size_activation_factor'])
 
         print("\n--> CASE {} of {}: theta_true={:.3f} (K_true={}), theta={:.3f} (K={}), J/K={:.3f}," \
               " exponent={}: N={} (err_nom={:.1f}%, err={:.1f}%), T={} (err_nom={:.1f}%, err={:.1f}%)" \
@@ -81,22 +82,24 @@ def run_simulation_policy_learning(simul, dict_params_simul, dict_info,
 
     # Show execution parameters
     params = dict({
+        '0(a)-Seed': seed,
         '1(a)-System-#Servers': simul.getEnv().getNumServers(),
         '1(b)-System-JobClassRates': simul.getEnv().getJobClassRates(),
         '1(c)-System-ServiceRates': simul.getEnv().getServiceRates(),
         '1(d)-System-TrueTheta': dict_params_simul['theta_true'],
         '1(e)-System-TrueK': dict_info['K_true'],
         '2(a)-Learning-Method': dict_info['learning_method'],
-        '2(b)-Learning-Method#Particles and % Rel Error Phi': (dict_params_simul['nparticles'], dict_info['error_rel_phi'] * 100),
-        '2(c)-Learning-Method#TimeSteps and % Rel Error E(T)': (dict_params_simul['t_sim'], dict_info['error_rel_et'] * 100),
-        '2(d)-Learning-LearningMode': simul.dict_learning_params['mode'].name,
-        '2(e)-Learning-ThetaStart': dict_params_simul['theta_start'],
-        '2(f)-Learning-#Steps': simul.getNumLearningSteps(),
-        '2(g)-Learning-SimulationTimePerLearningStep': dict_params_simul['t_sim'],
-        '2(h)-Learning-AlphaStart': dict_info['alpha_start'],
-        '2(i)-Learning-AdjustAlpha?': dict_info['adjust_alpha'],
-        '2(j)-Learning-MinEpisodeToAdjustAlpha': dict_info['min_time_to_update_alpha'],
-        '2(k)-Learning-AlphaMin': dict_info['alpha_min'],
+        '2(b)-Learning-Method#Particles and % Rel Error Phi': (dict_params_simul['nparticles'], dict_info['error_rel_phi']), #error_rel_phi_real * 100),  #dict_info['error_rel_phi']),
+        '2(c)-Learning-Method#TimeSteps and % Rel Error E(T)': (dict_params_simul['t_sim'], dict_info['error_rel_et']), #error_rel_et_real * 100), #dict_info['error_rel_et']),
+        '2(d)-Learning-Method#BurnInSteps (BITS)': dict_params_simul['burnin_time_steps'],
+        '2(e)-Learning-LearningMode': simul.dict_learning_params['mode'].name,
+        '2(f)-Learning-ThetaStart': dict_params_simul['theta_start'],
+        '2(g)-Learning-#Steps': simul.getNumLearningSteps(),
+        '2(h)-Learning-#SimulationTimePerLearningStep': dict_params_simul['t_sim'],     # [DM-2022/10/13] Is this rather the # arrival events? I think YES. We need to check the run() method in SimulatorQueue to answer this properly.
+        '2(i)-Learning-AlphaStart': dict_info['alpha_start'],
+        '2(j)-Learning-AdjustAlpha?': dict_info['adjust_alpha'],
+        '2(k)-Learning-MinEpisodeToAdjustAlpha': dict_info['min_time_to_update_alpha'],
+        '2(l)-Learning-AlphaMin': dict_info['alpha_min'],
     })
     show_exec_params(params)
 
@@ -115,7 +118,7 @@ def run_simulation_policy_learning(simul, dict_params_simul, dict_info,
 print("User arguments: {}".format(sys.argv))
 if len(sys.argv) == 1:  # Only the execution file name is contained in sys.argv
     sys.argv += [50]    # t_learn: Number of learning steps
-    sys.argv += ["FV"]  # learning_method: estimation method: "FV" or "MC";
+    sys.argv += ["MC"]  # learning_method: estimation method: "FV" or "MC";
                         # when learning_method = "MC", we expect there exists a benchmark file called benchmark_fv.csv
                         # that defines how many events were observed during the equivalent FV learning method
                         # (for fair comparison). If one does not exist, the Monte-Carlo simulation wil be run
@@ -127,12 +130,12 @@ if len(sys.argv) == 5:  # Only the 4 required arguments are given by the user (r
     # because the first 4 required parameters were just defined.
     # There is NO check that the user didn't pass the full set of 4 required parameters, i.e. if they pass 2 parameters
     # the parameter parsing process will fail because not all arguments are defined in sys.argv.
-    sys.argv += [20.0]  # 23.0]  # theta_true: true theta (only one value is allowed)
-    sys.argv += [1.1]   # 39.1]   # theta_start: non-integral initial theta value for the learning process (only one value is allowed)
-    sys.argv += [0.5]   # J_factor: fraction J/K to use in the FV learning method
-    sys.argv += [4.0]   # error_rel_phi: expected relative error for the estimation of Phi(t,K) in the FV learning method (1.0 means 100%) --> it defines the number of particles to use
-    sys.argv += [4.0]   # error_rel_phi: expected relative error for the estimation of E(T) in the FV learning method (1.0 means 100%) --> it defines the number of arrival events to observe in the MC-based simulation to estimate E(T)
-    sys.argv += ["nosave"]  # Either "nosave" or anything else for saving the results and log
+    sys.argv += [23.0]  # 18.0, 23.0]  # theta_true: true theta (only one value is allowed)
+    sys.argv += [34.1]  # 29.1, 34.1]   # theta_start: non-integral initial theta value for the learning process (only one value is allowed)
+    sys.argv += [0.3]   # J_factor: fraction J/K to use in the FV learning method
+    sys.argv += [1.0]   # error_rel_phi: expected relative error for the estimation of Phi(t,K) in the FV learning method (1.0 means 100%) --> it defines the number of particles to use
+    sys.argv += [0.2]   # error_rel_et: expected relative error for the estimation of E(T) in the FV learning method (1.0 means 100%) --> it defines the number of arrival events to observe in the MC-based simulation to estimate E(T)
+    sys.argv += ["save"]  # Either "nosave" or anything else for saving the results and log
 print("Parsed user arguments: {}".format(sys.argv))
 print("")
 assert len(sys.argv) == 11, "The number of parsed arguments is 11 ({})".format(len(sys.argv))
@@ -150,6 +153,8 @@ error_rel_et = float(sys.argv[9])
 create_log = sys.argv[10] != "nosave"
 save_results = sys.argv[10] != "nosave"
 
+seed = 1313 # 1317 #1717 #1313  #1859 (for learning step 53+91=144) #1769 (for learning step 53, NOT 52 because it took too long) #1717
+
 print("Execution parameters:")
 print("t_learn={}".format(t_learn))
 print("learning_method={}".format(learning_method.name))
@@ -162,6 +167,7 @@ print("error_rel_phi={}".format(error_rel_phi))
 print("error_rel_et={}".format(error_rel_et))
 print("create_log={}".format(create_log))
 print("save_results={}".format(save_results))
+print("seed={}".format(seed))
 
 # Look for memory leaks
 # Ref: https://pythonspeed.com/fil/docs/fil/other-tools.html (from the Fil profiler which also seems interesting)
@@ -190,12 +196,20 @@ if learning_method == LearningMethod.FV:
 else:
     # Monte-Carlo learner is the default
     learnerV = LeaMC
-    benchmark_file = os.path.join(os.path.abspath(resultsdir), "benchmark_fv.csv")
+    benchmark_file = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20221018_161552-K0=24-K=35-J=0.3-E1.0,0.2-AlphaConst(B=5)_seed1313.csv") #"benchmark_fv.csv")
     if not os.path.exists(benchmark_file):
         warnings.warn("Benchmark file 'benchmark_fv.csv' does not exist. The Monte-Carlo simulation will run without any reference to a previously run Fleming-Viot simulation")
         benchmark_file = None
     plot_trajectories = False
     symbol = 'g-'
+burnin_time_steps = 20  # Number of burn-in time steps until the Markov process is assumed to be in stationarity regime
+                        # (this has an impact in the estimation of expectations --e.g. E(T) in Monte-Carlo simulation
+                        # and E(T_A) in Fleming-Viot. In particular, blocking probability would be OVERESTIMATED when
+                        # the number of burn-in steps is too small, because the return times T and T_A will be
+                        # underestimated, as particles (simulated queues) start close to the state defining the cycles
+                        # of interest (i.e. J-1), so returning to those states will take shorter time than the stationary
+                        # return time at the beginning of the simulation.
+                ### NOTE THAT THIS VALUE burnin_time_steps IS OPTIONAL AS IT IS SET TO A DEFAULT VALUE IN SimulatorQueue.run(). ###
 fixed_window = False
 alpha_start = 10.0  # / t_sim  # Use `/ t_sim` when using update of theta at each simulation step (i.e. LeaPolicyGradient.learn_TR() is called instead of LeaPolicyGradient.learn())
 adjust_alpha = False  # True
@@ -239,7 +253,6 @@ env_queue, rhos, agent = define_queue_environment_and_agent(dict_params)
 # t_learn is now defined as input parameter passed to the script
 # 2022/01/14: t_learn = 10 times the optimum true theta so that we are supposed to reach that optimum under the REINFORCE_TRUE learning mode with decreasing alpha
 # t_learn = 800 #100 #800 #100 #198 - 91 #198 #250 #50
-seed = 1313  # 1317 #1717 #1313  #1859 (for learning step 53+91=144) #1769 (for learning step 53, NOT 52 because it took too long) #1717
 verbose = False
 dict_learning_params = dict({'mode': LearningMode.REINFORCE_TRUE, 't_learn': t_learn})
 dict_params_info = dict({'plot': False, 'log': False})
@@ -251,7 +264,7 @@ simul = SimulatorQueue(env_queue, agent, dict_learning_params,
 # Open the file to store the results
 if save_results:
     # Initialize the output file with the results with the column names
-    simul.fh_results.write("case,t_learn,theta_true,theta,theta_next,K,J/K,J,exponent,N,T,err_phi,err_et,seed,E(T),n_cycles,max_time_surv,Pr(K-1),Pr(K),Q_diff(K-1),Q_diff(K),alpha,V,gradV,n_events_mc,n_events_fv,n_trajectories_Q\n")
+    simul.fh_results.write("case,t_learn,theta_true,theta,theta_next,K,J/K,J,BITS,exponent,N,T,err_phi,err_et,seed,E(T),n_cycles,max_time_surv,Pr(K-1),Pr(K),error(K-1),error(K),Q_diff(K-1),Q_diff(K),alpha,V,gradV,n_events_mc,n_events_fv,n_trajectories_Q\n")
 
 # Run the simulations, either from parameters defined by a benchmark file or from parameters defined below
 if benchmark_file is None:
@@ -265,7 +278,7 @@ if benchmark_file is None:
     assert len(theta_true_values) == len(theta_start_values), \
             "The number of true theta values ({}) and start theta values ({}) should be the same" \
             .format(len(theta_true_values), len(theta_start_values))
-    J_factor_values = [0.3]  # [0.2, 0.3, 0.5]  # [0.2, 0.3, 0.5, 0.7]
+    J_factor_values = [J_factor]  # [0.2, 0.3, 0.5]  # [0.2, 0.3, 0.5, 0.7]
     NT_exponents = [0]  # [-2, -1, 0, 1]  # Exponents to consider for different N and T values as in exp(exponent)*N0, where N0 is the reference value to achieve a pre-specified relative error
     # Accepted relative errors for the estimation of Phi and of E(T_A)
     # They define respectively the number of particles N and the number of arrival events T to observe in each learning step.
@@ -275,12 +288,10 @@ if benchmark_file is None:
     # Output variables of the simulation
     case = 0
     ncases = len(theta_true_values) * len(theta_start_values) * len(J_factor_values) * len(NT_exponents)
-    theta_opt_values = np.nan * np.ones(
-        ncases)  # List of optimum theta values achieved by the learning algorithm for each parameter setting
+    theta_opt_values = np.nan * np.ones(ncases)  # List of optimum theta values achieved by the learning algorithm for each parameter setting
     for i, theta_true in enumerate(theta_true_values):
-        print(
-            "\nSimulating with {} learning on a queue environment with optimum theta (one less the deterministic blocking size) = {}".format(
-                learning_method.name, theta_true))
+        print("\nSimulating with {} learning on a queue environment with optimum theta (one less the deterministic blocking size) = {}" \
+            .format(learning_method.name, theta_true))
 
         # Set the number of learning steps to double the true theta value
         # Use this ONLY when looking at the MC method and running the learning process on several true theta values
@@ -295,14 +306,17 @@ if benchmark_file is None:
             K_true = simul.agent.getAcceptancePolicy().getBufferSizeForDeterministicBlockingFromTheta(theta_true)
             K = simul.agent.getAcceptancePolicy().getBufferSizeForDeterministicBlockingFromTheta(theta_start)
             for j, J_factor in enumerate(J_factor_values):
-                Nmin = 10
-                Tmin = 10
+                Nmin = 10; Nmax = 500
+                Tmin = 10; Tmax = 5000
                 NT_values = [compute_nparticles_and_nsteps_for_fv_process(rhos, K, J_factor, error_rel_phi=err1, error_rel_et=err2)
                              for err1, err2 in zip(error_rel_phi, error_rel_et)]
                 for idx, (exponent, (N, T)) in enumerate(zip(NT_exponents, NT_values)):
+                    print("NT values obtained for the requested expected relative errors (BEFORE BOUNDING):")
+                    print("err(phi) = {:.3f}% => N = {}".format(error_rel_phi[idx] * 100, NT_values[idx][0]))
+                    print("err(E(T)) = {:.3f}% => T = {}".format(error_rel_et[idx] * 100, NT_values[idx][1]))
                     # Lower bound for N and T so that we don't have too little particles!
-                    N = np.max([Nmin, N])
-                    T = np.max([Tmin, T])
+                    N = min( max(Nmin, N), Nmax )
+                    T = min( max(Tmin, T), Tmax )
                     # Set the parameters for this run
                     case += 1
                     simul.setCase(case)
@@ -312,7 +326,8 @@ if benchmark_file is None:
                         'theta_start': theta_start,
                         'buffer_size_activation_factor': J_factor,
                         'nparticles': N,
-                        't_sim': T
+                        't_sim': T,
+                        'burnin_time_steps': burnin_time_steps,
                     }
                     dict_info = {'case': case,
                                  'ncases': ncases,
@@ -355,6 +370,7 @@ else:
         exponent = benchmark_groups['exponent'].iloc[i]
         N = benchmark_groups['N'].iloc[i]
         T = benchmark_groups['T'].iloc[i]
+        burnin_time_steps = benchmark_groups['BITS']
         seed = benchmark_groups['seed'].iloc[i]
 
         # Get the number of events to run the simulation for (from the benchmark file)
@@ -376,7 +392,8 @@ else:
             'theta_start': theta_start,
             'buffer_size_activation_factor': J_factor,
             'nparticles': 1,
-            't_sim': t_sim
+            't_sim': t_sim,
+            'burnin_time_steps': burnin_time_steps
         }
         dict_info = {'case': case,
                      'ncases': ncases,
@@ -627,7 +644,7 @@ if PLOT_RESULTS_PAPER:
     results_file_mc = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_161121_MC-K=30-J=0.5K.csv")
     K_true = 19  # Optimum blocking size, the integer-valued K at which the expected cost is minimum
 
-    # All exponents, K0 = 10
+    # All exponents, K0 = 9
     # 2022/02/01 --> But this is wrong because of the error about the true theta, which was not updated to the one we set!
     results_file_fv = os.path.join(os.path.abspath(resultsdir),
                                    "SimulatorQueue_20220125_025523_FV-K0=40-K=10-AlphaAdaptive.csv")
@@ -635,6 +652,7 @@ if PLOT_RESULTS_PAPER:
     K_true = 9  # Optimum blocking size, the integer-valued K at which the expected cost is minimum
 
     # -- Alpha constant
+    # J/K = 0.5, K0 = 19
     results_file_fv = os.path.join(os.path.abspath(resultsdir),
                                    "SimulatorQueue_20220125_121657_FV-K0=20-K=30-J=0.5-AlphaConst.csv")
     results_file_mc = os.path.join(os.path.abspath(resultsdir),
@@ -650,14 +668,14 @@ if PLOT_RESULTS_PAPER:
                                    "SimulatorQueue_20220125_181511_MC-K0=30-K=5-J=0.5-AlphaConst.csv")
     K_true = 24  # Optimum blocking size, the integer-valued K at which the expected cost is minimum
 
-    # J/K = 0.5, K0 = 10
+    # J/K = 0.5, K0 = 9
     results_file_fv1 = os.path.join(os.path.abspath(resultsdir),
                                     "SimulatorQueue_20220130_105312_FV-K0=30-K=10-J=0.5-E1.5-AlphaConst(B=5).csv")
     results_file_mc1 = os.path.join(os.path.abspath(resultsdir),
                                     "SimulatorQueue_20220130_112523_MC-K0=30-K=10-J=0.5-E1.5-AlphaConst(B=5).csv")
     K_true = 9  # Optimum blocking size, the integer-valued K at which the expected cost is minimum
 
-    # J/K = 0.5, K0 = 20
+    # J/K = 0.5, K0 = 19
     results_file_fv1 = os.path.join(os.path.abspath(resultsdir),
                                     "SimulatorQueue_20220125_190830_FV-K0=20-K=30-J=0.5-E1.5-AlphaConst(B=5).csv")
     results_file_mc1 = os.path.join(os.path.abspath(resultsdir),
@@ -672,7 +690,67 @@ if PLOT_RESULTS_PAPER:
     # NOTE: K_true is NOT exactly theta_true + 1 because theta_true defines xref (if I recall correctly)
     # and the minimum of the expected cost function of K is not always xref + 1, although it is close to it.
 
-    # J/K = 0.5, K0 = 25
+    # J/K = 0.3, K0 = 24
+    # 2022/10/14: A little after the submission to AISTATS-2023 where we were not able to add these plots
+    results_file_fv1 = os.path.join(os.path.abspath(resultsdir),
+                                    "SimulatorQueue_20221013_190126-K0=24-K=35-J=0.3-E1.0-AlphaConst(B=5)_seed1317.csv")
+    results_file_mc1 = os.path.join(os.path.abspath(resultsdir),
+                                    "SimulatorQueue_20221014_082933_MC-K0=24-K=35-J=0.3-E1.0-AlphaConst(B=5)_seed1317.csv")
+    results_file_fv2 = os.path.join(os.path.abspath(resultsdir),
+                                    "SimulatorQueue_20221013_190211-K0=24-K=35-J=0.3-E1.0-AlphaConst(B=5)_seed1717.csv")
+    results_file_mc2 = os.path.join(os.path.abspath(resultsdir),
+                                    "SimulatorQueue_20221014_083614_MC-K0=24-K=35-J=0.3-E1.0-AlphaConst(B=5)_seed1717.csv")
+    K_true = 24  # Optimum blocking size, the integer-valued K at which the expected cost is minimum
+
+    # 2022/10/18: After adding a BURN-IN time (essential for a correct estimation of E(T_A)), with estimation even when the burn-in period CANNOT be satisfied
+    # Errors 20% for N and 20% for T
+    results_file_fv1 = os.path.join(os.path.abspath(resultsdir),
+                                    "SimulatorQueue_20221017_224403-K0=24-K=35-J=0.3-E0.2-AlphaConst(B=5)_seed1717.csv")
+    results_file_mc1 = os.path.join(os.path.abspath(resultsdir),
+                                    "SimulatorQueue_20221018_114036_MC-K0=24-K=35-J=0.3-E0.2-AlphaConst(B=5)_seed1717.csv")
+    results_file_fv2 = os.path.join(os.path.abspath(resultsdir),
+                                    "SimulatorQueue_20221017_224434-K0=24-K=35-J=0.3-E0.2-AlphaConst(B=5)_seed1317.csv")
+    results_file_mc2 = os.path.join(os.path.abspath(resultsdir),
+                                    "SimulatorQueue_20221018_114509_MC-K0=24-K=35-J=0.3-E0.2-AlphaConst(B=5)_seed1317.csv")
+    results_file_fv3 = os.path.join(os.path.abspath(resultsdir),
+                                    "SimulatorQueue_20221017_224514-K0=24-K=35-J=0.3-E0.2-AlphaConst(B=5)_seed1313.csv")
+    results_file_mc3 = os.path.join(os.path.abspath(resultsdir),
+                                    "SimulatorQueue_20221018_114531_MC-K0=24-K=35-J=0.3-E0.2-AlphaConst(B=5)_seed1313.csv")
+    K_true = 24  # Optimum blocking size, the integer-valued K at which the expected cost is minimum
+
+    # 2022/10/18: After adding a BURN-IN time (essential for a correct estimation of E(T_A)), with estimation ONLY when the burn-in period can be satisfied
+    # Errors 100% for N and 100% for T
+    results_file_fv1 = os.path.join(os.path.abspath(resultsdir),
+                                    "SimulatorQueue_20221018_124948-K0=24-K=35-J=0.3-E1.0-AlphaConst(B=5)_seed1717.csv")
+    results_file_mc1 = os.path.join(os.path.abspath(resultsdir),
+                                    "SimulatorQueue_20221018_145520_MC-K0=24-K=35-J=0.3-E1.0-AlphaConst(B=5)_seed1717.csv")
+    results_file_fv2 = os.path.join(os.path.abspath(resultsdir),
+                                    "SimulatorQueue_20221018_125247-K0=24-K=35-J=0.3-E1.0-AlphaConst(B=5)_seed1317.csv")
+    results_file_mc2 = os.path.join(os.path.abspath(resultsdir),
+                                    "SimulatorQueue_20221018_145552_MC-K0=24-K=35-J=0.3-E1.0-AlphaConst(B=5)_seed1317.csv")
+    results_file_fv3 = os.path.join(os.path.abspath(resultsdir),
+                                    "SimulatorQueue_20221018_125307-K0=24-K=35-J=0.3-E1.0-AlphaConst(B=5)_seed1313.csv")
+    results_file_mc3 = os.path.join(os.path.abspath(resultsdir),
+                                    "SimulatorQueue_20221018_145614_MC-K0=24-K=35-J=0.3-E1.0-AlphaConst(B=5)_seed1313.csv")
+    K_true = 24  # Optimum blocking size, the integer-valued K at which the expected cost is minimum
+
+    # 2022/10/18: After adding a BURN-IN time (essential for a correct estimation of E(T_A)), with estimation ONLY when the burn-in period can be satisfied
+    # Errors 100% for N and 20% for T
+    results_file_fv1 = os.path.join(os.path.abspath(resultsdir),
+                                    "SimulatorQueue_20221018_161511-K0=24-K=35-J=0.3-E1.0,0.2-AlphaConst(B=5)_seed1717.csv")
+    results_file_mc1 = os.path.join(os.path.abspath(resultsdir),
+                                    "SimulatorQueue_20221019_175002_MC-K0=24-K=35-J=0.3-E1.0,0.2-AlphaConst(B=5)_seed1717.csv")
+    results_file_fv2 = os.path.join(os.path.abspath(resultsdir),
+                                    "SimulatorQueue_20221018_161526-K0=24-K=35-J=0.3-E1.0,0.2-AlphaConst(B=5)_seed1317.csv")
+    results_file_mc2 = os.path.join(os.path.abspath(resultsdir),
+                                    "SimulatorQueue_20221019_175022_MC-K0=24-K=35-J=0.3-E1.0,0.2-AlphaConst(B=5)_seed1317.csv")
+    results_file_fv3 = os.path.join(os.path.abspath(resultsdir),
+                                    "SimulatorQueue_20221018_161552-K0=24-K=35-J=0.3-E1.0,0.2-AlphaConst(B=5)_seed1313.csv")
+    results_file_mc3 = os.path.join(os.path.abspath(resultsdir),
+                                    "SimulatorQueue_20221019_175034_MC-K0=24-K=35-J=0.3-E1.0,0.2-AlphaConst(B=5)_seed1313.csv")
+    K_true = 24  # Optimum blocking size, the integer-valued K at which the expected cost is minimum
+
+    # J/K = 0.5, K0 = 24
     # These only simulates for 300 learning steps
     # results_file_fv1 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_233513_FV-K0=25-K=35-J=0.5-E1.5-AlphaConst(B=5).csv")
     # results_file_mc1 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220126_004040_MC-K0=25-K=35-J=0.5-E1.5-AlphaConst(B=5).csv")
@@ -693,7 +771,7 @@ if PLOT_RESULTS_PAPER:
                                     "SimulatorQueue_20220127_022406_MC-K0=25-K=35-K=0.5-E0.5-AlphaConst(B=5).csv")
     K_true = 24  # Optimum blocking size, the integer-valued K at which the expected cost is minimum
 
-    # J/K = 0.3, K0 = 20
+    # J/K = 0.3, K0 = 19
     # These only simulates for 300 learning steps
     # results_file_fv1 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_235638_FV-K0=20-K=30-J=0.3-E1.5-AlphaConst(B=5).csv")
     # results_file_mc1 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220126_004118_MC-K0=20-K=30-J=0.3-E1.5-AlphaConst(B=5).csv")
@@ -720,7 +798,7 @@ if PLOT_RESULTS_PAPER:
     # results_file_fv = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_125902_FV-K0=20-K=30-J=0.5-AlphaConst-Clipping.csv")
     # results_file_mc = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_132227_MC-K0=20-K=30-J=0.5-AlphaConst-Clipping.csv")
 
-    # J/K = 0.5, K0 = 20
+    # J/K = 0.5, K0 = 19
     results_file_fv1 = os.path.join(os.path.abspath(resultsdir),
                                     "SimulatorQueue_20220125_212158_FV-K0=20-K=30-J=0.5-E1.5-Clipping.csv")
     results_file_mc1 = os.path.join(os.path.abspath(resultsdir),
@@ -731,7 +809,7 @@ if PLOT_RESULTS_PAPER:
                                     "SimulatorQueue_20220125_220710_MC-K0=20-K=30-J=0.5-E1.0-Clipping.csv")
     K_true = 19  # Optimum blocking size, the integer-valued K at which the expected cost is minimum
 
-    # J/K = 0.3, K0 = 20
+    # J/K = 0.3, K0 = 19
     results_file_fv1 = os.path.join(os.path.abspath(resultsdir),
                                     "SimulatorQueue_20220126_035241_FV-K0=20-K=30-J=0.3-E1.5-Clipping.csv")
     results_file_mc1 = os.path.join(os.path.abspath(resultsdir),
@@ -742,7 +820,7 @@ if PLOT_RESULTS_PAPER:
                                     "SimulatorQueue_20220126_131215_MC-K0=20-K=30-J=0.3-E1.0-Clipping.csv")
     K_true = 19  # Optimum blocking size, the integer-valued K at which the expected cost is minimum
 
-    # J/K = 0.5, K0 = 25
+    # J/K = 0.5, K0 = 24
     results_file_fv1 = os.path.join(os.path.abspath(resultsdir),
                                     "SimulatorQueue_20220126_034444_FV-K0=25-K=35-J=0.5-E1.5-Clipping.csv")
     results_file_mc1 = os.path.join(os.path.abspath(resultsdir),
@@ -771,28 +849,40 @@ if PLOT_RESULTS_PAPER:
     results_mc3 = pd.read_csv(results_file_mc3);
     results_mc3['case'] = 3
 
+    results_fv = pd.concat([results_fv1, results_fv2])
+    results_mc = pd.concat([results_mc1, results_mc2])
+
     results_fv = pd.concat([results_fv1, results_fv2, results_fv3])
     results_mc = pd.concat([results_mc1, results_mc2, results_mc3])
 
     results_fv = results_fv1
     results_mc = results_mc1
-    error = 1.5
+
     results_fv = results_fv2
     results_mc = results_mc2
-    error = 1.0
+
+    #-- Parameters used in the plots
+    theta_update_strategy = "normal"
+    error_nominal_phi = 1.0
+    error_nominal_et = 0.2
 
     # Whether to set specific tick marks for the Y-axis in order to align visually two contiguous plots in the paper
     set_special_axis_ticks = True
     # set_special_axis_ticks = False
 
-    t_learn_max = 200
+    # Whether to show the text box with simulation parameters IN THE PLOT
+    show_textbox = True
+
+    t_learn_max = 25
     if t_learn_max is not None:
-        results_fv = results_fv[results_fv['t_learn'] <= 200]
-        results_mc = results_mc[results_mc['t_learn'] <= 200]
+        results_fv = results_fv[results_fv['t_learn'] <= t_learn_max]
+        results_mc = results_mc[results_mc['t_learn'] <= t_learn_max]
 
 
     # Plotting process starts
-    all_cases = aggregation_bygroups(results_fv, ['case', 'theta_true', 'J/K', 'exponent', 'N', 'T'],
+    # (2022/10/18) Note that grouping by N and T have been commented out because N and T could be updated at every learning step
+    # (in order to make learning faster)
+    all_cases = aggregation_bygroups(results_fv, ['case', 'theta_true', 'J/K', 'exponent'], #, 'N', 'T'],
                                      ['K', 'n_events_mc', 'n_events_fv'],
                                      stats=['count', 'mean', 'std', 'min', 'max'])
     n_events_by_case = aggregation_bygroups(results_mc, ['case'], ['n_events_mc'])
@@ -801,23 +891,30 @@ if PLOT_RESULTS_PAPER:
     case_values = all_cases.index.get_level_values('case')
     theta_true_values = all_cases.index.get_level_values('theta_true')
     exponent_values = all_cases.index.get_level_values('exponent')
-    N_values = all_cases.index.get_level_values('N')
-    T_values = all_cases.index.get_level_values('T')
+    N_values = [np.max(results_fv.loc[ results_fv['case'] == case, 'N' ]) for case in np.unique(results_fv['case'])]
+    T_values = [np.max(results_fv.loc[ results_fv['case'] == case, 'T' ]) for case in np.unique(results_fv['case'])]
     # Cases are sorted from larger error to smaller error
-    case_descs = ['Larger error', 'Mid error', 'Smaller error']
+    #case_descs = ['Larger error', 'Mid error', 'Smaller error']
     colors = ['red', 'blue', 'green']
     colors = ['black', 'black', 'black']
-    linestyles = ['dotted', 'dashed', 'solid']
+    # Linestyles to use for each 'case' stored in results_* data frames
+    #linestyles = ['dotted', 'dashed', 'solid']
     # linestyles = ['dashed', 'solid', 'solid']
     linestyles = ['solid', 'dashed', 'solid']
+    # Linestyles to use for each method (FV and MC, in this order)
+    linestyles_method = ['solid', 'dashed']
     linewidth = 2
-    fontsize = 22
-    n_subplots = 1
+    fontsize = 15
+    # Number of subplots in the figure as follows:
+    # - When subplotting by method, n_subplots = 1 or 2
+    # - When subplotting by case, n_subplots = # cases (i.e. len(np.unique(results_fv['case'])))
+    n_subplots = len(np.unique(results_fv['case']))
+    # Criterion to subplot by: "method" (FV or MC) or case (e.g. one subplot for each replication or for each different parameter setting (e.g. error = 100% and error = 150%)
+    subplotby = "case"
     # Shift of the optimum theta when we define the cost as an increasing function of the blocking size
     rho = 0.7
     b = 3.0
-    shift_optimum = np.log(-np.log(rho) / (np.log(b) + np.log(rho))) / np.log(
-        b)  # ~ -0.66667 when rho = 0.7 and b = 3.0
+    shift_optimum = np.log(-np.log(rho) / (np.log(b) + np.log(rho))) / np.log(b)  # ~ -0.66667 when rho = 0.7 and b = 3.0
     for J_factor in np.unique(J_factor_values):
         cases = case_values[J_factor_values == J_factor]
         ncases = len(cases)
@@ -828,16 +925,16 @@ if PLOT_RESULTS_PAPER:
         theta_start = results_fv['theta'].iloc[0]
         K_start = int(np.ceil(theta_start + 1))
 
-        axes = plt.figure(figsize=(18, 18)).subplots(1, n_subplots, squeeze=False)
+        axes = plt.figure(figsize=(24, 18)).subplots(1, n_subplots, squeeze=False)
         legend = [[], []]
         figfile = os.path.join(os.path.abspath(resultsdir),
-                               "RL-single-FVMC-K0={}-start={}-J={}-E{:.1f}-{}.jpg" \
-                               .format(K_true, K_start, J_factor, error, theta_update_strategy))
+                               "RL-single-FVMC-K0={}-start={}-J={}-E{:.1f},{:.1f}-{}.jpg" \
+                               .format(K_true, K_start, J_factor, error_nominal_phi, error_nominal_et, theta_update_strategy))
         for idx_case, case in enumerate(cases):
             print("Plotting case {} with idx_case = {}, K_true={}, K_start={}, J={}K".format(case, idx_case, K_true,
                                                                                              K_start, J_factor))
             # The metadata for the title and legend
-            case_desc = case_descs[idx_case]
+            #case_desc = case_descs[idx_case]
             N = N_values[idx_case]
             T = T_values[idx_case]
             n_events_et = all_cases['n_events_mc']['mean'].iloc[idx_case]
@@ -845,19 +942,28 @@ if PLOT_RESULTS_PAPER:
             n_events_mean = n_events_by_case.iloc[idx_case]['n_events_mc']['mean']
 
             # The data to plot
-            ind = results_fv['case'] == case
+            ind_fv = results_fv['case'] == case
+            ind_mc = results_mc['case'] == case
             K_start = int(np.ceil(theta_start + 1))
-            K_opt_fv = int(np.round(results_fv['theta'][ind].iloc[-1])) + 1  # Optimum K found by the algorithm = closest integer to last theta + 1
-            K_opt_mc = int(np.round(results_mc['theta'][ind].iloc[-1])) + 1  # Optimum K found by the algorithm = closest integer to last theta + 1
-            x = results_fv['t_learn'][ind]
-            y_fv = results_fv['theta'][ind]
-            y_mc = results_mc['theta'][ind]
-            axes[0][0].plot(x, y_fv, color='green', linestyle=linestyles[idx_case], linewidth=linewidth)
-            axes[0][n_subplots - 1].plot(x, y_mc, color='red', linestyle='dashed', linewidth=linewidth)
+            K_opt_fv = int(np.round(results_fv['theta'][ind_fv].iloc[-1])) + 1  # Optimum K found by the algorithm = closest integer to last theta + 1
+            K_opt_mc = int(np.round(results_mc['theta'][ind_mc].iloc[-1])) + 1  # Optimum K found by the algorithm = closest integer to last theta + 1
+            x_fv = results_fv['t_learn'][ind_fv]
+            x_mc = results_mc['t_learn'][ind_mc]
+            y_fv = results_fv['theta'][ind_fv]
+            y_mc = results_mc['theta'][ind_mc]
+            if subplotby == "method":
+                axes[0][0].plot(x_fv, y_fv, color='green', linestyle=linestyles[idx_case], linewidth=linewidth)
+                axes[0][n_subplots - 1].plot(x_mc, y_mc, color='red', linestyle='dashed', linewidth=linewidth)
+            else:
+                assert subplotby == "case"
+                # When setting linestyles by method because each case possibly goes in a different subplot (when n_subplots > 1)
+                axes[0][idx_case].plot(x_fv, y_fv, color='green', linestyle=linestyles_method[0], linewidth=linewidth)
+                axes[0][idx_case].plot(x_mc, y_mc, color='red', linestyle=linestyles_method[1], linewidth=linewidth)
+                axes[0][idx_case].set_title("Replication {}".format(idx_case+1))
 
             # Errors
-            err_phi = results_fv['err_phi'][ind].iloc[0]
-            err_et = results_fv['err_et'][ind].iloc[0]
+            err_phi = results_fv['err_phi'][ind_fv].iloc[0]
+            err_et = results_fv['err_et'][ind_fv].iloc[0]
 
             # legend[0] += ["{}) {}: FVRL (N={}, T={}, error(Phi)={:.0f}%, error(ET)={:.0f}%)" #, avg #events per learning step={})" \
             #                .format(idx_case+1, case_desc, N, T, err_phi*100, err_et*100)] #, n_events_et + n_events_fv)]
@@ -866,8 +972,8 @@ if PLOT_RESULTS_PAPER:
             # legend[0] += ["FVRL (N={}, T={}, expected error = {:.0f}%)\n(avg #events per learning step={:.0f})" \
             #                  .format(N, T, error*100, n_events_mean)]
             # legend[n_subplots-1] += ["MC (avg #events per learning step={:.0f})".format(n_events_mean)]
-            legend[0] += ["N={}, T={}: expected error = {:.0f}%)\n(avg #events per learning step={:.0f})" \
-                              .format(N, T, error * 100, n_events_mean)]
+            legend[0] += ["N={}, T={}: expected error Phi = {:.0f}%, expected error E(T_A) = {:.0f}%)\n(avg #events per learning step={:.0f})" \
+                              .format(N, T, error_nominal_phi * 100, error_nominal_et*100, n_events_mean)]
 
         for idx in range(n_subplots):
             axes[0][idx].set_xlabel('Learning step', fontsize=fontsize)
@@ -883,15 +989,22 @@ if PLOT_RESULTS_PAPER:
             if set_special_axis_ticks:
                 axes[0][idx].set_yticks(range(0, 36, 5))
             # axes[0][idx].legend(legend[idx] + ["Optimum theta"], fontsize='xx-large', loc='lower right')
-            axes[0][idx].text(axes[0][idx].get_xlim()[1] / 1.7, 5,
-                              "N={}, T={}\nAvg #events per step = {:.0f}\n\nK* = {}\nEstimated K* (FV) = {}\nEstimated K* (MC) = {}" \
-                              .format(N, T, n_events_mean, K_true, K_opt_fv, K_opt_mc),
-                              horizontalalignment='center',
-                              fontsize=fontsize, bbox={'facecolor': 'none', 'edgecolor': 'black'})
+            if show_textbox:
+                axes[0][idx].text(axes[0][idx].get_xlim()[1] / 1.7, 5,
+                                  "J/K={}, N={}, T={}\nAvg #events per step = {:.0f}\n\nK* = {}" \
+                                  #\nEstimated K* (FV) = {}\nEstimated K* (MC) = {}" \
+                                  .format(J_factor, N, T, n_events_mean, K_true),
+                                  #.format(J_factor, N, T, n_events_mean, K_true, K_opt_fv, K_opt_mc),
+                                  horizontalalignment='center',
+                                  fontsize=fontsize, bbox={'facecolor': 'none', 'edgecolor': 'black'})
             # plt.title("# particles N = {}, Simulation time for P(T>t) and E(T_A) = {}, # learning steps = {}, Average number of events per learning step = {:.0f}" \
             #          .format(N, 0, 0, 0))
 
+        # To avoid cut off of vertical axis label!!
+        # Ref: https://stackoverflow.com/questions/6774086/why-is-my-xlabel-cut-off-in-my-matplotlib-plot
         plt.gcf().subplots_adjust(left=0.15)
-        ## To avoid cut off of vertical axis label!!
-        ## Ref: https://stackoverflow.com/questions/6774086/why-is-my-xlabel-cut-off-in-my-matplotlib-plot
-        plt.savefig(figfile)
+        # Save leaving just a little margin (pad_inches=0.1), otherwise we would need to crop the generated figure
+        # before including it in a paper.
+        # Ref: https://stackoverflow.com/questions/36203597/remove-margins-from-a-matplotlib-figure
+        plt.savefig(figfile, bbox_inches="tight", pad_inches=0.1)
+        print("Save figure to file {}".format(figfile))

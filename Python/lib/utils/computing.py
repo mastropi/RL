@@ -3,7 +3,7 @@
 Created on Thu Jun 04 22:15:48 2020
 
 @author: Daniel Mastropietro
-@description: Functions used to perform computations
+@description: Functions used to perform specialized computations commonly used by the application.
 """
 
 import warnings
@@ -257,6 +257,8 @@ def generate_min_exponential_time(rates):
     # Probability of selection of each possible event with a valid rate
     probs = valid_rates[is_valid_rate] / event_rate
     indices_to_choose_from = [idx for idx, rate in enumerate(valid_rates) if not np.isnan(rate)]
+    #print("probs: {}".format(probs))   # For 5 particles with rates lambda = 0.7, mu = 1.0 each, these probabilities are 0.082353 (for each of the 5 lambda's) and 0.11765 (for each of the 5 mu's)
+    #print("indices to choose from: {}".format(indices_to_choose_from))
 
     # Define the index on which the generated event time should be associated with
     idx_event = np.random.choice(indices_to_choose_from, size=1, p=probs)[0]    # Need `[0]` because the value returned by random.choice() is an array
@@ -264,7 +266,19 @@ def generate_min_exponential_time(rates):
     return event_time, idx_event
 
 
-def compute_survival_probability(survival_times):
+def compute_survival_probability(survival_times: list):
+    """
+    Computes the survival probability from a list of sorted survival times
+
+    Arguments:
+    survival_times: list
+        Sorted list containing the observed survival times on which the step survival probability is computed.
+
+    Return: pandas DataFrame
+    Data frame containing the following two columns:
+    - 't': the input survival times (assumed sorted)
+    - 'P(T>t)': the survival probability for the corresponding t value.
+    """
     assert survival_times[0] == 0.0
     # Number of observed death events used to measure survival times
     N = len(survival_times) - 1
@@ -332,6 +346,36 @@ def compute_job_rates_by_server(job_class_rates, nservers, policy_assign_map):
             job_rates_by_server[r] += policy_assign_map[c][r] * job_class_rates[c]
 
     return job_rates_by_server
+
+
+def compute_number_of_burnin_cycles_from_burnin_time(cycle_times, burnin_time):
+    """
+    Computes the number of burn-in cycles to remove from the beginning of a simulation
+    when computing expectations in order to guarantee a specified burn-in continuous time
+    """
+    if burnin_time > 0:
+        # Find the number of cycles to remove from the beginning of the simulation in order to guarantee that
+        # the time at which the first cycle considered starts is larger than the burn-in time
+        # The logic is best illustrated by an example:
+        # burnin_time = 3.5
+        # cycle_times = [0.3, 0.7, 2.8, 0.4, 0.9]
+        # => cumsum(cycle_times) = [0.3, 1.0, 3.8, 4.2, 5.1]
+        #   => the loop below stops at idx = 2 (because t=3.8 >= burnin_time=3.5)
+        #       => burnin_cycles = 3 (that is we need to remove the first 3 cycles --including the third one--
+        #                              because all those cycles have a non-empty intersection with the interval
+        #                              [0, burnin_time=3.5]. So, the first cycle that is falls FULLY in the
+        #                              period assumed stationary is the fourth cycle that goes from 3.8 thru 4.2
+        #                              whose cycle time is 0.4, i.e. taken from index 3 of the cycle_times list)
+        assert cycle_times is not None
+        burnin_cycles = len(cycle_times)  # Initialize the number of burn-in cycles to the maximum possible (where all cycles are removed actually!)
+        for idx, t in enumerate(np.cumsum(cycle_times)):
+            if t >= burnin_time:
+                burnin_cycles = idx + 1  # See example above to justify why we sum +1 to idx to get the number of burn-in cycles
+                break
+    else:
+        burnin_cycles = 0
+
+    return burnin_cycles
 
 
 def compute_blocking_probability_birth_death_process(rhos: list, capacity: int):
@@ -587,28 +631,6 @@ if __name__ == "__main__":
         t, idx = generate_min_exponential_time([0.2, np.nan, -0.7])
         assert idx == idx_expected
     #---------- generate_min_exponential_time() -------------#
-
-
-    #-------- compute_nparticles_and_nsteps_for_fv_process & compute_rel_errors_for_fv_process() --------------#
-    print("\n--- Testing compute_nparticles_and_nsteps_for_fv_process() and its inverse compute_rel_errors_for_fv_process():")
-    rhos = [0.7]
-    K = 20
-    J_factor = 0.3
-    error_rel_phi = 0.5
-    error_rel_et = 0.7
-    N, T = compute_nparticles_and_nsteps_for_fv_process(rhos, K, J_factor, error_rel_phi=error_rel_phi, error_rel_et=error_rel_et)
-    print("N={}, T={}".format(N, T))
-    assert np.all([N==149, T==54])
-
-    # The inverse operation
-    err1, err2 = compute_rel_errors_for_fv_process(rhos, K, N, T, J_factor)
-    print("err1={:.3f}%, err2={:.3f}%".format(err1*100, err2*100))
-    assert np.allclose([err1, err2], [0.49928, 0.69388])
-    assert err1 <= error_rel_phi and err2 <= error_rel_et
-        ## NOTE that the relative error for E(T_A) is not so close to the nominal relative error...
-        ## but this is fine, as the reason is that the number of cycles M that then defines T in the first function call
-        ## is rounded up... What it's important is that the relative errors are smaller than the nominal errors.
-    #-------- compute_nparticles_and_nsteps_for_fv_process & compute_rel_errors_for_fv_process() --------------#
 
 
     #------------------- comb(n,k) -------------------------#

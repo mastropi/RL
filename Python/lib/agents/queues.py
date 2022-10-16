@@ -65,6 +65,7 @@ class AgeQueue(GenericAgent):
         Arguments:
         env: Queue environment (normally defined in environments/queues.py)
             The queue environment on which the agent acts.
+            NOTE: This object is updated after the action takes place.
 
         policy_type: PolicyTypes
             Type of policy on which the agent acts on the queue, one of:

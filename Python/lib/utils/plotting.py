@@ -17,18 +17,6 @@ from matplotlib import pyplot as plt, cm
 from .basic import parse_dict_params, aggregation_bygroups
 
 
-def plot_event_times(rates, times, classes, class_name="Group"):
-    print("Distribution of event times by {}:".format(class_name))
-    fig, axes = plt.subplots(1, len(rates), squeeze=False)
-    for j, r in enumerate(rates):
-        _times = [t for i, t in zip(classes, times) if i == j]
-        print(class_name + " {}: true mean (std) = {:.3f} ({:.3f}), observed mean (std, SE) (n={}) = {:.3f} ({:.3f}, {:.3f})" \
-              .format(j, 1 / r, 1 / r, len(_times), np.mean(_times), np.std(_times), np.std(_times)/np.sqrt(len(_times))))
-        axes[0][j].hist(_times)
-        axes[0][j].set_title(class_name + " {}, n = {}, mean = {:.3f}, std = {:.3f}, SE = {:.3f}" \
-                             .format(j, len(_times), np.mean(_times), np.std(_times), np.std(_times)/np.sqrt(len(_times))))
-
-
 def default_plot_options():
     return {'axis': {'fontsize': 13,
                      'limits': {'xmin': None, 'xmax': None,

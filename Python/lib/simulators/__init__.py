@@ -9,6 +9,7 @@ Created on Sun Jul 10 12:23:07 2022
 from enum import Enum, unique
 
 import numpy as np
+from matplotlib import pyplot as plt
 
 from Python.lib.agents import GenericAgent
 from Python.lib.agents.learners import LearnerTypes
@@ -207,10 +208,11 @@ def step(t, env, agent: GenericAgent, policy_type: PolicyTypes):
 
     Arguments:
     t: int
-        Current queue transition associated to the current step.
+        Discrete time step of the step carried out now.
 
     env: environment
         The environment where the agent acts.
+        NOTE: This object is updated after the step.
 
     agent: Agent
         The agent interacting with the environment.
@@ -271,3 +273,64 @@ def update_trajectory(agent, t_total, t_sim, state, action, reward):
 def show_messages(verbose, verbose_period, t_learn):
     return verbose and np.mod(t_learn - 1, verbose_period) == 0
 
+def analyze_event_times(rates, times, groups, group_name="group", plot=False):
+    """
+    Computes and plots the event times (e.g. inter-arrival times or service times) for each of the given groups,
+    and compares their rates with the nominal rates of each group.
+
+    Ex 1: If a system has two arriving job classes and three servers, parameter `rates` could be:
+    - the inter-arrival rates for each of two job classes (groups) in ONE PARTICULAR server.
+    - the service rates of each of three servers, which act as groups.
+    Parameters `times` and `groups` should have the same lengths and they could contain:
+    - the inter-arrival times for each of the two job classes, where the class to which the observed inter-arrival time
+    belongs to is indicated by the `groups` list. Ex: groups = [0, 0, 1, 0, 1]; times = [0.3, 0.2, 0.6, 0.1, 0.15]
+    which means that the inter-arrival times observed for class '0' are [0.3, 0.2, 0.1] and the inter-arrival times
+    observed for class '1' are [0.6, 0.15].
+    - the service rates for each of the three servers, following the same logic just described for the inter-arrival times.
+
+    Ex 2: If a system has one job class and one server, parameter `rates` could be the rates for each of N replications
+    of the system simulation (e.g. N particles) and parameters `times` and `groups` could be:
+    - the inter-arrival times observed in each of the N particles and the particle numbers associated to them.
+    - the service times observed in each of the N particles and the particle numbers associated to them.
+    e.g. times = [0.3, 0.2, 0.6, 0.1, 0.15], groups = [0, 0, 0, 1, 1]
+    meaning that the first three times were observed in particle 0 and the last two times were observed in particle 1.
+
+    Arguments:
+    rates: list
+        List containing the *true* jump rates of the Markov process whose observed times are analyzed.
+        Its length is NOT related with the length of parameters `times` and `groups`.
+        See examples above.
+
+    times: list
+        List containing the times to analyze by comparing them with the expected times deduced from the given `rates`,
+        in terms of their average and standard deviation / standard error.
+        It should have the same length as the `groups` list.
+        See examples above.
+
+    groups: list
+        It should have the same length as the `groups` list and its value be integer values that index the `rates` list.
+        See examples above.
+
+    group_name: (opt) str
+        Name that is used to give a meaning to the `groups` list values.
+        Ex:
+        - "job class" if `times` contains inter-arrival times for different job classes.
+        - "particle" if `times` contains inter-arrival times or service times observed in different particles
+        of a Fleming-Viot system.
+        default: "group" (i.e. a name that contains no semantic)
+
+    plot: (opt) bool
+        Whether to generate a histogram of the values given in `times` for each group given in `rates`.
+        default: False
+    """
+    print("Distribution of event times by {}:".format(group_name))
+    if plot:
+        fig, axes = plt.subplots(1, len(rates), squeeze=False)
+    for j, r in enumerate(rates):
+        _times = [t for i, t in zip(groups, times) if i == j]
+        print(group_name + " {}: true mean (std) = {:.3f} ({:.3f}), observed mean (std, SE) (n={}) = {:.3f} ({:.3f}, {:.3f})" \
+              .format(j, 1 / r, 1 / r, len(_times), np.mean(_times), np.std(_times), np.std(_times)/np.sqrt(len(_times))))
+        if plot:
+            axes[0][j].hist(_times)
+            axes[0][j].set_title("Dist. event times: " + group_name + " {}, n = {}, mean = {:.3f}, std = {:.3f}, SE = {:.3f}" \
+                                 .format(j, len(_times), np.mean(_times), np.std(_times), np.std(_times)/np.sqrt(len(_times))))

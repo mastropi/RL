@@ -71,7 +71,27 @@ def rewardOnJobClassAcceptance(env, state, action, next_state, dict_params=None)
     else:
         return 0.0
 
+def rewardOnJobRejection_Constant(env, state, action, next_state, dict_params=None):
+    "Negative reward received when an incoming job is rejected"
+    if dict_params is None:
+        dict_params = dict({'reward_at_rejection': -1.0})
+
+    if action == Actions.REJECT:
+        # Blocking occurred
+        # => There is a negative reward or cost
+        assert env.getBufferSizeFromState(state) == env.getBufferSizeFromState(next_state), \
+            "At REJECT, the queue's buffer size after rejection ({}) is the same as before rejection ({})" \
+            .format(env.getBufferSizeFromState(state), env.getBufferSizeFromState(next_state))
+        reward = dict_params['reward_at_rejection']
+        assert reward < 0.0, "The reward of job rejection is negative ({})".format(reward)
+        return reward
+    else:
+        # No blocking
+        # => No reward
+        return 0.0
+
 def rewardOnJobRejection_ExponentialCost(env, state, action, next_state, dict_params=None):
+    "Negative reward received when an incoming job is rejected as a function of the queue's buffer size associated to the given state"
     if dict_params is None:
         dict_params = dict({'buffer_size_ref': COST_EXP_BUFFER_SIZE_REF})
     if 'buffer_size_ref' not in dict_params.keys():
@@ -79,7 +99,6 @@ def rewardOnJobRejection_ExponentialCost(env, state, action, next_state, dict_pa
                          " the reference buffer size, above which there is an exponentially increasing cost with"
                          " the buffer size when a job is rejected.")
 
-    "Negative reward received when an incoming job is rejected as a function of the queue's buffer size associated to the given state"
     if action == Actions.REJECT:
         # Blocking occurred
         # => There is a negative reward or cost
@@ -87,7 +106,7 @@ def rewardOnJobRejection_ExponentialCost(env, state, action, next_state, dict_pa
             "At REJECT, the queue's buffer size after rejection ({}) is the same as before rejection ({})" \
             .format(env.getBufferSizeFromState(state), env.getBufferSizeFromState(next_state))
         reward = -costBlockingExponential(env.getBufferSizeFromState(state), dict_params['buffer_size_ref'])
-        assert reward < 0.0, "The reward of blocking is negative ({})".format(reward)
+        assert reward < 0.0, "The reward of job rejection is negative ({})".format(reward)
         return reward
     else:
         # No blocking
