@@ -481,6 +481,28 @@ class SimulatorQueue(Simulator):
                                         'n_events_fv': n_events_fv,
                                         'n_Q': np.mean([n_Km1, n_K] if self.dict_learning_params['mode'] == LearningMode.IGA else n_Km1)}))
 
+            # Update the value of N and T for the next learning step if the desired expected relative errors are given as part of the input parameters
+            # Goal: Keep the same expected errors in Phi and in E(T_A) along the simulation process, for all blocking sizes K
+            if isinstance(self.getLearnerV(), LeaFV) and \
+                'error_rel_phi' in dict_info.keys() and 'error_rel_et' in dict_info.keys():
+                # Compute the new blocking size so that we can update the values of N and T
+                _K_next = self.agent.getAcceptancePolicy().getBufferSizeForDeterministicBlocking()
+                _N, _T = \
+                    compute_nparticles_and_nsteps_for_fv_process(self.rhos, _K_next, dict_params_simul['buffer_size_activation_factor'],
+                                                                 error_rel_phi=dict_info['error_rel_phi'],
+                                                                 error_rel_et=dict_info['error_rel_et'])
+                _N_new = min(max(dict_info.get('Nmin', 0), _N), dict_info.get('Nmax', np.Inf))
+                _T_new = min(max(dict_info.get('Tmin', 0), _T), dict_info.get('Tmax', np.Inf))
+                if True or show_messages(verbose, verbose_period, t_learn):
+                    print("New blocking size K = {}".format(_K_next))
+                    print("\tN updated from {} --> {}".format(dict_params_simul['nparticles'], _N_new))
+                    print("\tT updated from {} --> {}".format(dict_params_simul['T'], _T_new))
+                dict_params_simul['nparticles'] = _N_new
+                dict_params_simul['T'] = _T_new
+
+                # NOTE: The number of particles and the environments used in the simulation are updated at the beginning of the next iteration
+                # by calling the self.setNumberParticlesAndCreateEnvironments() method.
+
             if show_messages(verbose, verbose_period, t_learn):
                 print("\tUpdated value function at the end of the queue simulation: average reward V = {}".format(self.getLearnerV().getV()))
                 print("\tSame observed average reward (computed from Policy learner) = {}".format(self.getLearnerP().getAverageRewardUnderPolicy()))
