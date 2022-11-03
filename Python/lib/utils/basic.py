@@ -56,13 +56,13 @@ def get_current_datetime_as_string(format=None):
     Arguments:
     format: str or None
         Format hint for the output datetime string.
-        When "suffix" a datetime string suitable for a filename suffix is generated in the form "YYYYMMDD_HHMMSS".
+        When "filename" a datetime string suitable to be used in a filename is generated in the form "YYYYMMDD_HHMMSS".
         Otherwise the following format is used: "%Y-%m-%d %H:%M:%S".
 
     Return: str
     Current datetime as a string.
     """
-    if format is "suffix":
+    if format is "filename":
         format_strftime = "%Y%m%d_%H%M%S"
     else:
         format_strftime = "%Y-%m-%d %H:%M:%S"

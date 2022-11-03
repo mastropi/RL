@@ -27,7 +27,7 @@ from Python.lib.environments.queues import rewardOnJobRejection_Constant
 
 import Python.lib.estimators as estimators
 
-from Python.lib.simulators.queues import estimate_blocking_fv, estimate_blocking_mc
+from Python.lib.simulators.queues import SurvivalProbabilityEstimation, estimate_blocking_fv, estimate_blocking_mc
 from Python.lib.simulators import define_queue_environment_and_agent
 
 from Python.lib.utils.basic import aggregation_bygroups, get_current_datetime_as_string, get_datetime_from_string, is_scalar
@@ -42,9 +42,11 @@ class Process(Enum):
 
 
 #------------------- Functions --------------------
-def analyze_convergence(estimation_process=Process.Estimators,
+def analyze_convergence(estimation_process=Process.Simulators,
                         nservers=1, K=5, buffer_size_activation=1,
                         burnin_time_steps=20, burnin_cycles_absorption=5,
+                        min_num_cycles_for_expectations=5,
+                        method_proba_surv=SurvivalProbabilityEstimation.FROM_N_PARTICLES,
                         nparticles=[],
                         nparticles_min=40, nparticles_max=80, nparticles_step_prop=1,
                         nmeantimes=500,
@@ -55,23 +57,32 @@ def analyze_convergence(estimation_process=Process.Estimators,
     2021/04/19: Analyze convergence of the FV algorithm as the number of particles N increases
 
     Arguments:
-    burnin_time_steps: (int)
+    estimation_process: (opt) Process
+        The estimation process that should be used to estimate the blocking probability, whether the estimator
+        defined in estimators.py (Process.Estimators) or the estimator defined in simulators/queues.py
+        (Process.Simulators).
+        default: Process.Simulators
+
+    burnin_time_steps: (opt) int
         Number of burn-in time steps to consider before a return cycle and a reabsorption cycle qualifies for
         the estimation of expectations. This is used when the estimation is performed by the estimators
         defined in simulators.queues (NEW implementation) (e.g. estimate_blocking_mc() and estimate_blocking_fv()).
         default: 20
 
-    burnin_cycles_absorption: (int)
+    burnin_cycles_absorption: (opt) int
         Number of burn-in absorption cycles to consider before an absorption cycle qualifies for the estimation of
         expectations. This is used when the estimation is performed by the estimator EstimatorQueueBlockingFlemingViot
         (OLD implementation).
         default: 5
 
-    estimation_process: (opt) Process
-        The estimation process that should be used to estimate the blocking probability, whether the estimator
-        defined in estimators.py (Process.Estimators) or the estimator defined in simulators/queues.py
-        (Process.Simulators).
-        default: Process.Estimators
+    min_num_cycles_for_expectations: (opt) int
+        Minimum number of observed cycles in order to estimate expectations (instead of setting their values to NaN).
+        default: 5
+
+    method_proba_surv: (opt) SurvivalProbabilityEstimation
+        Method used to estimate the survival probability P(T>t), whether "from M cycles observed by a single particle"
+        or "from the N particles used in the FV simulation".
+        default: SurvivalProbabilityEstimation.FROM_N_PARTICLES
 
     nparticles: (opt) list
         List giving the number of particles to considered in each simulation.
@@ -83,8 +94,8 @@ def analyze_convergence(estimation_process=Process.Estimators,
         so that we scale the step as the number of particles increases.
 
     nmeantimes: (opt) int or list
-        Number of discrete time steps to run the queue to estimate either the blocking probability (for MC)
-        or to estimate P(T>t) and E(T_A) for the FV estimator.
+        Number of discrete *time steps* to run the queue to estimate the blocking probability in Monte-Carlo
+        or the number of *arrival events* to estimate E(T_A) for the FV estimator (at least in the Process.Simulators implementation).
         If not scalar, it should have the same number of elements as the number of particles that are tried
         in this simulation.
         default: 500
@@ -165,11 +176,16 @@ def analyze_convergence(estimation_process=Process.Estimators,
     pd.set_option('display.max_columns', None)
     pd.set_option('display.max_rows', None)
 
-    df_results = pd.DataFrame(columns=['K',
-                                       'BSA',
+    df_results = pd.DataFrame(columns=['nservers',
+                                       'rhos',
+                                       'K',
+                                       'J',
                                        'N',
+                                       'T',
                                        'burnin_time_steps',
                                        'burnin_cycles',
+                                       'min_n_cycles',
+                                       'method_proba_surv',
                                        'replication',
                                        'Pr(MC)',
                                        'EMC(T)',
@@ -207,8 +223,13 @@ def analyze_convergence(estimation_process=Process.Estimators,
             'nparticles': nparticles,
             'nmeantimes': nmeantimes,
             'buffer_size_activation': buffer_size_activation_value,
-            'burnin_time_steps': burnin_time_steps,                 # Used in the simulators.queues simulator
-            'burnin_cycles_absorption': burnin_cycles_absorption,   # Used in the estimators.py simulator
+            'burnin_time_steps': estimation_process == Process.Estimators and np.nan or \
+                                 estimation_process == Process.Simulators and burnin_time_steps,
+            'burnin_cycles_absorption': estimation_process == Process.Estimators and burnin_cycles_absorption or \
+                                        estimation_process == Process.Simulators and np.nan,
+            'min_num_cycles_for_expectations': estimation_process == Process.Estimators and np.nan or \
+                                               estimation_process == Process.Simulators and min_num_cycles_for_expectations,
+            'method_survival_probability_estimation': method_proba_surv,
             'seed': seed,
                 }
 
@@ -242,7 +263,7 @@ def analyze_convergence(estimation_process=Process.Estimators,
                     expected_absorption_time, n_absorption_time_observations, \
                         time_last_absorption, time_end_simulation_et, max_survival_time, time_end_simulation_fv, \
                             n_events_et, n_events_fv_only = estimate_blocking_fv(envs_queue, agent,
-                                                                                            dict_params_simul, dict_params_info)
+                                                                                 dict_params_simul, dict_params_info)
                 integral = np.nan
                 n_events_fv = n_events_et + n_events_fv_only
                 n_survival_curve_observations = n_absorption_time_observations
@@ -264,10 +285,20 @@ def analyze_convergence(estimation_process=Process.Estimators,
                     n_events_mc = dict_stats_mc.get('nevents', 0)
                 elif estimation_process == Process.Simulators:
                     dict_params_simul['T'] = n_events_fv
-                    proba_blocking_mc, expected_reward_mc, probas_stationary, \
-                        expected_return_time_mc, n_return_observations, \
+                    proba_blocking_mc, expected_reward_mc, probas_stationary, n_cycles, \
+                        expected_return_time_mc, _, \
                             n_events_mc = estimate_blocking_mc(env_queue, agent, dict_params_simul, dict_params_info=dict_params_info)
                     time_mc = np.nan
+                    # Note: (2022/10/24) The above number n_cycles is the number of cycles observed for the estimation of the stationary probabilities
+                    # It may NOT coincide with the number of return cycles observed and used to estimate expected_return_time_mc
+                    # (whose value is stored in returned object `_`)
+                    # when a burn-in period is left at the beginning of the simulation (see dict_params_simul['burnin_period']),
+                    # since in that case, the cycle used in the estimation of the stationary probabilities is defined by
+                    # the return to the buffer size at which the Markov process is found *after* the burn-in period is over
+                    # (which may NOT coincide with the start buffer size).
+                    # Here we store the former, i.e. the number of cycles used to estimate the stationary probabilities
+                    # because those are the values we are interested in collecting to analyze the Monte-Carlo estimator.
+                    n_return_observations = n_cycles
 
                 # Check comparability in terms of # events in each simulation (MC vs. FV)
                 if n_events_mc != n_events_fv:
@@ -317,31 +348,38 @@ def analyze_convergence(estimation_process=Process.Estimators,
             print("\tTrue P(K): {:.6f}%".format(proba_blocking_true*100))
 
             # Store the results
-            df_append = pd.DataFrame([[K,
-                                       buffer_size_activation_value,
-                                       nparticles,
-                                       burnin_time_steps,
-                                       burnin_cycles_absorption,
-                                       r,
-                                       proba_blocking_mc,
-                                       expected_return_time_mc,
-                                       time_mc,
-                                       n_events_mc,
-                                       n_return_observations,
-                                       expected_absorption_time,
-                                       n_absorption_time_observations,
-                                       max_survival_time,
-                                       proba_blocking_fv,
-                                       time_end_simulation_fv,
-                                       n_events_et,
-                                       n_events_fv_only,
-                                       n_events_fv,
-                                       n_survival_curve_observations,
-                                       proba_blocking_true,
-                                       dict_params_simul['seed'],
-                                       exec_time_mc,
-                                       exec_time_fv,
-                                       exec_time]],
+            df_append = pd.DataFrame([[ nservers,
+                                        len(rhos) == 1 and rhos or len(rhos) > 1 and format(rhos),
+                                        K,
+                                        buffer_size_activation_value,
+                                        nparticles,
+                                        nmeantimes,
+                                        # We use the dict_params_simul parameters here (as opposed to the input parameters to the function (e.g. `burnin_time_steps`)
+                                        # because these parameters may be changed above depending on the actual simulator+estimator used to run the experiments.
+                                        dict_params_simul['burnin_time_steps'],
+                                        dict_params_simul['burnin_cycles_absorption'],
+                                        dict_params_simul['min_num_cycles_for_expectations'],
+                                        method_proba_surv.name,
+                                        r,
+                                        proba_blocking_mc,
+                                        expected_return_time_mc,
+                                        time_mc,
+                                        n_events_mc,
+                                        n_return_observations,
+                                        expected_absorption_time,
+                                        n_absorption_time_observations,
+                                        max_survival_time,
+                                        proba_blocking_fv,
+                                        time_end_simulation_fv,
+                                        n_events_et,
+                                        n_events_fv_only,
+                                        n_events_fv,
+                                        n_survival_curve_observations,
+                                        proba_blocking_true,
+                                        dict_params_simul['seed'],
+                                        exec_time_mc,
+                                        exec_time_fv,
+                                        exec_time]],
                                      columns=df_results.columns, index=[case+1])
             df_results = df_results.append(df_append)
 
@@ -479,7 +517,7 @@ def analyze_absorption_size(nservers=1,
             if buffer_size_activation_value == buffer_size_activation_value_prev:
                 continue
             burnin_cycles_absorption = burnin_cycles_absorption_values[idx_bsa]
-            print("\n\t---> NEW BUFFER SIZE (BSA={}, BIC={})".format(buffer_size_activation_value, burnin_cycles_absorption))
+            print("\n\t---> NEW BUFFER SIZE (J={}, BIC={})".format(buffer_size_activation_value, burnin_cycles_absorption))
 
             case += 1
             print("******************!!!!!!! Simulation {} of {} !!!!!!*****************\n\tK={}, nparticles={}, nmeantimes={}, buffer_size_activation={}, #burn-in absorption cycles={}" \
@@ -562,7 +600,7 @@ def analyze_absorption_size(nservers=1,
                 # - There is no `index` parameter in the from_items() method so we need to set the index
                 # value afterwards by calling the set_index() method in conjunction with a pd.Index() call.
                 # Using set_index([1]) does NOT work because it says that the value 1 is an invalid key!!
-                df_new_estimates = pd.DataFrame.from_items([
+                df_new_estimates = pd.DataFrame.from_items([('nservers', nservers),
                                                             ('rhos', [len(rhos) == 1 and rhos or len(rhos) > 1 and format(rhos)]),
                                                             ('K', [K]),
                                                             ('N', [nparticles]),
@@ -668,6 +706,7 @@ def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None, y2=Non
                        splines=True, use_weights_splines=False,
                        smooth_params={'bias': None, 'variability': None, 'mse': None},
                        xmin=None, xmax=None, ymin=None, ymax=None,
+                       title=None,
                        subset=None,
                        plot_mc=True,
                        figfile=None):
@@ -700,6 +739,10 @@ def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None, y2=Non
 
     ylabel2: str
         Label for the secondary axis of the last variability plot (plot #6), which is ONLY plotted when y2 is not None.
+
+    title: str
+        Title to show in the first plot with the estimated values by each method.
+        The other subsequent plots have their title already set.
 
     Example: This example uses a secondary axis on the last variability plot (#6) to show the complexity of the algorithm
     [Aug-2021]
@@ -782,7 +825,8 @@ def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None, y2=Non
                                dict_options={'axis': axis_properties,
                                              'multipliers': {'x': 1, 'y': 100, 'error': 2},
                                              'labels': {'x': [xlabel, xlabel2], 'y': "Blocking probability (%)"},
-                                             'properties': {'color': "black", 'color_center': colors}})
+                                             'properties': {'color': "black", 'color_center': colors},
+                                             'texts': {'title': title}})
 
     # 2) Violin plots
     axes_violin = plotting.plot(plotting.plot_violins,
@@ -792,7 +836,8 @@ def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None, y2=Non
                                 dict_options={'axis': axis_properties,
                                               'multipliers': {'x': 1, 'y': 100},
                                               'labels': {'x': [xlabel, xlabel2], 'y': "Blocking probability (%)"},
-                                              'properties': {'color': colors, 'color_center': colors}})
+                                              'properties': {'color': colors, 'color_center': colors},
+                                              'texts': {'title': title}})
 
     # -- Compute variability and bias
     df2plot = pd.DataFrame()
@@ -969,20 +1014,28 @@ def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None, y2=Non
 
     return df2plot, axes_error[0], axes_violin[0], axes_variability[0], axes_bias[0], axes_mse[0]
 
-def createLogFileHandleAndResultsFileNames(path="../../RL-002-QueueBlocking", prefix="run"):
+def createLogFileHandleAndResultsFileNames(path="../../RL-002-QueueBlocking", prefix="run", suffix="", use_dt_suffix=True):
     """
     Redirects the standard output to a file which is used to log messages.
     Creates output filenames for raw results and aggregated results.
 
     Ref: https://www.stackabuse.com/writing-to-a-file-with-pythons-print-function/
-    """
 
+    Arguments:
+    use_dt_suffix: bool
+        Whether to add a suffix showing the execution datetime in the filenames.
+    """
+    if suffix is not None and suffix != "":
+        suffix = "_" + suffix
     dt_start = get_current_datetime_as_string()
-    dt_suffix = get_current_datetime_as_string(format="suffix")
-    logfile = "{}/logs/{}_{}.log".format(path, prefix, dt_suffix)
-    resultsfile = "{}/results/{}_{}_results.csv".format(path, prefix, dt_suffix)
-    resultsfile_agg = "{}/results/{}_{}_results_agg.csv".format(path, prefix, dt_suffix)
-    proba_functions_file = "{}/results/{}_{}_proba_functions.csv".format(path, prefix, dt_suffix)
+    if use_dt_suffix:
+        dt_suffix = "_" + get_current_datetime_as_string(format="filename")
+    else:
+        dt_suffix = ""
+    logfile = "{}/logs/{}{}{}.log".format(path, prefix, dt_suffix, suffix)
+    resultsfile = "{}/results/{}{}{}_results.csv".format(path, prefix, dt_suffix, suffix)
+    resultsfile_agg = "{}/results/{}{}{}_results_agg.csv".format(path, prefix, dt_suffix, suffix)
+    proba_functions_file = "{}/results/{}{}{}_proba_functions.csv".format(path, prefix, dt_suffix, suffix)
     figfile = re.sub("\.[a-z]*$", ".png", resultsfile)
 
     fh_log = open(logfile, "w")
@@ -1032,16 +1085,19 @@ print("User arguments: {}".format(sys.argv))
 if len(sys.argv) == 1:    # Only the execution file name is contained in sys.argv
     sys.argv += [1]       # Number of servers in the system to simulate
     sys.argv += ["N"]     # Type of analysis: either "N" for the impact of number of particles or "J" for the impact of buffer size"
-    sys.argv += [20]      # K: capacity of the system
-    sys.argv += [100]     # N: number of particles in the FV system. This must be only ONE. If we want to simulate on more than one value of N, set their values when calling analyze_convergence()
-    sys.argv += [0.5]     # J factor: factor such that J = factor*K.
-    sys.argv += [3]       # Number of replications
+    sys.argv += [20]       # K: capacity of the system
+    sys.argv += [0.4]     # J factor: factor such that J = round(factor*K)
+    sys.argv += [50]      # N: number of particles in the FV system. This must be only ONE. If we want to simulate on more than one value of N, set their values when calling analyze_convergence()
+    sys.argv += [5]       # Number of replications
     sys.argv += [1]       # Test number to run: only one is accepted
 if len(sys.argv) == 8:    # Only the 7 required arguments are given by the user (recall that the first argument is the program name)
-    sys.argv += [100]    # T: number of arrival events to consider in the estimation of E(T) in the FV approach. When 'None' it is chosen as 100*J, i.e. it increases as J increases (independently of K, as K doesn't play any role in the magnitude of the return cycle time to J-1.
-    sys.argv += [4]      # BITS: Burn-in time steps to consider until stationarity can be assumed for the estimation of expectations (e.g. E(T) (return cycle time) in Monte-Carlo, E(T_A) (reabsorption cycle time) in Fleming-Viot)
+    sys.argv += [50]     # T: number of arrival events to consider in the estimation of E(T) in the FV approach. When 'None' it is chosen as 100*J, i.e. it increases as J increases (independently of K, as K doesn't play any role in the magnitude of the return cycle time to J-1.
+    sys.argv += [10]      # BITS: Burn-in time steps to consider until stationarity can be assumed for the estimation of expectations (e.g. E(T) (return cycle time) in Monte-Carlo, E(T_A) (reabsorption cycle time) in Fleming-Viot)
+    sys.argv += [5]       # MINCE: Minimum number of cycles to be used for the estimation of expectations (e.g. E(T) in Monte-Carlo and E(T_A) in Fleming-Viot)
     sys.argv += [2]       # Number of methods to run: 1 (only FV), 2 (FV & MC)
-    sys.argv += ["nosave"]# Either "nosave" or anything else for saving the results and log
+    sys.argv += ["save"]  # Either "nosave" or anything else for saving the results and log
+    sys.argv += [False]   # Whether to use the execution date and time in the output file name containing the results
+    sys.argv += ["ID1"]      # Identifier to use for this run (e.g. "ID1")
 print("Parsed user arguments: {}".format(sys.argv))
 print("")
 
@@ -1049,38 +1105,46 @@ print("")
 nservers = int(sys.argv[1])
 analysis_type = sys.argv[2]
 K = int(sys.argv[3])
-N = int(sys.argv[4])
-J = int(np.round(sys.argv[5] * K))
+J = int(np.round(sys.argv[4] * K))
+N = int(sys.argv[5])
 replications = int(sys.argv[6])
 tests2run = [int(v) for v in [sys.argv[7]]]  # NOTE: It's important to enclose sys.argv[7] in brackets because o.w.,
                                              # from the command line, a number with more than one digit is interpreted
                                              # as a multi-element list!! (e.g. 10 is interpreted as a list with elements [1, 0])
 T = sys.argv[8]
-if isinstance(T, str) and T.lower() == 'none':
+if T is None or isinstance(T, str) and T.lower() == 'none':
     T = 100 * J
 else:
     T = int(T)
 burnin_time_steps = int(sys.argv[9])
-run_mc = int(sys.argv[10]) == 2
-save_results = sys.argv[11] != "nosave"
+min_num_cycles_for_expectations = int(sys.argv[10])
+run_mc = int(sys.argv[11]) == 2
+save_results = sys.argv[12] != "nosave"
+save_with_dt = bool(sys.argv[13])
+id_run = sys.argv[14]
 
 if len(tests2run) == 0:
     print("No tests have been specified to run. Please specify the test number as argument 4.")
     sys.exit()
+
+seed = 1313
 
 print(get_current_datetime_as_string())
 print("Execution parameters:")
 print("nservers={}".format(nservers))
 print("Type of analysis: analysis_type={}".format(analysis_type))
 print("Capacity K={}".format(K))
-print("# particles N={}".format(N))
 print("Activation size J={}".format(J))
-print("Burn-in time steps (BITS)={}".format(burnin_time_steps))
+print("# particles N={}".format(N))
+print("# events (MC) or # arrival events (FV) T={}".format(T))
+print("Burn-in time steps BITS={}".format(burnin_time_steps))
+print("Min #cycles to estimate expectations MINCE={}", min_num_cycles_for_expectations)
 print("Replications={}".format(replications))
 print("tests2run={}".format(tests2run))
 print("# arrival events T={}".format(T))
 print("run_mc={}".format(run_mc))
 print("save_results={}".format(save_results))
+print("seed={}".format(seed))
 
 if analysis_type not in ["N", "J"]:
     raise ValueError("Valid values for the second parameter are 'N' or 'J'. Given: {}".format(analysis_type))
@@ -1088,11 +1152,12 @@ elif analysis_type == "N":
     resultsfile_prefix = "estimates_vs_N"
 else:
     resultsfile_prefix = "estimates_vs_J"
+resultsfile_suffix = "{}K={},J={},N0={},T={}".format((id_run == "" and "") or (id_run + "_"), K, J, N, T)  # N0 is the smallest N considered in the analysis by N
 #-- Parse user arguments
 
 if save_results:
     dt_start, stdout_sys, fh_log, logfile, resultsfile, resultsfile_agg, proba_functions_file, figfile = \
-        createLogFileHandleAndResultsFileNames(prefix=resultsfile_prefix)
+        createLogFileHandleAndResultsFileNames(prefix=resultsfile_prefix, suffix=resultsfile_suffix, use_dt_suffix=save_with_dt)
 else:
     fh_log = None; resultsfile = None; resultsfile_agg = None; proba_functions_file = None; figfile = None
 
@@ -1102,41 +1167,18 @@ if analysis_type == "N":
                                                 estimation_process=Process.Simulators,
                                                 nservers=nservers, K=K, buffer_size_activation=J,
                                                 burnin_time_steps=burnin_time_steps,
-                                                nparticles=[N, 2*N, 4*N], #2*N, 4*N, 8*N, 16*N],  # [800, 1600, 3200], #[10, 20, 40], #[24, 66, 179],
+                                                method_proba_surv=SurvivalProbabilityEstimation.FROM_N_PARTICLES,
+                                                nparticles=[N, 2*N], #2*N, 4*N, 8*N, 16*N],  # [800, 1600, 3200], #[10, 20, 40], #[24, 66, 179],
                                                 nmeantimes=T,  # 50, #[170, 463, 1259],
                                                 replications=replications, run_mc=run_mc,
-                                                seed=1313)
-
-    # results, results_agg, est_fv, est_mc = analyze_convergence(nservers=1, K=20, buffer_size_activation=0.25)
-    # results, results_agg, est_fv, est_mc = analyze_convergence(nservers=1, K=20, buffer_size_activation=0.5)
-    # results, results_agg, est_fv, est_mc = analyze_convergence(nservers=1, K=20, buffer_size_activation=0.75)
-    # results, results_agg, est_fv, est_mc = analyze_convergence(nservers=1, K=20, buffer_size_activation=0.9)
-
-    # results, results_agg, est_fv, est_mc = analyze_convergence(nservers=1, K=40, buffer_size_activation=0.5)
+                                                seed=seed)
 
     # -- Multi-server
-    # results, results_agg, est_fv, est_mc = analyze_convergence(nservers=3, K=5, buffer_size_activation=0.5, burnin_cycles_absorption=3, run_mc=False)
-    # results, results_agg, est_fv, est_mc = analyze_convergence(nservers=3, K=10, buffer_size_activation=0.5)
     # results, results_agg, est_fv, est_mc = \
     #    analyze_convergence(nservers=3, K=20, buffer_size_activation=0.5, burnin_cycles_absorption=4,
     #                                             nparticles_min=800, nparticles_max=1600, nparticles_step_prop=1,
     #                                             nmeantimes=1400, replications=5,
     #                                             run_mc=run_mc, plotFlag=True)
-    # results, results_agg, est_fv, est_mc = \
-    #    analyze_convergence(nservers=3, K=20, buffer_size_activation=0.2, burnin_cycles_absorption=1,
-    #                                             nparticles_min=400, nparticles_max=1200, nparticles_step_prop=1,
-    #                                             nmeantimes=500, replications=5,
-    #                                             run_mc=run_mc, plotFlag=True)
-    # results, results_agg, est_fv, est_mc = analyze_convergence(nservers=3, K=30, buffer_size_activation=0.5)
-
-    # results, results_agg, est_fv, est_mc = analyze_convergence(nservers=3, K=40, buffer_size_activation=0.25)
-    # results, results_agg, est_fv, est_mc = analyze_convergence(nservers=3, K=40, buffer_size_activation=0.3, burnin_cycles_absorption=1)
-    # results, results_agg, est_fv, est_mc = \
-    #    analyze_convergence(nservers=3, K=40, buffer_size_activation=0.5, burnin_cycles_absorption=2,
-    #                                             nparticles_min=400, nparticles_max=1600, nparticles_step_prop=1,
-    #                                             nmeantimes=100000, replications=5,
-    #                                             run_mc=run_mc, plotFlag=True)
-    # results, results_agg, est_fv, est_mc = analyze_convergence(nservers=3, K=40, buffer_size_activation=0.7)
 
     # Save results
     save_dataframes([{'df': results, 'file': resultsfile},
@@ -1145,10 +1187,9 @@ if analysis_type == "N":
     # Plot results
     axes = plot_results_fv_mc(results, x="N", x2="#Cycles(MC)_mean",
                               xlabel="# particles", xlabel2="# Cycles",
-                              ymin=0.0, plot_mc=run_mc, splines=False)
-
-    if fh_log is not None:
-        closeLogFile(fh_log, stdout_sys, dt_start)
+                              ymin=0.0, plot_mc=run_mc, splines=False,
+                              title="nservers={}, K={}, J={}, T={}, BITS={}, MINCE={}" \
+                                    .format(nservers, K, J, T, burnin_time_steps, min_num_cycles_for_expectations))
 elif analysis_type == "J":
     # Info for plotting...
     x = "buffer_size_activation";

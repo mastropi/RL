@@ -15,7 +15,9 @@ from unittest_data_provider import data_provider
 
 import copy
 
-from Python.lib.simulators.queues import estimate_blocking_fv
+import numpy as np
+
+from Python.lib.simulators.queues import estimate_blocking_fv, SurvivalProbabilityEstimation
 from Python.lib.agents.learners import LearnerTypes, ResetMethod
 from Python.lib.agents.learners.continuing.fv import LeaFV
 from Python.lib.agents.policies import PolicyTypes
@@ -52,7 +54,9 @@ class Test_EstAverageValueV_EnvQueueSingleServer(unittest.TestCase):
                 dict_params_reward_func)
 
     @measure_exec_time
-    def run_fv_estimation(self, env_queue, K, J, N, T, seed=1717):
+    def run_fv_estimation(self, env_queue, K, J, N, T,
+                          burnin_time_steps, min_num_cycles_for_expectations, method_survival_probability_estimation,
+                          seed=1717):
         """
         Test the Fleming-Viot estimation of the blocking probability of a queue
 
@@ -94,6 +98,9 @@ class Test_EstAverageValueV_EnvQueueSingleServer(unittest.TestCase):
         # Simulation parameters
         dict_params_simul = dict({'buffer_size_activation': J,  # J-1 is the absorption buffer size
                                   'T': T,  # number of arrivals at which the simulation stops
+                                  'burnin_time_steps': burnin_time_steps,
+                                  'min_num_cycles_for_expectations': min_num_cycles_for_expectations,
+                                  'method_survival_probability_estimation': method_survival_probability_estimation,
                                   'seed': seed})
         dict_params_info = dict()
 
@@ -104,19 +111,74 @@ class Test_EstAverageValueV_EnvQueueSingleServer(unittest.TestCase):
     # -------- DATA -------
     # Case number, description, expected value, parameters
     # These are the same tests 1, 2 and 3 from data_test_lambda_return_random_walk
-    data_test_EnvQueueSingleServer_MetFV_TestSeveralCapacities = lambda: (
-        (1, True, 'Small K',
-         {'K': 5, 'J': 2, 'N': 5, 'T': 20},
-         {'Pr(FV)': 0.0598497, 'E(T)': 5.70, '#E(T)': 8, 'Tmax': 45.6, 'Tend': 50.3, 'Smax': 5.6, '#events_ET': 40,
-          '#events_FV': 47}),
-        (2, True, 'Moderate K',
-         {'K': 20, 'J': 10, 'N': 100, 'T': 2000},
+    data_test_EnvQueueSingleServer_MetFV_TestSeveralCapacities = lambda DEFAULT_EXECUTION = True: (
+        # Note: True blocking probability for different K values when rho = 0.7
+        # Pr(K) = rho^K * (1 - rho) / (1 - rho^(K+1))
+        # K = 5: Pr(K) = 5.71%
+        # K = 20: Pr(K) = 0.0239% = 2.39E-4
+        # K = 40: Pr(K) = 0.000019% = 1.9E-7
+        # Not so good estimation because:
+        # (a) P(T>t) is estimated from M reabsorption cycles of the single particle simulation
+        # (b) No burn-in period is used.
+        # (c) No minimum number of cycles are required for the estimation of expectations.
+        (1, DEFAULT_EXECUTION, 'Small K',
+         {'K': 5, 'J': 2, 'N': 5, 'T': 20,
+          'burnin_time_steps': 0, 'min_num_cycles_for_expectations': 0, 'method_survival_probability_estimation': SurvivalProbabilityEstimation.FROM_M_CYCLES},
+         {'Pr(FV)': 0.0598497, 'E(T)': 5.70, '#E(T)': 8, 'Tmax': 45.6, 'Tend': 50.3, 'Smax': 5.6,
+          '#events_ET': 40, '#events_FV': 47}),
+        (2, DEFAULT_EXECUTION, 'Moderate K',
+         {'K': 20, 'J': 10, 'N': 100, 'T': 2000,
+          'burnin_time_steps': 0, 'min_num_cycles_for_expectations': 0, 'method_survival_probability_estimation': SurvivalProbabilityEstimation.FROM_M_CYCLES},
          {'Pr(FV)': 0.00040698, 'E(T)': 40.14, '#E(T)': 70, 'Tmax': 2809.5, 'Tend': 2840.9, 'Smax': 37.1,
           '#events_ET': 4003, '#events_FV': 6370}),
-        (3, True, 'Large K',
-         {'K': 40, 'J': 35, 'N': 400, 'T': 2000},
+        (3, DEFAULT_EXECUTION, 'Large K',
+         {'K': 40, 'J': 35, 'N': 400, 'T': 2000,
+          'burnin_time_steps': 0, 'min_num_cycles_for_expectations': 0, 'method_survival_probability_estimation': SurvivalProbabilityEstimation.FROM_M_CYCLES},
          {'Pr(FV)': 0.0059430, 'E(T)': 6.09, '#E(T)': 1, 'Tmax': 6.1, 'Tend': 2849.5, 'Smax': 3.2,
           '#events_ET': 4033, '#events_FV': 2239}),
+
+        # Better estimation than above because items (b) and (c) are no longer true
+        (4, DEFAULT_EXECUTION, 'Small K',
+         {'K': 5, 'J': 2, 'N': 5, 'T': 20,
+          'burnin_time_steps': 10, 'min_num_cycles_for_expectations': 5,
+          'method_survival_probability_estimation': SurvivalProbabilityEstimation.FROM_M_CYCLES},
+         {'Pr(FV)': 0.0604309, 'E(T)': 5.65, '#E(T)': 7, 'Tmax': 45.6, 'Tend': 50.3, 'Smax': 5.6,
+          '#events_ET': 40, '#events_FV': 47}),
+        (5, DEFAULT_EXECUTION, 'Moderate K',
+         {'K': 20, 'J': 10, 'N': 100, 'T': 2000,
+          'burnin_time_steps': 10, 'min_num_cycles_for_expectations': 5,
+          'method_survival_probability_estimation': SurvivalProbabilityEstimation.FROM_M_CYCLES},
+         {'Pr(FV)': 0.00040203, 'E(T)': 40.63, '#E(T)': 69, 'Tmax': 2809.5, 'Tend': 2840.9, 'Smax': 37.1,
+          '#events_ET': 4003, '#events_FV': 6370}),
+        (6, DEFAULT_EXECUTION, 'Large K',
+         {'K': 40, 'J': 35, 'N': 400, 'T': 2000,
+          'burnin_time_steps': 10, 'min_num_cycles_for_expectations': 5,
+          'method_survival_probability_estimation': SurvivalProbabilityEstimation.FROM_M_CYCLES},
+         {'Pr(FV)': np.nan, 'E(T)': np.nan, '#E(T)': 0, 'Tmax': 6.1, 'Tend': 2849.5, 'Smax': 3.2,
+          '#events_ET': 4033, '#events_FV': 0}),
+
+        # Better estimation than above because in addition P(T>t) is estimated from the N particles used in the FV simulation
+        (7, DEFAULT_EXECUTION, 'Small K',
+         {'K': 5, 'J': 3, 'N': 80, 'T': 200,
+          'burnin_time_steps': 20, 'min_num_cycles_for_expectations': 5,
+          'method_survival_probability_estimation': SurvivalProbabilityEstimation.FROM_N_PARTICLES},
+            # NOTE: (2022/11/01) The estimated probability is too small compared to the true value...
+            # And this is most likely due to a large estimated E(T) value... which should have been ~ 5 (see above tests),
+            # but it turned out to be 8.65... why??
+         {'Pr(FV)': 0.02774982, 'E(T)': 8.65, '#E(T)': 25, 'Tmax': 269.5, 'Tend': 291.2, 'Smax': 8.2,
+          '#events_ET': 387, '#events_FV': 1126}),
+        (8, DEFAULT_EXECUTION, 'Moderate K',
+         {'K': 20, 'J': 10, 'N': 200, 'T': 2000,
+          'burnin_time_steps': 10, 'min_num_cycles_for_expectations': 5,
+          'method_survival_probability_estimation': SurvivalProbabilityEstimation.FROM_N_PARTICLES},
+         {'Pr(FV)': 0.000880075, 'E(T)': 40.26, '#E(T)': 69, 'Tmax': 2809.5, 'Tend': 2840.9, 'Smax': 77.0,
+          '#events_ET': 4003, '#events_FV': 26250}),
+        (9, DEFAULT_EXECUTION, 'Large K',
+         {'K': 40, 'J': 20, 'N': 400, 'T': 2000,
+          'burnin_time_steps': 10, 'min_num_cycles_for_expectations': 4,
+          'method_survival_probability_estimation': SurvivalProbabilityEstimation.FROM_N_PARTICLES},
+         {'Pr(FV)': 2.47624615E-06, 'E(T)': 585.21, '#E(T)': 4, 'Tmax': 2339.7, 'Tend': 2842.5, 'Smax': 100.2,
+          '#events_ET': 4017, '#events_FV': 68224}),
     )
 
     # -------- DATA -------
@@ -131,13 +193,16 @@ class Test_EstAverageValueV_EnvQueueSingleServer(unittest.TestCase):
             rates_job = self.dict_env_queue_mm_single_server[K].getJobClassRates()
             rates_service = self.dict_env_queue_mm_single_server[K].getServiceRates()
             proba_blocking_fv, expected_reward, probas_stationary, \
-            expected_absorption_time, n_absorption_time_observations, \
-            time_last_absorption, time_end_simulation_et, max_survival_time, time_end_simulation_fv, \
-            n_events_et, n_events_fv_only = self.run_fv_estimation(self.dict_env_queue_mm_single_server[K],
+                expected_absorption_time, n_absorption_time_observations, \
+                    time_last_absorption, time_end_simulation_et, max_survival_time, time_end_simulation_fv, \
+                        n_events_et, n_events_fv_only = self.run_fv_estimation(self.dict_env_queue_mm_single_server[K],
                                                                    dict_params['K'],
                                                                    dict_params['J'],
                                                                    dict_params['N'],
                                                                    dict_params['T'],
+                                                                   dict_params['burnin_time_steps'],
+                                                                   dict_params['min_num_cycles_for_expectations'],
+                                                                   dict_params['method_survival_probability_estimation'],
                                                                    seed=1313)
 
             print(get_current_datetime_as_string())
@@ -154,9 +219,10 @@ class Test_EstAverageValueV_EnvQueueSingleServer(unittest.TestCase):
             print("ESTIMATION RESULTS:")
             print("- Blocking probability Pr(K={}) = {}".format(K, proba_blocking_fv))
             print("- Stationary probability Pr(K={}) = {}".format(K, probas_stationary[K]))
-            self.assertAlmostEqual(proba_blocking_fv, probas_stationary[K])
-            print("- Expected re-absorption time E(T) = {}".format(expected_absorption_time))
-            print("- Number of re-absorption cycles = {}".format(n_absorption_time_observations))
+            assert np.isnan(proba_blocking_fv) and np.isnan(probas_stationary[K]) or \
+                   np.isclose(proba_blocking_fv, probas_stationary[K])
+            print("- Expected reabsorption time E(T) = {}".format(expected_absorption_time))
+            print("- Number of reabsorption cycles = {}".format(n_absorption_time_observations))
             print("- Time of last absorption = {:.1f}".format(time_last_absorption))
             print("- Last observed time of the MC simulation for E(T) = {:.1f}".format(time_end_simulation_et))
             print("- Max observed survival time = {:.1f}".format(max_survival_time))
@@ -170,17 +236,21 @@ class Test_EstAverageValueV_EnvQueueSingleServer(unittest.TestCase):
             assert rates_service == [1.0], "Service rate is 1.0"
 
             # Assertions
-            self.assertAlmostEqual(proba_blocking_fv, dict_expected['Pr(FV)'])
-            self.assertAlmostEqual(expected_absorption_time, dict_expected['E(T)'], places=2)  # places = decimal places
+            assert np.isnan(proba_blocking_fv) and np.isnan(dict_expected['Pr(FV)']) or \
+                   np.isclose(proba_blocking_fv, dict_expected['Pr(FV)'])
+            assert np.isnan(expected_absorption_time) and np.isnan(dict_expected['E(T)']) or \
+                   np.isclose(expected_absorption_time, dict_expected['E(T)'], atol=0.01)  # places = decimal places
             self.assertEqual(n_absorption_time_observations, dict_expected['#E(T)'])
             self.assertAlmostEqual(time_last_absorption, dict_expected['Tmax'], places=1)
             self.assertAlmostEqual(time_end_simulation_et, dict_expected['Tend'], places=1)
             self.assertAlmostEqual(max_survival_time, dict_expected['Smax'], places=1)
-            self.assertEqual(n_events_et, dict_expected['#events_ET'], 40)
-            self.assertEqual(n_events_fv_only, dict_expected['#events_FV'], 47)
+            self.assertEqual(n_events_et, dict_expected['#events_ET'])
+            self.assertEqual(n_events_fv_only, dict_expected['#events_FV'])
             # Consistency assertions
-            self.assertAlmostEqual(proba_blocking_fv, probas_stationary[K])
-            self.assertAlmostEqual(time_end_simulation_fv, max_survival_time, places=1)
+            assert np.isnan(proba_blocking_fv) and np.isnan(probas_stationary[K]) or \
+                   np.isclose(proba_blocking_fv, probas_stationary[K])
+            assert time_end_simulation_fv == 0.0 or \
+                   time_end_simulation_fv >= max_survival_time
 
 
 if __name__ == '__main__':

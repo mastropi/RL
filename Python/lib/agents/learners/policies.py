@@ -579,8 +579,8 @@ class LeaPolicyGradient(GenericLearner):
         - Q_diff: the difference in the state-action values between the accept action and the reject action
         """
         # -- Parse input parameters
-        if not (0.0 <= proba_stationary <= 1.0):
-            raise ValueError("The stationary probability estimate must be between 0 and 1 ({})".format(proba_stationary))
+        if not np.isnan(proba_stationary) and not (0.0 <= proba_stationary <= 1.0):
+            raise ValueError("If not missing, the stationary probability estimate must be between 0 and 1 ({})".format(proba_stationary))
         if not isinstance(Q_values, (list, np.ndarray)) or len(Q_values) != 2:
             raise ValueError("Parameter Q_values must be a list or numpy array of length 2 ({})".format(Q_values))
         # -- Parse input parameters
@@ -600,9 +600,15 @@ class LeaPolicyGradient(GenericLearner):
         # Estimated grad(V)
         Q_mean = 0.5 * (Q_values[1] + Q_values[0])
         Q_diff = Q_values[1] - Q_values[0]
-        gradV = proba_stationary * Q_diff
+        if np.isnan(proba_stationary):
+            gradV = np.nan
+        else:
+            gradV = proba_stationary * Q_diff
+        # DM-2022/10/30: Try using the estimated probability as 1.0 (idea suggested by Urtzi/Matt on 19-Oct-2022 stating that the
+        # resulting algorithm is a stochastic approximation algorithm and therefore should converge if alpha is decreased)
+        #gradV = 1.0 * Q_diff
 
-        if gradV != 0.0:
+        if not np.isnan(gradV) and gradV != 0.0:
             # Note that we bound the delta theta to avoid too large changes!
             # We use "strange" numbers to avoid having theta fall always on the same distance from an integer (e.g. 4.1, 5.1, etc.)
             # The lower and upper bounds are asymmetric (larger lower bound) so that a large negative reward can lead to a large reduction of theta.

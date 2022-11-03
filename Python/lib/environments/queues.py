@@ -49,7 +49,7 @@ class ActionTypes(IntEnum):
 class Actions(IntEnum):
     REJECT = 0
     ACCEPT = 1
-    OTHER = 99      # This is used for actions of ActionTypes = ASSIGN (where the action is actually the server number to which the accepted job is assigned)
+    OTHER = -99      # This is used for actions of ActionTypes = ASSIGN (where the action is actually the server number to which the accepted job is assigned)
 
 # Default reference buffer size used in the definition of the exponential cost when blocking an incoming job
 # This value is the minimum expected cost that is searched for by the learning process when only hard (i.e. deterministic) blocking is used)
@@ -307,11 +307,12 @@ class EnvQueueSingleBufferWithJobClasses(gym.Env):
             if action == Actions.REJECT:
                 # Reject the incoming job
                 # => Just set the job class to None because no new job has yet arrived after taking the action
-                self.setState((self.queue.getServerSizes(), None))
+                # The state of the queue is left unchanged.
+                self.setState((self.getQueueState(), None))
             elif action == Actions.ACCEPT:
                 # => Accept the incoming job unless the queue's buffer is at full capacity
                 # Note that when the job is accepted NOTHING is done here, because at this point
-                # we don't know how to assign the accepted to a server in the queue, as for that we need the
+                # we don't know how to assign the accepted job to a server in the queue, as for that we need the
                 # assignment policy, and this is a DIFFERENT policy, i.e. with actions of a different type
                 # (the ActionsType.ASSIGN type).
                 # So, accepting the job means simply "not rejecting it", and actually the ACTUAL acceptance
@@ -319,7 +320,8 @@ class EnvQueueSingleBufferWithJobClasses(gym.Env):
                 # with an ActionsType.ASSIGN type of action.
                 if self.getBufferSize() == self.queue.getCapacity():
                     # Set the job class to None because no new job has yet arrived at the moment of taking the action
-                    self.setState((self.queue.getServerSizes(), None))
+                    # The state of the queue is left unchanged.
+                    self.setState((self.getQueueState(), None))
                     # Set the action to REJECT because the job was actually rejected, as the buffer was full!
                     action = Actions.REJECT
         elif action_type == ActionTypes.ASSIGN:

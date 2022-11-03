@@ -6,6 +6,10 @@ Created on Sun Aug 30 16:55:27 2022
 @description: Unit tests for functions and methods defined in simulators.queues.
 @details: Naming conventions follow the instructions given in test_conventions.txt.
 """
+
+import runpy
+runpy.run_path('../../setup.py')
+
 import unittest
 
 import numpy as np

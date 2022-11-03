@@ -260,11 +260,11 @@ class GenericLearner:
         The updated value of alpha.
         """
         if self.adjust_alpha:
-            time_divisor = self.func_adjust_alpha( np.max([1, self._t - self.min_time_to_update_alpha]) )
+            time_divisor = self.func_adjust_alpha( max(1, self._t - self.min_time_to_update_alpha) )
                 ## See comment in method update_learning_rate() about not adding any constant to the difference time - min_time
             print("\tUpdating alpha by learning episode: time divisor = {}".format(time_divisor))
             alpha_prev = self._alpha
-            self._alpha = np.max( [self.alpha_min, self.alpha / time_divisor] )
+            self._alpha = max( self.alpha_min, self.alpha / time_divisor )
             print("\t\talpha: {} -> {}".format(alpha_prev, self._alpha))
         else:
             self._alpha = self.alpha

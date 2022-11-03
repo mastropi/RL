@@ -92,14 +92,15 @@ def run_simulation_policy_learning(simul, dict_params_simul, dict_info,
         '2(b)-Learning-Method#Particles and % Rel Error Phi': (dict_params_simul['nparticles'], dict_info['error_rel_phi']), #error_rel_phi_real * 100),  #dict_info['error_rel_phi']),
         '2(c)-Learning-Method#TimeSteps and % Rel Error E(T)': (dict_params_simul['t_sim'], dict_info['error_rel_et']), #error_rel_et_real * 100), #dict_info['error_rel_et']),
         '2(d)-Learning-Method#BurnInSteps (BITS)': dict_params_simul['burnin_time_steps'],
-        '2(e)-Learning-LearningMode': simul.dict_learning_params['mode'].name,
-        '2(f)-Learning-ThetaStart': dict_params_simul['theta_start'],
-        '2(g)-Learning-#Steps': simul.getNumLearningSteps(),
-        '2(h)-Learning-#SimulationTimePerLearningStep': dict_params_simul['t_sim'],     # [DM-2022/10/13] Is this rather the # arrival events? I think YES. We need to check the run() method in SimulatorQueue to answer this properly.
-        '2(i)-Learning-AlphaStart': dict_info['alpha_start'],
-        '2(j)-Learning-AdjustAlpha?': dict_info['adjust_alpha'],
-        '2(k)-Learning-MinEpisodeToAdjustAlpha': dict_info['min_time_to_update_alpha'],
-        '2(l)-Learning-AlphaMin': dict_info['alpha_min'],
+        '2(e)-Learning-Method#MinNumCycles': dict_params_simul['min_num_cycles_for_expectations'],
+        '2(f)-Learning-LearningMode': simul.dict_learning_params['mode'].name,
+        '2(g)-Learning-ThetaStart': dict_params_simul['theta_start'],
+        '2(h)-Learning-#Steps': simul.getNumLearningSteps(),
+        '2(i)-Learning-#SimulationTimePerLearningStep': dict_params_simul['t_sim'],     # [DM-2022/10/13] Is this rather the # arrival events? I think YES. We need to check the run() method in SimulatorQueue to answer this properly.
+        '2(j)-Learning-AlphaStart': dict_info['alpha_start'],
+        '2(k)-Learning-AdjustAlpha?': dict_info['adjust_alpha'],
+        '2(l)-Learning-MinEpisodeToAdjustAlpha': dict_info['min_time_to_update_alpha'],
+        '2(m)-Learning-AlphaMin': dict_info['alpha_min'],
     })
     show_exec_params(params)
 
@@ -118,7 +119,7 @@ def run_simulation_policy_learning(simul, dict_params_simul, dict_info,
 print("User arguments: {}".format(sys.argv))
 if len(sys.argv) == 1:  # Only the execution file name is contained in sys.argv
     sys.argv += [50]    # t_learn: Number of learning steps
-    sys.argv += ["MC"]  # learning_method: estimation method: "FV" or "MC";
+    sys.argv += ["FV"]  # learning_method: estimation method: "FV" or "MC";
                         # when learning_method = "MC", we expect there exists a benchmark file called benchmark_fv.csv
                         # that defines how many events were observed during the equivalent FV learning method
                         # (for fair comparison). If one does not exist, the Monte-Carlo simulation wil be run
@@ -210,12 +211,14 @@ burnin_time_steps = 20  # Number of burn-in time steps until the Markov process 
                         # of interest (i.e. J-1), so returning to those states will take shorter time than the stationary
                         # return time at the beginning of the simulation.
                 ### NOTE THAT THIS VALUE burnin_time_steps IS OPTIONAL AS IT IS SET TO A DEFAULT VALUE IN SimulatorQueue.run(). ###
+min_num_cycles_for_expectations = 5 # Minimum number of observed cycles to consider that the estimation of expectations
+                                    # (such as the expected cycle time or the stationary probability) is reliable.
 fixed_window = False
 alpha_start = 10.0  # / t_sim  # Use `/ t_sim` when using update of theta at each simulation step (i.e. LeaPolicyGradient.learn_TR() is called instead of LeaPolicyGradient.learn())
 adjust_alpha = False  # True
-func_adjust_alpha = np.sqrt
+func_adjust_alpha = np.float # np.sqrt
 min_time_to_update_alpha = 0  # int(t_learn / 3)
-alpha_min = 0.1  # 0.1
+alpha_min = 0.01  # 0.1
 
 dict_params = dict({'environment': {'capacity': np.Inf,
                                     'nservers': 1,  # 3
@@ -264,7 +267,7 @@ simul = SimulatorQueue(env_queue, agent, dict_learning_params,
 # Open the file to store the results
 if save_results:
     # Initialize the output file with the results with the column names
-    simul.fh_results.write("case,t_learn,theta_true,theta,theta_next,K,J/K,J,BITS,exponent,N,T,err_phi,err_et,seed,E(T),n_cycles,max_time_surv,Pr(K-1),Pr(K),error(K-1),error(K),Q_diff(K-1),Q_diff(K),alpha,V,gradV,n_events_mc,n_events_fv,n_trajectories_Q\n")
+    simul.fh_results.write("case,t_learn,theta_true,theta,theta_next,K,J/K,J,burnin_time_steps,min_n_cycles,exponent,N,T,err_phi,err_et,seed,E(T),n_cycles,max_time_surv,Pr(K-1),Pr(K),error(K-1),error(K),Q_diff(K-1),Q_diff(K),alpha,V,gradV,n_events_mc,n_events_fv,n_trajectories_Q\n")
 
 # Run the simulations, either from parameters defined by a benchmark file or from parameters defined below
 if benchmark_file is None:
@@ -328,6 +331,7 @@ if benchmark_file is None:
                         'nparticles': N,
                         't_sim': T,
                         'burnin_time_steps': burnin_time_steps,
+                        'min_num_cycles_for_expectations': min_num_cycles_for_expectations,
                     }
                     dict_info = {'case': case,
                                  'ncases': ncases,
@@ -374,7 +378,7 @@ else:
         exponent = benchmark_groups['exponent'].iloc[i]
         N = benchmark_groups['N'].iloc[i]
         T = benchmark_groups['T'].iloc[i]
-        burnin_time_steps = benchmark_groups['BITS']
+        burnin_time_steps = benchmark_groups['burnin_time_steps']
         seed = benchmark_groups['seed'].iloc[i]
 
         # Get the number of events to run the simulation for (from the benchmark file)
@@ -397,7 +401,8 @@ else:
             'buffer_size_activation_factor': J_factor,
             'nparticles': 1,
             't_sim': t_sim,
-            'burnin_time_steps': burnin_time_steps
+            'burnin_time_steps': burnin_time_steps,
+            'min_num_cycles_for_expectations': min_num_cycles_for_expectations,
         }
         dict_info = {'case': case,
                      'ncases': ncases,
