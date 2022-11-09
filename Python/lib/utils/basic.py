@@ -176,6 +176,33 @@ def show_exec_params(dict_params):
         print("{}: {}".format(key, dict_params[key]))
     print("**************** Execution parameters ***********************")
 
+def set_pandas_options():
+    "Sets pandas options to e.g. display all columns and all rows in a data frame"
+    pandas_options = dict({'display.width': pd.get_option('display.width'),
+                           'display.max_columns': pd.get_option('display.max_columns'),
+                           'display.max_rows': pd.get_option('display.max_rows')})
+
+    pd.set_option('display.width', None)
+    pd.set_option('display.max_columns', None)
+    pd.set_option('display.max_rows', None)
+
+    return pandas_options
+
+def reset_pandas_options(pandas_options: dict):
+    """Resets pandas options to the ones given in the input dictionary
+
+    Arguments:
+    pandas_options: dict
+        Dictionary with at least the following entries:
+        - 'display.width'
+        - 'display.max_columns'
+        - 'display.max_rows'
+        containing the values of the respective pandas options to reset.
+    """
+    pd.set_option('display.width', pandas_options['display.width'])
+    pd.set_option('display.max_columns', pandas_options['display.max_columns'])
+    pd.set_option('display.max_rows', pandas_options['display.max_rows'])
+
 def index_linear2multi(idx, shape, order='C'):
     """
     Converts a linear index into a 2D index based on the given shape and order of access as defined in numpy.reshape()"
@@ -767,6 +794,7 @@ def aggregation_bygroups(df, groupvars, analvars,
         raise ValueError("Parameter 'df' must be a pandas DataFrame ({})".format(type(df)))
 
     # Cast all analysis variables to float in order to compute statistics like mean, std, etc.!!
+    # Otherwise the statistics computed on integer variables are also integer-valued!
     # Ref: https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.astype.html
     for var in analvars:
         df = df.astype({var: np.float})

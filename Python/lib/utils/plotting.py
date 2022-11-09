@@ -547,7 +547,18 @@ def plot(plotting_func,
         for ax in axes1D:
             # Axis limits
             #xmin = min(xmin, ax.get_xlim()[0]); xmax = max(xmax, ax.get_xlim()[1])
-            ymin = min(ymin, ax.get_ylim()[0]); ymax = max(ymax, ax.get_ylim()[1])
+            if 'ymin' not in dict_options_local['axis']['limits'].keys() or dict_options_local['axis']['limits']['ymin'] is None:
+                ymin = min(ymin, ax.get_ylim()[0]);
+                # Now remove the key when it exists and is `None`, o.w. the value set here will not be applied
+                # (as being `None` doesn't make the get() method used below read its second argument as valid value).
+                if 'ymin' in dict_options_local['axis']['limits'].keys():
+                    dict_options_local['axis']['limits'].pop('ymin')
+            if 'ymax' not in dict_options_local['axis']['limits'].keys() or dict_options_local['axis']['limits']['ymax'] is None:
+                ymax = max(ymax, ax.get_ylim()[1])
+                # Now remove the key when it exists and is `None`, o.w. the value set here will not be applied
+                # (as being `None` doesn't make the get() method used below read its second argument as valid value).
+                if 'ymax' in dict_options_local['axis']['limits'].keys():
+                    dict_options_local['axis']['limits'].pop('ymax')
     else:
         #xmin = xmax = None
         ymin = ymax = None

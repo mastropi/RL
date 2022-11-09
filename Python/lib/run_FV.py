@@ -7,6 +7,9 @@ Created on Thu Oct 06 12:15:39 2022
 For queues, and when the reward (cost) for blocking is set equal to 1, it estimates the blocking probability.
 """
 
+import runpy
+runpy.run_path('../../setup.py')
+
 import os
 import sys
 import re
@@ -27,10 +30,13 @@ from Python.lib.environments.queues import rewardOnJobRejection_Constant
 
 import Python.lib.estimators as estimators
 
-from Python.lib.simulators.queues import SurvivalProbabilityEstimation, estimate_blocking_fv, estimate_blocking_mc
+from Python.lib.simulators.queues import SurvivalProbabilityEstimation, estimate_blocking_fv, estimate_blocking_mc, \
+    compute_nparticles_and_nsteps_for_fv_process, compute_nparticles_and_nsteps_for_fv_process_many_settings, \
+    compute_rel_errors_for_fv_process
 from Python.lib.simulators import define_queue_environment_and_agent
 
-from Python.lib.utils.basic import aggregation_bygroups, get_current_datetime_as_string, get_datetime_from_string, is_scalar
+from Python.lib.utils.basic import aggregation_bygroups, get_current_datetime_as_string, get_datetime_from_string, \
+    is_scalar, set_pandas_options, reset_pandas_options
 from Python.lib.utils.computing import compute_blocking_probability_birth_death_process
 import Python.lib.utils.plotting as plotting
 
@@ -43,7 +49,8 @@ class Process(Enum):
 
 #------------------- Functions --------------------
 def analyze_convergence(estimation_process=Process.Simulators,
-                        nservers=1, K=5, buffer_size_activation=1,
+                        nservers=1, job_class_rates=[0.7], service_rates=[1.0],
+                        K=5, buffer_size_activation=1,
                         burnin_time_steps=20, burnin_cycles_absorption=5,
                         min_num_cycles_for_expectations=5,
                         method_proba_surv=SurvivalProbabilityEstimation.FROM_N_PARTICLES,
@@ -84,28 +91,30 @@ def analyze_convergence(estimation_process=Process.Simulators,
         or "from the N particles used in the FV simulation".
         default: SurvivalProbabilityEstimation.FROM_N_PARTICLES
 
-    nparticles: (opt) list
-        List giving the number of particles to considered in each simulation.
+    nparticles: (opt) int or list or numpy array
+        List giving the number of particles to consider in each simulation.
         If given, it takes precedence over parameters nparticles_min and nparticles_max.
         default: []
 
     nparticles_step_prop: (opt) positive float
         Step proportion: N(n+1) = (1 + prop)*N(n),
         so that we scale the step as the number of particles increases.
+        default: 1
 
-    nmeantimes: (opt) int or list
+    nmeantimes: (opt) int or list or numpy array
         Number of discrete *time steps* to run the queue to estimate the blocking probability in Monte-Carlo
-        or the number of *arrival events* to estimate E(T_A) for the FV estimator (at least in the Process.Simulators implementation).
-        If not scalar, it should have the same number of elements as the number of particles that are tried
-        in this simulation.
+        or the number of *arrival events* to estimate E(T_A) for the FV estimator.
+        If not scalar, either nparticles should be a scalar or be a list with just one element, o.w. it should have
+        the same number of elements as the number of particles that are tried in this simulation.
         default: 500
     """
+    assert nservers == len(service_rates), "The number of servers coincides with the number of service rates given"
 
     #--- System setup
     dict_params = dict({'environment': {'capacity': K,
                                         'nservers': nservers,
-                                        'job_class_rates': [0.7],  # [0.8, 0.7]
-                                        'service_rates': [1.0],  # [1.0, 1.0, 1.0]
+                                        'job_class_rates': job_class_rates,  # [0.8, 0.7]
+                                        'service_rates': service_rates,  # [1.0, 1.0, 1.0]
                                         'policy_assignment_probabilities': [[1.0]], # [[0.5, 0.5, 0.0], [0.0, 0.5, 0.5]] )
                                         'reward_func': rewardOnJobRejection_Constant,
                                             # Note: this reward function is defined here just for informational purposes
@@ -130,15 +139,20 @@ def analyze_convergence(estimation_process=Process.Simulators,
                         })
     env_queue, rhos, agent = define_queue_environment_and_agent(dict_params)
 
-    # The test of the Fleming-Viot implementation is carried out as follows:
+    # The test of the Fleming-Viot convergence can be focused on either the convergence in terms of increasing
+    # number of particles (nparticles), or in terms of an increasing number of arrival events (nmeantimes), or both.
+    # For example, if an analysis on incrcarring number of particles is done, then we can:
     # - Set K to a small value (e.g. K=5)
-    # - Increase the number of particles N
-    # - Set a large simulation time (e.g. nmeantimes=50)
-    # - Increase the number of particles N check that the error
-    # between the estimated and true blocking probability decreases as 1/sqrt(N)
-    # (according to Propostion 2.1 in Matt's draft)
+    # - Consider increasing values of nparticles (e.g. nparticles=[200, 400, 800])
+    # - Set a large simulation time (e.g. nmeantimes=500)
+    # We should check that the error between the estimated and true blocking probability decreases as 1/sqrt(N)
+    # (according to Propostion 2.1 in Matt's draft, although this proposition applies to the estimation of Phi(t,K)
+    # NOT to the estimation of the blocking probability... In fact, we prove in our paper sent and accepted at EWRL-2022)
+    # that the blocking probability converges to the true blocking probability as 1/sqrt(M) + 1/sqrt(N) where M is the
+    # number of cycles observed and used for the estimation of E(T_A), the denominator of the blocking probability.
+    # This is why also an convergence analysis on increasing number of arrival events (nmeantimes) is sensible.
 
-    # Simulation parameters
+    #--------------------------- Parse input parameters -----------------------
     if buffer_size_activation < 1:
         buffer_size_activation_value = int( round(buffer_size_activation*K) )
     else:
@@ -152,29 +166,41 @@ def analyze_convergence(estimation_process=Process.Simulators,
            nparticles += int(nparticles_step_prop * nparticles)
            nparticles_list += [nparticles]
     elif is_scalar(nparticles):
-        nparticles_list = [nparticles]
+        if is_scalar(nmeantimes):
+            # There is only one value of nparticles and nmeantimes to try
+            nparticles_list = [nparticles]
+        else:
+            # The analysis is done for different nmeantimes values
+            # => Replicate the single nparticles value as many times as the number of nmeantimes values to try
+            nparticles_list = [nparticles] * len(nmeantimes)
     else:
-        # nparticles is a list
+        # nparticles is a list or array
         nparticles_list = list(nparticles)
 
-    if not is_scalar(nmeantimes) and len(nmeantimes) > 1 and len(nmeantimes) != len(nparticles):
-        raise ValueError("Parameter nmeantimes must be either scalar or have the same length as the number of particles to try ({}): {}" \
-                         .format(len(nparticles), nmeantimes))
     if is_scalar(nmeantimes):
         nmeantimes_list = [nmeantimes] * len(nparticles_list)
     else:
-        nmeantimes_list = nmeantimes
+        # nmeantimes is a list or array
+        nmeantimes_list = list(nmeantimes)
+
+    # Check if either of the input parameters is a list of length 1, in which case we just replicate the single value
+    # as many times as values in the other parameter
+    if len(nparticles_list) == 1 and len(nmeantimes_list) > 1:
+        nparticles_list = [nparticles_list[0]] * len(nmeantimes_list)
+    if len(nmeantimes_list) == 1 and len(nparticles_list) > 1:
+        nmeantimes_list = [nmeantimes_list[0]] * len(nparticles_list)
+
+    # Check
+    if len(nmeantimes_list) != len(nparticles_list):
+        raise ValueError("When both parameters nmeantimes and nparticles are lists they must have the same length:\nnparticles={}\nnmeantimes={}" \
+                         .format(nparticles, nmeantimes))
 
     # Info parameters
     dict_params_info = {'plot': True, 'log': False}
+    #--------------------------- Parse input parameters -----------------------
 
     # Modify pandas display options so that data frames are not truncated
-    pd_display_width = pd.get_option('display.width')
-    pd_display_max_columns = pd.get_option('display.max_columns')
-    pd_display_max_rows = pd.get_option('display.max_rows')
-    pd.set_option('display.width', None)
-    pd.set_option('display.max_columns', None)
-    pd.set_option('display.max_rows', None)
+    pandas_options = set_pandas_options()
 
     df_results = pd.DataFrame(columns=['nservers',
                                        'rhos',
@@ -381,7 +407,7 @@ def analyze_convergence(estimation_process=Process.Simulators,
                                         exec_time_fv,
                                         exec_time]],
                                      columns=df_results.columns, index=[case+1])
-            df_results = df_results.append(df_append)
+            df_results = pd.concat([df_results, df_append], axis=0)
 
         print("Results:")
         print(df_results)
@@ -398,18 +424,16 @@ def analyze_convergence(estimation_process=Process.Simulators,
     print("Raw results by N:")
     print(df_results)
 
-    df_results_agg_by_N = aggregation_bygroups(df_results, ['N'], ['#Events(MC)', '#Cycles(MC)', 'Pr(MC)', '#Events(FV)', 'Pr(FV)'])
+    df_results_agg_by_NT = aggregation_bygroups(df_results, ['N', 'T'], ['#Events(MC)', '#Cycles(MC)', 'Pr(MC)', '#Events(FV)', 'Pr(FV)'])
     print("Aggregated results by N:")
-    print(df_results_agg_by_N)
+    print(df_results_agg_by_NT)
 
     # Reset pandas display options modified above
-    pd.set_option('display.width', pd_display_width)
-    pd.set_option('display.max_columns', pd_display_max_columns)
-    pd.set_option('display.max_rows', pd_display_max_rows)
+    reset_pandas_options(pandas_options)
 
     # Add back the average of # events to the full data frame
-    df_results = pd.merge(df_results, df_results_agg_by_N.xs('mean', axis=1, level=1)[['#Events(MC)', '#Cycles(MC)', '#Events(FV)']],
-                          left_on='N', right_index=True, suffixes=["", "_mean"])
+    df_results = pd.merge(df_results, df_results_agg_by_NT.xs('mean', axis=1, level=1)[['#Events(MC)', '#Cycles(MC)', '#Events(FV)']],
+                          left_on=['N', 'T'], right_index=True, suffixes=["", "_mean"])
     # Convert average to integer
     if run_mc:
         df_results = df_results.astype({'#Events(MC)_mean': np.int})
@@ -417,9 +441,9 @@ def analyze_convergence(estimation_process=Process.Simulators,
     df_results = df_results.astype({'#Events(FV)_mean': np.int})
 
     if estimation_process == Process.Estimators:
-        return df_results, df_results_agg_by_N, est_fv, est_mc
+        return df_results, df_results_agg_by_NT, est_fv, est_mc
     else:
-        return df_results, df_results_agg_by_N, None, None
+        return df_results, df_results_agg_by_NT, None, None
 
 # TODO: (2022/10/17) Adapt the process to the new (simpler) implementation of the FV estimator done in simulators.queues
 def analyze_absorption_size(nservers=1,
@@ -600,6 +624,7 @@ def analyze_absorption_size(nservers=1,
                 # - There is no `index` parameter in the from_items() method so we need to set the index
                 # value afterwards by calling the set_index() method in conjunction with a pd.Index() call.
                 # Using set_index([1]) does NOT work because it says that the value 1 is an invalid key!!
+                # TODO: (2022/11/04) Change the way the data frame is created to the method used in analyze_convergence(), which does NOT use from_items()
                 df_new_estimates = pd.DataFrame.from_items([('nservers', nservers),
                                                             ('rhos', [len(rhos) == 1 and rhos or len(rhos) > 1 and format(rhos)]),
                                                             ('K', [K]),
@@ -1074,6 +1099,51 @@ def save_dataframes(list_of_dataframes):
             if filename is not None:
                 df.to_csv(filename)
                 print("Data frame saved to {}".format(os.path.abspath(filename)))
+
+def update_values_to_analyze(values, value_required, value_min, value_max, discard_smaller_than_minimum=True, factor_uplift=np.nan):
+    "Updates the list of parameter values to analyze (e.g. the list of N or of T values to analyze for convergence)"
+    if value_required < value_min and discard_smaller_than_minimum:
+        return values, np.nan
+
+    # We add the required value to the list first, because we want to uplift ALL subsequent values,
+    # regardless of whether they are smaller than the minimum or not
+    # We do this for ALL parameter values, even those whose value is larger than the minimum,
+    # because if we uplift the smaller values, the larger value will most likely be smaller than the uplifted values
+    # leaving us with a parameter sequence that is not increasing, e.g.: N=[50, 75, 125, 275, 87]
+
+    # NOTE: This assumes that the values to add to the list are in increasing order
+    if len(values) == 0 and value_required < value_min:
+        factor_uplift = value_min / value_required
+    if not np.isnan(factor_uplift):
+        value_required = int(value_required * factor_uplift)
+    if value_required <= value_max:
+        values += [value_required]
+
+    return values, factor_uplift
+
+def show_execution_parameters():
+    print(get_current_datetime_as_string())
+    print("Execution parameters:")
+    print("nservers={}".format(nservers))
+    print("Type of analysis: '{}'".format(analysis_type))
+    print("Capacity K={}".format(K))
+    print("Activation size J={}".format(J))
+    if analysis_type == "N":
+        print("# particles N={} (rel. errors = {}%)".format(N_values, errors_rel*100))
+        print("# events T={} (actually required for error in E(T_A) ~ {:.1f}%: T={})".format(T_values, error_rel*100, T_required))
+    elif analysis_type == "T":
+        print("# arrival events T={} (rel. errors = {}%)".format(T_values, errors_rel*100))
+        print("# particles N={} (actually required for error in phi(t,K) ~ {:.1f}%: N={})".format(N_values, error_rel*100, N_required))
+    elif analysis_type == "J":
+        print("# particles N={} (actually required for error in phi(t,K) ~ {:.1f}%: N={})".format(N, error_rel*100, N_required))
+        print("# events T={} (actually required for error in E(T_A) ~ {:.1f}%: T={})".format(T, error_rel * 100, T_required))
+    print("Burn-in time steps BITS={}".format(burnin_time_steps))
+    print("Min #cycles to estimate expectations MINCE={}".format(min_num_cycles_for_expectations))
+    print("Replications={}".format(replications))
+    print("tests2run={}".format(tests2run))
+    print("run_mc={}".format(run_mc))
+    print("save_results={}".format(save_results))
+    print("seed={}".format(seed))
 #------------------- Functions --------------------
 
 
@@ -1082,94 +1152,186 @@ def save_dataframes(list_of_dataframes):
 # Example of execution from the command line:
 # python run_FV.py 1 N 5 10 0.5 8 1
 print("User arguments: {}".format(sys.argv))
+nargs_required = 7
+counter_opt_args = 0
 if len(sys.argv) == 1:    # Only the execution file name is contained in sys.argv
     sys.argv += [1]       # Number of servers in the system to simulate
-    sys.argv += ["N"]     # Type of analysis: either "N" for the impact of number of particles or "J" for the impact of buffer size"
-    sys.argv += [20]       # K: capacity of the system
+    sys.argv += ["N"]     # Type of analysis: either "N" for the impact of number of particles, "T" for the impact of the number of events, or "J" for the impact of buffer size
+    sys.argv += [10]      # K: capacity of the system
     sys.argv += [0.4]     # J factor: factor such that J = round(factor*K)
-    sys.argv += [50]      # N: number of particles in the FV system. This must be only ONE. If we want to simulate on more than one value of N, set their values when calling analyze_convergence()
-    sys.argv += [5]       # Number of replications
+    sys.argv += [0.2]     # Either the value of the parameter that is NOT analyzed (according to parameter "type of analysis") (e.g. "N" if "type of analysis" = "T") (if value >= 10), or the relative expected error from which such value is computed (if value < 10).
+    sys.argv += [3]       # Number of replications
     sys.argv += [1]       # Test number to run: only one is accepted
-if len(sys.argv) == 8:    # Only the 7 required arguments are given by the user (recall that the first argument is the program name)
-    sys.argv += [50]     # T: number of arrival events to consider in the estimation of E(T) in the FV approach. When 'None' it is chosen as 100*J, i.e. it increases as J increases (independently of K, as K doesn't play any role in the magnitude of the return cycle time to J-1.
+if len(sys.argv) == nargs_required + counter_opt_args + 1:
+    sys.argv += [False]   # Whether to discard the values to analyze that are less than the minimum specified (e.g. N < N_min) or uplift the values to be larger so that we have enough samples to compute estimates
+counter_opt_args += 1
+if len(sys.argv) == nargs_required + counter_opt_args + 1:
     sys.argv += [10]      # BITS: Burn-in time steps to consider until stationarity can be assumed for the estimation of expectations (e.g. E(T) (return cycle time) in Monte-Carlo, E(T_A) (reabsorption cycle time) in Fleming-Viot)
+counter_opt_args += 1
+if len(sys.argv) == nargs_required + counter_opt_args + 1:
     sys.argv += [5]       # MINCE: Minimum number of cycles to be used for the estimation of expectations (e.g. E(T) in Monte-Carlo and E(T_A) in Fleming-Viot)
+counter_opt_args += 1
+if len(sys.argv) == nargs_required + counter_opt_args + 1:
     sys.argv += [2]       # Number of methods to run: 1 (only FV), 2 (FV & MC)
-    sys.argv += ["save"]  # Either "nosave" or anything else for saving the results and log
-    sys.argv += [False]   # Whether to use the execution date and time in the output file name containing the results
-    sys.argv += ["ID1"]      # Identifier to use for this run (e.g. "ID1")
+counter_opt_args += 1
+if len(sys.argv) == nargs_required + counter_opt_args + 1:
+    sys.argv += ["nosave"]  # Either "nosave" or anything else for saving the results and log
+counter_opt_args += 1
+if len(sys.argv) == nargs_required + counter_opt_args + 1:
+    sys.argv += [True]   # Whether to use the execution date and time in the output file name containing the results
+counter_opt_args += 1
+if len(sys.argv) == nargs_required + counter_opt_args + 1:
+    sys.argv += ["ID1"]      # Identifier to use for this run (e.g. "ID1"), in addition to the execution datetime (if requested)
+counter_opt_args += 1
+if len(sys.argv) == nargs_required + counter_opt_args + 1:
+    sys.argv += [True]   # Whether to generate plots with the results
 print("Parsed user arguments: {}".format(sys.argv))
 print("")
 
 #-- Parse user arguments
-nservers = int(sys.argv[1])
+# This function parses a boolean input parameter which, depending on where this script is called from, may be a boolean
+# value already (if run from e.g. PyCharm) or may be a string value (if run from the command line).
+parse_boolean_parameter = lambda x: isinstance(x, bool) and x or isinstance(x, str) and x == "True"
+
+nservers = int(sys.argv[1]); lmbda = 0.7; mu = 1.0  # Queue system characteristics
 analysis_type = sys.argv[2]
 K = int(sys.argv[3])
-J = int(np.round(sys.argv[4] * K))
-N = int(sys.argv[5])
+J = int(np.round(float(sys.argv[4]) * K))    # We need the float() because the input arguments are read as strings when running the program from the command line
+
+#---------------------- Definition of parameters N and T ----------------------
+# Min and Max values are defined for N and T in order to:
+# - (min) not have a too small values making estimates not work at all (they would most likely be set to NaN!)
+# - (max) not incur into a simulation that takes forever.
+# When the analysis is done by one of these parameters, any value that is above its max value is NOT considered for simulation.
+# Otherwise, the parameter is clipped to the [min, max] interval.
+N_min = 10; N_max = 6000
+T_min = 50; T_max = 10000
+# We define the relative errors to consider which define the values of the parameter to analyze.
+# Errors are defined in *decreasing* order so that the parameter values are in increasing order.
+errors_rel = np.r_[np.arange(1.0, 0.0, -0.2), 0.1, 0.05]
+
+other_parameter = float(sys.argv[5])
+discard_smaller_than_minimum = parse_boolean_parameter(sys.argv[8])
+if other_parameter >= 10:
+    # The parameter defines "the number of..." particles or arrivals (instead of an expected relative error value)
+    # => Just assign the given value to the respective parameter
+    if analysis_type == "N":
+        T = int(other_parameter)
+        error_rel = compute_rel_errors_for_fv_process([lmbda/mu], K, J/K, N=None, T=T, constant_proportionality=1)
+    elif analysis_type == "T":
+        N = int(other_parameter)
+        error_rel = compute_rel_errors_for_fv_process([lmbda/mu], K, J/K, N=N, T=None)
+    elif analysis_type == "J":
+        N = int(other_parameter)
+        T = int(other_parameter)
+else:
+    # The parameter defines the expected relative error for the estimation of Phi(t,K) or E(T_A)
+    # => Compute N or T based on this expected relative error
+    error_rel = other_parameter
+    # This expected relative error is used to define the value of the other parameter, but if this parameter value
+    # falls out of the [min, max] value defined for the parameter, then no experiments are run.
+    if analysis_type == "N":
+        T_required = compute_nparticles_and_nsteps_for_fv_process([lmbda/mu], K, J/K, error_rel_phi=None, error_rel_et=error_rel, constant_proportionality=1)
+        factor_uplift = np.nan
+        T_values, factor_uplift = update_values_to_analyze( [], T_required, T_min, T_max,
+                                                            discard_smaller_than_minimum=discard_smaller_than_minimum,
+                                                            factor_uplift=factor_uplift)
+        ## Note: T_values is used when calling the analyze_convergence() function
+    elif analysis_type == "T":
+        N_required = compute_nparticles_and_nsteps_for_fv_process([lmbda/mu], K, J/K, error_rel_phi=error_rel, error_rel_et=None)
+        factor_uplift = np.nan
+        N_values, factor_uplift = update_values_to_analyze( [], N_required, N_min, N_max,
+                                                            discard_smaller_than_minimum=discard_smaller_than_minimum,
+                                                            factor_uplift=factor_uplift)
+        ## Note: N_values is used when calling the analyze_convergence() function
+    elif analysis_type == "J":
+        N_required, T_required = compute_nparticles_and_nsteps_for_fv_process([lmbda/mu], K, J/K, error_rel_phi=error_rel, error_rel_et=error_rel, constant_proportionality=1)
+        N = int(min(max(N_min, N_required), N_max))
+        T = int(min(max(T_min, T_required), T_max))
+
+# Define the values to use on the parameter to analyze based on the expected relative error for the estimation
+# affected by the parameter (Phi(t,K) for parameter N and E(T_A) for parameter T)
+if analysis_type == "N":
+    N_values = []
+    factor_uplift = np.nan
+    for err_rel in errors_rel:
+        N_required = compute_nparticles_and_nsteps_for_fv_process([lmbda/mu], K, J/K, error_rel_phi=err_rel, error_rel_et=None)
+        N_values, factor_uplift = update_values_to_analyze(N_values, N_required, N_min, N_max,
+                                                           discard_smaller_than_minimum=discard_smaller_than_minimum,
+                                                           factor_uplift=factor_uplift)
+elif analysis_type == "T":
+    T_values = []
+    factor_uplift = np.nan
+    for err_rel in errors_rel:
+        T_required = compute_nparticles_and_nsteps_for_fv_process([lmbda / mu], K, J / K, error_rel_phi=None, error_rel_et=err_rel, constant_proportionality=1)
+        T_values, factor_uplift = update_values_to_analyze(T_values, T_required, T_min, T_max,
+                                                           discard_smaller_than_minimum=discard_smaller_than_minimum,
+                                                           factor_uplift=factor_uplift)
+#---------------------- Definition of parameters N and T ----------------------
+
+# Computing the minimum required N and T values for different expected relative errors for different K and J/K values
+df_NT_required = compute_nparticles_and_nsteps_for_fv_process_many_settings(   rhos=[lmbda/mu],
+                                                                               K_values=[5, 10, 20, 40],
+                                                                               JF_values=np.arange(0.1, 0.9, 0.1),
+                                                                               error_rel=np.arange(0.1, 1.1, 0.1))
+#df_NT_required.to_csv("../../RL-002-QueueBlocking/NT_required.csv")
+
 replications = int(sys.argv[6])
 tests2run = [int(v) for v in [sys.argv[7]]]  # NOTE: It's important to enclose sys.argv[7] in brackets because o.w.,
                                              # from the command line, a number with more than one digit is interpreted
                                              # as a multi-element list!! (e.g. 10 is interpreted as a list with elements [1, 0])
-T = sys.argv[8]
-if T is None or isinstance(T, str) and T.lower() == 'none':
-    T = 100 * J
-else:
-    T = int(T)
 burnin_time_steps = int(sys.argv[9])
 min_num_cycles_for_expectations = int(sys.argv[10])
 run_mc = int(sys.argv[11]) == 2
 save_results = sys.argv[12] != "nosave"
-save_with_dt = bool(sys.argv[13])
+save_with_dt = parse_boolean_parameter(sys.argv[13])
 id_run = sys.argv[14]
+plot = parse_boolean_parameter(sys.argv[15])
 
 if len(tests2run) == 0:
-    print("No tests have been specified to run. Please specify the test number as argument 4.")
+    print("No tests have been specified to run. Please specify the test number as one of the arguments.")
     sys.exit()
 
 seed = 1313
 
-print(get_current_datetime_as_string())
-print("Execution parameters:")
-print("nservers={}".format(nservers))
-print("Type of analysis: analysis_type={}".format(analysis_type))
-print("Capacity K={}".format(K))
-print("Activation size J={}".format(J))
-print("# particles N={}".format(N))
-print("# events (MC) or # arrival events (FV) T={}".format(T))
-print("Burn-in time steps BITS={}".format(burnin_time_steps))
-print("Min #cycles to estimate expectations MINCE={}", min_num_cycles_for_expectations)
-print("Replications={}".format(replications))
-print("tests2run={}".format(tests2run))
-print("# arrival events T={}".format(T))
-print("run_mc={}".format(run_mc))
-print("save_results={}".format(save_results))
-print("seed={}".format(seed))
+show_execution_parameters()
 
-if analysis_type not in ["N", "J"]:
-    raise ValueError("Valid values for the second parameter are 'N' or 'J'. Given: {}".format(analysis_type))
+if len(N_values) == 0 or len(T_values) == 0:
+    print("The parameter settings (K, J, error_rel) = {} are such that no N values or no T values are eligible",
+          " for running the simulation, because they would be too large making the simulation prohibitive in terms of execution time.",
+          "\nTry other set of parameters. The program stops.".format([K, J, error_rel]))
+    sys.exit()
+
+if analysis_type not in ["N", "T", "J"]:
+    raise ValueError("Valid values for the second parameter are 'N', 'T' or 'J'. Given: {}".format(analysis_type))
 elif analysis_type == "N":
     resultsfile_prefix = "estimates_vs_N"
+    resultsfile_suffix = "{}K={},J={},T={}".format((id_run == "" and "") or (id_run + "_"), K, J, T_values)
+elif analysis_type == "T":
+    resultsfile_prefix = "estimates_vs_T"
+    resultsfile_suffix = "{}K={},J={},N={}".format((id_run == "" and "") or (id_run + "_"), K, J, N_values)
 else:
     resultsfile_prefix = "estimates_vs_J"
-resultsfile_suffix = "{}K={},J={},N0={},T={}".format((id_run == "" and "") or (id_run + "_"), K, J, N, T)  # N0 is the smallest N considered in the analysis by N
+    resultsfile_suffix = "{}K={},N={},T={}".format((id_run == "" and "") or (id_run + "_"), K, N_values, T_values)
 #-- Parse user arguments
 
 if save_results:
     dt_start, stdout_sys, fh_log, logfile, resultsfile, resultsfile_agg, proba_functions_file, figfile = \
         createLogFileHandleAndResultsFileNames(prefix=resultsfile_prefix, suffix=resultsfile_suffix, use_dt_suffix=save_with_dt)
+    # Show the execution parameters again in the log file
+    show_execution_parameters()
 else:
     fh_log = None; resultsfile = None; resultsfile_agg = None; proba_functions_file = None; figfile = None
 
-if analysis_type == "N":
+if analysis_type in ["N", "T"]:
     # -- Single-server
     results, results_agg, est_fv, est_mc = analyze_convergence(
                                                 estimation_process=Process.Simulators,
-                                                nservers=nservers, K=K, buffer_size_activation=J,
+                                                nservers=nservers, job_class_rates=[lmbda], service_rates=[mu], K=K, buffer_size_activation=J,
                                                 burnin_time_steps=burnin_time_steps,
                                                 method_proba_surv=SurvivalProbabilityEstimation.FROM_N_PARTICLES,
-                                                nparticles=[N, 2*N], #2*N, 4*N, 8*N, 16*N],  # [800, 1600, 3200], #[10, 20, 40], #[24, 66, 179],
-                                                nmeantimes=T,  # 50, #[170, 463, 1259],
+                                                nparticles=N_values, #N, 2*N, 4*N, 8*N, 16*N],  # [800, 1600, 3200], #[10, 20, 40], #[24, 66, 179],
+                                                nmeantimes=T_values, #50, #[170, 463, 1259],
                                                 replications=replications, run_mc=run_mc,
                                                 seed=seed)
 
@@ -1185,11 +1347,23 @@ if analysis_type == "N":
                      {'df': results_agg, 'file': resultsfile_agg}])
 
     # Plot results
-    axes = plot_results_fv_mc(results, x="N", x2="#Cycles(MC)_mean",
-                              xlabel="# particles", xlabel2="# Cycles",
-                              ymin=0.0, plot_mc=run_mc, splines=False,
-                              title="nservers={}, K={}, J={}, T={}, BITS={}, MINCE={}" \
-                                    .format(nservers, K, J, T, burnin_time_steps, min_num_cycles_for_expectations))
+    if plot:
+        if analysis_type == "N":
+            for T in T_values:
+                # Note: the columns defined in parameters `x` and `x2` are grouping variables that define each violin plot
+                axes = plot_results_fv_mc(results, x="N", x2="#Cycles(MC)_mean",
+                                          xlabel="# particles", xlabel2="# Return Cycles to {}".format(J-1),
+                                          ymin=0.0, plot_mc=run_mc, splines=False,
+                                          title="nservers={}, K={}, J={}, T={}, BITS={}, MINCE={}" \
+                                                .format(nservers, K, J, T, burnin_time_steps, min_num_cycles_for_expectations))
+        elif analysis_type == "T":
+            for N in N_values:
+                # Note: the columns defined in parameters `x` and `x2` are grouping variables that define each violin plot
+                axes = plot_results_fv_mc(results, x="T", x2="#Cycles(MC)_mean",
+                                          xlabel="# arrival events", xlabel2="# Return Cycles to {}".format(J-1),
+                                          ymin=0.0, plot_mc=run_mc, splines=False,
+                                          title="nservers={}, K={}, J={}, N={}, BITS={}, MINCE={}" \
+                                                .format(nservers, K, J, N, burnin_time_steps, min_num_cycles_for_expectations))
 elif analysis_type == "J":
     # Info for plotting...
     x = "buffer_size_activation";

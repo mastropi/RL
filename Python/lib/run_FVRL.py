@@ -6,6 +6,9 @@ Created on Sun Jul 11 08:42:57 2022
 @description: Runs the FVRL algorithm to learn the optimum parameter of a parameterized policy.
 """
 
+import runpy
+runpy.run_path('../../setup.py')
+
 import os
 import sys
 import warnings
@@ -58,11 +61,10 @@ def run_simulation_policy_learning(simul, dict_params_simul, dict_info,
                          .format(set_required_entries_info.difference(dict_info.keys())))
 
     if not params_read_from_benchmark_file:
-        error_rel_phi_real, error_rel_et_real = compute_rel_errors_for_fv_process(dict_info['rhos'],
-                                                                                  dict_info['K'],
+        error_rel_phi_real, error_rel_et_real = compute_rel_errors_for_fv_process(dict_info['rhos'], dict_info['K'],
+                                                                                  dict_params_simul['buffer_size_activation_factor'],
                                                                                   dict_params_simul['nparticles'],
-                                                                                  dict_params_simul['t_sim'],
-                                                                                  dict_params_simul['buffer_size_activation_factor'])
+                                                                                  dict_params_simul['t_sim'])
 
         print("\n--> CASE {} of {}: theta_true={:.3f} (K_true={}), theta={:.3f} (K={}), J/K={:.3f}," \
               " exponent={}: N={} (err_nom={:.1f}%, err={:.1f}%), T={} (err_nom={:.1f}%, err={:.1f}%)" \

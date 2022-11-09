@@ -10,6 +10,7 @@ import copy
 import warnings
 import tracemalloc
 from enum import Enum, unique
+from typing import Union
 
 import numpy as np
 import pandas as pd
@@ -484,7 +485,9 @@ class SimulatorQueue(Simulator):
             # Use this when using REINFORCE to learn theta: LearningMode.REINFORCE_RETURN
             #self.learn(self.agent, t)
             # Use this when estimating the theoretical grad(V): LearningMode.REINFORCE_TRUE or LearningMode.IGA
-            err_phi, err_et = compute_rel_errors_for_fv_process(self.rhos, K, self.N, dict_params_simul['T'], dict_params_simul['buffer_size_activation_factor'])
+            err_phi, err_et = compute_rel_errors_for_fv_process(self.rhos, K,
+                                                                dict_params_simul['buffer_size_activation_factor'],
+                                                                self.N, dict_params_simul['T'])
             self.learn(self.agent, t,
                        probas_stationary=probas_stationary,
                        Q_values=dict({K-1: [Q0_Km1, Q1_Km1], K: [Q0_K, Q1_K]}),
@@ -840,7 +843,7 @@ class SimulatorQueue(Simulator):
 
         t_sim_max: int
             Maximum discrete simulation time allowed for the simulation. This is defined ONLY by job arrivals,
-            NOT by service events.
+            NOT by service events, as decisions are only taken when a job arrives.
 
         verbose: (opt) bool
             Whether to be verbose in the simulation process.
@@ -1271,10 +1274,33 @@ class SimulatorQueue(Simulator):
 
 
 #-------------------------------------------- FUNCTIONS --------------------------------------#
-def compute_nparticles_and_nsteps_for_fv_process(rhos: list, capacity: int, buffer_size_activation_factor: float=1/3, error_rel_phi=0.50, error_rel_et=0.50):
+def compute_nparticles_and_nsteps_for_fv_process_many_settings(rhos: list,
+                                                               K_values: Union[list, np.ndarray]=[5, 10, 20, 40],
+                                                               JF_values: Union[list, np.ndarray]=np.arange(0.1, 0.8, 0.1),
+                                                               error_rel: Union[list, np.ndarray]=np.arange(0.1, 1, 0.1)):
+    df_results = pd.DataFrame(columns=['rhos', 'K', 'J', 'J/K', 'error', 'N', 'T'])
+
+    for K in K_values:
+        for JF in JF_values:
+            for err in error_rel:
+                J, N, T = compute_nparticles_and_nsteps_for_fv_process( rhos, K, JF,
+                                                                        error_rel_phi=err,
+                                                                        error_rel_et=err,
+                                                                        return_J=True)
+                df_results = pd.concat([df_results, pd.DataFrame([[rhos, K, J, JF, err, N, T]], columns=df_results.columns)],
+                                       axis=0, ignore_index=True)
+
+    return df_results
+
+
+def compute_nparticles_and_nsteps_for_fv_process(rhos: list, capacity: int, buffer_size_activation_factor: float=1/3,
+                                                 error_rel_phi=0.50, error_rel_et=0.50,
+                                                 return_J=False,
+                                                 constant_proportionality=1):
     """
-    Computes the minimum number of particles and number of discrete steps to use in the FV process
-    for maximum relative errors in the estimation of Phi(t, K) and of E(T_A) where K is the capacity of the queue.
+    Computes the minimum number of particles and the minimum number of arrivals to use in the FV process
+    for expected relative errors in the estimation of Phi(t, K) and of E(T_A), respectively,
+    for given queue capacity K and absorption set size factor.
 
     Arguments:
     rhos: list
@@ -1286,52 +1312,103 @@ def compute_nparticles_and_nsteps_for_fv_process(rhos: list, capacity: int, buff
 
     buffer_size_activation_factor: (opt) float
         Buffer size activation factor J/K based on which the activation set of states is defined as
-        J = int( round( factor*K ) ), such as J-1 defines the absorption set of states.
+        J = max(1, int( round( factor*K ) )), such as J-1 defines the absorption set of states
+        (which justifies the use of `max(1, ...)` as J-1 should be >= 0).
+        Its value should not be outside the interval (0, 1] and should be such that the resulting
+        buffer size for activation value, J, is between 1 and K. If this is not the case, J is bounded between 1 and K.
         default: 1/3, which is the optimum in the sense that the algorithm complexity to estimate Phi(t, K) and E(T_A)
         in the Fleming-Viot estimation is the same.
 
     error_rel_phi: (opt) float
         Maximum relative error for the estimation of Phi(t, K).
         This is the relative error incurred in the estimation of a binomial probability based on N trials,
-        which is equal to sqrt((1-p)/p) / sqrt(N), where p is the blocking probability P(X(t) = K).
+        which is equal to sqrt((1-p)/p) / sqrt(N), where p is the blocking probability under the Fleming-Viot process
+        which is proportional to rho^((K-J)/2).
+        Use None if no calculation of N is wished.
         default: 0.50
 
     error_rel_et: (opt) float
         Maximum relative error for the estimation of the expected absorption cycle time E(T_A).
-        The calculation of the number of cycles needed assumes that the standard deviation of the estimation of E(T_A)
-        is proportional to E(T_A), which gives a relative error equal to 1/sqrt(M) where M is the number of
-        reabsorption cycles.
-        (Note that from simulations of the FV estimation for different J/K values, it was found that
+        The calculation of the number of cycles needed assumes that:
+        - K is large so that rho^K << 1.
+        - E(T_A) is approxiamted by E(T1) where T1 is the exit time from the absorption set of size J.
+        - the standard deviation of the estimation of E(T_A) is proportional to E(T_A),
+        which gives a relative error equal to 1/sqrt(M) where M is the number of reabsorption cycles.
+        (Note however that, from simulations of the FV estimation for different J/K values, it was found that
         the standard deviation is proportional to E(T_A)^1.6, more precisely Std(T_A) = 0.01 * E(T_A)^1.6
-        See an Excel file where I analyze this.)
+        See an Excel file where I analyze this. However, in order to stay conservative here, we stick to the constant
+        of proportionality equal to 1, as using 0.01 would give a T value that is 10,000 times smaller than with
+        constant of proportionality = 1)
         The number of discrete steps is then computed as M/q, where q is the blocking probability of the queue system
-        as if the queue had capacity = J, where J = buffer_size_activation_factor * K.
+        as if the queue had capacity = J-1, where J = buffer_size_activation_factor * K.
+        Use None if no calculation of T is wished.
         default: 0.50
 
-    Return: Tuple
-    Duple with the following elements:
-    - N: number of particles needed for the given relative error for Phi(t, K), error_rel_phi.
-    - T: Number of discrete time steps for the given relative error for E(T_A), error_rel_et.
+    return_J: (opt) bool
+        Whether to return the value of J on which the values of N and T are computed, as this value is computed from
+        the given J factor and K.
+        default: False
+
+    constant_proportionality: float
+        Constant of proportionality assumed between the standard deviation of the estimation of E(T_A) and its expected value.
+        default: 1
+
+    Return: int or tuple
+    The returned value is int when either error_rel_phi or error_rel_et is None and when return_J = False,
+    o.w. it's a tuple with the following elements:
+    - J: (if return_J=True) value of the absorption size set computed on the basis of given buffer size for activation factor and K,
+    and used as input to compute N and T.
+    - N: (if error_rel_phi is not None) number of particles needed for the given relative error for Phi(t, K), error_rel_phi.
+    - T: (if error_rel_et is not None) Number of arrival events for the given relative error for E(T_A), error_rel_et.
     """
-    K = capacity
-    J = int( np.round(buffer_size_activation_factor * K) )
+    if not (1 <= np.round(buffer_size_activation_factor * capacity) <= capacity):
+        warnings.warn("The value of input parameter `buffer_size_activation_factor` ({}) is either too small or too large" \
+                      .format(buffer_size_activation_factor) +
+                      " to have a valid buffer size for activation value, J (J yielded = {}). This value will be bounded to the interval [1, K={}]" \
+                      .format(int(np.round(buffer_size_activation_factor * capacity)), int(capacity)))
+    K = int(capacity)
+    J = min(max(1, int( np.round(buffer_size_activation_factor * K) )), K)
 
-    # -- Blocking probability
-    # This is the equivalent of a queue that has the blocking probability observed under the Fleming-Viot process
-    capacity_effective = int( np.ceil((K-J)/2) )
-    pK = compute_blocking_probability_birth_death_process(rhos, capacity_effective)
+    if error_rel_phi is not None:
+        # Compute N
+        # The calculation is based on the blocking probability associated to the Fleming-Viot process, which is
+        # proportional to rho^((K-J)/2). Therefore we compute the blocking probability for a queue with capacity
+        # int( ceil(K-J)/2 )
+        capacity_effective = int( np.ceil((K-J)/2) )
+        pK = compute_blocking_probability_birth_death_process(rhos, capacity_effective)
+        N = int(np.ceil( (1 - pK) / pK / error_rel_phi**2 ))
 
-    # Expected return time to J (under stationarity), which is what mostly defines the magnitude of E(T_A) = E(T1+T2)
-    pJ = compute_blocking_probability_birth_death_process(rhos, J)
+    if error_rel_et is not None:
+        # Compute T, the number of arrival events required to achieve the given expected relative error.
+        # This is based on the expected exit time from the absorption set of size J (under stationarity),
+        # T1, which is what mostly defines the magnitude of E(T_A) = E(T1+T2), as T2 is usually quite small
+        # compared to T1, at least for large J values.
+        # Note that the expected exit time is proportional to the expected return time to J-1, with constant
+        # of proportionality (in the M/M/1/K case) equal to (1 + mu/lambda) (see details in my green notebook,
+        # where I wrote about this on 06-Nov-2022).
+        pJm1 = compute_blocking_probability_birth_death_process(rhos, J - 1)
+        #M = int(np.ceil( constant_proportionality**2 / error_rel_et**2 ))
+        T = int(np.ceil( constant_proportionality**2 / error_rel_et**2 / pJm1 ))
 
-    N = int(np.ceil( (1 - pK) / pK / error_rel_phi**2 ))
-    #M = int(np.ceil( 1 / error_rel_et**2 ))
-    T = int(np.ceil( 1 / error_rel_et**2 / pJ ))
+    if error_rel_phi is not None and error_rel_et is not None:
+        if return_J:
+            return J, N, T
+        else:
+            return N, T
+    if error_rel_phi is not None:
+        if return_J:
+            return J, N
+        else:
+            return N
+    if error_rel_et is not None:
+        if return_J:
+            return J, T
+        else:
+            return T
 
-    return N, T
 
-
-def compute_rel_errors_for_fv_process(rhos: list, capacity: int, N: int, T: int, buffer_size_activation_factor: float=1/3):
+def compute_rel_errors_for_fv_process(rhos: list, capacity: int, buffer_size_activation_factor: float=1/3,
+                                      N: int=None, T: int=None, constant_proportionality=1):
     """
     Computes the relative errors expected in the estimation of the two main quantities of the FV estimator,
     Phi(t, K), whose accuracy increases as the activation factor J/K increases, and E(T_A), whose accuracy
@@ -1345,47 +1422,70 @@ def compute_rel_errors_for_fv_process(rhos: list, capacity: int, N: int, T: int,
     capacity: int
         Capacity of the system: maximum size of the buffer placed at the entrance of the system.
 
-    N: int
+    N: (opt) int
         Number of particles used in the FV process.
+        default: None
 
-    T: int
-        Number of discrete time steps used in the estimation of P(T>t) and E(T_A).
+    T: (opt) int
+        Number of arrival events allowed in the simulation of the single particle that estimates E(T_A).
+        default: None
 
     buffer_size_activation_factor: (opt) float
         Buffer size activation factor J/K based on which the activation set of states is defined as
-        J = int( round( factor*K ) ), such as J-1 defines the absorption set of states.
+        J = max(1, int( round( factor*K ) )), such as J-1 defines the absorption set of states
+        (which justifies the use of `max(1, ...)` as J-1 should be >= 0).
+        Its value should not be outside the interval (0, 1] and should be such that the resulting
+        buffer size for activation value, J, is between 1 and K. If this is not the case, J is bounded between 1 and K.
         default: 1/3, which is the optimum in the sense that the algorithm complexity to estimate Phi(t, K) and E(T_A)
         in the Fleming-Viot estimation is the same.
 
-    Return: tuple
-    Duple with the following elements:
-    - error_rel_phi: relative error expected for the estimation of Phi(t, K) given N.
+    constant_proportionality: float
+        Constant of proportionality assumed between the standard deviation of the estimation of E(T_A) and its expected value.
+        default: 1
+
+    Return: float or tuple
+    The return value is float when either parameter N or T is None, o.w. it's a tuple with the following elements:
+    - error_rel_phi: (when N is not None) relative error expected for the estimation of Phi(t, K) given N.
         This is the relative error incurred in the estimation of a binomial probability based on N trials,
         which is equal to sqrt((1-p)/p) / sqrt(N)
-    - error_rel_et: relative error expected for the estimation of the expected absorption cycle time E(T_A).
+    - error_rel_et: (whne T is not None) approximate relative error expected for the estimation of the expected
+        reabsorption cycle time E(T_A) when T arrival events are observed during the simulation from which E(T_A)
+        is estimated.
         This calculation assumes that the standard deviation of the estimation of E(T_A)
-        is proportional to E(T_A), which gives a relative error equal to 1/sqrt(M) where M is the number of
-        reabsorption cycles.
+        is proportional to E(T_A), with constant of proportionality given by parameter `constant_proportionality`.
+        The expected relative error is then given by `constant_proportionality / sqrt(M)` where M is the expected
+        number of reabsorption cycles when T arrival events are observed, satisfying M / p(J-1) = T, where p(J-1) is the
+        stationary probability that the queue has occupation (buffer size) = J - 1.
         (Note that from simulations of the FV estimation for different J/K values, it was found that
         the standard deviation is proportional to E(T_A)^1.6, more precisely Std(T_A) = 0.01 * E(T_A)^1.6)
         The number of discrete steps is then computed as M/p, where p is the blocking probability of the given
         queue system.
     """
-    K = capacity
-    J = int( np.round(buffer_size_activation_factor * K) )
+    if not (1 <= np.round(buffer_size_activation_factor * capacity) <= capacity):
+        warnings.warn("The value of input parameter `buffer_size_activation_factor` ({}) is either too small or too large" \
+                      .format(buffer_size_activation_factor) +
+                      " to have a valid buffer size for activation value, J (J yielded = {}). This value will be bounded to the interval [1, K={}]" \
+                      .format(int(np.round(buffer_size_activation_factor * capacity)), int(capacity)))
+    K = int(capacity)
+    J = min(max(1, int( np.round(buffer_size_activation_factor * K) )), K)
 
-    # -- Blocking probability
-    # This is the equivalent of a queue that has the blocking probability observed under the Fleming-Viot process
-    capacity_effective = int( np.ceil((K-J)/2) )
-    pK = compute_blocking_probability_birth_death_process(rhos, capacity_effective)
+    if N is not None:
+        # This is the equivalent of a queue that has the blocking probability observed under the Fleming-Viot process
+        capacity_effective = int( np.ceil((K-J)/2) )
+        pK = compute_blocking_probability_birth_death_process(rhos, capacity_effective)
+        error_rel_phi = np.sqrt( (1 - pK) / pK / N )
 
-    # Expected return time to J (under stationarity), which is what mostly defines the magnitude of E(T_A) = E(T1+T2)
-    pJ = compute_blocking_probability_birth_death_process(rhos, J)
+    if T is not None:
+        # Expected return time to J (under stationarity), which is what mostly defines the magnitude of E(T_A) = E(T1+T2)
+        pJm1 = compute_blocking_probability_birth_death_process(rhos, J - 1)
+        error_rel_et  = constant_proportionality * np.sqrt( 1 / T / pJm1 )    # Recall that M / p(J-1) = T (see my notes in the small green book dated 06-Nov-2022)
 
-    error_rel_phi = np.sqrt( (1 - pK) / pK / N )
-    error_rel_et  = np.sqrt( 1 / T / pJ )
-
-    return error_rel_phi, error_rel_et
+    if N is not None and T is not None:
+        return error_rel_phi, error_rel_et
+    if N is None:
+        return error_rel_et
+    if T is None:
+        return error_rel_phi
 
 
 def compute_reward_for_buffer_size(env, bs):
@@ -1584,7 +1684,7 @@ def estimate_expected_cycle_time(n_cycles: int, time_end_last_cycle: float,
     n_cycles: int
         Number of cycles observed.
 
-    time_end_last_cycle: float
+    time_end_last_cycle: non-negative float
         Continuous time at which the last cycle ends.
 
     cycle_times: (opt) list
@@ -1607,7 +1707,10 @@ def estimate_expected_cycle_time(n_cycles: int, time_end_last_cycle: float,
     `min_num_cycles_for_expectations`.
     - n_cycles_after_burnin: the number of cycles left after the initial burn-in period.
     """
-    assert time_end_last_cycle > 0.0
+    assert time_end_last_cycle >= 0.0   # time_end_last_cycle could be 0... namely when no cycle is observed.
+                                        # In any case, a value of 0 (actually a value that is smaller than burnin_time)
+                                        # does not generate problems in the calculation of the expected cycle time below,
+                                        # because its value is lower bounded by 0.
     assert cycle_times is None and burnin_time == 0.0 or \
            cycle_times is not None and len(cycle_times) == n_cycles
     if burnin_time == 0:
@@ -2009,6 +2112,11 @@ def run_simulation_mc(env, agent, t_learn, start_state, t_sim_max,
         Monte-Carlo estimation of the blocking probability)
         OR the maximum number of *arrival events* when track_absorption=True (which we assume it indicates that
         this function is called as part of the Fleming-Viot estimation of the blocking probability).
+        Note that its meaning is different in one case and the other because in the Fleming-Viot case,
+        the number of arrivals, and NOT the number of events, is the one that determines the expected error
+        in the estimation of E(T_A), which is due to the fact that the expected reabsorption time is normally larger
+        than the expected return time to J-1 (as, in order to be reabsorbed, the particle first needs to exit
+        the absorption set A) (for further details, see calculations in my green small notebok written on 06-Nov-2022).
 
     track_return_cycles: (opt) bool
         Whether to track the return cycle times to the initial buffer size (defined by parameter start_state),
@@ -3393,7 +3501,7 @@ if __name__ == "__main__":
     assert np.all([N==149, T==54])
 
     # The inverse operation
-    err1, err2 = compute_rel_errors_for_fv_process(rhos, K, N, T, J_factor)
+    err1, err2 = compute_rel_errors_for_fv_process(rhos, K, J_factor, N, T)
     print("err1={:.3f}%, err2={:.3f}%".format(err1*100, err2*100))
     assert np.allclose([err1, err2], [0.49928, 0.69388])
     assert err1 <= error_rel_phi and err2 <= error_rel_et
