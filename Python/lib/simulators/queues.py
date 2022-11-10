@@ -12,6 +12,7 @@ import tracemalloc
 from enum import Enum, unique
 from typing import Union
 
+from collections import OrderedDict
 import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt, cm
@@ -63,7 +64,7 @@ DEBUG_TRAJECTORIES = False
 class SimulatorQueue(Simulator):
     """
     Simulator class that runs a Reinforcement Learning simulation on a given Queue environment `env` and an `agent`
-    using the learning mode, number of learning steps, and number of simulation steps per learning step
+    using the learning mode, number of learning steps, and number of simulation steps/arrival events per learning step
     specified in the `dict_learning_params` dictionary.
 
     Arguments:
@@ -91,8 +92,8 @@ class SimulatorQueue(Simulator):
         default: 1
     """
 
-    def __init__(self, env, agent, dict_learning_params, case=1, N=1, seed=None, log=False, save=False, logsdir=None, resultsdir=None, debug=False):
-        super().__init__(env, agent, case, seed, log, save, logsdir, resultsdir, debug)
+    def __init__(self, env, agent, dict_learning_params, case=1, replication=1, N=1, seed=None, log=False, save=False, logsdir=None, resultsdir=None, debug=False):
+        super().__init__(env, agent, case, replication, seed, log, save, logsdir, resultsdir, debug)
         self.dict_learning_params = dict_learning_params
         # Attributes used during Fleming-Viot simulation (each env in envs is one of the N particles)
         self.N = N
@@ -112,7 +113,8 @@ class SimulatorQueue(Simulator):
             self.job_rates_by_server = compute_job_rates_by_server(self.env.getJobClassRates(),
                                                                    self.env.getNumServers(),
                                                                    self.agent.getAssignmentPolicy().getProbabilisticMap())
-            # Compute the server loads which is used to compute the expected relative errors associated to the number of particles N and the number of arrival events (or simulation steps?) T
+            # Compute the server loads which is used to compute the expected relative errors associated to
+            # the number of particles N and the number of arrival events T used in the FVRL algorithm
             self.rhos = [l / m for l, m in zip(self.getJobRatesByServer(), self.env.getServiceRates())]
         else:
             self.learnerV = None
@@ -127,7 +129,12 @@ class SimulatorQueue(Simulator):
                 # in the `env` queue environment.
                 self.rhos = [l / m  for l, m in zip(self.env.getQueue().getBirthRates(), self.env.getQueue().getDeathRates())]
 
-        # Storage of learning history
+        self.reset_learning_history()
+
+    def reset_learning_history(self):
+        """
+        Resets the policy learning history. This should be called for any new learning simulation that is run (e.g. a new replication of the learning process)
+        """
         self.alphas = []            # Learning rates used in the learning of the policy when updating from theta to theta_next (i.e. from thetas -> thetas_updated)
         self.thetas = []            # List of theta values before the update by the policy learning step
         self.thetas_updated = []    # List of theta values AFTER the update by the policy learning step.
@@ -146,8 +153,18 @@ class SimulatorQueue(Simulator):
 
     # IMPORTANT: This method overrides the method of the superclass! (so when reset() is called from the super()
     # object, actually THIS reset() method defined here is called!
-    def reset(self, state=None, reset_value_functions=False, reset_counts=False):
-        "Resets the environments used in the simulation to the given state and the learners for a new learning process"
+    def reset(self, state=None, reset_learning_history=False, reset_value_functions=False, reset_counts=False):
+        "Resets the environments used in the simulation. How much is reset depends on the given parameter values"
+
+        # Reset the policy learning history
+        if reset_learning_history:
+            self.reset_learning_history()
+            # We should also erase the policy learning history below
+            reset_policy_trajectory = True
+        else:
+            # We do not want to erase the policy learning history done below
+            reset_policy_trajectory = False
+
         # Reset the environments (particles) used in the simulation
         if state is not None:
             for env in self.envs:
@@ -155,7 +172,7 @@ class SimulatorQueue(Simulator):
 
         if self.agent is not None:
             # Reset the learners
-            # This is expected to be called after each learning step, i.e. before a new queue simulation is run
+            # This is expected to be called after each learning step, i.e. before a new queue simulation is run.
             # Based on this, note that we do NOT reset the trajectory stored in the policy learner because we want to
             # keep the WHOLE history of learning (i.e. for all queue simulation episodes) in the policy learner.
             # Note that we reset the time and alphas of the value function learner (because this happens within each
@@ -164,7 +181,7 @@ class SimulatorQueue(Simulator):
             if self.agent.getLearnerV() is not None:
                 self.agent.getLearnerV().reset(reset_time=True,  reset_alphas=True,  reset_value_functions=reset_value_functions, reset_trajectory=True,  reset_counts=reset_counts)
             if self.agent.getLearnerP() is not None:
-                self.agent.getLearnerP().reset(reset_time=False, reset_alphas=False, reset_value_functions=reset_value_functions, reset_trajectory=False, reset_counts=reset_counts)
+                self.agent.getLearnerP().reset(reset_time=False, reset_alphas=False, reset_value_functions=reset_value_functions, reset_trajectory=reset_policy_trajectory, reset_counts=reset_counts)
             if not reset_value_functions:
                 # Set the start value of the value functions to their current estimate
                 # Goal: we can use the current estimated values in the next learning step,
@@ -173,15 +190,21 @@ class SimulatorQueue(Simulator):
                     self.agent.getLearnerV().setVStart(self.agent.getLearnerV().getV())
                     self.agent.getLearnerV().setQStart(self.agent.getLearnerV().getQ())
 
+    def initialize_results_file(self):
+        if self.fh_results is not None:
+            self.fh_results.write("case,replication,t_learn,theta_true,theta,theta_next,K,J/K,J,burnin_time_steps,min_n_cycles,exponent,N,T,err_phi,err_et,seed,E(T),n_cycles,max_time_surv,Pr(K-1),Pr(K),error(K-1),error(K),Q_diff(K-1),Q_diff(K),alpha,V,gradV,n_events_mc,n_events_fv,n_trajectories_Q\n")
+
     def run(self, dict_params_simul: dict, dict_params_info: dict={'plot': False, 'log': False}, dict_info: dict={},
             start_state=None,
             seed=None,
             verbose=False, verbose_period=1,
             colormap="seismic", pause=0):
         """
-        Runs a Reinforcement Learning experiment on a queue environment for the given number of time steps.
+        Runs a Reinforcement Learning experiment on a queue environment for the given number of learning steps.
         No reset of the learning history is done at the beginning of the simulation.
-        It is assumed that this reset, when needed, is done by the calling function.
+        It is assumed that this reset, when needed, is done by the calling function, e.g. by calling
+        `reset(reset_learning_history=True, reset_value_functions=True, reset_counts=True)`,
+        a method defined by this class.
 
         Parameters:
         dict_params_simul: dict
@@ -190,10 +213,11 @@ class SimulatorQueue(Simulator):
             by the process.
             - 'theta_start': initial value of theta at which the learning process starts.
             - 'nparticles': # particles to use in the FV simulation.
-            - 't_sim': number of simulation steps per learning step. This is either a scalar or a list with as many
-            elements as the number of learning steps defined in self.dict_learning_params['t_learn'].
+            - 't_sim': either number of simulation steps (MC learning) or number of arrival events (FVRL) per learning step.
+            This is either a scalar or a list with as many elements as the number of learning steps defined in
+            self.dict_learning_params['t_learn'].
             This latter case serves the purpose of running as many simulation steps as were run in a benchmark method
-            (for instance when comparing the results by Monte-Carlo with those by Fleming-Viot).
+            for *each* learning step (for instance when comparing the results by Monte-Carlo with those by Fleming-Viot).
             - 'buffer_size_activation_factor': factor multiplying the blocking size K defining the value of
             the buffer size for activation.
             - 'burnin_time_steps': (opt) number of time steps to use as burn-in, before assuming that the process is
@@ -210,7 +234,7 @@ class SimulatorQueue(Simulator):
         dict_info: (opt) dict
             Dictionary with information of interest to store in the results file.
             From this dictionary, when defined, we extract the following keys:
-            - 'exponent': the exponent used to define the values of N (# particles) and T (# time steps) used in the
+            - 'exponent': the exponent used to define the values of N (# particles) and T (# arrival events) used in the
             simulation.
             default: {}
 
@@ -262,16 +286,14 @@ class SimulatorQueue(Simulator):
                              .format(set_required_entries_params_simul.difference(dict_params_simul.keys())))
 
         if is_scalar(dict_params_simul['t_sim']):
-            # Case when the simulation time (simulation steps, which normally equals # events) is the same
-            # for all learning steps (typically when learning via the FV method).
-            # Otherwise, in the MC method, the number of simulation steps is normally read from a benchmark file
-            # and therefore is expected to be different for each learning step.
-            # Note that we define the 'nmeantimes' key because this is the key required by the
-            # EstimatorQueueBlockingFlemingViot class that is used to run the single particle simulation
-            # to estimate P(T>t) and E(T_A) in the FV method.
-            # => Use the number of simulation steps defined in the object
-            dict_params_simul['nmeantimes'] = dict_params_simul['t_sim']    # This is used in Fleming-Viot simulation
-            dict_params_simul['T'] = dict_params_simul['t_sim']             # This is used in Monte-Carlo simulation
+            # Case when the simulation time (either #steps or #arrivals) is the same
+            # for all learning steps (typically when learning via the FVRL method).
+            # Otherwise, in the MC learning method, the number of simulation steps
+            # is normally read from a benchmark file and therefore is expected to be
+            # different for each learning step (although it could also be the same
+            # as the *total* number of simulation steps could be divided equally on each learning step).
+            # => Use the simulation time parameter defined in the object
+            dict_params_simul['T'] = dict_params_simul['t_sim'] # Recall that this is the #steps in MC and #arrivals in FVRL
 
         # -- Default values of parameters used in estimation.
         # Number of burn-in time steps to allow the simulation to run before considering that the Markov process
@@ -364,10 +386,10 @@ class SimulatorQueue(Simulator):
                 # because simulating is a quite computing intensive task!!
 
                 if not is_scalar(dict_params_simul['t_sim']):
-                    # There is a different simulation time for each learning step
+                    # There is a different simulation time (either #steps for MC or #arrivals for FVRL) for each learning step
+                    # => Read the value of the t_sim parameter from the learning step currently being processed
                     assert len(dict_params_simul) == self.dict_learning_params['t_learn']
-                    dict_params_simul['nmeantimes'] = dict_params_simul['t_sim'][t_learn-1]   # `t_learn-1` because t_learn starts at 1, not 0.
-                    dict_params_simul['T'] = dict_params_simul['nmeantimes']
+                    dict_params_simul['T'] = dict_params_simul['t_sim'][t_learn-1]   # `t_learn-1` because t_learn starts at 1, not 0.
 
                 #-- Estimation of the survival probability P(T>t) and the expected absorption cycle time, E(T_A) by MC
                 if show_messages(verbose, verbose_period, t_learn):
@@ -383,7 +405,14 @@ class SimulatorQueue(Simulator):
                 proba_blocking_fv, expected_reward, probas_stationary, \
                     expected_cycle_time, n_cycles, time_last_absorption, time_end_simulation_et, max_survival_time, time_end_simulation_fv, \
                         n_events_mc, n_events_fv = estimate_blocking_fv(self.envs, self.agent, dict_params_simul, dict_params_info)
-                # Equivalent (discrete) simulation time, as if it were a Monte-Carlo simulation
+                # Now we compute the equivalent (discrete) simulation time, as if it were a Monte-Carlo simulation
+                # Note that this measures the # simulation steps which does NOT coincide with parameter 't_sim'
+                # (equal to 'T') which in FVRL defines the # *arrival* events.
+                # This piece of information is needed in order to run an MC learner that is comparable with the FVRL
+                # learner in that the MC learner uses the same number of simulation steps for each learning step as
+                # those used by FVRL at the respective learning step, OR the MC learner uses the same *total* number
+                # of simulation steps as those used by FVRL in the whole learning process, divided equally into each
+                # learning step.
                 t = n_events_mc + n_events_fv
                 self.getLearnerV().setAverageReward(expected_reward)
                 self.getLearnerV().setProbasStationary(probas_stationary)
@@ -391,8 +420,6 @@ class SimulatorQueue(Simulator):
                 # Monte-Carlo learning is the default
                 assert self.N == 1, "The simulation system has only one particle in Monte-Carlo mode ({})".format(self.N)
 
-                # Define the following two quantities as None because they are sent to the output results file
-                # in the FV case and here they should be found as existing variables.
                 if not is_scalar(dict_params_simul['t_sim']):
                     # There is a different simulation time for each learning step
                     # => Use a number of simulation steps defined in a benchmark for each learning step
@@ -415,8 +442,8 @@ class SimulatorQueue(Simulator):
                 # Discrete simulation time
                 t = n_events
                 n_events_mc = n_events
-                n_events_fv = 0  # This information is output to the results file and therefore we set it to 0 here as we are in the MC approach
-                max_survival_time = 0.0
+                n_events_fv = 0         # This information is output to the results file and therefore we set it to 0 here as we are in the MC approach
+                max_survival_time = 0.0 # Ditto
 
             # Compute the state-action values (Q(s,a)) for buffer size = K-1
             if probas_stationary.get(K-1, 0.0) == 0.0:
@@ -517,9 +544,9 @@ class SimulatorQueue(Simulator):
                 # Compute the new blocking size so that we can update the values of N and T
                 _K_next = self.agent.getAcceptancePolicy().getBufferSizeForDeterministicBlocking()
                 _N, _T = \
-                    compute_nparticles_and_nsteps_for_fv_process(self.rhos, _K_next, dict_params_simul['buffer_size_activation_factor'],
-                                                                 error_rel_phi=dict_info['error_rel_phi'],
-                                                                 error_rel_et=dict_info['error_rel_et'])
+                    compute_nparticles_and_narrivals_for_fv_process(self.rhos, _K_next, dict_params_simul['buffer_size_activation_factor'],
+                                                                    error_rel_phi=dict_info['error_rel_phi'],
+                                                                    error_rel_et=dict_info['error_rel_et'])
                 _N_new = min(max(dict_info.get('Nmin', 0), _N), dict_info.get('Nmax', np.Inf))
                 _T_new = min(max(dict_info.get('Tmin', 0), _T), dict_info.get('Tmax', np.Inf))
                 if True or show_messages(verbose, verbose_period, t_learn):
@@ -541,22 +568,22 @@ class SimulatorQueue(Simulator):
             # TODO
             pass
 
-        df_learning = pd.DataFrame.from_items([
-                                            ('theta', self.thetas),
-                                            ('theta_next', self.thetas_updated),
-                                            ('Pr(K-1)', [p[0] for p in self.proba_stationary]),
-                                            ('Pr(K)', [p[1] for p in self.proba_stationary]),
-                                            ('Error(K-1)', [e[0] for e in self.error_proba_stationary]),
-                                            ('Error(K)', [e[1] for e in self.error_proba_stationary]),
-                                            ('Q_diff(K-1)', [q[0] for q in self.Q_diff]),
-                                            ('Q_diff(K)', [q[1] for q in self.Q_diff]),
-                                            ('alpha', self.alphas),
-                                            ('V', self.V),
-                                            ('gradV', self.gradV),
-                                            ('n_events_mc', self.n_events_mc),
-                                            ('n_events_fv', self.n_events_fv),
-                                            ('n_trajectories_Q', self.n_trajectories_Q)
-                                                ])
+        df_learning = pd.DataFrame.from_dict(OrderedDict({
+                                                        'theta': self.thetas,
+                                                        'theta_next': self.thetas_updated,
+                                                        'Pr(K-1)': [p[0] for p in self.proba_stationary],
+                                                        'Pr(K)': [p[1] for p in self.proba_stationary],
+                                                        'Error(K-1)': [e[0] for e in self.error_proba_stationary],
+                                                        'Error(K)': [e[1] for e in self.error_proba_stationary],
+                                                        'Q_diff(K-1)': [q[0] for q in self.Q_diff],
+                                                        'Q_diff(K)': [q[1] for q in self.Q_diff],
+                                                        'alpha': self.alphas,
+                                                        'V': self.V,
+                                                        'gradV': self.gradV,
+                                                        'n_events_mc': self.n_events_mc,
+                                                        'n_events_fv': self.n_events_fv,
+                                                        'n_trajectories_Q': self.n_trajectories_Q,
+                                                        }))
 
         dt_end = get_current_datetime_as_string()
         print("Simulation ends at: {}".format(dt_end))
@@ -726,7 +753,7 @@ class SimulatorQueue(Simulator):
 
         # 1) Starting at (K-1, a=1) is like starting at s=K (because the reward of the first action is 0)
         if show_messages(verbose, verbose_period, t_learn):
-            print("\n1) Running simulation on N={} queues for {} time steps to estimate Q(K-1, a=1)...".format(N, t_sim_max))
+            print("\n1) Running simulation on N={} queues for {} arrival events to estimate Q(K-1, a=1)...".format(N, t_sim_max))
         start_state = choose_state_for_buffer_size(self.env, K)
         Q1 = 0.0
         for _ in range(N):
@@ -740,7 +767,7 @@ class SimulatorQueue(Simulator):
 
         # 2) Starting at (K-1, a=0) is like starting at s=K-1 and adding one reward for the first rejection
         if show_messages(verbose, verbose_period, t_learn):
-            print("2) Running simulation on N={} queues for {} time steps to estimate Q(K-1, a=0)...".format(N, t_sim_max))
+            print("2) Running simulation on N={} queues for {} arrival events to estimate Q(K-1, a=0)...".format(N, t_sim_max))
         start_state = choose_state_for_buffer_size(self.env, K-1)
         # Reward received from the initial rejection of the job at buffer size K-1
         first_reward = compute_reward_for_buffer_size(self.env, K-1)
@@ -810,9 +837,9 @@ class SimulatorQueue(Simulator):
         Q1 = 0.0
         n = 0           # Number of times Q0 and Q1 can be estimated from mixing trajectories (out of N)
         max_t_mix = 0.0 # Maximum discrete mixing time observed over the n pair of trajectories that mix
+        if True:
+            print("Estimating Qdiff for buffer size bs={}... using {} replications".format(buffer_size, N))
         for i in range(N):
-            if True:
-                print("Estimating Qdiff for buffer size bs={}... {} out of {} replications".format(buffer_size, i, N))
             _, Q0_, Q1_, t_mix = self.run_simulation_2_until_mixing(t_learn, buffer_size, t_sim_max,
                                                                     verbose=verbose, verbose_period=verbose_period)
             if not np.isnan(Q0_) and not np.isnan(Q1_):
@@ -1151,9 +1178,9 @@ class SimulatorQueue(Simulator):
             min_num_cycles_for_expectations = simul_info.get('min_num_cycles_for_expectations', 0)
             exponent = simul_info.get('exponent', 0.0)  # Exponent that defines N and T w.r.t. a reference N0 and T0 as N0*exp(exponent) in order to consider different N and T values of interest (e.g. exponent = -2, -1, 0, 1, 2, etc.)
             N = simul_info.get('N', 0)              # number of particles used in the FV process (this is 1 for MC)
-            T = simul_info.get('T', 0)              # simulation time multiplier of 1/lambda (nmeantimes) (this is N_fv*T in MC)
+            T = simul_info.get('T', 0)              # this is either the number of arrival events in FVRL or the number of time steps in MC learning
             err_phi = simul_info.get('err_phi', 0)  # expected relative error in the estimation of Phi(t,K) when using N particles
-            err_et = simul_info.get('err_et', 0)    # expected relative error in the estimation of E(T_A) when using T time steps
+            err_et = simul_info.get('err_et', 0)    # expected relative error in the estimation of E(T_A) when using T arrival events
             seed = simul_info.get('seed')
             expected_cycle_time = simul_info.get('expected_cycle_time', 0.0)
             n_cycles = simul_info.get('n_cycles', 0)
@@ -1208,8 +1235,9 @@ class SimulatorQueue(Simulator):
         agent.getLearnerP().update_learning_rate_by_episode()
 
         if self.save:
-            self.fh_results.write("{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}\n" \
+            self.fh_results.write("{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}\n" \
                                     .format(self.case,
+                                            self.replication,
                                             t_learn,
                                             self.envs[0].getParamsRewardFunc().get('buffer_size_ref', None)-1,  # -1 because buffer_size_ref is K and the theta parameter, which is the one we want to store here is K-1
                                             self.thetas[-1],
@@ -1283,20 +1311,20 @@ def compute_nparticles_and_nsteps_for_fv_process_many_settings(rhos: list,
     for K in K_values:
         for JF in JF_values:
             for err in error_rel:
-                J, N, T = compute_nparticles_and_nsteps_for_fv_process( rhos, K, JF,
-                                                                        error_rel_phi=err,
-                                                                        error_rel_et=err,
-                                                                        return_J=True)
+                J, N, T = compute_nparticles_and_narrivals_for_fv_process(rhos, K, JF,
+                                                                          error_rel_phi=err,
+                                                                          error_rel_et=err,
+                                                                          return_J=True)
                 df_results = pd.concat([df_results, pd.DataFrame([[rhos, K, J, JF, err, N, T]], columns=df_results.columns)],
                                        axis=0, ignore_index=True)
 
     return df_results
 
 
-def compute_nparticles_and_nsteps_for_fv_process(rhos: list, capacity: int, buffer_size_activation_factor: float=1/3,
-                                                 error_rel_phi=0.50, error_rel_et=0.50,
-                                                 return_J=False,
-                                                 constant_proportionality=1):
+def compute_nparticles_and_narrivals_for_fv_process(rhos: list, capacity: int, buffer_size_activation_factor: float= 1 / 3,
+                                                    error_rel_phi=0.50, error_rel_et=0.50,
+                                                    return_J=False,
+                                                    constant_proportionality=1):
     """
     Computes the minimum number of particles and the minimum number of arrivals to use in the FV process
     for expected relative errors in the estimation of Phi(t, K) and of E(T_A), respectively,
@@ -1331,7 +1359,7 @@ def compute_nparticles_and_nsteps_for_fv_process(rhos: list, capacity: int, buff
         Maximum relative error for the estimation of the expected absorption cycle time E(T_A).
         The calculation of the number of cycles needed assumes that:
         - K is large so that rho^K << 1.
-        - E(T_A) is approxiamted by E(T1) where T1 is the exit time from the absorption set of size J.
+        - E(T_A) is approximated by E(T1) where T1 is the exit time from the absorption set of size J.
         - the standard deviation of the estimation of E(T_A) is proportional to E(T_A),
         which gives a relative error equal to 1/sqrt(M) where M is the number of reabsorption cycles.
         (Note however that, from simulations of the FV estimation for different J/K values, it was found that
@@ -1339,7 +1367,7 @@ def compute_nparticles_and_nsteps_for_fv_process(rhos: list, capacity: int, buff
         See an Excel file where I analyze this. However, in order to stay conservative here, we stick to the constant
         of proportionality equal to 1, as using 0.01 would give a T value that is 10,000 times smaller than with
         constant of proportionality = 1)
-        The number of discrete steps is then computed as M/q, where q is the blocking probability of the queue system
+        The number of arrival events is then computed as M/q, where q is the blocking probability of the queue system
         as if the queue had capacity = J-1, where J = buffer_size_activation_factor * K.
         Use None if no calculation of T is wished.
         default: 0.50
@@ -1458,8 +1486,8 @@ def compute_rel_errors_for_fv_process(rhos: list, capacity: int, buffer_size_act
         stationary probability that the queue has occupation (buffer size) = J - 1.
         (Note that from simulations of the FV estimation for different J/K values, it was found that
         the standard deviation is proportional to E(T_A)^1.6, more precisely Std(T_A) = 0.01 * E(T_A)^1.6)
-        The number of discrete steps is then computed as M/p, where p is the blocking probability of the given
-        queue system.
+        The number of arrival events is then computed as M/q, where q is the blocking probability of the queue system
+        as if the queue had capacity = J-1, where J = buffer_size_activation_factor * K.
     """
     if not (1 <= np.round(buffer_size_activation_factor * capacity) <= capacity):
         warnings.warn("The value of input parameter `buffer_size_activation_factor` ({}) is either too small or too large" \
@@ -1983,7 +2011,9 @@ def estimate_blocking_mc(env, agent, dict_params_simul, dict_params_info, start_
     dict_params_simul: dict
         Dictionary containing simulation and estimation parameters.
         It should contain at least the following keys:
-        - T: the number of simulation steps to use in the Monte-Carlo simulation that estimates E(T_A).
+        - T: either the number of simulation steps to use in the Monte-Carlo simulation when estimating the blocking
+        probability using Monte-Carlo ro the number of arrival events to use in the Monte-Carlo simulation used in
+        the FV estimator of the blocking probability to estimate E(T_A), i.e. the expected reabsorption time of a single queue.
         - buffer_size_activation: the overall system's buffer size for activation (J, where J-1 is the absorption buffer size)
         used when estimating the blocking probability with Fleming-Viot. This is used, ONLY when `start_state=None`,
         to choose the starting state of the Monte-Carlo simulation, so that the Monte-Carlo estimation of the blocking
@@ -2110,7 +2140,7 @@ def run_simulation_mc(env, agent, t_learn, start_state, t_sim_max,
         Maximum simulation *time steps* allowed for the simulation (equivalent to the number of observed events)
         when track_absorptions=False (which we assume it indicates that this function is called as part of the
         Monte-Carlo estimation of the blocking probability)
-        OR the maximum number of *arrival events* when track_absorption=True (which we assume it indicates that
+        OR maximum number of *arrival events* when track_absorption=True (which we assume it indicates that
         this function is called as part of the Fleming-Viot estimation of the blocking probability).
         Note that its meaning is different in one case and the other because in the Fleming-Viot case,
         the number of arrivals, and NOT the number of events, is the one that determines the expected error
@@ -2359,7 +2389,7 @@ def run_simulation_mc(env, agent, t_learn, start_state, t_sim_max,
             # Tracking absorptions means that we are running this simulation for the FV estimation of E(T_A) and perhaps P(T>t) as well
             # => We need to stop when a certain number of ARRIVALS have occurred
             # (because that's how the required simulation time has been determined in order to guarantee a maximum
-            # relative error of the estimation of E(T_A) --see compute_nparticles_and_nsteps_for_fv_process())
+            # relative error of the estimation of E(T_A) --see compute_nparticles_and_narrivals_for_fv_process())
             done = check_done(tmax, t_arrivals, state, action, reward)
         else:
             done = check_done(tmax, t, state, action, reward)
@@ -2558,7 +2588,7 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info):
         Dictionary containing simulation and estimation parameters.
         It should contain at least the following keys:
         - buffer_size_activation: the overall system's buffer size for activation (J, where J-1 is the absorption buffer size).
-        - T: the number of simulation steps to use in the Monte-Carlo simulation that estimates E(T_A).
+        - T: the number of arrival events to use in the Monte-Carlo simulation that estimates E(T_A).
 
         The following keys are optional:
         - burnin_time_steps: number of burn-in time steps to allow at the beginning of the simulation in order to
@@ -2570,7 +2600,7 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info):
             absorption times of each of the N particles used in the FV simulation, or
             - SurvivalProbabilityEstimation.FROM_M_CYCLES, where the survival probability is estimated from the M cycles
             defined by the return to the absorption set A of a single particle being simulated. The number M is a
-            function of the number of simulation time steps T and of J, the size of the absorption set A. For a fixed
+            function of the number of arrival events T and of J, the size of the absorption set A. For a fixed
             T value, M decreases as J increases as the queue has less probability of visiting a state further away from 0.
             Because of the non-control of the number of cycles M, the preferred method to estimate the survival probability
             is FROM_N_PARTICLES because N is controlled by the number of particles used in the FV simulation. If we
@@ -3489,14 +3519,14 @@ def plot_trajectory(env, agent, J):
 
 # Tests
 if __name__ == "__main__":
-    #-------- compute_nparticles_and_nsteps_for_fv_process & compute_rel_errors_for_fv_process() --------------#
-    print("\n--- Testing compute_nparticles_and_nsteps_for_fv_process() and its inverse compute_rel_errors_for_fv_process():")
+    #-------- compute_nparticles_and_narrivals_for_fv_process & compute_rel_errors_for_fv_process() --------------#
+    print("\n--- Testing compute_nparticles_and_narrivals_for_fv_process() and its inverse compute_rel_errors_for_fv_process():")
     rhos = [0.7]
     K = 20
     J_factor = 0.3
     error_rel_phi = 0.5
     error_rel_et = 0.7
-    N, T = compute_nparticles_and_nsteps_for_fv_process(rhos, K, J_factor, error_rel_phi=error_rel_phi, error_rel_et=error_rel_et)
+    N, T = compute_nparticles_and_narrivals_for_fv_process(rhos, K, J_factor, error_rel_phi=error_rel_phi, error_rel_et=error_rel_et)
     print("N={}, T={}".format(N, T))
     assert np.all([N==149, T==54])
 
@@ -3508,4 +3538,4 @@ if __name__ == "__main__":
         ## NOTE that the relative error for E(T_A) is not so close to the nominal relative error...
         ## but this is fine, as the reason is that the number of cycles M that then defines T in the first function call
         ## is rounded up... What it's important is that the relative errors are smaller than the nominal errors.
-    #-------- compute_nparticles_and_nsteps_for_fv_process & compute_rel_errors_for_fv_process() --------------#
+    #-------- compute_nparticles_and_narrivals_for_fv_process & compute_rel_errors_for_fv_process() --------------#

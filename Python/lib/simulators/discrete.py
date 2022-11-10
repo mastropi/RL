@@ -41,6 +41,10 @@ class Simulator:
         Simulation case, which can be used to group simulations by specific settings of interest.
         default: 1
 
+    replication: (opt) int
+        Replication number associated to a simulation experiment. Normally one case may have several replications.
+        default: 1
+
     seed: (opt) int
         Seed to use in the simulations as base seed (then the seed for each simulation is changed from this base seed).
         default: None, in which case a random seed is generated.
@@ -68,7 +72,7 @@ class Simulator:
         default: False
     """
 
-    def __init__(self, env, agent, case=1, seed=None, log=False, save=False, logsdir=None, resultsdir=None, debug=False):
+    def __init__(self, env, agent, case=1, replication=1, seed=None, log=False, save=False, logsdir=None, resultsdir=None, debug=False):
 #        if not isinstance(env, EnvironmentDiscrete):
 #            raise TypeError("The environment must be of type {} from the {} module ({})" \
 #                            .format(EnvironmentDiscrete.__name__, EnvironmentDiscrete.__module__, env.__class__))
@@ -82,6 +86,7 @@ class Simulator:
         self.log = log
         self.save = save
         self.case = case
+        self.replication = replication
 
         dt_today_str = generate_datetime_string(prefix=self.__class__.__name__)
         if self.log:
@@ -969,7 +974,13 @@ class Simulator:
     def getCase(self):
         return self.case
 
+    def getReplication(self):
+        return self.replication
+
     def setCase(self, case):
         "Sets the simulation case, identifying a common set of simulations performed by a certain criterion"
         self.case = case
 
+    def setReplication(self, replication):
+        "Sets the replication number associated to the simulation"
+        self.replication = replication

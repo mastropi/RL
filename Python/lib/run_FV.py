@@ -31,7 +31,7 @@ from Python.lib.environments.queues import rewardOnJobRejection_Constant
 import Python.lib.estimators as estimators
 
 from Python.lib.simulators.queues import SurvivalProbabilityEstimation, estimate_blocking_fv, estimate_blocking_mc, \
-    compute_nparticles_and_nsteps_for_fv_process, compute_nparticles_and_nsteps_for_fv_process_many_settings, \
+    compute_nparticles_and_narrivals_for_fv_process, compute_nparticles_and_nsteps_for_fv_process_many_settings, \
     compute_rel_errors_for_fv_process
 from Python.lib.simulators import define_queue_environment_and_agent
 
@@ -1185,6 +1185,7 @@ if len(sys.argv) == nargs_required + counter_opt_args + 1:
 counter_opt_args += 1
 if len(sys.argv) == nargs_required + counter_opt_args + 1:
     sys.argv += [True]   # Whether to generate plots with the results
+counter_opt_args += 1
 print("Parsed user arguments: {}".format(sys.argv))
 print("")
 
@@ -1231,21 +1232,21 @@ else:
     # This expected relative error is used to define the value of the other parameter, but if this parameter value
     # falls out of the [min, max] value defined for the parameter, then no experiments are run.
     if analysis_type == "N":
-        T_required = compute_nparticles_and_nsteps_for_fv_process([lmbda/mu], K, J/K, error_rel_phi=None, error_rel_et=error_rel, constant_proportionality=1)
+        T_required = compute_nparticles_and_narrivals_for_fv_process([lmbda / mu], K, J / K, error_rel_phi=None, error_rel_et=error_rel, constant_proportionality=1)
         factor_uplift = np.nan
         T_values, factor_uplift = update_values_to_analyze( [], T_required, T_min, T_max,
                                                             discard_smaller_than_minimum=discard_smaller_than_minimum,
                                                             factor_uplift=factor_uplift)
         ## Note: T_values is used when calling the analyze_convergence() function
     elif analysis_type == "T":
-        N_required = compute_nparticles_and_nsteps_for_fv_process([lmbda/mu], K, J/K, error_rel_phi=error_rel, error_rel_et=None)
+        N_required = compute_nparticles_and_narrivals_for_fv_process([lmbda / mu], K, J / K, error_rel_phi=error_rel, error_rel_et=None)
         factor_uplift = np.nan
         N_values, factor_uplift = update_values_to_analyze( [], N_required, N_min, N_max,
                                                             discard_smaller_than_minimum=discard_smaller_than_minimum,
                                                             factor_uplift=factor_uplift)
         ## Note: N_values is used when calling the analyze_convergence() function
     elif analysis_type == "J":
-        N_required, T_required = compute_nparticles_and_nsteps_for_fv_process([lmbda/mu], K, J/K, error_rel_phi=error_rel, error_rel_et=error_rel, constant_proportionality=1)
+        N_required, T_required = compute_nparticles_and_narrivals_for_fv_process([lmbda / mu], K, J / K, error_rel_phi=error_rel, error_rel_et=error_rel, constant_proportionality=1)
         N = int(min(max(N_min, N_required), N_max))
         T = int(min(max(T_min, T_required), T_max))
 
@@ -1255,7 +1256,7 @@ if analysis_type == "N":
     N_values = []
     factor_uplift = np.nan
     for err_rel in errors_rel:
-        N_required = compute_nparticles_and_nsteps_for_fv_process([lmbda/mu], K, J/K, error_rel_phi=err_rel, error_rel_et=None)
+        N_required = compute_nparticles_and_narrivals_for_fv_process([lmbda / mu], K, J / K, error_rel_phi=err_rel, error_rel_et=None)
         N_values, factor_uplift = update_values_to_analyze(N_values, N_required, N_min, N_max,
                                                            discard_smaller_than_minimum=discard_smaller_than_minimum,
                                                            factor_uplift=factor_uplift)
@@ -1263,7 +1264,7 @@ elif analysis_type == "T":
     T_values = []
     factor_uplift = np.nan
     for err_rel in errors_rel:
-        T_required = compute_nparticles_and_nsteps_for_fv_process([lmbda / mu], K, J / K, error_rel_phi=None, error_rel_et=err_rel, constant_proportionality=1)
+        T_required = compute_nparticles_and_narrivals_for_fv_process([lmbda / mu], K, J / K, error_rel_phi=None, error_rel_et=err_rel, constant_proportionality=1)
         T_values, factor_uplift = update_values_to_analyze(T_values, T_required, T_min, T_max,
                                                            discard_smaller_than_minimum=discard_smaller_than_minimum,
                                                            factor_uplift=factor_uplift)
