@@ -178,13 +178,17 @@ def run_simulation_policy_learning(simul, replications, dict_params_simul, dict_
             # Get the seed for the first learning step and number of events to run the simulation for (from the benchmark file)
             benchmark_this_case_and_replication = benchmark[(benchmark['case'] == dict_info['case']) & (benchmark['replication'] == r)]
             seed = benchmark_this_case_and_replication['seed'].iloc[0]
-            dict_params_simul['t_sim'] = list(benchmark_this_case_and_replication['n_events_mc'] + benchmark_this_case_and_replication['n_events_fv'])   # Note that this is a list with the number of time steps to use for each learning step of the learning process to be run next
-            assert len(dict_params_simul['t_sim']) == benchmark_this_case_and_replication.shape[0], \
-                "There are as many values for the number of simulation steps per learning step as the number" \
-                " of learning steps read from the benchmark file for the current case '{}' and replication '{}' ({})" \
-                    .format(len(dict_params_simul['t_sim']), case, r, benchmark_this_case_and_replication.shape[0])
+
+            # Number of learning steps
             t_learn = benchmark_this_case_and_replication['t_learn'].iloc[-1]
             simul.setNumLearningSteps(t_learn)
+
+            # Number of steps by learning step
+            # This is set to the total number of events observed during the FVRL benchmark divided by the number of learning steps,
+            # so that the MC learning has the same number of events at each learning step.
+            dict_params_simul['t_sim'] = int( np.ceil( np.sum( list(benchmark_this_case_and_replication['n_events_mc'] +
+                                                                    benchmark_this_case_and_replication['n_events_fv'])  )
+                                                       / t_learn ) )
 
         _, _, df_learning = simul.run(dict_params_simul,
                                       dict_params_info=dict_params_info,
@@ -522,7 +526,6 @@ else:
         K_true = simul.agent.getAcceptancePolicy().getBufferSizeForDeterministicBlockingFromTheta(theta_true)
         K = simul.agent.getAcceptancePolicy().getBufferSizeForDeterministicBlockingFromTheta(theta_start)
 
-        t_sim = T   # This is defined just because it is used in the plot title below
         dict_params_simul = {
             'theta_true': theta_true,
             'theta_start': theta_start,
@@ -559,6 +562,10 @@ else:
                                                                                 benchmark=benchmark,
                                                                                 seed=None,
                                                                                 verbose=verbose)
+    # Update the value of t_sim so that it stores the number of events observed at each learning step
+    # in the *last* MC learning run (i.e. the last replication of the last analyzed case)
+    # which is shown in the plots below that e.g. show the evolution of the theta parameter as is being learned.
+    t_sim = df_learning['n_events_mc'].iloc[-1] + df_learning['n_events_fv'].iloc[-1]
 
 print("Optimum theta found by the learning algorithm for each replication and each parameter setting:\n{}" \
       .format(pd.DataFrame({'theta_opt': theta_opt_values}, index=range(1, ncases+1))))
