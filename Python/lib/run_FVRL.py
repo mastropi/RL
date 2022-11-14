@@ -143,29 +143,10 @@ def run_simulation_policy_learning(simul, replications, dict_params_simul, dict_
         error_rel_phi_real = np.nan
         error_rel_et_real = np.nan
 
-    # Show execution parameters
-    params = dict({
-        '0(a)-Seed (for first replication)': seed,
-        '1(a)-System-#Servers': simul.getEnv().getNumServers(),
-        '1(b)-System-JobClassRates': simul.getEnv().getJobClassRates(),
-        '1(c)-System-ServiceRates': simul.getEnv().getServiceRates(),
-        '1(d)-System-TrueTheta': dict_params_simul['theta_true'],
-        '1(e)-System-TrueK': dict_info['K_true'],
-        '2(a)-Learning-Method': dict_info['learning_method'],
-        '2(b)-Learning-Method#Particles and % Rel Error Phi': (dict_params_simul['nparticles'], error_rel_phi_real * 100),
-        '2(c)-Learning-Method#TimeSteps/ArrivalEvents and % Rel Error E(T)': (dict_params_simul['t_sim'], error_rel_et_real * 100),
-        '2(d)-Learning-Method#BurnInSteps (BITS)': dict_params_simul['burnin_time_steps'],
-        '2(e)-Learning-Method#MinNumCycles': dict_params_simul['min_num_cycles_for_expectations'],
-        '2(f)-Learning-LearningMode': simul.dict_learning_params['mode'].name,
-        '2(g)-Learning-ThetaStart': dict_params_simul['theta_start'],
-        '2(h)-Learning-#Steps': simul.getNumLearningSteps(),
-        '2(i)-Learning-#SimulationTimePerLearningStep': dict_params_simul['t_sim'],     # [DM-2022/10/13] Is this rather the # arrival events? I think YES. We need to check the run() method in SimulatorQueue to answer this properly.
-        '2(j)-Learning-AlphaStart': dict_info['alpha_start'],
-        '2(k)-Learning-AdjustAlpha?': dict_info['adjust_alpha'],
-        '2(l)-Learning-MinEpisodeToAdjustAlpha': dict_info['min_time_to_update_alpha'],
-        '2(m)-Learning-AlphaMin': dict_info['alpha_min'],
-    })
-    show_exec_params(params)
+    # Store the number of particles and number of arrival events so that we can reset them at the start of every replication
+    # (only important when running FVRL, because when running the MC learner, their values are read from the benchmark file)
+    nparticles0 = dict_params_simul['nparticles']
+    t_sim0 = dict_params_simul['t_sim']
 
     for r in range(1, replications+1):
         print("\n=== Running replication {} of {} ===".format(r, replications))
@@ -173,6 +154,34 @@ def run_simulation_policy_learning(simul, replications, dict_params_simul, dict_
         simul.reset(reset_learning_history=True, reset_value_functions=True, reset_counts=True)
         simul.setCase(dict_info['case'])
         simul.setReplication(r)
+
+        # Reset the values of the number of particles and number of arrival events
+        # (only important when running FVRL, as in the MC learner case, their values are read from the benchmark file)
+        dict_params_simul['nparticles'] = nparticles0
+        dict_params_simul['t_sim'] = t_sim0
+
+        # Show execution parameters
+        params = dict({
+            '0(a)-Seed (for first replication)': seed,
+            '1(a)-System-#Servers': simul.getEnv().getNumServers(),
+            '1(b)-System-JobClassRates': simul.getEnv().getJobClassRates(),
+            '1(c)-System-ServiceRates': simul.getEnv().getServiceRates(),
+            '1(d)-System-TrueTheta': dict_params_simul['theta_true'],
+            '1(e)-System-TrueK': dict_info['K_true'],
+            '2(a)-Learning-Method': dict_info['learning_method'],
+            '2(b)-Learning-Method#Particles and % Rel Error Phi': (dict_params_simul['nparticles'], error_rel_phi_real * 100),
+            '2(c)-Learning-Method#TimeSteps/ArrivalEvents and % Rel Error E(T)': (dict_params_simul['t_sim'], error_rel_et_real * 100),
+            '2(d)-Learning-Method#BurnInSteps (BITS)': dict_params_simul['burnin_time_steps'],
+            '2(e)-Learning-Method#MinNumCycles': dict_params_simul['min_num_cycles_for_expectations'],
+            '2(f)-Learning-LearningMode': simul.dict_learning_params['mode'].name,
+            '2(g)-Learning-ThetaStart': dict_params_simul['theta_start'],
+            '2(h)-Learning-#Steps': simul.getNumLearningSteps(),
+            '2(i)-Learning-AlphaStart': dict_info['alpha_start'],
+            '2(j)-Learning-AdjustAlpha?': dict_info['adjust_alpha'],
+            '2(k)-Learning-MinEpisodeToAdjustAlpha': dict_info['min_time_to_update_alpha'],
+            '2(l)-Learning-AlphaMin': dict_info['alpha_min'],
+        })
+        show_exec_params(params)
 
         if params_read_from_benchmark_file:
             # Get the seed for the first learning step and number of events to run the simulation for (from the benchmark file)
@@ -219,8 +228,8 @@ print("User arguments: {}".format(sys.argv))
 nargs_required = 3
 counter_opt_args = 0
 if len(sys.argv) == 1:  # Only the execution file name is contained in sys.argv
-    sys.argv += [5]    # t_learn: Number of learning steps
-    sys.argv += ["MC"]  # learning_method: estimation method: "FV" or "MC";
+    sys.argv += [15]    # t_learn: Number of learning steps
+    sys.argv += ["FV"]  # learning_method: estimation method: "FV" or "MC";
                         # when learning_method = "MC", we expect there exists a benchmark file called benchmark_fv.csv
                         # that defines how many events were observed during the equivalent FV learning method
                         # (for fair comparison). If one does not exist, the Monte-Carlo simulation wil be run
@@ -330,7 +339,7 @@ else:
     learnerV = LeaMC
     benchmark_file = os.path.join(os.path.abspath(resultsdir), benchmark_filename) # "SimulatorQueue_20221018_161552-K0=24-K=35-J=0.3-E1.0,0.2-AlphaConst(B=5)_seed1313.csv") #"benchmark_fv.csv")
     if not os.path.exists(benchmark_file):
-        warnings.warn("Benchmark file 'benchmark_fv.csv' does not exist. The Monte-Carlo simulation will run without any reference to a previously run Fleming-Viot simulation")
+        warnings.warn("Benchmark file {} does not exist. The Monte-Carlo simulation will run without any reference to a previously run Fleming-Viot simulation".format(benchmark_filename))
         benchmark_file = None
     plot_trajectories = False
     symbol = 'g-'
@@ -447,8 +456,8 @@ if benchmark_file is None:
             K_true = simul.agent.getAcceptancePolicy().getBufferSizeForDeterministicBlockingFromTheta(theta_true)
             K = simul.agent.getAcceptancePolicy().getBufferSizeForDeterministicBlockingFromTheta(theta_start)
             for j, J_factor in enumerate(J_factor_values):
-                Nmin = 10; Nmax = 500
-                Tmin = 10; Tmax = 5000
+                N_min = 50; N_max = 500
+                T_min = 100; T_max = 5000
                 NT_values = [compute_nparticles_and_narrivals_for_fv_process(rhos, K, J_factor, error_rel_phi=err1, error_rel_et=err2)
                              for err1, err2 in zip(error_rel_phi, error_rel_et)]
                 for idx_case, (exponent, (N, T)) in enumerate(zip(NT_exponents, NT_values)):
@@ -456,8 +465,8 @@ if benchmark_file is None:
                     print("err(phi) = {:.3f}% => N = {}".format(error_rel_phi[idx_case] * 100, NT_values[idx_case][0]))
                     print("err(E(T)) = {:.3f}% => T = {}".format(error_rel_et[idx_case] * 100, NT_values[idx_case][1]))
                     # Lower bound for N and T so that we don't have too little particles!
-                    N = min( max(Nmin, N), Nmax )
-                    T = min( max(Tmin, T), Tmax )
+                    N = min( max(N_min, N), N_max )
+                    T = min( max(T_min, T), T_max )
                     # Set the parameters for this run
                     case += 1
                     t_sim = T  # This is used just for the title of plots done below (after the loop)
@@ -481,10 +490,10 @@ if benchmark_file is None:
                                  'K': K,
                                  'error_rel_phi': error_rel_phi[idx_case],
                                  'error_rel_et': error_rel_et[idx_case],
-                                 'Nmin': Nmin,
-                                 'Nmax': Nmax,
-                                 'Tmin': Tmin,
-                                 'Tmax': Tmax,
+                                 'N_min': N_min,
+                                 'N_max': N_max,
+                                 'T_min': T_min,
+                                 'T_max': T_max,
                                  'alpha_start': alpha_start,
                                  'adjust_alpha': adjust_alpha,
                                  'min_time_to_update_alpha': min_time_to_update_alpha,

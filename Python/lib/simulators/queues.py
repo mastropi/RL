@@ -446,7 +446,7 @@ class SimulatorQueue(Simulator):
                 max_survival_time = 0.0 # Ditto
 
             # Compute the state-action values (Q(s,a)) for buffer size = K-1
-            if probas_stationary.get(K-1, 0.0) == 0.0:
+            if probas_stationary.get(K-1, 0.0) == 0.0 or np.isnan(probas_stationary.get(K-1, 0.0)):
                 Q0_Km1 = 0.0
                 Q1_Km1 = 0.0
                 n_Km1 = 0
@@ -477,7 +477,7 @@ class SimulatorQueue(Simulator):
 
             # Compute the state-action values (Q(s,a)) for buffer size = K
             # This is needed ONLY when the policy learning methodology is IGA (Integer Gradient Ascent, presented in Massaro's paper (2019)
-            if self.dict_learning_params['mode'] != LearningMode.IGA or probas_stationary.get(K, 0.0) == 0.0:
+            if self.dict_learning_params['mode'] != LearningMode.IGA or probas_stationary.get(K, 0.0) == 0.0 or np.isnan(probas_stationary.get(K, 0.0)):
                 # We set all the values to 0 so that the learn() method called below doesn't fail, as it assumes that
                 # the values possibly involved with learning (which depend on the learning method) have a real value.
                 Q0_K = 0.0
@@ -547,8 +547,8 @@ class SimulatorQueue(Simulator):
                     compute_nparticles_and_narrivals_for_fv_process(self.rhos, _K_next, dict_params_simul['buffer_size_activation_factor'],
                                                                     error_rel_phi=dict_info['error_rel_phi'],
                                                                     error_rel_et=dict_info['error_rel_et'])
-                _N_new = min(max(dict_info.get('Nmin', 0), _N), dict_info.get('Nmax', np.Inf))
-                _T_new = min(max(dict_info.get('Tmin', 0), _T), dict_info.get('Tmax', np.Inf))
+                _N_new = min(max(dict_info.get('N_min', 0), _N), dict_info.get('N_max', np.Inf))
+                _T_new = min(max(dict_info.get('T_min', 0), _T), dict_info.get('T_max', np.Inf))
                 if True or show_messages(verbose, verbose_period, t_learn):
                     print("New blocking size K = {}".format(_K_next))
                     print("\tN updated from {} --> {}".format(dict_params_simul['nparticles'], _N_new))
@@ -556,8 +556,11 @@ class SimulatorQueue(Simulator):
                 dict_params_simul['nparticles'] = _N_new
                 dict_params_simul['T'] = _T_new
 
-                # NOTE: The number of particles and the environments used in the simulation are updated at the beginning of the next iteration
-                # by calling the self.setNumberParticlesAndCreateEnvironments() method.
+                # Set the number of particles in the object
+                # Note that for the updated number of arrival events to be used in the next iteration,
+                # it suffices to update dict_params_simul['T'] which is what we just did.
+                self.setNumberParticlesAndCreateEnvironments(dict_params_simul['nparticles'])
+                assert self.N == dict_params_simul['nparticles']
 
             if show_messages(verbose, verbose_period, t_learn):
                 print("\tUpdated value function at the end of the queue simulation: average reward V = {}".format(self.getLearnerV().getV()))
@@ -628,7 +631,7 @@ class SimulatorQueue(Simulator):
         #-- Parse input parameters
         if agent is None:
             agent = self.agent
-        tmax = t_sim_max
+        t_max = t_sim_max
 
         # Set the start state of the environment to the given start state
         job_class = None
@@ -660,9 +663,9 @@ class SimulatorQueue(Simulator):
                 # S(t): state BEFORE an action is taken
                 # A(t): action taken given the state S(t)
                 # R(t): reward received by taking action A(t) and transition to S(t+1)
-                update_trajectory(agent, (t_learn - 1) * (tmax + 1) + t, t, state, action, reward)
+                update_trajectory(agent, (t_learn - 1) * (t_max + 1) + t, t, state, action, reward)
 
-                done = check_done(tmax, t, state, action, reward)
+                done = check_done(t_max, t, state, action, reward)
             elif event == Event.DEATH:
                 # The event is a completed service
                 # => Update the state of the queue but do NOT update the discrete-time step
@@ -674,7 +677,7 @@ class SimulatorQueue(Simulator):
                     # at the end showing the states of the system at each time step does not raise suspicion
                     # because the buffer size doesn't change between two consecutive time steps --which would be
                     # inconsistent with the fact that a new time step is defined when a new job arrives).
-                    update_trajectory(agent, (t_learn - 1) * (tmax + 1) + t, t, state, action, reward)
+                    update_trajectory(agent, (t_learn - 1) * (t_max + 1) + t, t, state, action, reward)
 
             if self.debug:
                 print("{} | t={}: event={}, action={} -> state={}, reward={}".format(state, t, event, action, next_state, reward), end="\n")
@@ -1321,7 +1324,7 @@ def compute_nparticles_and_nsteps_for_fv_process_many_settings(rhos: list,
     return df_results
 
 
-def compute_nparticles_and_narrivals_for_fv_process(rhos: list, capacity: int, buffer_size_activation_factor: float= 1 / 3,
+def compute_nparticles_and_narrivals_for_fv_process(rhos: list, capacity: int, buffer_size_activation_factor: float= 1/3,
                                                     error_rel_phi=0.50, error_rel_et=0.50,
                                                     return_J=False,
                                                     constant_proportionality=1):
@@ -2224,7 +2227,7 @@ def run_simulation_mc(env, agent, t_learn, start_state, t_sim_max,
     # ---------------------------- Auxiliary functions
 
     # -- Parse input parameters
-    tmax = t_sim_max
+    t_max = t_sim_max
 
     # Seed
     if seed is not None:
@@ -2239,7 +2242,7 @@ def run_simulation_mc(env, agent, t_learn, start_state, t_sim_max,
               .format(env.getState(), buffer_size_start))
 
     # Store the initial position as part of the trajectory
-    update_trajectory(agent, (t_learn - 1) * (tmax + 1) + 0, 0.0, env.getState(), None, np.nan)
+    update_trajectory(agent, (t_learn - 1) * (t_max + 1) + 0, 0.0, env.getState(), None, np.nan)
 
     # Time step in the queue trajectory (the first time step is t = 0)
     done = False
@@ -2372,7 +2375,7 @@ def run_simulation_mc(env, agent, t_learn, start_state, t_sim_max,
         # S(t): state BEFORE an action is taken
         # A(t): action taken given the state S(t)
         # R(t): reward received by taking action A(t) and transition to S(t+1)
-        update_trajectory(agent, (t_learn - 1) * (tmax + 1) + t, time_abs, next_state, action, reward)
+        update_trajectory(agent, (t_learn - 1) * (t_max + 1) + t, time_abs, next_state, action, reward)
 
         # Check RETURN: the initial buffer size is observed again.
         buffer_size = env.getBufferSizeFromState(next_state)
@@ -2390,9 +2393,9 @@ def run_simulation_mc(env, agent, t_learn, start_state, t_sim_max,
             # => We need to stop when a certain number of ARRIVALS have occurred
             # (because that's how the required simulation time has been determined in order to guarantee a maximum
             # relative error of the estimation of E(T_A) --see compute_nparticles_and_narrivals_for_fv_process())
-            done = check_done(tmax, t_arrivals, state, action, reward)
+            done = check_done(t_max, t_arrivals, state, action, reward)
         else:
-            done = check_done(tmax, t, state, action, reward)
+            done = check_done(t_max, t, state, action, reward)
 
     # DONE
     if show_messages(verbose, verbose_period, t_learn):

@@ -89,7 +89,7 @@ class Test_EstPolicy_EnvQueueSingleServer(unittest.TestCase):
             '2(b)-Learning-Method#Particles': dict_params_simul['nparticles'],
             '2(c)-Learning-GradientEstimation': dict_params_learn['mode'].name,
             '2(d)-Learning-#Steps': dict_params_learn['t_learn'],
-            '2(e)-Learning-SimulationTimePerLearningStep': dict_params_simul['t_sim'],
+            '2(e)-Learning-#TimeSteps/ArrivalEvents': dict_params_simul['t_sim'],
         })
         show_exec_params(params)
         # Set the initial theta value
