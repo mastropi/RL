@@ -1177,406 +1177,436 @@ def show_execution_parameters():
 #------------------- Functions --------------------
 
 
-#------------------- Execution starts -------------
-# Default execution arguments when no arguments are given
-# Example of execution from the command line:
-# python run_FV.py 1 N 5 10 0.5 8 1
-print("User arguments: {}".format(sys.argv))
-nargs_required = 7
-counter_opt_args = 0
-if len(sys.argv) == 1:    # Only the execution file name is contained in sys.argv
-    sys.argv += [1]       # Number of servers in the system to simulate
-    sys.argv += ["N"]     # Type of analysis: either "N" for the impact of number of particles, "T" for the impact of the number of events, or "J" for the impact of buffer size
-    sys.argv += [10]      # K: capacity of the system
-    sys.argv += [0.4]     # J factor: factor such that J = round(factor*K)
-    sys.argv += [0.2]     # Either the value of the parameter that is NOT analyzed (according to parameter "type of analysis") (e.g. "N" if "type of analysis" = "T") (if value >= 10), or the relative expected error from which such value is computed (if value < 10).
-    sys.argv += [3]       # Number of replications
-    sys.argv += [1]       # Test number to run: only one is accepted
-if len(sys.argv) == nargs_required + counter_opt_args + 1:
-    sys.argv += [False]   # Whether to discard the values to analyze that are less than the minimum specified (e.g. N < N_min) or uplift the values to be larger so that we have enough samples to compute estimates
-counter_opt_args += 1
-if len(sys.argv) == nargs_required + counter_opt_args + 1:
-    sys.argv += [10]      # BITS: Burn-in time steps to consider until stationarity can be assumed for the estimation of expectations (e.g. E(T) (return cycle time) in Monte-Carlo, E(T_A) (reabsorption cycle time) in Fleming-Viot)
-counter_opt_args += 1
-if len(sys.argv) == nargs_required + counter_opt_args + 1:
-    sys.argv += [5]       # MINCE: Minimum number of cycles to be used for the estimation of expectations (e.g. E(T) in Monte-Carlo and E(T_A) in Fleming-Viot)
-counter_opt_args += 1
-if len(sys.argv) == nargs_required + counter_opt_args + 1:
-    sys.argv += [2]       # Number of methods to run: 1 (only FV), 2 (FV & MC)
-counter_opt_args += 1
-if len(sys.argv) == nargs_required + counter_opt_args + 1:
-    sys.argv += ["nosave"]  # Either "nosave" or anything else for saving the results and log
-counter_opt_args += 1
-if len(sys.argv) == nargs_required + counter_opt_args + 1:
-    sys.argv += [True]   # Whether to use the execution date and time in the output file name containing the results
-counter_opt_args += 1
-if len(sys.argv) == nargs_required + counter_opt_args + 1:
-    sys.argv += ["ID1"]      # Identifier to use for this run (e.g. "ID1"), in addition to the execution datetime (if requested)
-counter_opt_args += 1
-if len(sys.argv) == nargs_required + counter_opt_args + 1:
-    sys.argv += [True]   # Whether to generate plots with the results
-counter_opt_args += 1
-print("Parsed user arguments: {}".format(sys.argv))
-print("")
+if __name__ == "__main__":
+    #------------------- Execution starts -------------
+    # Default execution arguments when no arguments are given
+    # Example of execution from the command line:
+    # python run_FV.py 1 N 5 10 0.5 8 1
+    print("User arguments: {}".format(sys.argv))
+    nargs_required = 7
+    counter_opt_args = 0
+    if len(sys.argv) == 1:    # Only the execution file name is contained in sys.argv
+        sys.argv += [1]       # Number of servers in the system to simulate
+        sys.argv += ["N"]     # Type of analysis: either "N" for the impact of number of particles, "T" for the impact of the number of events, or "J" for the impact of buffer size
+        sys.argv += [10]      # K: capacity of the system
+        sys.argv += [0.4]     # J factor: factor such that J = round(factor*K)
+        sys.argv += [0.2]     # Either the value of the parameter that is NOT analyzed (according to parameter "type of analysis") (e.g. "N" if "type of analysis" = "T") (if value >= 10), or the relative expected error from which such value is computed (if value < 10).
+        sys.argv += [3]       # Number of replications
+        sys.argv += [1]       # Test number to run: only one is accepted
+    if len(sys.argv) == nargs_required + counter_opt_args + 1:
+        sys.argv += [False]   # Whether to discard the values to analyze that are less than the minimum specified (e.g. N < N_min) or uplift the values to be larger so that we have enough samples to compute estimates
+    counter_opt_args += 1
+    if len(sys.argv) == nargs_required + counter_opt_args + 1:
+        sys.argv += [10]      # BITS: Burn-in time steps to consider until stationarity can be assumed for the estimation of expectations (e.g. E(T) (return cycle time) in Monte-Carlo, E(T_A) (reabsorption cycle time) in Fleming-Viot)
+    counter_opt_args += 1
+    if len(sys.argv) == nargs_required + counter_opt_args + 1:
+        sys.argv += [5]       # MINCE: Minimum number of cycles to be used for the estimation of expectations (e.g. E(T) in Monte-Carlo and E(T_A) in Fleming-Viot)
+    counter_opt_args += 1
+    if len(sys.argv) == nargs_required + counter_opt_args + 1:
+        sys.argv += [2]       # Number of methods to run: 1 (only FV), 2 (FV & MC)
+    counter_opt_args += 1
+    if len(sys.argv) == nargs_required + counter_opt_args + 1:
+        sys.argv += ["nosave"]  # Either "nosave" or anything else for saving the results and log
+    counter_opt_args += 1
+    if len(sys.argv) == nargs_required + counter_opt_args + 1:
+        sys.argv += [True]   # Whether to use the execution date and time in the output file name containing the results
+    counter_opt_args += 1
+    if len(sys.argv) == nargs_required + counter_opt_args + 1:
+        sys.argv += ["ID1"]      # Identifier to use for this run (e.g. "ID1"), in addition to the execution datetime (if requested)
+    counter_opt_args += 1
+    if len(sys.argv) == nargs_required + counter_opt_args + 1:
+        sys.argv += [True]   # Whether to generate plots with the results
+    counter_opt_args += 1
+    print("Parsed user arguments: {}".format(sys.argv))
+    print("")
 
-#-- Parse user arguments
-# This function parses a boolean input parameter which, depending on where this script is called from, may be a boolean
-# value already (if run from e.g. PyCharm) or may be a string value (if run from the command line).
-parse_boolean_parameter = lambda x: isinstance(x, bool) and x or isinstance(x, str) and x == "True"
+    #-- Parse user arguments
+    # This function parses a boolean input parameter which, depending on where this script is called from, may be a boolean
+    # value already (if run from e.g. PyCharm) or may be a string value (if run from the command line).
+    parse_boolean_parameter = lambda x: isinstance(x, bool) and x or isinstance(x, str) and x == "True"
 
-nservers = int(sys.argv[1]); lmbda = 0.7; mu = 1.0  # Queue system characteristics
-analysis_type = sys.argv[2]
-K = int(sys.argv[3])
-J = int(np.round(float(sys.argv[4]) * K))    # We need the float() because the input arguments are read as strings when running the program from the command line
+    nservers = int(sys.argv[1]); lmbda = 0.7; mu = 1.0  # Queue system characteristics
+    analysis_type = sys.argv[2]
+    K = int(sys.argv[3])
+    J = int(np.round(float(sys.argv[4]) * K))    # We need the float() because the input arguments are read as strings when running the program from the command line
 
-#---------------------- Definition of parameters N and T ----------------------
-# Min and Max values are defined for N and T in order to:
-# - (min) not have a too small values making estimates not work at all (they would most likely be set to NaN!)
-# - (max) not incur into a simulation that takes forever.
-# When the analysis is done by one of these parameters, any value that is above its max value is NOT considered for simulation.
-# Otherwise, the parameter is clipped to the [min, max] interval.
-N_min = 10; N_max = 6000
-T_min = 50; T_max = 10000
-# We define the relative errors to consider which define the values of the parameter to analyze.
-# Errors are defined in *decreasing* order so that the parameter values are in increasing order.
-errors_rel = np.r_[np.arange(1.0, 0.0, -0.2), 0.1, 0.05]
+    #---------------------- Definition of parameters N and T ----------------------
+    # Min and Max values are defined for N and T in order to:
+    # - (min) not have a too small values making estimates not work at all (they would most likely be set to NaN!)
+    # - (max) not incur into a simulation that takes forever.
+    # When the analysis is done by one of these parameters, any value that is above its max value is NOT considered for simulation.
+    # Otherwise, the parameter is clipped to the [min, max] interval.
+    N_min = 10; N_max = 6000
+    T_min = 50; T_max = 10000
+    # We define the relative errors to consider which define the values of the parameter to analyze.
+    # Errors are defined in *decreasing* order so that the parameter values are in increasing order.
+    errors_rel = np.r_[np.arange(1.0, 0.0, -0.2), 0.1, 0.05]
 
-other_parameter = float(sys.argv[5])
-discard_smaller_than_minimum = parse_boolean_parameter(sys.argv[8])
-if other_parameter >= 10:
-    # The parameter defines "the number of..." particles or arrivals (instead of an expected relative error value)
-    # => Just assign the given value to the respective parameter
-    if analysis_type == "N":
-        T = int(other_parameter)
-        error_rel = compute_rel_errors_for_fv_process([lmbda/mu], K, J/K, N=None, T=T, constant_proportionality=1)
-    elif analysis_type == "T":
-        N = int(other_parameter)
-        error_rel = compute_rel_errors_for_fv_process([lmbda/mu], K, J/K, N=N, T=None)
-    elif analysis_type == "J":
-        N = int(other_parameter)
-        T = int(other_parameter)
-else:
-    # The parameter defines the expected relative error for the estimation of Phi(t,K) or E(T_A)
-    # => Compute N or T based on this expected relative error
-    error_rel = other_parameter
-    # This expected relative error is used to define the value of the other parameter, but if this parameter value
-    # falls out of the [min, max] value defined for the parameter, then no experiments are run.
-    if analysis_type == "N":
-        T_required = compute_nparticles_and_narrivals_for_fv_process([lmbda / mu], K, J / K, error_rel_phi=None, error_rel_et=error_rel, constant_proportionality=1)
-        factor_uplift = np.nan
-        T_values, factor_uplift = update_values_to_analyze( [], T_required, T_min, T_max,
-                                                            discard_smaller_than_minimum=discard_smaller_than_minimum,
-                                                            factor_uplift=factor_uplift)
-        ## Note: T_values is used when calling the analyze_convergence() function
-    elif analysis_type == "T":
-        N_required = compute_nparticles_and_narrivals_for_fv_process([lmbda / mu], K, J / K, error_rel_phi=error_rel, error_rel_et=None)
-        factor_uplift = np.nan
-        N_values, factor_uplift = update_values_to_analyze( [], N_required, N_min, N_max,
-                                                            discard_smaller_than_minimum=discard_smaller_than_minimum,
-                                                            factor_uplift=factor_uplift)
-        ## Note: N_values is used when calling the analyze_convergence() function
-    elif analysis_type == "J":
-        N_required, T_required = compute_nparticles_and_narrivals_for_fv_process([lmbda / mu], K, J / K, error_rel_phi=error_rel, error_rel_et=error_rel, constant_proportionality=1)
-        N = int(min(max(N_min, N_required), N_max))
-        T = int(min(max(T_min, T_required), T_max))
-
-# Define the values to use on the parameter to analyze based on the expected relative error for the estimation
-# affected by the parameter (Phi(t,K) for parameter N and E(T_A) for parameter T)
-if analysis_type == "N":
-    N_values = []
-    factor_uplift = np.nan
-    for err_rel in errors_rel:
-        N_required = compute_nparticles_and_narrivals_for_fv_process([lmbda / mu], K, J / K, error_rel_phi=err_rel, error_rel_et=None)
-        N_values, factor_uplift = update_values_to_analyze(N_values, N_required, N_min, N_max,
-                                                           discard_smaller_than_minimum=discard_smaller_than_minimum,
-                                                           factor_uplift=factor_uplift)
-elif analysis_type == "T":
-    T_values = []
-    factor_uplift = np.nan
-    for err_rel in errors_rel:
-        T_required = compute_nparticles_and_narrivals_for_fv_process([lmbda / mu], K, J / K, error_rel_phi=None, error_rel_et=err_rel, constant_proportionality=1)
-        T_values, factor_uplift = update_values_to_analyze(T_values, T_required, T_min, T_max,
-                                                           discard_smaller_than_minimum=discard_smaller_than_minimum,
-                                                           factor_uplift=factor_uplift)
-#---------------------- Definition of parameters N and T ----------------------
-
-# Computing the minimum required N and T values for different expected relative errors for different K and J/K values
-df_NT_required = compute_nparticles_and_nsteps_for_fv_process_many_settings(   rhos=[lmbda/mu],
-                                                                               K_values=[5, 10, 20, 40],
-                                                                               JF_values=np.arange(0.1, 0.9, 0.1),
-                                                                               error_rel=np.arange(0.1, 1.1, 0.1))
-#df_NT_required.to_csv("../../RL-002-QueueBlocking/NT_required.csv")
-
-replications = int(sys.argv[6])
-tests2run = [int(v) for v in [sys.argv[7]]]  # NOTE: It's important to enclose sys.argv[7] in brackets because o.w.,
-                                             # from the command line, a number with more than one digit is interpreted
-                                             # as a multi-element list!! (e.g. 10 is interpreted as a list with elements [1, 0])
-burnin_time_steps = int(sys.argv[9])
-min_num_cycles_for_expectations = int(sys.argv[10])
-run_mc = int(sys.argv[11]) == 2
-save_results = sys.argv[12] != "nosave"
-save_with_dt = parse_boolean_parameter(sys.argv[13])
-id_run = sys.argv[14]
-plot = parse_boolean_parameter(sys.argv[15])
-
-if len(tests2run) == 0:
-    print("No tests have been specified to run. Please specify the test number as one of the arguments.")
-    sys.exit()
-
-seed = 1313
-
-show_execution_parameters()
-
-if len(N_values) == 0 or len(T_values) == 0:
-    print("The parameter settings (K, J, error_rel) = {} are such that no N values or no T values are eligible",
-          " for running the simulation, because they would be too large making the simulation prohibitive in terms of execution time.",
-          "\nTry other set of parameters. The program stops.".format([K, J, error_rel]))
-    sys.exit()
-
-if analysis_type not in ["N", "T", "J"]:
-    raise ValueError("Valid values for the second parameter are 'N', 'T' or 'J'. Given: {}".format(analysis_type))
-elif analysis_type == "N":
-    resultsfile_prefix = "estimates_vs_N"
-    resultsfile_suffix = "{}K={},J={},T={}".format((id_run == "" and "") or (id_run + "_"), K, J, T_values)
-elif analysis_type == "T":
-    resultsfile_prefix = "estimates_vs_T"
-    resultsfile_suffix = "{}K={},J={},N={}".format((id_run == "" and "") or (id_run + "_"), K, J, N_values)
-else:
-    resultsfile_prefix = "estimates_vs_J"
-    resultsfile_suffix = "{}K={},N={},T={}".format((id_run == "" and "") or (id_run + "_"), K, N_values, T_values)
-#-- Parse user arguments
-
-if save_results:
-    dt_start, stdout_sys, fh_log, logfile, resultsfile, resultsfile_agg, proba_functions_file, figfile = \
-        createLogFileHandleAndResultsFileNames(prefix=resultsfile_prefix, suffix=resultsfile_suffix, use_dt_suffix=save_with_dt)
-    # Show the execution parameters again in the log file
-    show_execution_parameters()
-else:
-    fh_log = None; resultsfile = None; resultsfile_agg = None; proba_functions_file = None; figfile = None
-
-if analysis_type in ["N", "T"]:
-    # -- Single-server
-    results, results_agg, est_fv, est_mc = analyze_convergence(
-                                                estimation_process=Process.Simulators,
-                                                nservers=nservers, job_class_rates=[lmbda], service_rates=[mu], K=K, buffer_size_activation=J,
-                                                burnin_time_steps=burnin_time_steps,
-                                                method_proba_surv=SurvivalProbabilityEstimation.FROM_N_PARTICLES,
-                                                nparticles=N_values, #N, 2*N, 4*N, 8*N, 16*N],  # [800, 1600, 3200], #[10, 20, 40], #[24, 66, 179],
-                                                nmeantimes=T_values, #50, #[170, 463, 1259],
-                                                replications=replications, run_mc=run_mc,
-                                                seed=seed)
-
-    # -- Multi-server
-    # results, results_agg, est_fv, est_mc = \
-    #    analyze_convergence(nservers=3, K=20, buffer_size_activation=0.5, burnin_cycles_absorption=4,
-    #                                             nparticles_min=800, nparticles_max=1600, nparticles_step_prop=1,
-    #                                             nmeantimes=1400, replications=5,
-    #                                             run_mc=run_mc, plotFlag=True)
-
-    # Save results
-    save_dataframes([{'df': results, 'file': resultsfile},
-                     {'df': results_agg, 'file': resultsfile_agg}])
-
-    # Plot results
-    if plot:
+    other_parameter = float(sys.argv[5])
+    discard_smaller_than_minimum = parse_boolean_parameter(sys.argv[8])
+    if other_parameter >= 10:
+        # The parameter defines "the number of..." particles or arrivals (instead of an expected relative error value)
+        # => Just assign the given value to the respective parameter
         if analysis_type == "N":
-            for T in T_values:
-                # Note: the columns defined in parameters `x` and `x2` are grouping variables that define each violin plot
-                axes = plot_results_fv_mc(results, x="N", x2="#Cycles(MC)_mean",
-                                          xlabel="# particles", xlabel2="# Return Cycles to {}".format(J-1),
-                                          ymin=0.0, plot_mc=run_mc, splines=False,
-                                          title="nservers={}, K={}, J={}, T={}, BITS={}, MINCE={}" \
-                                                .format(nservers, K, J, T, burnin_time_steps, min_num_cycles_for_expectations))
+            T = int(other_parameter)
+            error_rel = compute_rel_errors_for_fv_process([lmbda/mu], K, J/K, N=None, T=T, constant_proportionality=1)
         elif analysis_type == "T":
-            for N in N_values:
-                # Note: the columns defined in parameters `x` and `x2` are grouping variables that define each violin plot
-                axes = plot_results_fv_mc(results, x="T", x2="#Cycles(MC)_mean",
-                                          xlabel="# arrival events", xlabel2="# Return Cycles to {}".format(J-1),
-                                          ymin=0.0, plot_mc=run_mc, splines=False,
-                                          title="nservers={}, K={}, J={}, N={}, BITS={}, MINCE={}" \
-                                                .format(nservers, K, J, N, burnin_time_steps, min_num_cycles_for_expectations))
-elif analysis_type == "J":
-    # Info for plotting...
-    x = "buffer_size_activation";
-    xlabel = "J as fraction of K"
-    if 1 in tests2run:
-        K_values = [5, 5]  # [10, 20, 30, 40]
-        results, results_agg, proba_functions, est_fv, est_mc = analyze_absorption_size(
-                                                                    nservers=nservers,
-                                                                    replications=replications,
-                                                                    K_values=K_values,
-                                                                    nparticles_values=[20, 40],  # [200, 400, 800, 1600],
-                                                                    nmeantimes_values=[5000, 5000],  # [50, 50, 50, 50],
-                                                                    buffer_size_activation_values=[0.25, 0.5],  # [1, 0.2, 0.4, 0.6, 0.8],
-                                                                    burnin_cycles_absorption_values=[5, 3],
-                                                                    seed=1313,
-                                                                    run_mc=run_mc)
+            N = int(other_parameter)
+            error_rel = compute_rel_errors_for_fv_process([lmbda/mu], K, J/K, N=N, T=None)
+        elif analysis_type == "J":
+            N = int(other_parameter)
+            T = int(other_parameter)
+    else:
+        # The parameter defines the expected relative error for the estimation of Phi(t,K) or E(T_A)
+        # => Compute N or T based on this expected relative error
+        error_rel = other_parameter
+        # This expected relative error is used to define the value of the other parameter, but if this parameter value
+        # falls out of the [min, max] value defined for the parameter, then no experiments are run.
+        if analysis_type == "N":
+            T_required = compute_nparticles_and_narrivals_for_fv_process([lmbda / mu], K, J / K, error_rel_phi=None, error_rel_et=error_rel, constant_proportionality=1)
+            factor_uplift = np.nan
+            T_values, factor_uplift = update_values_to_analyze( [], T_required, T_min, T_max,
+                                                                discard_smaller_than_minimum=discard_smaller_than_minimum,
+                                                                factor_uplift=factor_uplift)
+            ## Note: T_values is used when calling the analyze_convergence() function
+        elif analysis_type == "T":
+            N_required = compute_nparticles_and_narrivals_for_fv_process([lmbda / mu], K, J / K, error_rel_phi=error_rel, error_rel_et=None)
+            factor_uplift = np.nan
+            N_values, factor_uplift = update_values_to_analyze( [], N_required, N_min, N_max,
+                                                                discard_smaller_than_minimum=discard_smaller_than_minimum,
+                                                                factor_uplift=factor_uplift)
+            ## Note: N_values is used when calling the analyze_convergence() function
+        elif analysis_type == "J":
+            N_required, T_required = compute_nparticles_and_narrivals_for_fv_process([lmbda / mu], K, J / K, error_rel_phi=error_rel, error_rel_et=error_rel, constant_proportionality=1)
+            N = int(min(max(N_min, N_required), N_max))
+            T = int(min(max(T_min, T_required), T_max))
+
+    # Define the values to use on the parameter to analyze based on the expected relative error for the estimation
+    # affected by the parameter (Phi(t,K) for parameter N and E(T_A) for parameter T)
+    if analysis_type == "N":
+        N_values = []
+        factor_uplift = np.nan
+        for err_rel in errors_rel:
+            N_required = compute_nparticles_and_narrivals_for_fv_process([lmbda / mu], K, J / K, error_rel_phi=err_rel, error_rel_et=None)
+            N_values, factor_uplift = update_values_to_analyze(N_values, N_required, N_min, N_max,
+                                                               discard_smaller_than_minimum=discard_smaller_than_minimum,
+                                                               factor_uplift=factor_uplift)
+    elif analysis_type == "T":
+        T_values = []
+        factor_uplift = np.nan
+        for err_rel in errors_rel:
+            T_required = compute_nparticles_and_narrivals_for_fv_process([lmbda / mu], K, J / K, error_rel_phi=None, error_rel_et=err_rel, constant_proportionality=1)
+            T_values, factor_uplift = update_values_to_analyze(T_values, T_required, T_min, T_max,
+                                                               discard_smaller_than_minimum=discard_smaller_than_minimum,
+                                                               factor_uplift=factor_uplift)
+    #---------------------- Definition of parameters N and T ----------------------
+
+    # Computing the minimum required N and T values for different expected relative errors for different K and J/K values
+    df_NT_required = compute_nparticles_and_nsteps_for_fv_process_many_settings(   rhos=[lmbda/mu],
+                                                                                   K_values=[5, 10, 20, 40],
+                                                                                   JF_values=np.arange(0.1, 0.9, 0.1),
+                                                                                   error_rel=np.arange(0.1, 1.1, 0.1))
+    #df_NT_required.to_csv("../../RL-002-QueueBlocking/NT_required.csv")
+
+    replications = int(sys.argv[6])
+    tests2run = [int(v) for v in [sys.argv[7]]]  # NOTE: It's important to enclose sys.argv[7] in brackets because o.w.,
+                                                 # from the command line, a number with more than one digit is interpreted
+                                                 # as a multi-element list!! (e.g. 10 is interpreted as a list with elements [1, 0])
+    burnin_time_steps = int(sys.argv[9])
+    min_num_cycles_for_expectations = int(sys.argv[10])
+    run_mc = int(sys.argv[11]) == 2
+    save_results = sys.argv[12] != "nosave"
+    save_with_dt = parse_boolean_parameter(sys.argv[13])
+    id_run = sys.argv[14]
+    plot = parse_boolean_parameter(sys.argv[15])
+
+    if len(tests2run) == 0:
+        print("No tests have been specified to run. Please specify the test number as one of the arguments.")
+        sys.exit()
+
+    seed = 1313
+
+    show_execution_parameters()
+
+    if len(N_values) == 0 or len(T_values) == 0:
+        print("The parameter settings (K, J, error_rel) = {} are such that no N values or no T values are eligible",
+              " for running the simulation, because they would be too large making the simulation prohibitive in terms of execution time.",
+              "\nTry other set of parameters. The program stops.".format([K, J, error_rel]))
+        sys.exit()
+
+    if analysis_type not in ["N", "T", "J"]:
+        raise ValueError("Valid values for the second parameter are 'N', 'T' or 'J'. Given: {}".format(analysis_type))
+    elif analysis_type == "N":
+        resultsfile_prefix = "estimates_vs_N"
+        resultsfile_suffix = "{}K={},J={},T={}".format((id_run == "" and "") or (id_run + "_"), K, J, T_values)
+    elif analysis_type == "T":
+        resultsfile_prefix = "estimates_vs_T"
+        resultsfile_suffix = "{}K={},J={},N={}".format((id_run == "" and "") or (id_run + "_"), K, J, N_values)
+    else:
+        resultsfile_prefix = "estimates_vs_J"
+        resultsfile_suffix = "{}K={},N={},T={}".format((id_run == "" and "") or (id_run + "_"), K, N_values, T_values)
+    #-- Parse user arguments
+
+    if save_results:
+        dt_start, stdout_sys, fh_log, logfile, resultsfile, resultsfile_agg, proba_functions_file, figfile = \
+            createLogFileHandleAndResultsFileNames(prefix=resultsfile_prefix, suffix=resultsfile_suffix, use_dt_suffix=save_with_dt)
+        # Show the execution parameters again in the log file
+        show_execution_parameters()
+    else:
+        fh_log = None; resultsfile = None; resultsfile_agg = None; proba_functions_file = None; figfile = None
+
+    if analysis_type in ["N", "T"]:
+        # -- Single-server
+        results, results_agg, est_fv, est_mc = analyze_convergence(
+                                                    estimation_process=Process.Simulators,
+                                                    nservers=nservers, job_class_rates=[lmbda], service_rates=[mu], K=K, buffer_size_activation=J,
+                                                    burnin_time_steps=burnin_time_steps,
+                                                    method_proba_surv=SurvivalProbabilityEstimation.FROM_N_PARTICLES,
+                                                    nparticles=N_values, #N, 2*N, 4*N, 8*N, 16*N],  # [800, 1600, 3200], #[10, 20, 40], #[24, 66, 179],
+                                                    nmeantimes=T_values, #50, #[170, 463, 1259],
+                                                    replications=replications, run_mc=run_mc,
+                                                    seed=seed)
+
+        # -- Multi-server
+        # results, results_agg, est_fv, est_mc = \
+        #    analyze_convergence(nservers=3, K=20, buffer_size_activation=0.5, burnin_cycles_absorption=4,
+        #                                             nparticles_min=800, nparticles_max=1600, nparticles_step_prop=1,
+        #                                             nmeantimes=1400, replications=5,
+        #                                             run_mc=run_mc, plotFlag=True)
+
+        # Save results
         save_dataframes([{'df': results, 'file': resultsfile},
-                         {'df': results_agg, 'file': resultsfile_agg},
-                         {'df': proba_functions, 'file': proba_functions_file}])
-        for K in K_values:
-            axes = plot_results_fv_mc(results, x, xlabel=xlabel, subset=results['K']==K, plot_mc=run_mc)
-    if 2 in tests2run:
-        K_values = [10, 20]
+                         {'df': results_agg, 'file': resultsfile_agg}])
+
+        # Plot results
+        if plot:
+            if analysis_type == "N":
+                for T in T_values:
+                    # Note: the columns defined in parameters `x` and `x2` are grouping variables that define each violin plot
+                    axes = plot_results_fv_mc(results, x="N", x2="#Cycles(MC)_mean",
+                                              xlabel="# particles", xlabel2="# Return Cycles to {}".format(J-1),
+                                              ymin=0.0, plot_mc=run_mc, splines=False,
+                                              title="nservers={}, K={}, J={}, T={}, BITS={}, MINCE={}" \
+                                                    .format(nservers, K, J, T, burnin_time_steps, min_num_cycles_for_expectations))
+            elif analysis_type == "T":
+                for N in N_values:
+                    # Note: the columns defined in parameters `x` and `x2` are grouping variables that define each violin plot
+                    axes = plot_results_fv_mc(results, x="T", x2="#Cycles(MC)_mean",
+                                              xlabel="# arrival events", xlabel2="# Return Cycles to {}".format(J-1),
+                                              ymin=0.0, plot_mc=run_mc, splines=False,
+                                              title="nservers={}, K={}, J={}, N={}, BITS={}, MINCE={}" \
+                                                    .format(nservers, K, J, N, burnin_time_steps, min_num_cycles_for_expectations))
+    elif analysis_type == "J":
+        # Info for plotting...
+        x = "buffer_size_activation"
+        xlabel = "J as fraction of K"
+        J_values = []
+        multiplier = 1          # Multiplier (float >= 1) that defines the J values to consider
+                                # (e.g. if multiplier = 2 we consider the values J, 2*J, 4*J, as long as k*J does not go over K (where k = 1, 2, 4, ... in the example given))
+                                # The number of J values considered is more than one only when multiplier > 1
+        J_value = J             # This is an integer value
+        J_values = [J_value]
+        while multiplier > 1 and np.round(multiplier * J_values[-1]) < K:
+            J_values += [np.round(multiplier * J_values[-1])]
         results, results_agg, proba_functions, est_fv, est_mc = analyze_absorption_size(
                                                                     nservers=nservers,
                                                                     replications=replications,
-                                                                    K_values=K_values,
-                                                                    nparticles_values=[200, 400],
-                                                                    nmeantimes_values=[50, 50],
-                                                                    buffer_size_activation_values=[1, 0.2, 0.4, 0.6, 0.8],
-                                                                    burnin_cycles_absorption_values=[5, 5],
-                                                                    seed=1313,
-                                                                    run_mc=run_mc)
-        save_dataframes([{'df': results, 'file': resultsfile},
-                         {'df': results_agg, 'file': resultsfile_agg},
-                         {'df': proba_functions, 'file': proba_functions_file}])
-        for K in K_values:
-            axes = plot_results_fv_mc(results, x, xlabel=xlabel, subset=results['K'] == K, plot_mc=run_mc)
-    if 3 in tests2run:
-        K_values = [30, 40]
-        results, results_agg, proba_functions, est_fv, est_mc = analyze_absorption_size(
-                                                                    nservers=nservers,
-                                                                    replications=replications,
-                                                                    K_values=K_values,
-                                                                    nparticles_values=[800, 1600],
-                                                                    nmeantimes_values=[50, 50],
-                                                                    buffer_size_activation_values=[1, 0.2, 0.4, 0.5, 0.7],
-                                                                    burnin_cycles_absorption_values=[5, 5],
-                                                                    seed=1313,
-                                                                    run_mc=run_mc)
-        save_dataframes([{'df': results, 'file': resultsfile},
-                         {'df': results_agg, 'file': resultsfile_agg},
-                         {'df': proba_functions, 'file': proba_functions_file}])
-        for K in K_values:
-            axes = plot_results_fv_mc(results, x, xlabel=xlabel, subset=results['K'] == K, plot_mc=run_mc)
-    if 4 in tests2run:
-        K_values = [10]
-        results, results_agg, proba_functions, est_fv, est_mc = analyze_absorption_size(
-                                                                    nservers=nservers,
-                                                                    replications=replications,
-                                                                    K_values=K_values,
-                                                                    nparticles_values=[400],
-                                                                    nmeantimes_values=[50],
-                                                                    buffer_size_activation_values=[0.1, 0.25, 0.5],
-                                                                    burnin_cycles_absorption_values=[5],
-                                                                    seed=1313,
-                                                                    run_mc=run_mc)
-        save_dataframes([{'df': results, 'file': resultsfile},
-                         {'df': results_agg, 'file': resultsfile_agg},
-                         {'df': proba_functions, 'file': proba_functions_file}])
-        for K in K_values:
-            axes = plot_results_fv_mc(results, x, xlabel=xlabel, subset=results['K'] == K, plot_mc=run_mc)
-    if 5 in tests2run:
-        K_values = [20]
-        results, results_agg, proba_functions, est_fv, est_mc = analyze_absorption_size(
-                                                                    nservers=nservers,
-                                                                    replications=replications,
-                                                                    K_values=K_values,
-                                                                    nparticles_values=[3200],
-                                                                    nmeantimes_values=[50],
-                                                                    buffer_size_activation_values=[0.2, 0.4, 0.5, 0.6, 0.8],
-                                                                    burnin_cycles_absorption_values=[5],
-                                                                    seed=1313,
-                                                                    run_mc=run_mc)
-        save_dataframes([{'df': results, 'file': resultsfile},
-                         {'df': results_agg, 'file': resultsfile_agg},
-                         {'df': proba_functions, 'file': proba_functions_file}])
-        for K in K_values:
-            axes = plot_results_fv_mc(results, x, xlabel=xlabel, subset=results['K'] == K, plot_mc=run_mc)
-    if 6 in tests2run:
-        K_values = [30]
-        results, results_agg, proba_functions, est_fv, est_mc = analyze_absorption_size(
-                                                                    nservers=nservers,
-                                                                    replications=replications,
-                                                                    K_values=K_values,
-                                                                    nparticles_values=[800],
-                                                                    nmeantimes_values=[50],
-                                                                    buffer_size_activation_values=[0.1, 0.25, 0.5],
-                                                                    burnin_cycles_absorption_values=[5],
-                                                                    seed=1313,
-                                                                    run_mc=run_mc)
-        save_dataframes([{'df': results, 'file': resultsfile},
-                         {'df': results_agg, 'file': resultsfile_agg},
-                         {'df': proba_functions, 'file': proba_functions_file}])
-        for K in K_values:
-            axes = plot_results_fv_mc(results, x, xlabel=xlabel, subset=results['K'] == K, plot_mc=run_mc)
-    if 7 in tests2run:
-        K_values = [40]
-        results, results_agg, proba_functions, est_fv, est_mc = analyze_absorption_size(
-                                                                    nservers=nservers,
-                                                                    replications=replications,
-                                                                    K_values=K_values,
-                                                                    nparticles_values=[3200],
-                                                                    nmeantimes_values=[8E6],
-                                                                    buffer_size_activation_values=[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
-                                                                    burnin_cycles_absorption_values=[4, 3, 3, 3, 2, 1, 1, 1, 1],
-                                                                    seed=1313,
-                                                                    run_mc=run_mc)
-        save_dataframes([{'df': results, 'file': resultsfile},
-                         {'df': results_agg, 'file': resultsfile_agg},
-                         {'df': proba_functions, 'file': proba_functions_file}])
-        for K in K_values:
-            axes = plot_results_fv_mc(results, x, xlabel=xlabel, subset=results['K'] == K, plot_mc=run_mc)
-    if 8 in tests2run:
-        # Same as 7 but for small J values (to see if the variance of the estimator increases first and then decreases)
-        K_values = [40]
-        results, results_agg, proba_functions, est_fv, est_mc = analyze_absorption_size(
-                                                                    nservers=nservers,
-                                                                    replications=replications,
-                                                                    K_values=K_values,
-                                                                    nparticles_values=[3200],
-                                                                    nmeantimes_values=[8E6],
-                                                                    buffer_size_activation_values=[1, 2, 3, 4, 5, 6, 7, 8],
-                                                                    burnin_cycles_absorption_values=[4, 4, 4, 4, 4, 4, 4, 4],
-                                                                    seed=1313,
-                                                                    run_mc=run_mc)
-        save_dataframes([{'df': results, 'file': resultsfile},
-                         {'df': results_agg, 'file': resultsfile_agg},
-                         {'df': proba_functions, 'file': proba_functions_file}])
-        for K in K_values:
-            axes = plot_results_fv_mc(results, x, xlabel=xlabel, subset=results['K'] == K, plot_mc=run_mc)
-    if 9 in tests2run:
-        # Larger K value for multi-server, where MC is expected to fail
-        K_values = [60]
-        results, results_agg, proba_functions, est_fv, est_mc = analyze_absorption_size(
-                                                                    nservers=nservers,
-                                                                    replications=replications,
-                                                                    K_values=K_values,
-                                                                    nparticles_values=[6400],
-                                                                    nmeantimes_values=[1000],  # [8E7],
-                                                                    buffer_size_activation_values=[1, 3, 5, 7, 12, 15, 21, 24],  # [1, 3, 5, 7, 9, 12, 15, 18, 21, 24],
-                                                                    burnin_cycles_absorption_values=[3, 3, 3, 3, 2, 2, 2, 2],  # [3, 3, 3, 3, 3, 2, 2, 2, 2, 2]
-                                                                    seed=1313,
-                                                                    run_mc=run_mc)
-        save_dataframes([{'df': results, 'file': resultsfile},
-                         {'df': results_agg, 'file': resultsfile_agg},
-                         {'df': proba_functions, 'file': proba_functions_file}])
-        for K in K_values:
-            axes = plot_results_fv_mc(results, x, xlabel=xlabel, subset=results['K'] == K, plot_mc=run_mc)
-    if 10 in tests2run:
-        # Large K value for multi-server, with limited simulation time before
-        K_values = [40]
-        results, results_agg, proba_functions, est_fv, est_mc = analyze_absorption_size(
-                                                                    nservers=nservers,
-                                                                    replications=replications,
-                                                                    K_values=K_values,
-                                                                    nparticles_values=[3200],  # [1000],   #[5]
-                                                                    nmeantimes_values=[1000],  # [1000],   #[100]
-                                                                    buffer_size_activation_values=[0.1, 0.15, 0.2, 0.25, 0.3, 0.33, 0.35, 0.4, 0.5, 0.6],
-                                                                    # [0.1, 0.3, 0.5, 0.7], #[0.1, 0.3, 0.4, 0.5, 0.6, 0.8],
-                                                                    burnin_cycles_absorption_values=[0],  # [3, 3, 2, 1],#[3, 3, 2, 2, 1, 1], #[3, 3, 3, 2, 2, 1],
+                                                                    K_values=[K],
+                                                                    nparticles_values=[N],
+                                                                    nmeantimes_values=[T],
+                                                                    buffer_size_activation_values=J_values,
+                                                                    burnin_cycles_absorption_values=0,
                                                                     seed=1313,
                                                                     run_mc=run_mc,
                                                                     dict_params_info={'plot': False, 'log': False})
         save_dataframes([{'df': results, 'file': resultsfile},
                          {'df': results_agg, 'file': resultsfile_agg},
                          {'df': proba_functions, 'file': proba_functions_file}])
-        # for K in K_values:
-        #    axes = plot_results_fv_mc(results, "buffer_size_activation", xlabel="J as fraction of K",
-        #                              subset=results['K']==K,
-        #                              plot_mc=run_mc,
-        #                              smooth_params={'bias': [1E2], 'variability': 1E3, 'mse': 1E-22})
 
+        axes = plot_results_fv_mc(results, x, xlabel=xlabel, subset=results['K'] == K, plot_mc=run_mc)
+
+    # Close log file, if any was opened
     if fh_log is not None:
         closeLogFile(fh_log, stdout_sys, dt_start)
+
+
+    def deprecated_analysis_by_J_several_tests():
+        if 1 in tests2run:
+            K_values = [5, 5]  # [10, 20, 30, 40]
+            results, results_agg, proba_functions, est_fv, est_mc = analyze_absorption_size(
+                                                                        nservers=nservers,
+                                                                        replications=replications,
+                                                                        K_values=K_values,
+                                                                        nparticles_values=[20, 40],  # [200, 400, 800, 1600],
+                                                                        nmeantimes_values=[5000, 5000],  # [50, 50, 50, 50],
+                                                                        buffer_size_activation_values=[0.25, 0.5],  # [1, 0.2, 0.4, 0.6, 0.8],
+                                                                        burnin_cycles_absorption_values=[5, 3],
+                                                                        seed=1313,
+                                                                        run_mc=run_mc)
+            save_dataframes([{'df': results, 'file': resultsfile},
+                             {'df': results_agg, 'file': resultsfile_agg},
+                             {'df': proba_functions, 'file': proba_functions_file}])
+            for K in K_values:
+                axes = plot_results_fv_mc(results, x, xlabel=xlabel, subset=results['K']==K, plot_mc=run_mc)
+        if 2 in tests2run:
+            K_values = [10, 20]
+            results, results_agg, proba_functions, est_fv, est_mc = analyze_absorption_size(
+                                                                        nservers=nservers,
+                                                                        replications=replications,
+                                                                        K_values=K_values,
+                                                                        nparticles_values=[200, 400],
+                                                                        nmeantimes_values=[50, 50],
+                                                                        buffer_size_activation_values=[1, 0.2, 0.4, 0.6, 0.8],
+                                                                        burnin_cycles_absorption_values=[5, 5],
+                                                                        seed=1313,
+                                                                        run_mc=run_mc)
+            save_dataframes([{'df': results, 'file': resultsfile},
+                             {'df': results_agg, 'file': resultsfile_agg},
+                             {'df': proba_functions, 'file': proba_functions_file}])
+            for K in K_values:
+                axes = plot_results_fv_mc(results, x, xlabel=xlabel, subset=results['K'] == K, plot_mc=run_mc)
+        if 3 in tests2run:
+            K_values = [30, 40]
+            results, results_agg, proba_functions, est_fv, est_mc = analyze_absorption_size(
+                                                                        nservers=nservers,
+                                                                        replications=replications,
+                                                                        K_values=K_values,
+                                                                        nparticles_values=[800, 1600],
+                                                                        nmeantimes_values=[50, 50],
+                                                                        buffer_size_activation_values=[1, 0.2, 0.4, 0.5, 0.7],
+                                                                        burnin_cycles_absorption_values=[5, 5],
+                                                                        seed=1313,
+                                                                        run_mc=run_mc)
+            save_dataframes([{'df': results, 'file': resultsfile},
+                             {'df': results_agg, 'file': resultsfile_agg},
+                             {'df': proba_functions, 'file': proba_functions_file}])
+            for K in K_values:
+                axes = plot_results_fv_mc(results, x, xlabel=xlabel, subset=results['K'] == K, plot_mc=run_mc)
+        if 4 in tests2run:
+            K_values = [10]
+            results, results_agg, proba_functions, est_fv, est_mc = analyze_absorption_size(
+                                                                        nservers=nservers,
+                                                                        replications=replications,
+                                                                        K_values=K_values,
+                                                                        nparticles_values=[400],
+                                                                        nmeantimes_values=[50],
+                                                                        buffer_size_activation_values=[0.1, 0.25, 0.5],
+                                                                        burnin_cycles_absorption_values=[5],
+                                                                        seed=1313,
+                                                                        run_mc=run_mc)
+            save_dataframes([{'df': results, 'file': resultsfile},
+                             {'df': results_agg, 'file': resultsfile_agg},
+                             {'df': proba_functions, 'file': proba_functions_file}])
+            for K in K_values:
+                axes = plot_results_fv_mc(results, x, xlabel=xlabel, subset=results['K'] == K, plot_mc=run_mc)
+        if 5 in tests2run:
+            K_values = [20]
+            results, results_agg, proba_functions, est_fv, est_mc = analyze_absorption_size(
+                                                                        nservers=nservers,
+                                                                        replications=replications,
+                                                                        K_values=K_values,
+                                                                        nparticles_values=[3200],
+                                                                        nmeantimes_values=[50],
+                                                                        buffer_size_activation_values=[0.2, 0.4, 0.5, 0.6, 0.8],
+                                                                        burnin_cycles_absorption_values=[5],
+                                                                        seed=1313,
+                                                                        run_mc=run_mc)
+            save_dataframes([{'df': results, 'file': resultsfile},
+                             {'df': results_agg, 'file': resultsfile_agg},
+                             {'df': proba_functions, 'file': proba_functions_file}])
+            for K in K_values:
+                axes = plot_results_fv_mc(results, x, xlabel=xlabel, subset=results['K'] == K, plot_mc=run_mc)
+        if 6 in tests2run:
+            K_values = [30]
+            results, results_agg, proba_functions, est_fv, est_mc = analyze_absorption_size(
+                                                                        nservers=nservers,
+                                                                        replications=replications,
+                                                                        K_values=K_values,
+                                                                        nparticles_values=[800],
+                                                                        nmeantimes_values=[50],
+                                                                        buffer_size_activation_values=[0.1, 0.25, 0.5],
+                                                                        burnin_cycles_absorption_values=[5],
+                                                                        seed=1313,
+                                                                        run_mc=run_mc)
+            save_dataframes([{'df': results, 'file': resultsfile},
+                             {'df': results_agg, 'file': resultsfile_agg},
+                             {'df': proba_functions, 'file': proba_functions_file}])
+            for K in K_values:
+                axes = plot_results_fv_mc(results, x, xlabel=xlabel, subset=results['K'] == K, plot_mc=run_mc)
+        if 7 in tests2run:
+            K_values = [40]
+            results, results_agg, proba_functions, est_fv, est_mc = analyze_absorption_size(
+                                                                        nservers=nservers,
+                                                                        replications=replications,
+                                                                        K_values=K_values,
+                                                                        nparticles_values=[3200],
+                                                                        nmeantimes_values=[8E6],
+                                                                        buffer_size_activation_values=[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
+                                                                        burnin_cycles_absorption_values=[4, 3, 3, 3, 2, 1, 1, 1, 1],
+                                                                        seed=1313,
+                                                                        run_mc=run_mc)
+            save_dataframes([{'df': results, 'file': resultsfile},
+                             {'df': results_agg, 'file': resultsfile_agg},
+                             {'df': proba_functions, 'file': proba_functions_file}])
+            for K in K_values:
+                axes = plot_results_fv_mc(results, x, xlabel=xlabel, subset=results['K'] == K, plot_mc=run_mc)
+        if 8 in tests2run:
+            # Same as 7 but for small J values (to see if the variance of the estimator increases first and then decreases)
+            K_values = [40]
+            results, results_agg, proba_functions, est_fv, est_mc = analyze_absorption_size(
+                                                                        nservers=nservers,
+                                                                        replications=replications,
+                                                                        K_values=K_values,
+                                                                        nparticles_values=[3200],
+                                                                        nmeantimes_values=[8E6],
+                                                                        buffer_size_activation_values=[1, 2, 3, 4, 5, 6, 7, 8],
+                                                                        burnin_cycles_absorption_values=[4, 4, 4, 4, 4, 4, 4, 4],
+                                                                        seed=1313,
+                                                                        run_mc=run_mc)
+            save_dataframes([{'df': results, 'file': resultsfile},
+                             {'df': results_agg, 'file': resultsfile_agg},
+                             {'df': proba_functions, 'file': proba_functions_file}])
+            for K in K_values:
+                axes = plot_results_fv_mc(results, x, xlabel=xlabel, subset=results['K'] == K, plot_mc=run_mc)
+        if 9 in tests2run:
+            # Larger K value for multi-server, where MC is expected to fail
+            K_values = [60]
+            results, results_agg, proba_functions, est_fv, est_mc = analyze_absorption_size(
+                                                                        nservers=nservers,
+                                                                        replications=replications,
+                                                                        K_values=K_values,
+                                                                        nparticles_values=[6400],
+                                                                        nmeantimes_values=[1000],  # [8E7],
+                                                                        buffer_size_activation_values=[1, 3, 5, 7, 12, 15, 21, 24],  # [1, 3, 5, 7, 9, 12, 15, 18, 21, 24],
+                                                                        burnin_cycles_absorption_values=[3, 3, 3, 3, 2, 2, 2, 2],  # [3, 3, 3, 3, 3, 2, 2, 2, 2, 2]
+                                                                        seed=1313,
+                                                                        run_mc=run_mc)
+            save_dataframes([{'df': results, 'file': resultsfile},
+                             {'df': results_agg, 'file': resultsfile_agg},
+                             {'df': proba_functions, 'file': proba_functions_file}])
+            for K in K_values:
+                axes = plot_results_fv_mc(results, x, xlabel=xlabel, subset=results['K'] == K, plot_mc=run_mc)
+        if 10 in tests2run:
+            # Large K value for multi-server, with limited simulation time before
+            K_values = [40]
+            results, results_agg, proba_functions, est_fv, est_mc = analyze_absorption_size(
+                                                                        nservers=nservers,
+                                                                        replications=replications,
+                                                                        K_values=K_values,
+                                                                        nparticles_values=[3200],  # [1000],   #[5]
+                                                                        nmeantimes_values=[1000],  # [1000],   #[100]
+                                                                        buffer_size_activation_values=[0.1, 0.15, 0.2, 0.25, 0.3, 0.33, 0.35, 0.4, 0.5, 0.6],
+                                                                        # [0.1, 0.3, 0.5, 0.7], #[0.1, 0.3, 0.4, 0.5, 0.6, 0.8],
+                                                                        burnin_cycles_absorption_values=[0],  # [3, 3, 2, 1],#[3, 3, 2, 2, 1, 1], #[3, 3, 3, 2, 2, 1],
+                                                                        seed=1313,
+                                                                        run_mc=run_mc,
+                                                                        dict_params_info={'plot': False, 'log': False})
+            save_dataframes([{'df': results, 'file': resultsfile},
+                             {'df': results_agg, 'file': resultsfile_agg},
+                             {'df': proba_functions, 'file': proba_functions_file}])
+            # for K in K_values:
+            #    axes = plot_results_fv_mc(results, "buffer_size_activation", xlabel="J as fraction of K",
+            #                              subset=results['K']==K,
+            #                              plot_mc=run_mc,
+            #                              smooth_params={'bias': [1E2], 'variability': 1E3, 'mse': 1E-22})
+
