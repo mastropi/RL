@@ -734,6 +734,7 @@ def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None, y2=Non
                        title=None,
                        subset=None,
                        plot_mc=True,
+                       plot_violin_only=True,
                        figfile=None):
     """
     Plots the estimated blocking probability by number of particles (FV) and average #Cycles (MC)
@@ -768,6 +769,9 @@ def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None, y2=Non
     title: str
         Title to show in the first plot with the estimated values by each method.
         The other subsequent plots have their title already set.
+
+    subset: boolean list or numpy array
+        Subset of records in `df_results` to include in the plot.
 
     Example: This example uses a secondary axis on the last variability plot (#6) to show the complexity of the algorithm
     [Aug-2021]
@@ -843,15 +847,16 @@ def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None, y2=Non
     # --- Parse input parameters
 
     # 1) Average P(K) + error bars
-    axes_error = plotting.plot(plotting.plot_errorbars,
-                               df_results, xvars, yvars,
-                               yref=prob_true, yref_legend="True value",
-                               figsize=figsize, subplots=subplots,
-                               dict_options={'axis': axis_properties,
-                                             'multipliers': {'x': 1, 'y': 100, 'error': 2},
-                                             'labels': {'x': [xlabel, xlabel2], 'y': "Blocking probability (%)"},
-                                             'properties': {'color': "black", 'color_center': colors},
-                                             'texts': {'title': title}})
+    if not plot_violin_only:
+        axes_error = plotting.plot(plotting.plot_errorbars,
+                                   df_results, xvars, yvars,
+                                   yref=prob_true, yref_legend="True value",
+                                   figsize=figsize, subplots=subplots,
+                                   dict_options={'axis': axis_properties,
+                                                 'multipliers': {'x': 1, 'y': 100, 'error': 2},
+                                                 'labels': {'x': [xlabel, xlabel2], 'y': "Blocking probability (%)"},
+                                                 'properties': {'color': "black", 'color_center': colors},
+                                                 'texts': {'title': title}})
 
     # 2) Violin plots
     axes_violin = plotting.plot(plotting.plot_violins,
@@ -878,13 +883,26 @@ def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None, y2=Non
     vars2plot_bias = []
     vars2plot_variability = []
     vars2plot_mse = []
-    for idx, (x, y) in enumerate(zip(xvars, yvars)):
+    for idx, (xx, y) in enumerate(zip(xvars, yvars)):
         # Variability and bias
         if y2 is not None:
             yvars2agg = [y, y2]
         else:
             yvars2agg = [y]
-        summary_stats = aggregation_bygroups(df_results, [x], yvars2agg,
+        if idx == 0:
+            # We are plotting the FV results
+            # => xx = x and we should group just by that variable
+            assert x == xx
+            groupvars_ = [xx]
+        else:
+            # This is the case when plotting the MC results
+            # => We should group by x and xx in case the average number of return cycles plotted on the x-axis
+            # for the MC results is the same for more than one value of the analyzed x value shown on the FV results
+            # plot (e.g.  # particles). This already happened once for N = 10 and 22, we got #Cycles(MC)_mean = 53
+            # (namely today 15-Dec-2022).
+            groupvars_ = [x, xx]
+
+        summary_stats = aggregation_bygroups(df_results, groupvars_, yvars2agg,
                                              stats=["count", "mean", "median", "mad", "std", "var"])
 
         # Store the results in the data frame for plotting
@@ -901,8 +919,13 @@ def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None, y2=Non
         cvrmsevar = "CVRMSE({})".format(y)
         if y2 is not None:
             y2meanvar = "mean({})".format(y2)
-        df2plot[x] = summary_stats.index
-        df2plot.set_index(summary_stats.index, inplace=True)
+
+        # The following call to reset_index() removes the possibly multi-index (when processing the MC results)
+        # in summary_stats and stores those values as COLUMNS of the data frame.
+        # This is done in order to store the values of the currently analyzed variable `xx`
+        # (to be shown on the x-axis) as a column in the df2plot data frame.
+        summary_stats.reset_index(inplace=True)
+        df2plot[xx] = summary_stats[xx]
         df2plot[nvar] = summary_stats[y]["count"]
         df2plot[weightvar] = df2plot[nvar] / np.sum(df2plot[nvar])
         df2plot[biasvar] = summary_stats[y]["mean"] - df_results.iloc[0][prob_true]
@@ -959,85 +982,92 @@ def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None, y2=Non
         splines_opt = {'weights': weightvars, 'smooth_par': smooth_params['variability']}
     else:
         splines_opt = {}
-    axes_variability = plotting.plot(plot_func_summarize,
-                                     df2plot, xvars, vars2plot_variability,
-                                     subplots=subplots,
-                                     dict_params={'pointlabels': nvars, 'splines': splines_opt},
-                                     dict_options={'axis': axis_properties,
-                                                   'multipliers': {'x': 1, 'y': 1},
-                                                   'labels': {'x': [xlabel, xlabel2], 'y': "CV w.r.t. true Pr(K) (%)"},
-                                                   'properties': points_properties,
-                                                   'texts': {'title': "Relative variability of {}".format(y)}
-                                                   })
+    if not plot_violin_only:
+        axes_variability = plotting.plot(plot_func_summarize,
+                                         df2plot, xvars, vars2plot_variability,
+                                         subplots=subplots,
+                                         dict_params={'pointlabels': nvars, 'splines': splines_opt},
+                                         dict_options={'axis': axis_properties,
+                                                       'multipliers': {'x': 1, 'y': 1},
+                                                       'labels': {'x': [xlabel, xlabel2], 'y': "CV w.r.t. true Pr(K) (%)"},
+                                                       'properties': points_properties,
+                                                       'texts': {'title': "Relative variability of {}".format(y)}
+                                                       })
 
     # 4) Bias plot
     if splines:
         splines_opt = {'weights': weightvars, 'smooth_par': smooth_params['bias']}
     else:
         splines_opt = {}
-    axes_bias = plotting.plot(plot_func_summarize,
-                              df2plot, xvars, vars2plot_bias,
-                              subplots=subplots,
-                              dict_params={'pointlabels': nvars, 'splines': splines_opt},
-                              dict_options={'axis': axis_properties,
-                                            'multipliers': {'x': 1, 'y': 1},
-                                            'labels': {'x': [xlabel, xlabel2], 'y': "CV w.r.t. true Pr(K) (%)"},
-                                            'properties': points_properties,
-                                            'texts': {'title': "Relative bias of {}".format(y)}
-                                            })
+    if not plot_violin_only:
+        axes_bias = plotting.plot(plot_func_summarize,
+                                  df2plot, xvars, vars2plot_bias,
+                                  subplots=subplots,
+                                  dict_params={'pointlabels': nvars, 'splines': splines_opt},
+                                  dict_options={'axis': axis_properties,
+                                                'multipliers': {'x': 1, 'y': 1},
+                                                'labels': {'x': [xlabel, xlabel2], 'y': "CV w.r.t. true Pr(K) (%)"},
+                                                'properties': points_properties,
+                                                'texts': {'title': "Relative bias of {}".format(y)}
+                                                })
 
     # 5) RMSE = sqrt( Variance + Bias^2 )
     if splines:
         splines_opt = {'weights': weightvars, 'smooth_par': smooth_params['mse']}
     else:
         splines_opt = {}
-    axes_mse = plotting.plot(plot_func_summarize,
-                             df2plot, xvars, vars2plot_mse,
-                             subplots=subplots,
-                             dict_params={'pointlabels': nvars, 'splines': splines_opt},
-                             dict_options={'axis': axis_properties,
-                                           'multipliers': {'x': 1, 'y': 1},
-                                           'labels': {'x': [xlabel, xlabel2], 'y': "RMSE"},
-                                           'properties': points_properties,
-                                           'texts': {'title': "Root Mean Squared Error of {}".format(y)}
-                                           })
+    if not plot_violin_only:
+        axes_mse = plotting.plot(plot_func_summarize,
+                                 df2plot, xvars, vars2plot_mse,
+                                 subplots=subplots,
+                                 dict_params={'pointlabels': nvars, 'splines': splines_opt},
+                                 dict_options={'axis': axis_properties,
+                                               'multipliers': {'x': 1, 'y': 1},
+                                               'labels': {'x': [xlabel, xlabel2], 'y': "RMSE"},
+                                               'properties': points_properties,
+                                               'texts': {'title': "Root Mean Squared Error of {}".format(y)}
+                                               })
 
     # 6) Variability with the plot of a secondary axis (e.g. showing the "complexity" of the algorithm)
-    if y2 is not None:
-        axes = plt.figure().subplots(subplots[0], subplots[1])
-        if not isinstance(axes, list):
-            axes = [axes]
-        for (ax, x, y, n, var2plot, w, s, color) in zip(axes, xvars, yvars, nvars, vars2plot_variability, weightvars,
-                                                        smooth_params['variability'], colors):
-            if splines:
-                legend_obj, legend_txt = plotting.plot_splines(ax, df2plot, x, var2plot, w=w, s=s,
-                                                               dict_options={'properties': {'color': "black",
-                                                                                            'color_line': color}})
-            else:
-                points = plotting.pointsplot(ax, df2plot, x, var2plot, dict_options={'properties': points_properties})
-                legend_obj = [points[0]]
-                legend_txt = [var2plot]
-            # Point labels showing sample size
-            for (xx, yy, nn) in zip(df2plot[x], df2plot[var2plot], df2plot[n]):
-                ax.text(xx, yy, nn)
-            ax.set_title("Relative variability of {}".format(y))
-            ax.set_xlim([xmin, xmax])
-            ax.set_ylim([ymin, ymax])
-            ax.set_xlabel(xlabel)
-            ax.set_ylabel("CV w.r.t. true Pr(K) (%)")
-            ax2 = ax.twinx()
-            sizes = ax2.plot(df2plot[x], df2plot[y2meanvar], 'r.-')
-            ax2.set_ylabel(ylabel2)
-            ax2.set_ylim([0, ax2.get_ylim()[1]])
-            legend_obj += sizes
-            legend_txt += [ylabel2]
-            ax.legend(legend_obj, legend_txt)
+    if not plot_violin_only:
+        if y2 is not None:
+            axes = plt.figure().subplots(subplots[0], subplots[1])
+            if not isinstance(axes, list):
+                axes = [axes]
+            for (ax, x, y, n, var2plot, w, s, color) in zip(axes, xvars, yvars, nvars, vars2plot_variability, weightvars,
+                                                            smooth_params['variability'], colors):
+                if splines:
+                    legend_obj, legend_txt = plotting.plot_splines(ax, df2plot, x, var2plot, w=w, s=s,
+                                                                   dict_options={'properties': {'color': "black",
+                                                                                                'color_line': color}})
+                else:
+                    points = plotting.pointsplot(ax, df2plot, x, var2plot, dict_options={'properties': points_properties})
+                    legend_obj = [points[0]]
+                    legend_txt = [var2plot]
+                # Point labels showing sample size
+                for (xx, yy, nn) in zip(df2plot[x], df2plot[var2plot], df2plot[n]):
+                    ax.text(xx, yy, nn)
+                ax.set_title("Relative variability of {}".format(y))
+                ax.set_xlim([xmin, xmax])
+                ax.set_ylim([ymin, ymax])
+                ax.set_xlabel(xlabel)
+                ax.set_ylabel("CV w.r.t. true Pr(K) (%)")
+                ax2 = ax.twinx()
+                sizes = ax2.plot(df2plot[x], df2plot[y2meanvar], 'r.-')
+                ax2.set_ylabel(ylabel2)
+                ax2.set_ylim([0, ax2.get_ylim()[1]])
+                legend_obj += sizes
+                legend_txt += [ylabel2]
+                ax.legend(legend_obj, legend_txt)
 
     if figfile is not None:
         plt.gcf().subplots_adjust(left=0.15, top=0.75)
         plt.savefig(figfile)
 
-    return df2plot, axes_error[0], axes_violin[0], axes_variability[0], axes_bias[0], axes_mse[0]
+    if not plot_violin_only:
+        return df2plot, axes_error[0], axes_violin[0], axes_variability[0], axes_bias[0], axes_mse[0]
+    else:
+        return df2plot, axes_violin[0]
 
 def createLogFileHandleAndResultsFileNames(path="../../RL-002-QueueBlocking", prefix="run", suffix="", use_dt_suffix=True):
     """
