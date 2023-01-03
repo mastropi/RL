@@ -26,7 +26,7 @@ from gym.envs.toy_text import discrete
 
 class EnvironmentDiscrete(discrete.DiscreteEnv):
     """
-    Class defining methods that are generic to ALL environments.
+    Class defining methods that are generic to ALL environments with discrete state and actions
 
     Constructor parameters:
     - nS: number of possible states
@@ -100,3 +100,5 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
 
     def setState(self, s):
         self.s = s
+
+

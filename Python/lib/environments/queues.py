@@ -160,22 +160,13 @@ def costBlockingExponential(buffer_size: int, buffer_size_ref :int):
 #---------------------------- Reward functions that can be used in different environments -----------------------------#
 
 
-class EnvQueueSingleBufferWithJobClasses(gym.Env):
+class GenericEnvQueueWithJobClasses(gym.Env):
     """
-    Queue environment with a single buffer receiving jobs of different classes
-    being served by one or multiple servers.
-
-    The possible actions for an agent interacting with the queue are:
-    - Accept or reject an incoming job of a given class --> action_type = ActionTypes.ACCEPT_REJECT
-    - Choose the server to which the accepted incoming job is assigned --> action_type = ActionTypes.ASSIGN
+    Class defining methods that are generic to queue environments receiving multi-class jobs.
 
     Arguments:
     queue: QueueMM
         The queue object that governs the dynamics of the environment through the definition of a server system.
-
-    job_class_rates: list or numpy array
-        A list or array containing the arriving job rates for each valid job class.
-        It is always stored in the object as a list.
 
     reward_func: function
         Function returning the reward received after taking action A(t) at state S(t) and making the environment
@@ -184,22 +175,17 @@ class EnvQueueSingleBufferWithJobClasses(gym.Env):
     rewards_accept_by_job_class: list
         List of rewards for the acceptance of the different job class whose rate is given in job_class_rates.
 
-    dict_params_reward_funct: (opt) dict
+    dict_params_reward_func: (opt) dict
         Dictionary containing non-standard parameters (i.e. besides the state, the action and the next state)
         on which the reward function `reward_func` depends on.
         Ex: dict_params_reward_func = {'buffer_size_ref': 20}
         default: None, in which case the default parameter values are used
     """
 
-    def __init__(self, queue: QueueMM, job_class_rates: list,
+    def __init__(self, queue: QueueMM,
                  reward_func, rewards_accept_by_job_class: list,
                  dict_params_reward_func: dict=None):
-        #-- Environment
         self.queue = queue
-        self.job_class = None
-        if not isinstance(job_class_rates, (list, np.ndarray)):
-            raise ValueError("Input parameter `job_class_rates` must be a list or an array ({})".format(type(job_class_rates)))
-        self.job_class_rates = list(job_class_rates)
 
         #-- Rewards
         self.reward_func = reward_func
@@ -208,14 +194,16 @@ class EnvQueueSingleBufferWithJobClasses(gym.Env):
 
         # Create temporary variables that are shorter to reference and still easy to understand
         K = self.queue.getCapacity()
-        J = len(self.job_class_rates)
 
         # Action and observation spaces
         # TODO: (2021/10/22) Make sure we use these action and observation spaces in the implementation of actions and spaces in the environment
         # It seems to me that currently this information is never used.
         #self.action_space = spaces.Discrete(2)  # Either Reject (0) or Accept (1) an arriving job class
         self.action_space = Actions
-        self.observation_space = spaces.Tuple((spaces.Discrete(K+1), spaces.Discrete(J)))
+        # DM-2023/01/03: The following is commented out because job_class_rates is not defined for all subclasses of this superclass
+        # And in any case we are not using the observation_space defined here yet.
+        #J = len(self.job_class_rates)
+        #self.observation_space = spaces.Tuple((spaces.Discrete(K+1), spaces.Discrete(J)))
 
         # Last action taken by the agent interacting with the environment
         # (this piece of information is needed e.g. when learning the policy of the agent interacting
@@ -227,8 +215,27 @@ class EnvQueueSingleBufferWithJobClasses(gym.Env):
         # RANDOM policy of acceptance (see e.g. GenericParameterizedPolicyTwoActions.choose_action())
         self.seed = None
 
-        start_state = ([0]*self.queue.getNServers(), self.job_class)
+        # Initialize the state of the system at 0 jobs of each class and no arriving job
+        self.job_class = None  # Class of the arriving job (when a job arrives)
+        start_state = ([0] * self.queue.getNServers(), self.job_class)
         self.reset(start_state)
+
+    # THIS METHOD COULD GO TO A SUPERCLASS
+    def reset(self, state=None):
+        """
+        Resets the state of the environment and the last action it received
+
+        Arguments:
+        state: (opt) duple
+            Duple containing the following information:
+            - server sizes: list containing the queue size of each server making up the queue system
+            - job_class: class of the arriving job
+            default: None, in which case the queue is reset to the state with all 0 as server sizes and None job class
+        """
+        if state is None:
+            state = ([0] * self.queue.getNServers(), None)
+        self.setState(state)
+        self.action = None
 
     def reset(self, state=None):
         """
@@ -270,6 +277,130 @@ class EnvQueueSingleBufferWithJobClasses(gym.Env):
         """
         return np.random.random()
 
+    #------ GETTERS ------#
+    def get_seed(self):
+        return self.getSeed()
+    def getSeed(self):
+        return self.seed
+
+    def getQueue(self):
+        return self.queue
+
+    def getCapacity(self):
+        return self.queue.getCapacity()
+
+    def getServiceRates(self):
+        return self.queue.getDeathRates()
+
+    def getQueueState(self):
+        return self.queue.getServerSizes()
+
+    def getState(self):
+        return self.state
+
+    def getBufferSize(self):
+        return self.queue.getBufferSize()
+
+    def getBufferSizeFromState(self, state :list):
+        queue_state = state[0]
+        return np.sum(queue_state)
+
+    def getJobClass(self):
+        return self.job_class
+
+    def getLastAction(self):
+        return self.action
+
+    def getActions(self):
+        return self.action_space
+
+    def getRewardsForJobClassAcceptance(self):
+        return self.rewards_accept_by_job_class
+
+    def getRewardForJobClassAcceptance(self, job_class: int):
+        return self.rewards_accept_by_job_class[job_class]
+
+    def getRewardFunction(self):
+        return self.reward_func
+
+    def getParamsRewardFunc(self):
+        return self.dict_params_reward_func
+
+    #------ SETTERS ------#
+    def setCapacity(self, capacity):
+        self.queue.setCapacity(capacity)
+
+    def setParamsRewardFunc(self, dict_params):
+        self.dict_params_reward_func = dict_params
+
+    def _setServerSizes(self, sizes : int or list or np.array):
+        "Sets the size of the servers in the queue"
+        self.queue.setServerSizes(sizes)
+
+    def setJobClass(self, job_class: int or None):
+        "Sets the job class of a new arriving job and updates the environment's state. The job class can be None."
+        if not (
+                job_class is None or \
+                int(job_class) == job_class and 0 <= job_class <= self.getNumJobClasses()
+                ):
+            raise ValueError(
+                "The job class is invalid ({}). It must be an integer between {} and {}".format(job_class, 0, self.getNumJobClasses() - 1))
+        self.job_class = job_class
+        # Now we update the environment's state
+        # NOTE that this self.setState() call calls the appropriate method in the subclass of which `self` is an instance
+        # (because the state is defined differently depending on the subclass).
+        self.setState((self.getQueueState(), self.job_class))
+
+    def setState(self, state: tuple):
+        "This method is implemented by the subclass of which `self` is an instance"
+        raise NotImplementedError
+
+    def setLastAction(self, action):
+        self.action = action
+
+
+class EnvQueueSingleBufferWithJobClasses(GenericEnvQueueWithJobClasses):
+    """
+    Queue environment with a single buffer receiving jobs of different classes
+    being served by one or multiple servers.
+
+    The possible actions for an agent interacting with the queue are:
+    - Accept or reject an incoming job of a given class --> action_type = ActionTypes.ACCEPT_REJECT
+    - Choose the server to which the accepted incoming job is assigned --> action_type = ActionTypes.ASSIGN
+
+    Arguments:
+    queue: QueueMM
+        The queue object that governs the dynamics of the environment through the definition of a server system.
+
+    job_class_rates: list or numpy array
+        A list or array containing the arriving job rates for each valid job class.
+        It is always stored in the object as a list.
+
+    reward_func: function
+        Function returning the reward received after taking action A(t) at state S(t) and making the environment
+        go to state S(t+1).
+
+    rewards_accept_by_job_class: list
+        List of rewards for the acceptance of the different job class whose rate is given in job_class_rates.
+
+    dict_params_reward_func: (opt) dict
+        Dictionary containing non-standard parameters (i.e. besides the state, the action and the next state)
+        on which the reward function `reward_func` depends on.
+        Ex: dict_params_reward_func = {'buffer_size_ref': 20}
+        default: None, in which case the default parameter values are used
+    """
+
+    def __init__(self, queue: QueueMM, job_class_rates: list,
+                 reward_func, rewards_accept_by_job_class: list,
+                 dict_params_reward_func: dict=None):
+        super().__init__(queue, reward_func, rewards_accept_by_job_class, dict_params_reward_func)
+        if not isinstance(job_class_rates, (list, np.ndarray)):
+            raise ValueError("Input parameter `job_class_rates` must be a list or an array ({})".format(type(job_class_rates)))
+        self.job_class_rates = list(job_class_rates)
+
+        # State of the system
+        self.state = (self.getBufferSize(), self.getJobClass())
+
     def step(self, action: int or Actions, action_type: ActionTypes):
         """
         The environment takes a step when receiving the given accept/reject action with the given assignment policy
@@ -301,8 +432,7 @@ class EnvQueueSingleBufferWithJobClasses(gym.Env):
                 action = Actions(action)
 
             if action not in [Actions.ACCEPT, Actions.REJECT]:
-                raise ValueError(
-                    "Invalid action: {}\nValid actions are: {}".format(action, Actions))
+                raise ValueError("Invalid action: {}\nValid actions are: {}".format(action, Actions))
 
             if action == Actions.REJECT:
                 # Reject the incoming job
@@ -355,22 +485,8 @@ class EnvQueueSingleBufferWithJobClasses(gym.Env):
         return next_state, reward, {}
 
     #------ GETTERS ------#
-    def get_seed(self):
-        return self.getSeed()
-    def getSeed(self):
-        return self.seed
-
-    def getQueue(self):
-        return self.queue
-
-    def getCapacity(self):
-        return self.queue.getCapacity()
-
     def getJobClassRates(self):
         return self.job_class_rates
-
-    def getServiceRates(self):
-        return self.queue.getDeathRates()
 
     def getNumJobClasses(self):
         return len(self.job_class_rates)
@@ -378,65 +494,11 @@ class EnvQueueSingleBufferWithJobClasses(gym.Env):
     def getNumServers(self):
         return self.queue.getNServers()
 
-    def getQueueState(self):
-        return self.queue.getServerSizes()
-
-    def getState(self):
-        return (self.getBufferSize(), self.getJobClass())
-
-    def getBufferSize(self):
-        return self.queue.getBufferSize()
-
-    def getBufferSizeFromState(self, state :list):
-        queue_state = state[0]
-        return np.sum(queue_state)
-
-    def getJobClass(self):
-        return self.job_class
-
-    def getLastAction(self):
-        return self.action
-
-    def getActions(self):
-        return self.action_space
-
-    def getRewardsForJobClassAcceptance(self):
-        return self.rewards_accept_by_job_class
-
-    def getRewardForJobClassAcceptance(self, job_class: int):
-        return self.rewards_accept_by_job_class[job_class]
-
-    def getRewardFunction(self):
-        return self.reward_func
-
-    def getParamsRewardFunc(self):
-        return self.dict_params_reward_func
-
     #------ SETTERS ------#
-    def setCapacity(self, capacity):
-        self.queue.setCapacity(capacity)
-
-    def setParamsRewardFunc(self, dict_params):
-        self.dict_params_reward_func = dict_params
-
-    def _setServerSizes(self, sizes : int or list or np.array):
-        "Sets the size of the servers in the queue"
-        self.queue.setServerSizes(sizes)
-
-    def setJobClass(self, job_class: int or None):
-        "Sets the job class of a new arriving job. The job class can be None."
-        if not (
-                job_class is None or \
-                int(job_class) == job_class and 0 <= job_class <= self.getNumJobClasses()
-                ):
-            raise ValueError(
-                "The job class is invalid ({}). It must be an integer between {} and {}".format(job_class, 0, self.getNumJobClasses() - 1))
-        self.job_class = job_class
-
     def setState(self, state):
         """
         Sets the state (k, i) of the queue environment from the server sizes and the arriving job class.
-        - k is the buffer size
+        - k is the system's buffer size, which is computed from the queue sizes of each server passed in parameter `state`
         - i is the arriving job class
 
         Arguments:
@@ -446,60 +508,148 @@ class EnvQueueSingleBufferWithJobClasses(gym.Env):
             - job_class: class of the arriving job
         """
         assert len(state) == 2
-        sizes = state[0]
+        server_sizes = state[0]
         job_class = state[1]
-        self.queue.setServerSizes(sizes)
+        self.queue.setServerSizes(server_sizes)
         self.job_class = job_class
+        self.state = (self.queue.getBufferSize(), self.job_class)
 
-    def setLastAction(self, action):
-        self.action = action
 
-if __name__ == "__main__":
-    # ------------------------- Unit tests -----------------------------#
-    # --- Test #1: Create a queue environment
-    print("\nRunning test #3: Queue environment with a GenericQueue as parameter...")
-    capacity = 6
-    nservers = 1
-    queue = GenericQueue(capacity, nservers)
-    env = EnvQueueSingleBufferWithJobClasses(queue, [0.3, 0.8, 0.7, 0.9], rewardOnJobClassAcceptance, [1, 0.8, 0.3, 0.2])
-    K = env.getCapacity()
-    J = env.getNumJobClasses()
-    R = env.getRewardsForJobClassAcceptance()
+class EnvQueueLossNetworkWithJobClasses(GenericEnvQueueWithJobClasses):
+    """
+    Queue environment representing a loss network receiving jobs of different classes
+    being served by multiple servers without buffer.
 
-    # -- Equivalent job arrival rates (by server)
-    print("Job arrival rates: {}".format(env.job_class_rates))
+    The state of the system is the number of jobs of each class in the system, i.e. being served by one of the servers.
 
-    # -- Arriving job on buffer not full
-    buffer_size_orig = 0
-    job_class = 1
-    env.setJobClass(job_class)
-    state = env.getState()
-    assert state == (0, job_class)
-    # Action = reject
-    next_state, reward, info = env.step(Actions.REJECT, ActionTypes.ACCEPT_REJECT)
-    assert next_state == (0, None)
-    assert reward == 0
-    # Action = accept
-    env.setJobClass(job_class)
-    next_state, reward, info = env.step(Actions.ACCEPT, ActionTypes.ACCEPT_REJECT)
-    assert next_state == (buffer_size_orig, job_class)
-    assert reward == env.getRewardForJobClassAcceptance(job_class)
-    # Now we assign the job to the server
-    next_state, reward, info = env.step(0, ActionTypes.ASSIGN)
-    assert next_state == (buffer_size_orig + 1, None)
-    assert reward == 0
+    The possible actions for an agent interacting with the queue are:
+    - Accept or reject an incoming job of a given class --> action_type = ActionTypes.ACCEPT_REJECT
 
-    # -- Arriving job on full buffer
-    job_class = 1
-    env.setState((env.getCapacity(), job_class))
-    state = env.getState()
-    assert state == (env.getCapacity(), job_class)
-    # Action = reject
-    next_state, reward, info = env.step(Actions.REJECT, ActionTypes.ACCEPT_REJECT)
-    assert next_state == (env.getCapacity(), None)
-    assert reward == 0
-    # Action = accept (not taken because buffer is full)
-    env.setJobClass(job_class)
-    next_state, reward, info = env.step(Actions.ACCEPT, ActionTypes.ACCEPT_REJECT)
-    assert next_state == (env.getCapacity(), None)
-    assert reward == 0
+    Arguments:
+    queue: QueueMM
+        The queue object that governs the dynamics of the environment through the definition of a server system.
+        In the M/M/c/K notation, c (usually the number of servers in the system) here is the number of different
+        job classes, and K (usually the capacity of the system) here is the number of servers in the system that serve
+        jobs.
+
+    reward_func: function
+        Function returning the reward received after taking action A(t) at state S(t) and making the environment
+        go to state S(t+1).
+
+    rewards_accept_by_job_class: list
+        List of rewards for the acceptance of the different job class whose rate is given in job_class_rates.
+
+    dict_params_reward_func: (opt) dict
+        Dictionary containing non-standard parameters (i.e. besides the state, the action and the next state)
+        on which the reward function `reward_func` depends on.
+        Ex: dict_params_reward_func = {'buffer_size_ref': 20}
+        default: None, in which case the default parameter values are used
+    """
+
+    def __init__(self, queue: QueueMM,
+                 reward_func, rewards_accept_by_job_class: list,
+                 dict_params_reward_func: dict=None):
+        super().__init__(queue, reward_func, rewards_accept_by_job_class, dict_params_reward_func)
+        if self.queue.getNServers() != len(self.queue.getBirthRates()):
+            raise ValueError("The number of servers in the queue ({}) must equal the number of job arrival rates ({}), "
+                             "because the number of servers actually indicate the number of job classes." \
+                             .format(self.queue.getNServers(), len(self.queue.getBirthRates)))
+        # State of the system
+        self.state = (list(self.getQueueState()), self.getJobClass())
+
+    def step(self, action: Actions):
+        """
+        The environment takes a step when receiving the given accept/reject action
+
+        Arguments:
+        action: Actions
+            Action taken by the agent interacting with the environment either accept or reject an incoming job.
+
+        Returns: tuple
+        Tuple containing the following elements:
+        - the next state where the environment went to
+        - the reward received by taking the given action and transitioning from the current state to the next state
+        - additional relevant information in the form of a dictionary
+        """
+        if not isinstance(action, Actions):
+            raise ValueError("The action must be of type Actions ({})".format(type(action)))
+
+        state = self.getState()
+        assert self.getJobClass() is not None, "The job class of the arrived job is defined"
+
+        # Convert the action to an ActionTypes class if given as integer
+        if isinstance(action, int) or isinstance(action, np.int32) or isinstance(action, np.int64):
+            # Convert the action to an ActionTypes value
+            action = Actions(action)
+
+        if action not in [Actions.ACCEPT, Actions.REJECT]:
+            raise ValueError(
+                "Invalid action: {}\nValid actions are: {}".format(action, Actions))
+
+        if action == Actions.REJECT:
+            # Reject the incoming job
+            # => Just set the job class to None because no new job has yet arrived after taking the action
+            # The state of the queue is left unchanged.
+            self.setState((self.getQueueState(), None))
+        elif action == Actions.ACCEPT:
+            # => Accept the incoming job unless the system is at full capacity
+            if self.getSystemOccupancy() == self.queue.getCapacity():
+                # Set the job class to None because no new job has yet arrived at the moment of taking the action
+                # The state of the queue is left unchanged.
+                self.setState((self.getQueueState(), None))
+                # Set the action to REJECT because the job was actually rejected, as the buffer was full!
+                action = Actions.REJECT
+            else:
+                # Current state of the queue system
+                queue_state = self.getQueueState()
+                queue_next_state = copy.deepcopy(queue_state)
+                queue_next_state[self.getJobClass()] += 1
+
+                # Update the state of the system
+                self.setState((queue_next_state, None))
+
+        # Define the next state and the reward of going to that next state
+        next_state = self.getState()
+        # Reward observed by going from S(t) to S(t+1) via action A(t)
+        if self.reward_func is not None:
+            reward = self.reward_func(self, state, action, next_state, dict_params=self.dict_params_reward_func)
+        else:
+            reward = 0.0
+
+        # Update the last action stored in the object
+        self.setLastAction(action)
+
+        return next_state, reward, {}
+
+    #------ GETTERS ------#
+    def getNumJobClasses(self):
+        return super().getNumServers()
+
+    def getSystemOccupancy(self):
+        return super().getBufferSize()
+
+    def getSystemOccupancyFromState(self, state :list):
+        return super().getBufferSizeFromState(state)
+
+    #------ SETTERS ------#
+    def setState(self, state):
+        """
+        Sets the state ((j1, j2, ..., jc), i) of the queue environment from the number of jobs of each class and the arriving job class.
+        - (j1, ... jc) is the number of jobs of each class being served by the system
+        - i is the arriving job class
+
+        Arguments:
+        state: duple
+            Duple containing the following information:
+            - job class occupancy: list with the occupancy of each job class in the system
+            - job_class: class of the arriving job
+        """
+        assert len(state) == 2
+        job_class_occupancy = state[0]
+        assert len(job_class_occupancy) == self.queue.getNServers()
+        job_class = state[1]
+        self.queue.setServerSizes(job_class_occupancy)
+        self.job_class = job_class
+        self.state = (list(self.queue.getServerSizes()), self.job_class)
+
+

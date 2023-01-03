@@ -16,13 +16,67 @@ import numpy as np
 
 from Python.lib.agents.policies.job_assignment import PolJobAssignmentProbabilistic
 
-from Python.lib.environments.queues import EnvQueueSingleBufferWithJobClasses
+from Python.lib.environments.queues import Actions, ActionTypes, EnvQueueSingleBufferWithJobClasses, EnvQueueLossNetworkWithJobClasses, \
+    rewardOnJobRejection_Constant, rewardOnJobClassAcceptance
 import Python.lib.queues as queues
-from Python.lib.queues import Event
+from Python.lib.queues import Event, GenericQueue
 
 from Python.lib.simulators.queues import generate_event, SimulatorQueue
 
 from Python.lib.utils.computing import compute_job_rates_by_server
+
+
+class Test_Support_EnvGenericQueueSingleServer(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        # Define the queue environment
+        capacity = 6
+        nservers = 1
+        queue = GenericQueue(capacity, nservers)
+        cls.env_queue = EnvQueueSingleBufferWithJobClasses(queue, [0.3, 0.8, 0.7, 0.9], rewardOnJobClassAcceptance, [1, 0.8, 0.3, 0.2])
+
+    def test_step(self):
+        env = self.env_queue
+
+        # -- Equivalent job arrival rates (by server)
+        print("Job arrival rates: {}".format(env.job_class_rates))
+
+        # -- Arriving job on buffer not full
+        buffer_size_orig = 0
+        job_class = 1
+        env.setState((buffer_size_orig, job_class))
+        state = env.getState()
+        assert state == (0, job_class)
+        # Action = reject
+        next_state, reward, info = env.step(Actions.REJECT, ActionTypes.ACCEPT_REJECT)
+        assert next_state == (0, None)
+        assert reward == 0
+        # Action = accept
+        env.setJobClass(job_class)
+        next_state, reward, info = env.step(Actions.ACCEPT, ActionTypes.ACCEPT_REJECT)
+        assert next_state == (buffer_size_orig, job_class)
+        assert reward == env.getRewardForJobClassAcceptance(job_class)
+        # Now we assign the job to the server
+        next_state, reward, info = env.step(0, ActionTypes.ASSIGN)
+        assert next_state == (buffer_size_orig + 1, None)
+        assert reward == 0
+
+        # -- Arriving job on full buffer
+        job_class = 1
+        env.setState((env.getCapacity(), job_class))
+        state = env.getState()
+        assert state == (env.getCapacity(), job_class)
+        # Action = reject
+        next_state, reward, info = env.step(Actions.REJECT, ActionTypes.ACCEPT_REJECT)
+        assert next_state == (env.getCapacity(), None)
+        assert reward == 0
+        # Action = accept (not taken because buffer is full)
+        env.setJobClass(job_class)
+        next_state, reward, info = env.step(Actions.ACCEPT, ActionTypes.ACCEPT_REJECT)
+        assert next_state == (env.getCapacity(), None)
+        assert reward == 0
+
 
 class Test_Support_EnvQueueMultiServer(unittest.TestCase):
 
@@ -40,8 +94,8 @@ class Test_Support_EnvQueueMultiServer(unittest.TestCase):
         job_rates_by_server = compute_job_rates_by_server(job_class_rates, nservers, policy_assignment_probabilities)
 
         # Queue M/M/nservers/capacity object
-        queue = queues.QueueMM(job_rates_by_server, service_rates, nservers, capacity)
-        cls.env_queue_mm = EnvQueueSingleBufferWithJobClasses(queue, job_class_rates, None, None)
+        queue_mm = queues.QueueMM(job_rates_by_server, service_rates, nservers, capacity)
+        cls.env_queue_mm = EnvQueueSingleBufferWithJobClasses(queue_mm, job_class_rates, None, None)
 
     def test_function_generate_event(self):
         print("\n")
@@ -97,6 +151,60 @@ class Test_Support_EnvQueueMultiServer(unittest.TestCase):
         assert np.allclose(phat, p, atol=3 * se_phat)  # true probabilities should be contained in +/- 3 SE(phat) from phat
 
 
+class Test_Support_EnvQueueLossNetwork(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        # Define the queue environment representing a loss network, where the system contains c servers that can serve
+        # jobs of different job classes and there is no queue.
+        # This system can be represented by an M/M/c/K system where c = number of job classes each having a separate
+        # service rate, and K is the capacity of the system.
+        capacity = 10
+        job_class_rates = [0.7, 0.5, 0.2, 0.3]
+        service_rates = [1.0, 0.8, 1.3, 0.75]
+        assert len(job_class_rates) == len(service_rates)
+        n_job_classes = len(job_class_rates)
+
+        # Queue M/M/njobclasses/capacity object
+        queue_mm = queues.QueueMM(job_class_rates, service_rates, n_job_classes, capacity)
+        cls.env_queue_mm = EnvQueueLossNetworkWithJobClasses(queue_mm, rewardOnJobRejection_Constant, None)
+
+    def test_step(self):
+        env = self.env_queue_mm
+
+        # -- Arriving job on buffer not full
+        queue_state_0 = [0, 2, 3, 1]
+        job_class = 1
+        env.setState((queue_state_0, job_class))
+        state = env.getState()
+        assert state == (queue_state_0, job_class)
+        # Action = reject
+        next_state, reward, info = env.step(Actions.REJECT)
+        assert next_state == (queue_state_0, None)
+        assert reward == env.reward_func(env, state, env.getLastAction(), next_state)
+        # Action = accept
+        env.setState((queue_state_0, job_class))
+        next_state, reward, info = env.step(Actions.ACCEPT)
+        assert next_state == ([s + 1 if j == job_class else s for j, s in enumerate(queue_state_0)], None)
+        assert reward == 0
+
+        # -- Arriving job on full buffer
+        queue_state_0 = [4, 2, 3, 1]
+        job_class = 1
+        env.setState((queue_state_0, job_class))
+        state = env.getState()
+        assert state == (queue_state_0, job_class)
+        # Action = reject
+        next_state, reward, info = env.step(Actions.REJECT)
+        assert next_state == (queue_state_0, None)
+        assert reward == env.reward_func(env, state, env.getLastAction(), next_state)
+        # Action = accept (not taken because buffer is full)
+        env.setState((queue_state_0, job_class))
+        next_state, reward, info = env.step(Actions.ACCEPT)
+        assert next_state == (queue_state_0, None)
+        # The reward is not zero because even though we accepted the job, it was actually rejected due to full buffer
+        assert reward == env.reward_func(env, state, env.getLastAction(), next_state)
+
 
 if __name__ == "__main__":
     # Reference for creating test suites:
@@ -106,7 +214,17 @@ if __name__ == "__main__":
     # Run all tests
     # unittest.main()
 
+    # Single-server tests
+    test_suite_singleserver = unittest.TestSuite()
+    test_suite_singleserver.addTest(Test_Support_EnvGenericQueueSingleServer("test_step"))
+    runner.run(test_suite_singleserver)
+
     # Multi-server tests
     test_suite_multiserver = unittest.TestSuite()
     test_suite_multiserver.addTest(Test_Support_EnvQueueMultiServer("test_function_generate_event"))
     runner.run(test_suite_multiserver)
+
+    # Loss network tests
+    test_suite_lossnetwork = unittest.TestSuite()
+    test_suite_lossnetwork.addTest(Test_Support_EnvQueueLossNetwork("test_step"))
+    runner.run(test_suite_lossnetwork)
