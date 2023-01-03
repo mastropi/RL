@@ -2637,7 +2637,7 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info):
     """
 
     # -- Auxiliary functions
-    is_estimation_of_denominator_unreliable = lambda: track_survival and np.isnan(expected_absorption_time) or not track_survival and np.isnan(expected_exit_time)
+    is_estimation_of_denominator_unreliable = lambda: track_survival_in_single_particle_simulation and np.isnan(expected_absorption_time) or not track_survival_in_single_particle_simulation and np.isnan(expected_exit_time)
     # -- Auxiliary functions
 
     # -- Parse input parameters
@@ -2667,27 +2667,27 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info):
     # -- Step 1: Simulate a single queue to estimate P(T>t) and E(T_A)
     start_state_boundary_A = choose_state_for_buffer_size(envs[0], dict_params_simul['buffer_size_activation'] - 1)
     if dict_params_simul['method_survival_probability_estimation'] == SurvivalProbabilityEstimation.FROM_M_CYCLES:
-        track_survival = True
+        track_survival_in_single_particle_simulation = True
         t, time_end_simulation, n_cycles_absorption, time_last_absorption, exit_times, absorption_times, survival_times = \
             run_simulation_mc(envs[0], agent, dict_params_info.get('t_learn', 0), start_state_boundary_A,
                               dict_params_simul['T'],
-                              track_absorptions=True, track_survival=track_survival,
+                              track_absorptions=True, track_survival=track_survival_in_single_particle_simulation,
                               seed=dict_params_simul['seed'],
                               verbose=dict_params_info.get('verbose', False),
                               verbose_period=dict_params_info.get('verbose_period', 1))
     else:
-        track_survival = False
+        track_survival_in_single_particle_simulation = False
         t, time_end_simulation, n_cycles_absorption, time_last_absorption, exit_times, absorption_times = \
             run_simulation_mc(envs[0], agent, dict_params_info.get('t_learn', 0), start_state_boundary_A,
                               dict_params_simul['T'],
-                              track_absorptions=True, track_survival=track_survival,
+                              track_absorptions=True, track_survival=track_survival_in_single_particle_simulation,
                               seed=dict_params_simul['seed'],
                               verbose=dict_params_info.get('verbose', False),
                               verbose_period=dict_params_info.get('verbose_period', 1))
     n_events_et = t
     time_end_simulation_et = time_end_simulation
 
-    if track_survival:
+    if track_survival_in_single_particle_simulation:
         # Estimate E(T_A) and P(T>t) because both estimates come from the same simulation and are based on the
         # M reabsorption cycles observed therein. In fact, this guarantees that estimated E(T_A) >= estimated E(T_K),
         # where T_K is the killing time a.k.a. absorption time since activation, a requirement that is needed to make
@@ -2712,7 +2712,7 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info):
         df_proba_surv = None
 
     if DEBUG_ESTIMATORS or show_messages(dict_params_info.get('verbose', False), dict_params_info.get('verbose_period', 1), dict_params_info.get('t_learn', 0)):
-        if track_survival:
+        if track_survival_in_single_particle_simulation:
             print("\n*** RESULTS OF MC ESTIMATION OF P(T>t) and E(T) on {} events ***".format(n_events_et))
             max_rows = pd.get_option('display.max_rows')
             pd.set_option('display.max_rows', None)
@@ -2745,7 +2745,7 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info):
         expected_absorption_time = np.nan
         time_last_absorption = time_last_absorption
         time_end_simulation_et = time_end_simulation_et
-        if not track_survival:
+        if not track_survival_in_single_particle_simulation:
             max_survival_time = np.nan
         time_end_simulation_fv = 0.0
         n_events_et = n_events_et
@@ -2758,7 +2758,8 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info):
                   .format(N, dict_params_simul['buffer_size_activation'] - 1))
         t, event_times, phi, probas_stationary, expected_absorption_time, max_survival_time = \
             run_simulation_fv(  dict_params_info.get('t_learn', 0), envs, agent,
-                                dict_params_simul['buffer_size_activation'] - 1, # we pass the absorption buffer size to this function
+                                set({dict_params_simul['buffer_size_activation'] - 1}), # we pass the absorption buffer size to this function
+                                set({dict_params_simul['buffer_size_activation']}),
                                 expected_absorption_time=expected_absorption_time,
                                 expected_exit_time=expected_exit_time,
                                 df_proba_surv=df_proba_surv,
@@ -2789,7 +2790,7 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info):
 
 
 @measure_exec_time
-def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption,
+def run_simulation_fv(t_learn, envs, agent, absorption_set, activation_set,
                       expected_absorption_time=None, expected_exit_time=None,
                       df_proba_surv=None,
                       verbose=False, verbose_period=1, plot=False):
@@ -2808,8 +2809,11 @@ def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption,
         The learning time step to which the simulation will contribute.
         Only used for informative purposes or to decide whether to show information in the log.
 
-    buffer_size_absorption: non-negative int
-        Buffer size at which the particle is absorbed.
+    absorption_set: set
+        Set with the entrance states to the zero-reward set of states A.
+
+    activation_set: set
+        Set with the entrance states to the complement of the zero-reward set of states A.
 
     expected_absorption_time: (opt) positive float
         Expected absorption cycle time E(T_A) used to estimate the blocking probability for each blocking buffer size.
@@ -3206,10 +3210,19 @@ def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption,
     # ---------------------------------- Auxiliary functions ------------------------------#
 
     # ---------------------------- Check input parameters ---------------------------------#
-    if buffer_size_absorption < 0 \
-            or not isinstance(buffer_size_absorption, int) and not isinstance(buffer_size_absorption, np.int32) \
-            and not isinstance(buffer_size_absorption, np.int64):
-        raise ValueError("The buffer size for absorption must be integer and >= 0 ({})".format(buffer_size_absorption))
+    #if buffer_size_absorption < 0 \
+    #        or not isinstance(buffer_size_absorption, int) and not isinstance(buffer_size_absorption, np.int32) \
+    #        and not isinstance(buffer_size_absorption, np.int64):
+    #    raise ValueError("The buffer size for absorption must be integer and >= 0 ({})".format(buffer_size_absorption))
+    if not isinstance(absorption_set, set):
+        raise ValueError("Parameter `absorption_set` must be a set: {}".format(absorption_set))
+    if not isinstance(activation_set, set):
+        raise ValueError("Parameter `activation_set` must be a set: {}".format(activation_set))
+
+    if len(absorption_set) == 0:
+        raise ValueError("Parameter `absorption_set` must have at least one element")
+    if len(activation_set) == 0:
+        raise ValueError("Parameter `activation_set` must have at least one element")
 
     if df_proba_surv is not None:
         # Check the survival probability structure
@@ -3235,11 +3248,12 @@ def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption,
     # for the empirical distribution Phi(t).
     for i, env in enumerate(envs):
         # Set the start state of the queue environment so that we start at an activation state
-        start_state = choose_state_for_buffer_size(env, buffer_size_absorption + 1)
+        #start_state = choose_state_for_buffer_size(env, buffer_size_absorption + 1)
+        start_state = np.random.choice(list(activation_set))
         env.setState((start_state, None))
-        assert env.getBufferSize() == buffer_size_absorption + 1, \
-            "The start state of all environments/particles must be an activation state (start state of env #{}: {})" \
-                .format(i, env.getState())
+        #assert env.getBufferSize() == buffer_size_absorption + 1, \
+        #    "The start state of all environments/particles must be an activation state (start state of env #{}: {})" \
+        #        .format(i, env.getState())
 
     # Buffer sizes whose stationary probability is of interest
     buffer_sizes_of_interest = get_blocking_buffer_sizes(agent)
@@ -3299,7 +3313,7 @@ def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption,
 
         # Variables needed to update the plot that shows the trajectories of the particles (online)
         time0 = [0.0] * N
-        y0 = [buffer_size_absorption + 1] * N
+        y0 = [envs[0].getBufferSizeFromState(activation_set[0])] * N
     # Absolute time at which events happen
     time_abs = event_times[0]
     while not done:
@@ -3340,7 +3354,8 @@ def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption,
             action, next_state, reward = manage_service(envs[idx_particle], agent, state, job_class_or_server)
 
             # Check if the particle has been ABSORBED
-            if envs[idx_particle].getBufferSize() == buffer_size_absorption:
+            #if envs[idx_particle].getBufferSize() == buffer_size_absorption:
+            if set(envs[idx_particle].getQueueState()).issubset(absorption_set):
                 # The particle has been absorbed
                 # => Reactivate it to any of the other particles
                 # => If the survival probability function is not given as input parameter,
@@ -3349,8 +3364,11 @@ def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption,
                     survival_times += [time_abs]        # Note that we store the ABSOLUTE time because at first absorption, the particle started at 0, so this is correct.
                     ## IMPORTANT: By construction the survival times are ALREADY SORTED in the list, since we only add
                     ## the FIRST absorption time for each particle.
-                    # Mark the particle to have been absorbed once so that we don't use any absorption time from the
-                    # particle to estimate the survival probability.
+                    # Mark the particle as "absorbed once" so that we don't use any other absorption time from this
+                    # particle to estimate the survival probability, because the absorption times coming after the first
+                    # absorption time should NOT contribute to the survival probability, because their initial state
+                    # is NOT the correct one --i.e. it is not a state in the activation set, which is a requirement
+                    # for the estimation of the survival probability distribution.
                     has_particle_been_absorbed_once[idx_particle] = True
                     if False:
                         print("Survival times observed so far: {}".format(sum(has_particle_been_absorbed_once)))
@@ -3359,7 +3377,7 @@ def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption,
                 if plot:
                     # Show the absorption before reactivation takes place
                     y = envs[idx_particle].getBufferSize()
-                    J = buffer_size_absorption + 1
+                    J = envs[0].getBufferSizeFromState(activation_set[0])
                     print("* Particle {} ABSORBED! (at time = {:.3f}, buffer size = {})".format(idx_particle, time_abs, y))
                     plot_update_trajectory( ax, idx_particle, N, K, J,
                                             time0[idx_particle], y0[idx_particle], time_abs, y)
@@ -3368,7 +3386,7 @@ def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption,
                     y0[idx_particle] = y
                 idx_reactivate = reactivate_particle(envs, idx_particle, buffer_sizes_of_interest[-1], absorption_number=absorption_number)
                 next_state = envs[idx_particle].getState()
-                assert envs[idx_particle].getBufferSize() > buffer_size_absorption
+                #assert envs[idx_particle].getBufferSize() > buffer_size_absorption
                 if DEBUG_TRAJECTORIES:
                     print("*** Particle {} REACTIVATED to particle {} at position {}".format(idx_particle, idx_reactivate, envs[idx_reactivate].getBufferSize()))
 
@@ -3404,7 +3422,7 @@ def run_simulation_fv(t_learn, envs, agent, buffer_size_absorption,
             if agent.getLearnerP() is not None:
                 assert agent.getAcceptancePolicy().getThetaParameter() == agent.getLearnerP().getPolicy().getThetaParameter()
             K = agent.getAcceptancePolicy().getBufferSizeForDeterministicBlocking()
-            J = buffer_size_absorption + 1
+            J = envs[0].getBufferSizeFromState(activation_set[0])
             plot_update_trajectory( ax, idx_particle, N, K, J,
                                     time0[idx_particle], y0[idx_particle], time_abs, y,
                                     r=None) #idx_reactivate)    # Use idx_reactivate if we want to see a vertical line at the time of absorption with the color of the activated particle
