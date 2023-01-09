@@ -115,9 +115,17 @@ def generate_datetime_string(dt_str=None, format="%Y%m%d_%H%M%S", prefix="", suf
 
     return dt_str
 
+def is_integer(x):
+    "Returns whether the input parameter is an integer (i.e. either int, np.int32, np.int64)"
+    return isinstance(x, (int, np.int32, np.int64))
+
+def is_float(x):
+    "Returns whether the input parameter is a float number (i.e. either float, np.float32, np.float64)"
+    return isinstance(x, (float, np.float32, np.float64))
+
 def is_scalar(x):
     "Returns whether the input parameter is a scalar (i.e. either int, np.int32, np.int64, float, np.float32, np.float64)"
-    return isinstance(x, (int, np.int32, np.int64, float, np.float32, np.float64))
+    return is_integer(x) or is_float(x)
 
 def as_array(x):
     "Converts a scalar or list of values to a numpy array"

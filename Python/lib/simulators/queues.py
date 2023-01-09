@@ -21,7 +21,7 @@ from Python.lib.agents.learners.continuing.fv import LeaFV
 from Python.lib.agents.policies import PolicyTypes
 from Python.lib.agents.policies.parameterized import PolQueueTwoActionsLinearStep
 from Python.lib.environments.queues import Actions
-from Python.lib.simulators import analyze_event_times, check_done, show_messages, step, update_trajectory
+from Python.lib.simulators import analyze_event_times, check_done, show_messages, step, update_trajectory, SetOfStates
 from Python.lib.simulators.discrete import Simulator
 from Python.lib.queues import Event
 
@@ -1564,10 +1564,12 @@ def choose_state_for_buffer_size(env, buffer_size):
     return state
 
 
-def get_blocking_buffer_sizes(agent):
+# (2023/01/05) This function has been replaced with get_blocking_boundaries() which deals with policies applied to multi-dimensional states
+def deprecated_get_blocking_buffer_sizes(agent):
     "Returns the buffer sizes where the job acceptance policy of the given agent blocks an incoming job"
     assert agent is not None
     if agent.getLearnerP() is not None:
+        assert not isinstance(agent.getAcceptancePolicy(), list), "The acceptance policy is only one, i.e. it is NOT a list of policies"
         assert agent.getAcceptancePolicy().getThetaParameter() == agent.getLearnerP().getPolicy().getThetaParameter(), \
                 "The theta parameter of the agent's acceptance policy ({}) coincides with the theta parameter" \
                 .format(agent.getAcceptancePolicy().getThetaParameter()) + \
@@ -1578,6 +1580,53 @@ def get_blocking_buffer_sizes(agent):
                              if agent.getAcceptancePolicy().getPolicyForAction(Actions.REJECT, None, buffer_size=k) > 0]
 
     return blocking_buffer_sizes
+
+
+def get_blocking_boundaries(agent):
+    """
+    Returns all the blocking values for each dimension of a multi-dimensional state system where blocking may occur at
+    arrival of the corresponding job class
+
+    The agent is assumed to store one or more parameterized action policies, each of which is parameterized by a
+    real-valued parameter theta (as opposed to a multi-dimensional parameter).
+
+    Arguments:
+    agent: agent object interacting with the environment
+        Agent that defines a list of accept/reject policies, e.g. one for each arriving job class, normally
+        parameterized policies.
+
+    Return: list or list of lists
+    If the number of acceptance policies defined in the agent is only one, the returned value is a list of blocking sizes (e.g. [K-1, K]).
+    Otherwise, if more than one acceptance policy is defined by the agent, the returned value is a list of lists,
+    with as many elements as the number of policies defined in the agent. Each element is a list of potential
+    blocking sizes for each policy. Ex: [ [2, 3], [6, 7], [4, 5]] where each two-element list are the values of
+    K-1 and K deduced from each of the 1D-parameterized policies defined by the agent.
+    """
+    # TODO: (2023/01/09) Implement a way to assert or check that the policies stored in the given agent must be 1D-parameterized policies
+    assert agent is not None
+    if not isinstance(agent.getAcceptancePolicy(), list):
+        # Convert the acceptance policy to a list containing the acceptance policy so that we can generalize
+        # to the multi-dimensional case
+        policies = [agent.getAcceptancePolicy()]
+    else:
+        # There is only one policy and it is assumed to be a parameterized policy with a REAL (1D) theta parameter
+        policies = agent.getAcceptancePolicy()
+
+    # Sizes at which blocking is deterministic for each 1D-parameterized policy (the K values)
+    Ks = [policies[i].getBufferSizeForDeterministicBlocking() for i in range(len(policies))]
+    blocking_boundaries = [[k for k in range(0, Ks[i]+1) if policies[i].getPolicyForAction(Actions.REJECT, None, buffer_size=k) > 0]
+                           for i in range(len(policies))]
+
+    # Check that the list of blocking sizes for each policy does not contain repeated states
+    # (i.e. the list elements are [2, 3], [5, 6] but NOT [2, 2], [6, 6], etc.)
+    for boundaries in blocking_boundaries:
+        assert len(set(boundaries)) == len(boundaries), "The blocking boundaries found must NOT repeat within each policy: {}".format(boundaries)
+
+    # Remove the boundaries from the list object if there is only one boundary
+    if len(blocking_boundaries) == 1:
+        return blocking_boundaries[0]
+    else:
+        return blocking_boundaries
 
 
 def compute_burnin_time_from_burnin_time_steps(env, burnin_time_steps):
@@ -1642,7 +1691,7 @@ def compute_proba_blocking(agent, probas_stationary):
     Estimated blocking probability.
     """
     proba_blocking = 0.0
-    buffer_sizes_of_interest = get_blocking_buffer_sizes(agent)
+    buffer_sizes_of_interest = get_blocking_boundaries(agent)
     assert len(probas_stationary) == len(buffer_sizes_of_interest), \
         "The length of the probas_stationary dictionary ({}) is the same as the number of buffer sizes of interest ({})" \
             .format(probas_stationary, buffer_sizes_of_interest)
@@ -1684,7 +1733,7 @@ def estimate_expected_reward(env, agent, probas_stationary):
     Estimated expected reward.
     """
     expected_reward = 0.0
-    buffer_sizes_of_interest = get_blocking_buffer_sizes(agent)
+    buffer_sizes_of_interest = get_blocking_boundaries(agent)
     assert len(probas_stationary) == len(buffer_sizes_of_interest)
     for bs in buffer_sizes_of_interest:
         if agent.getLearnerP() is not None:
@@ -2060,7 +2109,7 @@ def estimate_blocking_mc(env, agent, dict_params_simul, dict_params_info, start_
     # -- Parse input parameters
     set_required_simul_params = set(['buffer_size_activation', 'T'])
     if not set_required_simul_params.issubset(dict_params_simul.keys()):
-        raise ValueError("Not all required parameters were given in `dict_params_simul`, which requires: {}".format(set_required_simul_params))
+        raise ValueError("Not all required parameters were given in `dict_params_simul`, which requires: {}\nGiven: {}".format(set_required_simul_params, dict_params_simul.keys()))
     if dict_params_simul['buffer_size_activation'] < 1:
         raise ValueError("The activation buffer size must be at least 1: {}".format(dict_params_simul['buffer_size_activation']))
     dict_params_simul['burnin_time_steps'] = dict_params_simul.get('burnin_time_steps', BURNIN_TIME_STEPS)
@@ -2509,7 +2558,7 @@ def estimate_stationary_probabilities_mc(env, agent, burnin_time=0, min_num_cycl
 
     # Initialize the output objects to NaN in case their values cannot be reliably estimated
     # (because of an insufficient number of observed return cycles)
-    buffer_sizes_of_interest = get_blocking_buffer_sizes(agent)
+    buffer_sizes_of_interest = get_blocking_boundaries(agent)
     probas_stationary = dict()
     for bs in buffer_sizes_of_interest:
         probas_stationary[bs] = np.nan
@@ -2589,9 +2638,16 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info):
 
     dict_params_simul: dict
         Dictionary containing simulation and estimation parameters.
-        It should contain at least the following keys:
-        - buffer_size_activation: the overall system's buffer size for activation (J, where J-1 is the absorption buffer size).
+        It should contain at least the following key:
         - T: the number of arrival events to use in the Monte-Carlo simulation that estimates E(T_A).
+        and one of the following set of keys:
+        - Set 1: suitable for systems with a single buffer governing blocking (e.g. single-server, multi-server with single buffer)
+            - buffer_size_activation: the overall system's buffer size for activation for systems with a single buffer
+        holding jobs that await being served. If we call this value J, then J-1 is the absorption buffer size.
+        - Set 2: suitable for systems where blocking occurs at multi-dimensional states (e.g. loss network with multi-class jobs)
+            - absorption_set: SetOfStates object defining the set of absorption states.
+            - activation_set: SetOfStates object defining the set of activation states.
+        When both set 1 and set 2 are given in the dictionary, precedence is given to the set 1 of parameters.
 
         The following keys are optional:
         - burnin_time_steps: number of burn-in time steps to allow at the beginning of the simulation in order to
@@ -2641,11 +2697,17 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info):
     # -- Auxiliary functions
 
     # -- Parse input parameters
-    set_required_simul_params = set(['buffer_size_activation', 'T'])
+    if 'buffer_size_activation' in dict_params_simul.keys():
+        # Define the simulation parameters that will be used from now on below in a unified estimation process that
+        # encompasses both the case where blocking occurs at a single buffer size (e.g. single-server system or
+        # multi-server system with single buffer) or when it occurs at a set of states (e.g. loss network with multi-class jobs).
+        dict_params_simul['absorption_set'] = SetOfStates(state_boundaries=dict_params_simul['buffer_size_activation'] - 1)
+        dict_params_simul['activation_set'] = SetOfStates(state_boundaries=dict_params_simul['buffer_size_activation'])
+    set_required_simul_params = set({'absorption_set', 'activation_set', 'T'})
     if not set_required_simul_params.issubset(dict_params_simul.keys()):
-        raise ValueError("Not all required parameters were given in `dict_params_simul`, which requires: 'buffer_size_activation', 'T'")
-    if dict_params_simul['buffer_size_activation'] < 1:
-        raise ValueError("The activation buffer size must be at least 1: {}".format(dict_params_simul['buffer_size_activation']))
+        raise ValueError("Not all required parameters were given in `dict_params_simul`, which requires: {}\nGiven: {}".format(set_required_simul_params, dict_params_simul.keys()))
+
+    # Parse the remaining simulation parameters
     dict_params_simul['burnin_time_steps'] = dict_params_simul.get('burnin_time_steps', BURNIN_TIME_STEPS)
     # Continuous burn-in time used to filter the continuous-time cycle times observed during the single-particle simulation
     # that is used to estimate the expected reabsorption cycle time, E(T_A).
@@ -2665,7 +2727,20 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info):
     # -- Parse input parameters
 
     # -- Step 1: Simulate a single queue to estimate P(T>t) and E(T_A)
-    start_state_boundary_A = choose_state_for_buffer_size(envs[0], dict_params_simul['buffer_size_activation'] - 1)
+    # DM-2023/01/09: The next line that calls choose_state_for_buffe_size() was commented out
+    # because it corresponds to the scenario where the system has a SINGLE queue buffer and this is the one
+    # defining when the system is blocked. Now however, we are generalizing the system to a blocking condition
+    # that may not depend only on a single buffer being full, but on reaching a set of multi-dimensinoal states
+    # (e.g. a queue system accepting multi-class jobs).
+    #start_state_boundary_A = choose_state_for_buffer_size(envs[0], dict_params_simul['buffer_size_activation'] - 1)
+    # DM-2023/01/09: This is the new line that chooses the start state among a set of absorption states
+    # Note that the set of absorption states is easy to define in the single-server context but in a multi-server context
+    # the set may be very large... I don't think there is an alternative for a concise definition of the absorption set
+    # in such multi-server situation.
+    # In a loss network context, e.g. a buffer-less server system that accepts jobs of different classes,
+    # this absorption set can concisely be defined by the set of unidimensional blocking sizes, one for each job class,
+    # and this is one of the options given by the constructor of the SetOfStates class used to define this set.
+    start_state_boundary_A = dict_params_simul['absorption_set'].random_choice()
     if dict_params_simul['method_survival_probability_estimation'] == SurvivalProbabilityEstimation.FROM_M_CYCLES:
         track_survival_in_single_particle_simulation = True
         t, time_end_simulation, n_cycles_absorption, time_last_absorption, exit_times, absorption_times, survival_times = \
@@ -2722,7 +2797,9 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info):
                   .format(expected_absorption_time, n_cycles_absorption_used, time_last_absorption, df_proba_surv['t'].iloc[-1]))
 
     if DEBUG_TRAJECTORIES:
-        ax0 = plot_trajectory(envs[0], agent, dict_params_simul['buffer_size_activation'])
+        # DM-2023/01/09: This assertion is commented out because we don't compute is_problem_1d here, we only compute it in function run_simulation_fv()
+        #assert is_problem_1d, "The problem must be 1D (one-dimensional states) when debugging trajectories"
+        ax0 = plot_trajectory(envs[0], agent, dict_params_simul['activation_set'].getStates())
         xticks = range(int(ax0.get_xlim()[1]))
         ax0.set_xticks(xticks)
         ax0.vlines(xticks, 0, ax0.get_ylim()[1], color="lightgray")
@@ -2738,7 +2815,7 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info):
               "\nThe estimated stationary probabilities, estimated blocking probability and estimated expected reward will be set to NaN.".format(n_cycles_absorption))
         proba_blocking = np.nan
         expected_reward = np.nan
-        buffer_sizes_of_interest = get_blocking_buffer_sizes(agent)
+        buffer_sizes_of_interest = get_blocking_boundaries(agent)
         probas_stationary = dict()
         for bs in buffer_sizes_of_interest:
             probas_stationary[bs] = np.nan
@@ -2754,12 +2831,13 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info):
         N = len(envs)
         assert N > 1, "The simulation system has more than one particle in Fleming-Viot mode ({})".format(N)
         if DEBUG_ESTIMATORS or show_messages(dict_params_info.get('verbose', False), dict_params_info.get('verbose_period', 1), dict_params_info.get('t_learn', 0)):
-            print("Running Fleming-Viot simulation on {} particles and absorption buffer size = {}..." \
-                  .format(N, dict_params_simul['buffer_size_activation'] - 1))
+            print("Running Fleming-Viot simulation on {} particles with absorption and activation sets defined as follows:"
+                  "\nabsorption set: {}".format(N, dict_params_simul['absorption_set'].getStates()) + \
+                  "\nactivation set: {}".format(N, dict_params_simul['activation_set'].getStates()))
         t, event_times, phi, probas_stationary, expected_absorption_time, max_survival_time = \
             run_simulation_fv(  dict_params_info.get('t_learn', 0), envs, agent,
-                                set({dict_params_simul['buffer_size_activation'] - 1}), # we pass the absorption buffer size to this function
-                                set({dict_params_simul['buffer_size_activation']}),
+                                dict_params_simul['absorption_set'],
+                                dict_params_simul['activation_set'],
                                 expected_absorption_time=expected_absorption_time,
                                 expected_exit_time=expected_exit_time,
                                 df_proba_surv=df_proba_surv,
@@ -2790,7 +2868,7 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info):
 
 
 @measure_exec_time
-def run_simulation_fv(t_learn, envs, agent, absorption_set, activation_set,
+def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activation_set: SetOfStates,
                       expected_absorption_time=None, expected_exit_time=None,
                       df_proba_surv=None,
                       verbose=False, verbose_period=1, plot=False):
@@ -2809,10 +2887,10 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set, activation_set,
         The learning time step to which the simulation will contribute.
         Only used for informative purposes or to decide whether to show information in the log.
 
-    absorption_set: set
+    absorption_set: SetOfStates
         Set with the entrance states to the zero-reward set of states A.
 
-    activation_set: set
+    activation_set: SetOfStates
         Set with the entrance states to the complement of the zero-reward set of states A.
 
     expected_absorption_time: (opt) positive float
@@ -2867,6 +2945,23 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set, activation_set,
     """
 
     # ---------------------------------- Auxiliary functions ------------------------------#
+    def is_particle_absorbed(envs: list, idx_particle: int, absorption_set: SetOfStates):
+        """
+        Check whether a particle has been absorbed. IMPORTANT: Here we assume that this function is called after a DEATH event,
+        i.e. no check is done of whether the previous state was in the complement of set A.
+        """
+        if absorption_set.getStorageFormat() == "states":
+            return set(envs[idx_particle].getQueueState()).issubset(absorption_set.getStates())
+        else:
+            # Note: we convert lists to arrays in order to perform an element-wise comparison of their elements
+            particle_state = np.array(envs[idx_particle].getQueueState())
+            state_boundaries = np.array(absorption_set.getStates())
+            if  any(particle_state == state_boundaries) and \
+                all(particle_state <= state_boundaries):
+                return True
+            else:
+                return False
+
     def initialize_phi(envs, t: float, buffer_sizes: list):
         """
         Initializes the conditional probability of each buffer size of interest, which are given by the keys
@@ -2878,8 +2973,9 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set, activation_set,
 
         t: float
 
-        buffer_sizes: list of int
-            Buffer sizes at which the Phi dictionary should be initialized.
+        buffer_sizes: list of int or list of lists
+            Buffer sizes (list of int for single-dimension policies) or state boundaries (list of lists, for multi-dimensional policies)
+            at which the Phi dictionary should be initialized.
 
         Return: dict
             Dictionary, indexed by the given buffer sizes, of data frames that will be used to store
@@ -2889,8 +2985,29 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set, activation_set,
             buffer size (indexing the dictionary).
         """
         dict_phi = dict()
-        for bs in buffer_sizes:
-            dict_phi[bs] = pd.DataFrame([[t, empirical_mean(envs, bs)]], columns=['t', 'Phi'])
+        if isinstance(buffer_sizes[0], list):
+            # Parameter `buffer_sizes` actually stores state boundaries at which blocking may occur for multi-dimensional-state
+            # environments, This means that ANY state having one of the state dimensions equal to the corresponding state boundary
+            # is a po
+            # tential blocking state (e.g. if state is 3D, and the first state boundary is 3, then the states
+            # [3, s2, s3] for all acceptable s2 and s3 based on the queue's capacity aare of interest for the tomputation of Phi.
+            states_of_interest = []
+            for idx_policy, boundaries in enumerate(buffer_sizes):     # E.g. [K-1, K] = [3, 4]
+                for b in boundaries:            # E.g. b = 3 when boundaries = [3, 4]
+                    states_of_interest_new = [[]]*len(buffer_sizes)
+                    states_of_interest_new[idx_policy] = b
+
+                    # Fill in the other dimensions with all possible state dimension values!!
+                    for idx in range(len(buffer_sizes)):
+                        if idx != idx_policy:
+                            for value in range(envs[0].getCapacity() + 1):
+                                states_of_interest_new[idx] = value
+                    states_of_interest += states_of_interest_new
+        else:
+            # Parameter `buffer_sizes` contains 1D states (e.g. [K-1, K])
+            states_of_interest = buffer_sizes
+        for s in states_of_interest:
+            dict_phi[s] = pd.DataFrame([[t, empirical_mean(envs, s)]], columns=['t', 'Phi'])
         return dict_phi
 
     def empirical_mean(envs: list, buffer_size: int):
@@ -2991,7 +3108,8 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set, activation_set,
             The index of the particle to be reactivated.
 
         K: int
-            Queue's capacity.
+            Queue's capacity. Only used when method = ReactivateMethod.VALUE_FUNCTION is used in the call to
+            choose_particle() done by this function.
 
         Return: int
         The index of the particle to which it is reactivated.
@@ -3013,7 +3131,7 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set, activation_set,
 
         Arguments:
         envs: list
-            List of queue environments used to run the FV process.
+            List of queue environments used to run the FV process. Only used when method = ReactivateMethod.VALUE_FUNCTION.
 
         idx_particle: int
             The index of the particle to be reactivated.
@@ -3022,7 +3140,7 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set, activation_set,
             Number of particles in the Fleming-Viot system.
 
         K: int
-            Queue's capacity.
+            Queue's capacity. Only used when method = ReactivateMethod.VALUE_FUNCTION.
 
         method: ReactivateMethod
             Reactivation method to use which defines how the particle is chosen
@@ -3210,20 +3328,30 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set, activation_set,
     # ---------------------------------- Auxiliary functions ------------------------------#
 
     # ---------------------------- Check input parameters ---------------------------------#
-    #if buffer_size_absorption < 0 \
-    #        or not isinstance(buffer_size_absorption, int) and not isinstance(buffer_size_absorption, np.int32) \
-    #        and not isinstance(buffer_size_absorption, np.int64):
-    #    raise ValueError("The buffer size for absorption must be integer and >= 0 ({})".format(buffer_size_absorption))
-    if not isinstance(absorption_set, set):
-        raise ValueError("Parameter `absorption_set` must be a set: {}".format(absorption_set))
-    if not isinstance(activation_set, set):
-        raise ValueError("Parameter `activation_set` must be a set: {}".format(activation_set))
-
-    if len(absorption_set) == 0:
+    # -- Absorption and activation sets
+    # Class
+    if not isinstance(absorption_set, SetOfStates):
+        raise ValueError("Parameter `absorption_set` must be of type SetOfStates: {}".format(absorption_set))
+    if not isinstance(activation_set, SetOfStates):
+        raise ValueError("Parameter `activation_set` must be of type SetOfStates: {}".format(activation_set))
+    # Set sizes
+    if not is_scalar(absorption_set.getStates()) and len(absorption_set.getStates()) == 0:
         raise ValueError("Parameter `absorption_set` must have at least one element")
-    if len(activation_set) == 0:
+    if not is_scalar(activation_set.getStates()) and len(activation_set.getStates()) == 0:
         raise ValueError("Parameter `activation_set` must have at least one element")
+    # Compatibility check (dimension)
+    if absorption_set.getStateDimension() != activation_set.getStateDimension():
+        raise ValueError("The absorption and activation sets must be compatible, i.e. either both should contain scalar states or both should have the same state dimension")
+    # Check if the problem is 1D (i.e. states are of dimension 1 and each of the absorption set and the activation set has just ONE element
+    is_problem_1d = absorption_set.getStateDimension() == 1 and \
+                    absorption_set.getNumStates() == 1 and \
+                    activation_set.getNumStates() == 1
+    if  is_problem_1d and absorption_set.getStates() != activation_set.getStates() - 1:
+        raise ValueError("The VALUE of the activation set in a 1D problem (i.e. one single number in the set, such as set({3}))"
+                         " must be exactly one more than the VALUE of the absorption set (e.g. absorption = 2, activation = 3): absorption={}, activation={}" \
+                         .format(absorption_set.getStates(), activation_set.getStates()))
 
+    # -- Data frame containing the survival probability (if provided)
     if df_proba_surv is not None:
         # Check the survival probability structure
         if 't' not in df_proba_surv.columns or 'P(T>t)' not in df_proba_surv.columns:
@@ -3248,15 +3376,11 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set, activation_set,
     # for the empirical distribution Phi(t).
     for i, env in enumerate(envs):
         # Set the start state of the queue environment so that we start at an activation state
-        #start_state = choose_state_for_buffer_size(env, buffer_size_absorption + 1)
-        start_state = np.random.choice(list(activation_set))
+        start_state = activation_set.random_choice()
         env.setState((start_state, None))
-        #assert env.getBufferSize() == buffer_size_absorption + 1, \
-        #    "The start state of all environments/particles must be an activation state (start state of env #{}: {})" \
-        #        .format(i, env.getState())
 
     # Buffer sizes whose stationary probability is of interest
-    buffer_sizes_of_interest = get_blocking_buffer_sizes(agent)
+    blocking_boundaries = get_blocking_boundaries(agent)    # This is a list for single dimensional policies and a list of lists for multi-dimensional policies
 
     # Event times (continuous times at which an event happens)
     # The first event time is 0.0
@@ -3264,7 +3388,7 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set, activation_set,
 
     # Phi(t, bs): Empirical probability of the buffer sizes of interest (bs)
     # at each time when an event happens (ANY event, both arriving job or completed service)
-    dict_phi = initialize_phi(envs, event_times[0], buffer_sizes_of_interest)
+    dict_phi = initialize_phi(envs, event_times[0], blocking_boundaries)
 
     # Time step in the queue trajectory (the first time step is t = 0)
     done = False
@@ -3304,6 +3428,7 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set, activation_set,
         # List of service times for each particle (used to estimate mu for each particle)
         times_service = array_of_objects((N,), [])
     if plot:
+        assert is_problem_1d, "The problem must be 1D (one-dimensional states) when plotting trajectories"
         # Initialize the plot
         ax = plt.figure().subplots(1,1)
         if agent.getLearnerP() is not None:
@@ -3313,7 +3438,7 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set, activation_set,
 
         # Variables needed to update the plot that shows the trajectories of the particles (online)
         time0 = [0.0] * N
-        y0 = [envs[0].getBufferSizeFromState(activation_set[0])] * N
+        y0 = [envs[0].getBufferSizeFromState(activation_set.getStates())] * N
     # Absolute time at which events happen
     time_abs = event_times[0]
     while not done:
@@ -3354,8 +3479,7 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set, activation_set,
             action, next_state, reward = manage_service(envs[idx_particle], agent, state, job_class_or_server)
 
             # Check if the particle has been ABSORBED
-            #if envs[idx_particle].getBufferSize() == buffer_size_absorption:
-            if set(envs[idx_particle].getQueueState()).issubset(absorption_set):
+            if is_particle_absorbed(envs, idx_particle, absorption_set):
                 # The particle has been absorbed
                 # => Reactivate it to any of the other particles
                 # => If the survival probability function is not given as input parameter,
@@ -3375,18 +3499,22 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set, activation_set,
                         print(survival_times)
 
                 if plot:
+                    assert is_problem_1d, "The problem must be 1D (one-dimensional states) when plotting trajectories"
                     # Show the absorption before reactivation takes place
                     y = envs[idx_particle].getBufferSize()
-                    J = envs[0].getBufferSizeFromState(activation_set[0])
+                    J = envs[0].getBufferSizeFromState(activation_set.getStates())
                     print("* Particle {} ABSORBED! (at time = {:.3f}, buffer size = {})".format(idx_particle, time_abs, y))
                     plot_update_trajectory( ax, idx_particle, N, K, J,
                                             time0[idx_particle], y0[idx_particle], time_abs, y)
                     # Update the coordinates of the latest plotted point for this particle, for the next iteration
                     time0[idx_particle] = time_abs
                     y0[idx_particle] = y
-                idx_reactivate = reactivate_particle(envs, idx_particle, buffer_sizes_of_interest[-1], absorption_number=absorption_number)
+                # (2023/01/05) the third parameter is dummy when we do NOT use method = ReactivateMethod.VALUE_FUNCTION to reactivate the particle inside function reactivate_particle().
+                #idx_reactivate = reactivate_particle(envs, idx_particle, buffer_sizes_of_interest[-1], absorption_number=absorption_number)
+                idx_reactivate = reactivate_particle(envs, idx_particle, 0, absorption_number=absorption_number)
                 next_state = envs[idx_particle].getState()
-                #assert envs[idx_particle].getBufferSize() > buffer_size_absorption
+                if is_problem_1d:
+                    assert envs[idx_particle].getBufferSize() > absorption_set.getStates()
                 if DEBUG_TRAJECTORIES:
                     print("*** Particle {} REACTIVATED to particle {} at position {}".format(idx_particle, idx_reactivate, envs[idx_reactivate].getBufferSize()))
 
@@ -3422,7 +3550,7 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set, activation_set,
             if agent.getLearnerP() is not None:
                 assert agent.getAcceptancePolicy().getThetaParameter() == agent.getLearnerP().getPolicy().getThetaParameter()
             K = agent.getAcceptancePolicy().getBufferSizeForDeterministicBlocking()
-            J = envs[0].getBufferSizeFromState(activation_set[0])
+            J = envs[0].getBufferSizeFromState(activation_set.getStates())
             plot_update_trajectory( ax, idx_particle, N, K, J,
                                     time0[idx_particle], y0[idx_particle], time_abs, y,
                                     r=None) #idx_reactivate)    # Use idx_reactivate if we want to see a vertical line at the time of absorption with the color of the activated particle

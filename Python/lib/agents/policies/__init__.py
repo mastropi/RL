@@ -114,7 +114,7 @@ class GenericParameterizedPolicyTwoActions:
 
     #----- ABSTRACT METHODS (to be defined by subclasses) -----#
     def getGradient(self, action, state):
-        pass
+        raise NotImplementedError
 
     def getPolicyForAction(self, action, state):
-        pass
+        raise NotImplementedError

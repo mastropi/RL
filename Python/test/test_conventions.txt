@@ -5,7 +5,8 @@ Goal: Make tests meaningful in terms of the RL estimation context.
 
 We define different naming conventions for the following two types of tests:
 A) Tests of the functionality of RL estimation processes (i.e. value functions, policies)
-B) Tests of functions and methods that support the RL processes.
+B) Tests of functions and methods that support the RL processes
+C) Tests of general classes and functions, not directly related to the RL processes
 
 
 A) Tests of the functionality of RL estimation processes
@@ -79,3 +80,11 @@ The file defining the
 2) Test methods: test_<function|method>_<name-of-function-or-method-being-tested>
 	Ex: test_function_generate_event
 
+
+C) Tests of general classes and functions, not directly related to the RL processes
+-----------------------------------------------------------------------------------
+Just create a regular Test class and mention in the test class name what we are testing whether a class or a function by using either:
+- Test_Class_<class-name>
+- Test_Function_<class-name>
+
+Ex: test_simulators.py tests the classes defined in simulators/__init__.py, of which the test class that tests the SetOfStates class is called: Test_Class_SetOfStates
