@@ -59,6 +59,10 @@ class GenericParameterizedPolicyTwoActions:
         Choose an action given the state: either ActionTypes.REJECT or ActionTypes.ACCEPT based on the policy
         evaluated at the given state.
 
+        state: State(?)
+            State of the environment stored in the object on which the policy acts.
+            The state type is highly dependent on the environment type.
+
         Return: Actions
             Action chosen by the policy.
         """

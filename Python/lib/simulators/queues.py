@@ -20,7 +20,8 @@ from matplotlib import pyplot as plt, cm
 from Python.lib.agents.learners.continuing.fv import LeaFV
 from Python.lib.agents.policies import PolicyTypes
 from Python.lib.agents.policies.parameterized import PolQueueTwoActionsLinearStep
-from Python.lib.environments.queues import Actions
+from Python.lib.agents.queues import AgeQueue
+from Python.lib.environments.queues import Actions, BufferType
 from Python.lib.simulators import analyze_event_times, check_done, show_messages, step, update_trajectory, SetOfStates
 from Python.lib.simulators.discrete import Simulator
 from Python.lib.queues import Event
@@ -28,8 +29,8 @@ from Python.lib.queues import Event
 from Python.lib.utils.basic import array_of_objects, find_last, get_current_datetime_as_string, \
     get_datetime_from_string, is_scalar, index_linear2multi, measure_exec_time, merge_values_in_time
 from Python.lib.utils.computing import compute_job_rates_by_server, compute_number_of_burnin_cycles_from_burnin_time, \
-    compute_blocking_probability_birth_death_process, compute_survival_probability, generate_min_exponential_time
-import Python.lib.utils.plotting as plotting
+    compute_blocking_probability_birth_death_process, compute_survival_probability, generate_min_exponential_time, \
+    all_combos_with_sum
 
 
 @unique
@@ -361,7 +362,8 @@ class SimulatorQueue(Simulator):
             if show_messages(True, verbose_period, t_learn):
                 print("\n************************ Learning step {} of {} running ****************************" \
                       .format(t_learn, self.dict_learning_params['t_learn']))
-                print("Theta parameter of policy: {}".format(self.getLearnerP().getPolicy().getThetaParameter()))
+                print("Theta parameter of policies in the policy learner: {}" \
+                      .format([policy.getThetaParameter() for policy in self.getLearnerP().getPolicy()]))
 
             # Buffer size of sure blocking, which is used to define the buffer size for activation and the start state for the simulations run
             # We set the activation buffer size as a specific fraction of the buffer size K of sure blocking.
@@ -369,8 +371,7 @@ class SimulatorQueue(Simulator):
             # a signal that leads to estimations of the numerator Phi(t) and the denominator E(T1+T2) in the
             # FV estimation of the stationary probability (found on Fri, 07-Jan-2022 at IRIT-N7 with Matt, Urtzi and
             # Szymon), namely J = K/3.
-            if self.getLearnerP() is not None:
-                assert self.agent.getAcceptancePolicy().getThetaParameter() == self.getLearnerP().getPolicy().getThetaParameter()
+            assertConsistencyPolicyLearnerAndAgentPolicy(self.agent)
             K = self.agent.getAcceptancePolicy().getBufferSizeForDeterministicBlocking()
             # Compute the true blocking probabilities, so that we know how much error we have in the estimation of Pr(K-1) and Pr(K)
             probas_stationary_true = dict({K-1: compute_blocking_probability_birth_death_process(self.rhos, K-1),
@@ -703,8 +704,7 @@ class SimulatorQueue(Simulator):
         states_with_actions = [s for s, a in zip(self.getLearnerV().getStates(), self.getLearnerV().getActions()) if a is not None]
         buffer_sizes = [self.env.getBufferSizeFromState(s) for s in states_with_actions]
         # print("buffer sizes, actions = {}".format(np.c_[buffer_sizes, actions]))
-        if self.getLearnerP() is not None:
-            assert self.agent.getAcceptancePolicy().getThetaParameter() == self.getLearnerP().getPolicy().getThetaParameter()
+        assertConsistencyPolicyLearnerAndAgentPolicy(self.agent)
         K = self.agent.getAcceptancePolicy().getBufferSizeForDeterministicBlocking()
         probas_stationary = dict({K-1:  np.sum([1 for bs in buffer_sizes if bs == K-1]) / len(buffer_sizes),
                                   K:    np.sum([1 for bs in buffer_sizes if bs == K]) / len(buffer_sizes)})
@@ -750,8 +750,7 @@ class SimulatorQueue(Simulator):
             raise ValueError("The agent's policy must be of type {} ({})" \
                              .format(type(PolQueueTwoActionsLinearStep), type(self.getLearnerP().getPolicy())))
 
-        if self.getLearnerP() is not None:
-            assert self.agent.getAcceptancePolicy().getThetaParameter() == self.getLearnerP().getPolicy().getThetaParameter()
+        assertConsistencyPolicyLearnerAndAgentPolicy(self.agent)
         K = self.agent.getAcceptancePolicy().getBufferSizeForDeterministicBlocking()
 
         # 1) Starting at (K-1, a=1) is like starting at s=K (because the reward of the first action is 0)
@@ -830,8 +829,7 @@ class SimulatorQueue(Simulator):
             raise ValueError("The agent's policy must be of type {} ({})" \
                              .format(type(PolQueueTwoActionsLinearStep), type(self.getLearnerP().getPolicy())))
 
-        if self.getLearnerP() is not None:
-            assert self.agent.getAcceptancePolicy().getThetaParameter() == self.getLearnerP().getPolicy().getThetaParameter()
+        assertConsistencyPolicyLearnerAndAgentPolicy(self.agent)
         K = self.agent.getAcceptancePolicy().getBufferSizeForDeterministicBlocking()
 
         np.random.seed(seed)
@@ -934,8 +932,9 @@ class SimulatorQueue(Simulator):
                 # Perform a step on the environment by applying the acceptance policy
                 action_accept_reject, next_state, reward_accept_reject, _ = step(t, env, self.agent, PolicyTypes.ACCEPT)
 
-                # Assign the job to a server if accepted
-                if action_accept_reject == Actions.ACCEPT:
+                # Assign the job to a server if accepted for queues having a buffer to hold jobs
+                # (i.e. loss networks are excluded from the job assignment part as it is irrelevant to which server the job is assigned)
+                if action_accept_reject == Actions.ACCEPT and env.getBufferType() != BufferType.NOBUFFER:
                     # Assign the job just accepted to a server and update the next_state value
                     # (because the next_state from the ACCEPT action has not been updated above
                     # as we need to know to which server the accepted job is assigned in order
@@ -946,9 +945,12 @@ class SimulatorQueue(Simulator):
 
                 action = action_accept_reject
                 reward = reward_accept_reject + reward_assign
-                if action == Actions.ACCEPT and reward != 0.0:
-                    print("--> action = {}, REWARD ASSIGN: {}, REWARD = {}".format(action_accept_reject, reward_assign, reward))
-                    raise ValueError("A non-zero reward is not possible when the action is ACCEPT.")
+                if action == Actions.ACCEPT:
+                    assert env.getBufferSizeFromState(next_state) == env.getBufferSizeFromState(state) + 1, \
+                        "The buffer size after a BIRTH increased by 1: BS(t) = {}, BS(t+1) = {}" \
+                            .format(env.getBufferSizeFromState(state), env.getBufferSizeFromState(next_state))
+                    assert reward == 0.0, "A non-zero reward is not possible when the action is ACCEPT.\n" \
+                                          "--> action = {}, REWARD ASSIGN: {}, REWARD = {}".format(action_accept_reject, reward_assign, reward)
             else:
                 assert event == Event.DEATH
                 # The event is a completed service
@@ -981,8 +983,7 @@ class SimulatorQueue(Simulator):
 
         # Set the state of each environment AFTER taking the respective action at time t=0.
         # This is buffer_size when the first action is Reject and buffer_size+1 when the first action is Accept.
-        if self.getLearnerP() is not None:
-            assert self.agent.getAcceptancePolicy().getThetaParameter() == self.getLearnerP().getPolicy().getThetaParameter()
+        assertConsistencyPolicyLearnerAndAgentPolicy(self.agent)
         K = self.agent.getAcceptancePolicy().getBufferSizeForDeterministicBlocking()
 
         # History of states, actions and rewards of each environment (2 x <undef> list)
@@ -1077,10 +1078,10 @@ class SimulatorQueue(Simulator):
 #        if show_messages(verbose, verbose_period, t_learn):
 #           plt.figure()
 #           print("Mixing time t={}, Q0={}, Q1={}".format(t, Q0, Q1))
-#           print(np.c_[[envs[0].getBufferSizeFromState(s) for s in states[0]], actions[0], rewards[0],
-#                        [envs[1].getBufferSizeFromState(s) for s in states[0]], actions[1], rewards[1]])
-#           plt.plot([envs[0].getBufferSizeFromState(s) for s in states[0]], 'b.-')
-#           plt.plot([envs[1].getBufferSizeFromState(s) for s in states[1]], 'r.-')
+#           print(np.c_[[envs[0].getBufferSizeFromState(s) for x in states[0]], actions[0], rewards[0],
+#                        [envs[1].getBufferSizeFromState(s) for x in states[0]], actions[1], rewards[1]])
+#           plt.plot([envs[0].getBufferSizeFromState(s) for x in states[0]], 'b.-')
+#           plt.plot([envs[1].getBufferSizeFromState(s) for x in states[1]], 'r.-')
 #           plt.show()
 #           input("Press ENTER...")
 
@@ -1151,8 +1152,7 @@ class SimulatorQueue(Simulator):
             # because, either it is empty as the rewards are not recorded while running the Fleming-Viot process,
             # or it does not reflect the actual values of each state-value of the original system.
             assert probas_stationary is not None and Q_values is not None
-            if self.getLearnerP() is not None:
-                assert self.agent.getAcceptancePolicy().getThetaParameter() == self.getLearnerP().getPolicy().getThetaParameter()
+            assertConsistencyPolicyLearnerAndAgentPolicy(self.agent)
             K = agent.getAcceptancePolicy().getBufferSizeForDeterministicBlocking()
             if self.dict_learning_params['mode'] == LearningMode.REINFORCE_TRUE:
                 # Regular gradient ascent based on grad(V)
@@ -1526,12 +1526,12 @@ def compute_reward_for_buffer_size(env, bs):
     If the environment does not have a reward function defined, the returned reward is -1.0, so that the expected reward
     is equal to minus the probability of being at the given buffer size.
     """
-    # *** We assume that the state of the environment is a duple: (list with server queue sizes, job class of latest arriving job) ***
-    state = ([0] * env.getNumServers(), None)
-    # We set the first server to have occupancy equal to the buffer size of interest
-    # as we assume that the reward function ONLY depends on the buffer size, and NOT on the actual state
-    # of the multi-server system.
-    state[0][0] = bs
+    # We set the state to be the buffer size stored in a single-element list
+    # We perform this trick in order to pass the STATE to the reward function, just because reward functions depend on:
+    # S(t), A(t), S(t+1)
+    # i.e. they conceptually depend on states, but here we are concerned with reward functions that depend on the buffer size,
+    # so we achieve this by defining a "fictitious" state of the system which is just the buffer size value.
+    state = [bs]
     reward_func = env.getRewardFunction()
     if reward_func is not None:
         params_reward_func = env.getParamsRewardFunc()
@@ -1564,24 +1564,6 @@ def choose_state_for_buffer_size(env, buffer_size):
     return state
 
 
-# (2023/01/05) This function has been replaced with get_blocking_boundaries() which deals with policies applied to multi-dimensional states
-def deprecated_get_blocking_buffer_sizes(agent):
-    "Returns the buffer sizes where the job acceptance policy of the given agent blocks an incoming job"
-    assert agent is not None
-    if agent.getLearnerP() is not None:
-        assert not isinstance(agent.getAcceptancePolicy(), list), "The acceptance policy is only one, i.e. it is NOT a list of policies"
-        assert agent.getAcceptancePolicy().getThetaParameter() == agent.getLearnerP().getPolicy().getThetaParameter(), \
-                "The theta parameter of the agent's acceptance policy ({}) coincides with the theta parameter" \
-                .format(agent.getAcceptancePolicy().getThetaParameter()) + \
-                " of the policy learner ({})" \
-                .format(agent.getLearnerP().getPolicy().getThetaParameter())
-    K = agent.getAcceptancePolicy().getBufferSizeForDeterministicBlocking()
-    blocking_buffer_sizes = [k for k in range(0, K+1)
-                             if agent.getAcceptancePolicy().getPolicyForAction(Actions.REJECT, None, buffer_size=k) > 0]
-
-    return blocking_buffer_sizes
-
-
 def get_blocking_boundaries(agent):
     """
     Returns all the blocking values for each dimension of a multi-dimensional state system where blocking may occur at
@@ -1602,15 +1584,9 @@ def get_blocking_boundaries(agent):
     blocking sizes for each policy. Ex: [ [2, 3], [6, 7], [4, 5]] where each two-element list are the values of
     K-1 and K deduced from each of the 1D-parameterized policies defined by the agent.
     """
-    # TODO: (2023/01/09) Implement a way to assert or check that the policies stored in the given agent must be 1D-parameterized policies
     assert agent is not None
-    if not isinstance(agent.getAcceptancePolicy(), list):
-        # Convert the acceptance policy to a list containing the acceptance policy so that we can generalize
-        # to the multi-dimensional case
-        policies = [agent.getAcceptancePolicy()]
-    else:
-        # There is only one policy and it is assumed to be a parameterized policy with a REAL (1D) theta parameter
-        policies = agent.getAcceptancePolicy()
+    policies = agent.getAcceptancePolicies()
+    assertPoliciesAreUnivariate(policies)
 
     # Sizes at which blocking is deterministic for each 1D-parameterized policy (the K values)
     Ks = [policies[i].getBufferSizeForDeterministicBlocking() for i in range(len(policies))]
@@ -1670,18 +1646,32 @@ def compute_expected_inter_event_time(env):
     return 1/event_rate
 
 
-def compute_proba_blocking(agent, probas_stationary):
+def compute_proba_blocking(env, agent: AgeQueue, probas_stationary: dict):
     """
-    Computes the blocking probability of the queue system
-
-    The blocking probability is computed as:
-    Pr(BLOCK) = sum_{buffer sizes bs with rejection probability Pi > 0} { Pi(reject/bs) * Pr(bs) }
-
-    where Pr(bs) is the estimated stationary probability for buffer size bs.
+    Computes the blocking probability of the queue system represented by environment `env`
 
     Arguments:
-    agent: Agent
-        Agent where the accept/reject policy is defined.
+    env: Queue environment
+        Queue environment where the agent acts and blocking can occur.
+        The following blocking possibilities in the queue environment are handled by this function:
+        - single-buffer-based blocking, i.e. when the total occupancy (i.e. the size of the system's single buffer)
+        of the queue system (either single- or multi-server) is at values where bloking may occur (with ANY positive probability).
+        - job-class-based blocking, i.e. where blocking depends on the queue occupancy of an arriving job class.
+
+        In the first case, the blocking probability is computed as:
+            Pr(BLOCK) = sum_{buffer sizes bs with rejection probability Pi > 0} { Pi(reject/bs) * Pr(bs) }
+        where Pr(bs) is the estimated stationary probability for buffer size bs.
+
+        In the second case, the blocking probability is computed as:
+            Pr(BLOCK) = sum_{states s with rejection probability Pi > 0} { Pi(reject/s) * Pr(s) }
+        where,
+            Pr(s) is the estimated stationary probability for state s.
+            P(reject/s) = sum_{arriving job classes j} { Pi(reject/s, job=j) * Pr(job=j) }
+        where,
+            P(job=j) = lambda(j) / sum_{i} { lambda(i) }
+
+    agent: AgeQueue
+        Agent acting on a queue environment where an accept/reject policy is defined.
 
     probas_stationary: dict
         Dictionary with the estimated stationary probability of the buffer sizes of interest which are
@@ -1691,26 +1681,25 @@ def compute_proba_blocking(agent, probas_stationary):
     Estimated blocking probability.
     """
     proba_blocking = 0.0
-    buffer_sizes_of_interest = get_blocking_boundaries(agent)
-    assert len(probas_stationary) == len(buffer_sizes_of_interest), \
-        "The length of the probas_stationary dictionary ({}) is the same as the number of buffer sizes of interest ({})" \
-            .format(probas_stationary, buffer_sizes_of_interest)
-    for bs in buffer_sizes_of_interest:
-        if False:
-            print("---> Computing blocking probability...")
-            print("buffer size = {}, Pr(Reject) = {:.3f}%, Pr({}) = {:.3f}%" \
-                  .format(bs, agent.getAcceptancePolicy().getPolicyForAction(Actions.REJECT, None, bs)*100, bs, probas_stationary[bs]*100))
-        if agent.getLearnerP() is not None:
-            assert agent.getAcceptancePolicy().getThetaParameter() == agent.getLearnerP().getPolicy().getThetaParameter()
-        proba_blocking += agent.getAcceptancePolicy().getPolicyForAction(Actions.REJECT, None, bs) * \
-                          probas_stationary[bs]
+
+    # Iterate on the blocking states stored as keys of the `probas_stationary` dictionary
+    for s in probas_stationary.keys():
+        assertConsistencyPolicyLearnerAndAgentPolicy(agent)
+        if agent.getAcceptancePolicyDependenceOnJobClass():
+            proba_arrival_jobclass = np.array(env.getJobClassRates()) / np.sum(env.getJobClassRates())
+            proba_reject = np.sum([agent.getAcceptancePolicies()[i].getPolicyForAction(Actions.REJECT, None, buffer_size=s[i]) * proba_arrival_jobclass[i]
+                                    for i, occupancy in enumerate(s)])
+        else:
+            proba_reject = agent.getAcceptancePolicies()[0].getPolicyForAction(Actions.REJECT, None, buffer_size=s)
+        proba_blocking += proba_reject * \
+                          probas_stationary[s]
     return proba_blocking
 
 
 def estimate_expected_reward(env, agent, probas_stationary):
     """
     Estimates the expected reward of the queue system defined in the given environment assuming a non-zero reward
-    happens at the buffer sizes of interest, i.e. those where the policy yields a positive probability of rejection.
+    happens at the states or buffer sizes of interest, i.e. those where the policy yields a positive probability of rejection.
 
     The expected reward is estimated as:
     E[R] = sum_{buffer sizes bs with rejection probability Pi > 0} { R(bs) * Pi(reject/bs) * Pr(bs) }
@@ -1720,27 +1709,32 @@ def estimate_expected_reward(env, agent, probas_stationary):
 
     Arguments:
     env: Queue environment
-        Queue environment where the reward function of the blocking buffer size is defined.
+        Queue environment where the reward function of blocking states or blocking buffer size is defined.
 
     agent: Agent
         Agent where the accept/reject policy is defined.
 
     probas_stationary: dict
-        Dictionary with the estimated stationary probability of the buffer sizes of interest which are
+        Dictionary with the estimated stationary probability of the states or buffer sizes of interest which are
         the dictionary keys.
 
     Return: float
     Estimated expected reward.
     """
     expected_reward = 0.0
-    buffer_sizes_of_interest = get_blocking_boundaries(agent)
-    assert len(probas_stationary) == len(buffer_sizes_of_interest)
-    for bs in buffer_sizes_of_interest:
-        if agent.getLearnerP() is not None:
-            assert agent.getAcceptancePolicy().getThetaParameter() == agent.getLearnerP().getPolicy().getThetaParameter()
-        expected_reward += compute_reward_for_buffer_size(env, bs) * \
-                           agent.getAcceptancePolicy().getPolicyForAction(Actions.REJECT, None, bs) * \
-                           probas_stationary[bs]
+    for s in probas_stationary.keys():
+        assertConsistencyPolicyLearnerAndAgentPolicy(agent)
+        if agent.getAcceptancePolicyDependenceOnJobClass():
+            proba_arrival_jobclass = np.array(env.getJobClassRates()) / np.sum(env.getJobClassRates())
+            expected_reward_reject = np.sum([compute_reward_for_buffer_size(env, s[i]) * \
+                                             agent.getAcceptancePolicies()[i].getPolicyForAction(Actions.REJECT, None, buffer_size=s[i]) * \
+                                             proba_arrival_jobclass[i]
+                                                for i, occupancy in enumerate(s)])
+        else:
+            expected_reward_reject = compute_reward_for_buffer_size(env, s) * \
+                                     agent.getAcceptancePolicies()[0].getPolicyForAction(Actions.REJECT, None, buffer_size=s)
+        expected_reward += expected_reward_reject * \
+                           probas_stationary[s]
     return expected_reward
 
 
@@ -1902,8 +1896,17 @@ def generate_event(envs):
     # (first come the job classes and then the servers).
     # A service rate is NaN when the server size is 0, so that the server cannot be selected to experience
     # a service rate.
-    valid_rates = np.array([env.getJobClassRates() + [r if s > 0 else np.nan for r, s in zip(env.getServiceRates(), env.getQueueState())]
-                            for env in envs])
+    assert isinstance(envs, list) and len(envs) > 0, "The `envs` parameter is a list and has at least one element"
+    if envs[0].getBufferType() == BufferType.NOBUFFER:
+        # There is NO buffer in the system
+        # => All jobs in the system can be served at any time, meaning that the service rates are proportional to the number of jobs of each class
+        valid_rates = np.array([list(env.getJobClassRates()) + [s * r if s > 0 else np.nan for r, s in zip(env.getServiceRates(), env.getQueueState())]
+                                for env in envs])
+    else:
+        # There is a buffer in the system
+        # => Jobs are served one at a time by each server
+        valid_rates = np.array([list(env.getJobClassRates()) + [r if s > 0 else np.nan for r, s in zip(env.getServiceRates(), env.getQueueState())]
+                                for env in envs])
 
     # Generate the event time and the index on the rates array to which it is associated
     event_time, event_idx = generate_min_exponential_time(valid_rates.flatten())
@@ -1915,7 +1918,7 @@ def generate_event(envs):
     if False and len(envs) > 1:
         # (2022/10/16) Only show this information when we are simulating N particles, not when we are simulating just one particle
         # (just because I am now debugging the event rates in the FV simulation, which seem to be underestimated)
-        print("\nQueue states:\n{}".format([[s for s in env.getQueueState()] for env in envs]))
+        print("\nQueue states:\n{}".format([[x for x in env.getQueueState()] for env in envs]))
         print("Valid rates: {}".format(valid_rates))
         print("Event time: {}, generated from rate index: (1D) {}, (2D) {}".format(event_time, event_idx, [idx_env, job_class_or_server]))
 
@@ -1944,6 +1947,7 @@ def manage_job_arrival(t, env, agent, state, job_class):
 
     env: Queue environment
         Queue environment where the service takes place.
+        NOTE: This object is updated with the next state of the system after managing the job arrival.
 
     agent: Agent
         Agent acting on the environment.
@@ -1967,8 +1971,9 @@ def manage_job_arrival(t, env, agent, state, job_class):
     # Perform a step on the environment by applying the acceptance policy
     action_accept_reject, next_state, reward_accept_reject, _ = step(t, env, agent, PolicyTypes.ACCEPT)
 
-    # Assign the job to a server if accepted
-    if action_accept_reject == Actions.ACCEPT:
+    # Assign the job to a server if accepted for queues having a buffer to hold jobs
+    # (i.e. loss networks are excluded from the job assignment part as it is irrelevant to which server the job is assigned)
+    if action_accept_reject == Actions.ACCEPT and env.getBufferType() != BufferType.NOBUFFER:
         # Assign the job just accepted to a server and update the next_state value
         # (because the next_state from the ACCEPT action has not been updated above
         # as we need to know to which server the accepted job is assigned in order
@@ -1979,9 +1984,12 @@ def manage_job_arrival(t, env, agent, state, job_class):
     action = action_accept_reject
     reward = reward_accept_reject + reward_assign
 
-    if action == Actions.ACCEPT and reward != 0.0:
-        print("--> action = {}, REWARD ASSIGN: {}, REWARD = {}".format(action_accept_reject, reward_assign, reward))
-        raise ValueError("A non-zero reward is not possible when the action is ACCEPT.")
+    if action == Actions.ACCEPT:
+        assert env.getBufferSizeFromState(next_state) == env.getBufferSizeFromState(state) + 1, \
+            "The buffer size after a BIRTH increased by 1: BS(t) = {}, BS(t+1) = {}" \
+                .format(env.getBufferSizeFromState(state), env.getBufferSizeFromState(next_state))
+        assert reward == 0.0, "A non-zero reward is not possible when the action is ACCEPT.\n" \
+                              "--> action = {}, REWARD ASSIGN: {}, REWARD = {}".format(action_accept_reject, reward_assign, reward)
 
     # Update the average reward (just for information purposes)
     if agent.getLearnerV() is not None:
@@ -2005,6 +2013,7 @@ def manage_service(env, agent, state, server):
     Arguments:
     env: Queue environment
         Queue environment where the service takes place.
+        NOTE: This object is updated with the next state of the system after managing the service.
 
     agent: Agent
         Agent acting on the environment.
@@ -2026,10 +2035,10 @@ def manage_service(env, agent, state, server):
     assert queue_state[server] > 0, "The server where the completed service occurs has at least one job"
 
     # Compute and set the next state of the affected server in the queue system
-    next_queue_state = copy.deepcopy(queue_state)
+    next_queue_state = list(copy.deepcopy(queue_state))
     next_queue_state[server] -= 1
 
-    env.setState((next_queue_state, None))
+    env.setState((tuple(next_queue_state), None))
     next_state = env.getState()
     assert env.getBufferSizeFromState(next_state) == env.getBufferSizeFromState(state) - 1, \
         "The buffer size after a DEATH decreased by 1: S(t) = {}, S(t+1) = {}" \
@@ -2147,7 +2156,7 @@ def estimate_blocking_mc(env, agent, dict_params_simul, dict_params_info, start_
     # Compute the other quantities that are returned to the outside world
     n_events_mc = t
     assert n_events_mc == dict_params_simul['T']
-    proba_blocking = compute_proba_blocking(agent, probas_stationary)
+    proba_blocking = compute_proba_blocking(env, agent, probas_stationary)
     expected_reward = estimate_expected_reward(env, agent, probas_stationary)
     # NOTE: This expected cycle time is just for informational purposes,
     # as we do not use it to compute the stationary probabilities (which are computed above)
@@ -2171,6 +2180,7 @@ def estimate_blocking_mc(env, agent, dict_params_simul, dict_params_info, start_
 
 @measure_exec_time
 def run_simulation_mc(env, agent, t_learn, start_state, t_sim_max,
+                      absorption_set: SetOfStates=None, activation_set: SetOfStates=None,
                       track_return_cycles=False,
                       track_absorptions=False, track_survival=False,
                       seed=None, verbose=False, verbose_period=1):
@@ -2199,6 +2209,12 @@ def run_simulation_mc(env, agent, t_learn, start_state, t_sim_max,
         in the estimation of E(T_A), which is due to the fact that the expected reabsorption time is normally larger
         than the expected return time to J-1 (as, in order to be reabsorbed, the particle first needs to exit
         the absorption set A) (for further details, see calculations in my green small notebok written on 06-Nov-2022).
+
+    absorption_set: (opt) SetOfStates
+        Set with the entrance states to the zero-reward set of states A.
+
+    activation_set: (opt) SetOfStates
+        Set with the entrance states to the complement of the zero-reward set of states A.
 
     track_return_cycles: (opt) bool
         Whether to track the return cycle times to the initial buffer size (defined by parameter start_state),
@@ -2348,14 +2364,28 @@ def run_simulation_mc(env, agent, t_learn, start_state, t_sim_max,
             t_arrivals += 1
             action, next_state, reward, gradient_for_action = manage_job_arrival(t, env, agent, state, job_class_or_server)
 
-            # Check ACTIVATION / EXIT from absorption set A: we touch a state having the start buffer size + 1 COMING FROM BELOW
-            # (i.e. the buffer size increased).
-            # Note that the condition "the buffer size increased" is important because it may happen that there is a BIRTH
-            # event but the state does not change because the incoming job is REJECTED!
-            # This may happen when the blocking size K is very close to the absorption set A
-            # (e.g. when the absorption set size J = K, or when the acceptance policy is not deterministic making it
-            # capable of rejecting an incoming job when x < K (for instance when x = K-1 and J = K-1))
-            if buffer_size_increased_to_start_buffer_size_plus_one(env, state, next_state, buffer_size_start):
+            # Check ACTIVATION / EXIT from absorption set A: we touch a state in the set of activation states
+            # COMING FROM the set of absorption states
+            # Note that the condition "COMING FROM the set of absorption states" is important because it may happen that:
+            # - there is a BIRTH event but the state does not change because the incoming job is REJECTED!
+            #   In an unidimensional-state setting, this may happen when the blocking size K is very close to the absorption set A
+            #   (e.g. when the absorption set size J = K, or when the acceptance policy is not deterministic making it
+            #   capable of rejecting an incoming job when x < K (for instance when x = K-1 and J = K-1))
+            # - in a multidimensional-state setting, there is a BIRTH event, the state changes but WITHOUT coming from
+            #   the set of absorption states (e.g. if the absorption set is made up of the boundary of the hypercube
+            #   [4, 2, 5], when the state changes from (4, 2, 6) to (4, 3, 6), the state (4, 3, 6) is in the set of
+            #   activation states (because the activation set is defined by the boundaries [5, 3, 6] (= absorption boundaries + 1)
+            #   but the previous state (4, 2, 6) was ALSO in the set of activation states (as it suffices to have at least ONE
+            #   component in the boundary of the activation set to be in the set).
+            #   NOTE, however, that the definition we are dealing with for the activation set is NOT the correct one, because
+            #   precisely because of what I just described, there are states in the activation set that are NOT really
+            #   activation states, because in order to be an activation state the system should be able to get to it
+            #   from on the absorption states --which is not the case for e.g. (4, 2, 6) because MORE THAN ONE component
+            #   is already at the boundary of the activation set (first and third components).
+            #if buffer_size_increased_to_start_buffer_size_plus_one(env, state, next_state, buffer_size_start):
+            # Note that the state of the environment has been updated by the manage_service() function, that's why env.getQueueState() returns the value of `next_state` above
+            assert env.getQueueStateFromState(next_state) == env.getQueueState()
+            if is_state_in_set(env.getQueueStateFromState(state), absorption_set) and is_state_in_set(env.getQueueState(), activation_set):
                 # Record the exit times, i.e. time elapsed since the latest absorption
                 n_exit_times += 1
                 exit_times += [time_abs - time_last_absorption]
@@ -2386,7 +2416,10 @@ def run_simulation_mc(env, agent, t_learn, start_state, t_sim_max,
             action, next_state, reward = manage_service(env, agent, state, job_class_or_server)
 
             # Check ABSORPTION
-            if buffer_size_decreased_to_start_buffer_size(env, state, next_state, buffer_size_start):
+            # Note that the state of the environment has been updated by the manage_service() function, that's why env.getQueueState() returns the value of `next_state` above
+            assert env.getQueueStateFromState(next_state) == env.getQueueState()
+            #if buffer_size_decreased_to_start_buffer_size(env, state, next_state, buffer_size_start):
+            if is_state_in_set(env.getQueueStateFromState(state), activation_set) and is_state_in_set(env.getQueueState(), absorption_set):
                 n_cycles_absorption += 1
                 absorption_times += [time_abs - time_last_absorption]
                 if False and DEBUG_ESTIMATORS:
@@ -2426,12 +2459,19 @@ def run_simulation_mc(env, agent, t_learn, start_state, t_sim_max,
         # R(t): reward received by taking action A(t) and transition to S(t+1)
         update_trajectory(agent, (t_learn - 1) * (t_max + 1) + t, time_abs, next_state, action, reward)
 
-        # Check RETURN: the initial buffer size is observed again.
-        buffer_size = env.getBufferSizeFromState(next_state)
-        if buffer_size == buffer_size_start:
-            n_cycles_return += 1
-            return_times += [time_abs - time_last_return]
-            time_last_return = time_abs
+        # Check RETURN
+        # Either the initial state (for e.g. loss networks with multi-class jobs) or the initial buffer size (e.g. single-buffer queue systems) is observed again.
+        if agent.getAcceptancePolicyDependenceOnJobClass() == True:
+            if next_state == start_state:
+                n_cycles_return += 1
+                return_times += [time_abs - time_last_return]
+                time_last_return = time_abs
+        else:
+            buffer_size = env.getBufferSizeFromState(next_state)
+            if buffer_size == buffer_size_start:
+                n_cycles_return += 1
+                return_times += [time_abs - time_last_return]
+                time_last_return = time_abs
 
         if DEBUG_TRAJECTORIES:
             print("[MC] {} | t={}: time={:.3f}, event={}, action={} -> state={}, reward={:.3f}" \
@@ -2454,7 +2494,7 @@ def run_simulation_mc(env, agent, t_learn, start_state, t_sim_max,
     if DEBUG_ESTIMATORS:
         # Distribution of inter-arrival and service times and their mean
         # NOTE: (2022/10/16) This only works when there is only ONE server in the system
-        # (because the way `job_rates_by_server` is used in plotting.analyze_event_times() assumes this.
+        # (because the way `job_rates_by_server` is used in analyze_event_times() assumes this.
         job_rates_by_server = compute_job_rates_by_server(env.getJobClassRates(),
                                                           env.getNumServers(),
                                                           agent.getAssignmentPolicy().getProbabilisticMap())
@@ -2472,8 +2512,8 @@ def run_simulation_mc(env, agent, t_learn, start_state, t_sim_max,
             x_n = n_cycles_absorption
             x_values = absorption_times
             x_total = time_last_absorption
-        results_str = "{} times (initial buffer size = {}): n = {}, mean = {:.3f}, SE = {:.3f}" \
-                      .format(type_of_times, buffer_size_start, x_n, np.mean(x_values), np.mean(x_values) / (np.std(x_values) / np.sqrt(x_n)))
+        results_str = "{} times (initial state = {}, initial buffer size = {}): n = {}, mean = {:.3f}, SE = {:.3f}" \
+                      .format(type_of_times, start_state, buffer_size_start, x_n, np.mean(x_values), np.mean(x_values) / (np.std(x_values) / np.sqrt(x_n)))
         assert len(x_values) == x_n
         assert np.isclose(x_total / x_n, np.mean(x_values))
         fig = plt.figure()
@@ -2551,7 +2591,7 @@ def estimate_stationary_probabilities_mc(env, agent, burnin_time=0, min_num_cycl
         # the buffer sizes associated to those states happening AFTER the burn-in time
         times_after_burnin = times[idx_first_after_burnin:]
         states_after_burnin = states[idx_first_after_burnin:]
-        buffer_sizes_after_burnin = [env.getBufferSizeFromState(s) for s in states_after_burnin]
+        buffer_sizes_after_burnin = [env.getBufferSizeFromState(x) for x in states_after_burnin]
 
         return idx_first_after_burnin, times_after_burnin, states_after_burnin, buffer_sizes_after_burnin
     # -- Auxiliary functions
@@ -2716,6 +2756,9 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info):
     dict_params_simul['method_survival_probability_estimation'] = dict_params_simul.get('method_survival_probability_estimation', SurvivalProbabilityEstimation.FROM_N_PARTICLES)
     dict_params_simul['seed'] = dict_params_simul.get('seed')
 
+    # Set the simulation seed
+    np.random.seed(dict_params_simul['seed'])
+
     # Reset environment and learner of the value functions
     # IMPORTANT: We should NOT reset the learner of the policy because this function could be called as part of a
     # policy learning process! Note that the learner of the value function V MUST be reset regardless of this because
@@ -2746,6 +2789,7 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info):
         t, time_end_simulation, n_cycles_absorption, time_last_absorption, exit_times, absorption_times, survival_times = \
             run_simulation_mc(envs[0], agent, dict_params_info.get('t_learn', 0), start_state_boundary_A,
                               dict_params_simul['T'],
+                              absorption_set=dict_params_simul['absorption_set'],
                               track_absorptions=True, track_survival=track_survival_in_single_particle_simulation,
                               seed=dict_params_simul['seed'],
                               verbose=dict_params_info.get('verbose', False),
@@ -2755,6 +2799,8 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info):
         t, time_end_simulation, n_cycles_absorption, time_last_absorption, exit_times, absorption_times = \
             run_simulation_mc(envs[0], agent, dict_params_info.get('t_learn', 0), start_state_boundary_A,
                               dict_params_simul['T'],
+                              absorption_set=dict_params_simul['absorption_set'],
+                              activation_set=dict_params_simul['activation_set'],
                               track_absorptions=True, track_survival=track_survival_in_single_particle_simulation,
                               seed=dict_params_simul['seed'],
                               verbose=dict_params_info.get('verbose', False),
@@ -2849,7 +2895,7 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info):
         n_events_fv = t
         time_end_simulation_fv = event_times[-1]
 
-        proba_blocking = compute_proba_blocking(agent, probas_stationary)
+        proba_blocking = compute_proba_blocking(envs[0], agent, probas_stationary)
         expected_reward = estimate_expected_reward(envs[0], agent, probas_stationary)
 
         if DEBUG_ESTIMATORS or show_messages(dict_params_info.get('verbose', False), dict_params_info.get('verbose_period', False), dict_params_info.get('t_learn', 0)):
@@ -2945,81 +2991,104 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
     """
 
     # ---------------------------------- Auxiliary functions ------------------------------#
-    def is_particle_absorbed(envs: list, idx_particle: int, absorption_set: SetOfStates):
+    def initialize_phi(envs, states_or_buffer_sizes: list, is_problem_1d, t: float=0.0):
         """
-        Check whether a particle has been absorbed. IMPORTANT: Here we assume that this function is called after a DEATH event,
-        i.e. no check is done of whether the previous state was in the complement of set A.
-        """
-        if absorption_set.getStorageFormat() == "states":
-            return set(envs[idx_particle].getQueueState()).issubset(absorption_set.getStates())
-        else:
-            # Note: we convert lists to arrays in order to perform an element-wise comparison of their elements
-            particle_state = np.array(envs[idx_particle].getQueueState())
-            state_boundaries = np.array(absorption_set.getStates())
-            if  any(particle_state == state_boundaries) and \
-                all(particle_state <= state_boundaries):
-                return True
-            else:
-                return False
-
-    def initialize_phi(envs, t: float, buffer_sizes: list):
-        """
-        Initializes the conditional probability of each buffer size of interest, which are given by the keys
-        of the dictionary of the input parameter dict_phi, which is updated.
+        Initializes the conditional probability Phi(t, x) of each state or buffer size x of interest,
+        i.e. those x values where blocking can occur.
+        These states or buffer sizes are the keys of the dictionary that is initialized and returned by this function.
 
         Arguments:
         envs: list
             List of queue environments used to run the FV process.
 
-        t: float
+        states_or_buffer_sizes: list of int or list of lists
+            Buffer sizes (list of int for single-dimension policies, e.g. [K-1, K]) if `is_problem_1d = True` or
+            state boundaries (list of lists, for multidimensional policies, e.g. [[K1-1, K1], [K2-1, K2], ...]) o.w.,
+            from which all potential (unidimensional or multidimensional) blocking states are derived and made keys
+            of the Phi dictionary that is initialized here.
 
-        buffer_sizes: list of int or list of lists
-            Buffer sizes (list of int for single-dimension policies) or state boundaries (list of lists, for multi-dimensional policies)
-            at which the Phi dictionary should be initialized.
+        is_problem_1d: bool
+            Whether the problem is 1D in nature, i.e. whether blocking occurs based on a unidimensional condition
+            such as "the single buffer of the queue system is full", or whether instead blocking can occur at several
+            multidimensional states, such as a loss network accepting multi-class jobs with no buffer.
+
+        t: (opt) float
+            Time associated to the first measurement of Phi.
+            default: 0.0
 
         Return: dict
-            Dictionary, indexed by the given buffer sizes, of data frames that will be used to store
-            the times 't' and the empirical distribution 'Phi' at which the latter changes.
+            Dictionary, indexed by the potential blocking states x (e.g. [3, 1, 0]), of data frames that will be used to store
+            the empirical distribution 'Phi' (Phi(t, x)) for every 't' value at which Phi(t, x) changes.
             Each entry of the dictionary is initialized with a data frame with just one row containing the
-            first time of measurement of Phi and the empirical distribution of the particles at the respective
-            buffer size (indexing the dictionary).
+            first time of measurement of Phi and the empirical distribution of the particles at the respective state x
+            (indexing the dictionary).
         """
+        assert envs is not None and isinstance(envs, list) and len(envs) > 0, "The list parameter `envs` is not empty"
         dict_phi = dict()
-        if isinstance(buffer_sizes[0], list):
-            # Parameter `buffer_sizes` actually stores state boundaries at which blocking may occur for multi-dimensional-state
-            # environments, This means that ANY state having one of the state dimensions equal to the corresponding state boundary
-            # is a po
-            # tential blocking state (e.g. if state is 3D, and the first state boundary is 3, then the states
-            # [3, s2, s3] for all acceptable s2 and s3 based on the queue's capacity aare of interest for the tomputation of Phi.
-            states_of_interest = []
-            for idx_policy, boundaries in enumerate(buffer_sizes):     # E.g. [K-1, K] = [3, 4]
-                for b in boundaries:            # E.g. b = 3 when boundaries = [3, 4]
-                    states_of_interest_new = [[]]*len(buffer_sizes)
-                    states_of_interest_new[idx_policy] = b
-
-                    # Fill in the other dimensions with all possible state dimension values!!
-                    for idx in range(len(buffer_sizes)):
-                        if idx != idx_policy:
-                            for value in range(envs[0].getCapacity() + 1):
-                                states_of_interest_new[idx] = value
-                    states_of_interest += states_of_interest_new
+        if is_problem_1d:
+            # Parameter `states_or_buffer_sizes` contains 1D states (e.g. [K-1, K])
+            states_or_buffer_sizes_of_interest = states_or_buffer_sizes
         else:
-            # Parameter `buffer_sizes` contains 1D states (e.g. [K-1, K])
-            states_of_interest = buffer_sizes
-        for s in states_of_interest:
-            dict_phi[s] = pd.DataFrame([[t, empirical_mean(envs, s)]], columns=['t', 'Phi'])
+            # Parameter `states_or_buffer_sizes` contains state boundaries at which blocking may occur for multidimensional-state
+            # environments such as a loss network receiving multi-class jobs.
+            # This means that ANY state having one of the state dimensions equal to the corresponding state boundary
+            # is a potential blocking state (e.g. if state is 3D, and the first state boundary is 4, then the states
+            # [4, s2, s3] for all acceptable s2 and s3 based on the queue's capacity aare of interest for the tomputation of Phi.
+            states_of_interest = []
+            n_policies = len(states_or_buffer_sizes)
+            system_capacity = envs[0].getCapacity()
+            assert not np.isinf(system_capacity), "The system's capacity must be finite"
+            count_blocking_states = 0
+            for idx_policy, boundaries in enumerate(states_or_buffer_sizes):      # E.g. states_or_buffer_sizes = [[3, 4], [7, 8], [1, 2]], which corresponds to a theta policy parameter that is 3D
+                for b in boundaries:                                              # E.g. b = 3 when boundaries = [3, 4]
+                    state_of_interest_new = [-1]*n_policies                      # E.g. [-1, -1, -1] if the theta policy parameter of the problem is 3D
+                    state_of_interest_new[idx_policy] = min(b, system_capacity)  # E.g. idx_policy = 0 and system_capacity > 3 => states_of_interest_new = [3, -1, -1]
+
+                    # Fill in the other dimensions with all possible state dimension values that make their sum be <= capacity - b
+                    for sum_values in range(system_capacity - b + 1):              # E.g. system_capacity = 10, b = 3 => sum_value in [0, 1, ..., 7]
+                        combos_generator = all_combos_with_sum(n_policies - 1, sum_values)
+                        while True:
+                            try:
+                                values = next(combos_generator)                   # E.g. n_policies = 3, sum_values = 5 => values = [4, 1]
+                                # Store the values just generated in the states_of_interest_new list
+                                indices_to_fill = list(range(idx_policy)) + list(range(idx_policy + 1, n_policies)) # E.g. idx_policy = 0, n_policies = 3 => indices_to_fill = [1, 2]
+                                assert len(values) == len(indices_to_fill)
+                                for i, p in enumerate(indices_to_fill):           # i for "index" in values; p for "policy" index in states_of_interest_new
+                                    state_of_interest_new[p] = values[i]
+                                # NOTES:
+                                # - We enclose state_of_interest_new in brackets so that states_of_interest becomes a list of lists
+                                # - We convert the state of interest added to tuple because these states are used to index a dictionary
+                                # (`dict_phi` below) and only tuples can be used as keys of dictionaries, NOT lists because they are mutable.
+                                states_of_interest += [tuple(state_of_interest_new)]
+                                count_blocking_states += 1
+                            except StopIteration:
+                                break
+                        combos_generator.close()
+            assert len(states_of_interest) == count_blocking_states, "The number of states of interest ({}) must coincide with the number of blocking states ({})" \
+                                                                    .format(len(states_of_interest), count_blocking_states)
+            states_or_buffer_sizes_of_interest = states_of_interest
+
+        for x in states_or_buffer_sizes_of_interest:
+            dict_phi[x] = pd.DataFrame([[t, empirical_mean(envs, x)]], columns=['t', 'Phi'])
+
         return dict_phi
 
-    def empirical_mean(envs: list, buffer_size: int):
+    def empirical_mean(envs: list, state_or_buffer_size: Union[list, int]):
         "Compute the proportion of environments/particles at the given buffer size"
-        return np.mean([int(bs == buffer_size) for bs in [env.getBufferSize() for env in envs]])
+        if is_scalar(state_or_buffer_size):
+            return np.mean([int(x == state_or_buffer_size) for x in [env.getBufferSize() for env in envs]])
+        else:
+            return np.mean([int(x == state_or_buffer_size) for x in [tuple(env.getQueueState()) for env in envs]])
 
-    def update_phi(N: int, t: float, dict_phi: dict, buffer_size_prev: int, buffer_size_cur: int):
+    def update_phi(env, N: int, t: float, dict_phi: dict, state_prev, state_cur, is_problem_1d: bool):
         """
-        Updates the conditional probability of each buffer size of interest, which are given by the keys
-        of the dictionary of the input parameter phi, which is updated.
+        Updates the conditional probability Phi of each buffer size of interest, which are stored by the keys
+        of the dictionary of input parameter dict_phi
 
         Arguments:
+        env: environment object
+            Environment representing any of the particles.
+
         N: int
             Number of particles in the Fleming-Viot system.
 
@@ -3029,70 +3098,103 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
         dict_phi: dict
             Dictionary, indexed by the buffer sizes of interest, of data frames containing the times 't' and
             the empirical distribution 'Phi' at which the latter changes.
-            IMPORTANT: this input parameter is updated by the function with a new row whenever the value of Phi(t,bs)
-            changes w.r.t. to the last stored value at the buffer size bs.
+            IMPORTANT: this input parameter is updated by the function with a new row whenever the value of Phi(t, x)
+            changes w.r.t. to the last stored value at the state or buffer size s.
 
-        buffer_size_prev: int
-            The previous buffer size of the particle that just changed state, which is used to update Phi(t,bs).
+        state_prev: State
+            The previous state of the particle that just changed state given as a valid state of the `env` environment.
+            Normally this is a tuple containing (queue_state, job_class) and NOT simply the queue state.
+            (see e.g. the classes defined in environments/queues.py).
+            The important thing is that the actual quantity that should be evaluated when updating Phi(t, x)
+            is obtained by one of the following methods defined in `env`:
+            - getBufferSizeFromState(state) in 1D problems, which returns the single buffer size of the system.
+            - getQueueStateFromState(state) in multidimensional problems, which returns the occupancy level of
+            each job class in the queue system.
 
-        buffer_size_cur: int
-            The current buffer size of the particle that just changed state, which is used to update Phi(t,bs).
+        state: State
+            The current state of the particle that just changed state.
+            The same considerations apply as those described for parameter `state_prev`.
+
+        is_problem_1d: bool
+            Whether the problem is 1D in nature, i.e. whether blocking occurs based on a unidimensional condition
+            such as "the single buffer of the queue system is full", or whether instead blocking occurs at several
+            multidimensional states, such as a loss network accepting multi-class jobs with no buffer where an
+            acceptance policy depends on the class of the arriving job.
 
         Return: dict
-        The updated input dictionary which contains a new row for each buffer size for which the value Phi(t,bs) changes
+        The updated input dictionary which contains a new row for each buffer size for which the value Phi(t, x) changes
         w.r.t. the last value stored in the data frame for that buffer size.
         """
-        for bs in dict_phi.keys():
-            assert dict_phi[bs].shape[0] > 0, "The Phi data frame has been initialized for buffer size = {}".format(bs)
-            phi_cur = dict_phi[bs]['Phi'].iloc[-1]
-            phi_new = empirical_mean_update(phi_cur, bs, buffer_size_prev, buffer_size_cur, N)
+        # Parse parameters state_prev, state_cur, is_problem_1d
+        if is_problem_1d:
+            state_or_buffer_size_prev = env.getBufferSizeFromState(state_prev)
+            state_or_buffer_size_cur = env.getBufferSizeFromState(state_cur)
+        else:
+            state_or_buffer_size_prev = env.getQueueStateFromState(state_prev)
+            state_or_buffer_size_cur = env.getQueueStateFromState(state_cur)
+
+        # Go over all the states or buffer sizes of interest where Phi should be estimated
+        for x in dict_phi.keys():
+            assert dict_phi[x].shape[0] > 0, "The Phi data frame has been initialized for state or buffer size = {}".format(x)
+            phi_cur = dict_phi[x]['Phi'].iloc[-1]
+            phi_new = empirical_mean_update(phi_cur, x, state_or_buffer_size_prev, state_or_buffer_size_cur, N)
+            #if phi_new > 0:
+            #    print("prev state: {} -> state: {}: New Phi: {}".format(state_or_buffer_size_prev, state_or_buffer_size_cur, phi_new))
             if not np.isclose(phi_new, phi_cur, atol=0.5/N, rtol=0):     # Note that the absolute tolerance decreases as N increases
                                                                          # Also, recall that the isclose() checks if |a - b| <= with atol + rtol*|b|,
                                                                          # and since we are interested in analyzing the absolute difference (not the relative difference)
                                                                          # between phi_new and phi_cur, we set rtol = 0.
                 # Phi(t) changed at t by at least 1/N (that's why we use atol < 1/N
-                # => add a new entry to the data frame containing Phi(t,bs)
+                # => add a new entry to the data frame containing Phi(t, x)
                 # (o.w. it's no use to store it because we only store the times at which Phi changes)
-                dict_phi[bs] = pd.concat([dict_phi[bs], pd.DataFrame({'t': [t], 'Phi': [phi_new]})], axis=0)
+                dict_phi[x] = pd.concat([dict_phi[x], pd.DataFrame({'t': [t], 'Phi': [phi_new]})], axis=0)
 
         return dict_phi
 
-    def empirical_mean_update(mean_value: float, buffer_size: int, buffer_size_prev: int, buffer_size_cur: int, N: int):
+    def empirical_mean_update(mean_value: float,
+                              state_or_buffer_size: Union[int, tuple],
+                              state_or_buffer_size_prev: Union[int, tuple],
+                              state_or_buffer_size_cur: Union[int, tuple],
+                              N: int):
         """
-        Update the proportion of environments/particles at the given buffer size based on the previous and current
-        position (buffer size) of the particle that experienced an event last.
+        Updates the proportion of environments/particles at the given queue state or buffer size based on the previous and current
+        queue state or buffer size of the particle that experienced an event last.
 
         Note that the particle may have experienced an event, but NO change of state observed because either:
         - the event was an arrival event and the particle was at its full capacity.
-        - the event was a service event and the particle was reactivated to the same buffer size as it was before.
+        - the event was a service event and the particle was reactivated to the same state or buffer size as it was before.
 
         Arguments:
         mean_value: float
             The current mean value to be updated.
 
-        buffer_size: int
-            The buffer size at which the empirical mean should be updated.
+        state_or_buffer_size: int or tuple
+            The queue state or buffer size at which the empirical mean should be updated.
 
-        buffer_size_prev: int
-            The previous buffer size of the particle that just "changed" state.
+        state_or_buffer_size_prev: int or tuple
+            The previous queue state or buffer size of the particle that just "changed" state.
 
-        buffer_size_cur: int
-            The current buffer size of the particle that just "changed" state.
+        state_or_buffer_size_cur: int or tuple
+            The current queue state or buffer size of the particle that just "changed" state.
 
         N: int
             Number of particles in the Fleming-Viot system.
 
         Return: float
-            The updated empirical mean at the given buffer size, following the change of buffer size from
-            `buffer_size_prev` to `buffer_size_cur`.
+            The updated empirical mean at the given state or buffer size, following the change of state or buffer size
+            from `state_or_buffer_size_prev` to `state_or_buffer_size_cur`.
         """
         # Add to the current `mean_value` to be updated a number that is either:
-        # - 0: when the current buffer size is NOT buffer_size and the previous buffer size was NOT buffer_size either
-        #       OR when the current buffer size IS buffer_size and the previous buffer size WAS buffer_size as well.
-        #       In both of these cases, there was NO change in the buffer size of the particle whose state was just "updated".
-        # - +1/N: when the current buffer size IS buffer_size and the previous buffer size was NOT buffer_size.
-        # - -1/N: when the current buffer size is NOT buffer_size and the previous buffer size WAS buffer_size
-        return mean_value + (int(buffer_size_cur == buffer_size) - int(buffer_size_prev == buffer_size)) / N
+        # - 0: when the current state or buffer size is NOT state_or_buffer_size and the previous state or buffer size
+        # was NOT state_or_buffer_size either
+        #   OR
+        #      when the current state or buffer size IS state_or_buffer_size and the previous state or buffer size
+        # WAS state_or_buffer_size as well.
+        #   In both of these cases, there was NO change in the state or buffer size of the particle whose state was just "updated".
+        # - +1/N: when the current state or buffer size IS state_or_buffer_size and the previous state or buffer size was NOT state_or_buffer_size.
+        # - -1/N: when the current state or buffer size is NOT state_or_buffer_size and the previous state or buffer size WAS state_or_buffer_size
+        #print("prev: {}, cur: {}, s: {}".format(state_or_buffer_size_prev, state_or_buffer_size_cur, state_or_buffer_size))
+        return mean_value + (int(state_or_buffer_size_cur == state_or_buffer_size) - int(state_or_buffer_size_prev == state_or_buffer_size)) / N
 
     def reactivate_particle(envs: list, idx_particle: int, K: int, absorption_number=None):
         """
@@ -3208,35 +3310,36 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
             reabsorption cycle when starting at the stationary absorption distribution of states.
 
         Return: tuple of dict
-        Duple with two dictionaries indexed by the buffer sizes (bs) of interest with the following content:
-        - the stationary probability of buffer size bs
-        - the value of the integral P(T>t)*Phi(t,bs)
+        Duple with two dictionaries indexed by the states or buffer sizes (x) of interest with the following content:
+        - the stationary probability of the state or buffer size x
+        - the value of the integral P(T>t) * Phi(t, x)
        """
-        buffer_sizes_of_interest = sorted( list(dict_phi.keys()) )
+        states_or_buffer_sizes_of_interest = sorted( list(dict_phi.keys()) )    # Note that sorted() still works when the keys, i.e. the elements of the list that is being sorted, are in turn a *list* of values
+                                                                                # (e.g. sorted( [[2, 2, 0], [1, 2, 3], [0, 1, 5]] ) returns [[0, 1, 5], [1, 2, 3], [2, 2, 0]]
         probas_stationary = dict()
         integrals = dict()
-        for bs in buffer_sizes_of_interest:
-            if dict_phi[bs].shape[0] == 1 and dict_phi[bs]['Phi'].iloc[-1] == 0.0:
-                # Buffer size bs was never observed during the simulation
-                probas_stationary[bs] = 0.0
-                integrals[bs] = 0.0
+        for x in states_or_buffer_sizes_of_interest:
+            if dict_phi[x].shape[0] == 1 and dict_phi[x]['Phi'].iloc[-1] == 0.0:
+                # State or buffer size x was never observed during the simulation
+                probas_stationary[x] = 0.0
+                integrals[x] = 0.0
             else:
                 # Merge the times where (T>t) and Phi(t) are measured
-                df_phi_proba_surv = merge_proba_survival_and_phi(df_proba_surv, dict_phi[bs])
+                df_phi_proba_surv = merge_proba_survival_and_phi(df_proba_surv, dict_phi[x])
 
                 if DEBUG_ESTIMATORS:
                     plt.figure()
                     plt.step(df_phi_proba_surv['t'], df_phi_proba_surv['P(T>t)'], color="blue", where='post')
                     plt.step(df_phi_proba_surv['t'], df_phi_proba_surv['Phi'], color="red", where='post')
                     plt.step(df_phi_proba_surv['t'], df_phi_proba_surv['Phi']*df_phi_proba_surv['P(T>t)'], color="green", where='post')
-                    plt.title("P(T>t) (blue) and Phi(t,bs) (red) and their product (green) for bs = {}".format(bs))
+                    plt.title("P(T>t) (blue) and Phi(t,x) (red) and their product (green) for state or buffer size x = {}".format(x))
 
                 # Stationary probability for each buffer size of interest
-                probas_stationary[bs], integrals[bs] = estimate_proba_stationary(df_phi_proba_surv, expected_absorption_time)
+                probas_stationary[x], integrals[x] = estimate_proba_stationary(df_phi_proba_surv, expected_absorption_time)
 
         return probas_stationary, integrals
 
-    @measure_exec_time
+    #@measure_exec_time
     def merge_proba_survival_and_phi(df_proba_surv, df_phi):
         """
         Merges the survival probability and the empirical distribution of the particle system at a particular
@@ -3271,7 +3374,7 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
 
         return df_merged
 
-    @measure_exec_time
+    #@measure_exec_time
     def estimate_proba_stationary(df_phi_proba_surv, expected_absorption_time):
         """
         Computes the stationary probability for a buffer size of interest via Approximation 1 in Matt's draft
@@ -3347,7 +3450,7 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
                     absorption_set.getNumStates() == 1 and \
                     activation_set.getNumStates() == 1
     if  is_problem_1d and absorption_set.getStates() != activation_set.getStates() - 1:
-        raise ValueError("The VALUE of the activation set in a 1D problem (i.e. one single number in the set, such as set({3}))"
+        raise ValueError("The VALUE of the activation set in a 1D problem (i.e. one single number in the set, such as set({3}))" +
                          " must be exactly one more than the VALUE of the absorption set (e.g. absorption = 2, activation = 3): absorption={}, activation={}" \
                          .format(absorption_set.getStates(), activation_set.getStates()))
 
@@ -3376,19 +3479,23 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
     # for the empirical distribution Phi(t).
     for i, env in enumerate(envs):
         # Set the start state of the queue environment so that we start at an activation state
+        # TODO: (2023/01/19) We should change the choice of the start state because any set having more than one component equal to the boundary value of that component is NOT eligible because they cannot transition to the absorption set of states in one step (because only ONE component can change at a time)
         start_state = activation_set.random_choice()
         env.setState((start_state, None))
 
-    # Buffer sizes whose stationary probability is of interest
-    blocking_boundaries = get_blocking_boundaries(agent)    # This is a list for single dimensional policies and a list of lists for multi-dimensional policies
+    # State boundaries whose stationary probability is of interest because they may be associated to blocking events
+    # This object is a list for 1D problems (i.e. 1D real-valued-theta-parameterized policies) (e.g. [K-1, K])
+    # and a list of lists for multidimensional problems (i.e. where a set of 1D real-valued-theta-parameterized policies
+    # are defined to act upon the environment).
+    blocking_boundaries = get_blocking_boundaries(agent)
 
     # Event times (continuous times at which an event happens)
     # The first event time is 0.0
     event_times = [0.0]
 
-    # Phi(t, bs): Empirical probability of the buffer sizes of interest (bs)
-    # at each time when an event happens (ANY event, both arriving job or completed service)
-    dict_phi = initialize_phi(envs, event_times[0], blocking_boundaries)
+    # Phi(t, x): Empirical probability of the states or buffer sizes of interest (x)
+    # at each time t when a variation in Phi(t, x) is observed.
+    dict_phi = initialize_phi(envs, blocking_boundaries, is_problem_1d, t=event_times[0])
 
     # Time step in the queue trajectory (the first time step is t = 0)
     done = False
@@ -3431,8 +3538,7 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
         assert is_problem_1d, "The problem must be 1D (one-dimensional states) when plotting trajectories"
         # Initialize the plot
         ax = plt.figure().subplots(1,1)
-        if agent.getLearnerP() is not None:
-            assert agent.getAcceptancePolicy().getThetaParameter() == agent.getLearnerP().getPolicy().getThetaParameter()
+        assertConsistencyPolicyLearnerAndAgentPolicy(agent)
         K = agent.getAcceptancePolicy().getBufferSizeForDeterministicBlocking()
         ax.set_title("N = {}, K= {}, maxtime = {:.1f}".format(N, K, maxtime))
 
@@ -3478,8 +3584,11 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
             # (Note that the state of the queue in envs[idx_particle] is updated by manage_service())
             action, next_state, reward = manage_service(envs[idx_particle], agent, state, job_class_or_server)
 
-            # Check if the particle has been ABSORBED
-            if is_particle_absorbed(envs, idx_particle, absorption_set):
+            # Check ABSORPTION
+            # It's IMPORTANT to check that the previous state is part of the activation set
+            # Note that the state of the environment has been updated by the manage_service() function, that's why env.getQueueState() returns the value of `next_state` above
+            assert envs[idx_particle].getQueueStateFromState(next_state) == envs[idx_particle].getQueueState()
+            if is_state_in_set(env.getQueueStateFromState(state), activation_set) and is_state_in_set(envs[idx_particle].getQueueState(), absorption_set):
                 # The particle has been absorbed
                 # => Reactivate it to any of the other particles
                 # => If the survival probability function is not given as input parameter,
@@ -3510,7 +3619,7 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
                     time0[idx_particle] = time_abs
                     y0[idx_particle] = y
                 # (2023/01/05) the third parameter is dummy when we do NOT use method = ReactivateMethod.VALUE_FUNCTION to reactivate the particle inside function reactivate_particle().
-                #idx_reactivate = reactivate_particle(envs, idx_particle, buffer_sizes_of_interest[-1], absorption_number=absorption_number)
+                #idx_reactivate = reactivate_particle(envs, idx_particle, states_or_buffer_sizes_of_interest[-1], absorption_number=absorption_number)
                 idx_reactivate = reactivate_particle(envs, idx_particle, 0, absorption_number=absorption_number)
                 next_state = envs[idx_particle].getState()
                 if is_problem_1d:
@@ -3536,19 +3645,11 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
                   .format(idx_particle, state, t, time_abs, event, action, next_state, reward), end="\n")
 
         # Update Phi based on the new state of the changed particle
-        # Note that the previous and current states of the changed particle are retrieved from `state` and `next_state`
-        # respectively, NOT from the current state of the change particle because this has already been updated.
-        # That's why we compute the previous and current buffer sizes by calling the method getBufferSizeFromState()
-        # of the very first environment (envs[0]) representing the first particle --i.e. no need to invoke the method
-        # of the changed particle (idx_particle).
-        buffer_size_prev = envs[0].getBufferSizeFromState(state)
-        buffer_size = envs[0].getBufferSizeFromState(next_state)
-        dict_phi = update_phi(len(envs), time_abs, dict_phi, buffer_size_prev, buffer_size)
+        dict_phi = update_phi(envs[0], len(envs), time_abs, dict_phi, state, next_state, is_problem_1d)
 
         if plot:
             y = envs[0].getBufferSizeFromState(next_state)
-            if agent.getLearnerP() is not None:
-                assert agent.getAcceptancePolicy().getThetaParameter() == agent.getLearnerP().getPolicy().getThetaParameter()
+            assertConsistencyPolicyLearnerAndAgentPolicy(agent)
             K = agent.getAcceptancePolicy().getBufferSizeForDeterministicBlocking()
             J = envs[0].getBufferSizeFromState(activation_set.getStates())
             plot_update_trajectory( ax, idx_particle, N, K, J,
@@ -3597,7 +3698,7 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
         analyze_event_times([envs[0].getJobClassRates()[0]] * N, times_inter_arrival_all, idx_particles_arrival, class_name="FV particle")
         analyze_event_times([envs[0].getServiceRates()[0]] * N, times_service_all, idx_particles_service, class_name="FV particle")
 
-    # Compute the stationary probability of each buffer size bs in Phi(t,bs) using Phi(t,bs), P(T>t) and E(T_A)
+    # Compute the stationary probability of each state or buffer size x in Phi(t, x) using Phi(t, x), P(T>t) and E(T_A)
     if df_proba_surv is None:
         df_proba_surv = compute_survival_probability(survival_times)
     if expected_absorption_time is None:
@@ -3607,6 +3708,22 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
                                                                      expected_absorption_time)
 
     return t, event_times, dict_phi, probas_stationary, expected_absorption_time, max_survival_time
+
+
+def is_state_in_set(state, set_of_interest: SetOfStates):
+    "Check whether the QUEUE state of the system is in the set of queue states of interest"
+    states_of_interest = set_of_interest.getStates()
+    if set_of_interest.getStorageFormat() == "states":
+        return set(state.issubset(states_of_interest))
+    else:
+        # Note: we convert lists to arrays in order to perform an element-wise comparison of their elements
+        particle_state = np.array([state]) if is_scalar(state) else np.array(state)
+        state_boundaries = np.array([states_of_interest]) if is_scalar(states_of_interest) else np.array(states_of_interest)
+        if  any(particle_state == state_boundaries) and \
+            all(particle_state <= state_boundaries):
+            return True
+        else:
+            return False
 
 
 def plot_update_trajectory(ax, p, N, K, J, x0, y0, x1, y1, marker='-', r=None):
@@ -3643,13 +3760,12 @@ def plot_trajectory(env, agent, J):
     This is used to plot the single queue simulated to estimate the quantities wth Monte-Carlo (e.g. P(T>t) and E(T)).
     """
     assert agent.getLearnerV() is not None
-    if agent.getLearnerP() is not None:
-        assert agent.getAcceptancePolicy().getThetaParameter() == agent.getLearnerP().getPolicy().getThetaParameter()
+    assertConsistencyPolicyLearnerAndAgentPolicy(agent)
     K = agent.getAcceptancePolicy().getBufferSizeForDeterministicBlocking()
     times = agent.getLearnerV().getTimes()
     states = agent.getLearnerV().getStates()
     #print("Times and states to plot:\n{}".format(np.c_[times, states]))
-    buffer_sizes = [env.getBufferSizeFromState(s) for s in states]
+    buffer_sizes = [env.getBufferSizeFromState(x) for x in states]
 
     # Non-overlapping step plots at vertical positions (K+1)*p
     ax = plt.figure().subplots(1,1)
@@ -3662,6 +3778,23 @@ def plot_trajectory(env, agent, J):
     ax.set_title("[MC] Evolution of the system's buffer size used to estimate P(T>t) and E(T): K = {}, J = {}".format(K, J))
 
     return ax
+
+
+def assertConsistencyPolicyLearnerAndAgentPolicy(agent):
+    """
+    When a policy learner is defined in the agent, assert the consistency between the policies stored in the agent's
+    POLICY LEARNER and the POLICY itself (which may be several policies) stored in the agent
+    (without going through the policy learner)
+    """
+    if agent.getLearnerP() is not None:
+        for i, policy in enumerate(agent.getAcceptancePolicy()):
+            assert policy.getThetaParameter() == agent.getLearnerP().getPolicy()[i].getThetaParameter()
+
+
+def assertPoliciesAreUnivariate(parameterizedPolicies):
+    "Asserts that the set of parameterized policies stored in the input parameter are univariate parameterized policies"
+    for policy in parameterizedPolicies:
+        return is_scalar(policy.getThetaParameter()) or len(policy.getThetaParameter()) == 1
 #-------------------------------------------- FUNCTIONS --------------------------------------#
 
 

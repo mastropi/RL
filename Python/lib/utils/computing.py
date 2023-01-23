@@ -9,11 +9,12 @@ Created on Thu Jun 04 22:15:48 2020
 import warnings
 import copy
 from unittest import TestCase
+from typing import Union
 
 import numpy as np
 import pandas as pd
 
-from Python.lib.utils.basic import as_array
+from Python.lib.utils.basic import as_array, is_integer
 
 
 def mad(x):
@@ -154,7 +155,7 @@ def smooth(x, window_size):
         return x_smooth
 
 
-def comb(n,k):
+def comb(n, k):
     """
     Efficient calculation of the combinatorial number, which does NOT use the factorial.
     
@@ -173,20 +174,30 @@ def comb(n,k):
     for i in range( min(n-k, k) ):
         num *= n - i
         den *= i + 1
-        
+
     return int( num / den )
+
+
+def factorial(n):
+    "Compute the factorial of a number"
+    if not is_integer(n) or n < 0:
+        raise ValueError("The input parameter `n` must be a non-negative integer ({}, type={})".format(n, type(n)))
+    res = 1
+    for i in range(1, n+1):
+        res *= i
+    return res
 
 
 def all_combos_with_sum(R, C):
     """
-    Returns a generator of all possible integer-valued arrays whose elements sum to a fixed number.
+    Returns a generator of all possible integer-valued arrays whose elements sum up to a fixed number.
 
     Arguments:
     R: int
-        Dimension of the integer-valued array to generate.
+        Dimension of the integer-valued lists to generate. E.g. if R = 3, a generated array will be of the form [x, y, z].
 
     C: int
-        Sum of the elements of the integer-valued array.
+        Sum of the elements of the integer-valued list.
     """
 
     # Note: documentation on the `yield` expression: https://docs.python.org/3/reference/expressions.html#yieldexpr
@@ -195,7 +206,7 @@ def all_combos_with_sum(R, C):
         # print("\nlevel={}:".format(level))
         r = level
         # Sum over the indices of v to the left of r
-        # which determrine the new capacity to satisfy on the indices from r to the right
+        # which determine the new capacity to satisfy on the indices from r to the right
         vleft = sum(v[0:r])
         if r < R - 1:
             for k in range(C - vleft, -1, -1):
@@ -212,7 +223,7 @@ def all_combos_with_sum(R, C):
             v[r] = C - vleft
             # print("\tv={}".format(v))
             # print("yield v! {}".format(v))
-            assert sum(v) == C, "The elements of v sum to C={} (v={})".format(C, v)
+            assert sum(v) == C, "The elements of v sum up to C={} (v={})".format(C, v)
             yield v
 
     v = [0] * R
@@ -313,7 +324,7 @@ def get_server_loads(job_rates, service_rates):
     return [b/d for b, d in zip(job_rates, service_rates)]
 
 
-def compute_job_rates_by_server(job_class_rates, nservers, policy_assign_map):
+def compute_job_rates_by_server(job_class_rates: Union[list, tuple, np.ndarray], nservers, policy_assign_map):
     """
     Computes the equivalent job arrival rates for each server from the job arrival rates (to the single buffer)
     and the job assignment policy of the agent.
@@ -378,6 +389,8 @@ def compute_number_of_burnin_cycles_from_burnin_time(cycle_times, burnin_time):
     return burnin_cycles
 
 
+# TODO: (2023/01/19) Refactor these 3 upcoming functions so that we use the new general-purpose calculation of product-form stationary distributions done by the new stationary_distribution_product_form() function
+# Unit tests at the end should also be updated
 def compute_blocking_probability_birth_death_process(rhos: list, capacity: int):
     """
     Computes the true blocking probability of a birth-death process with R servers and total capacity C.
@@ -426,7 +439,7 @@ def compute_blocking_probability_birth_death_process(rhos: list, capacity: int):
         # Blocking probability
         proba_blocking = prod[C] / const
 
-    return proba_blocking       
+    return proba_blocking
 
 
 def stationary_distribution_birth_death_process(nservers: int, capacity: int, rhos: list):
@@ -537,6 +550,143 @@ def stationary_distribution_birth_death_process_at_capacity_unnormalized(nserver
     assert ncases == ncases_expected, "The number of generated combinations for R={}, C={} ({}) is equal to the expected number of combinations ({})".format(R, C, ncases, ncases_expected)
 
     return x, dist
+
+
+def stationary_distribution_product_form(capacity: int, rhos: list, func_prod):
+    """
+    Computes the stationary distribution on all possible states of a system having product form distribution
+    for holding a set of items with load `rhos` up to a given capacity.
+
+    Arguments:
+    capacity: int
+        The capacity of the system.
+
+    rhos: list
+        The load of each item class accepted in the system (load = arrival-rate / service-rate).
+
+    func_prod: Callable
+        Function that should be used to compute the individual contribution of the occupancy of each item class
+        to the product form distribution of a particular occupancy state of all item classes n = (n1, n2, ..., nR),
+        where R is the number of classes, e.g. for n = (3, 2, 5).
+        For more details see the documentation for `stationary_distribution_product_form_fixed_occupancy_unnormalized()`.
+
+    Return: tuple
+    The tuple contains the following elements:
+    - a list of each possible state n = (n1, n2, ..., nR) such that the sum of the n(j)'s is less than or equal to the given capacity.
+    - a list with the stationary probability of occurrence of each state given in the first list.
+    """
+    if capacity < 0:
+        raise ValueError("The capacity must be non-negative: {}".format(capacity))
+
+        # Create short-name variable for number of servers
+    R = len(rhos)
+
+    # Total expected number of cases (needed to initialize the output arrays and check the results)
+    ncases_total_expected = 0
+    for c in range(capacity + 1):
+        ncases_total_expected += comb(c + R - 1, c)
+
+    # Initialize the output arrays with all possible x = (n1, n2, ..., nR) combinations,
+    # and the probability distribution for each x. They are all initialized to a dummy value.
+    # They are indexed by the order in which all the combinations are generated below:
+    # - by increasing capacity 0 <= c <= capacity
+    # - by the order defined by the all_combos_with_sum(R,c) function
+    x = [[-1] * R] * ncases_total_expected
+    dist = [0] * ncases_total_expected
+    ncases_total = 0
+    const = 0  # Normalizing constant (because the system's capacity is finite)
+    last_case = -1
+    for c in range(capacity + 1):
+        ncases_expected = comb(c + R - 1, c)
+        ind = slice(last_case + 1, last_case + 1 + ncases_expected)
+
+        x[ind], dist[ind] = stationary_distribution_product_form_fixed_occupancy_unnormalized(c, rhos, func_prod, ncases_expected)
+
+        const += sum(dist[ind])
+        ncases_total += ncases_expected
+        # Prepare for next iteration
+        last_case += ncases_expected
+    dist /= const
+    assert ncases_total == ncases_total_expected, \
+        "The number of TOTAL generated combinations for R={}, C<={} ({}) is equal to the expected number of combinations ({})" \
+        .format(R, C, ncases_total, ncases_total_expected)
+    assert abs(sum(dist) - 1.0) < 1E-6, "The sum of the distribution function is 1 ({:.6f})".format(sum(dist))
+
+    return x, dist
+
+
+def stationary_distribution_product_form_fixed_occupancy_unnormalized(occupancy: int, rhos: list, func_prod, ncases_expected=None):
+    """
+    Computes the UNNORMALIZED stationary distribution on a system having product form distribution for the state subspace
+    associated to a fixed total occupancy, i.e. for all the n = (n1, n2, ..., nR) such that their sum is equal to
+    the given occupancy.
+
+    This function is used as a helper function for the calculation of the stationary distribution of the whole
+    state space of a product form stationary distribution, where the components of n sum up to all occupancies that
+    do not overcome the system's capacity.
+
+    Arguments:
+    capacity: int
+        The capacity of the system.
+
+    rhos: list
+        The load of each item class accepted in the system (load = arrival-rate / service-rate).
+
+    func_prod: Callable
+        Function that should be used to compute the individual contribution of the occupancy of each item class
+        to the product form distribution of a particular occupancy state of all item classes n = (n1, n2, ..., nR),
+        where R is the number of classes.
+        The signature of the function should be the following:
+            func(rho, n)
+        where
+        - rho is the load of the class of interest.
+        - n is the occupancy in the system of the class of interest.
+
+    ncases_expected: (opt) int
+        The expected number of states satisfying the occupancy condition mentioned in the description.
+        This number may have been computed elsewhere and it is used here if given, in order to avoid
+        its recalculation.
+
+    Return: tuple
+    The tuple contains the following elements:
+    - a list of each possible state n = (n1, n2, ..., nR) such that the sum of the n(j)'s is equal to the given occupancy.
+    - a list with the unnormalized probability of occurrence of each state given in the first list.
+    In order to normalize it to a distribution, each value should be divided by the sum of all the values in the list.
+    """
+    R = len(rhos)
+    C = occupancy
+    if ncases_expected is None:
+        ncases_expected = comb(C + R - 1, C)
+    combos_generator = all_combos_with_sum(R, C)
+    ncases = 0
+    x = [[-1] * R] * ncases_expected
+    dist = [0] * ncases_expected
+    while True:
+        try:
+            next_combo = next(combos_generator)
+            # print("next_combo (k={}): {}".format(ncases, next_combo))
+            x[ncases] = copy.deepcopy(next_combo)  # IMPORTANT: Need to make a copy o.w. x[k] will share the same memory address as next_combo and its value will change at the next iteration!!
+            dist[ncases] = np.prod([func_prod(r, nr) for r, nr in zip(rhos, next_combo)])    # Note: next_combo = (n1, n2, ..., nR)
+            ncases += 1
+        except StopIteration:
+            break
+    combos_generator.close()
+    assert ncases == ncases_expected, \
+        "The number of generated combinations for R={}, C={} ({}) is equal to the expected number of combinations ({})" \
+        .format(R, C, ncases, ncases_expected)
+
+    return x, dist
+
+
+def func_prod_birthdeath(rho, n):
+    return (1 - rho) * rho ** n
+
+
+def func_prod_knapsack(rho, n):
+    # What I found about the knapsack in Python: https://www.pythonpool.com/knapsack-problem-python/, which presents 3 methods to SOLVE the kanpsack problem (i.e. maximize the number of items based on their values and required resources)
+    # Searching for 'python function to compute stationary distribution of knapsack'
+    # I haven't found a function that computes the stationary distribution.
+    return rho ** n / factorial(n)
 
 
 # Tests

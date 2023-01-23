@@ -34,3 +34,20 @@ class PolJobAssignmentProbabilistic:
     def choose_action(self, job_class, servers):
         server_assigned_to_job = np.random.choice(servers, p=self.getProbabilisticMapForJobClass(job_class))
         return server_assigned_to_job
+
+
+def define_uniform_job_assignment_policy(num_job_classes: int, num_servers: int):
+    """
+    Defines a policy with uniform probability of assignment to servers for each job class
+
+    Arguments:
+    num_job_classes: int
+        Number of possible job classes to assign to a server.
+
+    num_servers: int
+        Number of available servers to assign a job to.
+
+    Return: PolJobAssignmentProbabilistic object
+    A job-assignment-to-server policy that assigns each job class with uniform probability to each possible server.
+    """
+    return PolJobAssignmentProbabilistic([[1.0 / num_servers] * num_servers] * num_job_classes)

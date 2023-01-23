@@ -12,11 +12,10 @@ if __name__ == "__main__":
     import runpy
     runpy.run_path("../../../setup.py")
 
-from Python.lib.environments.queues import ActionTypes
 from Python.lib.agents import GenericAgent
 from Python.lib.agents.learners import LearnerTypes
 from Python.lib.agents.policies import PolicyTypes
-from Python.lib.agents.policies.job_assignment import PolJobAssignmentProbabilistic
+from Python.lib.environments.queues import ActionTypes, EnvQueueSingleBufferWithJobClasses
 
 
 class AgeQueue(GenericAgent):
@@ -36,7 +35,10 @@ class AgeQueue(GenericAgent):
 
     policies: dict
         Dictionary of policies followed by the agent, with the following elements:
-        - PolicyTypes.ACCEPT: Policy object defining the acceptance policy of an incoming job.
+        - PolicyTypes.ACCEPT: Policy object defining the acceptance policy of an incoming job. The acceptance policy
+        may depend on the class of the incoming job. If so, the policy object defined by this dictionary key should be
+        a list of policies with as many elements as job classes accepted by the queue environment on which the policy
+        is applied.
         - PolicyTypes.ASSIGN: Policy object defining the assignment policy of an incoming job class to a server.
             The assignment policy can be None, in which case the assignment of job classes to servers follows a uniform probability
             over all the servers in the queue.
@@ -46,16 +48,17 @@ class AgeQueue(GenericAgent):
         'V': GenericLearner used by the agent to learn the state value function.
         'Q': GenericLearner used by the agent to learn the action-state value function.
     """
-    def __init__(self, env, policies: dict, learners: dict,
-                 debug=False):
+    def __init__(self, env, policies: dict, learners: dict, debug=False):
         super().__init__(policies, learners)
         self.debug = debug
 
-        # Define the default job-type-to-server assignment policy in case it is None
-        if self.getAssignmentPolicy() is None:
-            # No assignment policy is given
-            # # => Define it as a policy with uniform probability over servers for each job class
-            self.setAssignmentPolicy( PolJobAssignmentProbabilistic([[1.0 / env.getNumServers()] * env.getNumServers()] * len(env.getJobClassRates()) ) )
+        # Check whether the acceptance policy depends on the arriving job class or is the same for all job classes
+        # We assume the policy depends on the job class when the `policies` parameter is a list of policies with
+        # as many elements as job classes on which the policy is applied.
+        if isinstance(self.getPolicy()[PolicyTypes.ACCEPT], list):
+            self.acceptance_policy_depends_on_jobclass = True
+        else:
+            self.acceptance_policy_depends_on_jobclass = False
 
     def act(self, env, policy_type):
         """
@@ -83,22 +86,59 @@ class AgeQueue(GenericAgent):
             raise ValueError("Invalid policy type to act on. Possible types are: {} ({})" \
                              .format(PolicyTypes, policy_type))
 
+        job_class = env.getJobClass()
+
         if policy_type == PolicyTypes.ACCEPT:
             # Choose the action to take and store it in the agent object
             action_type = ActionTypes.ACCEPT_REJECT
-            action = self.getPolicy()[PolicyTypes.ACCEPT].choose_action(env.getState())
+            if self.acceptance_policy_depends_on_jobclass:
+                # This is most likely the case when the environment is a loss network with multi-class jobs
+                assert job_class < len(env.getQueueState())
+                action = self.getAcceptancePolicies()[job_class].choose_action((env.getQueueState()[job_class], job_class))
+                ## IMPORTANT: The state that is passed to the policy's choose_action() method MUST be the state of the queue environment on which the policy acts
+                ## So for instance, for queue environments defined in environments/queues.py (such as EnvQueueSingleBufferWithJobClasses or EnvQueueLossNetworkWithJobClasses)
+                ## the state is a tuple containing the queue's state and the arriving job class.
+                ## The message here is that we should NOT simply pass the queue's state as parameter to choose_action() but also
+                ## the information of the arriving job class, as the queue's state is extacted from such tuple (queue_state, job_class)
+                ## by the getPolicyForAction() method of the parameterized policy that is called by the choose_action method called above.
+
+                ## NOTE also that, as queue_state we pass the occupancy level of the arriving job class because this is the piece of information of the state
+                ## that defines the acceptance or rejection of the job... i.e. the occupancy level of the other job classes do not play any role in this acceptance policy.
+            else:
+                # This is most likely the case when the environment is a single- or multi-server system with single queue (a.k.a. buffer)
+                action = self.getAcceptancePolicies()[0].choose_action(env.getState())
             self.setLastAction(action)
         elif policy_type == PolicyTypes.ASSIGN:
             # Choose the action to take and store it in the agent object
+            # In an ASSIGN policy type the action is the server number to which the arriving job is assigned
+            if env.getNumServers() > 1:
+                assert self.getAssignmentPolicy() is not None, "The assignment policy must be defined in multi-server systems"
+                servers = range(env.getNumServers())
+                # TODO: (2021/10/21) Homogenize the signature of choose_action() among policies so that they all receive one parameter: the current state (but I am not sure whether this is possible)
+                action = self.getAssignmentPolicy().choose_action(job_class, servers)
+            else:
+                # The action is choose the only server in the system, server #0
+                action = 0
             action_type = ActionTypes.ASSIGN
-            job_class = env.getJobClass()
-            servers = range(env.getNumServers())
-            # TODO: (2021/10/21) Homogenize the signature of choose_action() among policies so that they all receive one parameter: the current state
-            action = self.getPolicy()[PolicyTypes.ASSIGN].choose_action(job_class, servers)
             self.setLastAction(action)
 
         # Take the action, observe the next state, and get the reward received when transitioning to that state
         observation, reward, info = env.step(action, action_type)
+
+        # Update the action taken by the agent after the environment performed the step triggered by the action chosen by the agent above
+        # Note that the action can change after the environment received it from the agent and tried to make a step consistent with that action because,
+        # that action was actually not possible to be performed given the environment conditions.
+        # This is the case for instance when a policy (that depends on the job class --i.e. self.acceptance_policy_depends_on_jobclass = True)
+        # accepts a job based solely on the server occupancy of THAT ARRIVING JOB CLASS, but doesn't know anything about the system's occupancy
+        # (when the occupancy of all job classes in the system are taken into account), and the system's occupancy happens to be at full capacity!
+        # In such case, the job is actually rejected (by the environment, not by the policy). So here we update the action actually taken by the agent
+        # (rejection instead of its initial approval)
+        # Impacting the agent's action in this way is important, because o.w. an assertion written in the manage_job_arrival() function
+        # in simulators/queues.py would fail (because the assertion asserts that the reward is 0.0 when the action is ACCEPT, which would NOT be the case
+        # should the agent's action not be updated as done here.
+        # Note however that the last action taken by the agent (stored in the agent object) is NOT updated... so we can still know
+        # what action the agent took by retrieving the agent's last action with agent.getLastAction().
+        action = env.getLastAction()
 
         return action, observation, reward, info
 
@@ -107,8 +147,21 @@ class AgeQueue(GenericAgent):
         pass
 
     #------ GETTERS ------#
-    def getAcceptancePolicy(self):
-        return self.getPolicy()[PolicyTypes.ACCEPT]
+    def getAcceptancePolicies(self):
+        policies_accept = self.getPolicy()[PolicyTypes.ACCEPT]
+        if self.acceptance_policy_depends_on_jobclass:
+            # The agent defines several acceptance policies, one per arriving job class
+            # (which of course could be just one job class, in which case still the policy is stored as a list --of one policy)
+            # => Return all the acceptance policies defined in the agent
+            return policies_accept
+        else:
+            # There is only one policy defined in the agent
+            # => Convert the acceptance policy to a list containing the acceptance policy so that callers to this method
+            # have to deal only with one case, namely the case of *multiple* policies stored in a list.
+            return [policies_accept]
+
+    def getAcceptancePolicyDependenceOnJobClass(self):
+        return self.acceptance_policy_depends_on_jobclass
 
     def getAssignmentPolicy(self):
         return self.getPolicy()[PolicyTypes.ASSIGN]

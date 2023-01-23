@@ -15,7 +15,7 @@ Created on 22 Mar 2021
                 Note that it should NOT define any agents acting on the environment, as this is done separately.
 """
 import copy
-from enum import IntEnum, unique
+from enum import Enum, IntEnum, unique
 
 import numpy as np
 
@@ -51,6 +51,11 @@ class Actions(IntEnum):
     ACCEPT = 1
     OTHER = -99      # This is used for actions of ActionTypes = ASSIGN (where the action is actually the server number to which the accepted job is assigned)
 
+@unique
+class BufferType(Enum):
+    SINGLE = 1
+    NOBUFFER = 2
+
 # Default reference buffer size used in the definition of the exponential cost when blocking an incoming job
 # This value is the minimum expected cost that is searched for by the learning process when only hard (i.e. deterministic) blocking is used)
 COST_EXP_BUFFER_SIZE_REF = 40
@@ -64,7 +69,9 @@ COST_EXP_BUFFER_SIZE_REF = 40
 # - S(t+1) the next state where the system is at after applying action A(t) on state S(t)
 
 def rewardOnJobClassAcceptance(env, state, action, next_state, dict_params=None):
-    # The state is assumed to be a tuple (k, i) where k is the buffer size and i is the class of the arriving job
+    # The state is assumed to be a tuple (k, i) where k is the buffer size
+    # (either the size of the queue's SINGLE buffer or the occupancy number of the job class i in the system)
+    # and i is the class of the arriving job
     if action == Actions.ACCEPT:
         job_class = state[1]
         return env.getRewardForJobClassAcceptance(job_class)
@@ -168,6 +175,9 @@ class GenericEnvQueueWithJobClasses(gym.Env):
     queue: QueueMM
         The queue object that governs the dynamics of the environment through the definition of a server system.
 
+    buffer_type: BufferType
+        The type of buffer in the queue. Any valid values of the BufferType enum.
+
     reward_func: function
         Function returning the reward received after taking action A(t) at state S(t) and making the environment
         go to state S(t+1).
@@ -182,10 +192,11 @@ class GenericEnvQueueWithJobClasses(gym.Env):
         default: None, in which case the default parameter values are used
     """
 
-    def __init__(self, queue: QueueMM,
+    def __init__(self, queue: QueueMM, buffer_type: BufferType,
                  reward_func, rewards_accept_by_job_class: list,
                  dict_params_reward_func: dict=None):
         self.queue = queue
+        self.buffer_type = buffer_type
 
         #-- Rewards
         self.reward_func = reward_func
@@ -217,11 +228,11 @@ class GenericEnvQueueWithJobClasses(gym.Env):
 
         # Initialize the state of the system at 0 jobs of each class and no arriving job
         self.job_class = None  # Class of the arriving job (when a job arrives)
-        start_state = ([0] * self.queue.getNServers(), self.job_class)
+        start_state = (tuple([0] * self.queue.getNServers()), self.job_class)
         self.reset(start_state)
 
     # THIS METHOD COULD GO TO A SUPERCLASS
-    def reset(self, state=None):
+    def reset(self, state: tuple=None):
         """
         Resets the state of the environment and the last action it received
 
@@ -233,23 +244,23 @@ class GenericEnvQueueWithJobClasses(gym.Env):
             default: None, in which case the queue is reset to the state with all 0 as server sizes and None job class
         """
         if state is None:
-            state = ([0] * self.queue.getNServers(), None)
+            state = (tuple([0] * self.queue.getNServers()), None)
         self.setState(state)
         self.action = None
 
-    def reset(self, state=None):
+    def reset(self, state: tuple=None):
         """
         Resets the state of the environment and the last action it received
 
         Arguments:
         state: (opt) duple
             Duple containing the following information:
-            - server sizes: list with the size of each queue in each server making up the queue system
+            - server sizes: tuple with the size of each queue in each server making up the queue system
             - job_class: class of the arriving job
             default: None, in which case the queue is reset to the state with all 0s in the servers and None job class
         """
         if state is None:
-            state = ([0] * self.queue.getNServers(), None)
+            state = (tuple([0] * self.queue.getNServers()), None)
         self.setState(state)
         self.action = None
 
@@ -286,14 +297,24 @@ class GenericEnvQueueWithJobClasses(gym.Env):
     def getQueue(self):
         return self.queue
 
+    def getBufferType(self):
+        return self.buffer_type
+
     def getCapacity(self):
         return self.queue.getCapacity()
 
+    def getNumServers(self):
+        return self.queue.getNServers()
+
     def getServiceRates(self):
-        return self.queue.getDeathRates()
+        return list(self.queue.getDeathRates())
 
     def getQueueState(self):
-        return self.queue.getServerSizes()
+        return tuple(self.queue.getServerSizes())
+
+    def getQueueStateFromState(self, state: tuple):
+        queue_state = state[0]
+        return queue_state
 
     def getState(self):
         return self.state
@@ -301,12 +322,16 @@ class GenericEnvQueueWithJobClasses(gym.Env):
     def getBufferSize(self):
         return self.queue.getBufferSize()
 
-    def getBufferSizeFromState(self, state :list):
+    def getBufferSizeFromState(self, state: tuple):
         queue_state = state[0]
         return np.sum(queue_state)
 
     def getJobClass(self):
         return self.job_class
+
+    def getJobClassFromState(self, state: tuple):
+        job_class = state[1]
+        return job_class
 
     def getLastAction(self):
         return self.action
@@ -333,9 +358,8 @@ class GenericEnvQueueWithJobClasses(gym.Env):
     def setParamsRewardFunc(self, dict_params):
         self.dict_params_reward_func = dict_params
 
-    def _setServerSizes(self, sizes : int or list or np.array):
-        "Sets the size of the servers in the queue"
-        self.queue.setServerSizes(sizes)
+    def setQueueState(self, state):
+        self.queue.setServerSizes(state)
 
     def setJobClass(self, job_class: int or None):
         "Sets the job class of a new arriving job and updates the environment's state. The job class can be None."
@@ -372,7 +396,7 @@ class EnvQueueSingleBufferWithJobClasses(GenericEnvQueueWithJobClasses):
     queue: QueueMM
         The queue object that governs the dynamics of the environment through the definition of a server system.
 
-    job_class_rates: list or numpy array
+    job_class_rates: list, tuple or numpy array
         A list or array containing the arriving job rates for each valid job class.
         It is always stored in the object as a list.
 
@@ -393,7 +417,7 @@ class EnvQueueSingleBufferWithJobClasses(GenericEnvQueueWithJobClasses):
     def __init__(self, queue: QueueMM, job_class_rates: list,
                  reward_func, rewards_accept_by_job_class: list,
                  dict_params_reward_func: dict=None):
-        super().__init__(queue, reward_func, rewards_accept_by_job_class, dict_params_reward_func)
+        super().__init__(queue, BufferType.SINGLE, reward_func, rewards_accept_by_job_class, dict_params_reward_func)
         if not isinstance(job_class_rates, (list, np.ndarray)):
             raise ValueError("Input parameter `job_class_rates` must be a list or an array ({})".format(type(job_class_rates)))
         self.job_class_rates = list(job_class_rates)
@@ -459,11 +483,11 @@ class EnvQueueSingleBufferWithJobClasses(GenericEnvQueueWithJobClasses):
             queue_state = self.getQueueState()
             # Define the next state of the queue system based on the action
             # (which represents the server to which an incoming job is assigned)
-            queue_next_state = copy.deepcopy(queue_state)
+            queue_next_state = list(copy.deepcopy(queue_state))
             queue_next_state[action] += 1
 
             # Change the state of the system
-            self.setState((queue_next_state, None))
+            self.setState((tuple(queue_next_state), None))
 
             # Set the action to 'OTHER' because this is not an ACCEPT_REJECT type of action
             # This is important because otherwise the `reward_func` called below may interpret
@@ -491,9 +515,6 @@ class EnvQueueSingleBufferWithJobClasses(GenericEnvQueueWithJobClasses):
     def getNumJobClasses(self):
         return len(self.job_class_rates)
 
-    def getNumServers(self):
-        return self.queue.getNServers()
-
     #------ SETTERS ------#
     def setState(self, state):
         """
@@ -508,11 +529,11 @@ class EnvQueueSingleBufferWithJobClasses(GenericEnvQueueWithJobClasses):
             - job_class: class of the arriving job
         """
         assert len(state) == 2
-        server_sizes = state[0]
-        job_class = state[1]
-        self.queue.setServerSizes(server_sizes)
+        # Extract the job class occupancy and the job class from the GIVEN state
+        server_sizes, job_class = self.getQueueStateFromState(state), self.getJobClassFromState(state)
+        self.setQueueState(server_sizes)
         self.job_class = job_class
-        self.state = (self.queue.getBufferSize(), self.job_class)
+        self.state = (self.getBufferSize(), self.job_class)
 
 
 class EnvQueueLossNetworkWithJobClasses(GenericEnvQueueWithJobClasses):
@@ -549,15 +570,15 @@ class EnvQueueLossNetworkWithJobClasses(GenericEnvQueueWithJobClasses):
     def __init__(self, queue: QueueMM,
                  reward_func, rewards_accept_by_job_class: list,
                  dict_params_reward_func: dict=None):
-        super().__init__(queue, reward_func, rewards_accept_by_job_class, dict_params_reward_func)
+        super().__init__(queue, BufferType.NOBUFFER, reward_func, rewards_accept_by_job_class, dict_params_reward_func)
         if self.queue.getNServers() != len(self.queue.getBirthRates()):
             raise ValueError("The number of servers in the queue ({}) must equal the number of job arrival rates ({}), "
                              "because the number of servers actually indicate the number of job classes." \
                              .format(self.queue.getNServers(), len(self.queue.getBirthRates)))
         # State of the system
-        self.state = (list(self.getQueueState()), self.getJobClass())
+        self.state = (self.getQueueState(), self.getJobClass())
 
-    def step(self, action: Actions):
+    def step(self, action: Actions, action_type: ActionTypes=ActionTypes.ACCEPT_REJECT):
         """
         The environment takes a step when receiving the given accept/reject action
 
@@ -565,12 +586,18 @@ class EnvQueueLossNetworkWithJobClasses(GenericEnvQueueWithJobClasses):
         action: Actions
             Action taken by the agent interacting with the environment either accept or reject an incoming job.
 
+        action_type: (opt) ActionTypes
+            Type of the action taken. Only ActionTypes.ACCEPT_REJECT is accepted.
+            default: ActionTypes.ACCEPT_REJECT
+
         Returns: tuple
         Tuple containing the following elements:
         - the next state where the environment went to
         - the reward received by taking the given action and transitioning from the current state to the next state
         - additional relevant information in the form of a dictionary
         """
+        if action_type != ActionTypes.ACCEPT_REJECT:
+            raise ValueError("Invalid action type: {}\nValid action types are: {}".format(action_type.name, ActionTypes.ACCEPT_REJECT.name))
         if not isinstance(action, Actions):
             raise ValueError("The action must be of type Actions ({})".format(type(action)))
 
@@ -583,8 +610,7 @@ class EnvQueueLossNetworkWithJobClasses(GenericEnvQueueWithJobClasses):
             action = Actions(action)
 
         if action not in [Actions.ACCEPT, Actions.REJECT]:
-            raise ValueError(
-                "Invalid action: {}\nValid actions are: {}".format(action, Actions))
+            raise ValueError("Invalid action: {}\nValid actions are: {}".format(action, Actions))
 
         if action == Actions.REJECT:
             # Reject the incoming job
@@ -602,11 +628,11 @@ class EnvQueueLossNetworkWithJobClasses(GenericEnvQueueWithJobClasses):
             else:
                 # Current state of the queue system
                 queue_state = self.getQueueState()
-                queue_next_state = copy.deepcopy(queue_state)
+                queue_next_state = list(copy.deepcopy(queue_state))
                 queue_next_state[self.getJobClass()] += 1
 
                 # Update the state of the system
-                self.setState((queue_next_state, None))
+                self.setState((tuple(queue_next_state), None))
 
         # Define the next state and the reward of going to that next state
         next_state = self.getState()
@@ -623,7 +649,10 @@ class EnvQueueLossNetworkWithJobClasses(GenericEnvQueueWithJobClasses):
 
     #------ GETTERS ------#
     def getNumJobClasses(self):
-        return super().getNumServers()
+        return self.queue.getNServers()
+
+    def getJobClassRates(self):
+        return list(self.queue.getBirthRates())
 
     def getSystemOccupancy(self):
         return super().getBufferSize()
@@ -645,11 +674,9 @@ class EnvQueueLossNetworkWithJobClasses(GenericEnvQueueWithJobClasses):
             - job_class: class of the arriving job
         """
         assert len(state) == 2
-        job_class_occupancy = state[0]
-        assert len(job_class_occupancy) == self.queue.getNServers()
-        job_class = state[1]
-        self.queue.setServerSizes(job_class_occupancy)
+        # Extract the job class occupancy and the job class from the GIVEN state
+        job_class_occupancy, job_class = self.getQueueStateFromState(state), self.getJobClassFromState(state)
+        assert len(job_class_occupancy) == self.queue.getNServers()     # The number of servers is the capacity of the system in a Loss Network
+        self.setQueueState(job_class_occupancy)
         self.job_class = job_class
-        self.state = (list(self.queue.getServerSizes()), self.job_class)
-
-
+        self.state = (self.getQueueState(), self.job_class)

@@ -12,6 +12,9 @@ import warnings
 import numpy as np
 import copy
 
+from typing import Union
+
+
 if __name__ == "__main__":
     # Needed to run tests (see end of program)
     import runpy
@@ -62,7 +65,7 @@ class GenericQueue:
         default: False
     """
 
-    def __init__(self, capacity: int or np.Inf, nservers :int=1, size :int=0, origin :float=0.0, log :bool=False):
+    def __init__(self, capacity: int or np.Inf, nservers :int=1, size :Union[int, list, tuple, np.ndarray]=0, origin :float=0.0, log :bool=False):
         self.K = capacity           # Capacity of the buffer that receives the jobs before assigning them to a server
         self.c = nservers
 
@@ -167,10 +170,10 @@ class GenericQueue:
     def setOrigin(self, time_origin):
         self.origin = time_origin
 
-    def setServerSizes(self, size):
+    def setServerSizes(self, size: Union[int, list, tuple, np.ndarray]):
         "Sets the size of the queue in EACH server"
-        # Convert the size to an array (and to int if given as float)
         if is_scalar(size):
+            # Convert the size to an array (and to int if given as float)
             size = np.repeat(int(size), self.c)
         self.size = np.array(size)
 

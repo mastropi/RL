@@ -7,6 +7,7 @@ Created on Sun Jul 10 12:23:07 2022
 """
 
 from enum import Enum, unique
+from typing import Union
 
 import numpy as np
 from matplotlib import pyplot as plt
@@ -89,7 +90,9 @@ class SetOfStates:
         The result is different depending on whether the storage format of the set (see method `getStorageFormat()`)
         is "states" (where the states in the set are explicitly listed) or "state_boundaries" (where the states in the
         set are defined implicitly by the integer upper limits in each dimension of a state), in which case all states
-        made up of integer values satisfying those upper limits belong to the set.
+        made up of integer values ONE of which satisfies one of those upper limits belong to the set.
+        Example of the latter: if the state_boundaries are [4, 2, 5], then following are examples of states belonging
+        to the set: [4, 0, 0], [3, 2, 1], [3, 2, 5], etc.
 
         Arguments:
         size: int or None
@@ -163,7 +166,7 @@ class SetOfStates:
             if len(self.state_boundaries) == 0:
                 return None
             else:
-                return 1 if is_scalar(self.state_boundaries[0]) else len(self.state_boundaries[0])
+                return 1 if is_scalar(self.state_boundaries) else len(self.state_boundaries)
 
     def getNumStates(self):
         """
@@ -443,7 +446,7 @@ def update_trajectory(agent, t_total, t_sim, state, action, reward):
 def show_messages(verbose, verbose_period, t_learn):
     return verbose and np.mod(t_learn - 1, verbose_period) == 0
 
-def analyze_event_times(rates, times, groups, group_name="group", plot=False):
+def analyze_event_times(rates: Union[list, tuple, np.ndarray], times, groups, group_name="group", plot=False):
     """
     Computes and plots the event times (e.g. inter-arrival times or service times) for each of the given groups,
     and compares their rates with the nominal rates of each group.

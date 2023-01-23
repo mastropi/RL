@@ -11,6 +11,7 @@ import numpy as np
 import Python.lib.queues as queues
 from Python.lib.environments.queues import Actions, EnvQueueSingleBufferWithJobClasses, rewardOnJobClassAcceptance
 from Python.lib.agents.policies import GenericParameterizedPolicyTwoActions
+from Python.lib.utils.basic import is_scalar
 
 
 class PolQueueTwoActionsLogit(GenericParameterizedPolicyTwoActions):
@@ -35,8 +36,8 @@ class PolQueueTwoActionsLogit(GenericParameterizedPolicyTwoActions):
     """
 
     def __init__(self, env: EnvQueueSingleBufferWithJobClasses, theta: float, beta :float):
-        if not isinstance(theta, float):
-            raise ValueError("The theta parameter must be a float number ({})".format(theta))
+        if not is_scalar(theta):
+            raise ValueError("The theta parameter must be scalar ({})".format(theta))
         super().__init__(env, theta)
 
         if self.env.getCapacity() < np.Inf: # When capacity is Inf, theta is also allowed to be Inf
@@ -138,8 +139,8 @@ class PolQueueTwoActionsLinearStep(GenericParameterizedPolicyTwoActions):
     """
 
     def __init__(self, env: EnvQueueSingleBufferWithJobClasses, theta: float):
-        if not isinstance(theta, float):
-            raise ValueError("The theta parameter must be a float number ({})".format(theta))
+        if not is_scalar(theta):
+            raise ValueError("The theta parameter must be scalar ({})".format(theta))
         super().__init__(env, theta)
 
         if self.env.getCapacity() < np.Inf: # When capacity is Inf, theta is also allowed to be Inf
@@ -178,12 +179,14 @@ class PolQueueTwoActionsLinearStep(GenericParameterizedPolicyTwoActions):
 
     def getPolicyForAction(self, action, state, buffer_size=None):
         """
-        Returns the value of the policy for the given action when the queue environment is at the given state
-        or at the given buffer size, whichever is not None. If both are not None, the buffer size value is
-        overwritten with the buffer size associated to the given state.
+        Returns the value of the policy for the given action when the queue environment is at the given state or
+        buffer size, i.e. it returns the *probability* that the given action is taken when the system is at the given state.
 
-        The value of the policy is a function of the queue's buffer size, which is either given or computed
-        from the given state.
+        The calculation of the policy is based on either the `state` or the `buffer_size`, whichever is not none.
+        If both are given, the state has precedence and the buffer size is computed from it.
+
+        In all cases, since the policy's parameter is univariate, the value of the policy is a function of the buffer size
+        (either given or computed from the state), which is compared to the current value of the theta parameter of the policy.
 
         action: Actions
             Accept or Reject action at which the policy is evaluated.
@@ -371,14 +374,14 @@ if __name__ == "__main__":
     policy = PolQueueTwoActionsLinearStep(env, theta)
 
     buffer_size = 0
-    env._setServerSizes(buffer_size)
+    env.setQueueState(buffer_size)
     state = env.getState()
     print("\tTesting buffer_size = {}... Policy Accept = {}".format(buffer_size, policy.getPolicyForAction(Actions.ACCEPT, state)))
     assert policy.getPolicyForAction(Actions.ACCEPT, state) == 0.7
     assert policy.getPolicyForAction(Actions.REJECT, state) == 1 - policy.getPolicyForAction(Actions.ACCEPT, state)
 
     buffer_size = 1
-    env._setServerSizes(buffer_size)
+    env.setQueueState(buffer_size)
     state = env.getState()
     print("\tTesting buffer_size = {}... Policy Accept = {}".format(buffer_size, policy.getPolicyForAction(Actions.ACCEPT, state)))
     assert policy.getPolicyForAction(Actions.ACCEPT, state) == 0.0
@@ -389,7 +392,7 @@ if __name__ == "__main__":
     print("\ntheta: {}".format(theta))
     policy = PolQueueTwoActionsLinearStep(env, theta)
     for buffer_size in range(3):
-        env._setServerSizes(buffer_size)
+        env.setQueueState(buffer_size)
         state = env.getState()
         print("\tTesting buffer_size = {}... Policy Accept = {}".format(buffer_size, policy.getPolicyForAction(Actions.ACCEPT, state)))
         assert policy.getPolicyForAction(Actions.ACCEPT, state) == 0.0
@@ -401,28 +404,28 @@ if __name__ == "__main__":
     policy = PolQueueTwoActionsLinearStep(env, theta)
 
     buffer_size_small = 3
-    env._setServerSizes(buffer_size_small)
+    env.setQueueState(buffer_size_small)
     state = env.getState()
     print("\tTesting buffer_size smaller than theta: {}... Policy Accept = {}".format(buffer_size_small, policy.getPolicyForAction(Actions.ACCEPT, state)))
     assert policy.getPolicyForAction(Actions.ACCEPT, state) == 1.0
     assert policy.getPolicyForAction(Actions.REJECT, state) == 1 - policy.getPolicyForAction(Actions.ACCEPT, state)
 
     buffer_size_large = 8
-    env._setServerSizes(buffer_size_large)
+    env.setQueueState(buffer_size_large)
     state = env.getState()
     print("\tTesting buffer_size = {}, MUCH larger than theta... Policy Accept = {}".format(buffer_size_large, policy.getPolicyForAction(Actions.ACCEPT, state)))
     assert policy.getPolicyForAction(Actions.ACCEPT, state) == 0.0
     assert policy.getPolicyForAction(Actions.REJECT, state) == 1 - policy.getPolicyForAction(Actions.ACCEPT, state)
 
     buffer_size_border_blocked = int(theta+2)
-    env._setServerSizes(buffer_size_border_blocked)
+    env.setQueueState(buffer_size_border_blocked)
     state = env.getState()
     print("\tTesting buffer_size = {}, near theta with sure blocking... Policy Accept = {}".format(buffer_size_border_blocked, policy.getPolicyForAction(Actions.ACCEPT, state)))
     assert policy.getPolicyForAction(Actions.ACCEPT, state) == 0.0
     assert policy.getPolicyForAction(Actions.REJECT, state) == 1 - policy.getPolicyForAction(Actions.ACCEPT, state)
 
     buffer_size_border_random = int(theta+1)
-    env._setServerSizes(buffer_size_border_random)
+    env.setQueueState(buffer_size_border_random)
     state = env.getState()
     print("\tTesting buffer_size = {}, near theta with randomized blocking... Policy Accept = {}".format(buffer_size_border_random, policy.getPolicyForAction(Actions.ACCEPT, state)))
     assert np.isclose(policy.getPolicyForAction(Actions.ACCEPT, state), 0.3)

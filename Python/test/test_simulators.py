@@ -23,18 +23,28 @@ class Test_Class_SetOfStates(unittest.TestCase):
         # Using state_boundaries attribute
         print("Testing the SetOfStates class...")
         print("0) Test Getters multidimensional")
-        set_states = SetOfStates(states=set({(1, 1, 0), (0, 1, 2), (1, 2, 2)}))
+        set_states = SetOfStates(states=set({(1, 1, 0), (0, 1, 2), (1, 2, 2), (2, 2, 0)}))
         set_state_boundaries = SetOfStates(state_boundaries=(3, 5, 4))
-        assert set_states.getStates() == set({(1, 1, 0), (0, 1, 2), (1, 2, 2)})
+        # getDimension()
+        assert set_states.getStateDimension() == 3
+        assert set_state_boundaries.getStateDimension() == 3
+        # getStates()
+        assert set_states.getStates() == set({(1, 1, 0), (0, 1, 2), (1, 2, 2), (2, 2, 0)})
         assert set_state_boundaries.getStates() == (3, 5, 4)
+        # getStorageFormat()
         assert set_states.getStorageFormat() == "states"
         assert set_state_boundaries.getStorageFormat() == "state_boundaries"
 
         print("0) Test Getters unidimensional")
         set_states = SetOfStates(states=set({3, 5}))
         set_state_boundaries = SetOfStates(state_boundaries=5)
+        # getStateDimension()
+        assert set_states.getStateDimension() == 1
+        assert set_state_boundaries.getStateDimension() == 1
+        # getStates()
         assert set_states.getStates() == set({3, 5})
         assert set_state_boundaries.getStates() == 5
+        # getStorageFormat()
         assert set_states.getStorageFormat() == "states"
         assert set_state_boundaries.getStorageFormat() == "state_boundaries"
 
