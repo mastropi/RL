@@ -33,7 +33,7 @@ from Python.lib.environments.queues import Actions, rewardOnJobRejection_Exponen
 
 from Python.lib.simulators import LearningMethod, define_queue_environment_and_agent
 from Python.lib.simulators.queues import compute_nparticles_and_narrivals_for_fv_process, \
-    compute_rel_errors_for_fv_process, LearningMode, SimulatorQueue
+    compute_rel_errors_for_fv_process, get_deterministic_blocking_boundaries, LearningMode, SimulatorQueue
 
 from Python.lib.utils.basic import aggregation_bygroups, is_scalar, show_exec_params
 from Python.lib.utils.computing import stationary_distribution_birth_death_process
@@ -123,7 +123,7 @@ def run_simulation_policy_learning(simul, replications, dict_params_simul, dict_
                                                                                   dict_params_simul['nparticles'],
                                                                                   dict_params_simul['t_sim'])
 
-        print("\n--> CASE {} of {}: theta_true={:.3f} (K_true={}), theta={:.3f} (K={}), J/K={:.3f}," \
+        print("\n--> CASE {} of {}: theta_true={} (K_true={}), theta={} (K={}), J/K={:.3f}," \
               " exponent={}: N={} (err_nom={:.1f}%, err={:.1f}%), T={} (err_nom={:.1f}%, err={:.1f}%)" \
               .format(dict_info['case'], dict_info['ncases'], dict_params_simul['theta_true'], dict_info['K_true'],
                       dict_params_simul['theta_start'], dict_info['K'],
@@ -132,7 +132,7 @@ def run_simulation_policy_learning(simul, replications, dict_params_simul, dict_
                       error_rel_phi_real * 100,
                       dict_params_simul['t_sim'], dict_info['error_rel_et'] * 100, error_rel_et_real * 100))
     else:
-        print("\n--> CASE {} of {}: #replications={}, theta_true={:.3f} (K_true={}), theta={:.3f} (K={}), J/K={:.3f}," \
+        print("\n--> CASE {} of {}: #replications={}, theta_true={} (K_true={}), theta={} (K={}), J/K={:.3f}," \
               " exponent={}: N={}, T={})" \
               .format(dict_info['case'], replications, dict_info['ncases'], dict_params_simul['theta_true'], dict_info['K_true'],
                       dict_params_simul['theta_start'], dict_info['K'],
@@ -245,22 +245,22 @@ if len(sys.argv) == nargs_required + counter_opt_args + 1:
     sys.argv += [1.0]   # clipping_value: clipping value when clipping = True
 counter_opt_args += 1
 if len(sys.argv) == nargs_required + counter_opt_args + 1:
-    sys.argv += [5.0]   # 18.0, 23.0]  # theta_true: true theta (only one value is allowed)
+    sys.argv += [5.0]   # 18.0, 23.0]  # theta_true: true theta (only one value is allowed). NOTE: The optimum theta is NOT precisely `theta_true` as `theta_true` defines the sref value on which the exponential cost is centered. For more details see the notes in the costBlockingExponential() function defined in environments/queues.py.
 counter_opt_args += 1
 if len(sys.argv) == nargs_required + counter_opt_args + 1:
-    sys.argv += [1.1]   # 29.1, 34.1]   # theta_start: non-integral initial theta value for the learning process (only one value is allowed)
+    sys.argv += [22.1]   # 29.1, 34.1]   # theta_start: non-integral initial theta value for the learning process (only one value is allowed)
 counter_opt_args += 1
 if len(sys.argv) == nargs_required + counter_opt_args + 1:
-    sys.argv += [0.3]   # J_factor: fraction J/K to use in the FV learning method
+    sys.argv += [0.5]   # J_factor: fraction J/K to use in the FV learning method
 counter_opt_args += 1
 if len(sys.argv) == nargs_required + counter_opt_args + 1:
-    sys.argv += [1.0]   # error_rel_phi: expected relative error for the estimation of Phi(t,K) in the FV learning method (1.0 means 100%) --> it defines the number of particles to use
+    sys.argv += [0.5]   # error_rel_phi: expected relative error for the estimation of Phi(t,K) in the FV learning method (1.0 means 100%) --> it defines the number of particles to use
 counter_opt_args += 1
 if len(sys.argv) == nargs_required + counter_opt_args + 1:
-    sys.argv += [1.0]   # error_rel_et: expected relative error for the estimation of E(T) in the FV learning method (1.0 means 100%) --> it defines the number of arrival events to observe in the MC-based simulation to estimate E(T)
+    sys.argv += [0.5]   # error_rel_et: expected relative error for the estimation of E(T) in the FV learning method (1.0 means 100%) --> it defines the number of arrival events to observe in the MC-based simulation to estimate E(T)
 counter_opt_args += 1
 if len(sys.argv) == nargs_required + counter_opt_args + 1:
-    sys.argv += ["save"]  # Either "nosave" or anything else for saving the results and log
+    sys.argv += ["nosave"]  # Either "nosave" or anything else for saving the results and log
 counter_opt_args += 1
 if len(sys.argv) == nargs_required + counter_opt_args + 1:
     sys.argv += [True]  # Whether to save with the datetime in the file name
@@ -355,7 +355,7 @@ min_num_cycles_for_expectations = 5 # Minimum number of observed cycles to consi
                                     # (such as the expected cycle time or the stationary probability) is reliable.
 fixed_window = False
 alpha_start = 10.0  # / t_sim  # Use `/ t_sim` when using update of theta at each simulation step (i.e. LeaPolicyGradient.learn_TR() is called instead of LeaPolicyGradient.learn())
-adjust_alpha = False  # True
+adjust_alpha = True  # True
 func_adjust_alpha = np.float # np.sqrt
 min_time_to_update_alpha = 0  # int(t_learn / 3)
 alpha_min = 0.01  # 0.1
@@ -368,8 +368,8 @@ dict_params = dict({'environment': {'capacity': np.Inf,
                                     'reward_func': rewardOnJobRejection_ExponentialCost,
                                     'rewards_accept_by_job_class': None
                                     },
-                    'policy': {'parameterized_policy': PolQueueTwoActionsLinearStep,
-                               'theta': 1.0  # This value is dummy in the sense that it will be updated below
+                    'policy': {'parameterized_policy': PolQueueTwoActionsLinearStep if is_scalar(theta_start) else [PolQueueTwoActionsLinearStep for _ in theta_start],
+                               'theta': 1.0 if is_scalar(theta_start) else [1.0 for _ in theta_start]  # This value is dummy in the sense that it will be updated below
                                },
                     'learners': {'V': {'learner': learnerV,
                                        'params': {'gamma': 1}
@@ -453,8 +453,8 @@ if benchmark_file is None:
         # simul.dict_learning_params['t_learn'] = int(theta_true*2)
 
         for k, theta_start in enumerate(theta_start_values):
-            K_true = simul.agent.getAcceptancePolicy().getBufferSizeForDeterministicBlockingFromTheta(theta_true)
-            K = simul.agent.getAcceptancePolicy().getBufferSizeForDeterministicBlockingFromTheta(theta_start)
+            K_true = get_deterministic_blocking_boundaries(simul.agent, theta_true)
+            K = get_deterministic_blocking_boundaries(simul.agent, theta_start)
             for j, J_factor in enumerate(J_factor_values):
                 N_min = 50; N_max = 500
                 T_min = 100; T_max = 5000
@@ -532,8 +532,8 @@ else:
         T = benchmark_groups['T'].iloc[i]
         burnin_time_steps = benchmark_groups['burnin_time_steps'].iloc[i]
 
-        K_true = simul.agent.getAcceptancePolicy().getBufferSizeForDeterministicBlockingFromTheta(theta_true)
-        K = simul.agent.getAcceptancePolicy().getBufferSizeForDeterministicBlockingFromTheta(theta_start)
+        K_true = get_deterministic_blocking_boundaries(simul.agent, theta_true)
+        K = get_deterministic_blocking_boundaries(simul.agent, theta_start)
 
         dict_params_simul = {
             'theta_true': theta_true,

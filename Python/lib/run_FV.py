@@ -124,8 +124,8 @@ def analyze_convergence(estimation_process=Process.Simulators,
                                             # of reward, it could).
                                         'rewards_accept_by_job_class': None
                                         },
-                        'policy': {'parameterized_policy': PolQueueTwoActionsLinearStep,
-                                   'theta': float(K-1)  # This means that there blocking is deterministic at K and otherwise there is acceptance.
+                        'policy': { 'parameterized_policy': PolQueueTwoActionsLinearStep if is_scalar(K) else [PolQueueTwoActionsLinearStep for _ in K],
+                                    'theta': float(K-1) if is_scalar(K) else [float(KK-1) for KK in K]  # This means that there blocking is deterministic at K and otherwise there is acceptance.
                                    },
                         'learners': {'V': {'learner': LeaFV,
                                            'params': {'gamma': 1}
@@ -478,8 +478,8 @@ def analyze_absorption_size(nservers=1,
                                             # of reward, it could).
                                         'rewards_accept_by_job_class': None
                                         },
-                        'policy': {'parameterized_policy': PolQueueTwoActionsLinearStep,
-                                   'theta': np.Inf      # Set to Inf because the capacity has been set to Inf. This value will be updated below when analyzing each specific K
+                        'policy': { 'parameterized_policy': PolQueueTwoActionsLinearStep if is_scalar(K_values[0]) else [PolQueueTwoActionsLinearStep for _ in K_values[0]],
+                                    'theta': np.Inf if is_scalar(K_values[0]) else [np.Inf for KK in K_values[0]]  # Set to Inf because the capacity has been set to Inf. This value will be updated below when analyzing each specific K
                                    },
                         'learners': {'V': {'learner': LeaFV,
                                            'params': {'gamma': 1}
@@ -510,7 +510,7 @@ def analyze_absorption_size(nservers=1,
         # Set maximum capacity of queue to K
         env_queue.setCapacity(K)
         # Set deterministic acceptance policy that accepts up to K-1
-        agent.getAcceptancePolicy().setThetaParameter(K-1)
+        agent.setAcceptancePoliciesThresholds(K-1)
 
         nparticles = nparticles_values[idx_K]
         nmeantimes = nmeantimes_values[idx_K]
@@ -1203,7 +1203,7 @@ if __name__ == "__main__":
         sys.argv += [5]       # MINCE: Minimum number of cycles to be used for the estimation of expectations (e.g. E(T) in Monte-Carlo and E(T_A) in Fleming-Viot)
     counter_opt_args += 1
     if len(sys.argv) == nargs_required + counter_opt_args + 1:
-        sys.argv += [2]       # Number of methods to run: 1 (only FV), 2 (FV & MC)
+        sys.argv += [1]       # Number of methods to run: 1 (only FV), 2 (FV & MC)
     counter_opt_args += 1
     if len(sys.argv) == nargs_required + counter_opt_args + 1:
         sys.argv += ["nosave"]  # Either "nosave" or anything else for saving the results and log
@@ -1212,7 +1212,7 @@ if __name__ == "__main__":
         sys.argv += [True]   # Whether to use the execution date and time in the output file name containing the results
     counter_opt_args += 1
     if len(sys.argv) == nargs_required + counter_opt_args + 1:
-        sys.argv += ["ID1"]      # Identifier to use for this run (e.g. "ID1"), in addition to the execution datetime (if requested)
+        sys.argv += ["ID1"]  # Identifier to use for this run (e.g. "ID1"), in addition to the execution datetime (if requested)
     counter_opt_args += 1
     if len(sys.argv) == nargs_required + counter_opt_args + 1:
         sys.argv += [True]   # Whether to generate plots with the results

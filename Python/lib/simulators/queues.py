@@ -110,10 +110,14 @@ class SimulatorQueue(Simulator):
         if agent is not None:
             self.learnerV = self.agent.getLearnerV()
             self.learnerP = self.agent.getLearnerP()
-            # Job-rates by server (assuming jobs are pre-assigned to servers)
-            self.job_rates_by_server = compute_job_rates_by_server(self.env.getJobClassRates(),
-                                                                   self.env.getNumServers(),
-                                                                   self.agent.getAssignmentPolicy().getProbabilisticMap())
+            if self.env.getBufferType() != BufferType.NOBUFFER:
+                # Job rates by server (assuming jobs are pre-assigned to servers)
+                self.job_rates_by_server = compute_job_rates_by_server(self.env.getJobClassRates(),
+                                                                       self.env.getNumServers(),
+                                                                       self.agent.getAssignmentPolicy().getProbabilisticMap())
+            else:
+                # Job rates by server are actually the job class arrival rates
+                self.job_rates_by_server = self.env.getJobClassRates()
             # Compute the server loads which is used to compute the expected relative errors associated to
             # the number of particles N and the number of arrival events T used in the FVRL algorithm
             self.rhos = [l / m for l, m in zip(self.getJobRatesByServer(), self.env.getServiceRates())]
@@ -362,8 +366,10 @@ class SimulatorQueue(Simulator):
             if show_messages(True, verbose_period, t_learn):
                 print("\n************************ Learning step {} of {} running ****************************" \
                       .format(t_learn, self.dict_learning_params['t_learn']))
+                theta_parameters = self.getLearnerP().getPolicy()   if not isinstance(self.getLearnerP().getPolicy(), list) \
+                                                                    else [policy.getThetaParameter() for policy in self.getLearnerP().getPolicy()]
                 print("Theta parameter of policies in the policy learner: {}" \
-                      .format([policy.getThetaParameter() for policy in self.getLearnerP().getPolicy()]))
+                      .format(theta_parameters))
 
             # Buffer size of sure blocking, which is used to define the buffer size for activation and the start state for the simulations run
             # We set the activation buffer size as a specific fraction of the buffer size K of sure blocking.
@@ -371,11 +377,12 @@ class SimulatorQueue(Simulator):
             # a signal that leads to estimations of the numerator Phi(t) and the denominator E(T1+T2) in the
             # FV estimation of the stationary probability (found on Fri, 07-Jan-2022 at IRIT-N7 with Matt, Urtzi and
             # Szymon), namely J = K/3.
-            assertConsistencyPolicyLearnerAndAgentPolicy(self.agent)
-            K = self.agent.getAcceptancePolicy().getBufferSizeForDeterministicBlocking()
-            # Compute the true blocking probabilities, so that we know how much error we have in the estimation of Pr(K-1) and Pr(K)
-            probas_stationary_true = dict({K-1: compute_blocking_probability_birth_death_process(self.rhos, K-1),
-                                           K:   compute_blocking_probability_birth_death_process(self.rhos, K)})
+            K = get_deterministic_blocking_boundaries(self.agent)
+            if self.env.getBufferType() != BufferType.NOBUFFER:
+                # Compute the true blocking probabilities, so that we know how much error we have in the estimation of Pr(K-1) and Pr(K)
+                assert is_scalar(K)
+                probas_stationary_true = dict({K-1: compute_blocking_probability_birth_death_process(self.rhos, K-1),
+                                               K:   compute_blocking_probability_birth_death_process(self.rhos, K)})
             dict_params_simul['buffer_size_activation'] = np.max([1, int( np.round(dict_params_simul['buffer_size_activation_factor']*K) )])
             if isinstance(self.getLearnerV(), LeaFV):
                 # TODO: (2021/12/16) SHOULD WE MOVE ALL this learning process of the average reward and stationary probabilities to the learn() method of the LeaFV class?
@@ -543,7 +550,7 @@ class SimulatorQueue(Simulator):
             if isinstance(self.getLearnerV(), LeaFV) and \
                 'error_rel_phi' in dict_info.keys() and 'error_rel_et' in dict_info.keys():
                 # Compute the new blocking size so that we can update the values of N and T
-                _K_next = self.agent.getAcceptancePolicy().getBufferSizeForDeterministicBlocking()
+                _K_next = get_deterministic_blocking_boundaries(self.agent)
                 _N, _T = \
                     compute_nparticles_and_narrivals_for_fv_process(self.rhos, _K_next, dict_params_simul['buffer_size_activation_factor'],
                                                                     error_rel_phi=dict_info['error_rel_phi'],
@@ -704,8 +711,7 @@ class SimulatorQueue(Simulator):
         states_with_actions = [s for s, a in zip(self.getLearnerV().getStates(), self.getLearnerV().getActions()) if a is not None]
         buffer_sizes = [self.env.getBufferSizeFromState(s) for s in states_with_actions]
         # print("buffer sizes, actions = {}".format(np.c_[buffer_sizes, actions]))
-        assertConsistencyPolicyLearnerAndAgentPolicy(self.agent)
-        K = self.agent.getAcceptancePolicy().getBufferSizeForDeterministicBlocking()
+        K = get_deterministic_blocking_boundaries(self.agent)
         probas_stationary = dict({K-1:  np.sum([1 for bs in buffer_sizes if bs == K-1]) / len(buffer_sizes),
                                   K:    np.sum([1 for bs in buffer_sizes if bs == K]) / len(buffer_sizes)})
 
@@ -750,8 +756,7 @@ class SimulatorQueue(Simulator):
             raise ValueError("The agent's policy must be of type {} ({})" \
                              .format(type(PolQueueTwoActionsLinearStep), type(self.getLearnerP().getPolicy())))
 
-        assertConsistencyPolicyLearnerAndAgentPolicy(self.agent)
-        K = self.agent.getAcceptancePolicy().getBufferSizeForDeterministicBlocking()
+        K = get_deterministic_blocking_boundaries(self.agent)
 
         # 1) Starting at (K-1, a=1) is like starting at s=K (because the reward of the first action is 0)
         if show_messages(verbose, verbose_period, t_learn):
@@ -829,8 +834,7 @@ class SimulatorQueue(Simulator):
             raise ValueError("The agent's policy must be of type {} ({})" \
                              .format(type(PolQueueTwoActionsLinearStep), type(self.getLearnerP().getPolicy())))
 
-        assertConsistencyPolicyLearnerAndAgentPolicy(self.agent)
-        K = self.agent.getAcceptancePolicy().getBufferSizeForDeterministicBlocking()
+        K = get_deterministic_blocking_boundaries(self.agent)
 
         np.random.seed(seed)
 
@@ -958,7 +962,7 @@ class SimulatorQueue(Simulator):
                 server = job_class_or_server
                 queue_state = env.getQueueState()
                 assert queue_state[server] > 0, "The server where the completed service occurs has at least one job"
-                next_queue_state = copy.deepcopy(queue_state)
+                next_queue_state = list(copy.deepcopy(queue_state))
                 next_queue_state[server] -= 1
                 env.setState((next_queue_state, None))
                 next_state = env.getState()
@@ -983,8 +987,7 @@ class SimulatorQueue(Simulator):
 
         # Set the state of each environment AFTER taking the respective action at time t=0.
         # This is buffer_size when the first action is Reject and buffer_size+1 when the first action is Accept.
-        assertConsistencyPolicyLearnerAndAgentPolicy(self.agent)
-        K = self.agent.getAcceptancePolicy().getBufferSizeForDeterministicBlocking()
+        K = get_deterministic_blocking_boundaries(self.agent)
 
         # History of states, actions and rewards of each environment (2 x <undef> list)
         # Used for informational purposes, but actually we don't need to store the history because we are computing
@@ -1152,8 +1155,7 @@ class SimulatorQueue(Simulator):
             # because, either it is empty as the rewards are not recorded while running the Fleming-Viot process,
             # or it does not reflect the actual values of each state-value of the original system.
             assert probas_stationary is not None and Q_values is not None
-            assertConsistencyPolicyLearnerAndAgentPolicy(self.agent)
-            K = agent.getAcceptancePolicy().getBufferSizeForDeterministicBlocking()
+            K = get_deterministic_blocking_boundaries(agent)
             if self.dict_learning_params['mode'] == LearningMode.REINFORCE_TRUE:
                 # Regular gradient ascent based on grad(V)
                 # Only information about the buffer size K-1 is used to learn,
@@ -1566,16 +1568,17 @@ def choose_state_for_buffer_size(env, buffer_size):
 
 def get_blocking_boundaries(agent):
     """
-    Returns all the blocking values for each dimension of a multi-dimensional state system where blocking may occur at
+    Returns all the blocking values for each dimension of a multidimensional state system where blocking may occur at
     arrival of the corresponding job class
 
-    The agent is assumed to store one or more parameterized action policies, each of which is parameterized by a
-    real-valued parameter theta (as opposed to a multi-dimensional parameter).
+    The agent is assumed to store one or more acceptance policies where the getBufferSizeForDeterministicBlocking()
+    method is defined. Normally each of these policies are parameterized by a real-valued parameter theta
+    (as opposed to a multidimensional parameter).
 
     Arguments:
     agent: agent object interacting with the environment
-        Agent that defines a list of accept/reject policies, e.g. one for each arriving job class, normally
-        parameterized policies.
+        Agent that defines a list of accept/reject policies, as described in the description above,
+        e.g. one for each arriving job class, normally parameterized policies.
 
     Return: list or list of lists
     If the number of acceptance policies defined in the agent is only one, the returned value is a list of blocking sizes (e.g. [K-1, K]).
@@ -1603,6 +1606,49 @@ def get_blocking_boundaries(agent):
         return blocking_boundaries[0]
     else:
         return blocking_boundaries
+
+
+def get_deterministic_blocking_boundaries(agent, thresholds: Union[float, list]=None):
+    """
+    Returns all the deterministic blocking thresholds for each dimension of a multidimensional state system
+    where blocking may occur at arrival of the corresponding job class.
+
+    The agent is assumed to store one or more acceptance policies where the getBufferSizeForDeterministicBlocking()
+    method is defined (when thresholds=None) or the getBufferSizeForDeterministicBlockingFromTheta() is defined
+    (when thresholds is given and not None). Normally each of these policies are parameterized by a real-valued parameter theta
+    (as opposed to a multidimensional parameter).
+
+    Arguments:
+    agent: agent object interacting with the environment
+        Agent that defines a list of accept/reject policies, as described in the description above,
+        e.g. one for each arriving job class, normally parameterized policies.
+
+    thresholds: (opt) float or list
+        Thresholds on which the blocking boundaries are requested. This is useful for parameterized policies,
+        for which we are interested in obtaining the *deterministic* blocking policies, for example when the policies
+        are of class PolQueueTwoActionsLinearStep.
+        default: None
+
+    Return: list or int
+    Either a list containing the blocking thresholds for each policy defined in the agent when more than one policy
+    is defined or a integer with the blocking threshold when only one policy is defined.
+    """
+    assertConsistencyPolicyLearnerAndAgentPolicy(agent)
+
+    if thresholds is None:
+        blocking_boundaries = [policy.getBufferSizeForDeterministicBlocking() for policy in agent.getAcceptancePolicies()]
+    else:
+        if is_scalar(thresholds):
+            # Make the thresholds parameter always a list for easier treatment below
+            thresholds = [thresholds]
+        if len(thresholds) != len(agent.getAcceptancePolicies()):
+            raise ValueError("When given, the length of the `thresholds` parameter must be equal to the number of policies defined in the agent")
+        blocking_boundaries = [policy.getBufferSizeForDeterministicBlockingFromTheta(thresholds[i]) for i, policy in enumerate(agent.getAcceptancePolicies())]
+
+    # Return a scalar when the blocking boundary is only one (i.e. when there is only one policy)
+    # The goal is to facilitate treatment of the K value (the blocking threshold) when the blocking is single-buffer-based blocking)
+    if len(blocking_boundaries) == 1:
+        return blocking_boundaries[0]
 
 
 def compute_burnin_time_from_burnin_time_steps(env, burnin_time_steps):
@@ -2790,6 +2836,7 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info):
             run_simulation_mc(envs[0], agent, dict_params_info.get('t_learn', 0), start_state_boundary_A,
                               dict_params_simul['T'],
                               absorption_set=dict_params_simul['absorption_set'],
+                              activation_set=dict_params_simul['activation_set'],
                               track_absorptions=True, track_survival=track_survival_in_single_particle_simulation,
                               seed=dict_params_simul['seed'],
                               verbose=dict_params_info.get('verbose', False),
@@ -3538,8 +3585,7 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
         assert is_problem_1d, "The problem must be 1D (one-dimensional states) when plotting trajectories"
         # Initialize the plot
         ax = plt.figure().subplots(1,1)
-        assertConsistencyPolicyLearnerAndAgentPolicy(agent)
-        K = agent.getAcceptancePolicy().getBufferSizeForDeterministicBlocking()
+        K = get_deterministic_blocking_boundaries(agent)
         ax.set_title("N = {}, K= {}, maxtime = {:.1f}".format(N, K, maxtime))
 
         # Variables needed to update the plot that shows the trajectories of the particles (online)
@@ -3649,8 +3695,7 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
 
         if plot:
             y = envs[0].getBufferSizeFromState(next_state)
-            assertConsistencyPolicyLearnerAndAgentPolicy(agent)
-            K = agent.getAcceptancePolicy().getBufferSizeForDeterministicBlocking()
+            K = get_deterministic_blocking_boundaries(agent)
             J = envs[0].getBufferSizeFromState(activation_set.getStates())
             plot_update_trajectory( ax, idx_particle, N, K, J,
                                     time0[idx_particle], y0[idx_particle], time_abs, y,
@@ -3760,8 +3805,7 @@ def plot_trajectory(env, agent, J):
     This is used to plot the single queue simulated to estimate the quantities wth Monte-Carlo (e.g. P(T>t) and E(T)).
     """
     assert agent.getLearnerV() is not None
-    assertConsistencyPolicyLearnerAndAgentPolicy(agent)
-    K = agent.getAcceptancePolicy().getBufferSizeForDeterministicBlocking()
+    K = get_deterministic_blocking_boundaries(agent)
     times = agent.getLearnerV().getTimes()
     states = agent.getLearnerV().getStates()
     #print("Times and states to plot:\n{}".format(np.c_[times, states]))
@@ -3787,8 +3831,14 @@ def assertConsistencyPolicyLearnerAndAgentPolicy(agent):
     (without going through the policy learner)
     """
     if agent.getLearnerP() is not None:
-        for i, policy in enumerate(agent.getAcceptancePolicy()):
-            assert policy.getThetaParameter() == agent.getLearnerP().getPolicy()[i].getThetaParameter()
+        if len(agent.getAcceptancePolicies()) == 1:
+            policy = agent.getAcceptancePolicies()[0]
+            learner_policy = agent.getLearnerP().getPolicy()[0] if isinstance(agent.getLearnerP().getPolicy(), list) else agent.getLearnerP().getPolicy()
+            assert policy.getThetaParameter() == learner_policy.getThetaParameter()
+        else:
+            assert len(agent.getAcceptancePolicies()) == len(agent.getLearnerP().getPolicy())
+            for i, policy in enumerate(agent.getAcceptancePolicies()):
+                assert policy.getThetaParameter() == agent.getLearnerP().getPolicy()[i].getThetaParameter()
 
 
 def assertPoliciesAreUnivariate(parameterizedPolicies):

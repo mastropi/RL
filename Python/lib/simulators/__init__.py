@@ -227,7 +227,7 @@ def define_queue_environment_and_agent(dict_params: dict):
             whose rate is given in job_class_rates.
         - 'policy': dictionary defining the type of parameterized policy to use when learning the policy with the following entries:
             - 'parameterized_policy': object defining the parameterized policy.
-            - 'theta': the initial theta parameter value for the parameteried policy.
+            - 'theta': the initial theta parameter value for the parameterized policy.
         - 'learners': dictionary defining the learners of value functions and policies with the following entries:
             - 'V': dictionary defining the state value function parameters with the following entries:
                 - 'learner': learner for the state value function V.
@@ -311,8 +311,9 @@ def define_queue_environment_and_agent(dict_params: dict):
     rhos = [l / m for l, m in zip(job_rates_by_server, dict_params_env['service_rates'])]
 
     # Acceptance and assignment policies
-    policies = dict({PolicyTypes.ACCEPT: dict_params_policy['parameterized_policy'](env_queue,
-                                                                                    theta=dict_params_policy['theta']),
+    policies = dict({PolicyTypes.ACCEPT: dict_params_policy['parameterized_policy'](env_queue, theta=dict_params_policy['theta'])
+                                                if is_scalar(dict_params_policy['theta'])
+                                                else [policy(env_queue, theta=dict_params_policy['theta'][i]) for i, policy in enumerate(dict_params_policy['parameterized_policy'])],
                      PolicyTypes.ASSIGN: policy_assign})
 
     # Learners (for V, Q, and P)
@@ -322,7 +323,8 @@ def define_queue_environment_and_agent(dict_params: dict):
     if dict_params_learners['P']['learner'] is None:
         learnerP = None
     else:
-        learnerP = dict_params_learners['P']['learner'](env_queue, policies[PolicyTypes.ACCEPT],
+        learnerP = dict_params_learners['P']['learner'](env_queue,
+                                                        policies[PolicyTypes.ACCEPT],
                                                         learnerV,
                                                         alpha=dict_params_learners['P']['params'].get('alpha_start'),
                                                         adjust_alpha=dict_params_learners['P']['params'].get('adjust_alpha'),

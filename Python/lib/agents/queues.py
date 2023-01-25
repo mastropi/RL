@@ -150,7 +150,7 @@ class AgeQueue(GenericAgent):
     def getAcceptancePolicies(self):
         policies_accept = self.getPolicy()[PolicyTypes.ACCEPT]
         if self.acceptance_policy_depends_on_jobclass:
-            # The agent defines several acceptance policies, one per arriving job class
+            # The agent defines several acceptance policies, e.g. one per arriving job class
             # (which of course could be just one job class, in which case still the policy is stored as a list --of one policy)
             # => Return all the acceptance policies defined in the agent
             return policies_accept
@@ -176,6 +176,17 @@ class AgeQueue(GenericAgent):
         return self.getLearner()[LearnerTypes.P]
 
     #------ SETTERS ------#
+    def setAcceptancePoliciesThresholds(self, thresholds):
+        policies_accept = self.getPolicy()[PolicyTypes.ACCEPT]
+        if self.acceptance_policy_depends_on_jobclass:
+            policies_accept = [policies_accept]
+
+        # Set the threshold of each acceptance policy
+        if thresholds is None or len(thresholds) != len(policies_accept):
+            raise ValueError("The `thresholds` parameter must not be None and its length must be equal to the number of policies defined in the agent")
+        for i, policy in enumerate(policies_accept):
+            policy.setThetaParameter(thresholds[i])
+
     def setAssignmentPolicy(self, policy_assign):
         self.getPolicy()[PolicyTypes.ASSIGN] = policy_assign
 
