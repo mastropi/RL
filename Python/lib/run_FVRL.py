@@ -173,7 +173,7 @@ def run_simulation_policy_learning(simul, replications, dict_params_simul, dict_
             '2(c)-Learning-Method#TimeSteps/ArrivalEvents and % Rel Error E(T)': (dict_params_simul['t_sim'], error_rel_et_real * 100),
             '2(d)-Learning-Method#BurnInSteps (BITS)': dict_params_simul['burnin_time_steps'],
             '2(e)-Learning-Method#MinNumCycles': dict_params_simul['min_num_cycles_for_expectations'],
-            '2(f)-Learning-LearningMode': simul.dict_learning_params['mode'].name,
+            '2(f)-Learning-LearningMode': simul.dict_params_learning['mode'].name,
             '2(g)-Learning-ThetaStart': dict_params_simul['theta_start'],
             '2(h)-Learning-#Steps': simul.getNumLearningSteps(),
             '2(i)-Learning-AlphaStart': dict_info['alpha_start'],
@@ -216,7 +216,11 @@ def run_simulation_policy_learning(simul, replications, dict_params_simul, dict_
             df_learning_all = pd.concat([df_learning_all, df_learning], axis=0, ignore_index=False)
 
     # Return the optimum theta found for each replication and the data frame containing the results for all replications
-    return list( df_learning_all['theta_next'].loc[simul.getNumLearningSteps()-1] ),\
+    theta_opt_values = df_learning_all['theta_next'].loc[simul.getNumLearningSteps()-1]
+    if is_scalar(theta_opt_values):
+        # This happens when only one replication was run
+        theta_opt_values = [theta_opt_values]
+    return theta_opt_values, \
            df_learning_all
 # ---------------------------- Auxiliary functions ---------------------------#
 
@@ -282,8 +286,8 @@ replications = int(sys.argv[3])
 benchmark_filename = sys.argv[4]
 clipping = parse_boolean_parameter(sys.argv[5])
 clipping_value = float(sys.argv[6])
-theta_true = float(sys.argv[7])
-theta_start = float(sys.argv[8])
+theta_true = [float(sys.argv[7])]
+theta_start = [float(sys.argv[8])]
 J_factor = float(sys.argv[9])
 error_rel_phi = float(sys.argv[10])
 error_rel_et = float(sys.argv[11])
@@ -397,11 +401,11 @@ env_queue, rhos, agent = define_queue_environment_and_agent(dict_params)
 # 2022/01/14: t_learn = 10 times the optimum true theta so that we are supposed to reach that optimum under the REINFORCE_TRUE learning mode with decreasing alpha
 # t_learn = 800 #100 #800 #100 #198 - 91 #198 #250 #50
 verbose = False
-dict_learning_params = dict({'mode': LearningMode.REINFORCE_TRUE, 't_learn': t_learn})
+dict_params_learning = dict({'mode': LearningMode.REINFORCE_TRUE, 't_learn': t_learn})
 dict_params_info = dict({'plot': False, 'log': False})
 
 # Simulator object
-simul = SimulatorQueue(env_queue, agent, dict_learning_params,
+simul = SimulatorQueue(env_queue, agent, dict_params_learning,
                        log=create_log, save=save_results, logsdir=logsdir, resultsdir=resultsdir, debug=False)
 
 if save_results:
@@ -450,7 +454,7 @@ if benchmark_file is None:
         # theta at every learning step, so we would expect to reach the optimum value after about a number of
         # learning steps equal to the true theta value... so in the end, to give some margin, we allow for as
         # many learning steps as twice the value of true theta parameter.
-        # simul.dict_learning_params['t_learn'] = int(theta_true*2)
+        # simul.dict_params_learning['t_learn'] = int(theta_true*2)
 
         for k, theta_start in enumerate(theta_start_values):
             K_true = get_deterministic_blocking_boundaries(simul.agent, theta_true)
@@ -719,11 +723,11 @@ if len(theta_true_values) == 1:
         # Times at which the trajectory of states is recorded
         times = simul.getLearnerP().getTimes()
         times_unique = np.unique(times)
-        assert len(times_unique) == len(simul.getLearnerP().getPolicy().getThetas()) - 1, \
+        assert len(times_unique) == len(simul.getLearnerP().getThetas()) - 1, \
                 "The number of unique learning times ({}) is equal to the number of theta updates ({})".format(
-                len(times_unique), len(simul.getLearnerP().getPolicy().getThetas()) - 1)
+                len(times_unique), len(simul.getLearnerP().getThetas()) - 1)
         ## Note that we subtract 1 to the number of learning thetas because the first theta stored in the policy object is the initial theta before any update
-        plt.plot(np.r_[0.0, times_unique], simul.getLearnerP().getPolicy().getThetas(), 'b.-')
+        plt.plot(np.r_[0.0, times_unique], simul.getLearnerP().getThetas(), 'b.-')
         ## We add 0.0 as the first time to plot because the first theta value stored in the policy is the initial theta with which the simulation started
         ax = plt.gca()
         # Add vertical lines signalling the BEGINNING of each queue simulation
@@ -753,7 +757,7 @@ if len(theta_true_values) == 1:
         # The evolution of theta is plotted for the last replication run on the last case considered
         # (as the simul object and the value of K_true used below contain the information about precisely such execution)
         plt.figure()
-        plt.plot(simul.getLearnerP().getPolicy().getThetas(), symbol)
+        plt.plot(np.squeeze(simul.getLearnerP().getThetas()), symbol)
         plt.title(title)
         ax = plt.gca()
         ax.set_xlabel('Learning step')

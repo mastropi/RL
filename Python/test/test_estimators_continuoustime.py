@@ -350,9 +350,10 @@ class Test_EstAverageValueV_EnvQueueLossNetworkWithJobClasses(unittest.TestCase)
         #activation_occupancies_per_jobclass = [2, 1, 3]
         activation_occupancies_per_jobclass = [1, 1, 1]
         nservers = 10
-        N = 100
+        N = 1000
         T = 2000
-        burnin_time_steps = 5
+        # (2023/01/26) Note about burnin and min cycles: Using (5, 5) or (50, 10) as (burnin_time_steps, min_cycles) didn't change much the estimated probability (e.g. from 14.454 to 14.453!)
+        burnin_time_steps = 10
         min_num_cycles_for_expectations = 5
         method_survival_probability_estimation = SurvivalProbabilityEstimation.FROM_N_PARTICLES
 
@@ -368,7 +369,7 @@ class Test_EstAverageValueV_EnvQueueLossNetworkWithJobClasses(unittest.TestCase)
                                                                             burnin_time_steps,
                                                                             min_num_cycles_for_expectations,
                                                                             method_survival_probability_estimation,
-                                                                            seed=1717)
+                                                                            seed=1713)
 
         print(get_current_datetime_as_string())
         job_class_rates = self.env_queue_mm_loss.getJobClassRates()

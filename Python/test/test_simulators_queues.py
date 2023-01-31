@@ -173,7 +173,7 @@ class Test_Support_EnvQueueLossNetwork(unittest.TestCase):
         env = self.env_queue_mm
 
         # -- Arriving job on buffer not full
-        queue_state_0 = [0, 2, 3, 1]
+        queue_state_0 = (0, 2, 3, 1)
         job_class = 1
         env.setState((queue_state_0, job_class))
         state = env.getState()
@@ -185,11 +185,11 @@ class Test_Support_EnvQueueLossNetwork(unittest.TestCase):
         # Action = accept
         env.setState((queue_state_0, job_class))
         next_state, reward, info = env.step(Actions.ACCEPT)
-        assert next_state == ([s + 1 if j == job_class else s for j, s in enumerate(queue_state_0)], None)
+        assert next_state == (tuple(s + 1 if j == job_class else s for j, s in enumerate(queue_state_0)), None)
         assert reward == 0
 
         # -- Arriving job on full buffer
-        queue_state_0 = [4, 2, 3, 1]
+        queue_state_0 = (4, 2, 3, 1)
         job_class = 1
         env.setState((queue_state_0, job_class))
         state = env.getState()

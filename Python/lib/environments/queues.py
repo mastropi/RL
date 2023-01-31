@@ -14,20 +14,22 @@ Created on 22 Mar 2021
 
                 Note that it should NOT define any agents acting on the environment, as this is done separately.
 """
-import copy
-from enum import Enum, IntEnum, unique
-
-import numpy as np
-
-import gym
-from gym import spaces
 
 if __name__ == "__main__":
     # Needed to run tests (see end of program)
     import runpy
     runpy.run_path('../../../setup.py')
 
-from Python.lib.queues import GenericQueue, QueueMM
+import copy
+from enum import Enum, IntEnum, unique
+from typing import Union
+
+import numpy as np
+
+import gym
+from gym import spaces
+
+from Python.lib.queues import QueueMM
 
 # NOTE: We use IntEnum instead of Enum because of the problem of comparison described here!!
 # https://stackoverflow.com/questions/28125055/enum-in-python-doesnt-work-as-expected
@@ -358,8 +360,8 @@ class GenericEnvQueueWithJobClasses(gym.Env):
     def setParamsRewardFunc(self, dict_params):
         self.dict_params_reward_func = dict_params
 
-    def setQueueState(self, state):
-        self.queue.setServerSizes(state)
+    def setQueueState(self, queue_state: Union[int, tuple, np.ndarray]):
+        self.queue.setServerSizes(queue_state)
 
     def setJobClass(self, job_class: int or None):
         "Sets the job class of a new arriving job and updates the environment's state. The job class can be None."
@@ -371,7 +373,7 @@ class GenericEnvQueueWithJobClasses(gym.Env):
                 "The job class is invalid ({}). It must be an integer between {} and {}".format(job_class, 0, self.getNumJobClasses() - 1))
         self.job_class = job_class
         # Now we update the environment's state
-        # NOTE that this self.setState() call calls the appropriate method in the subclass of which `self` is an instance
+        # NOTE that this call to self.setState() calls the appropriate method in the subclass of which `self` is an instance
         # (because the state is defined differently depending on the subclass).
         self.setState((self.getQueueState(), self.job_class))
 
@@ -516,6 +518,12 @@ class EnvQueueSingleBufferWithJobClasses(GenericEnvQueueWithJobClasses):
         return len(self.job_class_rates)
 
     #------ SETTERS ------#
+    # TODO: (2023/01/26) I think we should set the state of the single-buffer queue system to the same state used in the loss network system so that this setState() method is NOT confusing...
+    # In fact, now the `state` parameter has a different meaning than the state attribute of the class:
+    # - the former refers to the tuple (queue_state, job_class)
+    # - the latter refers to the tuple (buffer_size, job_class)
+    # I propose that both states (the parameter and the attribute) be (queue_state, job_class) and that the buffer size is computed as needed from the queue state.
+    # If we do this, the setState() could move to the super class (GenericEnvQueueWithJobClasses) as the two setState() currently defined will have the same signature.
     def setState(self, state):
         """
         Sets the state (k, i) of the queue environment from the server sizes and the arriving job class.

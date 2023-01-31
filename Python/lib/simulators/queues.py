@@ -19,6 +19,7 @@ from matplotlib import pyplot as plt, cm
 
 from Python.lib.agents.learners.continuing.fv import LeaFV
 from Python.lib.agents.policies import PolicyTypes
+from Python.lib.agents.policies.job_assignment import define_uniform_job_assignment_policy
 from Python.lib.agents.policies.parameterized import PolQueueTwoActionsLinearStep
 from Python.lib.agents.queues import AgeQueue
 from Python.lib.environments.queues import Actions, BufferType
@@ -66,7 +67,7 @@ class SimulatorQueue(Simulator):
     """
     Simulator class that runs a Reinforcement Learning simulation on a given Queue environment `env` and an `agent`
     using the learning mode, number of learning steps, and number of simulation steps/arrival events per learning step
-    specified in the `dict_learning_params` dictionary.
+    specified in the `dict_params_learning` dictionary.
 
     Arguments:
     env: Environment
@@ -83,7 +84,7 @@ class SimulatorQueue(Simulator):
     agent: Agent
         Agent object that is responsible of performing the actions on the environment and learning from them.
 
-    dict_learning_params: dict
+    dict_params_learning: dict
         Dictionary containing the learning parameters as follows:
         - 'mode': learning mode, one of the values of the LearningMode enum
         - 't_learn': number of learning steps (of the value functions and policies)
@@ -93,9 +94,9 @@ class SimulatorQueue(Simulator):
         default: 1
     """
 
-    def __init__(self, env, agent, dict_learning_params, case=1, replication=1, N=1, seed=None, log=False, save=False, logsdir=None, resultsdir=None, debug=False):
+    def __init__(self, env, agent, dict_params_learning, case=1, replication=1, N=1, seed=None, log=False, save=False, logsdir=None, resultsdir=None, debug=False):
         super().__init__(env, agent, case, replication, seed, log, save, logsdir, resultsdir, debug)
-        self.dict_learning_params = dict_learning_params
+        self.dict_params_learning = dict_params_learning
         # Attributes used during Fleming-Viot simulation (each env in envs is one of the N particles)
         self.N = N
         # TODO: (2022/01/17) We should NOT copy ALL the environment to work with the N particles... In fact, the environment characteristics are the same for ALL particles, the only thing that changes is the latest state and change time of each particle
@@ -112,9 +113,11 @@ class SimulatorQueue(Simulator):
             self.learnerP = self.agent.getLearnerP()
             if self.env.getBufferType() != BufferType.NOBUFFER:
                 # Job rates by server (assuming jobs are pre-assigned to servers)
+                job_assignment_policy = self.agent.getAssignmentPolicy() if self.agent.getAssignmentPolicy() is not None \
+                                                                         else define_uniform_job_assignment_policy(len(self.env.getJobClassRates()), self.env.getNumServers())
                 self.job_rates_by_server = compute_job_rates_by_server(self.env.getJobClassRates(),
                                                                        self.env.getNumServers(),
-                                                                       self.agent.getAssignmentPolicy().getProbabilisticMap())
+                                                                       job_assignment_policy.getProbabilisticMap())
             else:
                 # Job rates by server are actually the job class arrival rates
                 self.job_rates_by_server = self.env.getJobClassRates()
@@ -141,8 +144,11 @@ class SimulatorQueue(Simulator):
         Resets the policy learning history. This should be called for any new learning simulation that is run (e.g. a new replication of the learning process)
         """
         self.alphas = []            # Learning rates used in the learning of the policy when updating from theta to theta_next (i.e. from thetas -> thetas_updated)
+        # TODO: (2023/01/28) The storage of the historic thetas obsreved during learning should probably NOT be stored as part of the simulator object but we should use the history already stored by the policy learner (see the LeaPolicyGradient class)
+        # In addition, the values of thetas_updated would be obtained from thetas by just looking at the following index (i.e. thetas[1] contains the updated theta from thetas[0], and so forth)
         self.thetas = []            # List of theta values before the update by the policy learning step
         self.thetas_updated = []    # List of theta values AFTER the update by the policy learning step.
+        # TODO: [MULTIDIMENSIONAL THETA] The following attributes `proba_stationary`, `error_proba_stationary` and `Q_diff` should be defined as dictionaries indexed by the states on which they are computed (which are many more than just K-1 and K as is the case for the unidimensional theta case)
         self.proba_stationary = []  # List of the estimates of the stationary probability of K-1 and K
         self.error_proba_stationary = []  # List of the estimation errors of the stationary probability of K-1 and K
         self.Q_diff = []            # List of the Q(K-1,a=1) - Q(K-1,a=0) values leading to the udpate of theta
@@ -150,7 +156,7 @@ class SimulatorQueue(Simulator):
                                     # i.e. the average reward rho observed in each queue simulation episode for a fixed policy before the update of theta takes place.
                                     # HOWEVER, it is NOT always the case that this is the average reward, see the self.learn() method for more details.
         self.gradV = []             # Gradient of the value function (grad(J) in Sutton) for the theta before the update, that is responsible for the theta update.
-        self.G = None               # G(t) for each simulation time step t as estimated by self.learn().
+        self.G = []                 # G(t) for each simulation time step t as estimated by self.learn().
         self.n_events_mc = []       # number of events used in the Monte-Carlo simulation, either to estimate the stationary probabilities under the MC approach, or P(T>t) and E(T_A) under the FV approach.
         self.n_events_fv = []       # number of events used to estimate the stationary probability in each episode.
         self.n_trajectories_Q = []  # Average number of trajectory pairs used to estimate Q_diff in each episode.
@@ -184,7 +190,7 @@ class SimulatorQueue(Simulator):
             # learning step or queue simulation episode), but we do NOT reset the time and alphas of the policy
             # learner because the learning step here is defined by a new queue simulation episode.
             if self.agent.getLearnerV() is not None:
-                self.agent.getLearnerV().reset(reset_time=True,  reset_alphas=True,  reset_value_functions=reset_value_functions, reset_trajectory=True,  reset_counts=reset_counts)
+                self.agent.getLearnerV().reset(reset_time=True,  reset_alphas=True,  reset_value_functions=reset_value_functions, reset_trajectory=True, reset_counts=reset_counts)
             if self.agent.getLearnerP() is not None:
                 self.agent.getLearnerP().reset(reset_time=False, reset_alphas=False, reset_value_functions=reset_value_functions, reset_trajectory=reset_policy_trajectory, reset_counts=reset_counts)
             if not reset_value_functions:
@@ -220,7 +226,7 @@ class SimulatorQueue(Simulator):
             - 'nparticles': # particles to use in the FV simulation.
             - 't_sim': either number of simulation steps (MC learning) or number of arrival events (FVRL) per learning step.
             This is either a scalar or a list with as many elements as the number of learning steps defined in
-            self.dict_learning_params['t_learn'].
+            self.dict_params_learning['t_learn'].
             This latter case serves the purpose of running as many simulation steps as were run in a benchmark method
             for *each* learning step (for instance when comparing the results by Monte-Carlo with those by Fleming-Viot).
             - 'buffer_size_activation_factor': factor multiplying the blocking size K defining the value of
@@ -243,10 +249,12 @@ class SimulatorQueue(Simulator):
             simulation.
             default: {}
 
-        start_state: (opt) int or list or numpy array
-            State at which the queue environment starts.
+        start_state: (opt) Queue-environment-dependent
+            (Environment) State at which the queue environment starts for the simulation.
             Its type depends on how the queue environment defines the state of the system.
-            default: None, in which case the start state is defined by the simulation process, based on the learning requirements
+            Ex: when the queue is of class GenericEnvQueueWithJobClasses, the state is a tuple with the following information:
+            (queue_state, job_class) = (state of the queue itself, class of the arriving job).
+            default: None, in which case the start state is defined by the simulation process, based on the learning requirements.
 
         seed: (opt) None or float
             Seed to use for the random number generator for the simulation.
@@ -280,11 +288,14 @@ class SimulatorQueue(Simulator):
         Tuple containing the following elements:
             - learnerV: the learner of the value function at the end of the learning process
             - learnerP: the learner of the policy at the end of the learning process.
-                The policy can be retrieved from this object by calling learnerP.getPolicy().
+                The policy can be retrieved from this object by calling learnerP.getPolicy()
+                and we can find out if the policy to learn is actually a multi-policy by calling
+                learnerP.getIsMultiPolicy().
             - df_learning: pandas data frame containing two columns: 'theta', 'gradV' containing the history
             of the observed thetas and gradients of the value function responsible for its update.
         """
         # -- Parse input parameters
+        # 1) dict_params_simul
         set_required_entries_params_simul= {'theta_true', 'theta_start', 'nparticles', 't_sim', 'buffer_size_activation_factor'}
         if not set_required_entries_params_simul.issubset(dict_params_simul.keys()):
             raise ValueError("Missing entries in the dict_params_simul dictionary: {}" \
@@ -309,8 +320,16 @@ class SimulatorQueue(Simulator):
         # cycle time for Fleming-Viot) is reliable.
         dict_params_simul['min_num_cycles_for_expectations'] = dict_params_simul.get('min_num_cycles_for_expectations', MIN_NUM_CYCLES_FOR_EXPECTATIONS)
 
+        # 2) self.dict_params_learning (an *attribute* of this object! --i.e. NOT an input parameter of this method run())
+        set_required_entries_params_learning = {'mode', 't_learn'}
+        if not set_required_entries_params_learning.issubset(self.dict_params_learning.keys()):
+            raise ValueError("Missing entries in the dict_params_learning dictionary: {}" \
+                             .format(set_required_entries_params_learning.difference(self.dict_params_learning.keys())))
+
+        # 3) self.dict_params_info
         dict_params_info['verbose'] = verbose
         dict_params_info['verbose_period'] = verbose_period
+        dict_params_info['plot'] = dict_params_info.get('plot', False)
 
         if dict_params_info['plot']:
             # TODO: See the run() method in the Simulator class
@@ -323,8 +342,13 @@ class SimulatorQueue(Simulator):
         # Set the true theta parameter (which is defined by a parameter of the queue environment) to use for the simulation
         # NOTE that this is done in EACH environment used in the simulation, because this environment is the one passed to functions
         # and the one that is used to retrieve the value of the true theta parameter.
-        for env in self.envs:
-            env.setParamsRewardFunc(dict({'buffer_size_ref': np.ceil(dict_params_simul['theta_true'] + 1)}))
+        if self.envs[0].getBufferType() == BufferType.SINGLE:
+            assert is_scalar(dict_params_simul['theta_true']) or len(dict_params_simul['theta_true']) == 1, \
+                    "The true theta parameter `theta_true` defined in the `dict_params_simul` parameter must be scalar or of length 1 for queues system with a single buffer: {}" \
+                    .format(dict_params_simul['theta_true'])
+            _theta_true = dict_params_simul['theta_true'] if is_scalar(dict_params_simul['theta_true']) else dict_params_simul['theta_true'][0]
+            for env in self.envs:
+                env.setParamsRewardFunc(dict({'buffer_size_ref': np.ceil(_theta_true + 1)}))
 
         # Simulation seed
         # NOTE: This seed is used as the base seed to generate the seeds that are used at each learning step
@@ -343,7 +367,7 @@ class SimulatorQueue(Simulator):
         # Reset the policy learner (this is especially important to reset the learning rate alpha to its initial value!)
         self.getLearnerP().reset()
         # Reset the theta value to the initial theta
-        self.getLearnerP().getPolicy().setThetaParameter(dict_params_simul['theta_start'])
+        self.getLearnerP().setThetaParameter(dict_params_simul['theta_start'])
 
         if verbose:
             print("Value function at start of experiment: {}".format(self.getLearnerV().getV()))
@@ -352,7 +376,7 @@ class SimulatorQueue(Simulator):
         # - t: the number of queue state changes (a.k.a. number of queue iterations)
         # - t_learn: the number of learning steps (of the value functions and policies)
         t_learn = 0
-        while t_learn < self.dict_learning_params['t_learn']:
+        while t_learn < self.dict_params_learning['t_learn']:
             t_learn += 1
             dict_params_info['t_learn'] = t_learn
             # Reset the learners
@@ -365,9 +389,8 @@ class SimulatorQueue(Simulator):
 
             if show_messages(True, verbose_period, t_learn):
                 print("\n************************ Learning step {} of {} running ****************************" \
-                      .format(t_learn, self.dict_learning_params['t_learn']))
-                theta_parameters = self.getLearnerP().getPolicy()   if not isinstance(self.getLearnerP().getPolicy(), list) \
-                                                                    else [policy.getThetaParameter() for policy in self.getLearnerP().getPolicy()]
+                      .format(t_learn, self.dict_params_learning['t_learn']))
+                theta_parameters = self.getLearnerP().getThetaParameter()
                 print("Theta parameter of policies in the policy learner: {}" \
                       .format(theta_parameters))
 
@@ -383,6 +406,7 @@ class SimulatorQueue(Simulator):
                 assert is_scalar(K)
                 probas_stationary_true = dict({K-1: compute_blocking_probability_birth_death_process(self.rhos, K-1),
                                                K:   compute_blocking_probability_birth_death_process(self.rhos, K)})
+            # TODO: [MULTIDIMENSIONAL THETA] (2023/01/26) Treat the case BufferType.NOBUFFER where we need to store the true stationary probabilities of a loss network
             dict_params_simul['buffer_size_activation'] = np.max([1, int( np.round(dict_params_simul['buffer_size_activation_factor']*K) )])
             if isinstance(self.getLearnerV(), LeaFV):
                 # TODO: (2021/12/16) SHOULD WE MOVE ALL this learning process of the average reward and stationary probabilities to the learn() method of the LeaFV class?
@@ -396,7 +420,7 @@ class SimulatorQueue(Simulator):
                 if not is_scalar(dict_params_simul['t_sim']):
                     # There is a different simulation time (either #steps for MC or #arrivals for FVRL) for each learning step
                     # => Read the value of the t_sim parameter from the learning step currently being processed
-                    assert len(dict_params_simul) == self.dict_learning_params['t_learn']
+                    assert len(dict_params_simul) == self.dict_params_learning['t_learn']
                     dict_params_simul['T'] = dict_params_simul['t_sim'][t_learn-1]   # `t_learn-1` because t_learn starts at 1, not 0.
 
                 #-- Estimation of the survival probability P(T>t) and the expected absorption cycle time, E(T_A) by MC
@@ -431,9 +455,9 @@ class SimulatorQueue(Simulator):
                 if not is_scalar(dict_params_simul['t_sim']):
                     # There is a different simulation time for each learning step
                     # => Use a number of simulation steps defined in a benchmark for each learning step
-                    assert len(dict_params_simul['t_sim']) == self.dict_learning_params['t_learn'], \
+                    assert len(dict_params_simul['t_sim']) == self.dict_params_learning['t_learn'], \
                             "The number of simulation steps read from the benchmark file ({}) coincides with the number of learning steps ({})" \
-                            .format(len(dict_params_simul['t_sim']), self.dict_learning_params['t_learn'])
+                            .format(len(dict_params_simul['t_sim']), self.dict_params_learning['t_learn'])
                     dict_params_simul['T'] = dict_params_simul['t_sim'][t_learn-1]     # `t_learn-1` because t_learn starts at 1, not 0.
                 proba_blocking_mc, expected_reward, probas_stationary, n_cycles_proba, expected_cycle_time, n_cycles, n_events = \
                     estimate_blocking_mc(self.env, self.agent, dict_params_simul, dict_params_info)
@@ -471,6 +495,8 @@ class SimulatorQueue(Simulator):
                     print("\nEstimating the difference of the state-action values when the initial buffer size is K-1={}...".format(K-1))
                 N = 100
                 t_sim_max = 250
+                # TODO: [MULTIDIMENSIONAL THETA] We should run this estimation for every state x for which x(i) = K(i) - 1 having estimated stationary probability > 0
+                # So, we would iterate on those states and call self.estimate_Q_values_until_mixing() on each of them.
                 K, Q0_Km1, Q1_Km1, n_Km1, max_t_Km1 = \
                     self.estimate_Q_values_until_mixing(t_learn, K - 1, t_sim_max=t_sim_max, N=N,
                                                         seed=dict_params_simul['seed'] * 100, verbose=verbose,
@@ -485,7 +511,7 @@ class SimulatorQueue(Simulator):
 
             # Compute the state-action values (Q(s,a)) for buffer size = K
             # This is needed ONLY when the policy learning methodology is IGA (Integer Gradient Ascent, presented in Massaro's paper (2019)
-            if self.dict_learning_params['mode'] != LearningMode.IGA or probas_stationary.get(K, 0.0) == 0.0 or np.isnan(probas_stationary.get(K, 0.0)):
+            if self.dict_params_learning['mode'] != LearningMode.IGA or probas_stationary.get(K, 0.0) == 0.0 or np.isnan(probas_stationary.get(K, 0.0)):
                 # We set all the values to 0 so that the learn() method called below doesn't fail, as it assumes that
                 # the values possibly involved with learning (which depend on the learning method) have a real value.
                 Q0_K = 0.0
@@ -515,7 +541,7 @@ class SimulatorQueue(Simulator):
                     .format(K, probas_stationary[K], K, probas_stationary_true[K - 1], (probas_stationary[K] / probas_stationary_true[K] - 1) * 100))
 
             # Learn the value function and the policy
-            theta_prev = self.getLearnerP().getPolicy().getThetaParameter()
+            theta_prev = self.getLearnerP().getThetaParameter()
 
             # Use this when using REINFORCE to learn theta: LearningMode.REINFORCE_RETURN
             #self.learn(self.agent, t)
@@ -523,6 +549,8 @@ class SimulatorQueue(Simulator):
             err_phi, err_et = compute_rel_errors_for_fv_process(self.rhos, K,
                                                                 dict_params_simul['buffer_size_activation_factor'],
                                                                 self.N, dict_params_simul['T'])
+            # TODO: [MULTIDIMENSIONAL THETA] We should learn by passing to self.learn() ALL the Q_values estimated for every state x for which the Q0_Km1 and Q1_Km1 values were computed
+            # In fact, we need to sum over ALL the Q differences in order to compute the gradient that allows us to learn
             self.learn(self.agent, t,
                        probas_stationary=probas_stationary,
                        Q_values=dict({K-1: [Q0_Km1, Q1_Km1], K: [Q0_K, Q1_K]}),
@@ -543,7 +571,7 @@ class SimulatorQueue(Simulator):
                                         'max_survival_time': max_survival_time,
                                         'n_events_mc': n_events_mc,
                                         'n_events_fv': n_events_fv,
-                                        'n_Q': np.mean([n_Km1, n_K] if self.dict_learning_params['mode'] == LearningMode.IGA else n_Km1)}))
+                                        'n_Q': np.mean([n_Km1, n_K] if self.dict_params_learning['mode'] == LearningMode.IGA else n_Km1)}))
 
             # Update the value of N and T for the next learning step if the desired expected relative errors are given as part of the input parameters
             # Goal: Keep the same expected errors in Phi and in E(T_A) along the simulation process, for all blocking sizes K
@@ -573,7 +601,7 @@ class SimulatorQueue(Simulator):
             if show_messages(verbose, verbose_period, t_learn):
                 print("\tUpdated value function at the end of the queue simulation: average reward V = {}".format(self.getLearnerV().getV()))
                 print("\tSame observed average reward (computed from Policy learner) = {}".format(self.getLearnerP().getAverageRewardUnderPolicy()))
-                print("\tUpdated theta parameter of policy after learning: theta = {} -> {}".format(theta_prev, self.getLearnerP().getPolicy().getThetaParameter()))
+                print("\tUpdated theta parameter of policy after learning: theta = {} -> {}".format(theta_prev, self.getLearnerP().getThetaParameter()))
 
         if dict_params_info['plot']:
             # TODO
@@ -613,9 +641,11 @@ class SimulatorQueue(Simulator):
         t_learn: int
             The learning time step to which the simulation will contribute.
 
-        start_state: int or list or numpy array
-            State at which the queue environment starts for the simulation.
+        start_state: Queue-environment-dependent
+            (Environment) state at which the queue environment starts for the simulation.
             Its type depends on how the queue environment defines the state of the system.
+            Ex: when the queue is of class GenericEnvQueueWithJobClasses, the state is a tuple with the following information:
+            (queue_state, job_class) = (state of the queue itself, class of the arriving job).
 
         t_sim_max: int
             Maximum discrete simulation time steps allowed for the simulation. Time steps are defined
@@ -642,8 +672,7 @@ class SimulatorQueue(Simulator):
         t_max = t_sim_max
 
         # Set the start state of the environment to the given start state
-        job_class = None
-        self.env.setState((start_state, job_class))
+        self.env.setState(start_state)
         if verbose:
             print("MC simulation: The queue environments starts at state {}".format(self.env.getState()))
 
@@ -752,16 +781,18 @@ class SimulatorQueue(Simulator):
         - The state-action value for (K-1, a=Accept)
         - N: the number of realizations used to compute the state-action values
         """
-        if not isinstance(self.getLearnerP().getPolicy(), PolQueueTwoActionsLinearStep):
-            raise ValueError("The agent's policy must be of type {} ({})" \
-                             .format(type(PolQueueTwoActionsLinearStep), type(self.getLearnerP().getPolicy())))
+        # TODO: (2023/01/28) Find out how to check the type of the policy because the lines below do not work. The returned value of type() is something like '<type>' so it does NOT make sense!!
+        #if not isinstance(self.getLearnerP().getPolicyClass(), PolQueueTwoActionsLinearStep):
+        #    raise ValueError("The agent's policy must be of type {} ({})" \
+        #                     .format(type(PolQueueTwoActionsLinearStep), type(self.getLearnerP().getPolicyClass())))
 
         K = get_deterministic_blocking_boundaries(self.agent)
 
         # 1) Starting at (K-1, a=1) is like starting at s=K (because the reward of the first action is 0)
         if show_messages(verbose, verbose_period, t_learn):
             print("\n1) Running simulation on N={} queues for {} arrival events to estimate Q(K-1, a=1)...".format(N, t_sim_max))
-        start_state = choose_state_for_buffer_size(self.env, K)
+        start_queue_state = choose_state_for_buffer_size(self.env, K)
+        start_state = (start_queue_state, None)
         Q1 = 0.0
         for _ in range(N):
             agent_Q = copy.deepcopy(self.agent)
@@ -775,7 +806,8 @@ class SimulatorQueue(Simulator):
         # 2) Starting at (K-1, a=0) is like starting at s=K-1 and adding one reward for the first rejection
         if show_messages(verbose, verbose_period, t_learn):
             print("2) Running simulation on N={} queues for {} arrival events to estimate Q(K-1, a=0)...".format(N, t_sim_max))
-        start_state = choose_state_for_buffer_size(self.env, K-1)
+        start_queue_state = choose_state_for_buffer_size(self.env, K-1)
+        start_state = (start_queue_state, None)
         # Reward received from the initial rejection of the job at buffer size K-1
         first_reward = compute_reward_for_buffer_size(self.env, K-1)
         Q0 = 0.0
@@ -830,9 +862,10 @@ class SimulatorQueue(Simulator):
         - n: the number of realizations, where trajectories mix, that are used to compute the state-action values
         - Maximum discrete time at which the pair of trajectories mix over the n pair of trajectories that mix
         """
-        if not isinstance(self.getLearnerP().getPolicy(), PolQueueTwoActionsLinearStep):
-            raise ValueError("The agent's policy must be of type {} ({})" \
-                             .format(type(PolQueueTwoActionsLinearStep), type(self.getLearnerP().getPolicy())))
+        # TODO: (2023/01/28) Find out how to check the type of the policy because the lines below do not work. The returned value of type() is something like '<type>' so it does NOT make sense!!
+        #if not isinstance(self.getLearnerP().getPolicyClass(), PolQueueTwoActionsLinearStep):
+        #    raise ValueError("The agent's policy must be of type {} ({})" \
+        #                     .format(PolQueueTwoActionsLinearStep.__class__, type(self.getLearnerP().getPolicyClass())))
 
         K = get_deterministic_blocking_boundaries(self.agent)
 
@@ -1138,12 +1171,12 @@ class SimulatorQueue(Simulator):
         # TODO: (2021/11/03) Think if we can separate the learning of the value function and return G(t) from the learning of the policy (theta)
         # Goal: avoid computing G(t) twice, one at learnerV.learn() and one at learnerP.learn()
 
-        assert self.dict_learning_params['mode'] in LearningMode
+        assert 'mode' in self.dict_params_learning.keys() and self.dict_params_learning['mode'] in LearningMode
 
         # Store the alpha used for the current learning step
         agent.getLearnerP().store_learning_rate()
 
-        if self.dict_learning_params['mode'] == LearningMode.REINFORCE_RETURN:
+        if self.dict_params_learning['mode'] == LearningMode.REINFORCE_RETURN:
             agent.getLearnerV().learn(t)  # UNCOMMENTED ON SAT, 27-NOV-2021
             theta_prev, theta, V, gradV, G = agent.getLearnerP().learn(t)
             #theta_prev, theta, V, gradV, G = agent.getLearnerP().learn_TR(t)
@@ -1156,7 +1189,7 @@ class SimulatorQueue(Simulator):
             # or it does not reflect the actual values of each state-value of the original system.
             assert probas_stationary is not None and Q_values is not None
             K = get_deterministic_blocking_boundaries(agent)
-            if self.dict_learning_params['mode'] == LearningMode.REINFORCE_TRUE:
+            if self.dict_params_learning['mode'] == LearningMode.REINFORCE_TRUE:
                 # Regular gradient ascent based on grad(V)
                 # Only information about the buffer size K-1 is used to learn,
                 # as long as the gradient of the parameterized policy is not 0
@@ -1164,8 +1197,8 @@ class SimulatorQueue(Simulator):
                 assert K-1 in probas_stationary.keys() and K-1 in Q_values.keys(), \
                     "Key K-1={} is present in the dictionaries containing the stationary probability estimation ({}) and the Q values ({})" \
                         .format(K-1, probas_stationary, Q_values)
-                theta_prev, theta, V, gradV, G = agent.getLearnerP().learn_linear_theoretical_from_estimated_values(t, probas_stationary[K-1], Q_values[K-1])
-            elif self.dict_learning_params['mode'] == LearningMode.IGA:
+                theta_prev, theta, V, gradV, G = agent.getLearnerP().learn_linear_theoretical_from_estimated_values(t, probas_stationary, Q_values)
+            elif self.dict_params_learning['mode'] == LearningMode.IGA:
                 # IGA: Integer Gradient Ascent (only the signs of the Q differences are of interest here)
                 keys_probas = probas_stationary.keys()
                 keys_Q_values = Q_values.keys()
@@ -1216,8 +1249,10 @@ class SimulatorQueue(Simulator):
         self.alphas += [agent.getLearnerP().getLearningRate()]
         self.thetas += [theta_prev]
         self.thetas_updated += [theta]
+        # TODO: [MULTIDIMENSIONAL THETA]
         self.proba_stationary += [[probas_stationary[K-1], probas_stationary.get(K)]]
         # Compute the error of the stationary probability estimations
+        # TODO: [MULTIDIMENSIONAL THETA]
         probas_stationary_true = dict({K-1: compute_blocking_probability_birth_death_process(self.rhos, K-1),
                                        K: compute_blocking_probability_birth_death_process(self.rhos, K)})
         error_proba_stationary_Km1 = probas_stationary[K-1] / probas_stationary_true[K-1] - 1
@@ -1227,10 +1262,11 @@ class SimulatorQueue(Simulator):
             # We do not report on the error estimating Pr(K) when we do not estimate Pr(K)
             error_proba_stationary_K = np.nan
         self.error_proba_stationary += [[error_proba_stationary_Km1, error_proba_stationary_K]]
+        # TODO: [MULTIDIMENSIONAL THETA] Adapt the output returned in df_learning because we now get a dictionary of values for V and for Qdiff!
         self.Q_diff += [[Q_values[K-1][1] - Q_values[K-1][0], Q_values[K][1] - Q_values[K][0]]]
         self.V += [V]               # NOTE: This is NOT always the average value, rho... for instance, NOT when linear_theoretical_from_estimated_values() is called above
         self.gradV += [gradV]
-        self.G = G                  # Note that G is Q_diff when we estimate the gradient from its theoretical expression, using the estimates of the stationary probabilities and the differences of Q
+        self.G += [G]               # Note that G is Q_diff when we estimate the gradient from its theoretical expression, using the estimates of the stationary probabilities and the differences of Q
         self.n_events_mc += [n_events_mc]
         self.n_events_fv += [n_events_fv]
         self.n_trajectories_Q += [n_trajectories_Q]
@@ -1286,7 +1322,7 @@ class SimulatorQueue(Simulator):
         return self.learnerP
 
     def getNumLearningSteps(self):
-        return self.dict_learning_params['t_learn']
+        return self.dict_params_learning['t_learn']
 
     # ------ SETTERS ------#
     def setNumberParticlesAndCreateEnvironments(self, N):
@@ -1303,7 +1339,7 @@ class SimulatorQueue(Simulator):
         self.envs = [self.env if i == 0 else copy.deepcopy(self.env) for i in range(self.N)]
 
     def setNumLearningSteps(self, t_learn):
-        self.dict_learning_params['t_learn'] = t_learn
+        self.dict_params_learning['t_learn'] = t_learn
 
 
 #-------------------------------------------- FUNCTIONS --------------------------------------#
@@ -1592,8 +1628,8 @@ def get_blocking_boundaries(agent):
     assertPoliciesAreUnivariate(policies)
 
     # Sizes at which blocking is deterministic for each 1D-parameterized policy (the K values)
-    Ks = [policies[i].getBufferSizeForDeterministicBlocking() for i in range(len(policies))]
-    blocking_boundaries = [[k for k in range(0, Ks[i]+1) if policies[i].getPolicyForAction(Actions.REJECT, None, buffer_size=k) > 0]
+    Ks = get_deterministic_blocking_boundaries(agent, return_int_when_single_policy=False)
+    blocking_boundaries = [[k for k in range(0, Ks[i]+1) if policies[i].getPolicyForAction(Actions.REJECT, (k, i)) > 0]
                            for i in range(len(policies))]
 
     # Check that the list of blocking sizes for each policy does not contain repeated states
@@ -1608,7 +1644,7 @@ def get_blocking_boundaries(agent):
         return blocking_boundaries
 
 
-def get_deterministic_blocking_boundaries(agent, thresholds: Union[float, list]=None):
+def get_deterministic_blocking_boundaries(agent, thresholds: Union[float, list]=None, return_int_when_single_policy=True):
     """
     Returns all the deterministic blocking thresholds for each dimension of a multidimensional state system
     where blocking may occur at arrival of the corresponding job class.
@@ -1629,9 +1665,14 @@ def get_deterministic_blocking_boundaries(agent, thresholds: Union[float, list]=
         are of class PolQueueTwoActionsLinearStep.
         default: None
 
+    return_int_when_single_policy: (opt) bool
+        Whether to return an integer when there is a single policy in the agent (normally done to facilitate processing
+        in the caller of the returned value).
+        default: True
+
     Return: list or int
     Either a list containing the blocking thresholds for each policy defined in the agent when more than one policy
-    is defined or a integer with the blocking threshold when only one policy is defined.
+    is defined or a integer with the blocking threshold when only one policy is defined and return_int_when_single_policy = True.
     """
     assertConsistencyPolicyLearnerAndAgentPolicy(agent)
 
@@ -1645,10 +1686,12 @@ def get_deterministic_blocking_boundaries(agent, thresholds: Union[float, list]=
             raise ValueError("When given, the length of the `thresholds` parameter must be equal to the number of policies defined in the agent")
         blocking_boundaries = [policy.getBufferSizeForDeterministicBlockingFromTheta(thresholds[i]) for i, policy in enumerate(agent.getAcceptancePolicies())]
 
-    # Return a scalar when the blocking boundary is only one (i.e. when there is only one policy)
+    # Return a scalar when the blocking boundary is only one (i.e. when there is only one policy and return_int_when_single_policy = True)
     # The goal is to facilitate treatment of the K value (the blocking threshold) when the blocking is single-buffer-based blocking)
-    if len(blocking_boundaries) == 1:
+    if len(blocking_boundaries) == 1 and return_int_when_single_policy:
         return blocking_boundaries[0]
+
+    return blocking_boundaries
 
 
 def compute_burnin_time_from_burnin_time_steps(env, burnin_time_steps):
@@ -1730,13 +1773,16 @@ def compute_proba_blocking(env, agent: AgeQueue, probas_stationary: dict):
 
     # Iterate on the blocking states stored as keys of the `probas_stationary` dictionary
     for s in probas_stationary.keys():
+        s_tuple = tuple([s]) if is_scalar(s) else s
         assertConsistencyPolicyLearnerAndAgentPolicy(agent)
         if agent.getAcceptancePolicyDependenceOnJobClass():
             proba_arrival_jobclass = np.array(env.getJobClassRates()) / np.sum(env.getJobClassRates())
-            proba_reject = np.sum([agent.getAcceptancePolicies()[i].getPolicyForAction(Actions.REJECT, None, buffer_size=s[i]) * proba_arrival_jobclass[i]
-                                    for i, occupancy in enumerate(s)])
+            proba_reject = np.sum([agent.getAcceptancePolicies()[i].getPolicyForAction(Actions.REJECT, (s, i)) * proba_arrival_jobclass[i]
+                                    for i, occupancy in enumerate(s_tuple)])
         else:
-            proba_reject = agent.getAcceptancePolicies()[0].getPolicyForAction(Actions.REJECT, None, buffer_size=s)
+            # We set the job_class of the state to None because its value does not matter in determining the rejection probability
+            state = (s, None)
+            proba_reject = agent.getAcceptancePolicies()[0].getPolicyForAction(Actions.REJECT, state)
         proba_blocking += proba_reject * \
                           probas_stationary[s]
     return proba_blocking
@@ -1769,16 +1815,19 @@ def estimate_expected_reward(env, agent, probas_stationary):
     """
     expected_reward = 0.0
     for s in probas_stationary.keys():
+        s_tuple = tuple([s]) if is_scalar(s) else s
         assertConsistencyPolicyLearnerAndAgentPolicy(agent)
         if agent.getAcceptancePolicyDependenceOnJobClass():
             proba_arrival_jobclass = np.array(env.getJobClassRates()) / np.sum(env.getJobClassRates())
-            expected_reward_reject = np.sum([compute_reward_for_buffer_size(env, s[i]) * \
-                                             agent.getAcceptancePolicies()[i].getPolicyForAction(Actions.REJECT, None, buffer_size=s[i]) * \
+            expected_reward_reject = np.sum([compute_reward_for_buffer_size(env, s_tuple[i]) * \
+                                             agent.getAcceptancePolicies()[i].getPolicyForAction(Actions.REJECT, (s, i)) * \
                                              proba_arrival_jobclass[i]
-                                                for i, occupancy in enumerate(s)])
+                                                for i, occupancy in enumerate(s_tuple)])
         else:
+            # We set the job_class of the state to None because its value does not matter in determining the rejection probability
+            state = (s, None)
             expected_reward_reject = compute_reward_for_buffer_size(env, s) * \
-                                     agent.getAcceptancePolicies()[0].getPolicyForAction(Actions.REJECT, None, buffer_size=s)
+                                     agent.getAcceptancePolicies()[0].getPolicyForAction(Actions.REJECT, state)
         expected_reward += expected_reward_reject * \
                            probas_stationary[s]
     return expected_reward
@@ -2044,8 +2093,8 @@ def manage_job_arrival(t, env, agent, state, job_class):
     # Compute and store the gradient of the policy evaluated on the taken action A(t) given the state S(t)
     # Goal: depending on the learning method, this value may be useful
     if agent.getLearnerP() is not None:
-        gradient_for_action = agent.getLearnerP().getPolicy().getGradient(action_accept_reject, state)
-        agent.getLearnerP().record_gradient(state, action_accept_reject, gradient_for_action)
+        gradient_for_action = agent.getLearnerP().getGradient(action_accept_reject, state)
+        agent.getLearnerP().store_gradient(state, action_accept_reject, gradient_for_action)
     else:
         gradient_for_action = 0.0
 
@@ -2101,7 +2150,45 @@ def manage_service(env, agent, state, server):
     return action, next_state, reward
 
 
-def estimate_blocking_mc(env, agent, dict_params_simul, dict_params_info, start_state=None):
+def parse_estimate_blocking_parameters(dict_params_simul, env):
+    """
+    Parses input parameters received by the estimate_blocking_*() functions
+
+    Arguments:
+    dict_params_simul: dict
+        Dictionary of simulation parameters to parse.
+
+    env: Queue Environment
+        Environment that should be used to compute the burn-in time (i.e. absolute time) from parameter 'burnin_time_steps',
+        which is done using the compute_burnin_time_from_burnin_time_steps() function that uses the expected inter-event time
+        computed from the job arrival rates and service rates of the queue.
+    """
+    if 'buffer_size_activation' in dict_params_simul.keys():
+        if dict_params_simul['buffer_size_activation'] < 1:
+            raise ValueError("The activation buffer size must be at least 1: {}".format(dict_params_simul['buffer_size_activation']))
+        # Define the simulation parameters that will be used from now on below in a unified estimation process that
+        # encompasses both the case where blocking occurs at a single buffer size (e.g. single-server system or
+        # multi-server system with single buffer) or when it occurs at a set of states (e.g. loss network with multi-class jobs).
+        dict_params_simul['absorption_set'] = SetOfStates(state_boundaries=dict_params_simul['buffer_size_activation'] - 1)
+        dict_params_simul['activation_set'] = SetOfStates(state_boundaries=dict_params_simul['buffer_size_activation'])
+    set_required_simul_params = set({'absorption_set', 'activation_set', 'T'})
+    if not set_required_simul_params.issubset(dict_params_simul.keys()):
+        raise ValueError("Not all required parameters were given in `dict_params_simul`, which requires: {}\nGiven: {}".format(set_required_simul_params, dict_params_simul.keys()))
+
+    # Parse the remaining simulation parameters
+    dict_params_simul['burnin_time_steps'] = dict_params_simul.get('burnin_time_steps', BURNIN_TIME_STEPS)
+    # Continuous burn-in time used to filter the continuous-time cycle times observed during the single-particle simulation
+    # that is used to estimate the expected reabsorption cycle time, E(T_A).
+    dict_params_simul['burnin_time'] = compute_burnin_time_from_burnin_time_steps(env, dict_params_simul['burnin_time_steps'])
+    print("Computed burn-in time from parameter burnin_time_steps = {}: {}".format(dict_params_simul['burnin_time_steps'], dict_params_simul['burnin_time']))
+    dict_params_simul['min_num_cycles_for_expectations'] = dict_params_simul.get('min_num_cycles_for_expectations', MIN_NUM_CYCLES_FOR_EXPECTATIONS)
+    dict_params_simul['method_survival_probability_estimation'] = dict_params_simul.get('method_survival_probability_estimation', SurvivalProbabilityEstimation.FROM_N_PARTICLES)
+    dict_params_simul['seed'] = dict_params_simul.get('seed')
+
+    return dict_params_simul
+
+
+def estimate_blocking_mc(env, agent, dict_params_simul, dict_params_info, start_queue_state=None):
     """
     Estimates the blocking probability using Monte-Carlo
 
@@ -2136,8 +2223,8 @@ def estimate_blocking_mc(env, agent, dict_params_simul, dict_params_info, start_
     dict_params_info: dict
         Dictionary containing information to display, or parameters to deal with the information to display.
 
-    start_state: (opt) int or list or numpy array
-        State at which the queue environment starts for the simulation.
+    start_queue_state: (opt) int or tuple or numpy array
+        Queue state at which the queue environment starts for the simulation.
         Its type depends on how the queue environment defines the state of the system.
         default: None, in which case the start state is defined as state whose buffer size coincides with
         dict_params_simul['buffer_size_activation'] - 1.
@@ -2162,14 +2249,7 @@ def estimate_blocking_mc(env, agent, dict_params_simul, dict_params_info, start_
     probabilities.
     """
     # -- Parse input parameters
-    set_required_simul_params = set(['buffer_size_activation', 'T'])
-    if not set_required_simul_params.issubset(dict_params_simul.keys()):
-        raise ValueError("Not all required parameters were given in `dict_params_simul`, which requires: {}\nGiven: {}".format(set_required_simul_params, dict_params_simul.keys()))
-    if dict_params_simul['buffer_size_activation'] < 1:
-        raise ValueError("The activation buffer size must be at least 1: {}".format(dict_params_simul['buffer_size_activation']))
-    dict_params_simul['burnin_time_steps'] = dict_params_simul.get('burnin_time_steps', BURNIN_TIME_STEPS)
-    dict_params_simul['min_num_cycles_for_expectations'] = dict_params_simul.get('min_num_cycles_for_expectations', MIN_NUM_CYCLES_FOR_EXPECTATIONS)
-    dict_params_simul['seed'] = dict_params_simul.get('seed')
+    dict_params_simul = parse_estimate_blocking_parameters(dict_params_simul, env)
 
     # Reset environment and learner of the value functions
     # IMPORTANT: We should NOT reset the learner of the policy because this function could be called as part of a
@@ -2179,24 +2259,25 @@ def estimate_blocking_mc(env, agent, dict_params_simul, dict_params_info, start_
     if agent.getLearnerV() is not None:
         agent.getLearnerV().reset()
 
-    # Smart selection of the start state as one having buffer size = K-1 so that we can better estimate Pr(K-1)
-    # start_state = choose_state_for_buffer_size(simul.env, K)
     # Selection of the start state as one having buffer size = J-1, in order to have a fair comparison with the FV method
     # where particles are reactivated when they reach J-1.
-    if start_state is None:
-        start_state = choose_state_for_buffer_size(env, dict_params_simul['buffer_size_activation'] - 1)
+    if start_queue_state is None:
+        # DM-2023/01/26: We comment the following out because we generalize the system to multidimensional-state systems
+        #start_queue_state = choose_state_for_buffer_size(env, dict_params_simul['buffer_size_activation'] - 1)
+        start_queue_state = dict_params_simul['absorption_set'].random_choice()
+    start_state = (start_queue_state, None)
     # -- Parse input parameters
 
     t, time_last_event, n_return_cycles, time_last_return, return_times = \
             run_simulation_mc(env, agent, dict_params_info.get('t_learn', 0), start_state, dict_params_simul['T'],
+                              absorption_set=dict_params_simul['absorption_set'],
+                              activation_set=dict_params_simul['activation_set'],
                               track_return_cycles=True,
                               seed=dict_params_simul['seed'],
                               verbose=dict_params_info.get('verbose', False), verbose_period=dict_params_info.get('verbose_period', 1))
-    burnin_time = compute_burnin_time_from_burnin_time_steps(env, dict_params_simul['burnin_time_steps'])
-    print("burnin_time: {}".format(burnin_time))
     probas_stationary, expected_cycle_time, n_cycles_used = \
         estimate_stationary_probabilities_mc(env, agent,
-                                             burnin_time=burnin_time,
+                                             burnin_time=dict_params_simul['burnin_time'],
                                              min_num_cycles_for_expectations=dict_params_simul['min_num_cycles_for_expectations'])
 
     # Compute the other quantities that are returned to the outside world
@@ -2210,9 +2291,9 @@ def estimate_blocking_mc(env, agent, dict_params_simul, dict_params_info, start_
     # above when estimating the stationary probabilities (where it is used as denominator of the estimation ratio).
     expected_return_time_to_start_buffer_size, n_cycles_to_start_buffer_size = \
         estimate_expected_cycle_time(n_return_cycles, time_last_return,
-                                     cycle_times=return_times, burnin_time=burnin_time,
+                                     cycle_times=return_times, burnin_time=dict_params_simul['burnin_time'],
                                      min_num_cycles_for_expectations=dict_params_simul['min_num_cycles_for_expectations'])
-    if burnin_time == 0.0 and n_return_cycles > 0:
+    if dict_params_simul['burnin_time'] == 0.0 and n_return_cycles > 0:
         assert n_cycles_to_start_buffer_size == n_return_cycles
         assert np.isclose(expected_return_time_to_start_buffer_size, expected_cycle_time), \
             "[estimation_blocking_mc] The average return time to the buffer size associated to the start state {} ({:.3f})" \
@@ -2226,7 +2307,7 @@ def estimate_blocking_mc(env, agent, dict_params_simul, dict_params_info, start_
 
 @measure_exec_time
 def run_simulation_mc(env, agent, t_learn, start_state, t_sim_max,
-                      absorption_set: SetOfStates=None, activation_set: SetOfStates=None,
+                      absorption_set: SetOfStates, activation_set: SetOfStates,
                       track_return_cycles=False,
                       track_absorptions=False, track_survival=False,
                       seed=None, verbose=False, verbose_period=1):
@@ -2240,9 +2321,11 @@ def run_simulation_mc(env, agent, t_learn, start_state, t_sim_max,
     t_learn: int
         The learning time step to which the simulation will contribute.
 
-    start_state: int or list or numpy array
-        State at which the queue environment starts for the simulation.
+    start_state: Queue-environment-dependent
+        (Environment) State at which the queue environment starts for the simulation.
         Its type depends on how the queue environment defines the state of the system.
+        Ex: when the queue is of class GenericEnvQueueWithJobClasses, the state is a tuple with the following information:
+        (queue_state, job_class) = (state of the queue itself, class of the arriving job).
 
     t_sim_max: int
         Maximum simulation *time steps* allowed for the simulation (equivalent to the number of observed events)
@@ -2256,25 +2339,25 @@ def run_simulation_mc(env, agent, t_learn, start_state, t_sim_max,
         than the expected return time to J-1 (as, in order to be reabsorbed, the particle first needs to exit
         the absorption set A) (for further details, see calculations in my green small notebok written on 06-Nov-2022).
 
-    absorption_set: (opt) SetOfStates
+    absorption_set: SetOfStates
         Set with the entrance states to the zero-reward set of states A.
 
-    activation_set: (opt) SetOfStates
+    activation_set: SetOfStates
         Set with the entrance states to the complement of the zero-reward set of states A.
 
     track_return_cycles: (opt) bool
-        Whether to track the return cycle times to the initial buffer size (defined by parameter start_state),
-        regardless from the value of the previous buffer size (it could be "initial buffer size" + 1 --which would be
-        tantamount to an absorption-- or "initial buffer size" - 1).
+        Whether to track the return cycle times to the initial state/buffer-size (defined by parameter `start_state`),
+        regardless of the value of the previous state (if the previous state is in the activation set of states, then
+        it would be tantamount to an absorption).
         default: False
 
     track_absorptions: (opt) bool
         Whether to track the absorption times, i.e. the times spent on the reabsorption cycles defined by the
-        interval between two consecutive times in which the queue returns to the initial buffer size FROM ABOVE
-        (i.e. from the "initial buffer size" + 1), where the initial buffer size is defined by parameter start_state).
+        interval between two consecutive times in which the queue returns to the initial state/buffer-size
+        (defined by parameter `start_state`), coming from the activation set of states.
         In addition, the exit times from the absorption set are also tracked, i.e. the times spent between an entry to
-        and an exit from the absorption set, i.e. when the queue system visits a state with "initial buffer size" + 1
-        from BELOW (i.e. from the initial buffer size).
+        and an exit from the absorption set, i.e. when the queue system visits a state in the activation set
+        coming from the absorption set of states.
         The exit times information is handy when running this function for the FV estimator, where we need to estimate
         E(T_A) as E(T_E) + E(T_K) where T_E is the exit time and T_K is the killing time since exit, which is estimated
         from a separate simulation run on the N particles used for the FV simulation. That is, estimating E(T_E) instead
@@ -2285,10 +2368,9 @@ def run_simulation_mc(env, agent, t_learn, start_state, t_sim_max,
         default: False
 
     track_survival: (opt) bool
-        Whether to track the survival times, i.e. the times spent between exit from the absorption set
-        (i.e. observed when the queue goes from a state with "initial buffer size" to a state with "initial buffer size" + 1)
-        and the first absorption afterwards in the absorption set (i.e. when the queue goes from a state with
-        "initial buffer size" + 1 to a state with "initial buffer size").
+        Whether to track the survival times, i.e. the times spent between exit from the absorption set into the activation set
+        and the first absorption afterwards (i.e. when the queue goes from a state in the activation set to a state
+        in the absorption set).
         When True, it only has an effect when track_absorptions = True as well.
         default: False
 
@@ -2310,16 +2392,16 @@ def run_simulation_mc(env, agent, t_learn, start_state, t_sim_max,
     - time_abs: the continuous (absolute) time of the last observed event during the simulation.
 
     If track_return_cycles = True, in addition:
-    - n_cycles: the number of cycles observed in the simulation, until the last return to the initial buffer size.
-    - time_last_return: the continuous time at which the Markov Chain returns to the initial buffer size (regardless
-    from where --whether from above or from below).
-    - return_times: list with the observed return times to a state with initial buffer size (whose value is
+    - n_cycles: the number of cycles observed in the simulation, until the last return to the initial state/buffer-size.
+    - time_last_return: the continuous time at which the Markov Chain returns to the initial state/buffer-size
+    (regardless of where it came from).
+    - return_times: list with the observed return times to a state with initial state/buffer-size (whose value is
     defined by `start_state`).
 
     If track_absorptions = True and track_survival = False, in addition to `t` and `time_abs`:
-    - n_cycles: the number of cycles observed in the simulation, until the last return to the initial buffer size
-    from ABOVE (i.e. as if it were an absorption).
-    - time_last_absorption: the continuous time at which the Markov Chain returns to the initial buffer size
+    - n_cycles: the number of cycles observed in the simulation, until the last return to the initial state/buffer-size
+    from the activation set of states (i.e. as if it were an absorption).
+    - time_last_absorption: the continuous time at which the Markov Chain returns to the initial state/buffer-size
     from ABOVE (i.e. as if it were an absorption).
     See the note below about precedence order between track_return_cycles and track_absorptions.
     - exit_times: list with the observed exit times from the absorption set since the latest reabsorption.
@@ -2332,11 +2414,6 @@ def run_simulation_mc(env, agent, t_learn, start_state, t_sim_max,
     - either track_return_cycles or track_absorptions may be True. If both are True, the first one has precedence.
     - track_survival = True has no effect if track_absorptions = False.
     """
-    # ---------------------------- Auxiliary functions
-    buffer_size_increased_to_start_buffer_size_plus_one = lambda env, state, next_state, buffer_size_start: env.getBufferSizeFromState(next_state) - env.getBufferSizeFromState(state) == 1 and env.getBufferSizeFromState(next_state) == buffer_size_start + 1
-    buffer_size_decreased_to_start_buffer_size = lambda env, state, next_state, buffer_size_start: env.getBufferSizeFromState(next_state) - env.getBufferSizeFromState(state) == -1 and env.getBufferSizeFromState(next_state) == buffer_size_start
-    # ---------------------------- Auxiliary functions
-
     # -- Parse input parameters
     t_max = t_sim_max
 
@@ -2345,8 +2422,7 @@ def run_simulation_mc(env, agent, t_learn, start_state, t_sim_max,
         env.set_seed(seed)
 
     # Set the start state of the environment to the given start state
-    job_class = None
-    env.setState((start_state, job_class))
+    env.setState(start_state)
     buffer_size_start = env.getBufferSize()
     if verbose:
         print("MC simulation: The queue environments starts at state {} (buffer size = {})" \
@@ -2366,7 +2442,7 @@ def run_simulation_mc(env, agent, t_learn, start_state, t_sim_max,
     n_cycles_absorption = 0
     time_last_return = 0.0
     time_last_absorption = 0.0
-    # Information about the return times to the initial buffer size
+    # Information about the return times to the initial state/buffer-size
     return_times = []
     # Information about the exit times (from the absorption set A)
     exit_times = []
@@ -2428,7 +2504,6 @@ def run_simulation_mc(env, agent, t_learn, start_state, t_sim_max,
             #   activation states, because in order to be an activation state the system should be able to get to it
             #   from on the absorption states --which is not the case for e.g. (4, 2, 6) because MORE THAN ONE component
             #   is already at the boundary of the activation set (first and third components).
-            #if buffer_size_increased_to_start_buffer_size_plus_one(env, state, next_state, buffer_size_start):
             # Note that the state of the environment has been updated by the manage_service() function, that's why env.getQueueState() returns the value of `next_state` above
             assert env.getQueueStateFromState(next_state) == env.getQueueState()
             if is_state_in_set(env.getQueueStateFromState(state), absorption_set) and is_state_in_set(env.getQueueState(), activation_set):
@@ -2507,14 +2582,17 @@ def run_simulation_mc(env, agent, t_learn, start_state, t_sim_max,
 
         # Check RETURN
         # Either the initial state (for e.g. loss networks with multi-class jobs) or the initial buffer size (e.g. single-buffer queue systems) is observed again.
-        if agent.getAcceptancePolicyDependenceOnJobClass() == True:
+        if env.getBufferType() != BufferType.NOBUFFER:
             if next_state == start_state:
                 n_cycles_return += 1
                 return_times += [time_abs - time_last_return]
                 time_last_return = time_abs
         else:
-            buffer_size = env.getBufferSizeFromState(next_state)
-            if buffer_size == buffer_size_start:
+            # Note that, by checking whether the system returns to the initial BUFFER SIZE --as opposed to the initial STATE--
+            # we are defining the stopping time to be the time to fulfill that condition, and we define it as the return time
+            # to the initial buffer size. In particular, note that there is NO Violation of the applicability of the renewal theorem
+            # on which the estimation of the blocking probability is based (as presented in e.g. Asmussen's book).
+            if env.getBufferSizeFromState(next_state) == buffer_size_start:
                 n_cycles_return += 1
                 return_times += [time_abs - time_last_return]
                 time_last_return = time_abs
@@ -2783,24 +2861,7 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info):
     # -- Auxiliary functions
 
     # -- Parse input parameters
-    if 'buffer_size_activation' in dict_params_simul.keys():
-        # Define the simulation parameters that will be used from now on below in a unified estimation process that
-        # encompasses both the case where blocking occurs at a single buffer size (e.g. single-server system or
-        # multi-server system with single buffer) or when it occurs at a set of states (e.g. loss network with multi-class jobs).
-        dict_params_simul['absorption_set'] = SetOfStates(state_boundaries=dict_params_simul['buffer_size_activation'] - 1)
-        dict_params_simul['activation_set'] = SetOfStates(state_boundaries=dict_params_simul['buffer_size_activation'])
-    set_required_simul_params = set({'absorption_set', 'activation_set', 'T'})
-    if not set_required_simul_params.issubset(dict_params_simul.keys()):
-        raise ValueError("Not all required parameters were given in `dict_params_simul`, which requires: {}\nGiven: {}".format(set_required_simul_params, dict_params_simul.keys()))
-
-    # Parse the remaining simulation parameters
-    dict_params_simul['burnin_time_steps'] = dict_params_simul.get('burnin_time_steps', BURNIN_TIME_STEPS)
-    # Continuous burn-in time used to filter the continuous-time cycle times observed during the single-particle simulation
-    # that is used to estimate the expected reabsorption cycle time, E(T_A).
-    burnin_time = compute_burnin_time_from_burnin_time_steps(envs[0], dict_params_simul['burnin_time_steps'])
-    dict_params_simul['min_num_cycles_for_expectations'] = dict_params_simul.get('min_num_cycles_for_expectations', MIN_NUM_CYCLES_FOR_EXPECTATIONS)
-    dict_params_simul['method_survival_probability_estimation'] = dict_params_simul.get('method_survival_probability_estimation', SurvivalProbabilityEstimation.FROM_N_PARTICLES)
-    dict_params_simul['seed'] = dict_params_simul.get('seed')
+    dict_params_simul = parse_estimate_blocking_parameters(dict_params_simul, envs[0])
 
     # Set the simulation seed
     np.random.seed(dict_params_simul['seed'])
@@ -2821,7 +2882,7 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info):
     # defining when the system is blocked. Now however, we are generalizing the system to a blocking condition
     # that may not depend only on a single buffer being full, but on reaching a set of multi-dimensinoal states
     # (e.g. a queue system accepting multi-class jobs).
-    #start_state_boundary_A = choose_state_for_buffer_size(envs[0], dict_params_simul['buffer_size_activation'] - 1)
+    #start_queue_state_boundary_A = choose_state_for_buffer_size(envs[0], dict_params_simul['buffer_size_activation'] - 1)
     # DM-2023/01/09: This is the new line that chooses the start state among a set of absorption states
     # Note that the set of absorption states is easy to define in the single-server context but in a multi-server context
     # the set may be very large... I don't think there is an alternative for a concise definition of the absorption set
@@ -2829,11 +2890,11 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info):
     # In a loss network context, e.g. a buffer-less server system that accepts jobs of different classes,
     # this absorption set can concisely be defined by the set of unidimensional blocking sizes, one for each job class,
     # and this is one of the options given by the constructor of the SetOfStates class used to define this set.
-    start_state_boundary_A = dict_params_simul['absorption_set'].random_choice()
+    start_queue_state_boundary_A = dict_params_simul['absorption_set'].random_choice()
     if dict_params_simul['method_survival_probability_estimation'] == SurvivalProbabilityEstimation.FROM_M_CYCLES:
         track_survival_in_single_particle_simulation = True
         t, time_end_simulation, n_cycles_absorption, time_last_absorption, exit_times, absorption_times, survival_times = \
-            run_simulation_mc(envs[0], agent, dict_params_info.get('t_learn', 0), start_state_boundary_A,
+            run_simulation_mc(envs[0], agent, dict_params_info.get('t_learn', 0), (start_queue_state_boundary_A, None),
                               dict_params_simul['T'],
                               absorption_set=dict_params_simul['absorption_set'],
                               activation_set=dict_params_simul['activation_set'],
@@ -2844,7 +2905,7 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info):
     else:
         track_survival_in_single_particle_simulation = False
         t, time_end_simulation, n_cycles_absorption, time_last_absorption, exit_times, absorption_times = \
-            run_simulation_mc(envs[0], agent, dict_params_info.get('t_learn', 0), start_state_boundary_A,
+            run_simulation_mc(envs[0], agent, dict_params_info.get('t_learn', 0), (start_queue_state_boundary_A, None),
                               dict_params_simul['T'],
                               absorption_set=dict_params_simul['absorption_set'],
                               activation_set=dict_params_simul['activation_set'],
@@ -2863,7 +2924,7 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info):
         # The condition is also used to prove convergence of the FV estimator (see our paper on Fleming-Viot).
         expected_exit_time = None
         expected_absorption_time, n_cycles_absorption_used = estimate_expected_cycle_time(n_cycles_absorption, time_last_absorption,
-                                                                                          cycle_times=absorption_times, burnin_time=burnin_time,
+                                                                                          cycle_times=absorption_times, burnin_time=dict_params_simul['burnin_time'],
                                                                                           min_num_cycles_for_expectations=dict_params_simul['min_num_cycles_for_expectations'])
         df_proba_surv = compute_survival_probability(survival_times)
         max_survival_time = np.max(survival_times)
@@ -2873,7 +2934,7 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info):
         # for each of the N particles used in the FV simulation.
         # However, in this case we need to estimate the expected exit time, E(T_E) which will be used to estimate E(T_A)
         expected_exit_time, n_exit_times_used = estimate_expected_stopping_time_in_cycle(exit_times, absorption_times,
-                                                                            burnin_time=burnin_time,
+                                                                            burnin_time=dict_params_simul['burnin_time'],
                                                                             min_num_cycles_for_expectations=dict_params_simul['min_num_cycles_for_expectations'])
         expected_absorption_time = None
         n_cycles_absorption_used = n_exit_times_used
@@ -3527,8 +3588,8 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
     for i, env in enumerate(envs):
         # Set the start state of the queue environment so that we start at an activation state
         # TODO: (2023/01/19) We should change the choice of the start state because any set having more than one component equal to the boundary value of that component is NOT eligible because they cannot transition to the absorption set of states in one step (because only ONE component can change at a time)
-        start_state = activation_set.random_choice()
-        env.setState((start_state, None))
+        start_queue_state = activation_set.random_choice()
+        env.setState((start_queue_state, None))
 
     # State boundaries whose stationary probability is of interest because they may be associated to blocking events
     # This object is a list for 1D problems (i.e. 1D real-valued-theta-parameterized policies) (e.g. [K-1, K])
@@ -3757,6 +3818,7 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
 
 def is_state_in_set(state, set_of_interest: SetOfStates):
     "Check whether the QUEUE state of the system is in the set of queue states of interest"
+    assert set_of_interest is not None
     states_of_interest = set_of_interest.getStates()
     if set_of_interest.getStorageFormat() == "states":
         return set(state.issubset(states_of_interest))
@@ -3833,12 +3895,13 @@ def assertConsistencyPolicyLearnerAndAgentPolicy(agent):
     if agent.getLearnerP() is not None:
         if len(agent.getAcceptancePolicies()) == 1:
             policy = agent.getAcceptancePolicies()[0]
-            learner_policy = agent.getLearnerP().getPolicy()[0] if isinstance(agent.getLearnerP().getPolicy(), list) else agent.getLearnerP().getPolicy()
+            learner_policy = agent.getLearnerP().getPolicy()[0] if agent.getLearnerP().getIsMultiPolicy() else agent.getLearnerP().getPolicy()
             assert policy.getThetaParameter() == learner_policy.getThetaParameter()
         else:
             assert len(agent.getAcceptancePolicies()) == len(agent.getLearnerP().getPolicy())
+            learner_policy_parameter = agent.getLearnerP().getThetaParameter()
             for i, policy in enumerate(agent.getAcceptancePolicies()):
-                assert policy.getThetaParameter() == agent.getLearnerP().getPolicy()[i].getThetaParameter()
+                assert policy.getThetaParameter() == learner_policy_parameter[i]
 
 
 def assertPoliciesAreUnivariate(parameterizedPolicies):

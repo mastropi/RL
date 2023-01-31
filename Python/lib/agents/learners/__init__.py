@@ -11,7 +11,6 @@ This class stores the following attributes as part of the object:
 - alpha: the learning rate
 
 Classes inheriting from this class should define the following methods:
-- reset_supporting_attributes()
 - reset_value_functions()
 """
 
@@ -111,6 +110,9 @@ class GenericLearner:
         self.actions = []       # Stores A(t), the action taken at state S(t)
         self.rewards = []       # Stores R(t) = R(S(t), A(t)), the reward received after taking action A(t) on state S(t)
 
+        # Count of visited states and visited state-actions
+        # Depending on the type of learner (e.g. learner of V or learner of Q) one ore the other will be updated.
+        self.dict_state_counts = dict()
         self.dict_state_action_counts = dict()
 
         # Learning time and learning rate at that time
@@ -151,8 +153,7 @@ class GenericLearner:
         self.action = None
         self.reward = None
 
-        # Reset the attributes that keep track of visited states
-        self.reset_supporting_attributes()
+        # Reset the return G
         self.reset_return()
 
         if reset_time:
@@ -171,7 +172,7 @@ class GenericLearner:
             self.reset_trajectory()
 
         if reset_counts:
-            self.dict_state_action_counts = dict()
+            self.reset_counts()
 
     def reset_trajectory(self):
         self.times = []
@@ -179,17 +180,19 @@ class GenericLearner:
         self.actions = []
         self.rewards = []
 
-    def reset_supporting_attributes(self):
-        # Reset supporting learning attributes (e.g. alphas, state counts, etc.). Method to be overridden by subclasses
-        pass
+    # Overrides superclass method
+    def reset_counts(self):
+        "Resets the dictionaries containing the number of times a state and a state-action is visited"
+        self.dict_state_counts = dict()
+        self.dict_state_action_counts = dict()
 
     def reset_return(self):
-        # Reset the observed return. Method to be overridden by subclasses
+        "Resets the observed return. Method to be implemented by subclasses if the return G is defined by the subclass."
         pass
 
     def reset_value_functions(self):
-        # Method to be overridden by subclasses
-        pass
+        # Method to be implemented by subclasses
+        raise NotImplementedError
 
     def store_learning_rate(self):
         """

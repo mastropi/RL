@@ -33,7 +33,6 @@ class LeaMC(GenericLearner):
         self.debug = debug
 
         self.gamma = gamma
-        self.dict_state_counts = dict()
 
         # Value functions and related quantities
         self.V_start = V_start
@@ -48,11 +47,6 @@ class LeaMC(GenericLearner):
         self.Q_hist = []
 
         super().reset()
-
-    # Overrides superclass method
-    def reset_supporting_attributes(self):
-        "Resets the dictionary containing the number of times a state is visited"
-        self.dict_state_counts = dict()
 
     # Overrides superclass method
     def reset_return(self):

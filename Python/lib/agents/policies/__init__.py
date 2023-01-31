@@ -34,8 +34,8 @@ class GenericParameterizedPolicyTwoActions:
 
     theta: float or list or array
         Initial values for the parameters of the parameterized policy.
-        The policy should defined two possible actions via the Actions enum.
-        The parameter is converted ALWAYS to an numpy array (i.e. instance of numpy.ndarray)
+        The policy should define two possible actions via the Actions enum.
+        The parameter is converted ALWAYS to a numpy array (i.e. instance of numpy.ndarray)
     """
 
     def __init__(self, env, theta: float or list or np.ndarray):
@@ -47,12 +47,8 @@ class GenericParameterizedPolicyTwoActions:
         # Store the start theta in the object
         self.setThetaParameter(self.theta_start)
 
-        # Attribute that keeps track of all the theta parameter values taken during the learning process
-        self.thetas = []
-
     def reset(self):
         self.setThetaParameter(self.theta_start)
-        self.thetas = []
 
     def choose_action(self, state):
         """
@@ -99,16 +95,12 @@ class GenericParameterizedPolicyTwoActions:
             # Division by 0 would have occurred!
             return np.nan
 
-    def store_theta(self, theta):
-        # TODO: (2021/11/04) Having renamed this method from `update_thetas` to `store_theta()`, make the same standardization change in `discrete.Learner._update_alphas()`
-        self.thetas += [theta]
-
     #----- GETTERS -----#
+    def getEnv(self):
+        return self.env
+
     def getThetaParameter(self):
         return self.theta
-
-    def getThetas(self):
-        return self.thetas
 
     #----- SETTERS -----#
     def setThetaParameter(self, theta):

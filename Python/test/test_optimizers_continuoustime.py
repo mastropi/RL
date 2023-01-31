@@ -93,7 +93,7 @@ class Test_EstPolicy_EnvQueueSingleServer(unittest.TestCase):
         })
         show_exec_params(params)
         # Set the initial theta value
-        simul.getLearnerP().getPolicy().setThetaParameter(dict_params_simul['theta_start'])
+        simul.getLearnerP().setThetaParameter(dict_params_simul['theta_start'])
         _, _, df_learning = simul.run(dict_params_simul, dict_params_info=dict_params_info, seed=dict_params_simul['seed'], verbose=False)
 
         return df_learning
