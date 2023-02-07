@@ -80,6 +80,9 @@ class LeaPolicyGradient(GenericLearner):
         self.reset_policy()
         self.learnerV.reset()
 
+    def is_theta_unidimensional(self, theta):
+        return not self.is_multi_policy or self.is_multi_policy and len(theta) == 1
+
     def store_theta(self, theta):
         "Stores the theta among the stored historical theta values"
         # TODO: (2021/11/04) Having renamed this method from `update_thetas` to `store_theta()`, make the same standardization change in `discrete.Learner._update_alphas()`
@@ -108,8 +111,9 @@ class LeaPolicyGradient(GenericLearner):
                 raise ValueError("The `gradient` parameter must not be None and must have the same length as the number of learner policies defined in the object (gradient={})".format(gradient))
             log_gradient = [np.nan]*len(self.policy)
             for i, pol in enumerate(self.policy):
-                policy_value = pol.getPolicyForAction(action, state)
-                log_gradient[i] = gradient[i] / policy_value if policy_value != 0.0 else 0.0 if gradient[i] == 0.0 else np.nan
+                state_i = self.getUnidimensionalStateFromMultidimensionalState(state, i)
+                policy_value_i = pol.getPolicyForAction(action, state_i)
+                log_gradient[i] = gradient[i] / policy_value_i if policy_value_i != 0.0 else 0.0 if gradient[i] == 0.0 else np.nan
         else:
             policy_value = self.policy.getPolicyForAction(action, state)
             log_gradient = gradient / policy_value if policy_value != 0.0 else 0.0 if gradient == 0.0 else np.nan
@@ -581,7 +585,7 @@ class LeaPolicyGradient(GenericLearner):
 
         return theta_prev, theta, self.learnerV.getV(), gradV, G1 - G0
 
-    def learn_linear_theoretical_from_estimated_values(self, T, proba_stationary, Q_values):
+    def learn_linear_theoretical_from_estimated_values(self, T, probas_stationary, Q_values):
         """
         Learns the policy by updating the theta parameter using gradient ascent and estimating the gradient
         from the theoretical expression of the gradient in the linear step policy (only applies for this type of policy!),
@@ -600,13 +604,13 @@ class LeaPolicyGradient(GenericLearner):
         That is, we assume that these values have been already computed elsewhere when calling this method.
 
         Arguments:
-        proba_stationary: dict
+        probas_stationary: dict
             Dictionary containing (state, stationary probability estimate) pairs for each `state` of interest
             (i.e. every state necessary to learn the theta parameter of the policy).
 
         Q_values: dict
             Dictionary containing (state, [Q(state, a=0), Q(state, a=1)]) pairs for each `state` of interest
-            present in the `proba_stationary` dictionary, where Q(state, a) is the state-action value of action `a`,
+            present in the `probas_stationary` dictionary, where Q(state, a) is the state-action value of action `a`,
             either reject (a=0) or accept (a=1).
 
         Return: tuple
@@ -619,7 +623,7 @@ class LeaPolicyGradient(GenericLearner):
         - Q_diff: same as Q_mean but the values stored are the difference in the state-action values for each state.
         """
         theta = self.getThetaParameter()    # For multi-policy learners, theta is an array (one scalar theta value for each policy being learned) o.w. theta is a scalar
-        theta_prev = copy.deepcopy(theta)
+        theta_prev = copy.deepcopy(theta) if self.is_multi_policy else theta
 
         # Store the value of theta (BEFORE its update) --> for plotting purposes
         # Note that we store just ONE theta, as opposed to repeating theta as many times as simulation steps
@@ -628,37 +632,54 @@ class LeaPolicyGradient(GenericLearner):
         # Fleming-Viot mode (where there is no one single trajectory to plot that is responsible for learning theta).
         self.store_theta(theta)
 
+        # Get the deterministic blocking values for each policy to be learned
+        if self.is_multi_policy:
+            Ks = [0]*self.getNumPolicies()
+            for i, pol in enumerate(self.policy):
+                Ks[i] = pol.getBufferSizeForDeterministicBlocking()
+        else:
+            Ks = [self.policy.getBufferSizeForDeterministicBlocking()]
+
         # Estimated grad(V)
-        gradV = np.zeros(len(theta)) if self.is_multi_policy else np.array([0.0])
+        gradV = np.zeros(self.getNumPolicies()) if self.is_multi_policy else np.array([0.0])
             ## Note: For single policy learners we still define the gradient as an array in order to define a common code below
             ## that works both for the multidimensional theta case and the unidimensional theta case.
         # Create the dictionaries that will contain the information about the average Q and the Q difference between the two possible actions for each state or buffer size
         Q_mean = dict()
         Q_diff = dict()
-        for x, p in proba_stationary.items():
+        for x, p in probas_stationary.items():
             if not np.isnan(p) and not (0.0 <= p <= 1.0):
                 raise ValueError("If not missing, the stationary probability estimate must be between 0 and 1 ({})".format(p))
-            if p > 0.0:
-                # TODO: [MULTIDIMENSIONAL THETA] We should know that component of the gradient is the current state contributing to...
-                # Namely: the state is contributing to the gradient of the average state value coming from the gradient component
-                # of the policy of accepting a job of class i whose occupancy in the system is K(i) - 1.
-                # This means that we need to store the value of i alongside the estimated probability value.
-                # The contribution to the gradient happens only when the estimated stationary probability is non-zero
+            if p > 0.0 and x in Q_values.keys():    # TODO: (2023/02/01) Remove the part `x in Q_vales.keys()` because this is asserted below
+                # The contribution to the gradient happens only when the estimated stationary probability is positive
+                assert x in Q_values.keys(), "Currently analyzed state x={} must be a key of the Q_values dictionary:\n{}".format(x, Q_values)
                 if not isinstance(Q_values[x], (list, np.ndarray)) or len(Q_values[x]) != 2:
                     raise ValueError("Each entry of parameter Q_values (a dictionary) must be a list or numpy array of length 2 ({})".format(Q_values[x]))
-                i = 0   # TEMPORARY: The index value indicating which gradient component to update will be later deduced from a new parameter received by the method containing the boundary sizes associated to each acceptance policy
-                assert not self.is_multi_policy or len(theta) == 1  # TEMPORARY ASSERTION UNTIL THE to-do TASK DESCRIBED ABOVE IS IMPLEMENTED.
-                Q_mean[x] = 0.5 * (Q_values[x][1] + Q_values[x][0])
-                Q_diff[x] = Q_values[x][1] - Q_values[x][0]
-                if np.isnan(p):
-                    gradV[i] += np.nan
-                else:
-                    gradV[i] += p * Q_diff[x]
-                # DM-2022/10/30: Try using the estimated probability as 1.0 (idea suggested by Urtzi/Matt on 19-Oct-2022 stating that the
-                # resulting algorithm is a stochastic approximation algorithm and therefore should converge if alpha is decreased)
-                #gradV[i] += 1.0 * Q_diff[x]
+                # Find the component(s) of the gradient to which the current analyzed state x contributes,
+                # namely ALL components i whose occupancy in the system is K(i) - 1, for which the derivative of the linear-step acceptance policy is not zero.
+                # NOTE that, for a given x, there may be more than one component satisfying this condition,
+                # which happens when more than one component has its value at the blocking value - 1, e.g. x = (0, 3, 5) and the blocking values are Ks = [8, 4, 6]
+                # meaning that components 1 and 2 (with values 3 and 5) will contribute to the respective gradient component value.
+                for i, K in enumerate(Ks):
+                    # TODO: (2023/02/01) Try to remove the `isinstance()` calls here on `x`... if possible. They are intended to accomodate both a 1D queue state represented as a scalar and an n-D queue state represented as a tuple
+                    # I guess the best solution would be to change the whole code base so that 1D states are ALSO represented as a tuple
+                    if not isinstance(x, tuple) and x == K - 1 or isinstance(x, tuple) and x[i] == K - 1:
+                        # Non-deterministic blocking occurs for the i-th component of the state x when a new job of class i arrives
+                        # => The product p(x) * Delta(Q[x]) contributes to the i-th component of the gradient
+                        Q_mean[x] = 0.5 * (Q_values[x][1] + Q_values[x][0])
+                        Q_diff[x] = Q_values[x][1] - Q_values[x][0]
+                        if np.isnan(p):
+                            gradV[i] += np.nan
+                        else:
+                            gradV[i] += p * Q_diff[x]
+            # DM-2022/10/30: Try using the estimated probability as 1.0 (idea suggested by Urtzi/Matt on 19-Oct-2022 stating that the
+            # resulting algorithm is a stochastic approximation algorithm and therefore should converge if alpha is decreased)
+            #for i in range(Ks):
+            #    if x[i] == Ks[i] - 1:
+            #        Q_diff[x] = Q_values[x][1] - Q_values[x][0]
+            #        gradV[i] += 1.0 * Q_diff[x]
 
-        if not self.is_multi_policy or self.is_multi_policy and len(theta) == 1:
+        if self.is_theta_unidimensional(theta):
             # Unidimensional theta case
             if not np.isnan(gradV[0]) and gradV[0] != 0.0:
                 # Note that we bound the delta theta to avoid too large changes!
@@ -687,7 +708,7 @@ class LeaPolicyGradient(GenericLearner):
                 # (which makes its value very big when the stationary probability is very small... thus making theta
                 # oscillate largely around the optimum theta...)
                 # Ref: handwritten notes written on 21-Dec-2021 thru 24-Dec-2021.
-                #alpha = self.getLearningRate() / theta[0] / proba_stationary / np.abs(gradV)
+                #alpha = self.getLearningRate() / theta[0] / probas_stationary / np.abs(gradV)
                 alpha = self.getLearningRate()
                 delta_theta = np.max([bound_delta_theta_lower, np.min([alpha * gradV[0], bound_delta_theta_upper])])
                 print("Estimated grad(V(theta)) = {}".format(gradV[0]))
@@ -701,13 +722,23 @@ class LeaPolicyGradient(GenericLearner):
                 theta = np.max([theta_lower, theta + delta_theta])
 
                 # Update the policy on the new theta and record it into the history of its updates
-                # Note that we convert theta to a list because the result of the theta update just done above is always a scalar
-                # and the setThetaParameter() method needs a non-scalar in the multi-policy scenario, and in the single-policy scenario
-                # the theta value to set can ALSO be a list or array.
-                self.setThetaParameter([theta])
+                if self.is_multi_policy:
+                    self.setThetaParameter([theta])
+                else:
+                    self.setThetaParameter(theta)
         else:
-            # TODO: [MULTIDIMENSIONAL THETA] gradV is now an array, so we should change the code accordingly!
-            pass
+            # gradV is a multidimensional array
+            if not any(np.isnan([g for g in gradV])):
+                assert isinstance(theta, np.ndarray), "The theta parameter must be an array for multidimensional theta parameters: {}".format(theta)
+                assert isinstance(gradV, np.ndarray), "The gradV object storing the policy gradient must be an array for multidimensional theta parameters: {}".format(gradV)
+                alpha = self.getLearningRate()
+                delta_theta = alpha * gradV
+                theta += delta_theta
+                print("Estimated grad(V(theta)) = {}".format(gradV))
+                print("Delta(theta) = alpha * grad(V) = {:.3f} * {} = {}".format(alpha, gradV, delta_theta))
+                print("theta: {} -> {}".format(theta_prev, theta))
+
+                self.setThetaParameter(theta)
 
         return theta_prev, theta, Q_mean, gradV, Q_diff
 
@@ -793,6 +824,9 @@ class LeaPolicyGradient(GenericLearner):
     def getIsMultiPolicy(self):
         return self.is_multi_policy
 
+    def getNumPolicies(self):
+        return len(self.policy)
+
     def getPolicy(self):
         return self.policy
 
@@ -806,8 +840,9 @@ class LeaPolicyGradient(GenericLearner):
         return self.learnerV
 
     def getThetaParameter(self):
+        "Returns the unidimensional or multidimensional theta of the parameterized policy"
         if self.is_multi_policy:
-            theta = [np.nan] * len(self.policy)
+            theta = np.nan * np.ones(self.getNumPolicies())
             for i, pol in enumerate(self.policy):
                 theta[i] = pol.getThetaParameter()
         else:
@@ -815,21 +850,27 @@ class LeaPolicyGradient(GenericLearner):
         return theta
 
     def getGradient(self, action, state):
-        "Returns the (unidimensional or multidimensional) gradient for the given action applied on the given state"
+        "Returns the unidimensional or multidimensional gradient for the given action applied on the given state"
         if self.is_multi_policy:
-            gradient = [np.nan] * len(self.policy)
+            gradient = [np.nan] * self.getNumPolicies()
             for i, pol in enumerate(self.policy):
-                gradient[i] = pol.getGradient(action, state)
+                # Extract the real-valued state for the current policy, as the gradient of each paramterized policy
+                # is based on a real-valued parameter (as opposed to an array parameter)
+                state_i = self.getUnidimensionalStateFromMultidimensionalState(state, i)
+                gradient[i] = pol.getGradient(action, state_i)
         else:
             gradient = self.policy.getGradient(action, state)
         return gradient
 
     def getGradientLog(self, action, state):
-        "Returns the log of the (unidimensional or multidimensional) gradient for the given action applied on the given state"
+        "Returns the log of the unidimensional or multidimensional gradient for the given action applied on the given state"
         if self.is_multi_policy:
-            log_gradient = [np.nan] * len(self.policy)
+            log_gradient = [np.nan] * self.getNumPolicies()
             for i, pol in enumerate(self.policy):
-                log_gradient[i] = pol.getGradientLog(action, state)
+                # Extract the real-valued state for the current policy, as the gradient of each paramterized policy
+                # is based on a real-valued parameter (as opposed to an array parameter)
+                state_i = self.getUnidimensionalStateFromMultidimensionalState(state, i)
+                log_gradient[i] = pol.getGradientLog(action, state_i)
         else:
             log_gradient = self.policy.getGradientLog(action, state)
         return log_gradient
@@ -846,12 +887,52 @@ class LeaPolicyGradient(GenericLearner):
         return self.log_gradients
 
     def getAverageRewardUnderPolicy(self):
+        "Returns the observed average reward under the current theta parameter of the policy"
         return self.averageRewardUnderPolicy
+
+    def getUnidimensionalStateFromMultidimensionalState(self, state, dim):
+        """
+        Extracts the real-valued state corresponding to the given dimension of a multidimensional state,
+        based on the state structure defined by the queue environment stored in the object.
+
+        This assumes that the queue environment defines a state based on the queue state itself and on the class
+        of the arriving job (if any), which are extracted using methods getQueueStateFromState() and getJobClassFromState().
+
+        Note: The unidimensional and multidimensional characteristic of a state refers to the unidimensional and
+        multidimensional characteristic of the QUEUE state itself.
+        Ex:
+        - unidimensional state: (3, None)           => `3` is unidimensional
+        - multidimensional state: ((0, 5, 2), None) => `(0, 5, 2)` is multidimensional
+        where in both cases `None` refers to the class of the arriving job, which is None because no job is considered
+        to have arrived at the moment of analysis of the Markov chain whose state is given by the queue environment state.
+
+        NOTE: The multidimensional state could also be a scalar value, in which case the output unidimensional state
+        coincides with the input unidimensional state.
+
+        IMPORTANT: This method further ASSUMES that the way in which the queue environment stores states is using
+        a 2D tuple, where the first element is the QUEUE state itself and the second element is the job class.
+        This is reflected in the fact that the returned value of the method is a 2D tuple containing these pieces of information.
+
+        Arguments:
+        state: Queue-environment dependent
+            Multidimensional queue environment state from which the unidimensional state should be created.
+            The multidimensional state could also be unidimensional nd scalar.
+
+        dim: int
+            Dimension of interest that should be extracted from the given multidimensional state.
+
+        Return: tuple
+        Duple of the form (unidimensional-queue-state, job-class), where `unidimensional-queue-state` is extracted
+        from the `dim`-th dimension of the multidimensional QUEUE state in the input `state`. Ex: `(3, None)`.
+        """
+        queue_state, job_class = self.env.getQueueStateFromState(state), self.env.getJobClassFromState(state)
+        queue_state_dim = queue_state if is_scalar(queue_state) else queue_state[dim]
+        return (queue_state_dim, job_class)
 
     #----- SETTERS -----#
     def setThetaParameter(self, theta):
         if self.is_multi_policy:
-            if theta is None or is_scalar(theta) or len(theta) != len(self.policy):
+            if theta is None or is_scalar(theta) or len(theta) != self.getNumPolicies():
                 raise ValueError("The parameter value to set `theta` must not be None or scalar and must have the same length as the number of multi-policy learners defined in the object")
             for i, pol in enumerate(self.policy):
                 pol.setThetaParameter(theta[i])

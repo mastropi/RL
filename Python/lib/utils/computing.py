@@ -389,8 +389,6 @@ def compute_number_of_burnin_cycles_from_burnin_time(cycle_times, burnin_time):
     return burnin_cycles
 
 
-# TODO: (2023/01/19) Refactor these 3 upcoming functions so that we use the new general-purpose calculation of product-form stationary distributions done by the new stationary_distribution_product_form() function
-# Unit tests at the end should also be updated
 def compute_blocking_probability_birth_death_process(rhos: list, capacity: int):
     """
     Computes the true blocking probability of a birth-death process with R servers and total capacity C.
@@ -409,40 +407,17 @@ def compute_blocking_probability_birth_death_process(rhos: list, capacity: int):
     if not isinstance(rhos, list) or len(rhos) == 0:
         raise ValueError("Input parameter `rho` must be a non-empty list: {}".format(rhos))
          
-    R = len(rhos)
     C = capacity
-    if R == 1:
-        proba_blocking = rhos[0]**C / np.sum([ rhos[0]**i for i in range(C+1) ])
-    else:
-        const = 0
-        ncases_total = 0
-        prod = [0]*(C+1)   # Array to store the contributions to the normalizing constant for each 1 <= c <= C
-        for c in range(C+1):
-            ncases = comb(c+R-1,c)
-            combos_generator = all_combos_with_sum(R,c)
-            count = 0
-            while True:
-                try:
-                    n = next(combos_generator)
-                    assert len(n) == len(rhos), "The length of v and rho rates coincide ({}, {})".format(len(n), len(rhos))
-                    prod[c] += np.prod( [(1- r)*r**nr for r, nr in zip(rhos, n)] )
-                    count += 1
-                except StopIteration:
-                    break
-            combos_generator.close()
-            const += prod[c]
-            assert count == ncases
-            ncases_total += ncases
-        assert const <= 1, "The normalizing constant is <= 1"
-        assert abs(sum(prod)/const - 1.0) < 1E-6
-
-        # Blocking probability
-        proba_blocking = prod[C] / const
+    x, dist = stationary_distribution_product_form(C, rhos, func_prod_birthdeath)
+    proba_blocking = 0.0
+    for xx, dd in zip(x, dist):
+        if sum(xx) == C:
+            proba_blocking += dd
 
     return proba_blocking
 
 
-def stationary_distribution_birth_death_process(nservers: int, capacity: int, rhos: list):
+def deprecated_stationary_distribution_birth_death_process(nservers: int, capacity: int, rhos: list):
     """
     Computes the stationary distribution of a birth-death process for all its possible states.
 
@@ -488,7 +463,7 @@ def stationary_distribution_birth_death_process(nservers: int, capacity: int, rh
         ncases_expected = comb(c+R-1,c)
         ind = slice(last_case+1, last_case+1+ncases_expected)
         
-        x[ind], dist[ind] = stationary_distribution_birth_death_process_at_capacity_unnormalized(R, c, rhos, ncases_expected)
+        x[ind], dist[ind] = deprecated_stationary_distribution_birth_death_process_at_capacity_unnormalized(R, c, rhos, ncases_expected)
 
         const += sum(dist[ind])
         ncases_total += ncases_expected
@@ -502,7 +477,7 @@ def stationary_distribution_birth_death_process(nservers: int, capacity: int, rh
     return x, dist
 
 
-def stationary_distribution_birth_death_process_at_capacity_unnormalized(nservers: int, capacity: int, rhos: list, ncases_expected=None):
+def deprecated_stationary_distribution_birth_death_process_at_capacity_unnormalized(nservers: int, capacity: int, rhos: list, ncases_expected=None):
     """
     Computes the UNNORMALIZED stationary distribution of a birth-death process for the state subspace
     associated to a fixed capacity, i.e. for all the n = (n1, n2, ..., nR) such that their sum is equal
@@ -846,9 +821,9 @@ if __name__ == "__main__":
     #------------ all_combos_with_sum(R,C) -----------------#
 
 
-    #------------ stationary_distribution_birth_death_process --------------#
+    #------------ stationary_distribution_product_form --------------#
     import matplotlib.pyplot as plt
-    print("\n--- Testing stationary_distribution_birth_death_process(nservers, capacity, rhos):")
+    print("\n--- Testing stationary_distribution_product_form(capacity, rhos, func_prod_birthdeath):")
     R = 3
     C = 3
     n_expected = [
@@ -898,7 +873,7 @@ if __name__ == "__main__":
                     0.023810,
                     0.023810
                     ]           
-    n, dist = stationary_distribution_birth_death_process(R, C, rhos_equal)
+    n, dist = stationary_distribution_product_form(C, rhos_equal, func_prod_birthdeath)
     print("State space for R={}, C={}: {}".format(R, C, len(dist)))
     print("Distribution for rhos={}:".format(rhos_equal))
     [print("index={}: x={}, p={:.6f}".format(idx, x, p)) for idx, (x, p) in enumerate(zip(n, dist))]
@@ -906,7 +881,7 @@ if __name__ == "__main__":
     print("Sum: p={:.6f}".format(sum(dist)))
     assert abs(sum(dist) - 1.0) < 1E-6, "The sum of the distribution function is 1 ({.6f})".format(sum(dist))
     assert all([x == x_expected for x, x_expected in zip(n, n_expected)]), "The expected event space is verified"
-    assert all(abs(dist - dist_expected) < 1E-6), "The expected distribution is verified"
+    assert np.allclose(dist, dist_expected, atol=1E-6), "The expected distribution is verified"
 
     # Multinomial distribution on these events
     # Notes:
@@ -948,7 +923,7 @@ if __name__ == "__main__":
                     0.013956,
                     0.007975
                     ]
-    n, dist = stationary_distribution_birth_death_process(R, C, rhos_diff)
+    n, dist = stationary_distribution_product_form(C, rhos_diff, func_prod_birthdeath)
     print("State space for R={}, C={}: {}".format(R, C, len(dist)))
     print("Distribution for rhos={}:".format(rhos_diff))
     [print("index={}: x={}, p={:.6f}".format(idx, x, p)) for idx, (x, p) in enumerate(zip(n, dist))]
@@ -956,7 +931,7 @@ if __name__ == "__main__":
     print("Sum: p={:.6f}".format(sum(dist)))
     assert abs(sum(dist) - 1.0) < 1E-6, "The sum of the distribution function is 1 ({.6f})".format(sum(dist))
     assert all([x == x_expected for x, x_expected in zip(n, n_expected)]), "The expected event space is verified"
-    assert all(abs(dist - dist_expected) < 1E-6), "The expected distribution is verified"
+    assert np.allclose(dist, dist_expected, atol=1E-6), "The expected distribution is verified"
 
     # Multinomial distribution on these events
     # Notes:
@@ -973,4 +948,40 @@ if __name__ == "__main__":
     plt.plot(dist, 'r.-')
     plt.plot(sample[0]/sample_size, 'b.')
     plt.title("R={}, C={}, rhos={} (ALL DIFFERENT) (sample size = {})".format(R, C, rhos_diff, sample_size))
-    #------------ stationary_distribution_birth_death_process --------------#
+    #------------ stationary_distribution_product_form --------------#
+
+
+    #------ compute_blocking_probability_birth_death_process --------#
+    print("\n--- Testing compute_blocking_probability_birth_death_process(rhos, capacity):")
+    print("Single server system")
+    print("Test #1: rho = 0.7")
+    rhos = [0.7]
+    C = 3
+    p_expected = 0.135413
+    p = compute_blocking_probability_birth_death_process(rhos, C)
+    print("---------------")
+    print("Estimated p = {:.6f}".format(p))
+    print("True p = {:.6f}".format(p_expected))
+    assert np.isclose(p, p_expected), "The expected blocking probability is verified"
+
+    print("\nMulti-server systems:")
+    C = 3
+
+    print("Test #1: all process intensities rhos are equal (to 0.5)")
+    rhos_equal = [0.5, 0.5, 0.5]
+    p_expected = 0.238095
+    p = compute_blocking_probability_birth_death_process(rhos_equal, C)
+    print("---------------")
+    print("Estimated p = {:.6f}".format(p))
+    print("True p = {:.6f}".format(p_expected))
+    assert np.isclose(p, p_expected), "The expected blocking probability is verified"
+
+    print("Test #2: process intensities rhos are different (smaller than 1)")
+    rhos_diff = [0.8, 0.7, 0.4]
+    p_expected = 0.333333
+    p = compute_blocking_probability_birth_death_process(rhos_diff, C)
+    print("---------------")
+    print("Estimated p = {:.6f}".format(p))
+    print("True p = {:.6f}".format(p_expected))
+    assert np.isclose(p, p_expected), "The expected blocking probability is verified"
+    #----------------- compute_blocking_probability -----------------#

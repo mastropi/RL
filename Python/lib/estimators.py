@@ -40,8 +40,9 @@ from Python.lib.utils.basic import  array_of_objects, find, find_last_value_in_l
                                     list_contains_either, merge_values_in_time, measure_exec_time
 from Python.lib.utils.computing import get_server_loads, compute_job_rates_by_server, \
     compute_blocking_probability_birth_death_process, \
-    stationary_distribution_birth_death_process, \
-    stationary_distribution_birth_death_process_at_capacity_unnormalized
+    stationary_distribution_product_form, \
+    stationary_distribution_product_form_fixed_occupancy_unnormalized, \
+    func_prod_birthdeath
 
 DEBUG_ESTIMATORS = False
 DEBUG_TIME_GENERATION = False
@@ -576,11 +577,11 @@ class EstimatorQueueBlockingFlemingViot:
 
         #-- Compute the theoretical absorption and activation distributions
         self.rhos = [lmbda / mu for lmbda, mu in zip(self.queue.getBirthRates(), self.queue.getDeathRates())]
-        self.states_absorbed, self.dist_absorption_set = stationary_distribution_birth_death_process(self.nservers, self.buffer_size_activation-1, self.rhos)
-        self.states_absorption, self.dist_absorption = stationary_distribution_birth_death_process_at_capacity_unnormalized(self.nservers, self.buffer_size_activation-1, self.rhos)
+        self.states_absorbed, self.dist_absorption_set = stationary_distribution_product_form_fixed_occupancy_unnormalized(self.buffer_size_activation-1, self.rhos, func_prod_birthdeath)
+        self.states_absorption, self.dist_absorption = stationary_distribution_product_form_fixed_occupancy_unnormalized(self.buffer_size_activation-1, self.rhos, func_prod_birthdeath)
         # Normalize the distribution on the absorption states so that it is a probability from which we can sample
         self.dist_absorption = self.dist_absorption / np.sum(self.dist_absorption)
-        self.states_activation, self.dist_activation = stationary_distribution_birth_death_process_at_capacity_unnormalized(self.nservers, self.buffer_size_activation, self.rhos)
+        self.states_activation, self.dist_activation = stationary_distribution_product_form_fixed_occupancy_unnormalized(self.buffer_size_activation, self.rhos, func_prod_birthdeath)
         # Normalize the distribution on the activation states so that it is a probability from which we can sample
         self.dist_activation = self.dist_activation / np.sum(self.dist_activation)
 
@@ -5468,7 +5469,7 @@ if __name__ == "__main__":
         s: int
             State on which the expected return time is wished.
         """
-        x, dist = stationary_distribution_birth_death_process(est.nservers, est.queue.K, est.rhos)
+        x, dist = stationary_distribution_product_form(est.queue.K, est.rhos, func_prod_birthdeath)
         ET_expected = 1/dist[s]/np.sum(est.queue.getBirthRates())
 
         return ET_expected

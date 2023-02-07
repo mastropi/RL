@@ -36,7 +36,7 @@ from Python.lib.simulators.queues import compute_nparticles_and_narrivals_for_fv
     compute_rel_errors_for_fv_process, get_deterministic_blocking_boundaries, LearningMode, SimulatorQueue
 
 from Python.lib.utils.basic import aggregation_bygroups, is_scalar, show_exec_params
-from Python.lib.utils.computing import stationary_distribution_birth_death_process
+from Python.lib.utils.computing import stationary_distribution_product_form, func_prod_birthdeath
 import Python.lib.utils.plotting as plotting
 
 
@@ -637,8 +637,7 @@ if len(theta_true_values) == 1:
         # Block size for each theta, defined by the fact that K-1 is between theta and theta+1 => K = ceiling(theta+1)
         Ks = [np.int(np.ceil(np.squeeze(t) + 1)) for t in df_learning['theta']]
         # Blocking probability = Pr(K)
-        p_stationary = [stationary_distribution_birth_death_process(simul.getEnv().getNumServers(), K, rhos)[1] for K in
-                        Ks]
+        p_stationary = [stationary_distribution_product_form(K, rhos, func_prod_birthdeath)[1] for K in Ks]
         pblock_K = np.array([p[-1] for p in p_stationary])
         pblock_Km1 = np.array([p[-2] for p in p_stationary])
         # Blocking probability adjusted for different jump rates between K-1 and K (affected by the non-deterministic probability of blocking at K-1)

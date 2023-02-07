@@ -10,7 +10,7 @@ from enum import Enum, unique
 
 import numpy as np
 
-from Python.lib.utils.basic import as_array
+from Python.lib.utils.basic import is_scalar
 
 
 @unique
@@ -31,17 +31,20 @@ class GenericParameterizedPolicyTwoActions:
     env: Environment
         A generic environment object accepting two actions which must have the following methods defined:
         - np_random() which generates a random value between 0 and 1.
+        - getActions() which returns all possible actions to be done when interacting with the environment.
 
-    theta: float or list or array
-        Initial values for the parameters of the parameterized policy.
+    theta: float
+        Initial value for the parameter of the parameterized policy, which should be a real unidimensional value
+        because it is a threshold value between two possible actions (as the name of the current class indicates is the case).
         The policy should define two possible actions via the Actions enum.
-        The parameter is converted ALWAYS to a numpy array (i.e. instance of numpy.ndarray)
     """
 
-    def __init__(self, env, theta: float or list or np.ndarray):
+    def __init__(self, env, theta: float):
         self.env = env
 
         # Store the given theta as start theta value so that we can reset it to that value when resetting the policy
+        if not is_scalar(theta):
+            raise ValueError("The theta parameter must be scalar ({})".format(theta))
         self.theta_start = theta
 
         # Store the start theta in the object
@@ -105,8 +108,9 @@ class GenericParameterizedPolicyTwoActions:
     #----- SETTERS -----#
     def setThetaParameter(self, theta):
         "Sets the theta parameter of the parameterized policy"
-        # Convert theta to a numpy array
-        self.theta = as_array(theta)
+        if not is_scalar(theta):
+            raise ValueError("Parameter theta to set must be scalar: {}".format(theta))
+        self.theta = theta
 
     #----- ABSTRACT METHODS (to be defined by subclasses) -----#
     def getGradient(self, action, state):

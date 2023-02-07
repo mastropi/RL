@@ -19,12 +19,10 @@ from Python.lib.agents.policies import GenericParameterizedPolicyTwoActions
 from Python.lib.utils.basic import is_scalar
 
 
-class QueueParameterizedPolicyTwoActionsOnScalarParameter(GenericParameterizedPolicyTwoActions):
+class QueueParameterizedPolicyTwoActions(GenericParameterizedPolicyTwoActions):
     "Superclass that defines common constructor and methods for some parameterized policies with two possible actions and scalar parameter"
 
     def __init__(self, env_queue: GenericEnvQueueWithJobClasses, theta: float):
-        if not is_scalar(theta):
-            raise ValueError("The theta parameter must be scalar ({})".format(theta))
         super().__init__(env_queue, theta)
 
         if self.getEnv().getCapacity() < np.Inf: # When capacity is Inf, theta is also allowed to be Inf
@@ -36,39 +34,39 @@ class QueueParameterizedPolicyTwoActionsOnScalarParameter(GenericParameterizedPo
 
         state: Queue-environment dependent
             State of the environment at which the policy gradient is evaluated.
-            It should contain at least two pieces of information:
-            - the queue state
-            - the class of the currently arriving job
-            These pieces of information are extracted using the following methods which are assumed to be defined
-            in the environment object stored in attribute `env_queue` of this object:
-            - getQueueStateFromState()
-            - getJobClassFromState()
+            It should contain at least the information about the queue state itself.
 
-            The value on which the gradient is computed depends on the buffer type of the environment, as follows:
-            - for BufferType.SINGLE: the value is the single-buffer size, which is computed from ALL the queue state dimensions
-            using the getBufferSizeFromState() method assumed defined in the environment object stored in attribute `env_queue`.
-            - for BufferType.NOBUFFER: the value is the job occupancy of the current arriving job class.
+            Depending on the buffer type of the queue environment, the process of "getting" the SCALAR value x
+            against which the scalar-parameterized policy is evaluated is as follows:
+            1) for BufferType.SINGLE:
+                - the QUEUE state is assumed to be a TUPLE.
+                - the value of x is computed by calling getBufferSizeFromState(state).
+            2) for BufferType.NOBUFFER:
+                - the QUEUE state is assumed to be a SCALAR.
+                - the value of x is computed by calling getQueueStateFromState(state).
 
         Return: int
         The buffer size for single-buffer queue systems or the job class occupancy for queue systems with no buffer (e.g. loss networks).
         """
         if self.getEnv().getBufferType() == BufferType.SINGLE:
-            # We need to compute the buffer size because that's how blocking is determined
+            # The queue environment has a single buffer whose value decides whether blocking occurs or may occur (i.e. probabilistic blocking)
+            # => the buffer size is computed from the potentially multidimensional queue state
             buffer_size_or_jobclass_occupancy = self.getEnv().getBufferSizeFromState(state)
         elif self.getEnv().getBufferType() == BufferType.NOBUFFER:
             # The policy is assumed to apply separately for each job class
-            # => The buffer size to use is the job occupancy of the class
+            # => the input `state` parameter is assumed to contain the job occupancy of the arriving job class as its "queue state" component
+            # (i.e. its queue state component is assumed to be a SCALAR), which is retrieved using the getQueueStateFromState() method of the environment class
             queue_state = self.getEnv().getQueueStateFromState(state)
-            job_class = self.getEnv().getJobClassFromState(state)
-            buffer_size_or_jobclass_occupancy = queue_state[job_class]
+            buffer_size_or_jobclass_occupancy = queue_state
         else:
             raise ValueError("The buffer type of the environment is not a valid one for this parameterized policy ({}): {}" \
                              .format(type(self), env_queue.getBufferType().name))
 
+        assert is_scalar(buffer_size_or_jobclass_occupancy)
         return buffer_size_or_jobclass_occupancy
 
 
-class PolQueueTwoActionsLogit(QueueParameterizedPolicyTwoActionsOnScalarParameter):
+class PolQueueTwoActionsLogit(QueueParameterizedPolicyTwoActions):
     """
     Randomized policy on a queue with two possible actions: accept or reject an incoming job.
     The policy is defined as a logit function around parameter theta where the probability of any of the action
@@ -106,8 +104,8 @@ class PolQueueTwoActionsLogit(QueueParameterizedPolicyTwoActionsOnScalarParamete
 
         state: Environment dependent
             State of the environment at which the policy gradient is evaluated.
-            For more information about its expected value, see the documentation for the
-            `QueueParameterizedPolicyTwoActionsOnScalarParameter.get_x_value_for_policy()` method.
+            For more information about its expected type, see the documentation for the
+            `QueueParameterizedPolicyTwoActions.get_x_value_for_policy()` method.
 
         Return: float
         Gradient of the policy for the given action given the environment's state.
@@ -133,15 +131,15 @@ class PolQueueTwoActionsLogit(QueueParameterizedPolicyTwoActionsOnScalarParamete
 
         state: Queue-environment dependent
             State of the environment at which the policy gradient is evaluated.
-            For more information about its expected value, see the documentation for the
-            `QueueParameterizedPolicyTwoActionsOnScalarParameter.get_x_value_for_policy()` method.
+            For more information about its expected type, see the documentation for the
+            `QueueParameterizedPolicyTwoActions.get_x_value_for_policy()` method.
 
         Return: float
         Value of the policy for the given action given the environment's state.
         """
         buffer_size_or_jobclass_occupancy = super().get_x_value_for_policy(state)
 
-        policy_accept = 1 / (1 + np.exp( self.beta * (buffer_size_or_jobclass_occupancy - self.theta) ))
+        policy_accept = 1 / (1 + np.exp( self.beta * (buffer_size_or_jobclass_occupancy - self.getThetaParameter()) ))
 
         if action == Actions.ACCEPT:
             policy_value_for_action = policy_accept
@@ -153,7 +151,7 @@ class PolQueueTwoActionsLogit(QueueParameterizedPolicyTwoActionsOnScalarParamete
         return policy_value_for_action
 
 
-class PolQueueTwoActionsLinearStep(QueueParameterizedPolicyTwoActionsOnScalarParameter):
+class PolQueueTwoActionsLinearStep(QueueParameterizedPolicyTwoActions):
     """
     Randomized policy on a queue with two possible actions: accept or reject an incoming job.
     The policy is defined as a stepwise linear function that transitions from deterministic acceptance to deterministic rejection.
@@ -192,15 +190,15 @@ class PolQueueTwoActionsLinearStep(QueueParameterizedPolicyTwoActionsOnScalarPar
 
         state: Queue-environment dependent
             State of the environment at which the policy gradient is evaluated.
-            For more information about its expected value, see the documentation for the
-            `QueueParameterizedPolicyTwoActionsOnScalarParameter.get_x_value_for_policy()` method.
+            For more information about its expected type, see the documentation for the
+            `QueueParameterizedPolicyTwoActions.get_x_value_for_policy()` method.
 
         Return: float
         Gradient of the policy for the given action given the environment's state.
         """
         buffer_size_or_jobclass_occupancy = super().get_x_value_for_policy(state)
 
-        is_buffer_size_or_jobclass_occupancy_in_linear_piece = float( self.theta < buffer_size_or_jobclass_occupancy < self.theta + 1 )
+        is_buffer_size_or_jobclass_occupancy_in_linear_piece = float( self.getThetaParameter() < buffer_size_or_jobclass_occupancy < self.getThetaParameter() + 1 )
         # Recall that the gradient is w.r.t. theta, NOT w.r.t. to the buffer size
         # which is how we normally plot the policy and against which the derivative has the opposite sign
         # compared to the sign of the derivative w.r.t. theta.
@@ -223,22 +221,22 @@ class PolQueueTwoActionsLinearStep(QueueParameterizedPolicyTwoActionsOnScalarPar
 
         state: Environment dependent
             State of the environment at which the policy is evaluated.
-            For more information about its expected value, see the documentation for the
-            `QueueParameterizedPolicyTwoActionsOnScalarParameter.get_x_value_for_policy()` method.
+            For more information about its expected type, see the documentation for the
+            `QueueParameterizedPolicyTwoActions.get_x_value_for_policy()` method.
 
         Return: float
         Value of the policy for the given action given the environment's state.
         """
         buffer_size_or_jobclass_occupancy = super().get_x_value_for_policy(state)
 
-        if buffer_size_or_jobclass_occupancy <= self.theta[0]:
+        if buffer_size_or_jobclass_occupancy <= self.getThetaParameter():
             policy_accept = 1.0
-        elif buffer_size_or_jobclass_occupancy >= self.theta[0] + 1:
+        elif buffer_size_or_jobclass_occupancy >= self.getThetaParameter() + 1:
             policy_accept = 0.0
         else:
             # theta < s < theta + 1
             # => The acceptance policy is linear in s
-            policy_accept = self.theta[0] - buffer_size_or_jobclass_occupancy + 1
+            policy_accept = self.getThetaParameter() - buffer_size_or_jobclass_occupancy + 1
 
         if action == Actions.ACCEPT:
             policy_value_for_action = policy_accept
@@ -251,10 +249,11 @@ class PolQueueTwoActionsLinearStep(QueueParameterizedPolicyTwoActionsOnScalarPar
 
     def getBufferSizeForDeterministicBlocking(self):
         "Returns K, the first integer greater than the theta parameter stored in the object + 1"
-        return self.getBufferSizeForDeterministicBlockingFromTheta(self.getThetaParameter()[0])
+        return self.getBufferSizeForDeterministicBlockingFromTheta(self.getThetaParameter())
 
     def getBufferSizeForDeterministicBlockingFromTheta(self, theta):
         "Returns K, the first integer greater than theta + 1"
+        assert is_scalar(theta), "Parameter theta must be scalar: {}".format(theta)
         return int( np.ceil( theta + 1 ) )
 
 
@@ -335,7 +334,7 @@ class PolQueueTwoActionsLinearStepOnJobClasses(GenericParameterizedPolicyTwoActi
         """
         buffer_size, job_class = state
 
-        is_job_class_in_linear_piece = self.theta[buffer_size] < job_class < self.theta[buffer_size] + 1
+        is_job_class_in_linear_piece = self.getThetaParameter()[buffer_size] < job_class < self.getThetaParameter()[buffer_size] + 1
         if action == Actions.ACCEPT:
             slope = is_job_class_in_linear_piece
         elif action == Actions.REJECT:
