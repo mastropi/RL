@@ -641,7 +641,7 @@ def stationary_distribution_product_form_fixed_occupancy_unnormalized(occupancy:
             next_combo = next(combos_generator)
             # print("next_combo (k={}): {}".format(ncases, next_combo))
             x[ncases] = copy.deepcopy(next_combo)  # IMPORTANT: Need to make a copy o.w. x[k] will share the same memory address as next_combo and its value will change at the next iteration!!
-            dist[ncases] = np.prod([func_prod(r, nr) for r, nr in zip(rhos, next_combo)])    # Note: next_combo = (n1, n2, ..., nR)
+            dist[ncases] = np.prod([func_prod(r, nr) for r, nr in zip(rhos, next_combo)])    # Note: next_combo is a tuple containing the number of jobs of each class in the system: (n1, n2, ..., nR)
             ncases += 1
         except StopIteration:
             break
@@ -651,6 +651,179 @@ def stationary_distribution_product_form_fixed_occupancy_unnormalized(occupancy:
         .format(R, C, ncases, ncases_expected)
 
     return x, dist
+
+
+def compute_expected_cost_knapsack(costs: Union[list, tuple, np.ndarray], capacity: int, rhos: Union[list, tuple, np.ndarray], lambdas: Union[list, tuple, np.ndarray]):
+    """
+    Computes the expected cost of a stochastic knapsack receiving multi-class jobs having potentially different costs of blocking
+
+    Arguments:
+    costs: list, tuple or numpy array
+        Costs of blocking each job class.
+
+    capacity: int
+        Number of servers in the knapsack.
+
+    rhos: list, tuple or numpy array
+        Load of each job class.
+
+    lambdas: list, tuple or numpy array
+        Arrival rate of each job class.
+
+    Return: dict
+    Dictionary containing each possible set of blocking sizes (job occupancies) as keys and their expected cost
+    of blocking a job (of any class) arriving to the stochastic knapsack, as value.
+    """
+    if  not isinstance(costs, (list, tuple, np.ndarray)) or \
+        not isinstance(rhos, (list, tuple, np.ndarray)) or \
+        not isinstance(lambdas, (list, tuple, np.ndarray)):
+        raise ValueError("Parameters `costs`, `rhos`, `lambdas` must be of type list, tuple or numpy array")
+    if not len(costs) == len(rhos) and len(rhos) == len(lambdas):
+        raise ValueError("Parameters `costs`, `rhos`, `lambdas` must all have the same length ({}, {}, {})".format(len(costs), len(rhos), len(lambdas)))
+
+    if capacity <= 3:
+        printFlag = True
+    else:
+        printFlag = False
+
+    # All possible blocking sizes to consider: these are all states (x1, x2, ..., xR) that sum up to C <= R*capacity while satisfying that x(j) <= capacity
+    # Ex: if R = 3 and capacity = 10, states that satisfy these conditions are e.g. (10, 10, 10), (10, 8, 0),
+    # where we see that in both cases the sum of the x values exceed the system's capacity 10 but do NOT exceed R*capacity = 30,
+    # and the following states do NOT satisfy the condition (10, 13, 0), (15, 10, 3),
+    # although in both cases the sum of the x values are still smaller than R*capacity = 30;
+    # however in these cases the states do not qualify because at least one of the components x(j) is > capacity,
+    # meaning that blocking at that value is the same as blocking at x(j) = capacity, therefore this state
+    # does NOT *need* to be considered (although it could).
+    # Note that it's important to consider these larger set of blocking sizes (i.e. larger than the set of all possible states where the system could be in)
+    # because they are valid blocking sizes to be set for EACH job class. I.e. the blocking sizes do NOT have to be valid system states, they have
+    # to satisfy the univariate condition that their components are <= capacity of the knapsack.
+    all_blocking_sizes = []
+    R = len(rhos)
+    for C in range(R*capacity + 1):
+        combos_generator = all_combos_with_sum(R, C)
+        while True:
+            try:
+                combo = next(combos_generator)
+                if all(np.array(combo) <= capacity):
+                    all_blocking_sizes += [tuple(combo)]
+            except StopIteration:
+                break
+
+    # Iterate on all possible blocking sizes and compute the expected cost for each of them
+    expected_costs = dict()
+    Lambda = sum(lambdas)
+    for blocking_sizes in all_blocking_sizes:
+        # Compute the stationary probabilities for the valid states x in which the Markov chain can be,
+        # *given* the currently considered blocking sizes
+        # (a valid state x must satisfy that each state dimension x(j) <= blocking_size(j))
+        # by renormalizing the stationary probability of a knapsack having capacity equal to
+        # the sum of blocking sizes on the valid states.
+        capacity_blocking, states_valid_when_blocking, p_blocking = \
+            compute_stationary_probability_knapsack_when_blocking_by_class(capacity, rhos, blocking_sizes)
+
+        if printFlag:
+            print("\n------- ", blocking_sizes)
+        expected_costs[blocking_sizes] = 0.0
+        for idx, x in enumerate(states_valid_when_blocking):
+            total_x = sum(x)
+            if printFlag:
+                print(x, total_x, capacity_blocking, "p=", p_blocking[idx], end=":    ")
+            # Cost of leaving unused servers in the system: number of unused servers, imputed even if there is no blocking
+            #cost_unused_servers = max(0, capacity - total_x)
+            cost_unused_servers = 0
+            contribution_from_jobclasses = 0.0
+            for j, costj in enumerate(costs):
+                contribution_from_jobclasses +=  costj * lambdas[j] if total_x == capacity or x[j] == blocking_sizes[j] \
+                                            else 0.0
+            if printFlag:
+                print("cost unused = {:.3f}".format(cost_unused_servers), end=", ")
+                print("cost*lambda = {:.3f}".format(contribution_from_jobclasses), end=" --> ")
+            expected_costs[blocking_sizes] += p_blocking[idx] * (cost_unused_servers + contribution_from_jobclasses)
+            if printFlag:
+                print("cost = {:.3g}".format(expected_costs[blocking_sizes]))
+        expected_costs[blocking_sizes] /= Lambda
+        if printFlag:
+            print("-----------> ", expected_costs[blocking_sizes])
+
+    return expected_costs
+
+
+def compute_stationary_probability_knapsack_when_blocking_by_class(capacity, rhos, blocking_sizes=None):
+    """
+    Computes the stationary probability of a knapsack with a given capacity that is potentially limited by
+    a policy that blocks incoming jobs at the given blocking sizes by job class
+
+    capacity: int
+        Capacity of the knapsack, independently of the blocking sizes by job class.
+
+    rhos: list or tuple or numpy.ndarray
+        Loads of each job class arriving to the knapsack.
+
+    blocking_sizes: (opt) list or tuple or numpy.ndarray
+        Sizes (occupations) of the different job classes in the knapsack at which an incoming job of the respective class is blocked.
+        default: None, in which case the full capacity of the knapsack is used to compute the stationary probability distribution
+        and no limitation to the occupancy of each job class is applied.
+
+    Return: tuple
+    - capacity_blocking: the capacity of the knapsack taking into account the blocking sizes.
+    - states_valid_when_blocking: list of states that are valid in the knapsack whose capacity is potentially limited
+    by the blocking sizes of the different job classes, and each job class occupancy is limited by the respective blocking size.
+    - p: the stationary probability of each valid state in the knapsack whose capacity is potentially limited by the
+    blocking sizes of the different job classes, and each job class occupancy is limited by the respective blocking size.
+    """
+    if blocking_sizes is None:
+        blocking_sizes = [capacity] * len(rhos)
+
+    capacity_blocking = min(capacity, sum(blocking_sizes))  # e.g. min(10, sum([2, 1, 0])) = 3 or min(10, sum([8, 8, 6]) = 10
+    states, p = stationary_distribution_product_form(capacity_blocking, rhos, func_prod_knapsack)
+    states_valid_when_blocking, p_blocking = adjust_stationary_probability_knapsack_when_blocking(states, p, blocking_sizes)
+
+    return capacity_blocking, states_valid_when_blocking, p_blocking
+
+
+def adjust_stationary_probability_knapsack_when_blocking(states, p, blocking_sizes):
+    """
+    Adjusts the stationary probabilities of a knapsack (computed theoretically or estimated by simulation) with a given capacity
+    that is potentially limited by a policy that blocks incoming jobs at the given blocking sizes by job class.
+
+    Note that the knapsack's capacity is not a parameter of this function, but it can be inferred from the `states` parameter.
+
+    states: list
+        List of states on which the stationary probability has been computed.
+        Some of these states may NOT be valid states given the blocking sizes.
+
+    p: list
+        List of the stationary probability computed or estimated for each state in `states` that need to be adjusted.
+        If the stationary probability of a state is NaN, it is assumed it is zero.
+
+    blocking_sizes: list or tuple or numpy.ndarray
+        Sizes (occupations) of the different job classes in the knapsack at which an incoming job of the respective class is blocked.
+        default: None, in which case the full capacity of the knapsack is used to compute the stationary probability distribution
+
+    Return: tuple
+    - states_valid_when_blocking: list of states that are valid in the knapsack whose capacity is potentially limited
+    by the blocking sizes of the different job classes, and each job class occupancy is limited by the respective blocking size.
+    - p: the stationary probability of each valid state in the knapsack whose capacity is potentially limited by the
+    blocking sizes of the different job classes, and each job class occupancy is limited by the respective blocking size.
+    """
+    states_valid_when_blocking = []  # List of states that are valid when blocking at the current blocking_sizes
+    p_blocking = []
+    for idx, x in enumerate(states):
+        if all(np.array(x) <= blocking_sizes):
+            # We have filtered here on valid states, i.e. for which x(j) <= blocking_sizes(j) for each job class j
+            # e.g. if blocking_sizes = [2, 1, 0] (i.e. the maximum knapsack's capacity is 3),
+            # then e.g. [0, 1, 1] is NOT a valid state, despite being a possible state for a knapsack with capacity 3,
+            # because x[2] = 1 > blocking_sizes[2] = 0.
+            states_valid_when_blocking += [x]
+            p_blocking += [p[idx] if not np.isnan(p[idx]) else 0.0]
+    # Normalize the stationary probabilities of the valid states
+    p_blocking_sum = sum(p_blocking)
+    if p_blocking_sum > 0:
+        p_blocking = [pp / p_blocking_sum for pp in p_blocking]
+    assert sum(p_blocking) == 0.0 or np.isclose(sum(p_blocking), 1.0), \
+        f"Either all adjusted probabilities are 0 or their sum is equal to 1: sum(p_blocking) = {sum(p_blocking)}"
+
+    return states_valid_when_blocking, p_blocking
 
 
 def func_prod_birthdeath(rho, n):

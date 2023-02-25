@@ -12,6 +12,7 @@ runpy.run_path('../../setup.py')
 
 import unittest
 from unittest_data_provider import data_provider
+from typing import Union
 
 import numpy as np
 import pandas as pd
@@ -27,13 +28,14 @@ from Python.lib.agents.policies.parameterized import PolQueueTwoActionsLinearSte
 from Python.lib.agents.queues import AgeQueue
 
 from Python.lib.environments import queues as env_queues
-from Python.lib.environments.queues import EnvQueueSingleBufferWithJobClasses, rewardOnJobRejection_Constant, rewardOnJobRejection_ExponentialCost
+from Python.lib.environments.queues import rewardOnJobRejection_ByClass, rewardOnJobRejection_ExponentialCost
 import Python.lib.queues as queues
 
 from Python.lib.simulators import LearningMethod
 from Python.lib.simulators.queues import LearningMode, SimulatorQueue, SurvivalProbabilityEstimation
 
 from Python.lib.utils.basic import is_scalar, show_exec_params
+from Python.lib.utils.computing import compute_expected_cost_knapsack
 
 
 class Test_EstPolicy_EnvQueueSingleServer(unittest.TestCase):
@@ -41,7 +43,7 @@ class Test_EstPolicy_EnvQueueSingleServer(unittest.TestCase):
     # https://stackoverflow.com/questions/54264073/what-is-the-use-and-when-to-use-classmethod-in-python
     # See the only answer by Navy Cheng.
 
-    # TODO: (2023/02/02) Setup the class by calling function define_queue_environment_and_agent() defined in simulators/__init__.py which takes care of everything I do here, and in addition we initialize objects in a consistent manner!
+    # TODO: (2023/02/02) Setup the class by calling function define_queue_environment_and_agent() defined in simulators/__init__.py (instead of using the classmethod createAgentWithPolicyGradientLearner()) which takes care of everything I do here, and in addition we initialize objects in a consistent manner!
     @classmethod
     def setUpClass(cls):
         # Define the queue environment
@@ -51,7 +53,7 @@ class Test_EstPolicy_EnvQueueSingleServer(unittest.TestCase):
         service_rates = [1.0]
         job_rates_by_server = job_class_rates
         queue = queues.QueueMM(job_rates_by_server, service_rates, nservers, capacity)
-        cls.env_queue_mm_singleserver = EnvQueueSingleBufferWithJobClasses(queue, job_class_rates, rewardOnJobRejection_ExponentialCost, None)
+        cls.env_queue_mm_singleserver = env_queues.EnvQueueSingleBufferWithJobClasses(queue, job_class_rates, rewardOnJobRejection_ExponentialCost, None)
 
     @classmethod
     def createAgentWithPolicyGradientLearner(cls, dict_params_simul, dict_params_learn):
@@ -111,6 +113,72 @@ class Test_EstPolicy_EnvQueueSingleServer(unittest.TestCase):
         _, _, df_learning = simul.run(dict_params_simul, dict_params_info=dict_params_info, seed=dict_params_simul['seed'], verbose=False)
 
         return df_learning
+
+    def test_Env_MetMCwithReinforceTrue(self):
+        print("\n")
+        print("".join(np.repeat("*", 20)))
+        print("Testing the MC algorithm on a single server system using the REINFORCE_TRUE learning strategy...")
+
+        # Light execution parameters
+        dict_params_info = dict({'plot': False, 'log': False, 'symbol': 'r.-'})
+
+        # Simulation parameters
+        dict_params_learn = dict({'method': LearningMethod.MC,
+                                  'alpha_start': 10.0, 'adjust_alpha': False,
+                                  'mode': LearningMode.REINFORCE_TRUE, 't_learn': 5})
+        dict_params_simul = dict({
+            'seed': 1717,
+            'theta_true': 19,
+            'theta_start': 1.1,     # This number should NOT be integer, o.w. the estimated Pr(K-1) will always be 0
+            'nparticles': 1,
+            't_sim': 30 * 50,
+            'buffer_size_activation_factor': 0.3,
+            'burnin_time_steps': 20,
+            'min_num_cycles_for_expectations': 5,
+            })
+        # Make a copy of the seed used to run the process (for the assertion below),
+        # because the key in dict_params_simul is changed by the process
+        # as we need to consider different seeds for the different simulation parts and this seed is passed to each
+        # simulator through the dict_params_simul dictionary and is used to store its value in the output files
+        # to allow repeatability.
+        seed = dict_params_simul['seed']
+
+        # Agent interacting with the environment
+        agent_gradient = self.createAgentWithPolicyGradientLearner(dict_params_simul, dict_params_learn)
+
+        # Run the simulation!
+        df_learning = self.runSimulation(agent_gradient, dict_params_simul, dict_params_learn, dict_params_info)
+        print(df_learning)
+        # Expected result when using MC with REINFORCE_TRUE strategy
+        # (2023/02/02) Today these results have been carefully copied from the observed result of the test and checked that they are verified!
+        df_learning_expected = pd.DataFrame.from_items([
+                                                ('theta', [1.1, 6.450352, 6.685442, 6.792059, 6.761383]),
+                                                ('theta_next', [6.450352, 6.685442, 6.792059, 6.761383, 7.615656]),
+                                                ('Pr(K-1)', [0.209818, 0.015167, 0.053310, 0.010225, 0.031064]),
+                                                ('Pr(K)', [0.0]*5),
+                                                ('Error(K-1)', [-0.062243, -0.421494, 1.033354, -0.609999, 0.184868]),
+                                                ('Error(K)', [-1.0]*5),
+                                                ('Q_diff(K-1)', [2.55, 1.549996, 0.199995, -0.300008, 2.749998]),
+                                                ('Q_diff(K)', [0.0]*5),
+                                                ('alpha', [10.0]*5),
+                                                ('gradV', [0.535035, 0.023509, 0.010662, -0.003068, 0.085427]),
+                                                ('n_events_mc', [1500, 1500, 1500, 1500, 1500]),
+                                                ('n_events_fv', [0]*5),
+                                                ('n_trajectories_Q', [100.0]*5)
+                                                ])
+
+        assert  dict_params_learn['mode'] == LearningMode.REINFORCE_TRUE and \
+                dict_params_learn['t_learn'] == 5
+        assert  seed == 1717 and \
+                dict_params_simul['theta_true'] == 19 and \
+                dict_params_simul['theta_start'] == 1.1 and \
+                dict_params_simul['nparticles'] == 1 and \
+                dict_params_simul['t_sim'] == 30 * 50 and \
+                dict_params_simul['buffer_size_activation_factor'] == 0.3 and \
+                dict_params_simul['burnin_time_steps'] == 20 and \
+                dict_params_simul['min_num_cycles_for_expectations'] == 5
+
+        assert np.allclose(df_learning, df_learning_expected, atol=1E-6)
 
     def test_Env_MetFVRLwithReinforceTrue(self):
         print("\n")
@@ -208,7 +276,7 @@ class Test_EstPolicy_EnvQueueSingleServer(unittest.TestCase):
     # -------- DATA -------
 
     @data_provider(data_test_Env_MetFVRL)
-    def test_EnvQueueSingleServer_MetFVRL_TestSeveralCases(self, casenum, run, desc, dict_params_simul, dict_params_learn, dict_expected):
+    def test_Env_MetFVRL_TestSeveralCases(self, casenum, run, desc, dict_params_simul, dict_params_learn, dict_expected):
         "Test the FVRL implementation that learns the optimum parameter theta of a parameterized policy on the single-server queue system"
         dict_params_info = dict({'plot': False, 'log': False, 'symbol': 'r.-'})
         assert dict_params_learn['method'] == LearningMethod.FV
@@ -225,91 +293,55 @@ class Test_EstPolicy_EnvQueueSingleServer(unittest.TestCase):
             for column, expected_value in dict_expected.items():
                 assert np.allclose(df_learning[column], expected_value, atol=1E-6)
 
-    def test_Env_MetMCwithReinforceTrue(self):
-        print("\n")
-        print("".join(np.repeat("*", 20)))
-        print("Testing the MC algorithm on a single server system using the REINFORCE_TRUE learning strategy...")
-
-        # Light execution parameters
-        dict_params_info = dict({'plot': False, 'log': False, 'symbol': 'r.-'})
-
-        # Simulation parameters
-        dict_params_learn = dict({'method': LearningMethod.MC,
-                                  'alpha_start': 10.0, 'adjust_alpha': False,
-                                  'mode': LearningMode.REINFORCE_TRUE, 't_learn': 5})
-        dict_params_simul = dict({
-            'seed': 1717,
-            'theta_true': 19,
-            'theta_start': 1.1,     # This number should NOT be integer, o.w. the estimated Pr(K-1) will always be 0
-            'nparticles': 1,
-            't_sim': 30 * 50,
-            'buffer_size_activation_factor': 0.3,
-            'burnin_time_steps': 20,
-            'min_num_cycles_for_expectations': 5,
-            })
-        # Make a copy of the seed used to run the process (for the assertion below),
-        # because the key in dict_params_simul is changed by the process
-        # as we need to consider different seeds for the different simulation parts and this seed is passed to each
-        # simulator through the dict_params_simul dictionary and is used to store its value in the output files
-        # to allow repeatability.
-        seed = dict_params_simul['seed']
-
-        # Agent interacting with the environment
-        agent_gradient = self.createAgentWithPolicyGradientLearner(dict_params_simul, dict_params_learn)
-
-        # Run the simulation!
-        df_learning = self.runSimulation(agent_gradient, dict_params_simul, dict_params_learn, dict_params_info)
-        print(df_learning)
-        # Expected result when using MC with REINFORCE_TRUE strategy
-        # (2023/02/02) Today these results have been carefully copied from the observed result of the test and checked that they are verified!
-        df_learning_expected = pd.DataFrame.from_items([
-                                                ('theta', [1.1, 6.450352, 6.685442, 6.792059, 6.761383]),
-                                                ('theta_next', [6.450352, 6.685442, 6.792059, 6.761383, 7.615656]),
-                                                ('Pr(K-1)', [0.209818, 0.015167, 0.053310, 0.010225, 0.031064]),
-                                                ('Pr(K)', [0.0]*5),
-                                                ('Error(K-1)', [-0.062243, -0.421494, 1.033354, -0.609999, 0.184868]),
-                                                ('Error(K)', [-1.0]*5),
-                                                ('Q_diff(K-1)', [2.55, 1.549996, 0.199995, -0.300008, 2.749998]),
-                                                ('Q_diff(K)', [0.0]*5),
-                                                ('alpha', [10.0]*5),
-                                                ('gradV', [0.535035, 0.023509, 0.010662, -0.003068, 0.085427]),
-                                                ('n_events_mc', [1500, 1500, 1500, 1500, 1500]),
-                                                ('n_events_fv', [0]*5),
-                                                ('n_trajectories_Q', [100.0]*5)
-                                                ])
-
-        assert  dict_params_learn['mode'] == LearningMode.REINFORCE_TRUE and \
-                dict_params_learn['t_learn'] == 5
-        assert  seed == 1717 and \
-                dict_params_simul['theta_true'] == 19 and \
-                dict_params_simul['theta_start'] == 1.1 and \
-                dict_params_simul['nparticles'] == 1 and \
-                dict_params_simul['t_sim'] == 30 * 50 and \
-                dict_params_simul['buffer_size_activation_factor'] == 0.3 and \
-                dict_params_simul['burnin_time_steps'] == 20 and \
-                dict_params_simul['min_num_cycles_for_expectations'] == 5
-
-        assert np.allclose(df_learning, df_learning_expected, atol=1E-6)
-
 
 class Test_EstPolicy_EnvQueueLossNetworkWithJobClasses(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        rates_birth = [0.1, 0.5, 0.8]       # Let's use very different arrival rates so that we can see differences in the optimum theta values found...
+        rates_birth = [0.1, 0.5, 0.8] #[2, 8, 15] #[0.1, 0.5, 0.8]       # Let's use very different arrival rates so that we can see differences in the optimum theta values found...
         rates_death = [1.0, 1.0, 1.0]
         nservers = len(rates_death)
+        # Cost of blocking an incoming job of each class
+        # NOTE: The blocking costs are stored as parameters of the reward function in the environment defined below,
+        # where we pass the dict_params_reward_func dictionary to the environment constructor
+        costs_blocking = [1E1, 1E2, 1E4] #[1E1, 2E2, 5E3] #[1E2, 1E4, 1E6]
         # Capacity of the loss network
         K = 10
         queue_mm_loss = queues.QueueMM(rates_birth, rates_death, nservers, K, origin=0.0)
-        reward_func = rewardOnJobRejection_Constant
+        reward_func = rewardOnJobRejection_ByClass
         rewards_accept_by_job_class = [0.0] * len(rates_birth)
-        dict_params_reward_func = None
+        dict_params_reward_func = dict({'reward_at_rejection': [-c for c in costs_blocking]})
         cls.env_queue_mm_loss = env_queues.EnvQueueLossNetworkWithJobClasses(
             queue_mm_loss,
             reward_func,
             rewards_accept_by_job_class,
             dict_params_reward_func)
+
+        # Compute the minimum expected cost and its corresponding blocking sizes (job occupancies)
+        # (it could be a multiple set of blocking sizes if the minimum expected cost is achieved at different set of blocking sizes (unlikely though))
+        # so that we can compare the optimum theta estimated for the loss network with the true optimum theta
+        print(f"Computing the optimum expected cost for a knapsack with capacity = {K}, blocking costs = {costs_blocking}, lambdas = {rates_birth}, mus = {rates_death}...")
+        expected_costs = compute_expected_cost_knapsack(costs_blocking, K, [l/m for l, m in zip(rates_birth, rates_death)], rates_birth)
+        min_expected_cost = min([v for v in expected_costs.values()])
+        states_min_expected_cost = [k for k, v in expected_costs.items() if v == min_expected_cost]
+        print(f"Minimum expected cost = {min_expected_cost} happening at state = {states_min_expected_cost}")
+        print("Lowest 10 expected cost values:")
+        for k in sorted(expected_costs, key=lambda x: expected_costs[x])[:11]:
+            print(k, expected_costs[k])
+        print("Highest 10 expected cost values:")
+        for k in sorted(expected_costs, key=lambda x: expected_costs[x])[-11:]:
+            print(k, expected_costs[k])
+        import matplotlib.pyplot as plt
+        plt.figure()
+        plt.plot([t[1] for t in sorted(expected_costs.items(), key=lambda x: x[1])])
+        ax = plt.gca()
+        ax.set_yscale('log')
+        ax.set_title(f"Sorted expected costs on different blocking size tuples: K={K}, costs={costs_blocking}, lambdas={rates_birth}, mus={rates_death}")
+
+        cls.expected_costs = expected_costs
+        cls.optimum_expected_cost = min_expected_cost
+        cls.states_optimum_expected_cost = states_min_expected_cost
+        cls.dict_optimum_expected_cost = dict([(k, min_expected_cost) for k in states_min_expected_cost])
 
     @classmethod
     def createAgentWithPolicyGradientLearner(cls, dict_params_simul, dict_params_learn):
@@ -326,7 +358,17 @@ class Test_EstPolicy_EnvQueueLossNetworkWithJobClasses(unittest.TestCase):
             learnerV = LeaMC(cls.env_queue_mm_loss, gamma=1.0)
         learners = dict({LearnerTypes.V: learnerV,
                          LearnerTypes.Q: None,
-                         LearnerTypes.P: LeaPolicyGradient(cls.env_queue_mm_loss, policies[PolicyTypes.ACCEPT], learnerV, alpha=10.0)})
+                         LearnerTypes.P: LeaPolicyGradient(cls.env_queue_mm_loss, policies[PolicyTypes.ACCEPT], learnerV,
+                                                           alpha=dict_params_learn.get('alpha_start', 1.0),
+                                                           adjust_alpha=dict_params_learn.get('adjust_alpha', False),
+                                                           func_adjust_alpha=dict_params_learn.get('func_adjust_alpha', np.float),
+                                                           min_count_to_update_alpha=dict_params_learn.get('min_count_to_update_alpha', 0),
+                                                           min_time_to_update_alpha=dict_params_learn.get('min_time_to_update_alpha', 0),
+                                                           alpha_min=dict_params_learn.get('alpha_min', 0),
+                                                           fixed_window=dict_params_learn.get('fixed_window', False),
+                                                           clipping=dict_params_learn.get('clipping', False),
+                                                           clipping_value=dict_params_learn.get('clipping_value', +1.0))
+                         })
         agent_gradient = AgeQueue(cls.env_queue_mm_loss, policies, learners)
 
         return agent_gradient
@@ -364,10 +406,94 @@ class Test_EstPolicy_EnvQueueLossNetworkWithJobClasses(unittest.TestCase):
 
         return df_learning
 
+    @classmethod
+    def showResults(cls, agent_gradient):
+        print("\n\n**************")
+        optimum_theta = agent_gradient.getAcceptancePolicyThresholds()
+        optimum_blocking = agent_gradient.getAcceptancePolicyIntegerThresholds()
+        print("ESTIMATED:")
+        print("Optimum theta: {}".format(optimum_theta))
+        print("Optimum blocking sizes: {}".format(optimum_blocking))
+        print("Expected cost (based on true stationary probabilities): {}".format(cls.expected_costs[tuple(optimum_blocking)]))
+        print("")
+        print("TRUE:")
+        print("Optimum theta: {}".format([tuple([K-1 for K in state]) for state in cls.states_optimum_expected_cost]))
+        print("Optimum blocking sizes: {}".format(cls.states_optimum_expected_cost))
+        print("Expected cost (based on true stationary probabilities): {}".format(cls.optimum_expected_cost))
+        print("**************")
+
+    def test_Env_MetMCwithReinforceTrue(self):
+        print("\n")
+        print("".join(np.repeat("*", 20)))
+        print("Testing the MC algorithm on a loss network system receiving multi-class jobs using the REINFORCE_TRUE learning strategy...")
+
+        # Light execution parameters
+        dict_params_info = dict({'plot': False, 'log': False, 'symbol': 'r.-'})
+
+        # Simulation parameters
+        dict_params_learn = dict({  'method': LearningMethod.MC,
+                                    'alpha_start': 10.0, 'adjust_alpha': True, 'func_adjust_alpha': np.float, 'min_time_to_update_alpha': 0, 'alpha_min': 0.01,
+                                    # Use the following when learning using p(x) = 1.0 for all x
+                                    #'alpha_start': 0.01, 'adjust_alpha': False, 'func_adjust_alpha': np.float, 'min_time_to_update_alpha': 0, 'alpha_min': 0.01,
+                                    'clipping': False, 'clipping_value': +1.0,
+                                    'mode': LearningMode.REINFORCE_TRUE, 't_learn': 30})
+        dict_params_simul = dict({
+            'seed': 1717,
+            'theta_true': [4, 7, 10],
+            'theta_start': [0.1, 0.1, 0.1], #[0.1, 0.1, 0.1],
+            'nparticles': 1,
+            't_sim': 100 * 100,
+            'buffer_size_activation_factor': [0.3, 0.3, 0.3],
+            'burnin_time_steps': 20,
+            'min_num_cycles_for_expectations': 5,
+            })
+        # Make a copy of the seed used to run the process (for the assertion below),
+        # because the key in dict_params_simul is changed by the process
+        # as we need to consider different seeds for the different simulation parts and this seed is passed to each
+        # simulator through the dict_params_simul dictionary and is used to store its value in the output files
+        # to allow repeatability.
+        seed = dict_params_simul['seed']
+
+        # Agent interacting with the environment
+        agent_gradient = self.createAgentWithPolicyGradientLearner(dict_params_simul, dict_params_learn)
+
+        # Run the simulation!
+        df_learning = self.runSimulation(agent_gradient, dict_params_simul, dict_params_learn, dict_params_info)
+        print(df_learning)
+        # [TBD] Expected result when using MC with REINFORCE_TRUE strategy
+        # (2023/01/31) FOR NOW THESE ARE INVENTED RESULTS AS I HAVEN'T RUN IT SUCCESSFULLY YET
+        df_learning_expected = pd.DataFrame.from_items([
+                                                ('theta', [[1.1, 2.1, 3.1], [1.3, 2.3, 3.4], [1.1, 2.1, 3.1], [1.1, 2.1, 3.1], [1.1, 2.1, 3.1]]),
+                                                ('theta_next', [[1.3, 2.3, 3.4], [1.1, 2.1, 3.1], [1.1, 2.1, 3.1], [1.1, 2.1, 3.1], [1.1, 2.1, 3.1]]),
+                                                ('gradV', [ np.array([0.123813, 0.234522, 0.584292]),
+                                                            np.array([0.2, 0.3, 0.5]),
+                                                            np.array([0.3, -0.6, 0.8]),
+                                                            np.array([0.1, 0.4, 0.9]),
+                                                            np.array([-0.25, 0.33, 0.75])]),
+                                                ('alpha', [1.0]*5),
+                                                ('V', [-9.000, -10.775, -8.925, -9.675, -9.725]),
+                                                ('n_events_mc', [1500, 1500, 1500, 1500, 1500]),
+                                                ('n_events_fv', [0]*5)
+                                                ])
+        self.showResults(agent_gradient)
+
+        assert  dict_params_learn['mode'] == LearningMode.REINFORCE_TRUE and \
+                dict_params_learn['t_learn'] == 15
+        assert  seed == 1717 and \
+                dict_params_simul['theta_true'] == [4, 7, 10] and \
+                dict_params_simul['theta_start'] == [0.1, 0.1, 0.1] and \
+                dict_params_simul['nparticles'] == 1 and \
+                dict_params_simul['t_sim'] == 30*50 and \
+                dict_params_simul['buffer_size_activation_factor'] == [0.3, 0.3, 0.3] and \
+                dict_params_simul['burnin_time_steps'] == 0 and \
+                dict_params_simul['min_num_cycles_for_expectations'] == 0
+        #assert np.allclose(df_learning, df_learning_expected, atol=1E-6)
+
     def test_Env_MetFVRLwithReinforceTrue(self):
         print("\n")
         print("".join(np.repeat("*", 20)))
-        print("Testing the FVRL algorithm on a single server system using the REINFORCE_TRUE learning strategy...")
+        print("Testing the FVRL algorithm on a loss network system receiving multi-class jobs using the REINFORCE_TRUE learning strategy...")
+        print("Optimum theta and expected cost for loss network system: {}".format(self.dict_optimum_expected_cost))
 
         # Light execution parameters
         dict_params_info = dict({'plot': False, 'log': False, 'symbol': 'g.-'})
@@ -375,18 +501,18 @@ class Test_EstPolicy_EnvQueueLossNetworkWithJobClasses(unittest.TestCase):
         # Simulation parameters
         dict_params_learn = dict({'method': LearningMethod.FV,
                                   'alpha_start': 10.0, 'adjust_alpha': True, 'func_adjust_alpha': np.float, 'min_time_to_update_alpha': 0, 'alpha_min': 0.01,
-                                 'mode': LearningMode.REINFORCE_TRUE, 't_learn': 5})
+                                 'mode': LearningMode.REINFORCE_TRUE, 't_learn': 30})
         dict_params_simul = dict({
             'seed': 1717,
-            'theta_true': [4, 2, 5],            # These theta_true are NOT the actual true thetas!! In fact, we do NOT know the true values at this point.
-            'theta_start': [7.1, 3.1, 0.1],     # IMPORTANT: The theta values in each component should NOT give a blocking size K(i) that is larger than the system's capacity K... o.w. the gradient of that component is always 0...
-            'nparticles': 30, #300
-            't_sim': 50, #100
+            'theta_true': [4, 7, 10],            # These theta_true are NOT the actual true thetas!! In fact, we do NOT know the true values at this point.
+            'theta_start': [0.1, 0.1, 0.1],
+            'nparticles': 100, #30, 300
+            't_sim': 100, #50
             'buffer_size_activation_factor': [0.3, 0.3, 0.3],
             # For now the following two attributes  are set to 0 until I solve the TO-DO task in the estimate_blocking_fv() function in simulators/queues.py
             # as the process of setting the estimated probability to NaN does not work with the multidimensional theta case.
-            'burnin_time_steps': 0,
-            'min_num_cycles_for_expectations': 0,
+            'burnin_time_steps': 20,
+            'min_num_cycles_for_expectations': 5, #5,
             })
         # Make a copy of the seed used to run the process (for the assertion below),
         # because the key in dict_params_simul is changed by the process
@@ -416,83 +542,19 @@ class Test_EstPolicy_EnvQueueLossNetworkWithJobClasses(unittest.TestCase):
                                                 ('n_events_mc', [95, 92, 88, 97, 88]),
                                                 ('n_events_fv', [179, 235, 300, 454, 674])
                                                 ])
+        self.showResults(agent_gradient)
 
         assert  dict_params_learn['mode'] == LearningMode.REINFORCE_TRUE and \
                 dict_params_learn['t_learn'] == 5
         assert  seed == 1717 and \
-                dict_params_simul['theta_true'] == [4, 2, 5] and \
-                dict_params_simul['theta_start'] == [7.1, 3.1, 0.1] and \
+                dict_params_simul['theta_true'] == [4, 7, 10] and \
+                dict_params_simul['theta_start'] == [0.1, 0.1, 0.1] and \
                 dict_params_simul['nparticles'] == 30 and \
                 dict_params_simul['t_sim'] == 50 and \
                 dict_params_simul['buffer_size_activation_factor'] == [0.3, 0.3, 0.3] and \
                 dict_params_simul['burnin_time_steps'] == 0 and \
                 dict_params_simul['min_num_cycles_for_expectations'] == 0
         #assert np.allclose(df_learning, df_learning_expected, atol=1E-6)
-
-    def notyet_test_Env_MetMCwithReinforceTrue(self):
-        print("\n")
-        print("".join(np.repeat("*", 20)))
-        print("Testing the MC algorithm on a single server system using the REINFORCE_TRUE learning strategy...")
-
-        # Light execution parameters
-        dict_params_info = dict({'plot': False, 'log': False, 'symbol': 'r.-'})
-
-        # Simulation parameters
-        dict_params_learn = dict({  'method': LearningMethod.MC,
-                                    'alpha_start': 10.0, 'adjust_alpha': True, 'func_adjust_alpha': np.float, 'min_time_to_update_alpha': 0, 'alpha_min': 0.01,
-                                    'mode': LearningMode.REINFORCE_TRUE, 't_learn': 5})
-        dict_params_simul = dict({
-            'seed': 1717,
-            'theta_true': [4, 2, 5],
-            'theta_start': [7.1, 3.1, 0.1],
-            'nparticles': 1,
-            't_sim': 30*50,
-            'buffer_size_activation_factors': [0.3, 0.3, 0.3],
-            'burnin_time_steps': 20,
-            'min_num_cycles_for_expectations': 5,
-            })
-        # Make a copy of the seed used to run the process (for the assertion below),
-        # because the key in dict_params_simul is changed by the process
-        # as we need to consider different seeds for the different simulation parts and this seed is passed to each
-        # simulator through the dict_params_simul dictionary and is used to store its value in the output files
-        # to allow repeatability.
-        seed = dict_params_simul['seed']
-
-        # Agent interacting with the environment
-        agent_gradient = self.createAgentWithPolicyGradientLearner(dict_params_simul, dict_params_learn)
-
-        # Run the simulation!
-        df_learning = self.runSimulation(agent_gradient, dict_params_simul, dict_params_learn, dict_params_info)
-        print(df_learning)
-        # [TBD] Expected result when using MC with REINFORCE_TRUE strategy
-        # (2023/01/31) FOR NOW THESE ARE INVENTED RESULTS AS I HAVEN'T RUN IT SUCCESSFULLY YET
-        df_learning_expected = pd.DataFrame.from_items([
-                                                ('theta', [[1.1, 2.1, 3.1], [1.3, 2.3, 3.4], [1.1, 2.1, 3.1], [1.1, 2.1, 3.1], [1.1, 2.1, 3.1]]),
-                                                ('theta_next', [[1.3, 2.3, 3.4], [1.1, 2.1, 3.1], [1.1, 2.1, 3.1], [1.1, 2.1, 3.1]]),
-                                                ('gradV', [ np.array([0.123813, 0.234522, 0.584292]),
-                                                            np.array([0.2, 0.3, 0.5]),
-                                                            np.array([0.3, -0.6, 0.8]),
-                                                            np.array([0.1, 0.4, 0.9]),
-                                                            np.array([-0.25, 0.33, 0.75])]),
-                                                ('alpha', [1.0]*5),
-                                                ('V', [-9.000, -10.775, -8.925, -9.675, -9.725]),
-                                                ('n_events_mc', [1500, 1500, 1500, 1500, 1500]),
-                                                ('n_events_fv', [0]*5)
-                                                ])
-
-        assert  dict_params_learn['mode'] == LearningMode.REINFORCE_TRUE and \
-                dict_params_learn['t_learn'] == 5
-        assert  seed == 1717 and \
-                dict_params_simul['theta_true'] == [4, 2, 5] and \
-                dict_params_simul['theta_start'] == [2.1, 3.1, 0.1] and \
-                dict_params_simul['nparticles'] == 1 and \
-                dict_params_simul['t_sim'] == 30*50 and \
-                dict_params_simul['buffer_size_activation_factors'] == [0.3, 0.3, 0.3] and \
-                dict_params_simul['burnin_time_steps'] == 0 and \
-                dict_params_simul['min_num_cycles_for_expectations'] == 0
-
-        assert np.allclose(df_learning, df_learning_expected, atol=1E-6)
-
 
 
 if __name__ == "__main__":
@@ -510,14 +572,14 @@ if __name__ == "__main__":
     # (e.g. passing the learning mode (e.g. IGA or REINFORCE_TRUE) to functions such as
     # estimate_blocking_probability_fv() and similar.
     test_suite_singleserver = unittest.TestSuite()
-    test_suite_singleserver.addTest(Test_EstPolicy_EnvQueueSingleServer("test_Env_MetFVRLwithReinforceTrue"))
-    test_suite_singleserver.addTest(Test_EstPolicy_EnvQueueSingleServer("test_EnvQueueSingleServer_MetFVRL_TestSeveralCases"))
     test_suite_singleserver.addTest(Test_EstPolicy_EnvQueueSingleServer("test_Env_MetMCwithReinforceTrue"))
+    test_suite_singleserver.addTest(Test_EstPolicy_EnvQueueSingleServer("test_Env_MetFVRLwithReinforceTrue"))
+    test_suite_singleserver.addTest(Test_EstPolicy_EnvQueueSingleServer("test_Env_MetFVRL_TestSeveralCases"))
 
     # 2) Loss network tests
     test_suite_lossnetwork = unittest.TestSuite()
+    test_suite_lossnetwork.addTest(Test_EstPolicy_EnvQueueLossNetworkWithJobClasses("test_Env_MetMCwithReinforceTrue"))
     test_suite_lossnetwork.addTest(Test_EstPolicy_EnvQueueLossNetworkWithJobClasses("test_Env_MetFVRLwithReinforceTrue"))
-    #test_suite_lossnetwork.addTest(Test_EstPolicy_EnvQueueLossNetworkWithJobClasses("test_Env_MetMCwithReinforceTrue"))
 
     #-- Run the test suites
     runner.run(test_suite_singleserver)

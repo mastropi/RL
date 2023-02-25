@@ -31,7 +31,7 @@ from Python.lib.utils.basic import array_of_objects, find_last, get_current_date
     get_datetime_from_string, is_scalar, index_linear2multi, measure_exec_time, merge_values_in_time
 from Python.lib.utils.computing import compute_job_rates_by_server, compute_number_of_burnin_cycles_from_burnin_time, \
     compute_blocking_probability_birth_death_process, compute_survival_probability, generate_min_exponential_time, \
-    all_combos_with_sum, stationary_distribution_product_form, func_prod_knapsack
+    all_combos_with_sum, compute_stationary_probability_knapsack_when_blocking_by_class
 
 
 @unique
@@ -144,7 +144,7 @@ class SimulatorQueue(Simulator):
         Resets the policy learning history. This should be called for any new learning simulation that is run (e.g. a new replication of the learning process)
         """
         self.alphas = []            # Learning rates used in the learning of the policy when updating from theta to theta_next (i.e. from thetas -> thetas_updated)
-        # TODO: (2023/01/28) The storage of the historic thetas obsreved during learning should probably NOT be stored as part of the simulator object but we should use the history already stored by the policy learner (see the LeaPolicyGradient class)
+        # TODO: (2023/01/28) The storage of the historic thetas observed during learning should probably NOT be stored as part of the simulator object but we should use the history already stored by the policy learner (see the LeaPolicyGradient class)
         # In addition, the values of thetas_updated would be obtained from thetas by just looking at the following index (i.e. thetas[1] contains the updated theta from thetas[0], and so forth)
         self.thetas = []            # List of theta values before the update by the policy learning step
         self.thetas_updated = []    # List of theta values AFTER the update by the policy learning step.
@@ -343,8 +343,10 @@ class SimulatorQueue(Simulator):
         # NOTE that this is done in EACH environment used in the simulation, because this environment is the one passed to functions
         # and the one that is used to retrieve the value of the true theta parameter.
         if self.envs[0].getBufferType() == BufferType.SINGLE:
-            assert is_scalar(dict_params_simul['theta_true']) or len(dict_params_simul['theta_true']) == 1, \
-                    "The true theta parameter `theta_true` defined in the `dict_params_simul` parameter must be scalar or of length 1 for queues system with a single buffer: {}" \
+            assert is_scalar(dict_params_simul['theta_true']) and len(self.agent.getAcceptancePolicies()) == 1 or \
+                   len(dict_params_simul['theta_true']) == len(self.agent.getAcceptancePolicies()), \
+                    "The true theta parameter `theta_true` defined in the `dict_params_simul` parameter must be scalar " \
+                    "(and the number of acceptance policies must be 1 in that case) or of length equal to the number of acceptance policies for queues system with a single buffer: {}" \
                     .format(dict_params_simul['theta_true'])
             _theta_true = dict_params_simul['theta_true'] if is_scalar(dict_params_simul['theta_true']) else dict_params_simul['theta_true'][0]
             for env in self.envs:
@@ -376,6 +378,15 @@ class SimulatorQueue(Simulator):
         # - t: the number of queue state changes (a.k.a. number of queue iterations)
         # - t_learn: the number of learning steps (of the value functions and policies)
         t_learn = 0
+        # Need to keep track of the original capacity of the queue environment because,
+        # in problems where blocking is not based on a single buffer (i.e. when self.env.BufferType != BufferType.SINGLE)
+        # the capacity may change along the way of learning, as the capacity may be limited by the blocking sizes of
+        # each job class arriving to the system (e.g. when capacity = 10 and blocking sizes by job class are [2, 3, 1],
+        # the effective capacity of the system is 2 + 3 + 1 = 6 < 10 = original capacity).
+        # As the blocking sizes change during learning, the new effective capacity of the system needs to be re-computed
+        # having the ORIGINAL capacity of the system as upper bound, NOT the latest effective capacity computed by the
+        # learning process!
+        env_original_capacity = self.env.getCapacity()
         while t_learn < self.dict_params_learning['t_learn']:
             t_learn += 1
             dict_params_info['t_learn'] = t_learn
@@ -409,10 +420,22 @@ class SimulatorQueue(Simulator):
             else:
                 # True stationary probability of a loss network system for ALL possible states
                 # (further down, we will use the true probabilities that are actually checked, i.e. for those states for which an estimated probability is computed)
-                x, dist = stationary_distribution_product_form(self.env.getCapacity(), self.rhos, func_prod_knapsack)
+                env_effective_capacity, x, dist = compute_stationary_probability_knapsack_when_blocking_by_class(env_original_capacity, self.rhos, Ks)
                 probas_stationary_true = dict()
                 for xx, dd in zip(x, dist):
                     probas_stationary_true[tuple(xx)] = dd
+
+                # *** IMPORTANT ***
+                # Set the capacity of each environment used for the simulation to the EFFECTIVE capacity computed above
+                # so that stationary probabilities computed below by estimate_blocking_fv() or estimate_blocking_mc()
+                # are computed ONLY on the valid states when the environment's capacity may have been potentially limited by
+                # the blocking sizes defined by the current policy (given in variable Ks),
+                # e.g. when capacity = 10 and blocking sizes are Ks = [2, 1, 3] => the effective capacity is 2 + 1 + 3 = 6
+                # which means that for example the state = (4, 0, 0), although valid in the original environment with capacity 10
+                # is NOT valid in the environment limited by the blocking size values Ks because state[0] = 4 > 2 = Ks[0].
+                for env in self.envs:
+                    env.setCapacity(env_effective_capacity)
+                # *** IMPORTANT ***
 
             if self.env.getBufferType() == BufferType.SINGLE:
                 dict_params_simul['buffer_size_activation'] = np.max([1, int( np.round(dict_params_simul['buffer_size_activation_factor']*Ks) )])
@@ -480,6 +503,11 @@ class SimulatorQueue(Simulator):
                 max_survival_time = 0.0 # Ditto
 
             if self.env.getBufferType() == BufferType.SINGLE:
+                if True or DEBUG_ESTIMATORS or show_messages(verbose, verbose_period, t_learn):
+                    print("\n--> Estimated stationary probability: Pr(K-1={}) = {} vs. True Pr(K-1={}) = {}, error = {:.3f}%" \
+                          .format(Ks-1, probas_stationary[Ks-1], Ks-1, probas_stationary_true[Ks-1], (probas_stationary[Ks-1] / probas_stationary_true[Ks-1] - 1) * 100))
+                    print("--> Estimated stationary probability: Pr(K={}) = {} vs. True Pr(K={}) = {}, error = {:.3f}%" \
+                        .format(Ks, probas_stationary[Ks], Ks, probas_stationary_true[Ks-1], (probas_stationary[Ks] / probas_stationary_true[Ks] - 1) * 100))
                 # Compute the state-action values (Q(s,a)) for buffer size = Ks-1
                 if probas_stationary.get(Ks-1, 0.0) == 0.0 or np.isnan(probas_stationary.get(Ks-1, 0.0)):
                     Q0_Km1 = 0.0
@@ -487,8 +515,8 @@ class SimulatorQueue(Simulator):
                     n_Km1 = 0
                     if True or DEBUG_ESTIMATORS or show_messages(verbose, verbose_period, t_learn):
                         print("Estimation of Q_diff(K-1) skipped because the stationary probability Pr(K-1) is {}".format(probas_stationary.get(Ks-1)))
-                    # Set Pr(K-1) to 0 in case it was not computed, so that learns the policy below (`learn()`)
-                    # receives the input parameters as expected (e.g. probas_stationary should have 2 keys: K-1 and K
+                    # Set Pr(K-1) to 0 in case it was not computed, so that the policy leaning method called below (`learn()`)
+                    # receives the input parameters as expected (e.g. probas_stationary should have 2 keys: K-1 and K)
                     probas_stationary[Ks-1] = 0.0
                 else:
                     # When the parameterized policy is a linear step function with only one buffer size where its
@@ -505,9 +533,6 @@ class SimulatorQueue(Simulator):
                     if True or DEBUG_ESTIMATORS or show_messages(verbose, verbose_period, t_learn):
                         print("--> Estimated state-action values on n={} realizations out of {} with max simulation time = {:.1f} out of {:.1f}:\nQ(K-1={}, a=1) = {}\nQ(K-1={}, a=0) = {}\nQ_diff = Q(K-1,1) - Q(K-1,0) = {}" \
                             .format(n_Km1, N, max_t_Km1, t_sim_max, Ks-1, Q1_Km1, Ks-1, Q0_Km1, Q1_Km1 - Q0_Km1))
-                if True or DEBUG_ESTIMATORS or show_messages(verbose, verbose_period, t_learn):
-                    print("--> Estimated stationary probability: Pr(K-1={}) = {} vs. True Pr(K-1={}) = {}, error = {:.3f}%" \
-                          .format(Ks-1, probas_stationary[Ks-1], Ks-1, probas_stationary_true[Ks-1], (probas_stationary[Ks-1] / probas_stationary_true[Ks-1] - 1) * 100))
 
                 # Compute the state-action values (Q(s,a)) for buffer size = K
                 # This is needed ONLY when the policy learning methodology is IGA (Integer Gradient Ascent, presented in Massaro's paper (2019)
@@ -519,10 +544,10 @@ class SimulatorQueue(Simulator):
                     n_K = 0
                     if DEBUG_ESTIMATORS or show_messages(verbose, verbose_period, t_learn):
                         print("Estimation of Q_diff(K) skipped because the stationary probability Pr(K) is {}".format(probas_stationary.get(Ks-1)))
-                    # Set Pr(K) to 0 in case it was not computed, so that learns the policy below (`learn()`)
-                    # receives the input parameters as expected (e.g. probas_stationary should have 2 keys: K-1 and K
+                    # Set Pr(K) to 0 in case it was not computed, so that the policy learning method called below (`learn()`)
+                    # receives the input parameters as expected (e.g. probas_stationary should have 2 keys: K-1 and K)
                     probas_stationary[Ks] = 0.0
-                else:
+                elif False: # (2023/02/21) I decided NOT to enter the below block because we don't need the Qdiff for buffer size = K, and the calculation takes time!
                     # Same as above, but for buffer size = K
                     if DEBUG_ESTIMATORS or show_messages(verbose, verbose_period, t_learn):
                         print("\nEstimating the difference of the state-action values when the initial buffer size is K={}...".format(Ks))
@@ -535,15 +560,29 @@ class SimulatorQueue(Simulator):
                     if show_messages(verbose, verbose_period, t_learn):
                         print("--> Estimated state-action values on n={} realizations out of {} with max simulation time = {:.1f} out of {:.1f}:\nQ(K={}, a=1) = {}\nQ(K={}, a=0) = {}\nQ_diff = Q(K,1) - Q(K,0) = {}" \
                             .format(n_K, N, max_t_K, t_sim_max, Ks, Q1_K, Ks, Q0_K, Q1_K - Q0_K))
-                if show_messages(verbose, verbose_period, t_learn):
-                    print("--> Estimated stationary probability: Pr(K={}) = {} vs. True Pr(K={}) = {}, error = {:.3f}%" \
-                        .format(Ks, probas_stationary[Ks], Ks, probas_stationary_true[Ks-1], (probas_stationary[Ks] / probas_stationary_true[Ks] - 1) * 100))
+                else:
+                    # Set the values that are used below when storing the results to NaN or 0
+                    Q0_K, Q1_K, n_K, max_t_K = np.nan, np.nan, 0, 0
+
             else:
+                if probas_stationary_true is not None:
+                    assert set(probas_stationary.keys()).issubset(set(probas_stationary_true.keys())),\
+                        "The set of states in the probas_stationary dictionary with the estimated stationary probabilities " \
+                        "must be a subset of the set of states in the probas_stationary_true dictionary with the true stationary probabilities:" \
+                        f"\nTrue ({len(probas_stationary_true.keys())} keys):\n{sorted(probas_stationary_true.keys())}" \
+                        f"\nEstimated ({len(probas_stationary.keys())} keys):\n{sorted(probas_stationary.keys())}"
+
                 # Compute the difference in Q's for EACH state whose stationary probability was estimated by the FV process
                 Q_values = dict()
                 n_replications_with_mixing = dict()   # Number of replications out of N run where trajectories mix
                 for x, p in probas_stationary.items():
-                    if p > 0:
+                    if True or DEBUG_ESTIMATORS or show_messages(verbose, verbose_period, t_learn):
+                        print("\n--> Estimated stationary probability of blocking state: Pr(x={}) = {} vs. True Pr(x={}) = {}, error = {:.3f}%" \
+                            .format(x, probas_stationary[x], x, probas_stationary_true[x], (probas_stationary[x] / probas_stationary_true[x] - 1) * 100))
+                    ### TEMPORARY ###
+                    if p > 0.0:
+                    #if probas_stationary_true[x] > 0:
+                    ### TEMPORARY ###
                         if DEBUG_ESTIMATORS or show_messages(verbose, verbose_period, t_learn):
                             print("\nEstimating the difference of the state-action values when the initial state is x={}...".format(x))
                         # Find the component(s) of state x on which the Q value difference should be computed,
@@ -561,15 +600,12 @@ class SimulatorQueue(Simulator):
                                                                         seed=dict_params_simul['seed'] * 100, verbose=verbose,
                                                                         verbose_period=verbose_period)
                                 if True or DEBUG_ESTIMATORS or show_messages(verbose, verbose_period, t_learn):
-                                    print("--> Estimated state-action values for blocking job of class {} on n={} realizations out of {} with max simulation time = {:.1f} out of {:.1f}:"
+                                    print("--> Estimated state-action values for blocking job of class {} at K-1={} on n={} realizations out of {} with max simulation time = {:.1f} out of {:.1f}:"
                                           "\nQ(x={}, a=1) = {}\nQ(x={}, a=0) = {}\nQ_diff = Q(x,1) - Q(x,0) = {}" \
-                                        .format(dim_blocking, n, N, max_t, t_sim_max, x, Q1, x, Q0, Q1 - Q0))
+                                            .format(dim_blocking, K-1, n, N, max_t, t_sim_max, x, Q1, x, Q0, Q1 - Q0))
 
                                 Q_values[x] = [Q0, Q1]
                                 n_replications_with_mixing[x] = n
-                        if True or DEBUG_ESTIMATORS or show_messages(verbose, verbose_period, t_learn):
-                            print("--> Estimated stationary probability: Pr(x={}) = {} vs. True Pr(x={}) = {}, error = {:.3f}%" \
-                                  .format(x, probas_stationary[x], x, probas_stationary_true[x], (probas_stationary[x] / probas_stationary_true[x] - 1) * 100))
 
             # Learn the value function and the policy
             theta_prev = self.getLearnerP().getThetaParameter()
@@ -634,7 +670,10 @@ class SimulatorQueue(Simulator):
                 # In the multidimensional state case, we don't know at this point how to compute the errors of Phi and E(T_A)
                 err_phi, err_et = np.nan, np.nan
                 self.learn(self.agent, t,
+                           ### TEMPORARY ###
                            probas_stationary=probas_stationary,
+                           #probas_stationary=dict([(x, probas_stationary_true[x]) for x in probas_stationary]),
+                           ### TEMPORARY ###
                            Q_values=Q_values,
                            simul_info=dict({'t_learn': t_learn,
                                             'K': Ks,
@@ -881,7 +920,7 @@ class SimulatorQueue(Simulator):
         start_queue_state = choose_state_for_buffer_size(self.env, K-1)
         start_state = (start_queue_state, None)
         # Reward received from the initial rejection of the job at buffer size K-1
-        first_reward = compute_reward_for_buffer_size(self.env, K-1)
+        first_reward = compute_reward_for_rejection_at_current_state(self.env, state=(K-1, 0))
         Q0 = 0.0
         for _ in range(N):
             agent_Q = copy.deepcopy(self.agent)
@@ -949,8 +988,10 @@ class SimulatorQueue(Simulator):
         n = 0           # Number of times Q0 and Q1 can be estimated from mixing trajectories (out of N)
         max_t_mix = 0.0 # Maximum discrete mixing time observed over the n pair of trajectories that mix
         if True:
-            print("Estimating Qdiff for state or buffer size s={}... using {} replications".format(state_or_buffer_size, N))
+            print("Estimating Qdiff for state or buffer size s={} at blocking dimension {}... using {} replications".format(state_or_buffer_size, dim_blocking, N))
         for i in range(N):
+            if False:
+                print(f"--- Replication {i+1} of {N} ---")
             _, Q0_, Q1_, t_mix = self.run_simulation_2_until_mixing(t_learn, state_or_buffer_size, dim_blocking, t_sim_max,
                                                                     verbose=verbose, verbose_period=verbose_period)
             if not np.isnan(Q0_) and not np.isnan(Q1_):
@@ -1007,7 +1048,7 @@ class SimulatorQueue(Simulator):
         # ------------------------------ Auxiliary functions ----------------------------------#
         def apply_event(env, t, event, job_class_or_server):
             """
-            Apply the given event, either a BIRTH with the incoming job class or a DEATH event at the given server,
+            Apply the given event, either a BIRTH with the incoming job class, or a DEATH event at the given server,
             on the given environment that is currently at discrete time t.
 
             Arguments:
@@ -1099,24 +1140,29 @@ class SimulatorQueue(Simulator):
         # Set the state of each environment AFTER taking the respective action at time t=0.
         # This is state_or_buffer_size when the first action is Reject and state_or_buffer_size increased by +1
         # in the `dim_blocking` dimension when the first action is Accept.
+        _state_or_buffer_size_start_reject = state_or_buffer_size
+        _state_or_buffer_size_start_accept = tuple([bs + 1 if i == dim_blocking else bs for i, bs in enumerate(state_or_buffer_size)])
+        # Environment that starts at REJECTION. Note that the job class is set to `dim_blocking`
+        # because it CANNOT be None since we need the job class to compute below the first reward of rejecting the job.
+        envs[0].setState((_state_or_buffer_size_start_reject, dim_blocking))
+        # Environment that starts at ACCEPTANCE. The job class could be set to None in this case (as no reward is
+        # computed because the reward of accepting is assumed to be 0.0 (although we could at some point use
+        # a reward function for acceptance --such as rewardOnJobClassAcceptance() in environments/queues.py--
+        # so we also set it to `dim_blocking`).
+        envs[1].setState((_state_or_buffer_size_start_accept, dim_blocking))
 
         # History of states, actions and rewards of each environment (2 x <undef> list)
         # Used for informational purposes, but actually we don't need to store the history because we are computing
-        # Q0 and Q1 on the fly.
-        times = [[0],
-                 [0]]
-        states = [[(state_or_buffer_size, None)],
-                  [(state_or_buffer_size, None)]]
+        # Q0 and Q1 on the fly. But still I store the history just in case we need it for some debugging purposes for instance.
+        # NOTE that only the BIRTH events are recorded, therefore the state values may show jumps that are larger than -1 or +1.
+        times = [[0.0],
+                 [0.0]]
+        states = [[envs[0].getState()],
+                  [envs[1].getState()]]
         actions = [[Actions.REJECT],
                    [Actions.ACCEPT]]
-        rewards = [[compute_reward_for_buffer_size(self.env, state_or_buffer_size[dim_blocking])],
+        rewards = [[compute_reward_for_rejection_at_current_state(envs[0])],
                    [0.0]]
-
-        # Set the NEW state of the environments once the above actions have been taken on the respective states
-        _state_or_buffer_size_start_reject = state_or_buffer_size
-        _state_or_buffer_size_start_accept = tuple([bs + 1 if i == dim_blocking else bs for i, bs in enumerate(state_or_buffer_size)])
-        envs[0].setState((_state_or_buffer_size_start_reject, None))     # Environment that starts at REJECTION
-        envs[1].setState((_state_or_buffer_size_start_accept, None))     # Environment that starts at ACCEPTANCE
 
         # Time step in the queue trajectory (the first time step is t = 0)
         done = False
@@ -1180,17 +1226,18 @@ class SimulatorQueue(Simulator):
                 # Either we reached the maximum simulation time allowed or mixing occurs
                 # => Stop the simulation
                 if False:
-                    print("*** TRAJECTORIES MIXED! (Q1={:.1f}, Q0={:.1f}, Qdiff = {:.1f}) ***".format(Q1, Q0, Q1 - Q0))
+                    print("*** TRAJECTORIES MIXED AT t={}! (state0={}, state1={}; Q1={:.1f}, Q0={:.1f}, Qdiff = {:.1f}) ***".format(t, states[0][-1], states[1][-1], Q1, Q0, Q1 - Q0))
                 done = True
 
             if self.debug:
-                print("t={}: states = [{}, {}] events={} actions={} -> states={} rewards={}" \
-                      .format(t, states[-2][0], states[-2][1], [event0, event1], [action0, action1], [next_state0, next_state1], [reward0, reward1]), end="\n")
+                # Note that only the states at birth times are recorded, therefore the occupancy values may NOT always change by -1 or +1!
+                print("t={}: states = [{}, {}] events={}, job_classes={}, actions={} -> states={} rewards={}" \
+                      .format(t, states[0][-2], states[1][-2], [event0.name, event1.name], [job_class_or_server0, job_class_or_server1], [action0.name, action1.name], [next_state0, next_state1], [reward0, reward1]), end="\n")
 
         # DONE
         if show_messages(verbose, verbose_period, t_learn):
             print("==> simulation ENDS at discrete time t={} at states = {} coming from states = {}, actions = {} rewards = {})" \
-                    .format(t, [next_state0, next_state1], [states[-2][0], states[-2][1]], [action0, action1], [reward0, reward1]))
+                    .format(t, [next_state0, next_state1], [states[0][-2], states[1][-2]], [action0, action1], [reward0, reward1]))
 
 #        if show_messages(verbose, verbose_period, t_learn):
 #           plt.figure()
@@ -1213,7 +1260,7 @@ class SimulatorQueue(Simulator):
         return t, Q0, Q1, t_mix
 
     @measure_exec_time
-    def learn(self, agent, t, probas_stationary: dict=None, Q_values: dict=None, simul_info: dict=None):
+    def learn(self, agent, t, probas_stationary: dict=None, Q_values: dict=None, probas_stationary_true: dict=None, simul_info: dict=None):
         """
         Learns the value functions and the policy at time t
 
@@ -1226,14 +1273,20 @@ class SimulatorQueue(Simulator):
             In Monte-Carlo learning, this time would be the end of the queue simulation.
 
         probas_stationary: (opt) dict of floats between 0 and 1 (used when estimating the theoretical grad(V))
-            Dictionary with the estimated stationary probability for each buffer size defined in its keys.
-            The dictionary keys are expected to be K-1 and K.
+            Dictionary with the estimated stationary probability for each state of interest for learning defined in its keys.
+            For a single-buffer system the dictionary keys are expected to be K-1 and K.
             default: None
 
         Q_values: (opt) dict of lists or numpy arrays (used when estimating the theoretical grad(V))
-            Dictionary with the estimated state-action values for each buffer size defined in its keys.
+            Dictionary with the estimated state-action values for each state of interest for learning defined in its keys.
             Each element in the list is indexed by the initial action taken when estimating the corresponding Q value.
-            The dictionary keys are expected to be K-1 and K.
+            For a single-buffer system the dictionary keys are expected to be K-1 and K.
+            default: None
+
+        probas_stationary_true: (opt) dict of floats between 0 and 1
+            Dictionary with the estimated stationary probability for each state of interest for learning
+            (e.g. states with non-deterministic blocking) defined in its keys.
+            For a single-buffer system, the dictionary keys are expected to be K-1 and K.
             default: None
 
         simul_info: (opt) dict
@@ -1259,13 +1312,12 @@ class SimulatorQueue(Simulator):
 
         if self.dict_params_learning['mode'] == LearningMode.REINFORCE_RETURN:
             agent.getLearnerV().learn(t)  # UNCOMMENTED ON SAT, 27-NOV-2021
-            theta_prev, theta, V, gradV, G = agent.getLearnerP().learn(t)
-            #theta_prev, theta, V, gradV, G = agent.getLearnerP().learn_TR(t)
+            theta_prev, theta, V, gradV, G = agent.getLearnerP().learn_update_theta_at_end_of_episode(t)
+            #theta_prev, theta, V, gradV, G = agent.getLearnerP().learn_update_theta_at_each_time_step(t)
         else:
-            # When learning via the theoretical grad(V) expression we don't need to estimate the average reward!
+            # When learning via the theoretical grad(V) expression, we don't need to estimate the average reward!
             # (because grad(V) is the difference between two state-action values, and the average reward affects both the same way)
-            # This is the option to use when learning via Fleming-Viot because in that case the return G(t)
-            # --used when learning with learn() or learn_TR() or learn_linear_theoretical()-- is NOT meaningful
+            # This is the option to use when learning via Fleming-Viot because in that case the return G(t) is NOT meaningful
             # because, either it is empty as the rewards are not recorded while running the Fleming-Viot process,
             # or it does not reflect the actual values of each state-value of the original system.
             assert probas_stationary is not None and Q_values is not None
@@ -1281,6 +1333,18 @@ class SimulatorQueue(Simulator):
                     "Keys K-1={} and K={} are present in the dictionaries containing the stationary probability estimations ({}) and the Q values ({})" \
                         .format(K-1, K, probas_stationary, Q_values)
                 theta_prev, theta, V, gradV, G = agent.getLearnerP().learn_linear_theoretical_from_estimated_values_IGA(t, probas_stationary, Q_values)
+
+        # For no-buffer systems, the value of each theta dimension cannot exceed a threshold that would make the blocking size K(i) for job class i be larger than the system's capacity K, which is a characteristic of the system (i.e. fixed)
+        if self.env.getBufferType() == BufferType.NOBUFFER:
+            assert not is_scalar(theta), "Parameter theta must NOT be scalar-valued"
+            K = self.env.getCapacity()
+            for i, theta_i in enumerate(theta):
+                # We need to upper bound theta by K-1 where K is the capacity of the loss network
+                # (MINUS a small epsilon so that theta is NOT an integer and learning can continue --o.w. the derivative of the policy will always be 0 at theta)
+                # so that the blocking states defined by theta are *valid states* of the Markov Chain.
+                # Note that we bound theta by K-1 MINUS epsilon, instead of PLUS epsilon so that the deterministic blocking size that is equal to ceiling(theta+1) = K.
+                theta[i] = min(theta_i, K-1 - 0.1)
+                agent.getLearnerP().setThetaParameter(theta)
 
         if simul_info is not None:
             t_learn = simul_info.get('t_learn', 0)
@@ -1327,18 +1391,21 @@ class SimulatorQueue(Simulator):
         self.proba_stationary += [probas_stationary]
         # Compute the error of the stationary probability estimations
         if self.env.getBufferType() == BufferType.SINGLE:
-            probas_stationary_true = dict({K-1: compute_blocking_probability_birth_death_process(self.rhos, K-1),
-                                           K:   compute_blocking_probability_birth_death_process(self.rhos, K)})
-            error_proba_stationary_Km1 = probas_stationary[K-1] / probas_stationary_true[K-1] - 1
-            error_proba_stationary_K = probas_stationary.get(K, np.nan) / probas_stationary_true[K] - 1
+            if probas_stationary is None or probas_stationary_true is None:
+                error_proba_stationary_Km1 = np.nan
+                error_proba_stationary_K = np.nan
+            else:
+                error_proba_stationary_Km1 = probas_stationary[K-1] / probas_stationary_true[K-1] - 1
+                error_proba_stationary_K = probas_stationary.get(K, np.nan) / probas_stationary_true[K] - 1
             self.error_proba_stationary += [dict({K-1:  error_proba_stationary_Km1,
                                                   K:    error_proba_stationary_K})]
             self.Q_diff += [dict({K-1:  Q_values[K - 1][1] - Q_values[K - 1][0],
                                   K:    Q_values[K][1] - Q_values[K][0]})]
         else:
-            # TODO: [MULTIDIMENSIONAL THETA] If we want, we could compute the error of the estimated stationary probabilities of the blocking states by computing the true stationary probabilities on the loss network system
-            self.error_proba_stationary += [np.nan]
-            # TODO: [MULTIDIMENSIONAL THETA] If we want, we could store the Q difference for ALL the states of interest, namely those with non-deterministic blocking probability. These values will be stored as a dictionary index by these states x.
+            if probas_stationary is None or probas_stationary_true is None:
+                self.error_proba_stationary += [dict([(x, np.nan) for x in probas_stationary])]
+            else:
+                self.error_proba_stationary += [dict([(x, probas_stationary[x] / probas_stationary_true[x] - 1) for x in probas_stationary])]
             self.Q_diff += [np.nan]
         self.V += [V]               # NOTE: This is NOT always the average value, rho... for instance, NOT when linear_theoretical_from_estimated_values() is called above
         self.gradV += [gradV]
@@ -1348,8 +1415,9 @@ class SimulatorQueue(Simulator):
         self.n_trajectories_Q += [n_trajectories_Q]
 
         agent.getLearnerP().update_learning_time()
-        #print("*** Learning-time updated: time = {} ***".format(agent.getLearnerP().getLearningTime()))
+        #print("*** Learning time updated: time = {} ***".format(agent.getLearnerP().getLearningTime()))
         agent.getLearnerP().update_learning_rate_by_episode()
+        #print("*** Learning rate updated: alpha = {} ***".format(agent.getLearnerP().getLearningRate()))
 
         if self.save:
             self.fh_results.write("{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}\n" \
@@ -1633,19 +1701,30 @@ def compute_rel_errors_for_fv_process(rhos: list, capacity: int, buffer_size_act
         return error_rel_phi
 
 
-def compute_reward_for_buffer_size(env, buffer_size: int):
+def compute_reward_for_rejection_at_current_state(env, state=None):
     """
-    Computes the reward given by the environment when blocking at the given buffer size bs
+    Computes the reward given by the environment when rejecting an incoming job at the current state of the environment
+    or at the given state (if not None).
 
+    Arguments:
+    env: Queue environment
+        Queue environment used to compute the reward of rejecting an incoming job at its state or at the state given
+        in parameter `state`. In the latter case, the environment is used to retrieve the reward function to use for
+        the computation of the reward and its parameters.
+
+    state: tuple
+        State of the queue environment on which the reward for rejection is wished.
+        The assumed tuple is 2D, where the first element is the queue state itself and the
+        second element is the class of the arriving job that is rejected (which must NOT be None).
+
+    Return: float
+    The reward given by the environment when an incoming job is rejected at the environment's state or at the state
+    given in parameter `state`.
     If the environment does not have a reward function defined, the returned reward is -1.0, so that the expected reward
-    is equal to minus the probability of being at the given buffer size.
+    is equal to minus the probability of being at the current state of the environment.
     """
-    # We set the state to be the buffer size stored in a single-element list
-    # We perform this trick in order to pass the STATE to the reward function, just because reward functions depend on:
-    # S(t), A(t), S(t+1)
-    # i.e. they conceptually depend on states, but here we are concerned with reward functions that depend on the buffer size,
-    # so we achieve this by defining a "fictitious" state of the system which is just the buffer size value.
-    state = [buffer_size]
+    if state is None:
+        state = env.getState()
     reward_func = env.getRewardFunction()
     if reward_func is not None:
         params_reward_func = env.getParamsRewardFunc()
@@ -1692,12 +1771,13 @@ def get_blocking_boundaries(agent):
         Agent that defines a list of accept/reject policies, as described in the description above,
         e.g. one for each arriving job class, normally parameterized policies.
 
-    Return: list or list of lists
+    Return: list of int or list of lists
     If the number of acceptance policies defined in the agent is only one, the returned value is a list of blocking sizes (e.g. [K-1, K]).
     Otherwise, if more than one acceptance policy is defined by the agent, the returned value is a list of lists,
     with as many elements as the number of policies defined in the agent. Each element is a list of potential
-    blocking sizes for each policy. Ex: [ [2, 3], [6, 7], [4, 5]] where each two-element list are the values of
-    K-1 and K deduced from each of the 1D-parameterized policies defined by the agent.
+    blocking sizes for each policy. Ex: [[2, 3], [6, 7], [4, 5]] where each two-element list are the values of
+    K-1 and K deduced from each of the 1D-parameterized policies defined by the agent, in the case when these policies
+    are a linear step parameterized by theta.
     """
     assert agent is not None
     policies = agent.getAcceptancePolicies()
@@ -1879,7 +1959,7 @@ def estimate_expected_reward(env, agent, probas_stationary):
     Arguments:
     env: Queue environment
         Queue environment where the reward function of blocking states or blocking buffer size is defined.
-        The reward is computed by calling function compute_reward_for_buffer_size().
+        The reward is computed by calling function compute_reward_for_rejection_at_current_state().
 
     agent: Agent
         Agent where the accept/reject policy is defined.
@@ -1897,14 +1977,14 @@ def estimate_expected_reward(env, agent, probas_stationary):
         assertConsistencyPolicyLearnerAndAgentPolicy(agent)
         if agent.getAcceptancePolicyDependenceOnJobClass():
             proba_arrival_jobclass = np.array(env.getJobClassRates()) / np.sum(env.getJobClassRates())
-            expected_reward_reject = np.sum([compute_reward_for_buffer_size(env, occupancy) * \
+            expected_reward_reject = np.sum([compute_reward_for_rejection_at_current_state(env, state=(occupancy, i)) * \
                                              agent.getAcceptancePolicies()[i].getPolicyForAction(Actions.REJECT, (occupancy, i)) * \
                                              proba_arrival_jobclass[i]
                                                 for i, occupancy in enumerate(s_tuple)])
         else:
             # We set the job_class of the state to None because its value does not matter in determining the rejection probability
             state = (s, None)
-            expected_reward_reject = compute_reward_for_buffer_size(env, s) * \
+            expected_reward_reject = compute_reward_for_rejection_at_current_state(env, state=state) * \
                                      agent.getAcceptancePolicies()[0].getPolicyForAction(Actions.REJECT, state)
         expected_reward += expected_reward_reject * \
                            probas_stationary[s]
@@ -1987,7 +2067,7 @@ def estimate_expected_cycle_time(n_cycles: int, time_end_last_cycle: float,
 
 def estimate_expected_stopping_time_in_cycle(stopping_times, cycle_times, burnin_time: float=0.0, min_num_cycles_for_expectations: int=1):
     """
-    Computes the estimated expected stopping time based on times observed within a cycle
+    Computes the estimated expected stopping time based on stopping times observed within a cycle
 
     Arguments:
     stopping_times: list
@@ -1996,7 +2076,7 @@ def estimate_expected_stopping_time_in_cycle(stopping_times, cycle_times, burnin
     cycle_times: list
         List containing the observed cycle times within which the stopping times are observed.
         Each stopping time in `stopping_times` should be <= the corresponding cycle time in `cycle_times`
-        stored at the samed index, except for the last stopping time which may not have any corresponding cycle time,
+        stored at the same index, except for the last stopping time which may not have any corresponding cycle time,
         as the latter may not have been measured because the simulation stopped before the cycle completed.
         The length of the list should be either equal to the length of `stopping_times` or one less.
 
@@ -2023,9 +2103,8 @@ def estimate_expected_stopping_time_in_cycle(stopping_times, cycle_times, burnin
     burnin_cycles = compute_number_of_burnin_cycles_from_burnin_time(cycle_times, burnin_time)
     n_stopping_times_after_burnin = len(stopping_times) - burnin_cycles
     if n_stopping_times_after_burnin < min_num_cycles_for_expectations:
-        warnings.warn("The number of calculated burn-in cycles ({}) is too large,".format(burnin_cycles) +
-                      " as the number of observed stopping times left to estimate the expected stopping time ({}) is less than the minimum allowed ({})." \
-                      .format(len(stopping_times), min_num_cycles_for_expectations) +
+        warnings.warn("The number of observed stopping times left after the burn-in period of {} cycles to estimate the expected stopping time ({}) is smaller than the minimum allowed ({})." \
+                      .format(burnin_cycles, n_stopping_times_after_burnin, min_num_cycles_for_expectations) +
                       "The estimated expected stopping time will be set to NaN.")
         expected_stopping_time = np.nan
     else:
@@ -2235,11 +2314,58 @@ def parse_estimate_blocking_parameters(dict_params_simul, env):
     Arguments:
     dict_params_simul: dict
         Dictionary of simulation parameters to parse.
+        It should contain at least the following keys:
+        - T: either the number of simulation steps to use in the Monte-Carlo simulation when estimating the blocking
+        probability using Monte-Carlo or the number of arrival events to use in the Monte-Carlo simulation used in
+        the FV estimator of the blocking probability to estimate E(T_A), i.e. the expected reabsorption time of a single queue.
+        and one of the following set of keys:
+        a) suitable for systems with a single buffer governing blocking (e.g. single-server, multi-server with single buffer)
+            - buffer_size_activation: the overall system's buffer size for activation for systems with a single buffer
+        holding jobs that await being served. If we call this value J, then J-1 is the absorption buffer size.
+        b) suitable for systems where blocking occurs at multi-dimensional states (e.g. loss network with multi-class jobs)
+            - absorption_set: SetOfStates object defining the set of absorption states.
+            - activation_set: SetOfStates object defining the set of activation states.
+        When both (a) and (b) are given in the dictionary, precedence is given to the information provided in (a).
+
+        The following keys are optional:
+        - burnin_time_steps: number of burn-in time steps to allow at the beginning of the simulation in order to
+        consider that the Markov process is in stationary regime.
+        default: BURNIN_TIME_STEPS
+        - min_num_cycles_for_expectations: minimum number of observed reabsorption cycles to consider that the expected
+        reabsorption cycle time, E(T_A), can be reliably estimated.
+        default: MIN_NUM_CYCLES_FOR_EXPECTATIONS
+        - method_survival_probability_estimation: method to use to estimate the survival probability P(T>t)
+        in the Fleming-Viot estimation approach, which can be either:
+            - SurvivalProbabilityEstimation.FROM_N_PARTICLES, where the survival probability is estimated from the first
+            absorption times of each of the N particles used in the FV simulation, or
+            - SurvivalProbabilityEstimation.FROM_M_CYCLES, where the survival probability is estimated from the M cycles
+            defined by the return to the absorption set A of a single particle being simulated. The number M is a
+            function of the number of arrival events T and of J, the size of the absorption set A. For a fixed
+            T value, M decreases as J increases as the queue has less probability of visiting a state further away from 0.
+            Because of the non-control of the number of cycles M, the preferred method to estimate the survival probability
+            is FROM_N_PARTICLES because N is controlled by the number of particles used in the FV simulation. If we
+            increase N, the simulation time for FV will be larger as this is determined by the maximum observed survival time
+            (as no contribution to the integral appearing in the FV estimator (int{P(T>t)*phi(t)}) is received from
+            blocking events happening past the maximum observed survival time).
+        default: SurvivalProbabilityEstimation.FROM_N_PARTICLES
+        - seed: the seed to use for the pseudo-random number generation.
+        default: None
 
     env: Queue Environment
         Environment that should be used to compute the burn-in time (i.e. absolute time) from parameter 'burnin_time_steps',
         which is done using the compute_burnin_time_from_burnin_time_steps() function that uses the expected inter-event time
         computed from the job arrival rates and service rates of the queue.
+
+    Return: dict
+    Input dictionary with the following parsed parameters that are normally used in the simulation process:
+    - absorption_set
+    - activation_set
+    - T
+    - burnin_time_steps
+    - burnin_time
+    - min_num_cycles_for_expectations
+    - method_survival_probability_estimation
+    - seed
     """
     if 'buffer_size_activation' in dict_params_simul.keys():
         if dict_params_simul['buffer_size_activation'] < 1:
@@ -2276,32 +2402,14 @@ def estimate_blocking_mc(env, agent, dict_params_simul, dict_params_info, start_
 
     agent: Agent
         Agent that interacts with the environment.
+        It should have the getLearnerV() method defined.
 
     simul: SimulatorQueue
         Simulation object used for the simulation that allows estimating the blocking probability.
 
     dict_params_simul: dict
         Dictionary containing simulation and estimation parameters.
-        It should contain at least the following keys:
-        - T: either the number of simulation steps to use in the Monte-Carlo simulation when estimating the blocking
-        probability using Monte-Carlo or the number of arrival events to use in the Monte-Carlo simulation used in
-        the FV estimator of the blocking probability to estimate E(T_A), i.e. the expected reabsorption time of a single queue.
-        and one of the following set of keys, which is used only when `start_queue_state=None` to choose the starting state
-        of the Monte-Carlo simulation, so that the Monte-Carlo estimation of the blocking probability is fairly comparable
-        with the Fleming-Viot estimation (by making both of them start at a state in the boundary of the absorption set A).
-        a) suitable for systems with a single buffer governing blocking (e.g. single-server, multi-server with single buffer)
-            - buffer_size_activation: the overall system's buffer size for activation for systems with a single buffer
-        holding jobs that await being served. If we call this value J, then J-1 is the absorption buffer size.
-        b) suitable for systems where blocking occurs at multi-dimensional states (e.g. loss network with multi-class jobs)
-            - absorption_set: SetOfStates object defining the set of absorption states.
-        When both (a) and (b) are given in the dictionary, precedence is given to the information provided in (a).
-
-        The following keys are optional:
-        - burnin_time_steps: number of burn-in time steps to allow at the beginning of the simulation in order to
-        consider that the Markov process is in stationary regime.
-        - min_num_cycles_for_expectations: minimum number of observed return cycles to consider that the expected return
-         time and the stationary probabilities can be reliably estimated.
-        - seed: the seed to use for the pseudo-random number generation.
+        The dictionary should contain the keys described in function `parse_estimate_blocking_parameters()`.
 
     dict_params_info: dict
         Dictionary containing information to display, or parameters to deal with the information to display.
@@ -2309,23 +2417,29 @@ def estimate_blocking_mc(env, agent, dict_params_simul, dict_params_info, start_
     start_queue_state: (opt) int or tuple or numpy array
         Queue state at which the queue environment starts for the simulation.
         Its type depends on how the queue environment defines the state of the system.
-        default: None, in which case the start state is defined as state whose buffer size coincides with
-        dict_params_simul['buffer_size_activation'] - 1.
+        default: None, in which case the start state is randomly chosen among the states of the absorption set defined
+        either by the entry 'absorption_set' of the `dict_params_simul` parameter, or derived from the buffer size
+        defined in entry 'buffer_size_activation' of such dictionary as dict_params_simul['buffer_size_activation'] - 1.
+        Note that this start state is used to obtain a fair comparison of the Monte-Carlo estimation method with the
+        Fleming-Viot estimation method, as it makes both methods start at a state in the boundary of the absorption set A,
+        and this is the reason we need the parameter defining the set of absorption set A to be passed as part of the
+        `dict_params_simul` dictionary.
 
     Return: tuple
     Tuple with the following elements:
     - proba_blocking: the estimated blocking probability.
     - expected_reward: the estimated expected reward.
-    - probas_stationary: dictionary with the estimated stationary probability for each queue state or buffer size where blocking
-    may occur.
+    - probas_stationary: dictionary with the estimated stationary probability for each queue state or buffer size where
+    blocking may occur.
     - n_cycles_used: number of cycles used for the estimation of the stationary probabilities.
-    - expected_return_time_to_start_buffer_size: estimated expected cycle time E(T) of return to the initial buffer size.
+    - expected_return_time_to_start_state_or_buffer_size: estimated expected cycle time E(T) of return to the initial
+    queue state or buffer size.
     This value coincides with the denominator of the MC estimator of the blocking probabilities (based on renewal theory)
     ONLY when burnin_time = 0.
     Otherwise, this expected return time may or may NOT coincide with such denominator: it will coincide if, after the
-    burn-in period, the Markov chain is found at the same position (buffer size) as the starting position (buffer size);
-    otherwise it will not be the same.
-    - n_cycles_to_start_buffer_size: number of return cycles observed to estimate E(T). This will most likely NOT
+    burn-in period, the Markov chain is found at the same queue state or buffer size as the initial queue state or
+    buffer size; otherwise it will not be the same.
+    - n_cycles_to_start_state_or_buffer_size: number of return cycles observed to estimate E(T). This will most likely NOT
     coincide with the returned value `n_cycles_used` which contains the number of cycles used in the estimation of
     the stationary probabilities based on renewal theory.
     - n_events_mc: number of events observed during the Monte-Carlo simulation used to estimate the stationary
@@ -2342,11 +2456,9 @@ def estimate_blocking_mc(env, agent, dict_params_simul, dict_params_info, start_
     if agent.getLearnerV() is not None:
         agent.getLearnerV().reset()
 
-    # Selection of the start state as one having buffer size = J-1, in order to have a fair comparison with the FV method
-    # where particles are reactivated when they reach J-1.
+    # Selection of the queue start state out of the set of absorption states in order to have a fair comparison
+    # with the Fleming-Viot method where particles are reactivated when they reach a state in the absorption set.
     if start_queue_state is None:
-        # DM-2023/01/26: We comment the following out because we generalize the system to multidimensional-state systems
-        #start_queue_state = choose_state_for_buffer_size(env, dict_params_simul['buffer_size_activation'] - 1)
         start_queue_state = dict_params_simul['absorption_set'].random_choice()
     start_state = (start_queue_state, None)
     # -- Parse input parameters
@@ -2363,29 +2475,45 @@ def estimate_blocking_mc(env, agent, dict_params_simul, dict_params_info, start_
                                              burnin_time=dict_params_simul['burnin_time'],
                                              min_num_cycles_for_expectations=dict_params_simul['min_num_cycles_for_expectations'])
 
-    # Compute the other quantities that are returned to the outside world
+    #-- Compute the other quantities that are returned to the outside world
+    # Blocking probability and expected reward
     n_events_mc = t
     assert n_events_mc == dict_params_simul['T']
     proba_blocking = compute_proba_blocking(env, agent, probas_stationary)
     expected_reward = estimate_expected_reward(env, agent, probas_stationary)
-    # NOTE: This expected cycle time is just for informational purposes,
-    # as we do not use it to compute the stationary probabilities (which are computed above)
-    # However, we do perform an assertion that compares this expected return time with the expected cycle time obtained
-    # above when estimating the stationary probabilities (where it is used as denominator of the estimation ratio).
-    expected_return_time_to_start_buffer_size, n_cycles_to_start_buffer_size = \
+
+    # Expected return time to the start state or buffer size
+    # Notes: (complement the notes written in the function's documentation above)
+    # 1) This is another estimate of the expected cycle time which yields a different value from the expected cycle time
+    # returned above by the call to estimate_stationary_probabilities() when the burn-in time parameter is > 0.
+    # In fact, cycles are defined differently by the estimate_expected_cycle_time() function called below, as follows:
+    #   a) In estimate_expected_cycle_time(), cycles are defined by the return times to the initial state or buffer size.
+    #   b) In estimate_stationary_probabilities() called above, cycles are defined by the return times to whatever state
+    #       or buffer size the Markov chain is found at soon after the burn-in time is over, and that state or buffer size
+    #       is used in the application of the stationary probabilities estimation based on the renewal theorem (cf. Asmussen).
+    #   The reason for doing (b) is that we want to take the most out of the time after the burn-in time has passed,
+    #   which may not always be the case in (a) because we are waiting until the Markov chain returns to the INITIAL
+    #   state or buffer size, which may not happen soon after the burn-in time has passed...
+    # 2) The above observation implies that the number of cycles observed in (a) may be completely different from the
+    # number of cycles observed in (b) and they are not related (i.e. n_cycles_to_start_state_or_buffer_size computed
+    # in (a) could be larger or smaller than the n_cycles_used value computed in (b)).
+    # 3) The two quantities estimated by (a) and by (b) do coincide when the burn-in time parameter is equal to 0.
+    # This is asserted below.
+    expected_return_time_to_start_state_or_buffer_size, n_cycles_to_start_state_or_buffer_size = \
         estimate_expected_cycle_time(n_return_cycles, time_last_return,
                                      cycle_times=return_times, burnin_time=dict_params_simul['burnin_time'],
                                      min_num_cycles_for_expectations=dict_params_simul['min_num_cycles_for_expectations'])
     if dict_params_simul['burnin_time'] == 0.0 and n_return_cycles > 0:
-        assert n_cycles_to_start_buffer_size == n_return_cycles
-        assert np.isclose(expected_return_time_to_start_buffer_size, expected_cycle_time), \
-            "[estimation_blocking_mc] The average return time to the buffer size associated to the start state {} ({:.3f})" \
-            " coincides with the average cycle time used as denominator for the estimation of the stationary probabilities" \
+        assert n_cycles_to_start_state_or_buffer_size == n_return_cycles
+        assert  np.isnan(expected_return_time_to_start_state_or_buffer_size) and np.isnan(expected_cycle_time) or \
+                np.isclose(expected_return_time_to_start_state_or_buffer_size, expected_cycle_time), \
+            "[estimation_blocking_mc] The average return time to the start state or buffer size {} ({:.3f})" \
+            " must coincide with the average cycle time ({:.3f}) used as denominator for the estimation of the stationary probabilities" \
             " (using renewal theory), when the burn-in time is 0.0." \
-            .format(start_state, expected_return_time_to_start_buffer_size, expected_cycle_time)
+            .format(start_state, expected_return_time_to_start_state_or_buffer_size, expected_cycle_time)
 
     return proba_blocking, expected_reward, probas_stationary, n_cycles_used, \
-                expected_return_time_to_start_buffer_size, n_cycles_to_start_buffer_size, n_events_mc
+                expected_return_time_to_start_state_or_buffer_size, n_cycles_to_start_state_or_buffer_size, n_events_mc
 
 
 @measure_exec_time
@@ -2622,7 +2750,6 @@ def run_simulation_mc(env, agent, t_learn, start_state, t_sim_max,
             # Check ABSORPTION
             # Note that the state of the environment has been updated by the manage_service() function, that's why env.getQueueState() returns the value of `next_state` above
             assert env.getQueueStateFromState(next_state) == env.getQueueState()
-            #if buffer_size_decreased_to_start_buffer_size(env, state, next_state, buffer_size_start):
             if is_state_in_set(env.getQueueStateFromState(state), activation_set) and is_state_in_set(env.getQueueState(), absorption_set):
                 n_cycles_absorption += 1
                 absorption_times += [time_abs - time_last_absorption]
@@ -2671,7 +2798,9 @@ def run_simulation_mc(env, agent, t_learn, start_state, t_sim_max,
             # Note that, by checking whether the system returns to the initial BUFFER SIZE --as opposed to the initial STATE--
             # we are defining the stopping time to be the time to fulfill that condition, and we define it as the return time
             # to the initial buffer size. In particular, note that there is NO Violation of the applicability of the renewal theorem
-            # on which the estimation of the blocking probability is based (as presented in e.g. Asmussen's book).
+            # on which the estimation of the blocking probability is based (as presented in e.g. Asmussen's book), because for the theorem
+            # to apply, it suffices that the cycle is defined by a *stopping* time, and the return time to the initial buffer size
+            # classifies as a stopping time.
             if env.getBufferSizeFromState(next_state) == buffer_size_start:
                 n_cycles_return += 1
                 return_times += [time_abs - time_last_return]
@@ -2742,7 +2871,7 @@ def run_simulation_mc(env, agent, t_learn, start_state, t_sim_max,
     return t, time_abs
 
 
-def estimate_stationary_probabilities_mc(env, agent, burnin_time=0, min_num_cycles_for_expectations=1):
+def deprecated_estimate_stationary_probabilities_mc(env, agent, burnin_time=0, min_num_cycles_for_expectations=1):
     """
     Monte-Carlo estimation of the stationary probability at the buffer sizes of interest
     (defined by the agent's job acceptance policy) from the observed trajectory in continuous time
@@ -2811,10 +2940,10 @@ def estimate_stationary_probabilities_mc(env, agent, burnin_time=0, min_num_cycl
 
     # Initialize the output objects to NaN in case their values cannot be reliably estimated
     # (because of an insufficient number of observed return cycles)
-    state_or_buffer_sizes_of_interest = get_blocking_boundaries(agent)
+    buffer_sizes_of_interest = get_blocking_boundaries(agent)
     probas_stationary = dict()
-    for s in state_or_buffer_sizes_of_interest:
-        probas_stationary[s] = np.nan
+    for bs in buffer_sizes_of_interest:
+        probas_stationary[bs] = np.nan
     expected_cycle_time = np.nan
 
     idx_first_after_burnin, times_after_burnin, states_after_burnin, buffer_sizes_after_burnin = get_events_after_burnin(agent, burnin_time)
@@ -2834,8 +2963,8 @@ def estimate_stationary_probabilities_mc(env, agent, burnin_time=0, min_num_cycl
 
     # Compute the number of cycles observed after the burn-in time in order to decide whether stationary probabilities
     # can be reliably computed (based on the minimum requirement for the number of observed cycles defined as parameter)
-    # Ex: buffer_sizes_after_burnin = [1, 2, 1, 2, 3, 1, 0] => buffer_size_anchor = 1 =>
-    # idx_buffer_size_at_anchor = [0, 2, 5] => n_cycles = 3 - 1 = 2 (OK, as there are two return cycles to 1 in buffer_sizes_after_burnin)
+    # Ex: buffer_sizes_after_burnin = [1, 2, 1, 2, 3, 1, 0] => buffer_size_anchor = 1 (as this is the first element in the list) =>
+    # idx_buffer_size_at_anchor = [0, 2, 5] => n_cycles = len([0, 2, 5]) - 1 = 2 (OK, as there are two return cycles to 1 in buffer_sizes_after_burnin)
     idx_buffer_size_at_anchor = [idx for idx, bs in enumerate(buffer_sizes_after_burnin) if bs == buffer_size_anchor]
     n_cycles = len(idx_buffer_size_at_anchor) - 1   # We subtract 1 because the first value in buffer_sizes_after_burnin is the anchor buffer size (see example above)
     if n_cycles < min_num_cycles_for_expectations:
@@ -2862,7 +2991,7 @@ def estimate_stationary_probabilities_mc(env, agent, burnin_time=0, min_num_cycl
     assert len(sojourn_times_until_end_of_last_cycle) == idx_last_visit_to_anchor_buffer_size
 
     # Compute the total sojourn time at each buffer size of interest and then the corresponding stationary probability
-    for bs in state_or_buffer_sizes_of_interest:
+    for bs in buffer_sizes_of_interest:
         total_sojourn_time_at_bs = np.sum([st for x, st in zip(buffer_sizes_until_end_of_last_cycle, sojourn_times_until_end_of_last_cycle)
                                            if x == bs])
         assert total_sojourn_time_at_bs <= total_cycle_time, \
@@ -2878,6 +3007,250 @@ def estimate_stationary_probabilities_mc(env, agent, burnin_time=0, min_num_cycl
     return probas_stationary, expected_cycle_time, n_cycles
 
 
+def estimate_stationary_probabilities_mc(env, agent, burnin_time=0, min_num_cycles_for_expectations=1):
+    """
+    Monte-Carlo estimation of the stationary probability at states of interest (defined by the agent's job acceptance policy)
+    from the observed trajectory in continuous time (stored in the agent's learner).
+
+    The stationary probability is estimated as the fraction of time spent at each state of interest
+    over the sum of cycle times of returning to the state at which the Markov process is found to be
+    after removal of a possibly non-zero burn-in time from the beginning of the simulation.
+    If the burn-in time is 0, then that state is the state at which the Markov process started.
+
+    Arguments:
+    env: environment
+        The queue environment where the agent acts.
+
+    agent: Agent
+        The agent interacting with the environment in terms of job acceptance/rejection.
+        It should have a learner of the value function V and a learner of the policy P defined.
+        It should also store the observed trajectory while exploring the environment from a simulation already run
+        (which is used to estimate the stationary probabilities).
+
+    burnin_time: float
+        Continuous time to be used for burn-in, i.e. in which the process is assumed to still not be stationary,
+        and therefore the observed event times in that initial period should be excluded.
+
+    min_num_cycles_for_expectations: int
+        Minimum number of observed cycles in order to consider the estimation of the stationary probability, using
+        renewal theory, reliable.
+
+    Return: tuple
+    Tuple with the following elements:
+    - probas_stationary: Dictionary with the estimated stationary probability for the states of interest,
+    typically those where blocking may occur (deterministically or non-deterministically) according to the agent's job
+    acceptance policy.
+    - expected_cycle_time: the average observed cycle time of return to the *first* state visited by the Markov
+    process *after* the burn-in time. This coincides with the expected return time to the state at which the Markov
+    process started if burnin_time = 0.
+    - n_cycles: number of cycles used to compute the expected cycle time.
+    """
+
+    # -- Auxiliary functions
+    def get_events_after_burnin(env, agent, burnin_time):
+        "Returns the times and queue states (events) after the burn-in time"
+        # Event times and states (BEFORE the event occurs)
+        times = agent.getLearnerV().getTimes()
+        states = agent.getLearnerV().getStates()
+
+        # Remove any times and states occurring before the burn-in time
+        idx_first_after_burnin = -1
+        for idx, t in enumerate(times):
+            if t >= burnin_time:
+                idx_first_after_burnin = idx
+                break
+
+        if burnin_time == 0.0:
+            assert idx_first_after_burnin == 0
+
+        if idx_first_after_burnin == -1:
+            return idx_first_after_burnin, [], []
+
+        # Lists containing the event times, the states before those event times and
+        # the buffer sizes associated to those states happening AFTER the burn-in time
+        times_after_burnin = times[idx_first_after_burnin:]
+        states_after_burnin = [env.getQueueStateFromState(s) for s in states[idx_first_after_burnin:]]
+
+        return idx_first_after_burnin, times_after_burnin, states_after_burnin
+
+    def get_states_and_their_sojourn_times_until_end_of_last_cycle(indices_return_times: list, states: list, times: list):
+        idx_last_return_time = indices_return_times[-1]
+        states_or_buffer_sizes_until_end_of_last_cycle = states[:idx_last_return_time + 1]
+        times_until_end_of_last_cycle = times[:idx_last_return_time + 1]
+        sojourn_times_until_end_of_last_cycle = np.diff(times_until_end_of_last_cycle)
+        assert len(sojourn_times_until_end_of_last_cycle) == idx_last_return_time
+        
+        # Compute the total cycle time which is used as denominator of the stationary probability estimation
+        total_cycle_time = times_until_end_of_last_cycle[-1] - times_until_end_of_last_cycle[0]
+
+        return states_or_buffer_sizes_until_end_of_last_cycle, sojourn_times_until_end_of_last_cycle, total_cycle_time
+    # -- Auxiliary functions
+
+    # Get the states or buffer sizes on which the stationary probability should be estimated
+    states_or_buffer_sizes_of_interest = get_blocking_states_or_buffer_sizes(env, agent)
+
+    # Initialize the output objects to NaN in case their values cannot be reliably estimated
+    # (because of an insufficient number of observed return cycles)
+    probas_stationary = dict()
+    for s in states_or_buffer_sizes_of_interest:
+        probas_stationary[s] = np.nan
+    expected_cycle_time = np.nan
+
+    idx_first_after_burnin, times_after_burnin, states_after_burnin = get_events_after_burnin(env, agent, burnin_time)
+    if idx_first_after_burnin == -1:
+        warnings.warn(  "No events were observed after the initial burn-in time ({:.3f})," \
+                        " therefore stationary probability estimates and the expected cycle time are set to NaN." \
+                        "\nTry increasing the simulation time.".format(burnin_time))
+        n_cycles = 0
+        return probas_stationary, expected_cycle_time, n_cycles
+
+    assert  len(times_after_burnin) > 0 and len(states_after_burnin) == len(times_after_burnin)
+
+    # Compute the number of cycles to be used for the computation of the stationary probabilities
+    # We call the state or buffer size that defines these cycles the ANCHOR state or buffer size.
+    if env.getBufferType() == BufferType.SINGLE:
+        _buffer_sizes_after_burnin = [np.sum(x) for x in states_after_burnin]
+        _anchor_buffer_size = _buffer_sizes_after_burnin[0]
+        idx_anchor_state_or_buffer_size = [idx for idx, bs in enumerate(_buffer_sizes_after_burnin) if bs == _anchor_buffer_size]
+    else:
+        _anchor_state = states_after_burnin[0]
+        idx_anchor_state_or_buffer_size = [idx for idx, s in enumerate(states_after_burnin) if s == _anchor_state]
+
+    # Compute the number of cycles observed after the burn-in time in order to decide whether stationary probabilities
+    # can be reliably computed (based on the minimum requirement for the number of observed cycles defined as parameter)
+    # Examples:
+    # 1) Single-buffer case:
+    # buffer_sizes_after_burnin = [1, 2, 1, 2, 3, 1, 0] => buffer_size_anchor = 1 (as this is the first element in the list) =>
+    # idx_buffer_size_at_anchor = [0, 2, 5] => n_cycles = len([0, 2, 5]) - 1 = 2 (OK, as there are two return cycles to 1 in buffer_sizes_after_burnin)
+    # 2) No-buffer case: multidimensional state case
+    # states_after_bunin = [(1, 2, 3), (1, 2, 4), (2, 2, 4), (2, 2, 3), (1, 2, 3), (0, 2, 3)] => anchor_state = (1, 2, 3)
+    # (as this is the first element in the list) => idx_anchor_states = [0, 4] => n_cycles = len([0, 4]) - 1 = 1
+    n_cycles = len(idx_anchor_state_or_buffer_size) - 1   # We subtract 1 because the first value in states_after_burnin is the anchor state (see example above)
+    if n_cycles < min_num_cycles_for_expectations:
+        warnings.warn("There aren't enough return cycles experienced by the Markov process after the burn-in time ({:.3f})".format(burnin_time) +
+                      " in order to obtain a reliable estimation of the stationary probabilities nor of the expected cycle time, which are therefore set to NaN." +
+                      "\nThe number of observed cycles is {}, while the minimum required is {}.".format(n_cycles, min_num_cycles_for_expectations))
+        return probas_stationary, expected_cycle_time, n_cycles
+
+    #-- Compute the necessary measures needed to compute the stationary probability of every state or buffer size of interest, namely:
+    # - the total cycle times of return to the anchor state or buffer size
+    # - the total sojourn times at each state or buffer size
+    # of interest, whose ratio gives the estimated stationary probability of the respective state or buffer size of interest.
+    # Note: each sojourn time is the time the Markov process sojourned at each state stored in the `states_after_burnin` list.
+    # This is so because the first state in `states_after_burnin` is the state where the Markov process was
+    # PRIOR to the occurrence of the event happening at the first time stored in `times_after_burnin`
+    # (this is a direct consequence of the fact that the first state stored for the Markov process is the state at which
+    # the Markov process was initialized, and the first time stored for the Markov process is 0.0, meaning that the
+    # first non-zero event time stored is the time at which the Markov process changes state for the first time
+    # --to the state stored as the second position in the list).
+    # This is why the first element in `sojourn_times` is the difference between the first two elements in `times_after_burnin`.
+    states_or_buffer_sizes_until_end_of_last_cycle,\
+        sojourn_times_until_end_of_last_cycle, \
+            total_cycle_time = get_states_and_their_sojourn_times_until_end_of_last_cycle(
+                                                                                        idx_anchor_state_or_buffer_size,
+                                                                                        states_after_burnin,
+                                                                                        times_after_burnin)
+
+    # Compute the total sojourn time at each state or buffer size of interest and the corresponding stationary probability
+    for s in states_or_buffer_sizes_of_interest:
+        total_sojourn_time_at_state_or_buffer_size_of_interest =\
+            np.sum([st for x, st in zip(states_or_buffer_sizes_until_end_of_last_cycle, sojourn_times_until_end_of_last_cycle)
+                    if x == s])
+        assert total_sojourn_time_at_state_or_buffer_size_of_interest <= total_cycle_time, \
+            "The total sojourn time at the state or buffer size of interest s={} ({:.3f})" \
+            " is at most equal to the total cycle time of return to the anchor state or buffer size ({:.3f})," \
+            " i.e. to the total time of the multiple return cycles experienced by the Markov process" \
+            .format(s, total_sojourn_time_at_state_or_buffer_size_of_interest, total_cycle_time)
+        probas_stationary[s] = total_sojourn_time_at_state_or_buffer_size_of_interest / total_cycle_time
+
+    # Compute the expected cycle time
+    expected_cycle_time = total_cycle_time / n_cycles
+
+    return probas_stationary, expected_cycle_time, n_cycles
+
+
+def get_blocking_states_or_buffer_sizes(env, agent):
+    """
+    Returns the states or buffer sizes in the environment that can potentially generate blocking based on the
+    agent's accept/reject policy or policies.
+
+    Arguments:
+    env: Environment
+        Queue environment.
+
+    agent: Agent
+        Accept/Reject agent acting on the environment.
+        It should be an agent accepted by the get_blocking_boundaries() function.
+
+    Return: list of int or list of tuples
+    List containing the states (tuples) (for multidimensional-state blocking) or the buffer sizes (int)
+    (for single-buffer blocking0 that can potentially generate blocking of the system.
+    """
+    # Output variable
+    states_of_interest = []
+
+    blocking_boundaries = get_blocking_boundaries(agent)
+    n_policies = len(blocking_boundaries)
+    system_capacity = env.getCapacity()
+    assert not np.isinf(system_capacity), "The system's capacity must be finite"
+
+    if env.getBufferType() == BufferType.SINGLE:
+        # The states or buffer sizes of interest are *buffer sizes* (i.e. scalar values) and are directly the blocking boundaries (e.g. [K-1, K])
+        buffer_sizes_of_interest = blocking_boundaries
+        return buffer_sizes_of_interest
+    else:
+        # The states or buffer sizes of interest are multidimensional states of the given environment
+        # Ex: the environment is a multi-server system with separate queues or a loss network, receiving multi-class jobs.
+        # This means that ANY state having one of the state dimensions equal to the corresponding state boundary
+        # is a potential blocking state (e.g. if state is 3D, and the first state boundary is 4, then the states
+        # [4, s2, s3] for all acceptable s2 and s3 based on the queue's capacity AND the agent's acceptance policy
+        # (e.g. the agent may block an incoming job in the second dimension if s2 = 3)
+        # are of interest.
+        count_blocking_states = 0
+        for idx_policy, boundaries in enumerate(blocking_boundaries):       # E.g. blocking_boundaries = [[3, 4], [7, 8], [1, 2]], which corresponds to a theta policy parameter that is 3D
+            for b in boundaries:                                            # E.g. b = 3 when boundaries = [3, 4]
+                # We start by setting the currently processed state dimension (defined by idx_policy) to a blocking state value
+                # (this avoids going over states where no blocking occurs)
+                state_of_interest_new = [-1] * n_policies                   # E.g. [-1, -1, -1] if the theta policy parameter of the problem is 3D. -1 is the value we use to indicate missing.
+                state_of_interest_new[idx_policy] = min(b, system_capacity) # E.g. idx_policy = 1 and system_capacity > 3 => states_of_interest_new is initialized to [-1, 3, -1]
+
+                # Fill in the other dimensions with all possible state dimension values that make their sum be <= capacity - b
+                for sum_values in range(system_capacity - b + 1):           # E.g. system_capacity = 10, b = 3 => sum_value in [0, 1, ..., 7]
+                    combos_generator = all_combos_with_sum(n_policies - 1, sum_values)
+                    while True:
+                        try:
+                            values = next(combos_generator)                 # E.g. n_policies = 3, sum_values = 5 => values = [4, 1]
+                            # Store the values just generated in the states_of_interest_new list
+                            indices_to_fill = list(range(idx_policy)) + list(range(idx_policy + 1, n_policies))  # E.g. idx_policy = 0, n_policies = 3 => indices_to_fill = [1, 2]; if idx_policy = 1, n_policies = 3 => indices_to_fill = [2]
+                            assert len(values) == len(indices_to_fill)
+                            blocking_boundaries_in_other_dimensions = blocking_boundaries.copy()
+                            blocking_boundaries_in_other_dimensions.pop(idx_policy)
+                            if all(np.array(values) <= [max(bb) for bb in blocking_boundaries_in_other_dimensions]):
+                                # Only add the state associated to `values` if ALL the occupancy levels in `values` are at most equal to maximum blocking size defined by the policy.
+                                # Otherwise the state is not a feasible state given the policy.
+                                # Note that we need to compute max() on the boundaries present in blocking_boundaries above
+                                # because recall that each element of blocking_boundaries contains ALL *valid* (this is why we take the max())
+                                # blocking values for the respective dimension.
+                                for i, p in enumerate(indices_to_fill):     # i for "index" in values; p for "policy" index in states_of_interest_new
+                                    state_of_interest_new[p] = values[i]
+
+                                if tuple(state_of_interest_new) not in states_of_interest:
+                                    # NOTES:
+                                    # - We enclose state_of_interest_new in brackets so that states_of_interest becomes a list of tuples
+                                    # - We convert the state of interest added to `tuple` because these states are commonly used to index dictionaries
+                                    # and only tuples can be used as keys of dictionaries, NOT lists because they are mutable.
+                                    states_of_interest += [tuple(state_of_interest_new)]
+                                    count_blocking_states += 1
+                        except StopIteration:
+                            break
+                    combos_generator.close()
+
+        print(f"states_of_interest {len(states_of_interest)}:\n {sorted(states_of_interest)}")
+        assert len(states_of_interest) == len(set(states_of_interest)), "The states in the generated list of states with possible blocking are unique."
+
+        return states_of_interest
+
+
 def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info):
     """
     Estimates the blocking probability using the Fleming-Viot approach
@@ -2891,35 +3264,7 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info):
 
     dict_params_simul: dict
         Dictionary containing simulation and estimation parameters.
-        It should contain at least the following key:
-        - T: the number of arrival events to use in the Monte-Carlo simulation that estimates E(T_A).
-        and one of the following set of keys:
-        - Set 1: suitable for systems with a single buffer governing blocking (e.g. single-server, multi-server with single buffer)
-            - buffer_size_activation: the overall system's buffer size for activation for systems with a single buffer
-        holding jobs that await being served. If we call this value J, then J-1 is the absorption buffer size.
-        - Set 2: suitable for systems where blocking occurs at multi-dimensional states (e.g. loss network with multi-class jobs)
-            - absorption_set: SetOfStates object defining the set of absorption states.
-            - activation_set: SetOfStates object defining the set of activation states.
-        When both set 1 and set 2 are given in the dictionary, precedence is given to the set 1 of parameters.
-
-        The following keys are optional:
-        - burnin_time_steps: number of burn-in time steps to allow at the beginning of the simulation in order to
-        consider that the Markov process is in stationary regime.
-        - min_num_cycles_for_expectations: minimum number of observed reabsorption cycles to consider that the expected
-        reabsorption cycle time, E(T_A), can be reliably estimated.
-        - method_survival_probability_estimation: method to use to estimate the survival probability P(T>t), either:
-            - SurvivalProbabilityEstimation.FROM_N_PARTICLES, where the survival probability is estimated from the first
-            absorption times of each of the N particles used in the FV simulation, or
-            - SurvivalProbabilityEstimation.FROM_M_CYCLES, where the survival probability is estimated from the M cycles
-            defined by the return to the absorption set A of a single particle being simulated. The number M is a
-            function of the number of arrival events T and of J, the size of the absorption set A. For a fixed
-            T value, M decreases as J increases as the queue has less probability of visiting a state further away from 0.
-            Because of the non-control of the number of cycles M, the preferred method to estimate the survival probability
-            is FROM_N_PARTICLES because N is controlled by the number of particles used in the FV simulation. If we
-            increase N, the simulation time for FV will be larger as this is determined by the maximum observed survival time
-            (as no contribution to the integral appearing in the FV estimator (int{P(T>t)*phi(t)}) is received from
-            blocking events happening past the maximum observed survival time).
-        - seed: the seed to use for the pseudo-random number generation.
+        The dictionary should contain the keys described in function `parse_estimate_blocking_parameters()`.
 
     dict_params_info: dict
         Dictionary containing information to display or parameters to deal with the information to display.
@@ -3040,32 +3385,25 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info):
                   .format(expected_absorption_time, n_cycles_absorption_used, time_last_absorption, df_proba_surv['t'].iloc[-1]))
 
     if DEBUG_TRAJECTORIES:
-        # DM-2023/01/09: This assertion is commented out because we don't compute is_problem_1d here, we only compute it in function run_simulation_fv()
-        #assert is_problem_1d, "The problem must be 1D (one-dimensional states) when debugging trajectories"
+        assert envs[0].getBufferType() == BufferType.SINGLE, "The problem must have a single buffer when plotting trajectories"
         ax0 = plot_trajectory(envs[0], agent, dict_params_simul['activation_set'].getStates())
         xticks = range(int(ax0.get_xlim()[1]))
         ax0.set_xticks(xticks)
         ax0.vlines(xticks, 0, ax0.get_ylim()[1], color="lightgray")
 
-    # -- Step 2: Simulate N particles with FLeming-Viot to compute the empirical distribution and estimate the expected reward
-    # The empirical distribution Phi(t, bs) estimates the conditional probability of buffer sizes bs
-    # for which the probability of rejection is > 0
+    # -- Step 2: Simulate N particles with FLeming-Viot to compute the empirical distribution and estimate the stationary probabilities, then the blocking probability and the expected reward
+    # BUT do this ONLY when the estimation of E(T_A) is reliable... otherwise, set the stationary probabilities, blocking probability and expected reward to NaN.
     if is_estimation_of_denominator_unreliable():
         # FV is not run because the simulation that is used to estimate E(T_A) would not generate a reliable estimation
         # (most likely it would UNDERESTIMATE E(T_A) making the blocking probabilities be OVERESTIMATED)
         print("Fleming-Viot process is NOT run because the estimation of the expected absorption time E(T_A) cannot be reliably performed"
-              " because of an insufficient number of observed cycles under assumed stationarity: {}" \
-              "\nThe estimated stationary probabilities, estimated blocking probability and estimated expected reward will be set to NaN.".format(n_cycles_absorption))
+              " because of an insufficient number of observed cycles after the burn-in period of {} time steps: {} < {}" \
+              "\nThe estimated stationary probabilities, estimated blocking probability and estimated expected reward will be set to NaN." \
+              .format(dict_params_simul['burnin_time_steps'], n_cycles_absorption, dict_params_simul['min_num_cycles_for_expectations']))
         proba_blocking = np.nan
         expected_reward = np.nan
-        _states_or_buffer_sizes_of_interest = get_blocking_boundaries(agent)
+        _states_or_buffer_sizes_of_interest = get_blocking_states_or_buffer_sizes(envs[0], agent)
         probas_stationary = dict()
-        # TODO: [MULTIDIMENSIONAL THETA] Need to create a dictionary probas_stationary with all the keys that are computed by the run_simulation_fv() called below, i.e. one per each state x of interest (e.g. (3, 0, 1), (3, 1, 1), etc.)
-        # I think the best way to do this is to move the subfunction in run_simulation_fv() that creates all states x of interest to compute the stationary probability on to an accessible function from here and call that function.
-        # For now, the following setting of the entries of the probas_stationary dictionary fails because s is a list and not a tuple in multidimensional theta scenarios.
-        # HOWEVER, that is not the only problem: the main problem is that the keys that are defined below (even if s has the proper type of tuple)
-        # are NOT the correct keys, because we should have every possible x state of interest on which stationary probabilities should be computed
-        # (i.e. potential blocking states by a non-deterministic blocking).
         for s in _states_or_buffer_sizes_of_interest:
             probas_stationary[s] = np.nan
         expected_absorption_time = np.nan
@@ -3166,10 +3504,6 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
         is ignored.
         default: None
 
-    agent: (opt) Agent
-        Agent object that is responsible of performing the actions on the environment and learning from them.
-        default: None, in which case the agent defined in the object is used
-
     verbose: (opt) bool
         Whether to be verbose in the simulation process.
         default: False
@@ -3194,7 +3528,7 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
     """
 
     # ---------------------------------- Auxiliary functions ------------------------------#
-    def initialize_phi(envs, states_or_buffer_sizes: list, is_problem_1d, t: float=0.0):
+    def initialize_phi(envs, agent, t: float=0.0):
         """
         Initializes the conditional probability Phi(t, x) of each state or buffer size x of interest,
         i.e. those x values where blocking can occur.
@@ -3204,16 +3538,9 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
         envs: list
             List of queue environments used to run the FV process.
 
-        states_or_buffer_sizes: list of int or list of lists
-            Buffer sizes (list of int for single-dimension policies, e.g. [K-1, K]) if `is_problem_1d = True` or
-            state boundaries (list of lists, for multidimensional policies, e.g. [[K1-1, K1], [K2-1, K2], ...]) o.w.,
-            from which all potential (unidimensional or multidimensional) blocking states are derived and made keys
-            of the Phi dictionary that is initialized here.
-
-        is_problem_1d: bool
-            Whether the problem is 1D in nature, i.e. whether blocking occurs based on a unidimensional condition
-            such as "the single buffer of the queue system is full", or whether instead blocking can occur at several
-            multidimensional states, such as a loss network accepting multi-class jobs with no buffer.
+        agent: Agent
+            The Accept/Reject agent interacting with the environment.
+            It should be an agent accepted by the get_blocking_states_or_buffer_sizes() function.
 
         t: (opt) float
             Time associated to the first measurement of Phi.
@@ -3227,50 +3554,10 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
             (indexing the dictionary).
         """
         assert envs is not None and isinstance(envs, list) and len(envs) > 0, "The list parameter `envs` is not empty"
+
+        states_or_buffer_sizes_of_interest = get_blocking_states_or_buffer_sizes(envs[0], agent)
+
         dict_phi = dict()
-        if is_problem_1d:
-            # Parameter `states_or_buffer_sizes` contains 1D states (e.g. [K-1, K])
-            states_or_buffer_sizes_of_interest = states_or_buffer_sizes
-        else:
-            # Parameter `states_or_buffer_sizes` contains state boundaries at which blocking may occur for multidimensional-state
-            # environments such as a loss network receiving multi-class jobs.
-            # This means that ANY state having one of the state dimensions equal to the corresponding state boundary
-            # is a potential blocking state (e.g. if state is 3D, and the first state boundary is 4, then the states
-            # [4, s2, s3] for all acceptable s2 and s3 based on the queue's capacity aare of interest for the tomputation of Phi.
-            states_of_interest = []
-            n_policies = len(states_or_buffer_sizes)
-            system_capacity = envs[0].getCapacity()
-            assert not np.isinf(system_capacity), "The system's capacity must be finite"
-            count_blocking_states = 0
-            for idx_policy, boundaries in enumerate(states_or_buffer_sizes):      # E.g. states_or_buffer_sizes = [[3, 4], [7, 8], [1, 2]], which corresponds to a theta policy parameter that is 3D
-                for b in boundaries:                                              # E.g. b = 3 when boundaries = [3, 4]
-                    state_of_interest_new = [-1]*n_policies                      # E.g. [-1, -1, -1] if the theta policy parameter of the problem is 3D
-                    state_of_interest_new[idx_policy] = min(b, system_capacity)  # E.g. idx_policy = 0 and system_capacity > 3 => states_of_interest_new = [3, -1, -1]
-
-                    # Fill in the other dimensions with all possible state dimension values that make their sum be <= capacity - b
-                    for sum_values in range(system_capacity - b + 1):              # E.g. system_capacity = 10, b = 3 => sum_value in [0, 1, ..., 7]
-                        combos_generator = all_combos_with_sum(n_policies - 1, sum_values)
-                        while True:
-                            try:
-                                values = next(combos_generator)                   # E.g. n_policies = 3, sum_values = 5 => values = [4, 1]
-                                # Store the values just generated in the states_of_interest_new list
-                                indices_to_fill = list(range(idx_policy)) + list(range(idx_policy + 1, n_policies)) # E.g. idx_policy = 0, n_policies = 3 => indices_to_fill = [1, 2]
-                                assert len(values) == len(indices_to_fill)
-                                for i, p in enumerate(indices_to_fill):           # i for "index" in values; p for "policy" index in states_of_interest_new
-                                    state_of_interest_new[p] = values[i]
-                                # NOTES:
-                                # - We enclose state_of_interest_new in brackets so that states_of_interest becomes a list of lists
-                                # - We convert the state of interest added to tuple because these states are used to index a dictionary
-                                # (`dict_phi` below) and only tuples can be used as keys of dictionaries, NOT lists because they are mutable.
-                                states_of_interest += [tuple(state_of_interest_new)]
-                                count_blocking_states += 1
-                            except StopIteration:
-                                break
-                        combos_generator.close()
-            assert len(states_of_interest) == count_blocking_states, "The number of states of interest ({}) must coincide with the number of blocking states ({})" \
-                                                                    .format(len(states_of_interest), count_blocking_states)
-            states_or_buffer_sizes_of_interest = states_of_interest
-
         for x in states_or_buffer_sizes_of_interest:
             dict_phi[x] = pd.DataFrame([[t, empirical_mean(envs, x)]], columns=['t', 'Phi'])
 
@@ -3283,7 +3570,7 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
         else:
             return np.mean([int(x == state_or_buffer_size) for x in [tuple(env.getQueueState()) for env in envs]])
 
-    def update_phi(env, N: int, t: float, dict_phi: dict, state_prev, state_cur, is_problem_1d: bool):
+    def update_phi(env, N: int, t: float, dict_phi: dict, state_prev, state_cur):
         """
         Updates the conditional probability Phi of each buffer size of interest, which are stored by the keys
         of the dictionary of input parameter dict_phi
@@ -3318,18 +3605,12 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
             The current state of the particle that just changed state.
             The same considerations apply as those described for parameter `state_prev`.
 
-        is_problem_1d: bool
-            Whether the problem is 1D in nature, i.e. whether blocking occurs based on a unidimensional condition
-            such as "the single buffer of the queue system is full", or whether instead blocking occurs at several
-            multidimensional states, such as a loss network accepting multi-class jobs with no buffer where an
-            acceptance policy depends on the class of the arriving job.
-
         Return: dict
         The updated input dictionary which contains a new row for each buffer size for which the value Phi(t, x) changes
         w.r.t. the last value stored in the data frame for that buffer size.
         """
-        # Parse parameters state_prev, state_cur, is_problem_1d
-        if is_problem_1d:
+        # Parse parameters state_prev, state_cur
+        if env.getBufferType() == BufferType.SINGLE:
             state_or_buffer_size_prev = env.getBufferSizeFromState(state_prev)
             state_or_buffer_size_cur = env.getBufferSizeFromState(state_cur)
         else:
@@ -3518,7 +3799,7 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
         - the value of the integral P(T>t) * Phi(t, x)
        """
         states_or_buffer_sizes_of_interest = sorted( list(dict_phi.keys()) )    # Note that sorted() still works when the keys, i.e. the elements of the list that is being sorted, are in turn a *list* of values
-                                                                                # (e.g. sorted( [[2, 2, 0], [1, 2, 3], [0, 1, 5]] ) returns [[0, 1, 5], [1, 2, 3], [2, 2, 0]]
+                                                                                # (e.g. sorted( [(2, 2, 0), (1, 2, 3), (0, 1, 5)] ) returns [(0, 1, 5), (1, 2, 3), (2, 2, 0)]
         probas_stationary = dict()
         integrals = dict()
         for x in states_or_buffer_sizes_of_interest:
@@ -3648,14 +3929,14 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
     # Compatibility check (dimension)
     if absorption_set.getStateDimension() != activation_set.getStateDimension():
         raise ValueError("The absorption and activation sets must be compatible, i.e. either both should contain scalar states or both should have the same state dimension")
-    # Check if the problem is 1D (i.e. states are of dimension 1 and each of the absorption set and the activation set has just ONE element
-    is_problem_1d = absorption_set.getStateDimension() == 1 and \
-                    absorption_set.getNumStates() == 1 and \
-                    activation_set.getNumStates() == 1
-    if  is_problem_1d and absorption_set.getStates() != activation_set.getStates() - 1:
-        raise ValueError("The VALUE of the activation set in a 1D problem (i.e. one single number in the set, such as set({3}))" +
-                         " must be exactly one more than the VALUE of the absorption set (e.g. absorption = 2, activation = 3): absorption={}, activation={}" \
-                         .format(absorption_set.getStates(), activation_set.getStates()))
+    if envs[0].getBufferType() == BufferType.SINGLE:
+        assert absorption_set.getStateDimension() == 1 and \
+               absorption_set.getNumStates() == 1 and \
+               activation_set.getNumStates() == 1
+        if absorption_set.getStates() != activation_set.getStates() - 1:
+            raise ValueError("The VALUE of the activation set in a 1D problem (i.e. one single number in the set, such as set({3}))" +
+                             " must be exactly one more than the VALUE of the absorption set (e.g. absorption = 2, activation = 3): absorption={}, activation={}" \
+                             .format(absorption_set.getStates(), activation_set.getStates()))
 
     # -- Data frame containing the survival probability (if provided)
     if df_proba_surv is not None:
@@ -3686,19 +3967,13 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
         start_queue_state = activation_set.random_choice()
         env.setState((start_queue_state, None))
 
-    # State boundaries whose stationary probability is of interest because they may be associated to blocking events
-    # This object is a list for 1D problems (i.e. 1D real-valued-theta-parameterized policies) (e.g. [K-1, K])
-    # and a list of lists for multidimensional problems (i.e. where a set of 1D real-valued-theta-parameterized policies
-    # are defined to act upon the environment).
-    blocking_boundaries = get_blocking_boundaries(agent)
-
     # Event times (continuous times at which an event happens)
     # The first event time is 0.0
     event_times = [0.0]
 
     # Phi(t, x): Empirical probability of the states or buffer sizes of interest (x)
     # at each time t when a variation in Phi(t, x) is observed.
-    dict_phi = initialize_phi(envs, blocking_boundaries, is_problem_1d, t=event_times[0])
+    dict_phi = initialize_phi(envs, agent, t=event_times[0])
 
     # Time step in the queue trajectory (the first time step is t = 0)
     done = False
@@ -3738,7 +4013,7 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
         # List of service times for each particle (used to estimate mu for each particle)
         times_service = array_of_objects((N,), [])
     if plot:
-        assert is_problem_1d, "The problem must be 1D (one-dimensional states) when plotting trajectories"
+        assert envs[0].getBufferType() == BufferType.SINGLE, "The problem must have a single buffer when plotting trajectories"
         # Initialize the plot
         ax = plt.figure().subplots(1,1)
         K = get_deterministic_blocking_boundaries(agent)
@@ -3810,7 +4085,7 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
                         print(survival_times)
 
                 if plot:
-                    assert is_problem_1d, "The problem must be 1D (one-dimensional states) when plotting trajectories"
+                    assert envs[0].getBufferType() == BufferType.SINGLE, "The problem must have a single buffer when plotting trajectories"
                     # Show the absorption before reactivation takes place
                     y = envs[idx_particle].getBufferSize()
                     J = envs[0].getBufferSizeFromState(activation_set.getStates())
@@ -3824,7 +4099,7 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
                 #idx_reactivate = reactivate_particle(envs, idx_particle, states_or_buffer_sizes_of_interest[-1], absorption_number=absorption_number)
                 idx_reactivate = reactivate_particle(envs, idx_particle, 0, absorption_number=absorption_number)
                 next_state = envs[idx_particle].getState()
-                if is_problem_1d:
+                if envs[idx_particle].getBufferType() == BufferType.SINGLE:
                     assert envs[idx_particle].getBufferSize() > absorption_set.getStates()
                 if DEBUG_TRAJECTORIES:
                     print("*** Particle {} REACTIVATED to particle {} at position {}".format(idx_particle, idx_reactivate, envs[idx_reactivate].getBufferSize()))
@@ -3847,7 +4122,7 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
                   .format(idx_particle, state, t, time_abs, event, action, next_state, reward), end="\n")
 
         # Update Phi based on the new state of the changed particle
-        dict_phi = update_phi(envs[0], len(envs), time_abs, dict_phi, state, next_state, is_problem_1d)
+        dict_phi = update_phi(envs[0], len(envs), time_abs, dict_phi, state, next_state)
 
         if plot:
             y = envs[0].getBufferSizeFromState(next_state)

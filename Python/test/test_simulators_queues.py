@@ -16,7 +16,7 @@ import numpy as np
 
 from Python.lib.agents.policies.job_assignment import PolJobAssignmentProbabilistic
 
-from Python.lib.environments.queues import Actions, ActionTypes, EnvQueueSingleBufferWithJobClasses, \
+from Python.lib.environments.queues import Actions, ActionTypes, BufferType, EnvQueueSingleBufferWithJobClasses, \
     EnvQueueLossNetworkWithJobClasses, rewardOnJobRejection_Constant, rewardOnJobClassAcceptance
 import Python.lib.queues as queues
 from Python.lib.queues import Event, GenericQueue

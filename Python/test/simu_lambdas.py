@@ -323,7 +323,7 @@ learner_hatd = td.LeaTDLambdaAdaptive(env, gamma=gamma, adjust_alpha=adjust_alph
 # This update of alpha could lead to an ADAPTIVE alpha, in a similar way we propose an adaptive lambda...
 # (but in the opposite direction, i.e. adaptive_alpha(delta) = 1 - adaptive_lambda(delta))
 # ==> IDEA 3: Keep alpha the same for 10 episodes/visits to the state and then decrease it by
-# episode-number/state-count. In this way, we can learn for a litte bit before decreasing it!
+# episode-number/state-count. In this way, we can learn for a little bit before decreasing it!
 # This also would follow the strategy suggested by Srikant, Gupta & Yin in their 2020 paper about
 # leveraging transient state and steady-state.
 #

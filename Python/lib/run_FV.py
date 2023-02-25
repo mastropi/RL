@@ -510,7 +510,7 @@ def analyze_absorption_size(nservers=1,
         # Set maximum capacity of queue to K
         env_queue.setCapacity(K)
         # Set deterministic acceptance policy that accepts up to K-1
-        agent.setAcceptancePoliciesThresholds(K-1)
+        agent.setAcceptancePolicyThresholds(K-1)
 
         nparticles = nparticles_values[idx_K]
         nmeantimes = nmeantimes_values[idx_K]

@@ -55,6 +55,8 @@ class AgeQueue(GenericAgent):
         # Check whether the acceptance policy depends on the arriving job class or is the same for all job classes
         # We assume the policy depends on the job class when the `policies` parameter is a list of policies with
         # as many elements as job classes on which the policy is applied.
+        # NOTE that we cannot call the self.getAcceptancePolicies() method defined below because that method USES
+        # the value of the attribute we define here self.acceptance_policy_depends_on_jobclass whose value we set here!
         if isinstance(self.getPolicy()[PolicyTypes.ACCEPT], list):
             self.acceptance_policy_depends_on_jobclass = True
         else:
@@ -148,6 +150,7 @@ class AgeQueue(GenericAgent):
 
     #------ GETTERS ------#
     def getAcceptancePolicies(self):
+        "Returns a *list* with the acceptance policies defined in the agent, either when only one policy is defined or when multiple policies are defined"
         policies_accept = self.getPolicy()[PolicyTypes.ACCEPT]
         if self.acceptance_policy_depends_on_jobclass:
             # The agent defines several acceptance policies, e.g. one per arriving job class
@@ -159,6 +162,17 @@ class AgeQueue(GenericAgent):
             # => Convert the acceptance policy to a list containing the acceptance policy so that callers to this method
             # have to deal only with one case, namely the case of *multiple* policies stored in a list.
             return [policies_accept]
+
+    def getAcceptancePolicyThresholds(self):
+        "Returns the thresholds (theta parameters) of the acceptance policies defined in the agent. Each acceptance policy is expected to have a SCALAR theta parameter, that's why we use the word 'threshold' in the method's name."
+        return [pol.getThetaParameter() for pol in self.getAcceptancePolicies()]
+
+    def getAcceptancePolicyIntegerThresholds(self):
+        thresholds = self.getAcceptancePolicyThresholds()
+        policies_accept = self.getAcceptancePolicies()
+        assert isinstance(thresholds, list)
+        assert isinstance(policies_accept, list)
+        return [policies_accept[p].getBufferSizeForDeterministicBlockingFromTheta(theta) for p, theta in enumerate(thresholds)]
 
     def getAcceptancePolicyDependenceOnJobClass(self):
         return self.acceptance_policy_depends_on_jobclass
@@ -176,11 +190,8 @@ class AgeQueue(GenericAgent):
         return self.getLearner()[LearnerTypes.P]
 
     #------ SETTERS ------#
-    def setAcceptancePoliciesThresholds(self, thresholds):
-        policies_accept = self.getPolicy()[PolicyTypes.ACCEPT]
-        if self.acceptance_policy_depends_on_jobclass:
-            policies_accept = [policies_accept]
-
+    def setAcceptancePolicyThresholds(self, thresholds):
+        policies_accept = self.getAcceptancePolicies()
         # Set the threshold of each acceptance policy
         if thresholds is None or len(thresholds) != len(policies_accept):
             raise ValueError("The `thresholds` parameter must not be None and its length must be equal to the number of policies defined in the agent")
@@ -188,6 +199,8 @@ class AgeQueue(GenericAgent):
             policy.setThetaParameter(thresholds[i])
 
     def setAssignmentPolicy(self, policy_assign):
+        # Note that we cannot invoke the getAssignmentPolicy() method defined above
+        # because it is not possible to assign a value to a function call (this is the error we get when we try to use that method on the LHS of the equality)
         self.getPolicy()[PolicyTypes.ASSIGN] = policy_assign
 
     #------ CHECKERS ------#

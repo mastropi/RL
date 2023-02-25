@@ -71,17 +71,68 @@ COST_EXP_BUFFER_SIZE_REF = 40
 # - S(t+1) the next state where the system is at after applying action A(t) on state S(t)
 
 def rewardOnJobClassAcceptance(env, state, action, next_state, dict_params=None):
-    # The state is assumed to be a tuple (k, i) where k is the buffer size
-    # (either the size of the queue's SINGLE buffer or the occupancy number of the job class i in the system)
-    # and i is the class of the arriving job
+    """
+    Constant reward of rejecting an incoming job
+
+    Arguments:
+    env: Queue environment
+        Queue environment receiving the action. It should define the following methods:
+        - getRewardsForJobClassAcceptance()
+        - getRewardForJobClassAcceptance()
+
+    state: tuple
+        State of the queue environment BEFORE the action is taken.
+        The assumed tuple is 2D, where the first element is the queue state itself and the
+        second element is the class of the arriving job (if any, o.w. it's value is None).
+        Normally, the second element is NOT None because rejection can only happen when a job arrives.
+
+    action: Actions
+        Action taken by the agent interacting with the environment when a job arrives, either ACCEPT or REJECT.
+
+    next_state: tuple
+        State of the queue environment AFTER the action is taken.
+        The assumed tuple is 2D, where the first element is the queue state itself and the
+        second element is the class of the arriving job, which should be None, as no job arrives soon after
+        a job has arrived and an accept/reject action taken on the arrival.
+
+    dict_params: None
+        This parameter is not currently used.
+    """
     if action == Actions.ACCEPT:
-        job_class = state[1]
+        job_class = env.getJobClassFromState(state)
+        assert job_class is not None and 0 <= job_class < len(env.getRewardsForJobClassAcceptance()), \
+            "The job class of the arriving job must not be None and must be in range 0-{} ({})" \
+            .format(len(env.getRewardsForJobClassAcceptance()), job_class)
         return env.getRewardForJobClassAcceptance(job_class)
     else:
         return 0.0
 
 def rewardOnJobRejection_Constant(env, state, action, next_state, dict_params=None):
-    "Negative reward received when an incoming job is rejected"
+    """
+    Constant reward of rejecting an incoming job
+
+    Arguments:
+    env: Queue environment
+        Queue environment receiving the action. Method getBufferSizeFromState() should be defined.
+
+    state: tuple
+        State of the queue environment BEFORE the action is taken.
+        The assumed tuple is 2D, where the first element is the queue state itself and the
+        second element is the class of the arriving job which must NOT be None.
+
+    action: Actions
+        Action taken by the agent interacting with the environment when a job arrives, either ACCEPT or REJECT.
+
+    next_state: tuple
+        State of the queue environment AFTER the action is taken.
+        The assumed tuple is 2D, where the first element is the queue state itself and the
+        second element is the class of the arriving job, which should be None, as no job arrives soon after
+        a job has arrived and an accept/reject action taken on the arrival.
+
+    dict_params: dict
+        Dictionary of parameters used by the function, which should have the following entries:
+        - reward_at_rejection: the reward emitted by the environment when a rejection occurs. It must be negative or zero.
+    """
     if dict_params is None:
         dict_params = dict({'reward_at_rejection': -1.0})
 
@@ -92,15 +143,96 @@ def rewardOnJobRejection_Constant(env, state, action, next_state, dict_params=No
             "At REJECT, the queue's buffer size after rejection ({}) is the same as before rejection ({})" \
             .format(env.getBufferSizeFromState(state), env.getBufferSizeFromState(next_state))
         reward = dict_params['reward_at_rejection']
-        assert reward < 0.0, "The reward of job rejection is negative ({})".format(reward)
+        assert reward <= 0.0, "The reward of job rejection must be negative or zero ({})".format(reward)
         return reward
     else:
         # No blocking
         # => No reward
         return 0.0
 
+def rewardOnJobRejection_ByClass(env, state, action, next_state, dict_params=None):
+    """
+    Reward of rejecting an incoming job of a given class
+
+    Arguments:
+    env: Queue environment
+        Queue environment receiving the action. The following methods should be defined by the environment class:
+        - getNumJobClasses()
+        - getQueueStateFromState()
+        - getJobClassFromState()
+
+    state: tuple
+        State of the queue environment BEFORE the action is taken.
+        The assumed tuple is 2D, where the first element is the queue state itself and the
+        second element is the class of the arriving job which must NOT be None.
+
+    action: Actions
+        Action taken by the agent interacting with the environment when a job arrives, either ACCEPT or REJECT.
+
+    next_state: tuple
+        State of the queue environment AFTER the action is taken.
+        The assumed tuple is 2D, where the first element is the queue state itself and the
+        second element is the class of the arriving job, which should be None, as no job arrives soon after
+        a job has arrived and an accept/reject action taken on the arrival.
+
+    dict_params: dict
+        Dictionary of parameters used by the function, which should have the following entries:
+        - reward_at_rejection: the reward emitted by the environment by each valid job class when an incoming job is rejected.
+        Each of the values must be negative or zero. It must have as many elements as the number of possible job classes
+        arriving to the queue environment.
+    """
+    if dict_params is None:
+        dict_params = dict({'reward_at_rejection': [-1.0]*env.getNumJobClasses()})
+
+    if action == Actions.REJECT:
+        # Blocking occurred
+        # => There is a negative reward or cost defined by the job class that has been rejected
+        assert env.getQueueStateFromState(state) == env.getQueueStateFromState(next_state), \
+            "At REJECT, the queue's state after rejection ({}) is the same as before rejection ({})" \
+            .format(env.getQueueStateFromState(state), env.getQueueStateFromState(next_state))
+        rewards_by_jobclass = dict_params['reward_at_rejection']
+        assert len(rewards_by_jobclass) == env.getNumJobClasses()
+        assert all(np.array(rewards_by_jobclass) <= 0.0), "All rewards of job rejection must be negative or zero, for every job class ({})".format(rewards_by_jobclass)
+
+        job_class = env.getJobClassFromState(state)
+        assert job_class is not None and 0 <= job_class < len(rewards_by_jobclass), \
+            "The job class of the arriving job must not be None and must be in range 0-{} ({})" \
+            .format(len(rewards_by_jobclass), job_class)
+        return rewards_by_jobclass[job_class]
+    else:
+        # No blocking
+        # => No reward
+        return 0.0
+
 def rewardOnJobRejection_ExponentialCost(env, state, action, next_state, dict_params=None):
-    "Negative reward received when an incoming job is rejected as a function of the queue's buffer size associated to the given state"
+    """
+    Reward of rejecting an incoming job as a function of the queue's buffer size associated to the given state
+
+    Arguments:
+    env: Queue environment
+        Queue environment receiving the action. Method getBufferSizeFromState() should be defined.
+
+    state: tuple
+        State of the queue environment BEFORE the action is taken.
+        The assumed tuple is 2D, where the first element is the queue state itself and the
+        second element is the class of the arriving job.
+
+    action: Actions
+        Action taken by the agent interacting with the environment when a job arrives, either ACCEPT or REJECT.
+
+    next_state: tuple
+        State of the queue environment AFTER the action is taken.
+        The assumed tuple is 2D, where the first element is the queue state itself and the
+        second element is the class of the arriving job, which should be None, as no job arrives soon after
+        a job has arrived and an accept/reject action taken on the arrival.
+
+    dict_params: dict
+        Dictionary of parameters used by the function, which should have the following entries:
+        - buffer_size_ref: the reference buffer size used in the exponential function that defines the reward (negative)
+        emitted by the environment when an incoming job is rejected.
+        The reference buffer size is normally the buffer size value close to the one where the expected rejection cost
+        (which depends on the exponential cost function) achieves its minimum.
+    """
     if dict_params is None:
         dict_params = dict({'buffer_size_ref': COST_EXP_BUFFER_SIZE_REF})
     if 'buffer_size_ref' not in dict_params.keys():
@@ -115,7 +247,7 @@ def rewardOnJobRejection_ExponentialCost(env, state, action, next_state, dict_pa
             "At REJECT, the queue's buffer size after rejection ({}) is the same as before rejection ({})" \
             .format(env.getBufferSizeFromState(state), env.getBufferSizeFromState(next_state))
         reward = -costBlockingExponential(env.getBufferSizeFromState(state), dict_params['buffer_size_ref'])
-        assert reward < 0.0, "The reward of job rejection is negative ({})".format(reward)
+        assert reward <= 0.0, "The reward of job rejection must be negative or zero ({})".format(reward)
         return reward
     else:
         # No blocking
@@ -220,7 +352,7 @@ class GenericEnvQueueWithJobClasses(gym.Env):
 
         # Last action taken by the agent interacting with the environment
         # (this piece of information is needed e.g. when learning the policy of the agent interacting
-        # with the environment. See e.g. LeaPolicyGradient.learn())
+        # with the environment. See e.g. any `learn` method in the LeaPolicyGradient class)
         self.action = None
 
         # Seed used in the generation of random numbers during the interaction with the environment.
@@ -657,7 +789,7 @@ class EnvQueueLossNetworkWithJobClasses(GenericEnvQueueWithJobClasses):
 
     #------ GETTERS ------#
     def getNumJobClasses(self):
-        return self.queue.getNServers()
+        return len(self.getJobClassRates())
 
     def getJobClassRates(self):
         return list(self.queue.getBirthRates())

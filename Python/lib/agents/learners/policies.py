@@ -22,7 +22,9 @@ class LeaPolicyGradient(GenericLearner):
         The environment where the learning takes place.
 
     policy: Parameterized policy
-        Parameterized policy that is used to learn the parameter theta of the policy.
+        Parameterized policy whose parameter theta is learned.
+        This policy should be an object instantiated to one of the policy classes defined in agent.learners.policies,
+        so that when the agent learns the policy, that object is also updated with the learned theta parameter value.
 
     learnerV: GenericLearner
         Learner of the state value function.
@@ -240,10 +242,10 @@ class LeaPolicyGradient(GenericLearner):
 
         return G
 
-    def learn(self, T):
+    def learn_update_theta_at_end_of_episode(self, T):
         """
-        Learns the policy by updating the theta parameter using gradient ascent and estimating the gradient as the
-        average of G(t) * grad( log(Pol(A(t)/S(t),theta) ).
+        Learns the policy by updating the theta parameter at the end of the episode using the average gradient
+        observed throughout the episode, i.e. as the average of G(t) * grad( log(Pol(A(t)/S(t),theta) ) over all t.
 
         When the fixed_window attribute is True, a fixed window is used to compute G(t) for each t.
         In that case, the size of the window is T/2 and G(t) is estimated for t = 0, 1, ..., int(T/2).
@@ -290,10 +292,10 @@ class LeaPolicyGradient(GenericLearner):
         actions = [a for a in self.learnerV.getActions() if a is not None]
         rewards = [s for s, a in zip(self.learnerV.getRewards(), self.learnerV.getActions()) if a is not None]
         print("\n--- POLICY LEARNING ---")
-        print("theta = {}".format(self.getThetaParameter()))
-        print("Average reward (from V learner) = {}".format(self.learnerV.getAverageReward()))
-        print("Average reward under policy (baseline for G(t)) rho = {}".format(self.getAverageRewardUnderPolicy()))
-        print("TRAJECTORY (t, state, action, reward, reward - rho, delta = G, gradient(log(Pol)))")
+        print("[LeaPolicyGradient.learn_update_theta_at_end_of_episode] theta = {}".format(self.getThetaParameter()))
+        print("[LeaPolicyGradient.learn_update_theta_at_end_of_episode] Average reward (from V learner) = {}".format(self.learnerV.getAverageReward()))
+        print("[LeaPolicyGradient.learn_update_theta_at_end_of_episode] Average reward under policy (baseline for G(t)) rho = {}".format(self.getAverageRewardUnderPolicy()))
+        print("[LeaPolicyGradient.learn_update_theta_at_end_of_episode] TRAJECTORY (t, state, action, reward, reward - rho, delta = G, gradient(log(Pol)))")
         df_trajectory = pd.DataFrame( np.c_[range(T+1), [self.env.getBufferSizeFromState(s) for s in states], actions,
                                             rewards, [r - self.getAverageRewardUnderPolicy() for r in rewards], deltas,
                                             [self.getGradientLog(a, s) for a, s in zip(actions, states)],
@@ -325,18 +327,18 @@ class LeaPolicyGradient(GenericLearner):
                 # Increase the count of actions taken by the agent, which is the denominator used when estimating grad(V)
                 # Note: the action may be None if for instance the environment experienced a completed service
                 # in which case there is no action to take... (in terms of Accept or Reject)
-                # Note also that we check that delta is not NaN because NaN indicate that the current simulation time step
+                # Note also that we check that delta is not NaN because NaN indicates that the current simulation time step
                 # is NOT part of the calculation of deltas (which happens when attribute fixed_window = True)
                 nactions += 1
 
                 gradLogPol = self.getGradientLog(action, state)
                 if gradLogPol != 0.0:
                     # Update the estimated gradient
-                    print("Learning at simulation time t={}, state={}, action={}, reward={}...".format(t, state, action, reward))
-                    print("\tt={}: Delta(t) = corrected G(t) = {:.3f}".format(t, delta))
-                    print("\tt={}: Log policy gradient for Pol(A(t)={}/S(t)={} ) = {}" \
+                    print("[LeaPolicyGradient.learn_update_theta_at_end_of_episode] Learning at simulation time t={}, state={}, action={}, reward={}...".format(t, state, action, reward))
+                    print("\t[LeaPolicyGradient.learn_update_theta_at_end_of_episode] t={}: Delta(t) = corrected G(t) = {:.3f}".format(t, delta))
+                    print("\t[LeaPolicyGradient.learn_update_theta_at_end_of_episode] t={}: Log policy gradient for Pol(A(t)={}/S(t)={} ) = {}" \
                           .format(t, action, state, gradLogPol))
-                    print("\t#actions taken by the agent so far = {}".format(nactions))
+                    print("\t[LeaPolicyGradient.learn_update_theta_at_end_of_episode] #actions taken by the agent so far = {}".format(nactions))
                     gradV += delta * gradLogPol
                     #gradV += (reward - self.getAverageRewardUnderPolicy()) * gradLogPol    # This computation of the gradient is NOT useful for the learning process
 
@@ -349,8 +351,8 @@ class LeaPolicyGradient(GenericLearner):
         bound_delta_theta_upper = +np.Inf if not self.clipping else self.clipping_value  #+1.131
         bound_delta_theta_lower = -np.Inf if not self.clipping else -self.clipping_value  #-1.131 #-5.312314 #-1.0
         delta_theta = np.max([ bound_delta_theta_lower, np.min([self.getLearningRate() * gradV, bound_delta_theta_upper]) ])
-        print("Estimated grad(V(theta)) = {}".format(gradV))
-        print("Delta(theta) = alpha * grad(V) = {}".format(delta_theta))
+        print("[LeaPolicyGradient.learn_update_theta_at_end_of_episode] Estimated grad(V(theta)) = {}".format(gradV))
+        print("[LeaPolicyGradient.learn_update_theta_at_end_of_episode] Delta(theta) = alpha * grad(V) = {}".format(delta_theta))
 
         theta_lower = 0.1       # Do NOT use an integer value as lower bound of theta because the gradient is never non-zero at integer-valued thetas
         theta = np.max([theta_lower, theta + delta_theta])
@@ -360,11 +362,15 @@ class LeaPolicyGradient(GenericLearner):
 
         return theta_prev, theta, self.getAverageRewardUnderPolicy(), gradV, deltas
 
-    def learn_TR(self, T):
+    def learn_update_theta_at_each_time_step(self, T):
         """
-        Learns the policy in the Trunk-Reservation (TR) manner, i.e. by updating the theta parameter
-        at every time step of each simulated trajectory but WITHOUT updating the policy until the last time step
-        has been reached.
+        Learns the policy by updating its theta parameter at each time step of the Markov chain.
+        Nevertheless, the policy is updated (i.e. the value of the theta parameter is set) ONLY at the end of the episode.
+        This is the way learning happens in the Trunk Reservation paper by Massaro et al. (2019).
+        This learning is supposed to give the same results as when the theta parameter is updated only at the end of
+        the episode, using the average gradient observed throughout the time steps of the Markov chain, as done by
+        learn_update_theta_at_end_of_episode(). However, the update of theta done here at every time step could be
+        bounded at each time step (e.g. when self.clipping = True), therefore results may not be exactly the same.
 
         When the fixed_window attribute is True, a fixed window is used to compute G(t) for each t.
         In that case, the size of the window is T/2 and G(t) is estimated for t = 0, 1, ..., int(T/2).
@@ -404,10 +410,10 @@ class LeaPolicyGradient(GenericLearner):
         actions = [a for a in self.learnerV.getActions() if a is not None]
         rewards = [s for s, a in zip(self.learnerV.getRewards(), self.learnerV.getActions()) if a is not None]
         print("\n--- POLICY LEARNING ---")
-        print("theta = {}".format(self.getThetaParameter()))
-        print("Average reward (from V learner) = {}".format(self.learnerV.getAverageReward()))
-        print("Average reward under policy (baseline for G(t)) = {}".format(self.getAverageRewardUnderPolicy()))
-        print("TRAJECTORY (t, state, action, reward, reward - rho, delta = G)")
+        print("[LeaPolicyGradient.learn_update_theta_at_each_time_step] theta = {}".format(self.getThetaParameter()))
+        print("[LeaPolicyGradient.learn_update_theta_at_each_time_step] Average reward (from V learner) = {}".format(self.learnerV.getAverageReward()))
+        print("[LeaPolicyGradient.learn_update_theta_at_each_time_step] Average reward under policy (baseline for G(t)) = {}".format(self.getAverageRewardUnderPolicy()))
+        print("[LeaPolicyGradient.learn_update_theta_at_each_time_step] TRAJECTORY (t, state, action, reward, reward - rho, delta = G)")
         df_trajectory = pd.DataFrame( np.c_[range(T+1), [self.env.getBufferSizeFromState(s) for s in states], actions,
                                             rewards, [r - self.getAverageRewardUnderPolicy() for r in rewards],
                                             deltas,
@@ -445,9 +451,9 @@ class LeaPolicyGradient(GenericLearner):
                 if self.getGradientLog(action, state) != 0.0:
                     # [DONE-2021/11/28] DM-2021/11/25: STOP AT LEARNING STEP 24 (starting at theta = 11.3) FOR METHOD 2 TO INVESTIGATE WHY A REJECTION OCCURS WHEN STATE = 2 AND THETA = 4...
                     # R: The reason is that the accept/reject policy is updated ONLY AT THE END of the episode!! which means that the value of theta is not always related to the occurrence of rejections.
-                    print("Learning at simulation time t={}, theta={}, state={}, action={}, reward={}...".format(t, theta, state, action, reward))
-                    print("\tt={}: Delta(t) = G(t) = {:.3f}".format(t, delta))
-                    print("\tt={}: Log-policy gradient for Pol(A(t)={}/S(t)={} ) = {:.6f}" \
+                    print("[LeaPolicyGradient.learn_update_theta_at_each_time_step] Learning at simulation time t={}, theta={}, state={}, action={}, reward={}...".format(t, theta, state, action, reward))
+                    print("\t[LeaPolicyGradient.learn_update_theta_at_each_time_step] t={}: Delta(t) = G(t) = {:.3f}".format(t, delta))
+                    print("\t[LeaPolicyGradient.learn_update_theta_at_each_time_step] t={}: Log-policy gradient for Pol(A(t)={}/S(t)={} ) = {:.6f}" \
                           .format(t, action, state, self.getGradientLog(action, state)))
 
                     # Store the gradient (for analysis purposes)
@@ -465,14 +471,14 @@ class LeaPolicyGradient(GenericLearner):
                     # Store the alpha that is going to be used for learning next
                     self.store_learning_rate()
 
-                    print("\tt={}: alpha(state={}, action={} (n={})) = {}".format(t, state, action, self.getCount(state, action), alpha))
+                    print("\t[LeaPolicyGradient.learn_update_theta_at_each_time_step] t={}: alpha(state={}, action={} (n={})) = {}".format(t, state, action, self.getCount(state, action), alpha))
 
                     # Note that we bound the delta theta to avoid too large changes!
                     #theta += self.getLearningRate() * delta * self.getGradientLog(action, state)
                     bound_delta_theta_upper = +np.Inf if not self.clipping else self.clipping_value  #+1.131
                     bound_delta_theta_lower = -np.Inf if not self.clipping else -self.clipping_value  #-1.131
                     delta_theta = np.max([ bound_delta_theta_lower, np.min([alpha * gradV, bound_delta_theta_upper]) ])
-                    print("\tt={}: delta(theta) = {}".format(t, delta_theta))
+                    print("\t[LeaPolicyGradient.learn_update_theta_at_each_time_step] t={}: delta(theta) = {}".format(t, delta_theta))
 
                     # Only update the visit count of the state and action when delta(theta) != 0.0 because this means that
                     # the state and action have actually been used to learn the policy.
@@ -495,96 +501,6 @@ class LeaPolicyGradient(GenericLearner):
 
         return theta_prev, theta, self.getAverageRewardUnderPolicy(), gradV_mean, deltas
 
-    def learn_linear_theoretical(self, T):
-        """
-        Learns the policy by updating the theta parameter using gradient ascent and estimating the gradient
-        from the theoretical expression of the gradient in the linear step policy (only applies for this case!), namely:
-        
-        grad(V) = Pr(K-1) * ( Q(K-1,1) - Q(K-1,0) )
-
-        where Pr(K-1) is the stationary distribution for the buffer size K-1.
-
-        Pr(K-1) is estimated by the observed distribution of buffer size K-1.
-        Q(K-1,a) are estimated respectively by G(t1) and G(t0), where t1 and t0 are the times at which
-        the FIRST state-action = (K-1,a) is observed (so that we get more history to the future for their estimation. 
-
-        Arguments:
-        T: int (currently NOT used)
-            Time corresponding to the end of simulation at which learning takes place.
-
-        Return: tuple
-        Tuple with the following elements:
-        - theta: theta value before its update
-        - theta_next: theta value after its update
-        - V: the average reward observed in the episodic simulation using the theta value before its update
-        - gradV: gradient of the value function that generated the update on theta
-        - Gdiff: the return difference between the accept action and the reject action
-        """
-        theta = self.getThetaParameter()
-        theta_prev = copy.deepcopy(theta)
-
-        # Compute the average reward under the policy (for informational purposes only, as this has already been computed by the value function learner, learnerV)
-        self.estimateAverageRewardUnderPolicy()
-
-        # Store the value of theta (BEFORE its update) --> for plotting purposes
-        for t in range(T+1):
-            self.store_theta(theta)
-
-        # Estimate the stationary probability of K-1
-        states = [s for s, a in zip(self.learnerV.getStates(), self.learnerV.getActions()) if a is not None]
-        actions = [a for a in self.learnerV.getActions() if a is not None]
-        buffer_sizes = [self.env.getBufferSizeFromState(s) for s in states]
-        K = int( np.ceil(theta + 1) )
-        print("K={}".format(K))
-        #print("buffer sizes, actions = {}".format(np.c_[buffer_sizes, actions]))
-        p_Km1 = np.sum([1 for bs in buffer_sizes if bs == K - 1]) / len(buffer_sizes)
-        print("Estimated stationary distribution of K-1 on {} samples: {}".format(len(buffer_sizes), p_Km1))
-
-        # Extract the return of interest G(K-1,a) 
-        G = self.learnerV.getReturn()
-        all_idx_action_0 = find(zip(buffer_sizes, actions), (K-1, 0))
-        all_idx_action_1 = find(zip(buffer_sizes, actions), (K-1, 1))
-        G1 = 0.0
-        G0 = 0.0
-        n1 = 0
-        n0 = 0
-        for idx in all_idx_action_1:
-            #G1 += G[idx]
-            #n1 += 1
-            G1 += (T - idx) * G[idx]
-            n1 += (T - idx)
-        for idx in all_idx_action_0:
-            #G0 += G[idx]
-            #n0 += 1
-            G0 += (T - idx) * G[idx]
-            n0 += (T - idx)
-        # G(K-1,a) is estimated by a WEIGHTED average on the sample sizes used to compute each G(K-1,a) contributing to the estimator
-        # We use np.max([1, ...]) to include the case when no cases are observed to estimate G(K-1,a)
-        G1 /= np.max([1, n1])
-        G0 /= np.max([1, n0])
-        print("Estimated return G(K-1,a=1) computed on {} time steps: {}".format(len(all_idx_action_1), G1))
-        print("Estimated return G(K-1,a=0) computed on {} time steps: {}".format(len(all_idx_action_0), G0))
-
-        # Estimated grad(V)
-        gradV = p_Km1 * (G1 - G0)
-
-        # Note that we bound the delta theta to avoid too large changes!
-        # We use "strange" numbers to avoid having theta fall always on the same distance from an integer (e.g. 4.1, 5.1, etc.)
-        # The lower and upper bounds are asymmetric (larger lower bound) so that a large negative reward can lead to a large reduction of theta.
-        bound_delta_theta_upper = +np.Inf if not self.clipping else self.clipping_value #+2.131 #+1.131
-        bound_delta_theta_lower = -np.Inf if not self.clipping else -self.clipping_value #-5.3123 #-1.131 #-5.312314 #-1.0
-        delta_theta = np.max([ bound_delta_theta_lower, np.min([self.getLearningRate() * gradV, bound_delta_theta_upper]) ])
-        print("Estimated grad(V(theta)) = {}".format(gradV))
-        print("Delta(theta) = alpha * grad(V) = {}".format(delta_theta))
-
-        theta_lower = 0.1       # Do NOT use an integer value as lower bound of theta because the gradient is never non-zero at integer-valued thetas
-        theta = np.max([theta_lower, theta + delta_theta])
-
-        # Update the policy on the new theta and record it into the history of its updates
-        self.setThetaParameter(theta)
-
-        return theta_prev, theta, self.learnerV.getV(), gradV, G1 - G0
-
     def learn_linear_theoretical_from_estimated_values(self, T, probas_stationary, Q_values):
         """
         Learns the policy by updating the theta parameter using gradient ascent and estimating the gradient
@@ -597,11 +513,6 @@ class LeaPolicyGradient(GenericLearner):
         In the case of a single-buffer queue system, the sum is over just ONE buffer size value, namely K-1, where K
         is the buffer size having deterministic blocking.
         Pr(x) is the stationary distribution of state x or buffer size K-1.
-
-        The difference with the learn_linear_theoretical() method is that the current method receives the estimated
-        values of Pr(x) and of Q(x,1), Q(x,0) as input parameters, while the other method estimates them.
-
-        That is, we assume that these values have been already computed elsewhere when calling this method.
 
         Arguments:
         probas_stationary: dict
@@ -622,6 +533,12 @@ class LeaPolicyGradient(GenericLearner):
         - gradV: gradient of the value function responsible for the update on theta
         - Q_diff: same as Q_mean but the values stored are the difference in the state-action values for each state.
         """
+        #---- Auxiliary functions -----
+        # TODO: (2023/02/01) Try to remove the `isinstance()` calls here on `x`... if possible. They are intended to accomodate both a 1D queue state represented as a scalar and an n-D queue state represented as a tuple
+        # I guess the best solution would be to change the whole code base so that 1D states are ALSO represented as a tuple
+        does_state_contribute_to_gradient_component = lambda x, i, K: not isinstance(x, tuple) and x == K - 1 or isinstance(x, tuple) and x[i] == K - 1
+        #---- Auxiliary functions -----
+
         theta = self.getThetaParameter()    # For multi-policy learners, theta is an array (one scalar theta value for each policy being learned) o.w. theta is a scalar
         theta_prev = copy.deepcopy(theta) if self.is_multi_policy else theta
 
@@ -647,37 +564,42 @@ class LeaPolicyGradient(GenericLearner):
         # Create the dictionaries that will contain the information about the average Q and the Q difference between the two possible actions for each state or buffer size
         Q_mean = dict()
         Q_diff = dict()
+        num_states_contributing_to_gradient_component = [0]*len(Ks)
+        coverage_states_contributing_to_gradient_component = [0.0]*len(Ks)  # Proportion of states contributing to the i-th gradient component that are used in the calculation of the gradient component (a state is not used if its estimated probability is = 0.0)
         for x, p in probas_stationary.items():
             if not np.isnan(p) and not (0.0 <= p <= 1.0):
                 raise ValueError("If not missing, the stationary probability estimate must be between 0 and 1 ({})".format(p))
-            if p > 0.0 and x in Q_values.keys():    # TODO: (2023/02/01) Remove the part `x in Q_vales.keys()` because this is asserted below
-                # The contribution to the gradient happens only when the estimated stationary probability is positive
-                assert x in Q_values.keys(), "Currently analyzed state x={} must be a key of the Q_values dictionary:\n{}".format(x, Q_values)
-                if not isinstance(Q_values[x], (list, np.ndarray)) or len(Q_values[x]) != 2:
-                    raise ValueError("Each entry of parameter Q_values (a dictionary) must be a list or numpy array of length 2 ({})".format(Q_values[x]))
-                # Find the component(s) of the gradient to which the current analyzed state x contributes,
-                # namely ALL components i whose occupancy in the system is K(i) - 1, for which the derivative of the linear-step acceptance policy is not zero.
-                # NOTE that, for a given x, there may be more than one component satisfying this condition,
-                # which happens when more than one component has its value at the blocking value - 1, e.g. x = (0, 3, 5) and the blocking values are Ks = [8, 4, 6]
-                # meaning that components 1 and 2 (with values 3 and 5) will contribute to the respective gradient component value.
-                for i, K in enumerate(Ks):
-                    # TODO: (2023/02/01) Try to remove the `isinstance()` calls here on `x`... if possible. They are intended to accomodate both a 1D queue state represented as a scalar and an n-D queue state represented as a tuple
-                    # I guess the best solution would be to change the whole code base so that 1D states are ALSO represented as a tuple
-                    if not isinstance(x, tuple) and x == K - 1 or isinstance(x, tuple) and x[i] == K - 1:
-                        # Non-deterministic blocking occurs for the i-th component of the state x when a new job of class i arrives
-                        # => The product p(x) * Delta(Q[x]) contributes to the i-th component of the gradient
+
+            # Find the component(s) of the gradient to which the current analyzed state x contributes,
+            # namely ALL components i whose occupancy in the system is K(i) - 1, for which the derivative of the linear-step acceptance policy is not zero.
+            # NOTE that, for a given x, there may be more than one component satisfying this condition,
+            # which happens when more than one component has its value at the blocking value - 1, e.g. x = (0, 3, 5) and the blocking values are Ks = [8, 4, 6]
+            # meaning that components 1 and 2 (with values 3 and 5) will contribute to the respective gradient component value.
+            for i, K in enumerate(Ks):
+                if does_state_contribute_to_gradient_component(x, i, K):
+                    # Non-deterministic blocking occurs for the i-th component of the state x when a new job of class i arrives
+                    # => The product p(x) * Delta(Q[x]) contributes to the i-th component of the gradient
+                    num_states_contributing_to_gradient_component[i] += 1
+                    if p > 0.0 and x in Q_values.keys():
+                        # The currently analyzed state x is a state for which the Q values have been computed
+                        if not isinstance(Q_values[x], (list, np.ndarray)) or len(Q_values[x]) != 2:
+                            raise ValueError("Each entry of parameter Q_values (a dictionary) must be a list or numpy array of length 2 ({})".format(Q_values[x]))
+                        coverage_states_contributing_to_gradient_component[i] += 1
                         Q_mean[x] = 0.5 * (Q_values[x][1] + Q_values[x][0])
                         Q_diff[x] = Q_values[x][1] - Q_values[x][0]
-                        if np.isnan(p):
-                            gradV[i] += np.nan
-                        else:
-                            gradV[i] += p * Q_diff[x]
-            # DM-2022/10/30: Try using the estimated probability as 1.0 (idea suggested by Urtzi/Matt on 19-Oct-2022 stating that the
-            # resulting algorithm is a stochastic approximation algorithm and therefore should converge if alpha is decreased)
-            #for i in range(Ks):
-            #    if x[i] == Ks[i] - 1:
-            #        Q_diff[x] = Q_values[x][1] - Q_values[x][0]
-            #        gradV[i] += 1.0 * Q_diff[x]
+                        gradV[i] += p * Q_diff[x]
+                    # DM-2022/10/30: This is a test to use the estimated probability as 1.0 (idea suggested by Urtzi/Matt on 19-Oct-2022 for the single-server queue system stating that the
+                    # resulting algorithm is a stochastic approximation algorithm and therefore should converge if alpha is decreased)
+                    #if x in Q_values.keys():
+                    #    coverage_states_contributing_to_gradient_component[i] += 1
+                    #    Q_mean[x] = 0.5 * (Q_values[x][1] + Q_values[x][0])
+                    #    Q_diff[x] = Q_values[x][1] - Q_values[x][0]
+                    #    gradV[i] += 1.0 * Q_diff[x]
+        # Finalize the computation of the state coverage by computing the *proportion* of covered states
+        for i in range(len(Ks)):
+            coverage_states_contributing_to_gradient_component[i] = coverage_states_contributing_to_gradient_component[i] / max(1, num_states_contributing_to_gradient_component[i])
+        print(f"[LeaPolicyGradient.learn_linear_theoretical_from_estimated_values] Number of states contributing to each gradient component: {num_states_contributing_to_gradient_component}")
+        print(f"[LeaPolicyGradient.learn_linear_theoretical_from_estimated_values] Coverage:" + "[" + ", ".join(["{:.1f}%".format(c*100) for c in coverage_states_contributing_to_gradient_component]) + "]")
 
         if self.is_theta_unidimensional(theta):
             # Unidimensional theta case
@@ -711,8 +633,8 @@ class LeaPolicyGradient(GenericLearner):
                 #alpha = self.getLearningRate() / theta[0] / probas_stationary / np.abs(gradV)
                 alpha = self.getLearningRate()
                 delta_theta = np.max([bound_delta_theta_lower, np.min([alpha * gradV[0], bound_delta_theta_upper])])
-                print("Estimated grad(V(theta)) = {}".format(gradV[0]))
-                print("Delta(theta) = alpha * grad(V) = {:.3f} * {:e} = {:.6f}".format(alpha, gradV[0], delta_theta))
+                print("[LeaPolicyGradient.learn_linear_theoretical_from_estimated_values] Estimated grad(V(theta)) = {}".format(gradV[0]))
+                print("[LeaPolicyGradient.learn_linear_theoretical_from_estimated_values] Delta(theta) = alpha * grad(V) = {:.3f} * {:e} = {:.6f}".format(alpha, gradV[0], delta_theta))
 
                 theta_lower = 0.1   # In principle, try to avoid a non integer value as lower bound of theta because
                                     # the estimated gradient of V may be zero at integer values of theta (depending on the
@@ -734,9 +656,11 @@ class LeaPolicyGradient(GenericLearner):
                 alpha = self.getLearningRate()
                 delta_theta = alpha * gradV
                 theta += delta_theta
-                print("Estimated grad(V(theta)) = {}".format(gradV))
-                print("Delta(theta) = alpha * grad(V) = {:.3f} * {} = {}".format(alpha, gradV, delta_theta))
-                print("theta: {} -> {}".format(theta_prev, theta))
+                # Lower bound theta so that it doesn't go negative or to zero, values which do not make sense for the policy
+                theta = np.max([theta, np.repeat(0.1, len(theta))], axis=0) # This computes the maximum between the two arrays, say theta = [3, -5, 0] and [0.1, 0.1, 0.1] by column giving [3, 0.1, 0.1]
+                print("[LeaPolicyGradient.learn_linear_theoretical_from_estimated_values] Estimated grad(V(theta)) = {}".format(gradV))
+                print("[LeaPolicyGradient.learn_linear_theoretical_from_estimated_values] Delta(theta) = alpha * grad(V) = {:.3f} * {} = {}".format(alpha, gradV, delta_theta))
+                print("[LeaPolicyGradient.learn_linear_theoretical_from_estimated_values] theta: {} -> {}".format(theta_prev, theta))
 
                 self.setThetaParameter(theta)
 

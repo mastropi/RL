@@ -312,8 +312,8 @@ def define_queue_environment_and_agent(dict_params: dict):
 
     # Acceptance and assignment policies
     policies = dict({PolicyTypes.ACCEPT: dict_params_policy['parameterized_policy'](env_queue, theta=dict_params_policy['theta'])
-                                                if is_scalar(dict_params_policy['theta'])
-                                                else [policy(env_queue, theta=dict_params_policy['theta'][i]) for i, policy in enumerate(dict_params_policy['parameterized_policy'])],
+                                            if is_scalar(dict_params_policy['theta'])
+                                            else [policy(env_queue, theta=dict_params_policy['theta'][i]) for i, policy in enumerate(dict_params_policy['parameterized_policy'])],
                      PolicyTypes.ASSIGN: policy_assign})
 
     # Learners (for V, Q, and P)
@@ -323,6 +323,11 @@ def define_queue_environment_and_agent(dict_params: dict):
     if dict_params_learners['P']['learner'] is None:
         learnerP = None
     else:
+        # NOTE: We now instantiate a learner object where we indicate that the policy learner learns the Acceptance Policy
+        # (but NOT e.g. the Assignment Policy). This is the difference between the `policies` object created above
+        # (which contains ALL policies the agent uses when interacting with the environment) and the policy stored
+        # in the `learnerP` object created now (which only learns ONE policy --in principle the agent could be prepared
+        # to learn more than one policy, but this is not assumed here for the learner passed in attribute dict_params_learners['P']['learner'].
         learnerP = dict_params_learners['P']['learner'](env_queue,
                                                         policies[PolicyTypes.ACCEPT],
                                                         learnerV,

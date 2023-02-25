@@ -117,7 +117,7 @@ class GenericLearner:
 
         # Learning time and learning rate at that time
         self._t = 0              # Int: this value is expected to be updated by the user, whenever learning takes place
-        self._alpha = self.alpha    # Float: current learning rate (at the learning time `self._t`)
+        self._alpha = self.alpha # Float: current learning rate (at the learning time `self._t`)
 
         # Information about the historical learning rates
         self.alpha_mean = []    # Average alpha
