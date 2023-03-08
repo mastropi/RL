@@ -15,8 +15,8 @@ from Python.lib.utils.basic import is_scalar
 
 @unique
 class PolicyTypes(Enum):
-    ACCEPT = 'accept'
-    ASSIGN = 'assign'
+    ACCEPT = 1
+    ASSIGN = 2
 
 
 class GenericParameterizedPolicyTwoActions:
@@ -36,11 +36,13 @@ class GenericParameterizedPolicyTwoActions:
     theta: float
         Initial value for the parameter of the parameterized policy, which should be a real unidimensional value
         because it is a threshold value between two possible actions (as the name of the current class indicates is the case).
-        The policy should define two possible actions via the Actions enum.
+        The policy to which this parameter applies should define two possible actions via the Actions enum.
     """
 
     def __init__(self, env, theta: float):
         self.env = env
+        assert set([0, 1]).issubset(set(env.getActions().__members__.values())), \
+            "The environment on which the two-action policy acts must have action-index 0 and action-index 1 as two possible actions ({})".format(env.getActions())
 
         # Store the given theta as start theta value so that we can reset it to that value when resetting the policy
         if not is_scalar(theta):
@@ -58,9 +60,12 @@ class GenericParameterizedPolicyTwoActions:
         Choose an action given the state: either ActionTypes.REJECT or ActionTypes.ACCEPT based on the policy
         evaluated at the given state.
 
-        state: State(?)
+        state: Undefined
             State of the environment stored in the object on which the policy acts.
             The state type is highly dependent on the environment type.
+            If the environment on which this policy acts is a queue environment, the state is most likely a tuple
+            with two elements: the queue state (which can be a scalar for single-server systems or a tuple for
+            multi-server systems or loss networks) and the class of the arriving job.
 
         Return: Actions
             Action chosen by the policy.

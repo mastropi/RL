@@ -30,10 +30,9 @@ from Python.lib.environments.queues import rewardOnJobRejection_Constant
 
 import Python.lib.estimators as estimators
 
-from Python.lib.simulators.queues import SurvivalProbabilityEstimation, estimate_blocking_fv, estimate_blocking_mc, \
-    compute_nparticles_and_narrivals_for_fv_process, compute_nparticles_and_nsteps_for_fv_process_many_settings, \
-    compute_rel_errors_for_fv_process
-from Python.lib.simulators import define_queue_environment_and_agent
+from Python.lib.simulators.queues import compute_nparticles_and_narrivals_for_fv_process, \
+    compute_nparticles_and_nsteps_for_fv_process_many_settings, compute_rel_errors_for_fv_process, \
+    define_queue_environment_and_agent, estimate_blocking_fv, estimate_blocking_mc, SurvivalProbabilityEstimation
 
 from Python.lib.utils.basic import aggregation_bygroups, get_current_datetime_as_string, get_datetime_from_string, \
     is_scalar, set_pandas_options, reset_pandas_options
@@ -1190,7 +1189,7 @@ if __name__ == "__main__":
         sys.argv += ["N"]     # Type of analysis: either "N" for the impact of number of particles, "T" for the impact of the number of events, or "J" for the impact of buffer size
         sys.argv += [10]      # K: capacity of the system
         sys.argv += [0.4]     # J factor: factor such that J = round(factor*K)
-        sys.argv += [0.2]     # Either the value of the parameter that is NOT analyzed (according to parameter "type of analysis") (e.g. "N" if "type of analysis" = "T") (if value >= 10), or the relative expected error from which such value is computed (if value < 10).
+        sys.argv += [0.2]     # Either the value of the parameter that is NOT analyzed (according to parameter "type of analysis", e.g. "N" if "type of analysis" = "T") (if value >= 10), or the relative expected error from which such value is computed (if value < 10).
         sys.argv += [3]       # Number of replications
         sys.argv += [1]       # Test number to run: only one is accepted
     if len(sys.argv) == nargs_required + counter_opt_args + 1:

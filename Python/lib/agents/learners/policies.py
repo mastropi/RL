@@ -12,7 +12,22 @@ import pandas as pd
 
 from Python.lib.agents.learners import GenericLearner
 from Python.lib.utils.basic import find, is_scalar
+from Python.lib.agents.policies.parameterized import AcceptPolicyType   # NEW: TO IMPLEMENT IN ORDER TO DECIDE WHETHER THE ACCEPTANCE POLICY IS OF THRESHOLD TYPE OR TRUNK-RESERVATION
 
+# Minimum value allowed for the theta parameter of a parameterized policy
+# NOTE: Avoid an integer value as lower bound of theta because the estimated gradient of the average state value
+# may be zero at integer values of theta (depending on the method used to compute it ).
+# We use a negative theta close to -1.0 (and not a theta that is close to 0, such as 0.1)
+# so that the deterministic blocking size of the linear step policy can be K=0 (as K = ceiling(theta + 1) in that case)
+# TODO: (2023/03/02) Probably this definition should go in parameterized.py and should be defined for each parameterized policy defined there.
+THETA_MIN = -1.0 + 0.1
+
+
+# TODO: (2023/02/27) Create a subclass of LeaPolicyGradient called LeaPolicyGradientOnQueues that should be used for policy gradient learners applied on queues
+# In such policy gradient learner applied on queues, we would be able to confidently talk about acceptance policies (as these are natural policies of agents interacting with queues),
+# which in a generic policy gradient learner as the one defined here, an acceptance policy may NOT be natural (or required).
+# Once we define the new LeaPolicyGradientOnQueues class, we should probably move the different learn() methods currently defined in this class
+# because they refer to acceptance policies for incoming jobs to queues.
 class LeaPolicyGradient(GenericLearner):
     """
     Policy gradient learner using step size `alpha` and `learnerV` as learner of the state value function
@@ -88,7 +103,12 @@ class LeaPolicyGradient(GenericLearner):
     def store_theta(self, theta):
         "Stores the theta among the stored historical theta values"
         # TODO: (2021/11/04) Having renamed this method from `update_thetas` to `store_theta()`, make the same standardization change in `discrete.Learner._update_alphas()`
-        self.thetas += [theta]
+        # NOTE: We store a COPY of the parameter passed here because otherwise any changes that are done at theta in the outside world
+        # will also be done in the element that is added here to self.thetas!!
+        # It already happened... when learning theta, the learn*() method that updates theta makes the value of theta
+        # initially stored here be updated when theta is updated!
+        # Note that if theta is a scalar, copy.deepcopy() still works fine.
+        self.thetas += [copy.deepcopy(theta)]
 
     def store_gradient(self, state, action, gradient):
         """
@@ -245,7 +265,7 @@ class LeaPolicyGradient(GenericLearner):
     def learn_update_theta_at_end_of_episode(self, T):
         """
         Learns the policy by updating the theta parameter at the end of the episode using the average gradient
-        observed throughout the episode, i.e. as the average of G(t) * grad( log(Pol(A(t)/S(t),theta) ) over all t.
+        observed throughout the episode, i.e. as the average of G(t) * grad( log(Pol(A(t)|S(t),theta) ) over all t.
 
         When the fixed_window attribute is True, a fixed window is used to compute G(t) for each t.
         In that case, the size of the window is T/2 and G(t) is estimated for t = 0, 1, ..., int(T/2).
@@ -257,10 +277,12 @@ class LeaPolicyGradient(GenericLearner):
 
         Return: tuple
         Tuple with the following elements:
-        - theta: theta value before its update
-        - theta_next: theta value after its update
-        - V: the average reward observed in the episodic simulation using the theta value before its update
-        - gradV: gradient of the value function that generated the update on theta
+        - theta: theta value before its update.
+        - theta_next: theta value after its update.
+        - None: this None element is added so that the return tuple is of the same size as the tuple returned by
+        learn_linear_theoretical_from_estimated_values(), where it contains the percent coverage of visit to blocking states.
+        - V: the average reward observed in the episodic simulation using the theta value before its update.
+        - gradV: gradient of the value function that generated the update on theta.
         - deltas: array with the delta innovation values for each simulation time step which is obtained by bootstrapping.
             This is normally equal to G(t). For the case when attribute fixed_window = True, this array is equal to NaN
             for int((T+1)/2) < t <= T+1
@@ -354,13 +376,13 @@ class LeaPolicyGradient(GenericLearner):
         print("[LeaPolicyGradient.learn_update_theta_at_end_of_episode] Estimated grad(V(theta)) = {}".format(gradV))
         print("[LeaPolicyGradient.learn_update_theta_at_end_of_episode] Delta(theta) = alpha * grad(V) = {}".format(delta_theta))
 
-        theta_lower = 0.1       # Do NOT use an integer value as lower bound of theta because the gradient is never non-zero at integer-valued thetas
+        theta_lower = THETA_MIN
         theta = np.max([theta_lower, theta + delta_theta])
 
         # Update the policy on the new theta and record it into the history of its updates
         self.setThetaParameter(theta)
 
-        return theta_prev, theta, self.getAverageRewardUnderPolicy(), gradV, deltas
+        return theta_prev, theta, None, self.getAverageRewardUnderPolicy(), gradV, deltas
 
     def learn_update_theta_at_each_time_step(self, T):
         """
@@ -383,10 +405,12 @@ class LeaPolicyGradient(GenericLearner):
 
         Return: tuple
         Tuple with the following elements:
-        - theta: theta value before its final update
-        - theta_next: theta value after its final update
-        - V: the average reward observed in the episodic simulation using the theta value before its update
-        - gradV: the average of the observed gradients of the value function throughout the episode
+        - theta: theta value before its final update.
+        - theta_next: theta value after its final update.
+        - None: this None element is added so that the return tuple is of the same size as the tuple returned by
+        learn_linear_theoretical_from_estimated_values(), where it contains the percent coverage of visit to blocking states.
+        - V: the average reward observed in the episodic simulation using the theta value before its update.
+        - gradV: the average of the observed gradients of the value function throughout the episode.
         - deltas: array with the delta innovation values for each simulation time step which is obtained by bootstrapping.
             This is normally equal to G(t). For the case when attribute fixed_window = True, this array is equal to NaN
             for int((T+1)/2) < t <= T+1
@@ -484,7 +508,7 @@ class LeaPolicyGradient(GenericLearner):
                     # the state and action have actually been used to learn the policy.
                     if delta_theta != 0.0:
                         self.update_counts(state, action)
-                    theta_lower = 0.1       # Do NOT use an integer value as lower bound of theta because the gradient is never non-zero at integer-valued thetas
+                    theta_lower = THETA_MIN
                     theta = np.max([theta_lower, theta + delta_theta])
 
                     n_theta_updates += 1
@@ -499,7 +523,7 @@ class LeaPolicyGradient(GenericLearner):
         else:
             gradV_mean = None
 
-        return theta_prev, theta, self.getAverageRewardUnderPolicy(), gradV_mean, deltas
+        return theta_prev, theta, None, self.getAverageRewardUnderPolicy(), gradV_mean, deltas
 
     def learn_linear_theoretical_from_estimated_values(self, T, probas_stationary, Q_values):
         """
@@ -526,11 +550,15 @@ class LeaPolicyGradient(GenericLearner):
 
         Return: tuple
         Tuple with the following elements:
-        - theta: theta value before its update
-        - theta_next: theta value after its update
+        - theta: theta value before its update.
+        - theta_next: theta value after its update.
+        - coverage: percent of blocking states or blocking buffer sizes that has been visited by the simulation.
+        There is one percent coverage value per policy threshold, since each threshold has an associated blocking size,
+        be it a buffer size (when the acceptance policy blocks based on buffer size) or a job occupancy
+        (when the acceptance policy blocks based on job-class occupancy of the arriving job class).
         - Q_mean: dictionary indexed by each state of interest where the estimated stationary probability is > 0 with
-        the average of the two state-action values (just to return something as it is not really meaningful)
-        - gradV: gradient of the value function responsible for the update on theta
+        the average of the two state-action values (just to return something as it is not really meaningful).
+        - gradV: gradient of the value function responsible for the update on theta.
         - Q_diff: same as Q_mean but the values stored are the difference in the state-action values for each state.
         """
         #---- Auxiliary functions -----
@@ -553,9 +581,9 @@ class LeaPolicyGradient(GenericLearner):
         if self.is_multi_policy:
             Ks = [0]*self.getNumPolicies()
             for i, pol in enumerate(self.policy):
-                Ks[i] = pol.getBufferSizeForDeterministicBlocking()
+                Ks[i] = pol.getDeterministicBlockingValue()
         else:
-            Ks = [self.policy.getBufferSizeForDeterministicBlocking()]
+            Ks = [self.policy.getDeterministicBlockingValue()]
 
         # Estimated grad(V)
         gradV = np.zeros(self.getNumPolicies()) if self.is_multi_policy else np.array([0.0])
@@ -636,11 +664,7 @@ class LeaPolicyGradient(GenericLearner):
                 print("[LeaPolicyGradient.learn_linear_theoretical_from_estimated_values] Estimated grad(V(theta)) = {}".format(gradV[0]))
                 print("[LeaPolicyGradient.learn_linear_theoretical_from_estimated_values] Delta(theta) = alpha * grad(V) = {:.3f} * {:e} = {:.6f}".format(alpha, gradV[0], delta_theta))
 
-                theta_lower = 0.1   # In principle, try to avoid a non integer value as lower bound of theta because
-                                    # the estimated gradient of V may be zero at integer values of theta (depending on the
-                                    # method used to compute it --does not happen when we estimate the theoretical expression
-                                    # for grad(V) because that expression assumes that theta is non-integer, and is still used
-                                    # even when theta is integer.
+                theta_lower = THETA_MIN
                 theta = np.max([theta_lower, theta + delta_theta])
 
                 # Update the policy on the new theta and record it into the history of its updates
@@ -649,7 +673,7 @@ class LeaPolicyGradient(GenericLearner):
                 else:
                     self.setThetaParameter(theta)
         else:
-            # gradV is a multidimensional array
+            # theta and gradV are multidimensional arrays
             if not any(np.isnan([g for g in gradV])):
                 assert isinstance(theta, np.ndarray), "The theta parameter must be an array for multidimensional theta parameters: {}".format(theta)
                 assert isinstance(gradV, np.ndarray), "The gradV object storing the policy gradient must be an array for multidimensional theta parameters: {}".format(gradV)
@@ -657,14 +681,29 @@ class LeaPolicyGradient(GenericLearner):
                 delta_theta = alpha * gradV
                 theta += delta_theta
                 # Lower bound theta so that it doesn't go negative or to zero, values which do not make sense for the policy
-                theta = np.max([theta, np.repeat(0.1, len(theta))], axis=0) # This computes the maximum between the two arrays, say theta = [3, -5, 0] and [0.1, 0.1, 0.1] by column giving [3, 0.1, 0.1]
+                theta = np.max([theta, np.repeat(THETA_MIN, len(theta))], axis=0) # This computes the maximum between the two arrays, say theta = [3, -5, 0] and [0.1, 0.1, 0.1] by column giving [3, 0.1, 0.1]
                 print("[LeaPolicyGradient.learn_linear_theoretical_from_estimated_values] Estimated grad(V(theta)) = {}".format(gradV))
                 print("[LeaPolicyGradient.learn_linear_theoretical_from_estimated_values] Delta(theta) = alpha * grad(V) = {:.3f} * {} = {}".format(alpha, gradV, delta_theta))
                 print("[LeaPolicyGradient.learn_linear_theoretical_from_estimated_values] theta: {} -> {}".format(theta_prev, theta))
 
+                # Upper bound theta according to the system's capacity (which is fixed)
+                # Either for threshold policies or for Trunk Reservation policies, the value of each theta dimension cannot exceed a value that would make
+                # the blocking size K(i) for job class i be larger than the system's capacity K.
+                K = self.env.getCapacity()
+                _theta_orig = copy.deepcopy(theta)
+                for i, theta_i in enumerate(theta):
+                    # We choose to upper bound theta by K-1 MINUS a small epsilon.
+                    # We consider this epsilon so that theta is NOT an integer and learning can continue
+                    # --o.w. the derivative of the linear step policy we are dealing with in this method will always be 0 at theta.
+                    # This upper bound guarantees that the blocking states defined by theta are *valid states* of the Markov Chain.
+                    # Note that we bound theta by K-1 MINUS epsilon, instead of PLUS epsilon so that the deterministic blocking size,
+                    # that is equal to ceiling(theta+1), is equal to K.
+                    theta[i] = min(theta_i, K - 1 - 0.1)
+                print("[LeaPolicyGradient.learn_linear_theoretical_from_estimated_values] theta BOUNDED by system's capacity K={}: {} -> {}".format(K, _theta_orig, theta))
+
                 self.setThetaParameter(theta)
 
-        return theta_prev, theta, Q_mean, gradV, Q_diff
+        return theta_prev, theta, coverage_states_contributing_to_gradient_component, Q_mean, gradV, Q_diff
 
     def learn_linear_theoretical_from_estimated_values_IGA(self, T, probas_stationary: dict, Q_values: dict):
         """
@@ -712,7 +751,7 @@ class LeaPolicyGradient(GenericLearner):
 
         # Estimated grad(V), left and right
         assert not self.is_multi_policy
-        K = self.policy.getBufferSizeForDeterministicBlocking()
+        K = self.policy.getDeterministicBlockingValue()
 
         # Check input parameters
         keys_probas = probas_stationary.keys()

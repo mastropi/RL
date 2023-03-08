@@ -139,7 +139,11 @@ class PolQueueTwoActionsLogit(QueueParameterizedPolicyTwoActions):
         """
         buffer_size_or_jobclass_occupancy = super().get_x_value_for_policy(state)
 
-        policy_accept = 1 / (1 + np.exp( self.beta * (buffer_size_or_jobclass_occupancy - self.getThetaParameter()) ))
+        if self.env.getBufferSizeFromState(state) >= self.env.getCapacity():
+            # Reject when the queue environment is already operating at its capacity
+            policy_accept = 0.0
+        else:
+            policy_accept = 1 / (1 + np.exp( self.beta * (buffer_size_or_jobclass_occupancy - self.getThetaParameter()) ))
 
         if action == Actions.ACCEPT:
             policy_value_for_action = policy_accept
@@ -149,6 +153,14 @@ class PolQueueTwoActionsLogit(QueueParameterizedPolicyTwoActions):
             raise ValueError(str(__class__) + ": An invalid action was given: {}".format(action))
 
         return policy_value_for_action
+
+    def getDeterministicBlockingValue(self):
+        return self.getDeterministicBlockingValueFromTheta(self.getThetaParameter())
+
+    def getDeterministicBlockingValueFromTheta(self, theta):
+        "What should we return in the case of a logit function for the parameterized policy? Perhaps choose the smallest K whose acceptance policy is close enough to 0.0 probability?"
+        assert is_scalar(theta), "Parameter theta must be scalar: {}".format(theta)
+        raise NotImplementedError
 
 
 class PolQueueTwoActionsLinearStep(QueueParameterizedPolicyTwoActions):
@@ -229,14 +241,20 @@ class PolQueueTwoActionsLinearStep(QueueParameterizedPolicyTwoActions):
         """
         buffer_size_or_jobclass_occupancy = super().get_x_value_for_policy(state)
 
-        if buffer_size_or_jobclass_occupancy <= self.getThetaParameter():
-            policy_accept = 1.0
-        elif buffer_size_or_jobclass_occupancy >= self.getThetaParameter() + 1:
+        if self.env.getBufferSizeFromState(state) >= self.env.getCapacity():
+            # Reject when the queue environment is already operating at its capacity
             policy_accept = 0.0
         else:
-            # theta < s < theta + 1
-            # => The acceptance policy is linear in s
-            policy_accept = self.getThetaParameter() - buffer_size_or_jobclass_occupancy + 1
+            if buffer_size_or_jobclass_occupancy <= self.getThetaParameter():
+                policy_accept = 1.0
+            elif buffer_size_or_jobclass_occupancy >= self.getThetaParameter() + 1:
+                policy_accept = 0.0
+            else:
+                # theta < s < theta + 1
+                # => The acceptance policy is linear in s = 1 - rejection_probability(s, theta) = 1 - (s - theta)
+                # Note that we lower bound theta to -1 because o.w. the acceptance policy would be negative (since the minimum value that s can take is 0)
+                policy_accept = 1 - (buffer_size_or_jobclass_occupancy - max(-1, self.getThetaParameter()))
+                assert 0 <= policy_accept <= 1, "The acceptance policy in the linear part is between 0 and 1 ({})".format(policy_accept)
 
         if action == Actions.ACCEPT:
             policy_value_for_action = policy_accept
@@ -247,11 +265,11 @@ class PolQueueTwoActionsLinearStep(QueueParameterizedPolicyTwoActions):
 
         return policy_value_for_action
 
-    def getBufferSizeForDeterministicBlocking(self):
+    def getDeterministicBlockingValue(self):
         "Returns K, the first integer greater than the theta parameter stored in the object + 1"
-        return self.getBufferSizeForDeterministicBlockingFromTheta(self.getThetaParameter())
+        return self.getDeterministicBlockingValueFromTheta(self.getThetaParameter())
 
-    def getBufferSizeForDeterministicBlockingFromTheta(self, theta):
+    def getDeterministicBlockingValueFromTheta(self, theta):
         "Returns K, the first integer greater than theta + 1"
         assert is_scalar(theta), "Parameter theta must be scalar: {}".format(theta)
         return int( np.ceil( theta + 1 ) )
@@ -259,7 +277,7 @@ class PolQueueTwoActionsLinearStep(QueueParameterizedPolicyTwoActions):
 
 class PolQueueTwoActionsLinearStepOnJobClasses(GenericParameterizedPolicyTwoActions):
     """
-    Randomized policy on a queue with two possible actions: accept or reject an incoming job.
+    Randomized trunk-reservation policy on a queue with two possible actions: accept or reject an incoming job.
     The policy is defined as a stepwise linear function that transitions from deterministic acceptance to deterministic rejection.
     The location of the linear transition from acceptance to rejection happens at only one job class and is defined
     by the threshold parameter `theta`.
@@ -270,11 +288,13 @@ class PolQueueTwoActionsLinearStepOnJobClasses(GenericParameterizedPolicyTwoActi
     - 1.0 if job_class <= theta[k]
     - 0.0 if job_class >= theta[k] + 1
     - theta[k] - job_class + 1.0, o.w.
-    where k is the current buffer size of the queue.
+    where k is the current buffer size of the queue, which is limited to its capacity.
 
     Note that if theta[k] is integer, the policy is deterministic for all job classes.
     
-    Ref: Massaro et al. (2019) "Optimal Trunk-Reservation by Policy Learning", pag. 3
+    Ref:
+    Massaro et al. (2019) "Optimal Trunk-Reservation by Policy Learning", pag. 3
+    Keith W. Ross (1995) "Multiservice Loss Models for Broadband Communication Systems", Ch. 4: Admission Policies (for the trunk-reservation policy)
 
     Arguments:
     env_queue: environment
@@ -286,18 +306,25 @@ class PolQueueTwoActionsLinearStepOnJobClasses(GenericParameterizedPolicyTwoActi
 
     def __init__(self, env_queue :GenericEnvQueueWithJobClasses, theta: list):
         super().__init__(env_queue, theta)
-        if len(self.getThetaParameter()) != self.getEnv().getCapacity() + 1:
-            raise ValueError("The number of theta parameters given ({}) must be equal to the capacity of the queue plus 1 ({})".format(len(theta), env_queue.getCapacity() + 1))
 
         # We now define the linear step policy
         # NOTE: if retrieving the policy becomes somehow inefficient for choosing the action
         # (because we are storing the policy for ALL the states)
-        # we may want to AVOID the definition of the policy, as, to determine the action to take,
+        # we may want to AVOID the definition of the policy since, in order to determine the action to take
         # we just need to know the job class falling in between the two different deterministic selections of an action.
         K = self.getEnv().getCapacity()
         J = self.getEnv().getNumJobClasses()
 
+        # Check the theta parameter given by the user
+        if len(self.getThetaParameter()) != self.getEnv().getCapacity() + 1:
+            raise ValueError("The number of theta parameters given ({}) must be equal to the capacity of the queue plus 1 ({})".format(len(theta), env_queue.getCapacity() + 1))
+        if not all([0 <= t <= J-1 for t in self.getThetaParameter()]):
+            # Note that the minimum accepted value for each theta dimension is -1 and not 0 because the job class numbers range from 0 to J-1
+            # A value of -1 for theta implies that NONE of the job classes is accepted, not even job class 0.
+            raise ValueError("All the values in the theta parameter of the policy must be between -1 and the number of classes minus 1 ({}): {}".format(J-1, self.getThetaParameter()))
+
         # Initialize acceptance policy to 0.0 which applies to job classes j >= theta[k] + 1
+        # Note that
         self.policy_accept = np.zeros((K + 1, J), dtype=float)
 
         # Define acceptance policy with non-zero probability
@@ -316,6 +343,8 @@ class PolQueueTwoActionsLinearStepOnJobClasses(GenericParameterizedPolicyTwoActi
                 # Policy of accept = theta[k] - j + 1 for theta[k] < j < theta[k] + 1
                 #print("2: j={}".format(j))
                 self.policy_accept[k, j] = theta[k] - j + 1
+                assert 0 <= self.policy_accept[k, j] <= 1, "The acceptance policy in the linear part is between 0 and 1 ({})".format(self.policy_accept[k, j])
+
             print("Acceptance policy as a function of the job class for buffer size k = {} (theta[k]={:.1f}): {}".format(k, theta[k], self.policy_accept[k]))
 
     def getGradient(self, action, state):

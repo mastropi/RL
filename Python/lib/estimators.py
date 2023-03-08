@@ -5839,7 +5839,7 @@ if __name__ == "__main__":
         # Define the agent acting on the queue environment
         policies = dict({PolicyTypes.ACCEPT: None, PolicyTypes.ASSIGN: policy_assign})
         learners = None
-        agent = AgeQueue(queue, policies, learners)
+        agent = AgeQueue(env_queue, policies, learners)
 
         # Simulation parameters
         dict_params_simul = {

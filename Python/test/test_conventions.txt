@@ -72,7 +72,13 @@ If, on the contrary, setting up the environment is quite involved (e.g. the queu
 
 B) Tests of functions and methods that support the RL estimation processes
 --------------------------------------------------------------------------
-The file defining the 
+The file defining the unit tests should be named according to the following convention:
+
+	test_<path-to-file-where-tested-classes-or-methods-are-defined>.py
+
+Ex:
+test_simulators.py --> tests classes or methods defined in simulators/__init__.py
+test_simulators_queues.py --> tests classes or methods defined in simulators/queues.py
 
 1) Test classes: Test_Support_Env<environment-where-tests-are-run>
 	Ex: Test_Support_EnvQueueMultiServer

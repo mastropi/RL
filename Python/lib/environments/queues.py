@@ -190,15 +190,15 @@ def rewardOnJobRejection_ByClass(env, state, action, next_state, dict_params=Non
         assert env.getQueueStateFromState(state) == env.getQueueStateFromState(next_state), \
             "At REJECT, the queue's state after rejection ({}) is the same as before rejection ({})" \
             .format(env.getQueueStateFromState(state), env.getQueueStateFromState(next_state))
-        rewards_by_jobclass = dict_params['reward_at_rejection']
-        assert len(rewards_by_jobclass) == env.getNumJobClasses()
-        assert all(np.array(rewards_by_jobclass) <= 0.0), "All rewards of job rejection must be negative or zero, for every job class ({})".format(rewards_by_jobclass)
+        rewards_by_job_class = dict_params['reward_at_rejection']
+        assert len(rewards_by_job_class) == env.getNumJobClasses()
+        assert all(np.array(rewards_by_job_class) <= 0.0), "All rewards of job rejection must be negative or zero, for every job class ({})".format(rewards_by_job_class)
 
         job_class = env.getJobClassFromState(state)
-        assert job_class is not None and 0 <= job_class < len(rewards_by_jobclass), \
+        assert job_class is not None and 0 <= job_class < len(rewards_by_job_class), \
             "The job class of the arriving job must not be None and must be in range 0-{} ({})" \
-            .format(len(rewards_by_jobclass), job_class)
-        return rewards_by_jobclass[job_class]
+            .format(len(rewards_by_job_class), job_class)
+        return rewards_by_job_class[job_class]
     else:
         # No blocking
         # => No reward
@@ -411,7 +411,7 @@ class GenericEnvQueueWithJobClasses(gym.Env):
         with no further explanations!
         Python-3.6.4 (22-Oct-2021)
         """
-        if seed != None:
+        if seed is not None:
             self.seed = seed
             np.random.seed(self.seed)
 
@@ -437,11 +437,21 @@ class GenericEnvQueueWithJobClasses(gym.Env):
     def getCapacity(self):
         return self.queue.getCapacity()
 
+    def getNumJobClasses(self):
+        return len(self.getJobClassRates())
+
     def getNumServers(self):
         return self.queue.getNServers()
 
     def getServiceRates(self):
         return list(self.queue.getDeathRates())
+
+    def getJobClassRates(self):
+        "This method is implemented by each subclass"
+        raise NotImplementedError
+
+    def getLoads(self):
+        return [l/m for l, m in zip(self.getJobClassRates(), self.getServiceRates())]
 
     def getQueueState(self):
         return tuple(self.queue.getServerSizes())
@@ -646,9 +656,6 @@ class EnvQueueSingleBufferWithJobClasses(GenericEnvQueueWithJobClasses):
     def getJobClassRates(self):
         return self.job_class_rates
 
-    def getNumJobClasses(self):
-        return len(self.job_class_rates)
-
     #------ SETTERS ------#
     # TODO: (2023/01/26) I think we should set the state of the single-buffer queue system to the same state used in the loss network system so that this setState() method is NOT confusing...
     # In fact, now the `state` parameter has a different meaning than the state attribute of the class:
@@ -788,9 +795,6 @@ class EnvQueueLossNetworkWithJobClasses(GenericEnvQueueWithJobClasses):
         return next_state, reward, {}
 
     #------ GETTERS ------#
-    def getNumJobClasses(self):
-        return len(self.getJobClassRates())
-
     def getJobClassRates(self):
         return list(self.queue.getBirthRates())
 

@@ -734,13 +734,13 @@ def compute_expected_cost_knapsack(costs: Union[list, tuple, np.ndarray], capaci
             contribution_from_jobclasses = 0.0
             for j, costj in enumerate(costs):
                 contribution_from_jobclasses +=  costj * lambdas[j] if total_x == capacity or x[j] == blocking_sizes[j] \
-                                            else 0.0
+                                                                    else 0.0
             if printFlag:
                 print("cost unused = {:.3f}".format(cost_unused_servers), end=", ")
                 print("cost*lambda = {:.3f}".format(contribution_from_jobclasses), end=" --> ")
             expected_costs[blocking_sizes] += p_blocking[idx] * (cost_unused_servers + contribution_from_jobclasses)
             if printFlag:
-                print("cost = {:.3g}".format(expected_costs[blocking_sizes]))
+                print("Expected cost = {:.3g}".format(expected_costs[blocking_sizes]))
         expected_costs[blocking_sizes] /= Lambda
         if printFlag:
             print("-----------> ", expected_costs[blocking_sizes])

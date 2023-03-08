@@ -15,7 +15,7 @@ if __name__ == "__main__":
 from Python.lib.agents import GenericAgent
 from Python.lib.agents.learners import LearnerTypes
 from Python.lib.agents.policies import PolicyTypes
-from Python.lib.environments.queues import ActionTypes, EnvQueueSingleBufferWithJobClasses
+from Python.lib.environments.queues import Actions, ActionTypes
 
 
 class AgeQueue(GenericAgent):
@@ -23,15 +23,17 @@ class AgeQueue(GenericAgent):
     Agent that acts on a queue environment
 
     Arguments:
-    env: environment
-        Queue environment defining the characteristics of the environment on which the agent acts.
-        Note that this object is NOT stored as part of the object's attributes, and the reason is that we may want
-        the agent to act on any given number of *different* environments having the same characteristics
-        (e.g. Fleming-Viot learning, where there are N copies of the same environment on which the same type of agent
+    env: Queue environment
+        The queue environment on which the agent acts is NOT stored in the class because we may want
+        the agent to act on *different* environments having the same or similar characteristics
+        (e.g. in Fleming-Viot learning, where there are N copies of the same environment on which the same type of agent
         interacts --by e.g. accepting or rejecting incoming jobs).
-        Here the queue environment is only used to retrieve the number of servers in the system and the arrival rates
-        of the different arriving job classes, in order to define the job assignment policy
-        (of an incoming job of a given class to a server in the queue system).
+
+        The attribute is left as part of the constructor because, conceptually, agents should receive the environment on
+        which they act, so that we homogenize the signature of all agents we define, by passing the environment,
+        the policies, and the learners.
+
+        The queue environment on which the agent acts is passed as argument to the act() method defined in the class.
 
     policies: dict
         Dictionary of policies followed by the agent, with the following elements:
@@ -56,7 +58,7 @@ class AgeQueue(GenericAgent):
         # We assume the policy depends on the job class when the `policies` parameter is a list of policies with
         # as many elements as job classes on which the policy is applied.
         # NOTE that we cannot call the self.getAcceptancePolicies() method defined below because that method USES
-        # the value of the attribute we define here self.acceptance_policy_depends_on_jobclass whose value we set here!
+        # the value of the attribute we define here self.acceptance_policy_depends_on_jobclass whose value we set now!
         if isinstance(self.getPolicy()[PolicyTypes.ACCEPT], list):
             self.acceptance_policy_depends_on_jobclass = True
         else:
@@ -70,7 +72,20 @@ class AgeQueue(GenericAgent):
         Arguments:
         env: Queue environment (normally defined in environments/queues.py)
             The queue environment on which the agent acts.
-            NOTE: This object is updated after the action takes place.
+            It should have the following methods defined:
+            - getActions(): gets the possible actions accepted by the environment.
+            - getBufferSize(): gets the current queue length, i.e. the sum of the occupancy levels of each job class
+                received by the queue system defined in the environment.
+            - getCapacity(): gets the capacity of the queue system defined in the environment.
+            - getJobClass(): gets the job class associated to the current state of the environment. If not None
+                this is the class of the arriving job at the time an action is required by the agent.
+            - getLastAction(): get the last action taken by the agent on the environment.
+            - getNumServers(): gets the number of servers in the queue system defined in the environment.
+            - getQueueState(): gets the queue state of the queue system defined in the environment.
+            - getState(): gets the current state of the environment.
+            - step(): the method that takes the action chosen by the agent on the environment.
+            NOTE: This object is updated after the action takes place with the result of taking the action of the given
+            policy_type chosen by the agent.
 
         policy_type: PolicyTypes
             Type of policy on which the agent acts on the queue, one of:
@@ -95,17 +110,32 @@ class AgeQueue(GenericAgent):
             action_type = ActionTypes.ACCEPT_REJECT
             if self.acceptance_policy_depends_on_jobclass:
                 # This is most likely the case when the environment is a loss network with multi-class jobs
-                assert job_class < len(env.getQueueState())
-                action = self.getAcceptancePolicies()[job_class].choose_action((env.getQueueState()[job_class], job_class))
-                ## IMPORTANT: The state that is passed to the policy's choose_action() method MUST be the state of the queue environment on which the policy acts
-                ## So for instance, for queue environments defined in environments/queues.py (such as EnvQueueSingleBufferWithJobClasses or EnvQueueLossNetworkWithJobClasses)
-                ## the state is a tuple containing the queue's state and the arriving job class.
-                ## The message here is that we should NOT simply pass the queue's state as parameter to choose_action() but also
-                ## the information of the arriving job class, as the queue's state is extacted from such tuple (queue_state, job_class)
-                ## by the getPolicyForAction() method of the parameterized policy that is called by the choose_action method called above.
+                # Note that the action of the agent is REJECT when the system is at FULL CAPACITY (regardless of the class of the job that arrives)
+                # If the system is NOT at full capacity, the accept/reject action is chosen based on the class of the arriving job
+                # and the occupancy level of that class in the system, which are inputs for the acceptance policy.
+                assert job_class < len(env.getQueueState()), "The job class ({}) must be an index whose value is less than the queue state length ({})".format(job_class, len(env.getQueueState()))
+                buffer_size_is_smaller_than_queue_capacity = env.getBufferSize() < env.getCapacity()
+                # The action taken is the minimum between two possible actions:
+                # - accepting/rejecting the job based on the system being at full capacity or not.
+                # - accepting/rejecting the job based on the policy for the class of the arriving job.
+                # The fact that we use the minimum assumes that the possible actions defined in the Actions enum
+                # associates REJECT to a smaller index than ACCEPT, and in addition the way to retrieve the chosen action
+                # requires that REJECT is associated to index 0 and ACCEPT is associated to index 1 (because the chosen
+                # action is derived from the above boolean expression which is converted to integer on the next line).
+                assert Actions.ACCEPT.value > Actions.REJECT.value, "The REJECT action ({}) must have a lower index than the ACCEPT action ({}) in the Actions enum".format(Actions.REJECT, Actions.ACCEPT)
+                assert Actions.REJECT.value == 0 and Actions.ACCEPT.value == 1, "The REJECT action ({}) must have index value 0 and the ACCEPT action ({}) must have index value 1 in the Actions enum".format(Actions.REJECT, Actions.ACCEPT)
+                action = min( env.getActions()(int(buffer_size_is_smaller_than_queue_capacity)),
+                              self.getAcceptancePolicies()[job_class].choose_action((env.getQueueState()[job_class], job_class)) )
+                    ## IMPORTANT: The state that is passed to the policy's choose_action() method MUST be the state of the queue environment on which the policy acts
+                    ## So for instance, for queue environments defined in environments/queues.py (such as EnvQueueSingleBufferWithJobClasses or EnvQueueLossNetworkWithJobClasses)
+                    ## the state is a tuple containing the queue's state and the arriving job class.
+                    ## The message here is that we should NOT simply pass the queue's state as parameter to choose_action() but also
+                    ## the information of the arriving job class, as the queue's state is extacted from such tuple (queue_state, job_class)
+                    ## by the getPolicyForAction() method of the parameterized policy that is called by the choose_action method called above.
 
-                ## NOTE also that, as queue_state we pass the occupancy level of the arriving job class because this is the piece of information of the state
-                ## that defines the acceptance or rejection of the job... i.e. the occupancy level of the other job classes do not play any role in this acceptance policy.
+                    ## NOTE also that, as queue_state we pass the occupancy level of the arriving job class because this is the piece of information of the state
+                    ## that defines the acceptance or rejection of the job... i.e. the occupancy level of the other job classes do not play any role in this acceptance policy.
+                assert isinstance(action, Actions)
             else:
                 # This is most likely the case when the environment is a single- or multi-server system with single queue (a.k.a. buffer)
                 action = self.getAcceptancePolicies()[0].choose_action(env.getState())
@@ -172,7 +202,7 @@ class AgeQueue(GenericAgent):
         policies_accept = self.getAcceptancePolicies()
         assert isinstance(thresholds, list)
         assert isinstance(policies_accept, list)
-        return [policies_accept[p].getBufferSizeForDeterministicBlockingFromTheta(theta) for p, theta in enumerate(thresholds)]
+        return [policies_accept[p].getDeterministicBlockingValueFromTheta(theta) for p, theta in enumerate(thresholds)]
 
     def getAcceptancePolicyDependenceOnJobClass(self):
         return self.acceptance_policy_depends_on_jobclass

@@ -402,7 +402,7 @@ class Test_EstAverageValueV_EnvQueueLossNetworkWithJobClasses(unittest.TestCase)
 
     @classmethod
     def setUpClass(cls):
-        rates_birth = [0.5, 0.7, 0.8]
+        rates_birth = [0.1, 0.5, 0.8]
         rates_death = [1.0, 1.0, 1.0]
         nservers = len(rates_death)
         queue_mm_loss = queues.QueueMM(rates_birth, rates_death, nservers, +np.Inf, origin=0.0)
@@ -411,7 +411,6 @@ class Test_EstAverageValueV_EnvQueueLossNetworkWithJobClasses(unittest.TestCase)
         dict_params_reward_func = None
         cls.env_queue_mm_loss = env_queues.EnvQueueLossNetworkWithJobClasses(
             queue_mm_loss,
-            BufferType.SINGLE,
             reward_func,
             rewards_accept_by_job_class,
             dict_params_reward_func)
@@ -553,7 +552,9 @@ class Test_EstAverageValueV_EnvQueueLossNetworkWithJobClasses(unittest.TestCase)
         #activation_occupancies_per_jobclass = [int(0.3*occup) for occup in blocking_occupancies_per_jobclass]
         nservers = 10
         T = 2000 #200000 # 2000
-        burnin_time_steps = 5
+        J = activation_occupancies_per_jobclass
+        K = blocking_occupancies_per_jobclass
+        burnin_time_steps = 20
         min_num_cycles_for_expectations = 5
 
         proba_blocking_mc, expected_reward, probas_stationary, n_cycles_used_for_probas_estimation, \
@@ -597,29 +598,36 @@ class Test_EstAverageValueV_EnvQueueLossNetworkWithJobClasses(unittest.TestCase)
         print("- Number of cycles used in the estimation of the stationary probabilities (using renewal theory) = {}".format(n_cycles_used_for_probas_estimation))
         print("- Number of observed events = {}".format(n_events_mc))
 
-        # Check system setup is the one required to obtain the expected results
-        #assert nservers == 10, "Number of servers is 10"
-        #assert list(self.env_queue_mm_loss.getJobClassRates()) == [0.5, 0.7, 0.8], "Job arrival rates are [0.5, 0.7, 0.8]"
-        #assert list(self.env_queue_mm_loss.getServiceRates()) == [1.0, 1.0, 1.0], "Service rates are [1.0, 1.0, 1.0]"
-
         # True stationary probability of blocking
         x, dist = stationary_distribution_product_form(nservers, rhos, func_prod_knapsack)
         proba_stationary_true = np.sum([v for xx, v in zip(x, dist) if tuple(xx) in probas_stationary.keys()])
         print("")
-        print("- Stationary probability of ALL blocking states = {}".format(proba_stationary))
+        print("- Stationary probability of ALL blocking states (does NOT depend on the job arrival rates) = {}".format(proba_stationary))
         print("- TRUE Stationary probability of ALL blocking states = {}".format(proba_stationary_true))
-        #assert np.isclose(proba_stationary, proba_stationary_true)
+        print("- Blocking probability (it depends on the job arrival rates) = {}".format(proba_blocking_mc))
+
+        assert np.isclose(proba_stationary, 0.069825, atol=1E-6)
+        assert np.isclose(proba_blocking_mc, 0.025118, atol=1E-6)
+        # Check system setup is the one required to obtain the expected results
+        assert nservers == 10, "Number of servers is 10"
+        assert list(self.env_queue_mm_loss.getJobClassRates()) == [0.1, 0.5, 0.8], "Job arrival rates are [0.1, 0.5, 0.8]"
+        assert list(self.env_queue_mm_loss.getServiceRates()) == [1.0, 1.0, 1.0], "Service rates are [1.0, 1.0, 1.0]"
+        assert T == 2000, "Number of arrival events is 2000"
+        assert K == [4, 2, 5], "Blocking sizes are [4, 2, 5]"
+        assert J == [2, 1, 3], "Activation sizes are [1, 1, 1]"
 
     def test_EnvQueueLossNetwork_MetFV_SingleCapacity(self):
         blocking_occupancies_per_jobclass = [4, 2, 5]
-        #activation_occupancies_per_jobclass = [2, 1, 3]
-        activation_occupancies_per_jobclass = [1, 1, 1]
+        activation_occupancies_per_jobclass = [2, 1, 3]
+        #activation_occupancies_per_jobclass = [1, 1, 1]
         nservers = 10
-        N = 10 # 1000
-        T = 20 # 2000
-        # (2023/01/26) Note about burnin and min cycles: Using (5, 5) or (50, 10) as (burnin_time_steps, min_cycles) didn't change much the estimated probability (e.g. from 14.454 to 14.453!)
-        burnin_time_steps = 0 #10
-        min_num_cycles_for_expectations = 0 #5
+        N = 100 # 1000
+        T = 200 # 2000
+        K = blocking_occupancies_per_jobclass
+        J = activation_occupancies_per_jobclass
+        # (2023/01/26) Note about burnin and min cycles: Using (5, 5) or (50, 10) as (burnin_time_steps, min_cycles) didn't change much the estimated probability (e.g. from 14.454% to 14.453%!)
+        burnin_time_steps = 20 #10
+        min_num_cycles_for_expectations = 5
         method_survival_probability_estimation = SurvivalProbabilityEstimation.FROM_N_PARTICLES
 
         proba_blocking_fv, expected_reward, probas_stationary, \
@@ -672,18 +680,29 @@ class Test_EstAverageValueV_EnvQueueLossNetworkWithJobClasses(unittest.TestCase)
         print("- Number of events in MC simulation for E(T) = {}".format(n_events_et))
         print("- Number of events in FV simulation for Phi(t) = {}".format(n_events_fv_only))
 
-        # Check system setup is the one required to obtain the expected results
-        #assert nservers == 10, "Number of servers is 10"
-        #assert list(self.env_queue_mm_loss.getJobClassRates()) == [0.5, 0.7, 0.8], "Job arrival rates are [0.5, 0.7, 0.8]"
-        #assert list(self.env_queue_mm_loss.getServiceRates()) == [1.0, 1.0, 1.0], "Service rates are [1.0, 1.0, 1.0]"
-
         # True stationary probability of blocking
         x, dist = stationary_distribution_product_form(nservers, rhos, func_prod_knapsack)
         proba_stationary_true = np.sum([v for xx, v in zip(x, dist) if tuple(xx) in probas_stationary.keys()])
         print("")
-        print("- Stationary probability of ALL blocking states = {}".format(proba_stationary))
+        print("- Stationary probability of ALL blocking states (does NOT depend on the job arrival rates) = {}".format(proba_stationary))
         print("- TRUE Stationary probability of ALL blocking states = {}".format(proba_stationary_true))
-        #assert np.isclose(proba_stationary, proba_stationary_true)
+        print("- Blocking probability (it depends on the job arrival rates) = {}".format(proba_blocking_fv))
+
+        assert np.isclose(proba_stationary, 0.068997, atol=1E-6)
+            ## The above result is a little too far from the true stationary probability = 0.076922.
+            ## If we increase the number of particles from 100 to 500, the result is much closer (0.0737),
+            ## but the estimation process increases from 15 sec to ~ 7 min...
+            ## Note also that if the activation sizes are decreased from [2, 1, 3] to [1, 1, 1],
+            ## the stationary probability increases to 0.0943... the opposite from what I thought... although we are looking at just one sample here!
+        assert np.isclose(proba_blocking_fv, 0.025382, atol=1E-6)
+        # Check system setup is the one required to obtain the expected results
+        assert nservers == 10, "Number of servers is 10"
+        assert list(self.env_queue_mm_loss.getJobClassRates()) == [0.1, 0.5, 0.8], "Job arrival rates are [0.1, 0.5, 0.8]"
+        assert list(self.env_queue_mm_loss.getServiceRates()) == [1.0, 1.0, 1.0], "Service rates are [1.0, 1.0, 1.0]"
+        assert N == 100, "Number of particles is 100"
+        assert T == 200, "Number of arrival events is 200"
+        assert K == [4, 2, 5], "Blocking sizes are [4, 2, 5]"
+        assert J == [2, 1, 3], "Activation sizes are [2, 1, 3]"
 
 
 if __name__ == '__main__':

@@ -14,16 +14,19 @@ import unittest
 
 import numpy as np
 
+from Python.lib.agents.learners.continuing.mc import LeaMC
+from Python.lib.agents.learners.policies import LeaPolicyGradient
 from Python.lib.agents.policies.job_assignment import PolJobAssignmentProbabilistic
-
-from Python.lib.environments.queues import Actions, ActionTypes, BufferType, EnvQueueSingleBufferWithJobClasses, \
-    EnvQueueLossNetworkWithJobClasses, rewardOnJobRejection_Constant, rewardOnJobClassAcceptance
+from Python.lib.agents.policies.parameterized import PolQueueTwoActionsLinearStep
+from Python.lib.agents.queues import AgeQueue
+from Python.lib.environments.queues import Actions, ActionTypes, EnvQueueSingleBufferWithJobClasses, \
+    EnvQueueLossNetworkWithJobClasses, rewardOnJobClassAcceptance, rewardOnJobRejection_ByClass, rewardOnJobRejection_Constant
+from Python.lib.simulators.queues import get_deterministic_blocking_boundaries, define_queue_environment_and_agent, estimate_expected_reward, generate_event, SimulatorQueue
 import Python.lib.queues as queues
 from Python.lib.queues import Event, GenericQueue
 
-from Python.lib.simulators.queues import generate_event, SimulatorQueue
-
-from Python.lib.utils.computing import compute_job_rates_by_server
+from Python.lib.utils.computing import compute_expected_cost_knapsack, compute_job_rates_by_server, \
+    compute_stationary_probability_knapsack_when_blocking_by_class
 
 
 class Test_Support_EnvGenericQueueSingleServer(unittest.TestCase):
@@ -37,6 +40,9 @@ class Test_Support_EnvGenericQueueSingleServer(unittest.TestCase):
         cls.env_queue = EnvQueueSingleBufferWithJobClasses(queue, [0.3, 0.8, 0.7, 0.9], rewardOnJobClassAcceptance, [1, 0.8, 0.3, 0.2])
 
     def test_step(self):
+        print("\n")
+        print("Running test {}...".format(self.id()))
+
         env = self.env_queue
 
         # -- Equivalent job arrival rates (by server)
@@ -99,6 +105,7 @@ class Test_Support_EnvQueueMultiServer(unittest.TestCase):
 
     def test_function_generate_event(self):
         print("\n")
+        print("Running test {}...".format(self.id()))
         print("".join(np.repeat("*", 20)))
         print("Testing generate_event() method on a multi-server queue system defined in simulators.queues...")
 
@@ -170,6 +177,10 @@ class Test_Support_EnvQueueLossNetwork(unittest.TestCase):
         cls.env_queue_mm = EnvQueueLossNetworkWithJobClasses(queue_mm, rewardOnJobRejection_Constant, None)
 
     def test_step(self):
+        "Tests the step() method of the environment class used to model a Loss Network"
+        print("\n")
+        print("Running test {}...".format(self.id()))
+
         env = self.env_queue_mm
 
         # -- Arriving job on buffer not full
@@ -205,6 +216,92 @@ class Test_Support_EnvQueueLossNetwork(unittest.TestCase):
         # The reward is not zero because even though we accepted the job, it was actually rejected due to full buffer
         assert reward == env.reward_func(env, state, env.getLastAction(), next_state)
 
+    def test_estimate_expected_reward(self):
+        """
+        Tests the estimate_expected_reward() function in the context of a parameterized policy acting on a
+        loss network environment which can emit rewards for job blocking and/or job acceptance.
+
+        The expected reward thus computed is compared with the expected cost computed by compute_expected_cost_knapsack()
+        which assumes that rewards for blocking are emitted by a *deterministic* policy.
+
+        Due to the deterministic policy nature assumed by the compute_expected_cost_knapsack() function,
+        and the possibly non-deterministic policy on which the expected reward is computed by estimate_expected_reward(),
+        the value yielded by the latter function should be larger than or equal to the value computed by the former function,
+        and this is what is tested.
+        """
+        print("\n")
+        print("Running test {}...".format(self.id()))
+
+        # Define loss network characteristics
+        capacity = 6
+        costs = [10, 100, 10000]
+        rhos = [0.1, 0.5, 0.8]
+        lambdas = rhos
+
+        # Parameter for Acceptance policy
+        theta = [3.1, -1.1, 4.9]
+
+        # 1) Define the environment and the agent on which the expected reward is computed
+        dict_params = dict({'environment': {'queue_system': "loss-network",
+                                            'capacity': capacity,
+                                            'nservers': len(rhos),
+                                            'job_class_rates': lambdas,
+                                            'service_rates': rhos,
+                                            'policy_assignment_probabilities': None,
+                                            'reward_func': rewardOnJobRejection_ByClass,
+                                            'reward_func_params': dict({'reward_at_rejection': [-c for c in costs]}),
+                                            'rewards_accept_by_job_class': None,
+                                            },
+                            'policy': {'parameterized_policy': [PolQueueTwoActionsLinearStep for _ in theta],
+                                       'theta': theta
+                                       },
+                            'learners': {'V': {'learner': LeaMC,
+                                               'params': {'gamma': 1}
+                                               },
+                                         'Q': {'learner': None,
+                                               'params': {}},
+                                         'P': {'learner': LeaPolicyGradient,
+                                               'params': {'alpha_start': 10.0,
+                                                          'adjust_alpha': False,
+                                                          'func_adjust_alpha': float,
+                                                          'min_time_to_update_alpha': 0,
+                                                          'alpha_min': 0.1,
+                                                          'fixed_window': False,
+                                                          'clipping': False,
+                                                          'clipping_value': 1.0,
+                                                          }
+                                               }
+                                         },
+                            'agent': {'agent': AgeQueue}
+                            })
+        env, rhos, agent = define_queue_environment_and_agent(dict_params)
+
+        # Compute deterministic blocking sizes
+        blocking_sizes = get_deterministic_blocking_boundaries(agent, thresholds=theta)
+
+        # 2) Use estimate_expected_reward() to compute the TRUE (because we use the true stationary probabilities) expected reward for the given parameterized policy (which may include non-deterministic blocking)
+        # a) Compute the true stationary probability distribution based on blocking sizes, which is needed to compute the expected reward
+        capacity_blocking, states_valid_when_blocking, p_blocking = compute_stationary_probability_knapsack_when_blocking_by_class(capacity, rhos, blocking_sizes)
+        probas_stationary = dict([(tuple(x), p) for x, p in zip(states_valid_when_blocking, p_blocking)])
+
+        # b) Compute the expected reward given the agent acting on the environment with the given policies
+        expected_reward_parameterized_policy = estimate_expected_reward(env, agent, probas_stationary)
+
+        # 2) Use compute_expected_cost_knapsack() to compute the TRUE expected costs based on DETERMINISTIC blocking
+        # Compute the true expected costs for all possible blocking sizes given the system's characteristics
+        # WARNING: This may take quite a lot of time if the knapsack's capacity is "large", say > 10.
+        expected_costs_deterministic_policy = compute_expected_cost_knapsack(costs, capacity, rhos, lambdas)
+        print("Lowest 10 expected cost values based on a deterministic acceptance policy:")
+        for k in sorted(expected_costs_deterministic_policy, key=lambda x: expected_costs_deterministic_policy[x])[:11]:
+            print(k, expected_costs_deterministic_policy[k])
+        print(f"Expected cost when blocking at {blocking_sizes}: {expected_costs_deterministic_policy[tuple(blocking_sizes)]}")
+        print(f"Expected cost associated to the parameterized acceptance policy computed by estimate_expected_reward() with same deterministic blocking size"
+              f"\n(should be similar to above cost but a little larger): {-expected_reward_parameterized_policy}")
+
+        # 3) CHECK consistency between the two ways of computing the expected cost
+        assert -expected_reward_parameterized_policy >= min(expected_costs_deterministic_policy.values())
+        assert -expected_reward_parameterized_policy >= expected_costs_deterministic_policy[tuple(blocking_sizes)]
+
 
 if __name__ == "__main__":
     # Reference for creating test suites:
@@ -227,4 +324,5 @@ if __name__ == "__main__":
     # Loss network tests
     test_suite_lossnetwork = unittest.TestSuite()
     test_suite_lossnetwork.addTest(Test_Support_EnvQueueLossNetwork("test_step"))
+    test_suite_lossnetwork.addTest(Test_Support_EnvQueueLossNetwork("test_estimate_expected_reward"))
     runner.run(test_suite_lossnetwork)

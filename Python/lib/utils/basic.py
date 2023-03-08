@@ -211,6 +211,47 @@ def reset_pandas_options(pandas_options: dict):
     pd.set_option('display.max_columns', pandas_options['display.max_columns'])
     pd.set_option('display.max_rows', pandas_options['display.max_rows'])
 
+def assert_equal_data_frames(df_observed, df_expected, columns, atol=1E-6, printFlag=False):
+    """
+    Assert that two data frames are equal up to a given absolute tolerance.
+    The function is prepared to compare data frames that may contain lists as some of their cell values and to accept comparison between NaN values.
+
+    df_observed: pandas DataFrame
+        Data frame containing the observed data to compare against the expected.
+
+    df_expected: pandas DataFrame
+        Data frame containing the expected data against which the observed data is compare.
+
+    columns: list
+        List of the column names to compare between the two data frames.
+        The columns must exist in both data frames.
+
+    atol: (opt) float
+        Absolute tolerance for the comparison between numeric values (used in the call to np.allclose() for each compared value).
+        default: 1E-6
+
+    printFlag: bool
+        Whether to show which column is compared and their respective observed and expected values for each row.
+    """
+    # Note: we cannot simply use np.allclose() on all the data frame in the assertion because this fails when some elements of the output data frame are lists
+    # (e.g. 'theta_true', etc.) and a comparison of lists fails with np.allclose().
+    # The only solution I found was to iterate on the columns and on the rows for each column!
+    # Also, using `df_observed == df_expected` instead of np.allclose() does NOT work either
+    # because we get the error message that the truth value of a set of values... use all()...
+    # And still, if I use all as in `all((df_observed == df_expected).all())` it does not work!!!!!!
+    for col in columns:
+        if printFlag:
+            print(f"col={col}")
+        for idx, expected_value in df_expected[col].iteritems():
+            observed_value = df_observed[col][idx]
+            if printFlag:
+                print(f"idx={idx}, observed={observed_value}, expected={expected_value}")
+            assert is_scalar(observed_value) and is_scalar(expected_value) or \
+                    not is_scalar(observed_value) and len(observed_value) == 1 and is_scalar(expected_value) or \
+                    is_scalar(observed_value) and not is_scalar(expected_value) and len(expected_value) == 1 or \
+                    len(observed_value) == len(expected_value), "The observed and expected value have the same length"
+            assert np.allclose(observed_value, expected_value, atol=atol, equal_nan=True), f"The observed and expected value are the same within an absolute tolerance of {atol}"
+
 def index_linear2multi(idx, shape, order='C'):
     """
     Converts a linear index into a 2D index based on the given shape and order of access as defined in numpy.reshape()"

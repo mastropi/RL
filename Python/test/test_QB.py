@@ -708,7 +708,7 @@ def deprecated_test_mc_implementation(nservers, K, paramsfile, nmeantimes=None, 
     # Define the agent acting on the queue environment
     policies = dict({PolicyTypes.ACCEPT: None, PolicyTypes.ASSIGN: policy_assign})
     learners = None
-    agent = AgeQueue(queue, policies, learners)
+    agent = AgeQueue(env_queue, policies, learners)
 
     rhos = get_server_loads(queue.getBirthRates(), queue.getDeathRates())
 
