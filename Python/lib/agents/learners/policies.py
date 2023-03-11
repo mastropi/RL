@@ -682,7 +682,23 @@ class LeaPolicyGradient(GenericLearner):
                 assert isinstance(theta, np.ndarray), "The theta parameter must be an array for multidimensional theta parameters: {}".format(theta)
                 assert isinstance(gradV, np.ndarray), "The gradV object storing the policy gradient must be an array for multidimensional theta parameters: {}".format(gradV)
                 alpha = self.getLearningRate()
-                delta_theta = alpha * gradV
+
+                gradV_norm = np.linalg.norm(gradV)
+                nonzero_gradV_components = [np.abs(v) for v in gradV if v != 0.0]
+                #if gradV_norm == 0.0:
+                if len(nonzero_gradV_components) == 0:
+                    # All gradV components are 0! => nothing to update
+                    alpha = np.nan
+                    delta_theta = 0.0
+                else:
+                    #-- When adjusting alpha by the gradient magnitude at each learning step
+                    #gradV_abs_min_nonzero_component_value = np.min(nonzero_gradV_components)
+                    #alpha0 = self.getInitialLearningRate()
+                    #shrinkage = alpha0 / alpha
+                    #alpha = 1 / gradV_abs_min_nonzero_component_value / shrinkage
+                    #-- When adjusting alpha by the gradient magnitude
+
+                    delta_theta = alpha * gradV
                 theta += delta_theta
                 # Lower bound theta so that it doesn't go negative or to zero, values which do not make sense for the policy
                 theta = np.max([theta, np.repeat(THETA_MIN, len(theta))], axis=0) # This computes the maximum between the two arrays, say theta = [3, -5, 0] and [0.1, 0.1, 0.1] by column giving [3, 0.1, 0.1]
