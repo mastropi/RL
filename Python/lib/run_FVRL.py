@@ -14,7 +14,7 @@ import sys
 import shutil
 import warnings
 import tracemalloc
-from typing import Union
+import optparse
 
 import numpy as np
 import pandas as pd
@@ -30,7 +30,7 @@ from Python.lib.agents.policies.parameterized import PolQueueTwoActionsLinearSte
 
 from Python.lib.agents.queues import AgeQueue
 
-from Python.lib.environments.queues import Actions, BufferType, rewardOnJobRejection_ExponentialCost, rewardOnJobRejection_ByClass
+from Python.lib.environments.queues import COST_EXP_BUFFER_SIZE_REF, Actions, BufferType, rewardOnJobRejection_ExponentialCost, rewardOnJobRejection_ByClass
 
 from Python.lib.simulators import LearningMethod
 from Python.lib.simulators.queues import compute_nparticles_and_narrivals_for_fv_process, \
@@ -49,7 +49,7 @@ PLOT_RESULTS_TOGETHER = False           # Whether to plot the theta-learning tra
 PLOT_RESULTS_PAPER = False              # Whether to generate the plots with the theta learning for the paper
 
 
-# ---------------------------- Auxiliary functions ---------------------------#
+#---------------------------- Auxiliary functions ---------------------------#
 def run_simulation_policy_learning(simul, replications, dict_params_simul, dict_info,
                                    dict_params_info: dict = {'plot': False, 'log': False},
                                    params_read_from_benchmark_file=False, benchmark=None,
@@ -279,7 +279,7 @@ def compute_optimum_blocking_sizes_and_expected_cost(simul: SimulatorQueue, dict
     rhos = [l / m for l, m in zip(dict_params_environment['job_class_rates'], dict_params_environment['service_rates'])]
     if simul.getEnv().getBufferType() == BufferType.SINGLE:
         print(f"Computing the optimum expected cost and set of optimum capacities (normaly one value) for a single-buffer queue system with "
-              f"lambdas = {dict_params_environment.get('job_class_rates')}, mus = {dict_params_environment.get('service_rates')} and exponential reward function...")
+              f"lambdas = {dict_params_environment.get('job_class_rates')}, mus = {dict_params_environment.get('service_rates')}, rhos = {rhos} and exponential reward function...")
         assert dict_params_environment['reward_func'].__name__ == "rewardOnJobRejection_ExponentialCost", \
             "The reward function is an exponential function of the blocking size: {}".format(dict_params_environment['reward_func'].__name__)
 
@@ -309,7 +309,7 @@ def compute_optimum_blocking_sizes_and_expected_cost(simul: SimulatorQueue, dict
         # In a system with queue this is not the case because its capacity is not fixed and it's what it's optimized by the optimization algorithm, so we don't compute any expected costs.
         blocking_costs = [-r for r in dict_params_environment['reward_func_params']['reward_at_rejection']]
         print(f"Computing the optimum expected cost and set of optimum blocking sizes for a knapsack with capacity = {dict_params_environment['capacity']}, "
-              f"blocking costs = {blocking_costs}, lambdas = {dict_params_environment['job_class_rates']}, mus = {dict_params_environment['service_rates']}...")
+              f"blocking costs = {blocking_costs}, lambdas = {dict_params_environment['job_class_rates']}, mus = {dict_params_environment['service_rates']}, rhos = {rhos}...")
         expected_costs = compute_expected_cost_knapsack(blocking_costs, dict_params_environment['capacity'], rhos, dict_params_environment['job_class_rates'])
 
         # Find the minimum of the expected costs just computed
@@ -332,7 +332,7 @@ def compute_optimum_blocking_sizes_and_expected_cost(simul: SimulatorQueue, dict
         maximum_expected_cost = np.nan
 
     return optimum_blocking_sizes, optimum_expected_cost, average_expected_cost, maximum_expected_cost
-# ---------------------------- Auxiliary functions ---------------------------#
+#---------------------------- Auxiliary functions ---------------------------#
 
 
 # Default execution parameters when no arguments are given in the command line
@@ -342,7 +342,7 @@ print("User arguments: {}".format(sys.argv))
 nargs_required = 3
 counter_opt_args = 0
 if len(sys.argv) == 1:  # Only the execution file name is contained in sys.argv
-    sys.argv += [5]    # t_learn: Number of learning steps
+    sys.argv += [30]    # t_learn: Number of learning steps
     sys.argv += ["MC"]  # learning_method: estimation method: "FV" or "MC";
                         # when learning_method = "MC", we expect there exists a benchmark file called benchmark_fv.csv
                         # that defines how many events were observed during the equivalent FV learning method
@@ -374,7 +374,7 @@ if len(sys.argv) == nargs_required + counter_opt_args + 1:
     sys.argv += [1.5]   # error_rel_et: expected relative error for the estimation of E(T) in the FV learning method (1.0 means 100%) --> it defines the number of arrival events to observe in the MC-based simulation to estimate E(T)
 counter_opt_args += 1
 if len(sys.argv) == nargs_required + counter_opt_args + 1:
-    sys.argv += ["nosave"]  # Either "nosave" or anything else for saving the results and log
+    sys.argv += ["save"]  # Either "nosave" or anything else for saving the results and log
 counter_opt_args += 1
 if len(sys.argv) == nargs_required + counter_opt_args + 1:
     sys.argv += [True]  # Whether to save with the datetime in the file name
@@ -395,13 +395,49 @@ queue_system = "loss-network"   # "single-server"
 if queue_system not in ["single-server", "loss-network"]:
     raise ValueError(f"Invalid queue system: {queue_system}")
 if queue_system == "single-server":
+    capacity = +np.Inf
+    assert np.isinf(capacity), "The system's capacity must be infinite for single-buffer systems"
     job_class_rates = [0.7]  # For multi-server: [0.8, 0.7]
     service_rates = [1.0]
     blocking_costs = "exponential"
 elif queue_system == "loss-network":
-    job_class_rates = [0.1, 0.5, 0.8] #[2, 8, 15] #[0.1, 0.5, 0.8]
-    service_rates = [1.0, 1.0, 1.0] # [1.0, 1.0, 1.0]
-    blocking_costs = [1E1, 1E2, 1E4]  # [1E4, 1E2, 1E1] #[1E1, 1E2, 1E4]
+    capacity = 6 #6 #10
+    job_class_rates = [1, 5] #[1, 5, 8] # When lambda = rho: #[0.8, 0.8, 0.8] #[0.1, 0.5, 0.8] #[2, 8, 15] #[20, 80, 150]
+    rhos = [0.5, 0.3] #[0.6, 0.4]#[0.5]*len(job_class_rates) #[0.8]*len(job_class_rates)
+    service_rates = [l/r for l, r in zip(job_class_rates, rhos)] #[1.0, 1.0, 1.0]
+    #************ BLOCKING COSTS ************
+    # We should consider the following two conditions to define the blocking cost values:
+    # 1) For a fast-enough learning (i.e. < 30 learning steps) WITHOUT THINKING OF PROBABILITY *ESTIMATION*, i.e. assuming we KNOW the stationary probabilities:
+    #   --> Blocking costs should be such that alpha * gradient ~ "reasonable delta(theta) for learning" ~ 1
+    #   If we think that a natural choice of alpha is 1, then we have gradient ~ 1.
+    #   Since the contribution to the gradient for each job class i (i.e. for each theta dimension i) is of the order of
+    #       sum_{blocking states x for class i} p(x) * Qdiff(x)
+    #   we can think that:
+    #       Qdiff(x) ~ "average cost of blocking ANY of the job classes" = sum_{job class i} c(i) * lambda(i) / Lambda
+    #       (note that the average blocking cost depends on both the (stationary) probability of blocking states for each job class AND the job arrival probability, i.e. the arrival job-class rate is ALSO important)
+    #   We can design the system so that:
+    #       c(i) * lambda(i) / Lambda is about the same for all i.
+    #   We can also choose:
+    #       all rhos to be the same, making p(x) ~ same order regardless of the blocking class we are considering.
+    #   Thus the "sum of the blocking states..." mentioned above would be of the order:
+    #       #blocking-states * rho^(K-1) * c * lambda/Lambda
+    #   which should be ~ 1.
+    #   If we suppose that #blocking-states ~ 10, we can choose c(i) * lambda(i)
+    #
+    # 2) For a realistic problem scenario
+    #   --> The cost should be large enough so as to make the revenue of operating the system negative when blocking occurs.
+    #   In fact, in the problem we want to solve we state that we want to discover rare events (prob < 1E-5) which,
+    #   although rare, if they occur they are "very costly".
+    #   This "very costly" condition should be defined on the basis of the revenue (before costs deduction) under normal operation of the system (i.e. without blocking)
+    #   So, if we say that the expected revenue under normal conditions is 1 (or 1000 dollars, whatever) and we want to operate the system
+    #   in a realm where the expected cost < 50% of those expected revenues (revenues before costs deduction).
+    adjustment_constant_for_large_enough_cost = 20 # This constant is normally > 1 and is adjusted by eye-ball, after looking at the magnitude of the obtained gradient in the log
+    blocking_costs = [adjustment_constant_for_large_enough_cost * sum(job_class_rates) * 1/r**(capacity - 1) / l for l, r in zip(job_class_rates, rhos)] #[5000, 1000, 100] (for rho_average = 0.8) #[2E5, 1.5E5, 1E5] #[2E5, 1E2, 1E0] #[1E1, 1E2, 1E4] #[20.0, 10.0, 5.0]
+    # Perturb the costs so that we don't get the trivial optimum at e.g. [6, 6, 6]
+    np.random.seed(1)
+    multiplicative_noise_values = [0.5, 2]
+    blocking_costs = [c * n for c, n in zip(blocking_costs, multiplicative_noise_values)]
+    #************ BLOCKING COSTS ************
 rhos = [l / m for l, m in zip(job_class_rates, service_rates)]
 nservers = len(service_rates)
 
@@ -427,13 +463,13 @@ if queue_system == "single-server":
     error_rel_et = float(sys.argv[11])
 elif queue_system == "loss-network":
     theta_ref = [np.nan, np.nan, np.nan]
-    theta_start = [3.1, 3.1, 3.1] #[7.1, 7.1, 7.1] #[3.1, 3.1, 3.1] #[0.1, 0.1, 0.1]
-    J_factor = [0.3, 0.3, 0.3]
+    theta_start = [4.1]*len(job_class_rates) #[4.1, 4.1, 4.1] #[7.1, 7.1, 7.1] #[3.1, 3.1, 3.1] #[0.1, 0.1, 0.1]
+    J_factor = [0.1]*len(job_class_rates)
     # Values of N (#particles) and T (#arrival events) to use for the simulation used to estimate stationary probabilities
     if learning_method.name == "MC":
-        N = 1; T = 1000 * 100
+        N = 1; T = 70 * 50 #30 * 50 #500 * 100 #1000 * 100
     else:
-        N = 1000; T = 100
+        N = 70; T = 50 #N = 500; T = 100
     error_rel_phi = np.nan
     error_rel_et = np.nan
 create_log = sys.argv[12] != "nosave"
@@ -447,13 +483,10 @@ seed = 1313 # 1317 #1717 #1313  #1859 (for learning step 53+91=144) #1769 (for l
 # Reward functions
 rewards_accept_by_job_class = [0.0] * len(job_class_rates)
 if queue_system == "single-server":
-    capacity = +np.Inf #int(np.ceil(np.sum(theta_start)) + 1) # We use np.sum(theta_start) in order to avoid checking whether theta_start is scalar or a one-element list
-    assert np.isinf(capacity), "The system's capacity must be infinite for single-buffer systems"
     reward_func = rewardOnJobRejection_ExponentialCost
     reward_func_params = dict({'buffer_size_ref': np.nan})   # The value of this parameter will be set at each simulation iteration run in the below LOOP
     policy_assignment_probabilities = [[1.0]] # For multi-server: [[0.5, 0.5, 0.0], [0.0, 0.5, 0.5]] )
 elif queue_system == "loss-network":
-    capacity = 10 #6 #10
     reward_func = rewardOnJobRejection_ByClass
     reward_func_params = dict({'reward_at_rejection': [-c for c in blocking_costs]})   # None
     policy_assignment_probabilities = None
@@ -482,6 +515,7 @@ print("Capacity: {}".format(capacity))
 print("Blocking costs: {}".format(blocking_costs))
 print("Job arrival rates by class: {}".format(job_class_rates))
 print("Service rates by class: {}".format(service_rates))
+print("Loads by class: {}".format(rhos))
 print("Number of servers: {}".format(nservers))
 print("Policy assignment probabilities (from job class to server): {}".format(policy_assignment_probabilities))
 print("Reward function for blocking: {}".format(reward_func.__name__ if reward_func is not None else None))
@@ -531,7 +565,7 @@ burnin_time_steps = 20  # Number of burn-in time steps until the Markov process 
 min_num_cycles_for_expectations = 5 # Minimum number of observed cycles to consider that the estimation of expectations
                                     # (such as the expected cycle time or the stationary probability) is reliable.
 fixed_window = False
-alpha_start = 10.0  # / t_sim  # Use `/ t_sim` when using update of theta at each simulation step (i.e. LeaPolicyGradient.learn_update_theta_at_each_time_step() is called instead of LeaPolicyGradient.learn_update_theta_at_end_of_episode())
+alpha_start = 1.0  # / t_sim  # Use `/ t_sim` when using update of theta at each simulation step (i.e. LeaPolicyGradient.learn_update_theta_at_each_time_step() is called instead of LeaPolicyGradient.learn_update_theta_at_end_of_episode())
 adjust_alpha = True  # True
 func_adjust_alpha = np.float # np.sqrt
 min_time_to_update_alpha = 0  # int(t_learn / 3)
@@ -799,6 +833,7 @@ else:
 
 print("Optimum theta, K's and expected costs found by the learning algorithm for each replication and each parameter setting:\n{}" \
       .format(pd.DataFrame({'theta_opt': theta_opt_values, 'K_opt': K_opt_values, 'expected cost': cost_opt_values}, index=range(1, ncases+1))))
+print(f"True optima:\nK_opt = {K_true[0]}, expected cost = {cost_true}")
 
 # Closes the object (e.g. any log and result files are closed)
 simul.close()
@@ -813,7 +848,7 @@ if save_results:
 
     if queue_system == "loss-network":
         params_str = learning_method.name + \
-            "-K={}-theta0={}-theta={}-J={}-E={},{}".format(capacity, theta_true, theta_start_values, J_factor_values, error_rel_phi, error_rel_et)
+            "-K={}-costs={}-rhos={},theta0={}-theta={}-J={}-NT={}".format(capacity, blocking_costs, rhos, theta_true, theta_start_values, J_factor_values, NT_values)
     else:
         params_str = learning_method.name + \
             "-theta0={}-theta={}-J={}-E={},{}".format(theta_ref_values, theta_start_values, J_factor_values, error_rel_phi, error_rel_et)
@@ -978,7 +1013,11 @@ if len(theta_ref_values) == 1:
 
         # Plot of parameters evolution
         thetas = simul.getLearnerP().getThetas()
-        linestyles = ['-', '--', '-.', ':' ]
+        # Linestyles are sorted so that more continuous line means larger rho
+        linestyles_ref = ['-', '--', '-.', ':']
+        # Rank of rhos in reversed order (largest value has highest rank so that the largest value gets the most solid line in the plot)
+        rank_rhos = list(reversed(np.array(rhos).argsort().argsort()))
+        linestyles = [linestyles_ref[r] for r in rank_rhos]
         lines = []
         reflines = []
         legend_lines = []
