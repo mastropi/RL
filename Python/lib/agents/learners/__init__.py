@@ -321,6 +321,9 @@ class GenericLearner:
     def getLearningRate(self):
         return self._alpha
 
+    def getInitialLearningRate(self):
+        return self.alpha
+
     def getLearningTime(self):
         "Returns the number of times learning took place according to the learning time attribute"
         return self._t

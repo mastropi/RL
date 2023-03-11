@@ -466,10 +466,10 @@ class SimulatorQueue(Simulator):
                     assert len(dict_params_simul) == self.dict_params_learning['t_learn']
                     dict_params_simul['T'] = dict_params_simul['t_sim'][t_learn-1]   # `t_learn-1` because t_learn starts at 1, not 0.
 
-                proba_blocking_fv, expected_reward, probas_stationary, \
+                proba_blocking_fv, expected_reward, probas_stationary_blocking, \
                     expected_cycle_time, n_cycles, time_last_absorption, time_end_simulation_et, max_survival_time, time_end_simulation_fv, \
                         n_events_mc, n_events_fv = estimate_blocking_fv(self.envs, self.agent, dict_params_simul, dict_params_info)
-                print("Estimated stationary probabilities of states of interest:\n{}".format(probas_stationary))
+                print("Estimated stationary probabilities of states of interest:\n{}".format(probas_stationary_blocking))
                 # Now we compute the equivalent (discrete) simulation time, as if it were a Monte-Carlo simulation
                 # Note that this measures the # simulation steps which does NOT coincide with parameter 't_sim'
                 # (equal to 'T') which in FVRL defines the # *arrival* events.
@@ -480,7 +480,7 @@ class SimulatorQueue(Simulator):
                 # learning step.
                 t = n_events_mc + n_events_fv
                 self.getLearnerV().setAverageReward(expected_reward)
-                self.getLearnerV().setProbasStationary(probas_stationary)
+                self.getLearnerV().setProbasStationary(probas_stationary_blocking)
             else:
                 # Monte-Carlo learning is the default
                 assert self.N == 1, "The simulation system has only one particle in Monte-Carlo mode ({})".format(self.N)
@@ -492,10 +492,10 @@ class SimulatorQueue(Simulator):
                             "The number of simulation steps read from the benchmark file ({}) coincides with the number of learning steps ({})" \
                             .format(len(dict_params_simul['t_sim']), self.dict_params_learning['t_learn'])
                     dict_params_simul['T'] = dict_params_simul['t_sim'][t_learn-1]     # `t_learn-1` because t_learn starts at 1, not 0.
-                proba_blocking_mc, expected_reward, probas_stationary, n_cycles_proba, \
+                proba_blocking_mc, expected_reward, probas_stationary_blocking, n_cycles_proba, \
                     expected_cycle_time, n_cycles, n_events = estimate_blocking_mc(self.env, self.agent, dict_params_simul, dict_params_info)
                     ## IMPORTANT (2022/10/24) The expected_cycle_time is NOT equal to the denominator used to compute the stationary probabilities
-                    ## stored in probas_stationary when a positive number of burn-in time steps at the beginning of the simulation
+                    ## stored in probas_stationary_blocking when a positive number of burn-in time steps at the beginning of the simulation
                     ## before starting to use cycle times for estimations is considered.
                     ## In fact, in this case, as stated in function estimate_blocking_mc(), we have the following differences
                     ## between the two calculations:
@@ -513,19 +513,19 @@ class SimulatorQueue(Simulator):
             if self.env.getBufferType() == BufferType.SINGLE:
                 if True or DEBUG_ESTIMATORS or show_messages(verbose, verbose_period, t_learn):
                     print("\n--> Estimated stationary probability: Pr(K-1={}) = {} vs. True Pr(K-1={}) = {}, error = {:.3f}%" \
-                          .format(Ks-1, probas_stationary[Ks-1], Ks-1, probas_stationary_true[Ks-1], (probas_stationary[Ks-1] / probas_stationary_true[Ks-1] - 1) * 100))
+                          .format(Ks-1, probas_stationary_blocking[Ks-1], Ks-1, probas_stationary_true[Ks-1], (probas_stationary_blocking[Ks-1] / probas_stationary_true[Ks-1] - 1) * 100))
                     print("--> Estimated stationary probability: Pr(K={}) = {} vs. True Pr(K={}) = {}, error = {:.3f}%" \
-                        .format(Ks, probas_stationary[Ks], Ks, probas_stationary_true[Ks-1], (probas_stationary[Ks] / probas_stationary_true[Ks] - 1) * 100))
+                        .format(Ks, probas_stationary_blocking[Ks], Ks, probas_stationary_true[Ks-1], (probas_stationary_blocking[Ks] / probas_stationary_true[Ks] - 1) * 100))
                 # Compute the state-action values (Q(s,a)) for buffer size = Ks-1
-                if probas_stationary.get(Ks-1, 0.0) == 0.0 or np.isnan(probas_stationary.get(Ks-1, 0.0)):
+                if probas_stationary_blocking.get(Ks-1, 0.0) == 0.0 or np.isnan(probas_stationary_blocking.get(Ks-1, 0.0)):
                     Q0_Km1 = 0.0
                     Q1_Km1 = 0.0
                     n_Km1 = 0
                     if True or DEBUG_ESTIMATORS or show_messages(verbose, verbose_period, t_learn):
-                        print("Estimation of Q_diff(K-1) skipped because the stationary probability Pr(K-1) is {}".format(probas_stationary.get(Ks-1)))
+                        print("Estimation of Q_diff(K-1) skipped because the stationary probability Pr(K-1) is {}".format(probas_stationary_blocking.get(Ks-1)))
                     # Set Pr(K-1) to 0 in case it was not computed, so that the policy leaning method called below (`learn()`)
-                    # receives the input parameters as expected (e.g. probas_stationary should have 2 keys: K-1 and K)
-                    probas_stationary[Ks-1] = 0.0
+                    # receives the input parameters as expected (e.g. probas_stationary_blocking should have 2 keys: K-1 and K)
+                    probas_stationary_blocking[Ks-1] = 0.0
                 else:
                     # When the parameterized policy is a linear step function with only one buffer size where its
                     # derivative is non-zero, only the DIFFERENCE of two state-action values impacts the gradient, namely:
@@ -544,17 +544,17 @@ class SimulatorQueue(Simulator):
 
                 # Compute the state-action values (Q(s,a)) for buffer size = K
                 # This is needed ONLY when the policy learning methodology is IGA (Integer Gradient Ascent, presented in Massaro's paper (2019)
-                if self.dict_params_learning['mode'] != LearningMode.IGA or probas_stationary.get(Ks, 0.0) == 0.0 or np.isnan(probas_stationary.get(Ks, 0.0)):
+                if self.dict_params_learning['mode'] != LearningMode.IGA or probas_stationary_blocking.get(Ks, 0.0) == 0.0 or np.isnan(probas_stationary_blocking.get(Ks, 0.0)):
                     # We set all the values to 0 so that the learn() method called below doesn't fail, as it assumes that
                     # the values possibly involved with learning (which depend on the learning method) have a real value.
                     Q0_K = 0.0
                     Q1_K = 0.0
                     n_K = 0
                     if DEBUG_ESTIMATORS or show_messages(verbose, verbose_period, t_learn):
-                        print("Estimation of Q_diff(K) skipped because the stationary probability Pr(K) is {}".format(probas_stationary.get(Ks-1)))
+                        print("Estimation of Q_diff(K) skipped because the stationary probability Pr(K) is {}".format(probas_stationary_blocking.get(Ks-1)))
                     # Set Pr(K) to 0 in case it was not computed, so that the policy learning method called below (`learn()`)
-                    # receives the input parameters as expected (e.g. probas_stationary should have 2 keys: K-1 and K)
-                    probas_stationary[Ks] = 0.0
+                    # receives the input parameters as expected (e.g. probas_stationary_blocking should have 2 keys: K-1 and K)
+                    probas_stationary_blocking[Ks] = 0.0
                 elif False: # (2023/02/21) I decided NOT to enter the below block because we don't need the Qdiff for buffer size = K, and the calculation takes time!
                     # Same as above, but for buffer size = K
                     if DEBUG_ESTIMATORS or show_messages(verbose, verbose_period, t_learn):
@@ -574,19 +574,19 @@ class SimulatorQueue(Simulator):
 
             else:
                 if probas_stationary_true is not None:
-                    assert set(probas_stationary.keys()).issubset(set(probas_stationary_true.keys())),\
-                        "The set of states in the probas_stationary dictionary with the estimated stationary probabilities " \
+                    assert set(probas_stationary_blocking.keys()).issubset(set(probas_stationary_true.keys())),\
+                        "The set of states in the probas_stationary_blocking dictionary with the estimated stationary probabilities " \
                         "must be a subset of the set of states in the probas_stationary_true dictionary with the true stationary probabilities:" \
                         f"\nTrue ({len(probas_stationary_true.keys())} keys):\n{sorted(probas_stationary_true.keys())}" \
-                        f"\nEstimated ({len(probas_stationary.keys())} keys):\n{sorted(probas_stationary.keys())}"
+                        f"\nEstimated ({len(probas_stationary_blocking.keys())} keys):\n{sorted(probas_stationary_blocking.keys())}"
 
                 # Compute the difference in Q's for EACH state whose stationary probability was estimated by the FV process
                 Q_values = dict()
                 n_replications_with_mixing = dict()   # Number of replications out of N run where trajectories mix
-                for x, p in probas_stationary.items():
+                for x, p in probas_stationary_blocking.items():
                     if True or DEBUG_ESTIMATORS or show_messages(verbose, verbose_period, t_learn):
                         print("\n--> Estimated stationary probability of blocking state: Pr(x={}) = {} vs. True Pr(x={}) = {}, error = {:.3f}%" \
-                            .format(x, probas_stationary[x], x, probas_stationary_true[x], (probas_stationary[x] / probas_stationary_true[x] - 1) * 100))
+                            .format(x, probas_stationary_blocking[x], x, probas_stationary_true[x], (probas_stationary_blocking[x] / probas_stationary_true[x] - 1) * 100))
                     ### TEMPORARY ###
                     if p > 0.0:
                     #if probas_stationary_true[x] > 0:
@@ -599,7 +599,10 @@ class SimulatorQueue(Simulator):
                         # NOTE that, for a given x, there may be more than one component satisfying this condition,
                         # which happens when more than one component has its value at the blocking value - 1, e.g. x = (0, 3, 5) and the blocking values are Ks = [4, 3, 5]
                         for dim_blocking, K in enumerate(Ks):
-                            if x[dim_blocking] == K - 1:
+                            if x[dim_blocking] == K - 1 and np.sum(x) < self.env.getCapacity():
+                                ## NOTE that we only compute Qdiff when x is NOT at the full capacity of the system (np.sum(x) < self.env.getCapacity())
+                                ## because if this is the case the probability of rejecting an incoming job is 1,
+                                ## hence the derivative of the acceptance policy is 0 and thus no Qdiff needs to be computed.
                                 N = 100
                                 t_sim_max = 250
                                 Q0, Q1, n, max_t = \
@@ -626,7 +629,7 @@ class SimulatorQueue(Simulator):
                                                                     dict_params_simul['buffer_size_activation_factor'],
                                                                     self.N, dict_params_simul['T'])
                 self.learn(self.agent, t,
-                           probas_stationary=probas_stationary,
+                           probas_stationary=probas_stationary_blocking,
                            probas_stationary_true=probas_stationary_true,
                            Q_values=dict({Ks-1: [Q0_Km1, Q1_Km1], Ks: [Q0_K, Q1_K]}),
                            simul_info=dict({'t_learn': t_learn,
@@ -680,8 +683,8 @@ class SimulatorQueue(Simulator):
                 err_phi, err_et = np.nan, np.nan
                 self.learn(self.agent, t,
                            ### TEMPORARY ###
-                           probas_stationary=probas_stationary,
-                           #probas_stationary=dict([(x, probas_stationary_true[x]) for x in probas_stationary]),
+                           probas_stationary=probas_stationary_blocking,
+                           #probas_stationary=dict([(x, probas_stationary_true[x]) for x in probas_stationary_blocking]),
                            ### TEMPORARY ###
                            probas_stationary_true=probas_stationary_true,
                            Q_values=Q_values,
@@ -856,10 +859,10 @@ class SimulatorQueue(Simulator):
         buffer_sizes = [self.env.getBufferSizeFromState(s) for s in states_with_actions]
         # print("buffer sizes, actions = {}".format(np.c_[buffer_sizes, actions]))
         K = get_deterministic_blocking_boundaries(self.agent)
-        probas_stationary = dict({K-1:  np.sum([1 for bs in buffer_sizes if bs == K-1]) / len(buffer_sizes),
+        probas_stationary_blocking = dict({K-1:  np.sum([1 for bs in buffer_sizes if bs == K-1]) / len(buffer_sizes),
                                   K:    np.sum([1 for bs in buffer_sizes if bs == K]) / len(buffer_sizes)})
 
-        return probas_stationary
+        return probas_stationary_blocking
 
     @measure_exec_time
     def estimate_Q_values_until_stationarity(self, t_learn, t_sim_max=50, N=100, verbose=False, verbose_period=1):
@@ -2074,7 +2077,7 @@ def compute_expected_inter_event_time(env):
     return 1/event_rate
 
 
-def compute_proba_blocking(env, agent: AgeQueue, probas_stationary: dict):
+def compute_proba_blocking(env, agent: AgeQueue, probas_stationary_blocking: dict):
     """
     Computes the blocking probability of the queue system represented by environment `env`
 
@@ -2101,17 +2104,16 @@ def compute_proba_blocking(env, agent: AgeQueue, probas_stationary: dict):
     agent: AgeQueue
         Agent acting on a queue environment where an accept/reject policy is defined.
 
-    probas_stationary: dict
-        Dictionary with the estimated stationary probability of the buffer sizes of interest which are
-        the dictionary keys.
+    probas_stationary_blocking: dict
+        Dictionary with the estimated stationary probability of blocking buffer sizes or states which are the dictionary keys.
 
     Return: float
     Estimated blocking probability.
     """
     proba_blocking = 0.0
 
-    # Iterate on the blocking states stored as keys of the `probas_stationary` dictionary
-    for s in probas_stationary.keys():
+    # Iterate on the blocking states stored as keys of the `probas_stationary_blocking` dictionary
+    for s in probas_stationary_blocking.keys():
         s_tuple = tuple([s]) if is_scalar(s) else s
         assertConsistencyPolicyLearnerAndAgentPolicy(agent)
         if agent.getAcceptancePolicyDependenceOnJobClass():
@@ -2123,7 +2125,7 @@ def compute_proba_blocking(env, agent: AgeQueue, probas_stationary: dict):
             state = (s, None)
             proba_reject = agent.getAcceptancePolicies()[0].getPolicyForAction(Actions.REJECT, state)
         proba_blocking += proba_reject * \
-                          probas_stationary[s]
+                          probas_stationary_blocking[s]
     return proba_blocking
 
 
@@ -2155,8 +2157,8 @@ def estimate_expected_reward(env, agent, probas_stationary):
         Agent where the accept/reject policy is defined.
 
     probas_stationary: dict
-        Dictionary with the estimated stationary probability of the states or buffer sizes of interest which are
-        the dictionary keys.
+        Dictionary with the estimated stationary probability of the states or buffer sizes which are assumed to yield
+        non-zero rewards. These states or buffer sizes are the dictionary keys.
 
     Return: float
     Estimated expected reward.
@@ -2622,7 +2624,7 @@ def estimate_blocking_mc(env, agent, dict_params_simul, dict_params_info, start_
     Tuple with the following elements:
     - proba_blocking: the estimated blocking probability.
     - expected_reward: the estimated expected reward.
-    - probas_stationary: dictionary with the estimated stationary probability for each queue state or buffer size where
+    - probas_stationary_blocking: dictionary with the estimated stationary probability for each queue state or buffer size where
     blocking may occur.
     - n_cycles_used: number of cycles used for the estimation of the stationary probabilities.
     - expected_return_time_to_start_state_or_buffer_size: estimated expected cycle time E(T) of return to the initial
@@ -2669,7 +2671,7 @@ def estimate_blocking_mc(env, agent, dict_params_simul, dict_params_info, start_
                               track_return_cycles=True,
                               seed=dict_params_simul['seed'],
                               verbose=dict_params_info.get('verbose', False), verbose_period=dict_params_info.get('verbose_period', 1))
-    probas_stationary, expected_cycle_time, n_cycles_used = \
+    probas_stationary_blocking, expected_cycle_time, n_cycles_used = \
         estimate_stationary_probabilities_mc(env, agent,
                                              burnin_time=dict_params_simul['burnin_time'],
                                              min_num_cycles_for_expectations=dict_params_simul['min_num_cycles_for_expectations'])
@@ -2678,8 +2680,8 @@ def estimate_blocking_mc(env, agent, dict_params_simul, dict_params_info, start_
     # Blocking probability and expected reward
     n_events_mc = t
     assert n_events_mc == dict_params_simul['T']
-    proba_blocking = compute_proba_blocking(env, agent, probas_stationary)
-    expected_reward = estimate_expected_reward(env, agent, probas_stationary)
+    proba_blocking = compute_proba_blocking(env, agent, probas_stationary_blocking)
+    expected_reward = estimate_expected_reward(env, agent, probas_stationary_blocking)
 
     # Expected return time to the start state or buffer size
     # Notes: (complement the notes written in the function's documentation above)
@@ -2711,7 +2713,7 @@ def estimate_blocking_mc(env, agent, dict_params_simul, dict_params_info, start_
             " (using renewal theory), when the burn-in time is 0.0." \
             .format(start_state, expected_return_time_to_start_state_or_buffer_size, expected_cycle_time)
 
-    return proba_blocking, expected_reward, probas_stationary, n_cycles_used, \
+    return proba_blocking, expected_reward, probas_stationary_blocking, n_cycles_used, \
                 expected_return_time_to_start_state_or_buffer_size, n_cycles_to_start_state_or_buffer_size, n_events_mc
 
 
@@ -3394,7 +3396,6 @@ def get_blocking_states_or_buffer_sizes(env, agent):
 
     if env.getBufferType() == BufferType.SINGLE:
         # The states or buffer sizes of interest are *buffer sizes* (i.e. scalar values) and are directly the blocking boundaries (e.g. [K-1, K])
-        assert np.isinf(system_capacity), "The system's capacity must be infinite for single-buffer systems"
         buffer_sizes_of_interest = blocking_boundaries
         return buffer_sizes_of_interest
     else:
@@ -3477,7 +3478,7 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info):
     Tuple with the following elements:
     - proba_blocking: the estimated blocking probability.
     - expected_reward: the estimated expected reward.
-    - probas_stationary: dictionary with the estimated stationary probability for each buffer size where blocking
+    - probas_stationary_blocking: dictionary with the estimated stationary probability for each buffer size where blocking
     may occur.
     - expected_absorption_time: estimated expected absorption time E(T_A) used in the denominator of the FV estimator
     of the blocking probability.
@@ -3606,9 +3607,9 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info):
         proba_blocking = np.nan
         expected_reward = np.nan
         _states_or_buffer_sizes_of_interest = get_blocking_states_or_buffer_sizes(envs[0], agent)
-        probas_stationary = dict()
+        probas_stationary_blocking = dict()
         for s in _states_or_buffer_sizes_of_interest:
-            probas_stationary[s] = np.nan
+            probas_stationary_blocking[s] = np.nan
         expected_absorption_time = np.nan
         time_last_absorption = time_last_absorption
         time_end_simulation_et = time_end_simulation_et
@@ -3624,7 +3625,7 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info):
             print("Running Fleming-Viot simulation on {} particles with absorption and activation sets defined as follows:"
                   "\nabsorption set: {}".format(N, dict_params_simul['absorption_set'].getStates()) + \
                   "\nactivation set: {}".format(N, dict_params_simul['activation_set'].getStates()))
-        t, event_times, phi, probas_stationary, expected_absorption_time, max_survival_time = \
+        t, event_times, phi, probas_stationary_blocking, expected_absorption_time, max_survival_time = \
             run_simulation_fv(  dict_params_info.get('t_learn', 0), envs, agent,
                                 dict_params_simul['absorption_set'],
                                 dict_params_simul['activation_set'],
@@ -3639,8 +3640,8 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info):
         n_events_fv = t
         time_end_simulation_fv = event_times[-1]
 
-        proba_blocking = compute_proba_blocking(envs[0], agent, probas_stationary)
-        expected_reward = estimate_expected_reward(envs[0], agent, probas_stationary)
+        proba_blocking = compute_proba_blocking(envs[0], agent, probas_stationary_blocking)
+        expected_reward = estimate_expected_reward(envs[0], agent, probas_stationary_blocking)
 
         if DEBUG_ESTIMATORS or show_messages(dict_params_info.get('verbose', False), dict_params_info.get('verbose_period', False), dict_params_info.get('t_learn', 0)):
             print("\n*** RESULTS OF FLEMING-VIOT SIMULATION ***")
@@ -3648,11 +3649,11 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info):
             # pd.set_option('display.max_rows', None)
             # print("Phi(t):\n{}".format(phi))
             # pd.set_option('display.max_rows', max_rows)
-            print("Stationary probabilities: {}".format(probas_stationary))
+            print("Stationary probabilities: {}".format(probas_stationary_blocking))
             print("Pr(BLOCK) = {}".format(proba_blocking))
             print("Expected reward = {}".format(expected_reward))
 
-    return proba_blocking, expected_reward, probas_stationary, expected_absorption_time, n_cycles_absorption_used, \
+    return proba_blocking, expected_reward, probas_stationary_blocking, expected_absorption_time, n_cycles_absorption_used, \
            time_last_absorption, time_end_simulation_et, max_survival_time, time_end_simulation_fv, \
            n_events_et, n_events_fv
 
@@ -3720,10 +3721,9 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
     (below, K is determined by the parameterized acceptance policy as the smallest buffer size with deterministic rejection)
     - t: the last time step (integer-valued) of the simulation process.
     - event_times: list of times at which an event occurred during the simulation.
-    - dict_phi: dictionary of lists with the empirical distribution of the buffer sizes of interest, namely K-1 and K,
-    which are an estimate of the probability of those buffer sizes conditional to survival (not absorption).
-    - probas_stationary: dictionary of floats indexed by the buffer sizes of interest, namely K-1 and K, containing
-    the estimated stationary probability at those buffer sizes.
+    - dict_phi: dictionary of lists with the empirical distribution of the states or buffer sizes of interest (e.g. where blocking may occur)
+    which are an estimate of the probability of those states or buffer sizes conditional to survival (not absorption).
+    - probas_stationary: dictionary of floats indexed by the states or buffer sizes of interest (e.g. where blocking may occur).
     - expected_absorption_time: the expected absorption time, either computed by this function or passed as input parameter.
     - max_survival_time: maximum survival time observed during the simulation that estimated P(T>t). This value is
     obtained from the last row of the `df_proba_surv` data frame that is either given as input parameter or estimated
@@ -3789,7 +3789,7 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
             Continuous-valued time at which the latest change of a particle's state happened.
 
         dict_phi: dict
-            Dictionary, indexed by the buffer sizes of interest, of data frames containing the times 't' and
+            Dictionary, indexed by the states or buffer sizes of interest, of data frames containing the times 't' and
             the empirical distribution 'Phi' at which the latter changes.
             IMPORTANT: this input parameter is updated by the function with a new row whenever the value of Phi(t, x)
             changes w.r.t. to the last stored value at the state or buffer size s.
@@ -3982,7 +3982,7 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
 
         Arguments:
         dict_phi: dict of data frames
-            Empirical distribution of buffer sizes of interest which are the keys of the dictionary.
+            Empirical distribution of the states or buffer sizes of interest which are the keys of the dictionary.
             Each data frame contains the times 't' and Phi values 'Phi' containing the empirical distribution at the
             buffer size indicated by the dictionary's key.
 

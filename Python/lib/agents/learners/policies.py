@@ -564,7 +564,10 @@ class LeaPolicyGradient(GenericLearner):
         #---- Auxiliary functions -----
         # TODO: (2023/02/01) Try to remove the `isinstance()` calls here on `x`... if possible. They are intended to accomodate both a 1D queue state represented as a scalar and an n-D queue state represented as a tuple
         # I guess the best solution would be to change the whole code base so that 1D states are ALSO represented as a tuple
-        does_state_contribute_to_gradient_component = lambda x, i, K: not isinstance(x, tuple) and x == K - 1 or isinstance(x, tuple) and x[i] == K - 1
+        ## NOTE that we impose the condition to compute Qdiff ONLY when x is NOT at the full capacity of the system (np.sum(x) < self.env.getCapacity())
+        ## because if this is the case the probability of rejecting an incoming job is 1,
+        ## hence the derivative of the acceptance policy is 0 and thus no Qdiff needs to be computed.
+        does_state_contribute_to_gradient_component = lambda x, i, K: (not isinstance(x, tuple) and x == K - 1 or isinstance(x, tuple) and x[i] == K - 1) and np.sum(x) < self.env.getCapacity()
         #---- Auxiliary functions -----
 
         theta = self.getThetaParameter()    # For multi-policy learners, theta is an array (one scalar theta value for each policy being learned) o.w. theta is a scalar
@@ -626,6 +629,7 @@ class LeaPolicyGradient(GenericLearner):
         # Finalize the computation of the state coverage by computing the *proportion* of covered states
         for i in range(len(Ks)):
             coverage_states_contributing_to_gradient_component[i] = coverage_states_contributing_to_gradient_component[i] / max(1, num_states_contributing_to_gradient_component[i])
+        print("")
         print(f"[LeaPolicyGradient.learn_linear_theoretical_from_estimated_values] Number of states contributing to each gradient component: {num_states_contributing_to_gradient_component}")
         print(f"[LeaPolicyGradient.learn_linear_theoretical_from_estimated_values] Coverage:" + "[" + ", ".join(["{:.1f}%".format(c*100) for c in coverage_states_contributing_to_gradient_component]) + "]")
 
