@@ -82,11 +82,15 @@ class SetOfStates:
         Chooses one or more random states from the set
 
         The result is different depending on whether the storage format of the set (see method `getStorageFormat()`)
-        is "states" (where the states in the set are explicitly listed) or "state_boundaries" (where the states in the
-        set are defined implicitly by the integer upper limits in each dimension of a state), in which case all states
-        made up of integer values ONE of which satisfies one of those upper limits belong to the set.
-        Example of the latter: if the state_boundaries are [4, 2, 5], then following are examples of states belonging
-        to the set: [4, 0, 0], [3, 2, 1], [3, 2, 5], etc.
+        is "states" (where the states in the set are explicitly given --see also method `states_are_given_explicitly()`)
+        or "state_boundaries" (where the states in the set are defined implicitly by the integer upper limits in each
+        dimension of a state), in which case all states made up of integer values, of which at least ONE is equal to
+        one of those upper limits, belong to the set.
+        Example of the latter: if the state_boundaries are [4, 2, 5], then the following are examples of states belonging
+        to the set:
+        [4, 0, 0] (the first element is at the boundary)
+        [3, 2, 1] (the second element is at the boundary)
+        [3, 2, 5] (both the second and third elements are at the boundary)
 
         Arguments:
         size: int or None
@@ -102,15 +106,16 @@ class SetOfStates:
         if size_orig is None:
             size = 1
 
-        if self.states is not None:
+        if self.states_are_given_explicitly():
             # Note the following link about randomly choosing elements from a set:
             # https://stackoverflow.com/questions/1262955/how-do-i-pick-2-random-items-from-a-python-set
             idxs_chosen = np.random.choice(len(self.states), size=size)
             chosen_states = [list(self.states)[idx] for idx in idxs_chosen]
         else:
-            # First we randomly choose in which dimension we are at the state_value
+            # States are given indirectly via the set boundaries (e.g. [4, 2, 5])
+            # => First we randomly choose which dimension to set at the boundary (e.g. if dimension 0 is chosen, then we set state[0] = 4)
             idx_state_boundaries = np.random.choice(len(self.state_boundaries), size=size)
-            # Now we freely choose the other dimensions between 0 and the state_value once one of the state_boundaries has been chosen
+            # Now we freely choose the other dimensions between 0 and the corresponding state value (e.g. we choose dimension 1 between 0 and 2, and dimension 2 between 0 and 5)
             chosen_states = [[]]*size
             for s in range(size):
                 chosen_states[s] = [-1]*len(self.state_boundaries)
@@ -132,11 +137,21 @@ class SetOfStates:
             return chosen_states
 
     def getStates(self):
+        "Returns all the states in the set (if states are explicitly stored in the object) or the set boundaries (if states are implicitly stored via the set boundaries)"
         if self.getStorageFormat() == "states":
             if len(self.states) == 1:
                 return self.states[0]
             else:
                 return self.states
+        else:
+            if len(self.state_boundaries) == 1:
+                return self.state_boundaries[0]
+            else:
+                return self.state_boundaries
+
+    def getStateBoundaries(self):
+        if self.getStorageFormat() == "states":
+            raise AttributeError("States in the set are NOT stored implicitly by defining the set boundaries in each dimension")
         else:
             if len(self.state_boundaries) == 1:
                 return self.state_boundaries[0]
@@ -188,6 +203,9 @@ class SetOfStates:
                     for i in range(self.getStateDimension()):
                         n_states_upper_bound += np.prod([b+1 for ii, b in enumerate(self.state_boundaries) if ii != i])
                     return n_states_upper_bound
+
+    def states_are_given_explicitly(self):
+        return self.getStorageFormat() == "states"
 
     # toString() method: i.e. what should be shown when including an object of this class in a print() call
     def __str__(self):

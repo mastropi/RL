@@ -3035,11 +3035,13 @@ def run_simulation_mc(env, agent, t_learn, start_state, t_sim_max,
         # Distribution of inter-arrival and service times and their mean
         # NOTE: (2022/10/16) This only works when there is only ONE server in the system
         # (because the way `job_rates_by_server` is used in analyze_event_times() assumes this.
+        job_assignment_policy = agent.getAssignmentPolicy() if agent.getAssignmentPolicy() is not None \
+                                else define_uniform_job_assignment_policy(len(env.getJobClassRates()), env.getNumServers())
         job_rates_by_server = compute_job_rates_by_server(env.getJobClassRates(),
                                                           env.getNumServers(),
-                                                          agent.getAssignmentPolicy().getProbabilisticMap())
-        analyze_event_times(job_rates_by_server, times_inter_arrival, jobs_arrival, class_name="Job class")
-        analyze_event_times(env.getServiceRates(), times_service, servers_service, class_name="Server")
+                                                          job_assignment_policy.getProbabilisticMap())
+        analyze_event_times(job_rates_by_server, times_inter_arrival, jobs_arrival, group_name="Job class")
+        analyze_event_times(env.getServiceRates(), times_service, servers_service, group_name="Server")
 
         # Distribution of return or absorption cycle times, whatever is tracked
         if track_return_cycles:
@@ -3048,12 +3050,12 @@ def run_simulation_mc(env, agent, t_learn, start_state, t_sim_max,
             x_values = return_times
             x_total = time_last_return
         elif track_absorptions:
-            type_of_times = "Absorption"
+            type_of_times = "Re-absorption"
             x_n = n_cycles_absorption
             x_values = absorption_times
             x_total = time_last_absorption
-        results_str = "{} times (initial state = {}, initial buffer size = {}): n = {}, mean = {:.3f}, SE = {:.3f}" \
-                      .format(type_of_times, start_state, buffer_size_start, x_n, np.mean(x_values), np.mean(x_values) / (np.std(x_values) / np.sqrt(x_n)))
+        results_str = "{} times (initial state = {}, initial buffer size = {})\nn = {}, mean = {:.3f}, SE = {:.3f}" \
+                      .format(type_of_times, start_state, buffer_size_start, x_n, np.mean(x_values), np.std(x_values) / np.sqrt(x_n))
         assert len(x_values) == x_n
         assert np.isclose(x_total / x_n, np.mean(x_values))
         fig = plt.figure()
@@ -3758,6 +3760,7 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
         """
         assert envs is not None and isinstance(envs, list) and len(envs) > 0, "The list parameter `envs` is not empty"
 
+        # TODO: (2023/03/12) When using the linear step policy, limit the states of interests to those where the derivative is not zero, as we don't need to estimate the probability of the other blocking states (e.g. K-1 is of interest but K is NOT)
         states_or_buffer_sizes_of_interest = get_blocking_states_or_buffer_sizes(envs[0], agent)
 
         dict_phi = dict()
@@ -3821,13 +3824,15 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
             state_or_buffer_size_cur = env.getQueueStateFromState(state_cur)
 
         # Go over all the states or buffer sizes of interest where Phi should be estimated
+        # TODO: (2023/03/12) We should ONLY loop on the keys in dict_phi that intersect with previous state and the current state (as these are the only states which could change value)
+        # This will save a considerable amount of time in the multidimensional state case, considering the number of blocking states are many.
         for x in dict_phi.keys():
             assert dict_phi[x].shape[0] > 0, "The Phi data frame has been initialized for state or buffer size = {}".format(x)
             phi_cur = dict_phi[x]['Phi'].iloc[-1]
             phi_new = empirical_mean_update(phi_cur, x, state_or_buffer_size_prev, state_or_buffer_size_cur, N)
             #if phi_new > 0:
             #    print("prev state: {} -> state: {}: New Phi: {}".format(state_or_buffer_size_prev, state_or_buffer_size_cur, phi_new))
-            if not np.isclose(phi_new, phi_cur, atol=0.5/N, rtol=0):     # Note that the absolute tolerance decreases as N increases
+            if not np.isclose(phi_new, phi_cur, atol=0.5/N, rtol=0):     # Note that the absolute tolerance is smaller for larger N values.
                                                                          # Also, recall that the isclose() checks if |a - b| <= with atol + rtol*|b|,
                                                                          # and since we are interested in analyzing the absolute difference (not the relative difference)
                                                                          # between phi_new and phi_cur, we set rtol = 0.
@@ -4014,15 +4019,15 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
                 # Merge the times where (T>t) and Phi(t) are measured
                 df_phi_proba_surv = merge_proba_survival_and_phi(df_proba_surv, dict_phi[x])
 
+                # Stationary probability for each buffer size of interest
+                probas_stationary[x], integrals[x] = estimate_proba_stationary(df_phi_proba_surv, expected_absorption_time)
+
                 if DEBUG_ESTIMATORS:
                     plt.figure()
                     plt.step(df_phi_proba_surv['t'], df_phi_proba_surv['P(T>t)'], color="blue", where='post')
                     plt.step(df_phi_proba_surv['t'], df_phi_proba_surv['Phi'], color="red", where='post')
                     plt.step(df_phi_proba_surv['t'], df_phi_proba_surv['Phi']*df_phi_proba_surv['P(T>t)'], color="green", where='post')
-                    plt.title("P(T>t) (blue) and Phi(t,x) (red) and their product (green) for state or buffer size x = {}".format(x))
-
-                # Stationary probability for each buffer size of interest
-                probas_stationary[x], integrals[x] = estimate_proba_stationary(df_phi_proba_surv, expected_absorption_time)
+                    plt.title("P(T>t) (blue) and Phi(t,x) (red) and their product (green) for state or buffer size x = {}\n(Integral = Area under the green curve = {:.3f})".format(x, integrals[x]))
 
         return probas_stationary, integrals
 
@@ -4166,8 +4171,31 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
     # for the empirical distribution Phi(t).
     for i, env in enumerate(envs):
         # Set the start state of the queue environment so that we start at an activation state
-        # TODO: (2023/01/19) We should change the choice of the start state because any set having more than one component equal to the boundary value of that component is NOT eligible because they cannot transition to the absorption set of states in one step (because only ONE component can change at a time)
-        start_queue_state = activation_set.random_choice()
+        # Note that NOT every state in the activation_set set is an activation state because NOT all of them
+        # belong to the BOUNDARY of the active set of states, that is not all of them can transition
+        # to the absorption set in ONE step.
+        # For example, if the activation set is defined by the boundaries [4, 2, 5], the states [3, 2, 5] is NOT
+        # a valid activation state because we cannot transition to the absorption set (which is the set with boundaries
+        # [3, 1, 4] in one step, as the last two dimensions cannot transition at the same time from 2 -> 1 and from 5 -> 4.
+        # Thus, the condition for a state to be a valid activation state is that exactly ONE dimension is at the boundary.
+        # For instance, the state [3, 2, 4] IS a valid activation state.
+        # NOTE that we cannot implement this condition in the random_choice() method called below, because this condition
+        # is NOT necessary when sampling a state from the absorption set, as in that case ALL states can transition to
+        # the activation set in ONE step.
+        # If we don't limit the start state to valid activation states, the stationary probabilities would be overestimated
+        # because the contribution to the numerator coming from P(T>t) (i.e. the distribution of the time to absorption)
+        # will be a larger than it should (because P(T>t) will be overestimated).
+        # THIS WAS VERIFIED BY LOOKING AT THE LOG GENERATED FROM AN EXECUTION BEFORE THIS FIX AND AFTER THIS FIX:
+        # - Before: SimulatorQueue_20230312_093834_FV-K=6-costs=[1920.0, 1536.0]-rhos=[0.5, 0.5],theta0=[5, 5]-theta=[[4.1, 4.1]]-J=[[0.3, 0.3]]-NT=[[50, 100]].log
+        # - After: SimulatorQueue_20230312_115835_FV-K=6-costs=[1920.0, 1536.0]-rhos=[0.5, 0.5],theta0=[5, 5]-theta=[[4.1, 4.1]]-J=[[0.3, 0.3]]-NT=[[50, 100]].log
+        # Interestingly enough, the FIX also produced an increase in the number of states where the estimated probability p(x) is POSITIVE,
+        # from 20 states to 28 states. This makes sense because if a particle is absorbed more quickly there will more particles reactivated to more interesting states
+        # where rewards occur more often.
+        is_valid_state = False
+        while not is_valid_state:
+            start_queue_state = activation_set.random_choice()
+            if np.sum( np.array(start_queue_state) == np.array(activation_set.getStateBoundaries()) ) == 1:
+                is_valid_state = True
         env.setState((start_queue_state, None))
 
     # Event times (continuous times at which an event happens)
@@ -4224,13 +4252,15 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
 
         # Variables needed to update the plot that shows the trajectories of the particles (online)
         time0 = [0.0] * N
-        y0 = [envs[0].getBufferSizeFromState(activation_set.getStates())] * N
+        activation_state = activation_set.getStates()
+        assert is_scalar(activation_state), "The activation state must be scalar (i.e. the system must be a single-server system)"
+        y0 = [envs[0].getBufferSizeFromState((activation_state, None))] * N
     # Absolute time at which events happen
     time_abs = event_times[0]
     while not done:
         t += 1
         # We count the absorption number, an integer between 0 and N-2 which is used to deterministically choose
-        # the reactivation particle, in order to save time by not having to generate a uniform random number.
+        # the reactivation particle (if reactivation is via ReactivateMethod.ROBINS), in order to save time by not having to generate a uniform random number.
         # Note that the range from 0 to N-2 allows us to choose one of the N-1 particles to which the absorbed particle
         # can be reactivated into.
         absorption_number = t % (N - 1)
@@ -4291,7 +4321,9 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
                     assert envs[0].getBufferType() == BufferType.SINGLE, "The problem must have a single buffer when plotting trajectories"
                     # Show the absorption before reactivation takes place
                     y = envs[idx_particle].getBufferSize()
-                    J = envs[0].getBufferSizeFromState(activation_set.getStates())
+                    activation_state = activation_set.getStates()
+                    assert is_scalar(activation_state), "The activation state must be scalar (i.e. the system must be a single-server system)"
+                    J = envs[0].getBufferSizeFromState((activation_state, None))
                     print("* Particle {} ABSORBED! (at time = {:.3f}, buffer size = {})".format(idx_particle, time_abs, y))
                     plot_update_trajectory( ax, idx_particle, N, K, J,
                                             time0[idx_particle], y0[idx_particle], time_abs, y)
@@ -4330,7 +4362,9 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
         if plot:
             y = envs[0].getBufferSizeFromState(next_state)
             K = get_deterministic_blocking_boundaries(agent)
-            J = envs[0].getBufferSizeFromState(activation_set.getStates())
+            activation_state = activation_set.getStates()
+            assert is_scalar(activation_state), "The activation state must be scalar (i.e. the system must be a single-server system)"
+            J = envs[0].getBufferSizeFromState((activation_state, None))
             plot_update_trajectory( ax, idx_particle, N, K, J,
                                     time0[idx_particle], y0[idx_particle], time_abs, y,
                                     r=None) #idx_reactivate)    # Use idx_reactivate if we want to see a vertical line at the time of absorption with the color of the activated particle
@@ -4374,8 +4408,8 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
             times_service_all += times_service[idx_particle]
             idx_particles_arrival += [idx_particle]*len(times_inter_arrival[idx_particle])
             idx_particles_service += [idx_particle]*len(times_service[idx_particle])
-        analyze_event_times([envs[0].getJobClassRates()[0]] * N, times_inter_arrival_all, idx_particles_arrival, class_name="FV particle")
-        analyze_event_times([envs[0].getServiceRates()[0]] * N, times_service_all, idx_particles_service, class_name="FV particle")
+        analyze_event_times([envs[0].getJobClassRates()[0]] * N, times_inter_arrival_all, idx_particles_arrival, group_name="FV particle")
+        analyze_event_times([envs[0].getServiceRates()[0]] * N, times_service_all, idx_particles_service, group_name="FV particle")
 
     # Compute the stationary probability of each state or buffer size x in Phi(t, x) using Phi(t, x), P(T>t) and E(T_A)
     if df_proba_surv is None:
