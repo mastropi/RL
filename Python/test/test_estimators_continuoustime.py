@@ -13,24 +13,18 @@ runpy.run_path('../../setup.py')
 import unittest
 from unittest_data_provider import data_provider
 
-import copy
-
 import numpy as np
 
-from Python.lib.agents.learners import LearnerTypes
-from Python.lib.agents.learners.continuing.mc import LeaMC
-from Python.lib.agents.learners.continuing.fv import LeaFV
-from Python.lib.agents.policies import PolicyTypes
-from Python.lib.agents.policies.parameterized import PolQueueTwoActionsLinearStep
-from Python.lib.agents.queues import AgeQueue
 from Python.lib.environments import queues as env_queues
-from Python.lib.environments.queues import BufferType, rewardOnJobRejection_Constant
+from Python.lib.environments.queues import rewardOnJobRejection_Constant
 import Python.lib.queues as queues
-from Python.lib.simulators import SetOfStates
-from Python.lib.simulators.queues import estimate_blocking_mc, estimate_blocking_fv, SurvivalProbabilityEstimation
+from Python.lib.simulators.queues import SurvivalProbabilityEstimation
 
-from Python.lib.utils.basic import get_current_datetime_as_string, measure_exec_time
+from Python.lib.utils.basic import get_current_datetime_as_string
 from Python.lib.utils.computing import stationary_distribution_product_form, func_prod_birthdeath, func_prod_knapsack
+
+from Python.lib.run_FV import run_mc_estimation_single_server, run_fv_estimation_single_server
+from Python.lib.run_FV_LossNetwork import run_mc_estimation_loss_network, run_fv_estimation_loss_network
 
 
 class Test_EstAverageValueV_EnvQueueSingleServer(unittest.TestCase):
@@ -58,118 +52,6 @@ class Test_EstAverageValueV_EnvQueueSingleServer(unittest.TestCase):
                 reward_func,
                 rewards_accept_by_job_class,
                 dict_params_reward_func)
-
-    @measure_exec_time
-    def run_mc_estimation(self, env_queue, K, J, T,
-                          burnin_time_steps, min_num_cycles_for_expectations,
-                          seed=1717):
-        """
-        Test the Monte-Carlo estimation of the blocking probability of a single-server system
-
-        Arguments:
-        env_queue: environment
-            A queue environment out of those defined in environments/queues.py.
-
-        K: int
-            Capacity of the queue.
-
-        J: int
-            Smallest buffer size of the queue where the queue is still active (i.e. not absorbed).
-            Absorption happens at buffer size = J - 1.
-
-        N: int
-            Number of particles of the Fleming-Viot system.
-
-        T: int
-            Number of arrivals at which the simulation stops.
-
-        seed: int
-            Seed to use for the pseudo-random number generation.
-        """
-        print("\n--> Running Monte-Carlo estimation on a single server system...")
-
-        # Agent interacting with the environment (which defines whether to accept or reject a job)
-        # Define the agent acting on the queue environment
-        # The agent blocks an incoming job when the buffer size of the queue is at its capacity K.
-        # This is achieved by setting the parameter theta of the parameterized linear step acceptance policy
-        # to the integer value K-1.
-        policies = dict({PolicyTypes.ACCEPT: PolQueueTwoActionsLinearStep(env_queue,
-                                                                          float(K - 1)),
-                         PolicyTypes.ASSIGN: None})
-        learners = dict({LearnerTypes.V: LeaMC(env_queue, gamma=1.0),
-                         LearnerTypes.Q: None,
-                         LearnerTypes.P: None})
-        agent_accept_reject = AgeQueue(env_queue, policies, learners)
-
-        # Simulation parameters
-        dict_params_simul = dict({'buffer_size_activation': J,  # J-1 is the absorption buffer size
-                                  'T': T,  # number of arrivals at which the simulation stops
-                                  'burnin_time_steps': burnin_time_steps,
-                                  'min_num_cycles_for_expectations': min_num_cycles_for_expectations,
-                                  'seed': seed})
-        dict_params_info = dict()
-
-        # Run the simulation!
-        return estimate_blocking_mc(env_queue, agent_accept_reject,
-                                    dict_params_simul, dict_params_info)
-
-    @measure_exec_time
-    def run_fv_estimation(self, env_queue, K, J, N, T,
-                          burnin_time_steps, min_num_cycles_for_expectations, method_survival_probability_estimation,
-                          seed=1717):
-        """
-        Test the Fleming-Viot estimation of the blocking probability of a single-server system
-
-        Arguments:
-        env_queue: environment
-            A queue environment out of those defined in environments/queues.py.
-
-        K: int
-            Capacity of the queue.
-
-        J: int
-            Smallest buffer size of the queue where the queue is still active (i.e. not absorbed).
-            Absorption happens at buffer size = J - 1.
-
-        N: int
-            Number of particles of the Fleming-Viot system.
-
-        T: int
-            Number of arrivals at which the simulation stops.
-
-        seed: int
-            Seed to use for the pseudo-random number generation.
-        """
-        print("\n--> Running Fleming-Viot estimation on a single server system...")
-
-        # Queue environments to use as FV particles
-        envs_queue = [env_queue if i == 0 else copy.deepcopy(env_queue) for i in range(N)]
-
-        # Agent interacting with the environment (which defines whether to accept or reject a job)
-        # Define the agent acting on the queue environment
-        # The agent blocks an incoming job when the buffer size of the queue is at its capacity K.
-        # This is achieved by setting the parameter theta of the parameterized linear step acceptance policy
-        # to the integer value K-1.
-        policies = dict({PolicyTypes.ACCEPT: PolQueueTwoActionsLinearStep(env_queue,
-                                                                          float(K - 1)),
-                         PolicyTypes.ASSIGN: None})
-        learners = dict({LearnerTypes.V: LeaFV(env_queue, gamma=1.0),
-                         LearnerTypes.Q: None,
-                         LearnerTypes.P: None})
-        agent_accept_reject = AgeQueue(env_queue, policies, learners)
-
-        # Simulation parameters
-        dict_params_simul = dict({'buffer_size_activation': J,  # J-1 is the absorption buffer size
-                                  'T': T,  # number of arrivals at which the simulation stops
-                                  'burnin_time_steps': burnin_time_steps,
-                                  'min_num_cycles_for_expectations': min_num_cycles_for_expectations,
-                                  'method_survival_probability_estimation': method_survival_probability_estimation,
-                                  'seed': seed})
-        dict_params_info = dict()
-
-        # Run the simulation!
-        return estimate_blocking_fv(envs_queue, agent_accept_reject,
-                                    dict_params_simul, dict_params_info)
 
     # -------- DATA -------
     # Case number, description, expected value, parameters
@@ -266,13 +148,13 @@ class Test_EstAverageValueV_EnvQueueSingleServer(unittest.TestCase):
             job_rates = self.dict_env_queue_mm_single_server[K].getJobClassRates()
             service_rates = self.dict_env_queue_mm_single_server[K].getServiceRates()
             proba_blocking_mc, expected_reward, probas_stationary, n_cycles_used_for_probas_estimation, \
-                expected_return_time, n_return_cycles, n_events_mc = self.run_mc_estimation(self.dict_env_queue_mm_single_server[K],
-                                                                                           dict_params['K'],
-                                                                                           dict_params['J'],
-                                                                                           dict_params['N'] * dict_params['T'],
-                                                                                           dict_params['burnin_time_steps'],
-                                                                                           dict_params['min_num_cycles_for_expectations'],
-                                                                                           seed=1313)
+                expected_return_time, n_return_cycles, n_events_mc = run_mc_estimation_single_server(   self.dict_env_queue_mm_single_server[K],
+                                                                                                       dict_params['K'],
+                                                                                                       dict_params['J'],
+                                                                                                       dict_params['N'] * dict_params['T'],
+                                                                                                       dict_params['burnin_time_steps'],
+                                                                                                       dict_params['min_num_cycles_for_expectations'],
+                                                                                                       seed=1313)
 
             rhos = list(np.array(job_rates) / np.array(service_rates))
             print(get_current_datetime_as_string())
@@ -331,15 +213,15 @@ class Test_EstAverageValueV_EnvQueueSingleServer(unittest.TestCase):
             proba_blocking_fv, expected_reward, probas_stationary, \
                 expected_absorption_time, n_absorption_time_observations, \
                     time_last_absorption, time_end_simulation_et, max_survival_time, time_end_simulation_fv, \
-                        n_events_et, n_events_fv_only = self.run_fv_estimation(self.dict_env_queue_mm_single_server[K],
-                                                                   dict_params['K'],
-                                                                   dict_params['J'],
-                                                                   dict_params['N'],
-                                                                   dict_params['T'],
-                                                                   dict_params['burnin_time_steps'],
-                                                                   dict_params['min_num_cycles_for_expectations'],
-                                                                   dict_params['method_survival_probability_estimation'],
-                                                                   seed=1313)
+                        n_events_et, n_events_fv_only = run_fv_estimation_single_server(   self.dict_env_queue_mm_single_server[K],
+                                                                                           dict_params['K'],
+                                                                                           dict_params['J'],
+                                                                                           dict_params['N'],
+                                                                                           dict_params['T'],
+                                                                                           dict_params['burnin_time_steps'],
+                                                                                           dict_params['min_num_cycles_for_expectations'],
+                                                                                           dict_params['method_survival_probability_estimation'],
+                                                                                           seed=1313)
 
             rhos = list(np.array(job_rates) / np.array(service_rates))
             print(get_current_datetime_as_string())
@@ -415,157 +297,26 @@ class Test_EstAverageValueV_EnvQueueLossNetworkWithJobClasses(unittest.TestCase)
             rewards_accept_by_job_class,
             dict_params_reward_func)
 
-    @measure_exec_time
-    def run_mc_estimation(self, env_queue, Ks, Js, K, T,
-                          burnin_time_steps, min_num_cycles_for_expectations,
-                          seed=1717):
-        """
-        Test the Monte-Carlo estimation of the blocking probability of a loss network system
-
-        Arguments:
-        env_queue: EnvQueueLossNetworkWithJobClasses
-            The queue environment that handles the loss network to simulate.
-
-        Ks: list of int
-            Blocking sizes for each job class accepted by the loss network system.
-
-        Js: list of int
-            Smallest number of jobs of each class where the "equivalent" FV particle is still active (i.e. not absorbed).
-
-        K: int
-            The server's total capacity.
-
-        T: int
-            Number of arrivals at which the simulation stops.
-
-        seed: int
-            Seed to use for the pseudo-random number generation.
-        """
-        print("\n--> Running Monte-Carlo estimation on a multi-job-class loss network system...")
-
-        assert len(Ks) == len(Js), "The lengths of Ks and Js coincide: Ks={}, Js={}".format(Ks, Js)
-
-        # Queue environments to use
-        # Set the total server's capacity
-        env_queue.setCapacity(K)
-
-        # Agent interacting with the environment (which defines whether to accept or reject a job)
-        # Define the agent acting on the queue environment
-        # The agent blocks an incoming job of class c when the number of jobs of the class being served is K(c)
-        # where K(c) is defined by parameter theta(c) of the parameterized policy used for that job class,
-        # where theta(c) = K(c) - 1 which guarantees a deterministic blocking at K(c).
-        thetas = [K - 1 for K in Ks]
-        # We define a separate 1-D acceptance policy for each job class
-        # All policies have the same structure, what changes is their real-valued theta parameter
-        policies = dict({PolicyTypes.ACCEPT: [PolQueueTwoActionsLinearStep(env_queue, thetas[c])
-                                              for c in range(self.env_queue_mm_loss.getNumJobClasses())],
-                         PolicyTypes.ASSIGN: None})
-        learners = dict({LearnerTypes.V: LeaMC(env_queue, gamma=1.0),
-                         LearnerTypes.Q: None,
-                         LearnerTypes.P: None})
-        agent_accept_reject = AgeQueue(env_queue, policies, learners)
-
-        # Simulation parameters
-        dict_params_simul = dict({'absorption_set': SetOfStates(state_boundaries=tuple([J - 1 for J in Js])),
-                                  'activation_set': SetOfStates(state_boundaries=tuple(Js)),
-                                  'T': T,  # number of arrivals at which the simulation stops
-                                  'burnin_time_steps': burnin_time_steps,
-                                  'min_num_cycles_for_expectations': min_num_cycles_for_expectations,
-                                  'seed': seed})
-        dict_params_info = dict()
-
-        # Run the simulation!
-        return estimate_blocking_mc(env_queue, agent_accept_reject,
-                                    dict_params_simul, dict_params_info)
-
-    @measure_exec_time
-    def run_fv_estimation(self, env_queue, Ks, Js, K, N, T,
-                          burnin_time_steps, min_num_cycles_for_expectations, method_survival_probability_estimation,
-                          seed=1717):
-        """
-        Test the Fleming-Viot estimation of the blocking probability of a loss network system
-
-        Arguments:
-        env_queue: EnvQueueLossNetworkWithJobClasses
-            The queue environment that handles the loss network to simulate.
-
-        Ks: list of int
-            Blocking sizes for each job class accepted by the loss network system.
-
-        Js: list of int
-            Smallest number of jobs of each class where the FV particle is still active (i.e. not absorbed).
-
-        K: int
-            The server's total capacity.
-
-        N: int
-            Number of particles of the Fleming-Viot system.
-
-        T: int
-            Number of arrivals at which the simulation stops.
-
-        seed: int
-            Seed to use for the pseudo-random number generation.
-        """
-        print("\n--> Running Fleming-Viot estimation on a multi-job-class loss network system...")
-
-        assert len(Ks) == len(Js), "The lengths of Ks and Js coincide: Ks={}, Js={}".format(Ks, Js)
-
-        # Queue environments to use as FV particles
-        # Set the total server's capacity
-        env_queue.setCapacity(K)
-        envs_queue = [env_queue if i == 0 else copy.deepcopy(env_queue) for i in range(N)]
-
-        # Agent interacting with the environment (which defines whether to accept or reject a job)
-        # Define the agent acting on the queue environment
-        # The agent blocks an incoming job of class c when the number of jobs of the class being served is K(c)
-        # where K(c) is defined by parameter theta(c) of the parameterized policy used for that job class,
-        # where theta(c) = K(c) - 1 which guarantees a deterministic blocking at K(c).
-        thetas = [K - 1 for K in Ks]
-        # We define a separate 1-D acceptance policy for each job class
-        # All policies have the same structure, what changes is their real-valued theta parameter
-        policies = dict({PolicyTypes.ACCEPT: [PolQueueTwoActionsLinearStep(env_queue, thetas[c])
-                                              for c in range(self.env_queue_mm_loss.getNumJobClasses())],
-                         PolicyTypes.ASSIGN: None})
-        learners = dict({LearnerTypes.V: LeaFV(env_queue, gamma=1.0),
-                         LearnerTypes.Q: None,
-                         LearnerTypes.P: None})
-        agent_accept_reject = AgeQueue(env_queue, policies, learners)
-
-        # Simulation parameters
-        dict_params_simul = dict({'absorption_set': SetOfStates(state_boundaries=tuple([J - 1 for J in Js])),
-                                  'activation_set': SetOfStates(state_boundaries=tuple(Js)),
-                                  'T': T,  # number of arrivals at which the simulation stops
-                                  'burnin_time_steps': burnin_time_steps,
-                                  'min_num_cycles_for_expectations': min_num_cycles_for_expectations,
-                                  'method_survival_probability_estimation': method_survival_probability_estimation,
-                                  'seed': seed})
-        dict_params_info = dict()
-
-        # Run the simulation!
-        return estimate_blocking_fv(envs_queue, agent_accept_reject,
-                                    dict_params_simul, dict_params_info)
-
     def test_EnvQueueLossNetwork_MetMC_SingleCapacity(self):
-        blocking_occupancies_per_jobclass = [4, 2, 5]
-        activation_occupancies_per_jobclass = [2, 1, 3]
-        #activation_occupancies_per_jobclass = [int(0.3*occup) for occup in blocking_occupancies_per_jobclass]
+        blocking_occupancies_by_jobclass = [4, 2, 5]
+        activation_occupancies_by_jobclass = [2, 1, 3]
+        #activation_occupancies_by_jobclass = [int(0.3*occup) for occup in blocking_occupancies_by_jobclass]
         nservers = 10
         T = 2000 #200000 # 2000
-        J = activation_occupancies_per_jobclass
-        K = blocking_occupancies_per_jobclass
+        J = activation_occupancies_by_jobclass
+        K = blocking_occupancies_by_jobclass
         burnin_time_steps = 20
         min_num_cycles_for_expectations = 5
 
         proba_blocking_mc, expected_reward, probas_stationary, n_cycles_used_for_probas_estimation, \
-            expected_return_time, n_return_cycles, n_events_mc = self.run_mc_estimation(self.env_queue_mm_loss,
-                                                                                        blocking_occupancies_per_jobclass,
-                                                                                        activation_occupancies_per_jobclass,
-                                                                                        nservers,
-                                                                                        T,
-                                                                                        burnin_time_steps,
-                                                                                        min_num_cycles_for_expectations,
-                                                                                        seed=1313)
+            expected_return_time, n_return_cycles, n_events_mc = run_mc_estimation_loss_network(self.env_queue_mm_loss,
+                                                                                                blocking_occupancies_by_jobclass,
+                                                                                                activation_occupancies_by_jobclass,
+                                                                                                nservers,
+                                                                                                T,
+                                                                                                burnin_time_steps,
+                                                                                                min_num_cycles_for_expectations,
+                                                                                                seed=1313)
 
         print(get_current_datetime_as_string())
         job_class_rates = self.env_queue_mm_loss.getJobClassRates()
@@ -576,8 +327,8 @@ class Test_EstAverageValueV_EnvQueueLossNetworkWithJobClasses(unittest.TestCase)
         print("- job arrival rates: {}".format(job_class_rates))
         print("- service rates: {}".format(service_rates))
         print("- loads: {}".format(rhos))
-        print("- blocking occupancies per job class: {}".format(blocking_occupancies_per_jobclass))
-        print("- activation occupancies per job class: {}".format(activation_occupancies_per_jobclass))
+        print("- blocking occupancies per job class: {}".format(blocking_occupancies_by_jobclass))
+        print("- activation occupancies per job class: {}".format(activation_occupancies_by_jobclass))
         print("- # arrival time steps: {}".format(T))
         print("")
 
@@ -617,14 +368,14 @@ class Test_EstAverageValueV_EnvQueueLossNetworkWithJobClasses(unittest.TestCase)
         assert J == [2, 1, 3], "Activation sizes are [1, 1, 1]"
 
     def test_EnvQueueLossNetwork_MetFV_SingleCapacity(self):
-        blocking_occupancies_per_jobclass = [4, 2, 5]
-        activation_occupancies_per_jobclass = [2, 1, 3]
-        #activation_occupancies_per_jobclass = [1, 1, 1]
+        blocking_occupancies_by_jobclass = [4, 2, 5]
+        activation_occupancies_by_jobclass = [2, 1, 3]
+        #activation_occupancies_by_jobclass = [1, 1, 1]
         nservers = 10
         N = 100 # 1000
         T = 200 # 2000
-        K = blocking_occupancies_per_jobclass
-        J = activation_occupancies_per_jobclass
+        K = blocking_occupancies_by_jobclass
+        J = activation_occupancies_by_jobclass
         # (2023/01/26) Note about burnin and min cycles: Using (5, 5) or (50, 10) as (burnin_time_steps, min_cycles) didn't change much the estimated probability (e.g. from 14.454% to 14.453%!)
         burnin_time_steps = 20 #10
         min_num_cycles_for_expectations = 5
@@ -633,16 +384,16 @@ class Test_EstAverageValueV_EnvQueueLossNetworkWithJobClasses(unittest.TestCase)
         proba_blocking_fv, expected_reward, probas_stationary, \
             expected_absorption_time, n_absorption_time_observations, \
                 time_last_absorption, time_end_simulation_et, max_survival_time, time_end_simulation_fv, \
-                    n_events_et, n_events_fv_only = self.run_fv_estimation( self.env_queue_mm_loss,
-                                                                            blocking_occupancies_per_jobclass,
-                                                                            activation_occupancies_per_jobclass,
-                                                                            nservers,
-                                                                            N,
-                                                                            T,
-                                                                            burnin_time_steps,
-                                                                            min_num_cycles_for_expectations,
-                                                                            method_survival_probability_estimation,
-                                                                            seed=1713)
+                    n_events_et, n_events_fv_only = run_fv_estimation_loss_network( self.env_queue_mm_loss,
+                                                                                    blocking_occupancies_by_jobclass,
+                                                                                    activation_occupancies_by_jobclass,
+                                                                                    nservers,
+                                                                                    N,
+                                                                                    T,
+                                                                                    burnin_time_steps,
+                                                                                    min_num_cycles_for_expectations,
+                                                                                    method_survival_probability_estimation,
+                                                                                    seed=1713)
 
         print(get_current_datetime_as_string())
         job_class_rates = self.env_queue_mm_loss.getJobClassRates()
@@ -653,8 +404,8 @@ class Test_EstAverageValueV_EnvQueueLossNetworkWithJobClasses(unittest.TestCase)
         print("- job arrival rates: {}".format(job_class_rates))
         print("- service rates: {}".format(service_rates))
         print("- loads: {}".format(rhos))
-        print("- blocking occupancies per job class: {}".format(blocking_occupancies_per_jobclass))
-        print("- activation occupancies per job class: {}".format(activation_occupancies_per_jobclass))
+        print("- blocking occupancies per job class: {}".format(blocking_occupancies_by_jobclass))
+        print("- activation occupancies per job class: {}".format(activation_occupancies_by_jobclass))
         print("- # particles: {}".format(N))
         print("- # arrival time steps: {}".format(T))
         print("")

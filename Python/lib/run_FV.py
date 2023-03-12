@@ -22,7 +22,10 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
+from Python.lib.agents.learners import LearnerTypes
+from Python.lib.agents.learners.continuing.mc import LeaMC
 from Python.lib.agents.learners.continuing.fv import LeaFV
+from Python.lib.agents.policies import PolicyTypes
 from Python.lib.agents.policies.parameterized import PolQueueTwoActionsLinearStep
 from Python.lib.agents.queues import AgeQueue
 
@@ -35,9 +38,10 @@ from Python.lib.simulators.queues import compute_nparticles_and_narrivals_for_fv
     define_queue_environment_and_agent, estimate_blocking_fv, estimate_blocking_mc, SurvivalProbabilityEstimation
 
 from Python.lib.utils.basic import aggregation_bygroups, get_current_datetime_as_string, get_datetime_from_string, \
-    is_scalar, set_pandas_options, reset_pandas_options
+    is_scalar, measure_exec_time, set_pandas_options, reset_pandas_options
 from Python.lib.utils.computing import compute_blocking_probability_birth_death_process
 import Python.lib.utils.plotting as plotting
+
 
 @unique
 class Process(Enum):
@@ -47,6 +51,118 @@ class Process(Enum):
 
 
 #------------------- Functions --------------------
+@measure_exec_time
+def run_mc_estimation_single_server(env_queue, K, J, T,
+                                    burnin_time_steps, min_num_cycles_for_expectations,
+                                    seed=1717):
+    """
+    Test the Monte-Carlo estimation of the blocking probability of a single-server system
+
+    Arguments:
+    env_queue: environment
+        A queue environment out of those defined in environments/queues.py.
+
+    K: int
+        Capacity of the queue.
+
+    J: int
+        Smallest buffer size of the queue where the queue is still active (i.e. not absorbed).
+        Absorption happens at buffer size = J - 1.
+
+    N: int
+        Number of particles of the Fleming-Viot system.
+
+    T: int
+        Number of arrivals at which the simulation stops.
+
+    seed: int
+        Seed to use for the pseudo-random number generation.
+    """
+    print("\n--> Running Monte-Carlo estimation on a single server system...")
+
+    # Agent interacting with the environment (which defines whether to accept or reject a job)
+    # Define the agent acting on the queue environment
+    # The agent blocks an incoming job when the buffer size of the queue is at its capacity K.
+    # This is achieved by setting the parameter theta of the parameterized linear step acceptance policy
+    # to the integer value K-1.
+    policies = dict({PolicyTypes.ACCEPT: PolQueueTwoActionsLinearStep(env_queue, float(K - 1)),
+                     PolicyTypes.ASSIGN: None})
+    learners = dict({LearnerTypes.V: LeaMC(env_queue, gamma=1.0),
+                     LearnerTypes.Q: None,
+                     LearnerTypes.P: None})
+    agent_accept_reject = AgeQueue(env_queue, policies, learners)
+
+    # Simulation parameters
+    dict_params_simul = dict({'buffer_size_activation': J,  # J-1 is the absorption buffer size
+                              'T': T,  # number of arrivals at which the simulation stops
+                              'burnin_time_steps': burnin_time_steps,
+                              'min_num_cycles_for_expectations': min_num_cycles_for_expectations,
+                              'seed': seed})
+    dict_params_info = dict()
+
+    # Run the simulation!
+    return estimate_blocking_mc(env_queue, agent_accept_reject,
+                                dict_params_simul, dict_params_info)
+
+
+@measure_exec_time
+def run_fv_estimation_single_server(  env_queue, K, J, N, T,
+                                      burnin_time_steps, min_num_cycles_for_expectations, method_survival_probability_estimation,
+                                      seed=1717):
+    """
+    Test the Fleming-Viot estimation of the blocking probability of a single-server system
+
+    Arguments:
+    env_queue: environment
+        A queue environment out of those defined in environments/queues.py.
+
+    K: int
+        Capacity of the queue.
+
+    J: int
+        Smallest buffer size of the queue where the queue is still active (i.e. not absorbed).
+        Absorption happens at buffer size = J - 1.
+
+    N: int
+        Number of particles of the Fleming-Viot system.
+
+    T: int
+        Number of arrivals at which the simulation stops.
+
+    seed: int
+        Seed to use for the pseudo-random number generation.
+    """
+    print("\n--> Running Fleming-Viot estimation on a single server system...")
+
+    # Queue environments to use as FV particles
+    envs_queue = [env_queue if i == 0 else copy.deepcopy(env_queue) for i in range(N)]
+
+    # Agent interacting with the environment (which defines whether to accept or reject a job)
+    # Define the agent acting on the queue environment
+    # The agent blocks an incoming job when the buffer size of the queue is at its capacity K.
+    # This is achieved by setting the parameter theta of the parameterized linear step acceptance policy
+    # to the integer value K-1.
+    policies = dict({PolicyTypes.ACCEPT: PolQueueTwoActionsLinearStep(env_queue, float(K - 1)),
+                     PolicyTypes.ASSIGN: None})
+    learners = dict({LearnerTypes.V: LeaFV(env_queue, gamma=1.0),
+                     LearnerTypes.Q: None,
+                     LearnerTypes.P: None})
+    agent_accept_reject = AgeQueue(env_queue, policies, learners)
+
+    # Simulation parameters
+    dict_params_simul = dict({'buffer_size_activation': J,  # J-1 is the absorption buffer size
+                              'T': T,  # number of arrivals at which the simulation stops
+                              'burnin_time_steps': burnin_time_steps,
+                              'min_num_cycles_for_expectations': min_num_cycles_for_expectations,
+                              'method_survival_probability_estimation': method_survival_probability_estimation,
+                              'seed': seed})
+    dict_params_info = dict()
+
+    # Run the simulation!
+    return estimate_blocking_fv(envs_queue, agent_accept_reject,
+                                dict_params_simul, dict_params_info)
+
+
 def analyze_convergence(estimation_process=Process.Simulators,
                         nservers=1, job_class_rates=[0.7], service_rates=[1.0],
                         K=5, buffer_size_activation=1,
@@ -60,7 +176,8 @@ def analyze_convergence(estimation_process=Process.Simulators,
                         run_mc=True,
                         seed=1717):
     """
-    2021/04/19: Analyze convergence of the FV algorithm as the number of particles N increases
+    2021/04/19: Analyze convergence of the FV estimation of the blocking probability as the number of particles N OR
+    the number of arrival times (T = `nmeantimes`) increases.
 
     Arguments:
     estimation_process: (opt) Process
@@ -110,7 +227,8 @@ def analyze_convergence(estimation_process=Process.Simulators,
     assert nservers == len(service_rates), "The number of servers coincides with the number of service rates given"
 
     #--- System setup
-    dict_params = dict({'environment': {'capacity': K,
+    dict_params = dict({'environment': {'queue_system': "single-server",
+                                        'capacity': K,
                                         'nservers': nservers,
                                         'job_class_rates': job_class_rates,  # [0.8, 0.7]
                                         'service_rates': service_rates,  # [1.0, 1.0, 1.0]
@@ -464,7 +582,8 @@ def analyze_absorption_size(nservers=1,
     #--- Parse input parameters
 
     #--- System setup
-    dict_params = dict({'environment': {'capacity': np.Inf, # Set to Inf because the capacity is still undefined. This value will be updated below when analyzing each specific K.
+    dict_params = dict({'environment': {'queue_sytem': "single-server",
+                                        'capacity': np.Inf, # Set to Inf because the capacity is still undefined. This value will be updated below when analyzing each specific K.
                                         'nservers': nservers,
                                         'job_class_rates': [0.7],  # [0.8, 0.7]
                                         'service_rates': [1.0],  # [1.0, 1.0, 1.0]
@@ -1131,6 +1250,8 @@ def save_dataframes(list_of_dataframes):
 
 def update_values_to_analyze(values, value_required, value_min, value_max, discard_smaller_than_minimum=True, factor_uplift=np.nan):
     "Updates the list of parameter values to analyze (e.g. the list of N or of T values to analyze for convergence)"
+    if value_required <= 0:
+        raise ValueError("Parameter `value_required` must be positive: {}".format(value_required))
     if value_required < value_min and discard_smaller_than_minimum:
         return values, np.nan
 
@@ -1227,7 +1348,7 @@ if __name__ == "__main__":
     nservers = int(sys.argv[1]); lmbda = 0.7; mu = 1.0  # Queue system characteristics
     analysis_type = sys.argv[2]
     K = int(sys.argv[3])
-    J = int(np.round(float(sys.argv[4]) * K))    # We need the float() because the input arguments are read as strings when running the program from the command line
+    J = max(1, int(np.round(float(sys.argv[4]) * K)))    # We need the float() because the input arguments are read as strings when running the program from the command line
 
     #---------------------- Definition of parameters N and T ----------------------
     # Min and Max values are defined for N and T in order to:
@@ -1263,6 +1384,8 @@ if __name__ == "__main__":
         # falls out of the [min, max] value defined for the parameter, then no experiments are run.
         if analysis_type == "N":
             T_required = compute_nparticles_and_narrivals_for_fv_process([lmbda / mu], K, J / K, error_rel_phi=None, error_rel_et=error_rel, constant_proportionality=1)
+            if T_required == 0:
+                T_required = 1
             factor_uplift = np.nan
             T_values, factor_uplift = update_values_to_analyze( [], T_required, T_min, T_max,
                                                                 discard_smaller_than_minimum=discard_smaller_than_minimum,
@@ -1270,6 +1393,9 @@ if __name__ == "__main__":
             ## Note: T_values is used when calling the analyze_convergence() function
         elif analysis_type == "T":
             N_required = compute_nparticles_and_narrivals_for_fv_process([lmbda / mu], K, J / K, error_rel_phi=error_rel, error_rel_et=None)
+            if N_required == 0:
+                # This happens when J = K, in which case we don't need any particle because all the particles of the Fleming-Viot process will be always blocked! (since the only active state is x=K)                N_required = 1
+                N_required = 1
             factor_uplift = np.nan
             N_values, factor_uplift = update_values_to_analyze( [], N_required, N_min, N_max,
                                                                 discard_smaller_than_minimum=discard_smaller_than_minimum,
@@ -1298,6 +1424,9 @@ if __name__ == "__main__":
             T_values, factor_uplift = update_values_to_analyze(T_values, T_required, T_min, T_max,
                                                                discard_smaller_than_minimum=discard_smaller_than_minimum,
                                                                factor_uplift=factor_uplift)
+    # Use the following if we want to analyze a fixed value of N and T (e.g. when debugging)
+    #N_values = [50]
+    #T_values = [50]
     #---------------------- Definition of parameters N and T ----------------------
 
     # Computing the minimum required N and T values for different expected relative errors for different K and J/K values
@@ -1359,9 +1488,9 @@ if __name__ == "__main__":
         results, results_agg, est_fv, est_mc = analyze_convergence(
                                                     estimation_process=Process.Simulators,
                                                     nservers=nservers, job_class_rates=[lmbda], service_rates=[mu], K=K, buffer_size_activation=J,
-                                                    burnin_time_steps=burnin_time_steps,
+                                                    burnin_time_steps=burnin_time_steps, min_num_cycles_for_expectations=min_num_cycles_for_expectations,
                                                     method_proba_surv=SurvivalProbabilityEstimation.FROM_N_PARTICLES,
-                                                    nparticles=N_values, #N, 2*N, 4*N, 8*N, 16*N],  # [800, 1600, 3200], #[10, 20, 40], #[24, 66, 179],
+                                                    nparticles=N_values, #[N, 2*N, 4*N, 8*N, 16*N],  # [800, 1600, 3200], #[10, 20, 40], #[24, 66, 179],
                                                     nmeantimes=T_values, #50, #[170, 463, 1259],
                                                     replications=replications, run_mc=run_mc,
                                                     seed=seed)

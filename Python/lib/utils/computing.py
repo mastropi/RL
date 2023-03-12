@@ -417,6 +417,62 @@ def compute_blocking_probability_birth_death_process(rhos: list, capacity: int):
     return proba_blocking
 
 
+def compute_blocking_probability_knapsack(capacity: int, rhos: list, lambdas: list, blocking_sizes: list=None):
+    """
+    Computes the probability of blocking an incoming job (of any class) to a stochastic knapsack of a given capacity
+
+    Arguments:
+    capacity: int
+        Capacity of the knapsack, independently of the blocking sizes by job class.
+
+    rhos: list
+        Load of each job class arriving to the knapsack.
+
+    lambdas: list
+        Arrival rate of each job class.
+
+    blocking_sizes: (opt) list
+        Sizes (occupations) of the different job classes in the knapsack at which an incoming job of the respective class is blocked.
+        default: None, in which case the full capacity of the knapsack is used to compute the stationary probability distribution
+        and no limitation to the occupancy of each job class is applied.
+
+    Return: float
+    The probability of blocking an incoming job (of ANY class).
+    """
+    if  not isinstance(rhos, (list)) or \
+        not isinstance(lambdas, (list)):
+        raise ValueError("Parameters `rhos`, `lambdas` must be of type list")
+    if  len(rhos) == 0 or \
+        len(lambdas) == 0:
+        raise ValueError("Input parameter `rhos` and `lambdas` must be a non-empty list: {}, {}".format(rhos, lambdas))
+    if not len(rhos) == len(lambdas):
+        raise ValueError("Parameters `rhos` and `lambdas` must have the same length: {}, {}".format(len(rhos), len(lambdas)))
+
+    capacity_blocking, states_valid_when_blocking, probas_stationary_blocking = \
+        compute_stationary_probability_knapsack_when_blocking_by_class(capacity, rhos, blocking_sizes=blocking_sizes)
+
+    if blocking_sizes is None:
+        # If no blocking sizes are given, each class is blocked at the knapsack's capacity
+        blocking_sizes = [capacity] * len(rhos)
+        assert capacity_blocking == capacity
+
+    proba_blocking = 0.0
+    Lambda = np.sum(lambdas)
+    for x, p in zip(states_valid_when_blocking, probas_stationary_blocking):
+        total_x = sum(x)
+        # Before multiplying by the stationary probability,
+        # we first compute the contribution from each class to blocking because this depends on whether just one class
+        # can block or more than one class can block, or whether ALL classes block (which happens when the system is at full capacity)
+        contribution_from_jobclasses = 0.0
+        for j, lambdaj in enumerate(lambdas):
+            contribution_from_jobclasses += lambdaj if total_x == capacity_blocking or x[j] == blocking_sizes[j] \
+                                            else 0.0
+        proba_blocking += p * contribution_from_jobclasses
+    proba_blocking /= Lambda
+
+    return proba_blocking
+
+
 def stationary_distribution_product_form(capacity: int, rhos: list, func_prod):
     """
     Computes the stationary distribution on all possible states of a system having product form distribution
