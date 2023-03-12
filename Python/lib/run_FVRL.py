@@ -37,7 +37,8 @@ from Python.lib.simulators.queues import compute_nparticles_and_narrivals_for_fv
     compute_rel_errors_for_fv_process, define_queue_environment_and_agent, get_deterministic_blocking_boundaries, \
     LearningMode, SimulatorQueue
 
-from Python.lib.utils.basic import aggregation_bygroups, is_scalar, show_exec_params
+from Python.lib.utils.basic import aggregation_bygroups, array_of_objects, \
+    convert_str_to_list_of_type, is_scalar, show_exec_params
 from Python.lib.utils.computing import compute_blocking_probability_birth_death_process, compute_expected_cost_knapsack
 import Python.lib.utils.plotting as plotting
 
@@ -350,7 +351,7 @@ if len(sys.argv) == 1:  # Only the execution file name is contained in sys.argv
                         # no its own and no comparison is expected to be carried out with a previously FV simulation.
     sys.argv += [1]     # Number of replications to run
 if len(sys.argv) == nargs_required + counter_opt_args + 1:
-    sys.argv += ["nonexistent"] #["benchmark_fv.csv"] # Benchmark filename relative to the resultsdir directory defined below when the learning method is MC (instead of FVRL)
+    sys.argv += ["benchmark_fv.csv"] #["nonexistent"] #["benchmark_fv.csv"] # Benchmark filename relative to the resultsdir directory defined below when the learning method is MC (instead of FVRL)
 counter_opt_args += 1
 if len(sys.argv) == nargs_required + counter_opt_args + 1:
     sys.argv += [False] # clipping: whether to use clipping: False or True
@@ -403,7 +404,7 @@ if queue_system == "single-server":
 elif queue_system == "loss-network":
     capacity = 6 #6 #10
     job_class_rates = [1, 5] #[1, 5, 8] # When lambda = rho: #[0.8, 0.8, 0.8] #[0.1, 0.5, 0.8] #[2, 8, 15] #[20, 80, 150]
-    rhos = [0.5, 0.3] #[0.6, 0.4]#[0.5]*len(job_class_rates) #[0.8]*len(job_class_rates)
+    rhos = [0.2, 0.1] #[0.6, 0.4]#[0.5]*len(job_class_rates) #[0.8]*len(job_class_rates)
     service_rates = [l/r for l, r in zip(job_class_rates, rhos)] #[1.0, 1.0, 1.0]
     #************ BLOCKING COSTS ************
     # We should consider the following two conditions to define the blocking cost values:
@@ -464,12 +465,12 @@ if queue_system == "single-server":
 elif queue_system == "loss-network":
     theta_ref = [np.nan, np.nan, np.nan]
     theta_start = [4.1]*len(job_class_rates) #[4.1, 4.1, 4.1] #[7.1, 7.1, 7.1] #[3.1, 3.1, 3.1] #[0.1, 0.1, 0.1]
-    J_factor = [0.1]*len(job_class_rates)
+    J_factor = [0.5, 0.6] #[0.3]*len(job_class_rates)
     # Values of N (#particles) and T (#arrival events) to use for the simulation used to estimate stationary probabilities
     if learning_method.name == "MC":
-        N = 1; T = 70 * 50 #30 * 50 #500 * 100 #1000 * 100
+        N = 1; T = 200 * 1000 #50 * 100 #30 * 50 #500 * 100 #1000 * 100
     else:
-        N = 70; T = 50 #N = 500; T = 100
+        N = 200; T = 1000 #N = 500; T = 100
     error_rel_phi = np.nan
     error_rel_et = np.nan
 create_log = sys.argv[12] != "nosave"
@@ -758,14 +759,15 @@ if benchmark_file is None:
 else:
     # Read the execution parameters from the benchmark file
     print("Reading benchmark data containing the parameter settings from file\n{}".format(benchmark_file))
-    benchmark = pd.read_csv(benchmark_file)
+    benchmark = pd.read_csv(benchmark_file, sep="|")
     benchmark_groups = benchmark[(benchmark['t_learn'] == 1) & (benchmark['replication'] == 1)]
     ncases = benchmark_groups.shape[0]
-    theta_true_values = np.nan * np.ones(ncases)
+    theta_true_values = array_of_objects(ncases, value=np.nan) #np.nan * np.ones(ncases) ((2023/03/12) use np.ones() if the array_of_objects() doesn't work when dealing with scalar values of theta_true (e.g. single-server case)
     theta_opt_values = [[np.nan] * replications] * ncases   # List of optimum theta values achieved by the learning algorithm for each replication in each parameter setting
     K_opt_values = [[np.nan] * replications] * ncases       # List of optimum K values where deterministic blocking occurs
     cost_opt_values = [[np.nan] * replications] * ncases    # List of optimum costs found by the learning algorithm
     idx_case = -1
+    NT_values = []
     for i in range(ncases):
         idx_case += 1
         case = benchmark_groups['case'].iloc[i]
@@ -773,15 +775,19 @@ else:
 
         # Simulation and estimation parameters that are common for all replications of the current case (group) analyzed
         theta_true = benchmark_groups['theta_true'].iloc[i]
+        theta_true = convert_str_to_list_of_type(theta_true)
         if simul.getEnv().getBufferType() == BufferType.SINGLE:
             # Store the value of theta_true as parameter of the reward function because we use it below to compute the optimum blocking sizes and optimum expected cost
             dict_params['environment']['reward_func_params']['buffer_size_ref'] = theta_true
         theta_true_values[idx_case] = theta_true
         theta_start = benchmark_groups['theta'].iloc[i]
+        theta_start = convert_str_to_list_of_type(theta_start)
         J_factor = benchmark_groups['J/K'].iloc[i]
+        J_factor = convert_str_to_list_of_type(J_factor)
         exponent = benchmark_groups['exponent'].iloc[i]
-        N = benchmark_groups['N'].iloc[i]
+        N = benchmark_groups['N'].iloc[i] if learning_method.name == "FV" else 1
         T = benchmark_groups['T'].iloc[i]
+        NT_values += [[N, T]]
         burnin_time_steps = benchmark_groups['burnin_time_steps'].iloc[i]
 
         K_true, cost_true, cost_mean, cost_max = compute_optimum_blocking_sizes_and_expected_cost(simul, dict_params['environment'])
@@ -963,9 +969,9 @@ if len(theta_ref_values) == 1:
         ax.set_xlabel('Value function V (cost)')
         ax.set_ylabel('grad(V)')
 
-    # Plot evolution of theta
-    title = "Method: {}, Optimum Theta = {}, Theta start = {}, Theta final = {}, K_final = {}, Expected cost = {}, N = {}, T = {:.0f} \n K = {}, Blocking Costs = {}, lambdas = {}, rhos = {}" \
-                .format(learning_method.name, theta_true, theta_start, theta_opt_values[-1], K_opt_values[-1], cost_opt_values[-1], N, t_sim, capacity, blocking_costs, job_class_rates, rhos)
+    # Plot evolution of theta (for the last analyzed case)
+    title = "Method: {}, Optimum Theta = {}, Theta start = {}, Theta final = {}, K_final = {}, Expected cost = {}, N = {}, T = {:.0f} J = {} \n K = {}, Blocking Costs = {}, lambdas = {}, rhos = {}" \
+                .format(learning_method.name, theta_true, theta_start, theta_opt_values[-1], K_opt_values[-1], cost_opt_values[-1], N, t_sim, J_factor_values, capacity, blocking_costs, job_class_rates, rhos)
     if plot and plot_trajectories:
         "In the case of the MC learner, plot the theta-learning trajectory as well as rewards received during learning"
         assert N == 1, "The simulated system has only one particle (N={})".format(N)
@@ -1012,7 +1018,7 @@ if len(theta_ref_values) == 1:
         ax_params, ax_objective = axes
 
         # Plot of parameters evolution
-        thetas = simul.getLearnerP().getThetas()
+        thetas = df_learning['theta']
         # Linestyles are sorted so that more continuous line means larger rho
         linestyles_ref = ['-', '--', '-.', ':']
         # Rank of rhos in reversed order (largest value has highest rank so that the largest value gets the most solid line in the plot)

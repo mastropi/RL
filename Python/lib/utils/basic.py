@@ -8,6 +8,7 @@ Created on Thu Jun 07 21:43:52 2020
 
 import bisect   # To insert elements in order in a list (bisect.insort(list, element)
 import copy
+import re
 import numpy as np
 import pandas as pd
 
@@ -137,6 +138,19 @@ def as_array(x):
         x = np.array(x)
 
     return x
+
+def convert_str_to_list_of_type(str_value, sep="[, ]", type=float):
+    """
+    A string representing a list (e.g. of numbers) (e.g. '[3.1, 2.5]') is converted to a list of the given type (default `float`).
+    This is useful when reading list values from cells in a CSV file.
+
+    It is assumed that the values in the string are convertible to the given number type.
+    """
+    str_value_as_list = [type(s.replace("[", "").replace("]", "")) for s in re.split(sep, str_value) if len(s) > 0]
+    if len(str_value_as_list) == 1:
+        return str_value_as_list[0]
+    else:
+        return str_value_as_list
 
 def parse_dict_params(dict_params, dict_params_default):
     """
@@ -450,7 +464,7 @@ def array_of_objects(size, value=None, dtype=list):
 
     # Fill in the values of the array if `value` is not None 
     if value is not None:
-        if len(size) == 1:
+        if is_scalar(size) or len(size) == 1:
             # 1D array
             for idx in range(len(arr)):
                 # We store a COPY of `value` so that in case the value is immutable (e.g. a list)
@@ -816,6 +830,7 @@ def deprecated_aggregation_bygroups(df, groupvars, analvars,
 
 def aggregation_bygroups(df, groupvars, analvars,
                          stats=["count", "mean", "std", "min", "max"]):
+                        ## NOTE: (2023/03/12) To understand why PyCharm gives the warning that the default value of `stat` is mutable, see this link: http://www.omahapython.org/IdiomaticPython.html#default-parameter-values
     """
     Computes the given summary statistics in the input data frame on the analysis variables
     by the given group variables.
