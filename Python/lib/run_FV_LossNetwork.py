@@ -91,8 +91,8 @@ def run_mc_estimation_loss_network( env_queue, Ks, Js, K, T,
     agent_accept_reject = AgeQueue(env_queue, policies, learners)
 
     # Simulation parameters
-    dict_params_simul = dict({'absorption_set': SetOfStates(state_boundaries=tuple([J - 1 for J in Js])),
-                              'activation_set': SetOfStates(state_boundaries=tuple(Js)),
+    dict_params_simul = dict({'absorption_set': SetOfStates(set_boundaries=tuple([J - 1 for J in Js])),
+                              'activation_set': SetOfStates(set_boundaries=tuple(Js)),
                               'T': T,  # number of arrivals at which the simulation stops
                               'burnin_time_steps': burnin_time_steps,
                               'min_num_cycles_for_expectations': min_num_cycles_for_expectations,
@@ -159,8 +159,8 @@ def run_fv_estimation_loss_network( env_queue, Ks, Js, K, N, T,
     agent_accept_reject = AgeQueue(env_queue, policies, learners)
 
     # Simulation parameters
-    dict_params_simul = dict({'absorption_set': SetOfStates(state_boundaries=tuple([J - 1 for J in Js])),
-                              'activation_set': SetOfStates(state_boundaries=tuple(Js)),
+    dict_params_simul = dict({'absorption_set': SetOfStates(set_boundaries=tuple([J - 1 for J in Js])),
+                              'activation_set': SetOfStates(set_boundaries=tuple(Js)),
                               'T': T,  # number of arrivals at which the simulation stops
                               'burnin_time_steps': burnin_time_steps,
                               'min_num_cycles_for_expectations': min_num_cycles_for_expectations,
@@ -170,7 +170,8 @@ def run_fv_estimation_loss_network( env_queue, Ks, Js, K, N, T,
 
     # Run the simulation!
     return estimate_blocking_fv(envs_queue, agent_accept_reject,
-                                dict_params_simul, dict_params_info)
+                                dict_params_simul, dict_params_info,
+                                probas_stationary=None)
 
 
 def analyze_convergence(capacity=10, job_class_rates=[0.7], service_rates=[1.0],
@@ -350,8 +351,8 @@ def analyze_convergence(capacity=10, job_class_rates=[0.7], service_rates=[1.0],
 
         dict_params_simul = {
             'T': T,
-            'absorption_set': SetOfStates(state_boundaries=tuple([J - 1 for J in Js])),
-            'activation_set': SetOfStates(state_boundaries=tuple(Js)),
+            'absorption_set': SetOfStates(set_boundaries=tuple([J - 1 for J in Js])),
+            'activation_set': SetOfStates(set_boundaries=tuple(Js)),
             'burnin_time_steps': burnin_time_steps,
             'min_num_cycles_for_expectations': min_num_cycles_for_expectations,
             'method_survival_probability_estimation': method_proba_surv,

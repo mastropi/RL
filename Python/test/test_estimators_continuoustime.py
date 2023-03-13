@@ -439,13 +439,20 @@ class Test_EstAverageValueV_EnvQueueLossNetworkWithJobClasses(unittest.TestCase)
         print("- TRUE Stationary probability of ALL blocking states = {}".format(proba_stationary_true))
         print("- Blocking probability (it depends on the job arrival rates) = {}".format(proba_blocking_fv))
 
-        assert np.isclose(proba_stationary, 0.068997, atol=1E-6)
-            ## The above result is a little too far from the true stationary probability = 0.076922.
-            ## If we increase the number of particles from 100 to 500, the result is much closer (0.0737),
+        assert n_states_nonzero_probability == 16
+        assert len(probas_stationary) == 49
+        assert n_absorption_time_observations == 57
+        assert np.isclose(expected_absorption_time, 2.12, atol=1E-2)
+        assert n_events_et == 397
+        assert n_events_fv_only == 2308
+        assert np.isclose(max_survival_time, 6.0, atol=1E-1)
+        assert np.isclose(proba_stationary, 0.048536, atol=1E-6)
+            ## The above result is a rather far from the true stationary probability = 0.076922.
+            ## If we increase the number of particles from 100 to 500, the result gets closer,
             ## but the estimation process increases from 15 sec to ~ 7 min...
             ## Note also that if the activation sizes are decreased from [2, 1, 3] to [1, 1, 1],
-            ## the stationary probability increases to 0.0943... the opposite from what I thought... although we are looking at just one sample here!
-        assert np.isclose(proba_blocking_fv, 0.025382, atol=1E-6)
+            ## the stationary probability increases... the opposite from what I thought... although we are looking at just one sample here!
+        assert np.isclose(proba_blocking_fv, 0.017514, atol=1E-6)
         # Check system setup is the one required to obtain the expected results
         assert nservers == 10, "Number of servers is 10"
         assert list(self.env_queue_mm_loss.getJobClassRates()) == [0.1, 0.5, 0.8], "Job arrival rates are [0.1, 0.5, 0.8]"

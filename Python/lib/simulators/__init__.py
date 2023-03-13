@@ -16,6 +16,8 @@ from Python.lib.agents import GenericAgent
 from Python.lib.agents.policies import PolicyTypes
 
 from Python.lib.utils.basic import is_scalar, is_integer
+from Python.lib.utils.computing import all_combos_with_max_limits
+
 
 @unique
 class LearningMethod(Enum):
@@ -37,14 +39,14 @@ class SetOfStates:
         Ex: {(3, 2, 1), (4, 2, 5)}
         default: None
 
-    state_boundaries: (opt) tuple
+    set_boundaries: (opt) tuple of non-negative int, non-negative int or non-negative float
         A list defining the state value in each dimension of the state vector, above which we are outside the set.
         Ex: (3, 5, 2) means that the set is made up of the cube [0, 3] x [0, 5] x [0, 2]
         default: None
     """
-    def __init__(self, states: set=None, state_boundaries: tuple or int or float=None):
-        if states is None and state_boundaries is None:
-            raise ValueError("Either parameter `states` must be not None or `state_boundaries` must be not None")
+    def __init__(self, states: set=None, set_boundaries: Union[tuple, int, float]=None):
+        if states is None and set_boundaries is None:
+            raise ValueError("Either parameter `states` must be not None or `set_boundaries` must be not None")
         #-- Parameter `states`
         # Check the dimension of each state given in the set: they should all have the same dimension
         if states is not None:
@@ -64,18 +66,18 @@ class SetOfStates:
                                          .format(dim0, len(s)))
         self.states = states
 
-        #-- Parameter `state_boundaries`
-        if is_scalar(state_boundaries):
+        #-- Parameter `set_boundaries`
+        if is_scalar(set_boundaries):
             # Convert the scalar to a tuple in order to facilitate handling unidimensional and multidimensional states
-            # (the class assumes that `state_boundaries` is a tuple throughout its process)
+            # (the class assumes that `set_boundaries` is a tuple throughout its process)
             # Note that when the parameter is passed as e.g. `(3)` (note there is no comma as there is in `(3,)`)
             # it is converted to a scalar, i.e. it is NOT interpreted as a tuple
-            state_boundaries = (state_boundaries,)
-        if state_boundaries is not None and not all([is_integer(s) for s in state_boundaries]):
-            raise ValueError("The values in parameter `state_boundaries` values must be integers "
-                             "(because they represent boundaries of integer-valued state dimensions: {}" \
-                             .format(state_boundaries))
-        self.state_boundaries = state_boundaries
+            set_boundaries = (set_boundaries,)
+        if set_boundaries is not None and not all([is_integer(s) and s >= 0 for s in set_boundaries]):
+            raise ValueError("The values in parameter `set_boundaries` must be non-negative integers "
+                             "(because they represent the upper boundaries relative to 0 of integer-valued state dimensions: {}" \
+                             .format(set_boundaries))
+        self.set_boundaries = set_boundaries
 
     def random_choice(self, size: int=None):
         """
@@ -83,10 +85,10 @@ class SetOfStates:
 
         The result is different depending on whether the storage format of the set (see method `getStorageFormat()`)
         is "states" (where the states in the set are explicitly given --see also method `states_are_given_explicitly()`)
-        or "state_boundaries" (where the states in the set are defined implicitly by the integer upper limits in each
+        or "set_boundaries" (where the states in the set are defined implicitly by the integer upper limits in each
         dimension of a state), in which case all states made up of integer values, of which at least ONE is equal to
         one of those upper limits, belong to the set.
-        Example of the latter: if the state_boundaries are [4, 2, 5], then the following are examples of states belonging
+        Example of the latter: if the set_boundaries are [4, 2, 5], then the following are examples of states belonging
         to the set:
         [4, 0, 0] (the first element is at the boundary)
         [3, 2, 1] (the second element is at the boundary)
@@ -102,6 +104,8 @@ class SetOfStates:
         Otherwise, list with as many scalar or tuple elements of the set as specified by `size`,
         defining the randomly chosen states among all possible states in the set.
         """
+        at_least_one_dimension_is_at_boundary = lambda state: np.sum(np.array(state) == np.array(self.set_boundaries)) >= 1
+
         size_orig = size
         if size_orig is None:
             size = 1
@@ -114,56 +118,74 @@ class SetOfStates:
         else:
             # States are given indirectly via the set boundaries (e.g. [4, 2, 5])
             # => First we randomly choose which dimension to set at the boundary (e.g. if dimension 0 is chosen, then we set state[0] = 4)
-            idx_state_boundaries = np.random.choice(len(self.state_boundaries), size=size)
+            idx_set_boundaries = np.random.choice(len(self.set_boundaries), size=size)
             # Now we freely choose the other dimensions between 0 and the corresponding state value (e.g. we choose dimension 1 between 0 and 2, and dimension 2 between 0 and 5)
             chosen_states = [[]]*size
             for s in range(size):
-                chosen_states[s] = [-1]*len(self.state_boundaries)
-                chosen_states[s][ idx_state_boundaries[s] ] = self.state_boundaries[ idx_state_boundaries[s] ]
-                other_dimensions_to_choose_a_state_value = [ss for ss in range(len(self.state_boundaries)) if ss != idx_state_boundaries[s]]
+                chosen_states[s] = [-1]*len(self.set_boundaries)
+                chosen_states[s][ idx_set_boundaries[s] ] = self.set_boundaries[ idx_set_boundaries[s] ]
+                other_dimensions_to_choose_a_state_value = [ss for ss in range(len(self.set_boundaries)) if ss != idx_set_boundaries[s]]
                 for idx in other_dimensions_to_choose_a_state_value:
-                    # Random number between 0 and state_boundaries[idx]
-                    chosen_states[s][idx] = np.random.choice(self.state_boundaries[idx] + 1)
+                    # Random number between 0 and set_boundaries[idx]
+                    chosen_states[s][idx] = np.random.choice(self.set_boundaries[idx] + 1)
                 if len(chosen_states[s]) == 1:
                     # Convert the chosen state to scalar
                     chosen_states[s] = chosen_states[s][0]
                 else:
                     # Convert each list to tuple because the selected states are not mutable (lists are mutable, tuples are not)
                     chosen_states[s] = tuple(chosen_states[s])
+            assert all([at_least_one_dimension_is_at_boundary(state) for state in chosen_states]), \
+                "All chosen states have at least one dimension at its boundary"
 
         if size_orig is None:
             return chosen_states[0]
         else:
             return chosen_states
 
-    def getStates(self):
-        "Returns all the states in the set (if states are explicitly stored in the object) or the set boundaries (if states are implicitly stored via the set boundaries)"
+    def getStates(self, exactly_one_dimension_at_boundary=False, at_least_one_dimension_at_boundary=False):
+        "Returns the set of all possible states, explicitly enumerated, regardless of the storage format used in the object"
         if self.getStorageFormat() == "states":
             if len(self.states) == 1:
                 return self.states[0]
             else:
                 return self.states
         else:
-            if len(self.state_boundaries) == 1:
-                return self.state_boundaries[0]
-            else:
-                return self.state_boundaries
+            # We explicitly enumerate all states belonging to the set
+            if exactly_one_dimension_at_boundary and at_least_one_dimension_at_boundary:
+                raise ValueError("Parameters exactly_one_dimension_at_boundary and at_least_one_dimension_at_boundary cannot be both True")
+            states = set()
+            combos_generator = all_combos_with_max_limits(self.set_boundaries)
+            while True:
+                try:
+                    next_combo = next(combos_generator)
+                    if exactly_one_dimension_at_boundary or at_least_one_dimension_at_boundary:
+                        match_combo_to_boundaries = np.array(next_combo) == np.array(self.set_boundaries)
+                    if  not exactly_one_dimension_at_boundary and not at_least_one_dimension_at_boundary or \
+                        exactly_one_dimension_at_boundary and np.sum(match_combo_to_boundaries) == 1 or \
+                        at_least_one_dimension_at_boundary and np.sum(match_combo_to_boundaries) >= 1:
+                        states.add( next_combo[0] if len(next_combo) == 1 else tuple(next_combo) )
+                        ## NOTE: Since next_combo is a list and the value added to the `states` set is a tuple
+                        ## they won't share the same memory address and there is no risk that all elements will be the same in the end.
+                except StopIteration:
+                    break
+            combos_generator.close()
+            return states
 
-    def getStateBoundaries(self):
+    def getSetBoundaries(self):
         if self.getStorageFormat() == "states":
             raise AttributeError("States in the set are NOT stored implicitly by defining the set boundaries in each dimension")
         else:
-            if len(self.state_boundaries) == 1:
-                return self.state_boundaries[0]
+            if len(self.set_boundaries) == 1:
+                return self.set_boundaries[0]
             else:
-                return self.state_boundaries
+                return self.set_boundaries
 
     def getStorageFormat(self):
-        "Returns the format in which the states in the set are stored, either in their `states` attribute or in their `state_boundaries` attribute"
+        "Returns the format in which the states in the set are stored, either in their `states` attribute or in their `set_boundaries` attribute"
         if self.states is not None:
             return "states"
         else:
-            return "state_boundaries"
+            return "set_boundaries"
 
     def getStateDimension(self):
         if self.getStorageFormat() == "states":
@@ -172,15 +194,15 @@ class SetOfStates:
             else:
                 return 1 if is_scalar(list(self.states)[0]) else len(list(self.states)[0])
         else:
-            if len(self.state_boundaries) == 0:
+            if len(self.set_boundaries) == 0:
                 return None
             else:
-                return 1 if is_scalar(self.state_boundaries) else len(self.state_boundaries)
+                return 1 if is_scalar(self.set_boundaries) else len(self.set_boundaries)
 
     def getNumStates(self):
         """
         Get the number of states in the set when the storage format is 'states' or an upper bound of the number of states
-        when the storage format is 'state_boundaries' and the state dimension is larger than 1.
+        when the storage format is 'set_boundaries' and the state dimension is larger than 1.
 
         Computing the exact number of states requires further thinking which I have not the time to do now (09-Jan-2023).
 
@@ -189,7 +211,7 @@ class SetOfStates:
         if self.getStorageFormat() == "states":
             return len(self.states)
         else:
-            if len(self.state_boundaries) == 0:
+            if len(self.set_boundaries) == 0:
                 return 0
             else:
                 if self.getStateDimension() == 1:
@@ -197,11 +219,11 @@ class SetOfStates:
                 else:
                     # Compute an upper bound of the number of states in the absorption set
                     # This is an upper bound because we are not subtracting the repeated states in this count, such as:
-                    # if state_boundaries = [3, 2, 4], then we are counting more than once all the states having more than
+                    # if set_boundaries = [3, 2, 4], then we are counting more than once all the states having more than
                     # one dimension at the boundary (e.g. [3, 2, 1] or [0, 2, 4], etc.)
                     n_states_upper_bound = 0
                     for i in range(self.getStateDimension()):
-                        n_states_upper_bound += np.prod([b+1 for ii, b in enumerate(self.state_boundaries) if ii != i])
+                        n_states_upper_bound += np.prod([b+1 for ii, b in enumerate(self.set_boundaries) if ii != i])
                     return n_states_upper_bound
 
     def states_are_given_explicitly(self):

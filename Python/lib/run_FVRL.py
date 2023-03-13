@@ -404,7 +404,7 @@ if queue_system == "single-server":
 elif queue_system == "loss-network":
     capacity = 6 #6 #10
     job_class_rates = [1, 5] #[1, 5, 8] # When lambda = rho: #[0.8, 0.8, 0.8] #[0.1, 0.5, 0.8] #[2, 8, 15] #[20, 80, 150]
-    rhos = [0.2, 0.1] #[0.6, 0.4]#[0.5]*len(job_class_rates) #[0.8]*len(job_class_rates)
+    rhos = [0.8, 0.6] #[0.8, 0.6] #[0.5, 0.3] #[0.6, 0.4]#[0.5]*len(job_class_rates) #[0.8]*len(job_class_rates)
     service_rates = [l/r for l, r in zip(job_class_rates, rhos)] #[1.0, 1.0, 1.0]
     #************ BLOCKING COSTS ************
     # We should consider the following two conditions to define the blocking cost values:
@@ -432,7 +432,7 @@ elif queue_system == "loss-network":
     #   This "very costly" condition should be defined on the basis of the revenue (before costs deduction) under normal operation of the system (i.e. without blocking)
     #   So, if we say that the expected revenue under normal conditions is 1 (or 1000 dollars, whatever) and we want to operate the system
     #   in a realm where the expected cost < 50% of those expected revenues (revenues before costs deduction).
-    adjustment_constant_for_large_enough_cost = 20 # This constant is normally > 1 and is adjusted by eye-ball, after looking at the magnitude of the obtained gradient in the log
+    adjustment_constant_for_large_enough_cost = 20 # This constant is normally > 1 and is adjusted by eye-ball as a function of rhos (e.g. 20 for rhos = [0.5, 0.3], 2 for rhos = [0.2, 0.1]), based on NOT obtaining costs that are too large (but the final decision comes from observing the magnitude of the obtained gradient, which should not be too large nor too small)
     blocking_costs = [adjustment_constant_for_large_enough_cost * sum(job_class_rates) * 1/r**(capacity - 1) / l for l, r in zip(job_class_rates, rhos)] #[5000, 1000, 100] (for rho_average = 0.8) #[2E5, 1.5E5, 1E5] #[2E5, 1E2, 1E0] #[1E1, 1E2, 1E4] #[20.0, 10.0, 5.0]
     # Perturb the costs so that we don't get the trivial optimum at e.g. [6, 6, 6]
     np.random.seed(1)
@@ -465,12 +465,16 @@ if queue_system == "single-server":
 elif queue_system == "loss-network":
     theta_ref = [np.nan, np.nan, np.nan]
     theta_start = [4.1]*len(job_class_rates) #[4.1, 4.1, 4.1] #[7.1, 7.1, 7.1] #[3.1, 3.1, 3.1] #[0.1, 0.1, 0.1]
-    J_factor = [0.5, 0.6] #[0.3]*len(job_class_rates)
+    J_factor = [0.1, 0.6] #[0.1, 0.6] #[0.3]*len(job_class_rates)
     # Values of N (#particles) and T (#arrival events) to use for the simulation used to estimate stationary probabilities
     if learning_method.name == "MC":
+        # This is ONLY used when there is no benchmark file or if it does not exist
+        # (in order to run an ad-hoc MC learning that is not linked to a previously run FV learning)
         N = 1; T = 200 * 1000 #50 * 100 #30 * 50 #500 * 100 #1000 * 100
+        use_stationary_probability_for_start_states = None
     else:
-        N = 200; T = 1000 #N = 500; T = 100
+        N = 30; T = 100 #N = 500; T = 100
+        use_stationary_probability_for_start_states = False
     error_rel_phi = np.nan
     error_rel_et = np.nan
 create_log = sys.argv[12] != "nosave"
@@ -724,6 +728,7 @@ if benchmark_file is None:
                         't_sim': T,     # This is the number of arrival events, NOT the number of time steps to use in the estimation of E(T_A) in FV
                                         # In fact, the calculation of T on the basis of the expected relative error in the estimation of E(T_A) gives
                                         # us the number of arrival events (see details in my small dark green notebook in entry dated 06-Nov-2022).
+                        'use_stationary_probability_for_start_states': use_stationary_probability_for_start_states,
                         'burnin_time_steps': burnin_time_steps,
                         'min_num_cycles_for_expectations': min_num_cycles_for_expectations,
                     }
@@ -786,7 +791,7 @@ else:
         J_factor = convert_str_to_list_of_type(J_factor)
         exponent = benchmark_groups['exponent'].iloc[i]
         N = benchmark_groups['N'].iloc[i] if learning_method.name == "FV" else 1
-        T = benchmark_groups['T'].iloc[i]
+        T = benchmark_groups['T'].iloc[i]   # See NOTE below for entry 't_sim' of dict_params_simul dictionary about the meaning of T which is NOT the simulation time that will be used for the MC learning when a benchmark is available!
         NT_values += [[N, T]]
         burnin_time_steps = benchmark_groups['burnin_time_steps'].iloc[i]
 
@@ -799,7 +804,7 @@ else:
             'buffer_size_activation_factor': J_factor,
             'nparticles': 1,
             't_sim': T,         # This is the 'T' parameter used at the first learning step when running FVRL, and is used only as informational purposes inside
-                                # run_simulation_policy_learning() in order for the user to know the characteristics of the case we are currently comparing with MC learning.
+                                # run_simulation_policy_learning() and in the output filename in order for the user to know the characteristics of the case we are currently comparing with MC learning.
                                 # It is NOT the simulation time that will be used for MC learning, as this is defined by the actual #events observed during FVRL.
             'burnin_time_steps': burnin_time_steps,
             'min_num_cycles_for_expectations': min_num_cycles_for_expectations,
@@ -994,7 +999,7 @@ if len(theta_ref_values) == 1:
             ax.axvline(t, color='lightgray', linestyle='dashed')
 
         # Buffer sizes
-        buffer_sizes = [env_queue.getBufferSizeFromState(s) for s in simul.getLearnerP().getStates()]
+        buffer_sizes = [env_queue.getBufferSizeFromState(s) for s in simul.getLearnerP().getSetBoundaries()]
         ax.plot(times, buffer_sizes, 'g.', markersize=3)
         # Mark the start of each queue simulation
         # DM-2021/11/28: No longer feasible (or easy to do) because the states are recorded twice for the same time step (namely at the first DEATH after a BIRTH event)

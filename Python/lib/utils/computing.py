@@ -190,7 +190,7 @@ def factorial(n):
 
 def all_combos_with_sum(R, C):
     """
-    Returns a generator of all possible integer-valued arrays whose elements sum up to a fixed number.
+    Returns a generator of all possible integer-valued lists whose elements sum up to a fixed non-negative integer
 
     Arguments:
     R: int
@@ -202,23 +202,26 @@ def all_combos_with_sum(R, C):
 
     # Note: documentation on the `yield` expression: https://docs.python.org/3/reference/expressions.html#yieldexpr
 
-    def all_combos_with_subsum(v, level):
-        # print("\nlevel={}:".format(level))
-        r = level
+    def all_combos_with_sum_in_sublist(v, dim):
+        # print("\ndim={}:".format(dim))
+        r = dim
         # Sum over the indices of v to the left of r
         # which determine the new capacity to satisfy on the indices from r to the right
         vleft = sum(v[0:r])
         if r < R - 1:
+            # Set the current dimension value to all its possible values
+            # and for each of those values solve the sub-problem of finding all valid combinations
+            # for the sub-list that is to the RIGHT of r (this step calls this same function recursively)
             for k in range(C - vleft, -1, -1):
-                # print("\tFOR k ({} downto 0): level: {}, k={}".format(C-vleft, r, k))
+                # print("\tFOR k ({} downto 0): dim: {}, k={}".format(C-vleft, r, k))
                 # print("\tv before={}".format(v))
                 v[r] = k
                 # print("\tv={}".format(v))
                 # print("new call: (offset={})".format(r+1))
                 # NOTE THE USE OF `yield from` in order to get an yield value from a recursive call!
-                yield from all_combos_with_subsum(v, r + 1)
+                yield from all_combos_with_sum_in_sublist(v, r + 1)
         else:
-            # No degrees of freedom left for the last level (right-most index)
+            # No degrees of freedom left for the last dimension (right-most index)
             # print("\tv before={}".format(v))
             v[r] = C - vleft
             # print("\tv={}".format(v))
@@ -226,8 +229,54 @@ def all_combos_with_sum(R, C):
             assert sum(v) == C, "The elements of v sum up to C={} (v={})".format(C, v)
             yield v
 
+    if C < 0 or not isinstance(C, int):
+        raise ValueError("Parameter `C` specifying the sum to be satisfied by each valid combinations should be a non-negative integer: {}".format(C))
+
+    # Initialize the list on the combination that is valid for sure (i.e. list with all zeros, as the sum C must be at least 0)
     v = [0] * R
-    gen = all_combos_with_subsum(v, 0)
+    # We start the combination generation by calling "the generator that solves every sub-problem" on the WHOLE list (i.e. on the list with its full dimension)
+    gen = all_combos_with_sum_in_sublist(v, 0)
+    return gen
+
+
+def all_combos_with_max_limits(L: Union[list, tuple]):
+    """
+    Returns a generator of all possible integer-valued lists whose elements are limited by a non-negative integer
+
+    Arguments:
+    L: list or tuple of int
+        List or tuple containing the maximum integer value allowed for each dimension of the lists to generate.
+    """
+
+    # Note: documentation on the `yield` expression: https://docs.python.org/3/reference/expressions.html#yieldexpr
+
+    def all_combos_with_max_limits_in_sublist(v, dim):
+        r = dim
+        if r < R - 1:
+            # Set the current dimension value to all its possible values
+            # and for each of those values solve the sub-problem of finding all valid combinations
+            # for the sub-list that is to the RIGHT of r (this step calls this same function recursively)
+            for k in range(L[dim] + 1):
+                v[r] = k
+                # NOTE THE USE OF `yield from` in order to get an yield value from a recursive call!
+                yield from all_combos_with_max_limits_in_sublist(v, r + 1)
+        else:
+            # No degrees of freedom left for the last dimension (right-most index)
+            # => set its value to all its possible values accepted by the corresponding dimension of L
+            for k in range(L[dim] + 1):
+                v[r] = k
+                yield v
+
+    if not isinstance(L, (list, tuple)):
+        raise ValueError("Parameter `L` must be a list: {}".format(L))
+    if not all([is_integer(l) and l >= 0 for l in L]):
+        raise ValueError("The values in parameter `L` must be non-negative integers: {}".format(L))
+
+    R = len(L)
+    # Initialize the list on the combination that is valid for sure (i.e. list with all zeros, as the limits in L must be at least 0)
+    v = [0] * R
+    # We start the combination generation by calling "the generator that solves every sub-problem" on the WHOLE list (i.e. on the list with its full dimension)
+    gen = all_combos_with_max_limits_in_sublist(v, 0)
     return gen
 
 
@@ -938,6 +987,70 @@ if __name__ == "__main__":
     assert count == expected_count, "The number of combinations generated is {} ({})".format(expected_count, count)
     print("OK! {} combinations generated for R={}, C={}.".format(count, R, C))
     #------------ all_combos_with_sum(R,C) -----------------#
+
+
+    #--------------- all_combos_with_max_limits(L) ------------------#
+    print("\n--- Testing all_combos_with_max_limits(L):")
+    L = (1, 2, 1)
+    expected_count = np.prod([l + 1 for l in L])
+    combos = all_combos_with_max_limits(L)
+    count = 0
+    while True:
+        try:
+            v = next(combos)
+            assert len(v) == len(L), "v must be of length R={} ({})".format(len(L), len(v))
+            assert [0 <= v[i] <= L[i] for i, _ in enumerate(L)], "each element of v must satisfy 0 <= v[i] <= L[i]: v={} L={}".format(v, L)
+            count += 1
+            if count == 1:
+                assert v == [0, 0, 0]
+            if count == 2:
+                assert v == [0, 0, 1]
+            if count == 3:
+                assert v == [0, 1, 0]
+            if count == 4:
+                assert v == [0, 1, 1]
+            if count == 5:
+                assert v == [0, 2, 0]
+            if count == 6:
+                assert v == [0, 2, 1]
+            if count == 7:
+                assert v == [1, 0, 0]
+            if count == 8:
+                assert v == [1, 0, 1]
+            if count == 9:
+                assert v == [1, 1, 0]
+            if count == 10:
+                assert v == [1, 1, 1]
+            if count == 11:
+                assert v == [1, 2, 0]
+            if count == 12:
+                assert v == [1, 2, 1]
+        except StopIteration:
+            break
+    combos.close()
+    assert count == expected_count, "The number of combinations generated must be {} ({})".format(expected_count, count)
+    print("OK! {} combinations generated for L={}.".format(count, L))
+
+    # Case with ONE dimension
+    L = [4]
+    expected_count = L[0] + 1
+    combos = all_combos_with_max_limits(L)
+    count = 0
+    values = []
+    while True:
+        try:
+            v = next(combos)
+            assert len(v) == len(L), "v must be of length R={} ({})".format(len(L), len(v))
+            assert [0 <= v[i] <= L[i] for i, _ in enumerate(L)], "each element of v must satisfy 0 <= v[i] <= L[i]: v={} L={}".format(v, L)
+            values += v
+            count += 1
+        except StopIteration:
+            break
+    combos.close()
+    assert count == expected_count, "The number of combinations generated must be {} ({})".format(expected_count, count)
+    assert values == list(range(L[0] + 1))
+    print("OK! {} combinations generated for L={}.".format(count, L))
+    #--------------- all_combos_with_max_limits(L) ------------------#
 
 
     #------------ stationary_distribution_product_form --------------#
