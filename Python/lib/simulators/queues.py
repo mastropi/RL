@@ -3823,10 +3823,9 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
             state_or_buffer_size_prev = env.getQueueStateFromState(state_prev)
             state_or_buffer_size_cur = env.getQueueStateFromState(state_cur)
 
-        # Go over all the states or buffer sizes of interest where Phi should be estimated
-        # TODO: (2023/03/12) We should ONLY loop on the keys in dict_phi that intersect with previous state and the current state (as these are the only states which could change value)
-        # This will save a considerable amount of time in the multidimensional state case, considering the number of blocking states are many.
-        for x in dict_phi.keys():
+        # Go over the states or buffer sizes of interest that intersect with the previous and current states or buffer sizes
+        # (in fact, these two are the only states or buffer sizes whose Phi value can change now)
+        for x in set(dict_phi.keys()).intersection({state_or_buffer_size_prev, state_or_buffer_size_cur}):
             assert dict_phi[x].shape[0] > 0, "The Phi data frame has been initialized for state or buffer size = {}".format(x)
             phi_cur = dict_phi[x]['Phi'].iloc[-1]
             phi_new = empirical_mean_update(phi_cur, x, state_or_buffer_size_prev, state_or_buffer_size_cur, N)
