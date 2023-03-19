@@ -416,31 +416,35 @@ def analyze_convergence(estimation_process=Process.Simulators,
             if run_mc:
                 time_start_mc = timer()
                 print("\t--> Running Monte-Carlo estimation... {}".format(get_current_datetime_as_string()))
-                dict_params_simul['maxevents'] = n_events_fv
-                dict_params_simul['seed'] = seed_rep + 2  # This is the same seed used in the FV simulation in estimate_blocking_fv(), so we can compare better
+                # Make a copy of the simulation parameters so that we do not alter the simulation parameters that are in use for the FV simulation which defines the benchmark
+                dict_params_simul_mc = copy.deepcopy(dict_params_simul)
+                dict_params_simul_mc['maxevents'] = n_events_fv
                 if estimation_process == Process.Estimators:
                     proba_blocking_mc, \
                         expected_return_time_mc, \
                             n_return_observations, \
-                                est_mc, dict_stats_mc = estimators.estimate_blocking_mc(env_queue, agent, dict_params_simul,
+                                est_mc, dict_stats_mc = estimators.estimate_blocking_mc(env_queue, agent, dict_params_simul_mc,
                                                                                         dict_params_info=dict_params_info)
                     time_mc = dict_stats_mc.get('time'),
                     n_events_mc = dict_stats_mc.get('nevents', 0)
                 elif estimation_process == Process.Simulators:
-                    dict_params_simul['T'] = n_events_fv
+                    dict_params_simul_mc['T'] = n_events_fv
                     proba_blocking_mc, expected_reward_mc, probas_stationary, n_cycles, \
                         expected_return_time_mc, _, \
-                            n_events_mc = estimate_blocking_mc(env_queue, agent, dict_params_simul, dict_params_info=dict_params_info)
-                    time_mc = np.nan
-                    # Note: (2022/10/24) The above number n_cycles is the number of cycles observed for the estimation of the stationary probabilities
-                    # It may NOT coincide with the number of return cycles observed and used to estimate expected_return_time_mc
-                    # (whose value is stored in returned object `_`)
-                    # when a burn-in period is left at the beginning of the simulation (see dict_params_simul['burnin_period']),
-                    # since in that case, the cycle used in the estimation of the stationary probabilities is defined by
-                    # the return to the buffer size at which the Markov process is found *after* the burn-in period is over
-                    # (which may NOT coincide with the start buffer size).
+                            time_mc, n_events_mc = estimate_blocking_mc(env_queue, agent, dict_params_simul_mc, dict_params_info=dict_params_info)
+                    # Note: (2022/10/24) The above number n_cycles is the number of cycles used for the estimation of the stationary probabilities
+                    # It may NOT coincide with the number of return cycles used to estimate expected_return_time_mc
+                    # (whose value is stored in returned object `_`) when a burn-in period is left at the beginning
+                    # of the simulation (see dict_params_simul['burnin_time_steps']).
+                    # In fact, the cycle used in the estimation of the stationary probabilities is defined by
+                    # the return to the state at which the Markov process is found *after* the burn-in period is over
+                    # (which may NOT coincide with the start state) (and cycles are counted from that moment over,
+                    # so whatever happened during the burn-in period is discarded), whereas the cycle used in the estimation
+                    # of the expected return time is defined by the return to the *initial* state of the Markov chain,
+                    # and cycles are counted starting from the time the first return to the initial state happens *after*
+                    # the burn-in period.
                     # Here we store the former, i.e. the number of cycles used to estimate the stationary probabilities
-                    # because those are the values we are interested in collecting to analyze the Monte-Carlo estimator.
+                    # because the probabilities are our quantity of interest to evaluate the Monte-Carlo estimator.
                     n_return_observations = n_cycles
 
                 # Check comparability in terms of # events in each simulation (MC vs. FV)
@@ -497,8 +501,6 @@ def analyze_convergence(estimation_process=Process.Simulators,
                                         buffer_size_activation_value,
                                         nparticles,
                                         nmeantimes,
-                                        # We use the dict_params_simul parameters here (as opposed to the input parameters to the function (e.g. `burnin_time_steps`)
-                                        # because these parameters may be changed above depending on the actual simulator+estimator used to run the experiments.
                                         dict_params_simul['burnin_time_steps'],
                                         dict_params_simul['burnin_cycles_absorption'],
                                         dict_params_simul['min_num_cycles_for_expectations'],
@@ -844,7 +846,7 @@ def analyze_absorption_size(nservers=1,
                 df_proba_survival_and_blocking_conditional, \
                     est_fv, est_mc
 
-def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None, y2=None, ylabel2=None,
+def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None, y2=None, ylabel="Blocking probability (%)", ylabel2=None,
                        prob_fv="Pr(FV)", prob_mc="Pr(MC)", prob_true="Pr(K)",
                        splines=True, use_weights_splines=False,
                        smooth_params={'bias': None, 'variability': None, 'mse': None},
@@ -972,7 +974,7 @@ def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None, y2=Non
                                    figsize=figsize, subplots=subplots,
                                    dict_options={'axis': axis_properties,
                                                  'multipliers': {'x': 1, 'y': 100, 'error': 2},
-                                                 'labels': {'x': [xlabel, xlabel2], 'y': "Blocking probability (%)"},
+                                                 'labels': {'x': [xlabel, xlabel2], 'y': ylabel},
                                                  'properties': {'color': "black", 'color_center': colors},
                                                  'texts': {'title': title}})
 
@@ -983,7 +985,7 @@ def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None, y2=Non
                                 figsize=figsize, subplots=subplots,
                                 dict_options={'axis': axis_properties,
                                               'multipliers': {'x': 1, 'y': 100},
-                                              'labels': {'x': [xlabel, xlabel2], 'y': "Blocking probability (%)"},
+                                              'labels': {'x': [xlabel, xlabel2], 'y': ylabel},
                                               'properties': {'color': colors, 'color_center': colors},
                                               'texts': {'title': title}})
 
@@ -1107,7 +1109,7 @@ def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None, y2=Non
                                          dict_params={'pointlabels': nvars, 'splines': splines_opt},
                                          dict_options={'axis': axis_properties,
                                                        'multipliers': {'x': 1, 'y': 1},
-                                                       'labels': {'x': [xlabel, xlabel2], 'y': "CV w.r.t. true Pr(K) (%)"},
+                                                       'labels': {'x': [xlabel, xlabel2], 'y': "CV w.r.t. true " + prob_true + " (%)"},
                                                        'properties': points_properties,
                                                        'texts': {'title': "Relative variability of {}".format(y)}
                                                        })
@@ -1124,7 +1126,7 @@ def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None, y2=Non
                                   dict_params={'pointlabels': nvars, 'splines': splines_opt},
                                   dict_options={'axis': axis_properties,
                                                 'multipliers': {'x': 1, 'y': 1},
-                                                'labels': {'x': [xlabel, xlabel2], 'y': "CV w.r.t. true Pr(K) (%)"},
+                                                'labels': {'x': [xlabel, xlabel2], 'y': "CV w.r.t. true " + prob_true + " (%)"},
                                                 'properties': points_properties,
                                                 'texts': {'title': "Relative bias of {}".format(y)}
                                                 })
@@ -1169,7 +1171,7 @@ def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None, y2=Non
                 ax.set_xlim([xmin, xmax])
                 ax.set_ylim([ymin, ymax])
                 ax.set_xlabel(xlabel)
-                ax.set_ylabel("CV w.r.t. true Pr(K) (%)")
+                ax.set_ylabel("CV w.r.t. true " + prob_true + " (%)")
                 ax2 = ax.twinx()
                 sizes = ax2.plot(df2plot[x], df2plot[y2meanvar], 'r.-')
                 ax2.set_ylabel(ylabel2)
@@ -1230,7 +1232,7 @@ def closeLogFile(fh_log, stdout_sys, dt_start):
 
     fh_log.close()
 
-    # Reset the standard output
+    # Reset the standard output and show the execution time
     sys.stdout = stdout_sys
     print("Ended at: {}".format(dt_end))
     print("Execution time: {:.1f} min, {:.1f} hours".format(time_elapsed / 60, time_elapsed / 3600))

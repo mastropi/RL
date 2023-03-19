@@ -27,16 +27,19 @@ from Python.lib.agents.policies import PolicyTypes
 from Python.lib.agents.policies.parameterized import PolQueueTwoActionsLinearStep
 from Python.lib.agents.queues import AgeQueue
 
-from Python.lib.environments.queues import rewardOnJobRejection_Constant
+from Python.lib.environments.queues import rewardOnJobRejection_ByClass
 
 from Python.lib.simulators import SetOfStates
-from Python.lib.simulators.queues import define_queue_environment_and_agent, estimate_blocking_fv, estimate_blocking_mc, SurvivalProbabilityEstimation
+from Python.lib.simulators.queues import define_queue_environment_and_agent, estimate_blocking_fv, estimate_blocking_mc, \
+    estimate_expected_reward, SurvivalProbabilityEstimation
 
 from Python.lib.utils.basic import aggregation_bygroups, convert_str_argument_to_list_of_type, get_current_datetime_as_string, \
     is_scalar, measure_exec_time, set_pandas_options, reset_pandas_options
-from Python.lib.utils.computing import compute_blocking_probability_knapsack
+from Python.lib.utils.computing import compute_blocking_probability_knapsack, \
+    compute_blocking_probability_knapsack_from_probabilities_and_job_arrival_rates, \
+    compute_stationary_probability_knapsack_when_blocking_by_class
 
-from Python.lib.run_FV import createLogFileHandleAndResultsFileNames, plot_results_fv_mc, save_dataframes, show_execution_parameters
+from Python.lib.run_FV import closeLogFile, createLogFileHandleAndResultsFileNames, plot_results_fv_mc, save_dataframes
 
 
 #------------------- Functions --------------------
@@ -175,10 +178,11 @@ def run_fv_estimation_loss_network( env_queue, Ks, Js, K, N, T,
 
 
 def analyze_convergence(capacity=10, job_class_rates=[0.7], service_rates=[1.0],
-                        blocking_sizes=[5],
+                        blocking_sizes=[5], blocking_costs=None,
                         N=[20, 40, 80],
                         T=500,
                         J_factor=[0.3],
+                        use_stationary_probability_for_start_state=False,
                         burnin_time_steps=20, min_num_cycles_for_expectations=5,
                         method_proba_surv=SurvivalProbabilityEstimation.FROM_N_PARTICLES,
                         replications=5,
@@ -192,6 +196,12 @@ def analyze_convergence(capacity=10, job_class_rates=[0.7], service_rates=[1.0],
     blocking_sizes: (opt) list
         List of blocking sizes for the different job classes.
         default: [5]
+
+    blocking_costs: (opt) list
+        List of blocking closts for the different job classes.
+        Blocking costs should be non-negative values.
+        When none, a blocking cost of 1 is assumed for each class.
+        default: None
 
     N: (opt) int or list or numpy array
         List giving the number of particles to consider in each simulation.
@@ -223,21 +233,46 @@ def analyze_convergence(capacity=10, job_class_rates=[0.7], service_rates=[1.0],
         or "from the N particles used in the FV simulation".
         default: SurvivalProbabilityEstimation.FROM_N_PARTICLES
     """
+    #---------------------------- Auxiliary functions --------------------------
+    def compute_blocking_state_coverages(probas_stationary, probas_stationary_true, expected_costs):
+        "All states in probas_stationary should be present in probas_stationary_true and in expected_costs"
+        # Dictionary of weights based on the true stationary probabilities
+        blocking_states = probas_stationary.keys()
+        dict_prob_blocking_states = dict([(x, p) for x, p in probas_stationary_true.items() if x in blocking_states])
+        dict_info_blocking_states = dict([(x, -np.log10(p)) for x, p in probas_stationary_true.items() if x in blocking_states])
+        dict_expcosts_blocking_states = dict([(x, c) for x, c in expected_costs.items() if x in blocking_states])
+
+        # Data for the coverage computation
+        blocking_states_observed = [x for x, p in probas_stationary.items() if p > 0]
+        prob_blocking_states_observed = [p for x, p in dict_prob_blocking_states.items() if x in blocking_states_observed]
+        info_blocking_states_observed = [logp for x, logp in dict_info_blocking_states.items() if x in blocking_states_observed]
+
+        # Coverages
+        n_blocking_states_observed = len(blocking_states_observed)
+        n_blocking_states = len(dict_prob_blocking_states)
+        coverage_blocking_states = n_blocking_states_observed / n_blocking_states
+        coverage_prob_blocking_states = np.sum(prob_blocking_states_observed) / sum(dict_prob_blocking_states.values())    # CANNOT np.sum() on the output of dict.values()!!!
+        coverage_info_blocking_states = np.sum(info_blocking_states_observed) / sum(dict_info_blocking_states.values())    # CANNOT np.sum() on the output of dict.values()!!!
+        # Entropy coverage
+        coverage_entropy_blocking_states = np.sum([probas_stationary[x] * dict_info_blocking_states[x] for x in blocking_states_observed]) / \
+                                           np.sum([probas_stationary_true[x] * dict_info_blocking_states[x] for x in blocking_states])
+        coverage_costentropy_blocking_states = np.sum([expected_costs[x] * probas_stationary[x] * dict_info_blocking_states[x] for x in blocking_states_observed]) / \
+                                               np.sum([expected_costs[x] * probas_stationary_true[x] * dict_info_blocking_states[x] for x in blocking_states])
+
+        return coverage_blocking_states, coverage_prob_blocking_states, coverage_info_blocking_states, coverage_entropy_blocking_states, coverage_costentropy_blocking_states, n_blocking_states_observed
+    #---------------------------- Auxiliary functions --------------------------
+
     nservers = len(service_rates)
 
     #--- System setup
-    dict_params = dict({'environment': {'queue_system': "single-server",
+    dict_params = dict({'environment': {'queue_system': "loss-network",
                                         'capacity': capacity,
                                         'nservers': nservers,
                                         'job_class_rates': job_class_rates,  # [0.8, 0.7]
                                         'service_rates': service_rates,  # [1.0, 1.0, 1.0]
-                                        'policy_assignment_probabilities': [[1.0]], # [[0.5, 0.5, 0.0], [0.0, 0.5, 0.5]] )
-                                        'reward_func': rewardOnJobRejection_Constant,
-                                            # Note: this reward function is defined here just for informational purposes
-                                            # (e.g. when showing debug messages when DEBUG_ESTIMATORS = True in the simulator class)
-                                            # but the process actually simply estimates the blocking probability,
-                                            # i.e. it does NOT estimate the average reward (although with this definition
-                                            # of reward, it could).
+                                        'policy_assignment_probabilities': None, # [[0.5, 0.5, 0.0], [0.0, 0.5, 0.5]] )
+                                        'reward_func': rewardOnJobRejection_ByClass,
+                                        'reward_func_params': None if blocking_costs is None else {'reward_at_rejection': [-c for c in blocking_costs]},
                                         'rewards_accept_by_job_class': None
                                         },
                         'policy': { 'parameterized_policy': [PolQueueTwoActionsLinearStep for _ in blocking_sizes],
@@ -269,7 +304,7 @@ def analyze_convergence(capacity=10, job_class_rates=[0.7], service_rates=[1.0],
     # This is why also an convergence analysis on increasing number of arrival events (T) is sensible.
 
     #--------------------------- Parse input parameters -----------------------
-    Js = [int( round(J_factor * K) ) for J_factor, K in zip(J_factor, blocking_sizes)]
+    Js = [max(1, int( round(JF * K) )) for JF, K in zip(J_factor, blocking_sizes)]
 
     if is_scalar(N):
         if is_scalar(T):
@@ -308,40 +343,99 @@ def analyze_convergence(capacity=10, job_class_rates=[0.7], service_rates=[1.0],
     # Modify pandas display options so that data frames are not truncated
     pandas_options = set_pandas_options()
 
-    df_results = pd.DataFrame(columns=['capacity',
-                                       'rhos',
-                                       'J',
-                                       'N',
-                                       'T',
-                                       'burnin_time_steps',
-                                       'min_n_cycles',
-                                       'method_proba_surv',
-                                       'replication',
-                                       'Pr(MC)',
-                                       'EMC(T)',
-                                       'Time(MC)',          # Last continuous time value observed in the MC simulation
-                                       '#Events(MC)',
-                                       '#Cycles(MC)',
-                                       'E(T)',
-                                       '#Cycles(E(T))',
-                                       'MaxSurvTime',
-                                       'Pr(FV)',
-                                       'Time(FV)',          # Last continuous time value observed in the FV simulation
-                                       '#Events(ET)',
-                                       '#Events(FV-Only)',
-                                       '#Events(FV)',
-                                       '#Samples(S(t))',
-                                       'Pr(K)',
-                                       'seed',
-                                       'exec_time_mc(sec)',
-                                       'exec_time_fv(sec)',
-                                       'exec_time(sec)'])
+    df_results = pd.DataFrame(columns=[ # System characteristics
+                                        'capacity',
+                                        'blocking_costs',
+                                        'lambdas',
+                                        'rhos',
+                                        # Simulation parameters
+                                        'J',
+                                        'N',
+                                        'T',
+                                        'burnin_time_steps',
+                                        'min_n_cycles',
+                                        'method_proba_surv',
+                                        # Replication
+                                        'replication',
+                                        'seed',
+                                        # Monte-Carlo results
+                                        'Pr(MC)',
+                                        'ExpCost(MC)',       # Expected blocking cost
+                                        'Time(MC)',          # Last continuous time value observed in the MC simulation
+                                        'EMC(T)',            # Estimated expected return time E(T) used in the MC probability estimator
+                                        '#Events(MC)',
+                                        '#Cycles(MC)',       # Number of return cycles on which E(T) is estimated
+                                        'Coverage(MC)',      # Proportion of blocking states coverage (where estimated stationary p(x) > 0)
+                                        'CoverageProb(MC)',  # Probability-weighted proportion of blocking states coverage (where estimated stationary p(x) > 0, weighted by p)
+                                        'CoverageInfo(MC)',  # Information-weighted proportion of blocking states coverage (where estimated stationary p(x) > 0, weighted by -log10(p), so the states with smaller p receive larger weight)
+                                        'CoverageEntropy(MC)',      # Entropy coverage (-p*log10(p))
+                                        'CoverageCostEntropy(MC)',  # Cost-Entropy coverage (-c*p*log(p))
+                                        # Fleming-Viot results
+                                        'Pr(FV)',
+                                        'ExpCost(FV)',       # Expected blocking cost
+                                        'Time(FV)',          # Last continuous time value observed in the FV simulation
+                                        'E(T)',              # Estimated expected re-absorption time E(T_A), denominator of the FV probability estimator
+                                        '#Cycles(E(T))',
+                                        'MaxSurvTime',       # Max survival time observed when estimating S(t) = P(T>t)
+                                        '#Events(ET)',
+                                        '#Events(FV-Only)',
+                                        '#Events(FV)',
+                                        '#Samples(S(t))',
+                                        'Coverage(FV)',      # Proportion of blocking states coverage (where estimated stationary p(x) > 0)
+                                        'CoverageProb(FV)',  # Probability-weighted proportion of blocking states coverage (where estimated stationary p(x) > 0, weighted by p)
+                                        'CoverageInfo(FV)',  # Information-weighted proportion of blocking states coverage (where estimated stationary p(x) > 0, weighted by -log10(p), so the states with smaller p receive larger weight)
+                                        'CoverageEntropy(FV)',      # Entropy coverage (-p*log10(p))
+                                        'CoverageCostEntropy(FV)',  # Cost-Entropy coverage (-c*p*log(p))
+                                        # True probability
+                                        'Pr(True)',
+                                        'ExpCost',
+                                        'Entropy',           # Entropy of the blocking event
+                                        'CostEntropy',       # Entropy of the blocking cost
+                                        # Execution times
+                                        'exec_time_mc(sec)',
+                                        'exec_time_fv(sec)',
+                                        'exec_time(sec)'])
     #ncases = int( np.log(nparticles_max / nparticles_min) / np.log(1 + nparticles_step_prop)) + 1
     ncases = len(N_values)
 
     # Compute the true blocking probability that is used to analyze the estimator quality
-    print("Computing TRUE blocking probability for capacity={}, rhos={}...".format(capacity, rhos))
+    print("Computing stationary probability of blocking states and TRUE blocking probability for capacity={}, rhos={}...".format(capacity, rhos))
     proba_blocking_true = compute_blocking_probability_knapsack(capacity, rhos, job_class_rates, blocking_sizes=blocking_sizes)
+
+    # True stationary probability (this is used to:
+    # - choose the start state in the FV simulation when use_stationary_probability_for_start_state = True
+    # - compute the probability-weighted coverage of blocking states:
+    effective_capacity, x, dist = compute_stationary_probability_knapsack_when_blocking_by_class(capacity, rhos, blocking_sizes)
+    probas_stationary_true = dict([(tuple(xx), dd) for xx, dd in zip(x, dist)])
+    assert proba_blocking_true == compute_blocking_probability_knapsack_from_probabilities_and_job_arrival_rates(probas_stationary_true, effective_capacity, job_class_rates, blocking_sizes)
+
+    # Blocking states
+    set_of_valid_states = SetOfStates(set_boundaries=blocking_sizes)
+    blocking_states = set_of_valid_states.getStates(at_least_one_dimension_at_boundary=True).intersection(probas_stationary_true.keys())
+    n_blocking_states = len(blocking_states)
+    print("Blocking states: {}".format(blocking_states))
+
+    # Expected blocking cost
+    expected_blocking_cost = -estimate_expected_reward(env_queue, agent, probas_stationary_true)
+    # Expected costs for each blocking state x
+    probas_arrival = [l / np.sum(job_class_rates) for l in job_class_rates]
+    expected_costs_values = [probas_stationary_true[x] * \
+                             np.sum([blocking_costs[i] * probas_arrival[i] * int(x[i] == blocking_sizes[i] or np.sum(x) >= effective_capacity) for i, _ in enumerate(job_class_rates)])
+                                for x in blocking_states]
+    expected_costs = dict([(tuple(x), c) for x, c in zip(blocking_states, expected_costs_values)])
+
+    # Entropy of blocking and entropy of blocking cost relative to the maximum possible entropy
+    # The maximum possible entropy is log(#blocking-states) which is derived when all probabilities (of each blocking state) are the same,
+    # since in that case, letting B = #blocking-states, the entropy becomes H = -1/B*log(1/B) * B = log(B)
+    # In the cost-based entropy, the maximum entropy is assumed to also happen when all probabilities are the same,
+    # which yield equal-probability costs computed below as expected_costs_uniform_values
+    # which makes the maximum cost-based entropy be equal to HC = sum_x{ -c_unif(x)*1/B*log(1/B) } = sum_x{c_unif(x)} * log(B) / B
+    expected_costs_uniform_values = [1/n_blocking_states * \
+                                     np.sum([blocking_costs[i] * probas_arrival[i] * int(x[i] == blocking_sizes[i] or np.sum(x) >= effective_capacity) for i, _ in enumerate(job_class_rates)])
+                                        for x in blocking_states]
+    entropy_blocking = np.sum([-probas_stationary_true[x] * np.log10(probas_stationary_true[x]) for x in blocking_states]) / np.log10(n_blocking_states)
+    entropy_blocking_cost = np.sum([-expected_costs[x] * probas_stationary_true[x] * np.log10(probas_stationary_true[x]) for x in blocking_states]) / \
+                            (np.sum(expected_costs_uniform_values) * np.log10(n_blocking_states) / n_blocking_states)
 
     print("System: capacity={}, lambdas={}, mus={}, rhos={}, buffer_size_activation={}, # burn-in time steps={}, min # cycles for expectations={}" \
           .format(capacity, job_class_rates, service_rates, rhos, Js, burnin_time_steps, min_num_cycles_for_expectations))
@@ -372,11 +466,20 @@ def analyze_convergence(capacity=10, job_class_rates=[0.7], service_rates=[1.0],
             dict_params_simul['maxevents'] = np.Inf
             dict_params_simul['seed'] = seed_rep
             envs_queue = [env_queue if i == 0 else copy.deepcopy(env_queue) for i in range(N)]
-            proba_blocking_fv, expected_reward, probas_stationary, \
+            proba_blocking_fv, expected_reward_fv, probas_stationary_fv, \
                 expected_absorption_time, n_absorption_time_observations, \
                     time_last_absorption, time_end_simulation_et, max_survival_time, time_end_simulation_fv, \
                         n_events_et, n_events_fv_only = estimate_blocking_fv(envs_queue, agent,
-                                                                             dict_params_simul, dict_params_info)
+                                                                             dict_params_simul, dict_params_info,
+                                                                             probas_stationary=probas_stationary_true if use_stationary_probability_for_start_state else None)
+            # If we need to check the calculation of the blocking probability done by the above estimate_blocking_*() call
+            if False:
+                proba_blocking_from_stationary_probabilities = compute_blocking_probability_knapsack_from_probabilities_and_job_arrival_rates(
+                    probas_stationary_fv,
+                    capacity, job_class_rates,
+                    blocking_sizes)
+                #print(f"Pr(FV)={proba_blocking_fv}, from stationary probs: {proba_blocking_from_stationary_probabilities}")
+                assert np.isclose(proba_blocking_fv, proba_blocking_from_stationary_probabilities)
             n_events_fv = n_events_et + n_events_fv_only
             n_survival_curve_observations = n_absorption_time_observations
 
@@ -385,23 +488,36 @@ def analyze_convergence(capacity=10, job_class_rates=[0.7], service_rates=[1.0],
             if run_mc:
                 time_start_mc = timer()
                 print("\t--> Running Monte-Carlo estimation... {}".format(get_current_datetime_as_string()))
-                dict_params_simul['maxevents'] = n_events_fv
-                dict_params_simul['seed'] = seed_rep + 2  # This is the same seed used in the FV simulation in estimate_blocking_fv(), so we can compare better
-                dict_params_simul['T'] = n_events_fv
-                proba_blocking_mc, expected_reward_mc, probas_stationary, n_cycles, \
+                # Make a copy of the simulation parameters so that we do not alter the simulation parameters that are in use for the FV simulation which defines the benchmark
+                dict_params_simul_mc = copy.deepcopy(dict_params_simul)
+                dict_params_simul_mc['maxevents'] = n_events_fv
+                dict_params_simul_mc['T'] = n_events_fv
+                proba_blocking_mc, expected_reward_mc, probas_stationary_mc, n_cycles, \
                     expected_return_time_mc, _, \
-                        n_events_mc = estimate_blocking_mc(env_queue, agent, dict_params_simul, dict_params_info=dict_params_info)
-                time_mc = np.nan
-                # Note: (2022/10/24) The above number n_cycles is the number of cycles observed for the estimation of the stationary probabilities
-                # It may NOT coincide with the number of return cycles observed and used to estimate expected_return_time_mc
-                # (whose value is stored in returned object `_`)
-                # when a burn-in period is left at the beginning of the simulation (see dict_params_simul['burnin_period']),
-                # since in that case, the cycle used in the estimation of the stationary probabilities is defined by
-                # the return to the buffer size at which the Markov process is found *after* the burn-in period is over
-                # (which may NOT coincide with the start buffer size).
+                        time_mc, n_events_mc = estimate_blocking_mc(env_queue, agent, dict_params_simul_mc, dict_params_info=dict_params_info)
+                # Note: (2022/10/24) The above number n_cycles is the number of cycles used for the estimation of the stationary probabilities
+                # It may NOT coincide with the number of return cycles used to estimate expected_return_time_mc
+                # (whose value is stored in returned object `_`) when a burn-in period is left at the beginning
+                # of the simulation (see dict_params_simul['burnin_time_steps']).
+                # In fact, the cycle used in the estimation of the stationary probabilities is defined by
+                # the return to the state at which the Markov process is found *after* the burn-in period is over
+                # (which may NOT coincide with the start state) (and cycles are counted from that moment over,
+                # so whatever happened during the burn-in period is discarded), whereas the cycle used in the estimation
+                # of the expected return time is defined by the return to the *initial* state of the Markov chain,
+                # and cycles are counted starting from the time the first return to the initial state happens *after*
+                # the burn-in period.
                 # Here we store the former, i.e. the number of cycles used to estimate the stationary probabilities
-                # because those are the values we are interested in collecting to analyze the Monte-Carlo estimator.
+                # because the probabilities are our quantity of interest to evaluate the Monte-Carlo estimator.
                 n_return_observations = n_cycles
+
+                # If we need to check the calculation of the blocking probability done by the above estimate_blocking_*() call
+                if False:
+                    proba_blocking_from_stationary_probabilities = compute_blocking_probability_knapsack_from_probabilities_and_job_arrival_rates(
+                        probas_stationary_mc,
+                        capacity, job_class_rates,
+                        blocking_sizes)
+                    # print(f"Pr(MC)={proba_blocking_mc}, from stationary probs: {proba_blocking_from_stationary_probabilities}")
+                    assert np.isclose(proba_blocking_mc, proba_blocking_from_stationary_probabilities)
 
                 # Check comparability in terms of # events in each simulation (MC vs. FV)
                 if n_events_mc != n_events_fv:
@@ -426,50 +542,89 @@ def analyze_convergence(capacity=10, job_class_rates=[0.7], service_rates=[1.0],
             # -- Results
             if run_mc:
                 # MC results
-                print("\tP(K) by MC: {:.6f}% (#events {})".format(proba_blocking_mc*100, n_events_mc))
+                # Compute the frequence-based and probability-based coverage of the blocking states where the estimated stationary probability > 0
+                # The probability-based coverage is computed using the TRUE stationary probabilities as (inverse) weights of the observed states
+                # so that we know the observation of the most important states to
+                coverage_blocking_states_mc, coverage_prob_blocking_states_mc, coverage_info_blocking_states_mc, \
+                    coverage_entropy_blocking_states_mc, coverage_costentropy_blocking_states_mc, \
+                        n_blocking_states_observed_mc = \
+                            compute_blocking_state_coverages(probas_stationary_mc, probas_stationary_true, expected_costs)
+                print("\tP(K) by MC: {:.6f}% (#events: {}, coverage of blocking states: {} of {} {:.1f}%, prob-weighted coverage: {:.1f}%, inverse-prob-weighted coverage: {:.1f}%)" \
+                      .format(proba_blocking_mc*100, n_events_mc, n_blocking_states_observed_mc, n_blocking_states, coverage_blocking_states_mc*100, coverage_prob_blocking_states_mc*100, coverage_info_blocking_states_mc*100))
 
             # FV results
+            coverage_blocking_states_fv, coverage_prob_blocking_states_fv, coverage_info_blocking_states_fv, \
+                coverage_entropy_blocking_states_fv, coverage_costentropy_blocking_states_fv, \
+                    n_blocking_states_observed_fv = \
+                        compute_blocking_state_coverages(probas_stationary_fv, probas_stationary_true, expected_costs)
             print("\tP(K) by FV: {:.6f}%, E(T) = {:.1f} (simulation time for E(T) = {:.1f} ({} steps) (complete cycles span {:.1f}%),"
-                    " max survival time = {:.1f}, #events = {} (ET) + {} (FV) = {})" \
+                    " max survival time = {:.1f}, #events = {} (ET) + {} (FV) = {}), coverage of blocking states = {} of {} {:.1f}%, prob-weighted coverage = {:.1f}%, inverse-prob-weighted coverage = {:.1f}%" \
                   .format(  proba_blocking_fv * 100, expected_absorption_time, time_end_simulation_et, n_events_et,
                             time_last_absorption/time_end_simulation_et*100,
                             max_survival_time,
-                            n_events_et, n_events_fv_only, n_events_fv))
+                            n_events_et, n_events_fv_only, n_events_fv,
+                            n_blocking_states_observed_fv, n_blocking_states, coverage_blocking_states_fv*100, coverage_prob_blocking_states_fv*100, coverage_info_blocking_states_fv*100))
             print("\tTrue P(K): {:.6f}%".format(proba_blocking_true*100))
 
             # Store the results
-            df_append = pd.DataFrame([[ capacity,
+            df_append = pd.DataFrame([[ # System characteristics
+                                        capacity,
+                                        blocking_costs,
+                                        job_class_rates,
                                         format(rhos),
+                                        # Simulation parameters
                                         Js,
                                         N,
                                         T,
-                                        # We use the dict_params_simul parameters here (as opposed to the input parameters to the function (e.g. `burnin_time_steps`)
-                                        # because these parameters may be changed above depending on the actual simulator+estimator used to run the experiments.
                                         dict_params_simul['burnin_time_steps'],
                                         dict_params_simul['min_num_cycles_for_expectations'],
                                         method_proba_surv.name,
+                                        # Replication
                                         r,
+                                        dict_params_simul['seed'],
+                                        # MC results
                                         proba_blocking_mc,
-                                        expected_return_time_mc,
+                                        -expected_reward_mc,
                                         time_mc,
+                                        expected_return_time_mc,
                                         n_events_mc,
                                         n_return_observations,
+                                        coverage_blocking_states_mc,
+                                        coverage_prob_blocking_states_mc,
+                                        coverage_info_blocking_states_mc,
+                                        coverage_entropy_blocking_states_mc,
+                                        coverage_costentropy_blocking_states_mc,
+                                        # FV results
+                                        proba_blocking_fv,
+                                        -expected_reward_fv,
+                                        time_end_simulation_fv,
                                         expected_absorption_time,
                                         n_absorption_time_observations,
                                         max_survival_time,
-                                        proba_blocking_fv,
-                                        time_end_simulation_fv,
                                         n_events_et,
                                         n_events_fv_only,
                                         n_events_fv,
                                         n_survival_curve_observations,
+                                        coverage_blocking_states_fv,
+                                        coverage_prob_blocking_states_fv,
+                                        coverage_info_blocking_states_fv,
+                                        coverage_entropy_blocking_states_fv,
+                                        coverage_costentropy_blocking_states_fv,
+                                        # True probability
                                         proba_blocking_true,
-                                        dict_params_simul['seed'],
+                                        expected_blocking_cost,
+                                        entropy_blocking,
+                                        entropy_blocking_cost,
+                                        # Execution times
                                         exec_time_mc,
                                         exec_time_fv,
                                         exec_time]],
                                      columns=df_results.columns, index=[case+1])
             df_results = pd.concat([df_results, df_append], axis=0)
+
+        # Fill NaN values that would impede the generation of plots
+        for col in ['Pr(MC)', 'ExpCost(MC)', 'Pr(FV)', 'ExpCost(FV)']:
+            df_results[col].fillna(0, inplace=True)
 
         print("Results:")
         print(df_results)
@@ -516,7 +671,6 @@ def parse_input_parameters(argv):
                                          "[--min_num_cycles_for_expectations] "
                                          "[--replications] "
                                          "[--seed] "
-                                         "[--create_log] "
                                          "[--save_results] "
                                          "[--plot] "
                                          )
@@ -532,7 +686,7 @@ def parse_input_parameters(argv):
                       type="str",
                       metavar="Type of analysis",
                       help="Type of analysis, either 'N' (#particles is increased) or 'T' (#arrival events is increased) [default: %default]")
-    parser.add_option("--values_parameter_analyzed",
+    parser.add_option("--values_parameter_analyzed", dest="values_parameter_analyzed",
                       action="callback",
                       callback=convert_str_argument_to_list_of_type,
                       metavar="Values of the analysis parameter",
@@ -545,8 +699,11 @@ def parse_input_parameters(argv):
                       type="str",
                       action="callback",
                       callback=convert_str_argument_to_list_of_type,
-                      metavar="J/K factors", default="0.3, 0.3, 0.3",
+                      metavar="J/K factors",
                       help="Factors that define the absorption set size J [default: %default]")
+    parser.add_option("--use_stationary_probability_for_start_states",
+                      action="store_true",
+                      help="Whether to use the stationary probability distribution for the start states in Fleming-Viot simulation [default: %default]")
     parser.add_option("--burnin_time_steps",
                       type="int",
                       metavar="Burn-in time steps",
@@ -559,24 +716,21 @@ def parse_input_parameters(argv):
                       type="int",
                       metavar="# Replications",
                       help="Number of replications to run [default: %default]")
+    parser.add_option("--run_mc",
+                      type="int",
+                      metavar="Whether to run the Monte-Carlo estimation",
+                      help="Whether to run the Monte-Carlo estimation against which the FV estimator is compared [default: %default]")
     parser.add_option("--seed",
                       type="int",
                       metavar="Seed",
                       help="Seed value to use for the simulations [default: %default]")
-    parser.add_option("--create_log",
-                      type="bool",
-                      action="store_true",
-                      help="Whether to create a log file [default: %default]")
     parser.add_option("--save_results",
-                      type="bool",
                       action="store_true",
                       help="Whether to save the results into a CSV file [default: %default]")
     parser.add_option("--save_with_dt",
-                      type="bool",
                       action="store_true",
                       help="Whether to use the execution datetime as suffix of output file names [default: %default]")
     parser.add_option("--plot",
-                      type="bool",
                       action="store_true",
                       help="Whether to plot the learning process (e.g. theta estimates and objective function) [default: %default]")
     if False:
@@ -587,17 +741,19 @@ def parse_input_parameters(argv):
                           action="store_true",
                           help="verbose: show relevant messages in the log")
 
+    # NOTE: The default values of parameters processed by callbacks should define the value in the type of the `dest` option of the callback!
     parser.set_defaults(queue_system="loss-network",
-                        method="MC",
+                        method="FV",
                         analysis_type="N",
-                        values_parameter_analyzed="10, 20, 40, 80",
-                        value_parameter_not_analyzed=100,
-                        J_factor=0.3,
+                        values_parameter_analyzed=[80, 160], #[80, 160, 320, 640],
+                        value_parameter_not_analyzed=200,   #500 #100
+                        J_factor=[0.1, 0.6],
+                        use_stationary_probability_for_start_states=True,
                         burnin_time_steps=20,
                         min_num_cycles_for_expectations=5,
                         replications=5,
+                        run_mc=True,
                         seed=1313,
-                        create_log=False,
                         save_results=False,
                         save_with_dt=True,
                         plot=True)
@@ -606,9 +762,30 @@ def parse_input_parameters(argv):
 
     print("Parsed command line options: " + repr(options))
 
-    # options: dictionary with name-value pairs
+    # options: `Values` object whose parameters are referred with the dot notation (e.g. options.x)
     # args: argument values (which do not require an argument name
     return options, args
+
+def show_execution_parameters(options):
+    print(get_current_datetime_as_string())
+    print("Execution parameters:")
+    print("nservers={}".format(nservers))
+    print("job class rates={}".format(job_class_rates))
+    print("service rates={}".format(service_rates))
+    print("class loads={}".format(rhos))
+    print("blocking sizes={}".format(blocking_sizes))
+    print("Type of analysis: '{}'".format(options.analysis_type))
+    print("Capacity K={}".format(capacity))
+    print("Activation size factors J/K={}".format(options.J_factor))
+    print("# particles N={}".format(N_values))
+    print("# arrival events T={}".format(T_values))
+    print("use_stationary_probability_for_start_states={}".format(options.use_stationary_probability_for_start_states))
+    print("Burn-in time steps BITS={}".format(options.burnin_time_steps))
+    print("Min #cycles to estimate expectations MINCE={}".format(options.min_num_cycles_for_expectations))
+    print("Replications={}".format(options.replications))
+    print("run_mc={}".format(options.run_mc))
+    print("save_results={}".format(options.save_results))
+    print("seed={}".format(options.seed))
 #------------------- Functions to parse input arguments ---------------------#
 
 
@@ -621,74 +798,97 @@ if __name__ == "__main__":
     print(f"Arguments: {args}")
     print("")
 
-    if options['queue_system'] == "loss-network":
-        capacity = 6  # 6 #10
+    if options.queue_system == "loss-network":
+        capacity = 6 #7 #6 #10
         job_class_rates = [1, 5]
-        rhos = [0.8, 0.6]
+        rhos = [0.8, 0.6] #[0.8, 0.6] #[0.2, 0.1] #[0.5, 0.3]
         service_rates = [l / r for l, r in zip(job_class_rates, rhos)]
+        blocking_sizes = [4, 6] #[1, 2] #[4, 6] #[5, 7] #[4, 6]
+        blocking_costs = [180, 600] #[2000, 20000] ([0.5, 0.3]) #[180, 600] ([0.8. 0.6]) # Costs computed in run_FVRL.py from p(x), lambdas and rhos
     else:
-        raise ValueError(f"The queue system ({options['queue_system']}) is invalid. Valid queue systems are: 'loss-network'")
+        raise ValueError(f"The queue system ({options.queue_system}) is invalid. Valid queue systems are: 'loss-network'")
 
     nservers = len(service_rates)
-    J_factor = options['J_factor']
-    #J = int(np.round(options['J_factor'] * K))    # We need the float() because the input arguments are read as strings when running the program from the command line
+    J_factor = options.J_factor
+    #J = int(np.round(options.J_factor * K))    # We need the float() because the input arguments are read as strings when running the program from the command line
 
     # Set the values of N and T
-    if not options['analysis_type'] in ["N", "T"]:
+    if not options.analysis_type in ["N", "T"]:
         raise ValueError("Parameter 'analysis_type' must be either 'N' or 'T'")
-    if options['analysis_type'] == "N":
-        N = options['values_parameter_analyzed']
-        T = options['value_parameter_not_analyzed']
-        N_values = []
+    if options.analysis_type == "N":
+        N_values = options.values_parameter_analyzed
+        T_values = [options.value_parameter_not_analyzed]
         resultsfile_prefix = "estimates_vs_N"
-        resultsfile_suffix = "K={},J={},T={}".format(capacity, J_factor, T)
+        params_str = "K={},block={},costs={},lambdas={},rho={},J={},T={},N_values={},ProbStart={}" \
+            .format(capacity, blocking_sizes, 1 if blocking_costs is None else blocking_costs, job_class_rates, rhos, J_factor, T_values, N_values, options.use_stationary_probability_for_start_states)
     else:
-        N = options['value_parameter_not_analyzed']
-        T = options['values_parameter_analyzed']
-        T_values = []
+        N_values = [options.value_parameter_not_analyzed]
+        T_values = options.values_parameter_analyzed
         resultsfile_prefix = "estimates_vs_T"
-        resultsfile_suffix = "K={},J={},N={}".format(capacity, J_factor, N)
+        params_str = "K={},block={},costs={},lambdas={},rho={},J={},N={},T_values={},ProbStart={}" \
+                .format(capacity, blocking_sizes, 1 if blocking_costs is None else blocking_costs, job_class_rates, rhos, J_factor, N_values, T_values, options.use_stationary_probability_for_start_states)
 
-    seed = options['seed']
-    show_execution_parameters()
+    seed = options.seed
+    show_execution_parameters(options)
 
-    if options['save_results']:
+    if options.save_results:
         dt_start, stdout_sys, fh_log, logfile, resultsfile, resultsfile_agg, proba_functions_file, figfile = \
-            createLogFileHandleAndResultsFileNames(prefix=resultsfile_prefix, suffix=resultsfile_suffix, use_dt_suffix=options['save_with_dt'])
+            createLogFileHandleAndResultsFileNames(prefix=resultsfile_prefix, suffix=params_str, use_dt_suffix=options.save_with_dt)
         # Show the execution parameters again in the log file
-        show_execution_parameters()
+        show_execution_parameters(options)
     else:
         fh_log = None; resultsfile = None; resultsfile_agg = None; proba_functions_file = None; figfile = None
     #--------------------------- Parse user arguments -----------------------#
 
+    start_time = timer()
     results, results_agg = analyze_convergence( capacity=capacity, job_class_rates=job_class_rates, service_rates=service_rates,
-                                                N=N, #[N, 2*N, 4*N, 8*N, 16*N],  # [800, 1600, 3200], #[10, 20, 40], #[24, 66, 179],
-                                                T=T, #50, #[170, 463, 1259],
+                                                blocking_sizes=blocking_sizes, blocking_costs=blocking_costs,
+                                                N=N_values, #[N, 2*N, 4*N, 8*N, 16*N],  # [800, 1600, 3200], #[10, 20, 40], #[24, 66, 179],
+                                                T=T_values, #50, #[170, 463, 1259],
                                                 J_factor=J_factor,
-                                                burnin_time_steps=options['burnin_time_steps'], min_num_cycles_for_expectations=options['min_num_cycles_for_expectations'],
+                                                use_stationary_probability_for_start_state=options.use_stationary_probability_for_start_states,
+                                                burnin_time_steps=options.burnin_time_steps, min_num_cycles_for_expectations=options.min_num_cycles_for_expectations,
                                                 method_proba_surv=SurvivalProbabilityEstimation.FROM_N_PARTICLES,
-                                                replications=options['replications'], run_mc=False,
+                                                replications=options.replications, run_mc=options.run_mc,
                                                 seed=seed)
+    end_time = timer()
+    elapsed_time = end_time - start_time
+    print("\n+++ OVERALL execution time: {:.1f} min, {:.1f} hours".format(elapsed_time / 60, elapsed_time / 3600))
 
     # Save results
     save_dataframes([{'df': results, 'file': resultsfile},
                      {'df': results_agg, 'file': resultsfile_agg}])
 
     # Plot results
-    if options['plot']:
-        if options['analysis_type'] == "N":
+    if options.plot:
+        title = (resultsfile if resultsfile is not None else "") + "\n" + params_str + " (exec. time = {:.0f} min)".format(elapsed_time / 60)
+        if options.analysis_type == "N":
             for T in T_values:
                 # Note: the columns defined in parameters `x` and `x2` are grouping variables that define each violin plot
-                axes = plot_results_fv_mc(results, x="N", x2="#Cycles(MC)_mean",
+                axes1 = plot_results_fv_mc(results, x="N", x2="#Cycles(MC)_mean",
+                                           prob_true="Pr(True)",
                                           xlabel="# particles", xlabel2="# Return Cycles to absorption set",
-                                          ymin=0.0, plot_mc=False, splines=False,
-                                          title="nservers={}, K={}, J={}, T={}, BITS={}, MINCE={}" \
-                                                .format(nservers, capacity, J_factor, T, options['burnin_time_steps'], options['min_num_cycles_for_expectations']))
-        elif options['analysis_type'] == "T":
+                                          ymin=0.0, plot_mc=options.run_mc, splines=False,
+                                          title=title)
+                axes2 = plot_results_fv_mc(results, x="N", x2="#Cycles(MC)_mean",
+                                          prob_mc="ExpCost(MC)", prob_fv="ExpCost(FV)", prob_true="ExpCost",
+                                          xlabel="# particles", xlabel2="# Return Cycles to absorption set", ylabel="Expected cost",
+                                          ymin=0.0, plot_mc=options.run_mc, splines=False,
+                                          title=title)
+        elif options.analysis_type == "T":
             for N in N_values:
                 # Note: the columns defined in parameters `x` and `x2` are grouping variables that define each violin plot
-                axes = plot_results_fv_mc(results, x="T", x2="#Cycles(MC)_mean",
+                axes1 = plot_results_fv_mc(results, x="T", x2="#Cycles(MC)_mean",
+                                           prob_true="Pr(True)",
                                           xlabel="# arrival events", xlabel2="# Return Cycles to absorption set",
-                                          ymin=0.0, plot_mc=False, splines=False,
-                                          title="nservers={}, K={}, J={}, N={}, BITS={}, MINCE={}" \
-                                                .format(nservers, capacity, J_factor, N, options['burnin_time_steps'], options['min_num_cycles_for_expectations']))
+                                          ymin=0.0, plot_mc=options.run_mc, splines=False,
+                                          title=title)
+                axes2 = plot_results_fv_mc(results, x="T", x2="#Cycles(MC)_mean",
+                                          prob_mc="ExpCost(MC)", prob_fv="ExpCost(FV)", prob_true="ExpCost",
+                                          xlabel="# particles", xlabel2="# Return Cycles to absorption set",
+                                          ymin=0.0, plot_mc=options.run_mc, splines=False,
+                                          title=title)
+
+    # Close log file, if any was opened
+    if fh_log is not None:
+        closeLogFile(fh_log, stdout_sys, dt_start)

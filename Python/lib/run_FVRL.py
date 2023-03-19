@@ -507,6 +507,7 @@ print("theta_start={}".format(theta_start))
 print("J_factor={}".format(J_factor))
 print("#particles(N)= {}".format(N))
 print("#learning_steps(T)={}".format(T))
+print("use_stationary_probability_for_start_states={}".format(use_stationary_probability_for_start_states))
 print("error_rel_phi={} (only used when N and T are not defined)".format(error_rel_phi))
 print("error_rel_et={} (only used when N and T are not defined)".format(error_rel_et))
 print("benchmark file: {}".format(benchmark_filename))
@@ -859,7 +860,8 @@ if save_results:
 
     if queue_system == "loss-network":
         params_str = learning_method.name + \
-            "-K={}-costs={}-rhos={},theta0={}-theta={}-J={}-NT={}".format(capacity, blocking_costs, rhos, theta_true, theta_start_values, J_factor_values, NT_values)
+            "-K={}-costs={}-rhos={},theta0={}-theta={}-J={}-NT={}-ProbStart={}" \
+                .format(capacity, [int(c) for c in blocking_costs], rhos, theta_true, theta_start_values, J_factor_values, NT_values, use_stationary_probability_for_start_states)
     else:
         params_str = learning_method.name + \
             "-theta0={}-theta={}-J={}-E={},{}".format(theta_ref_values, theta_start_values, J_factor_values, error_rel_phi, error_rel_et)
@@ -887,6 +889,8 @@ if save_results:
     log_filename_with_parameters = results_filename[:str.index(log_filename, ".log")] + "_" + params_str + ".log"
     log_file_with_parameters = os.path.join(log_dir, log_filename_with_parameters)
     os.rename(simul.logfile, log_file_with_parameters)
+else:
+    params_str = "-- No output file --"
 
 if len(theta_ref_values) == 1:
     if PLOT_GRADIENT and env_queue.getBufferType == BufferType.SINGLE:
@@ -975,8 +979,12 @@ if len(theta_ref_values) == 1:
         ax.set_ylabel('grad(V)')
 
     # Plot evolution of theta (for the last analyzed case)
-    title = "Method: {}, Optimum Theta = {}, Theta start = {}, Theta final = {}, K_final = {}, Expected cost = {}, N = {}, T = {:.0f} J = {} \n K = {}, Blocking Costs = {}, lambdas = {}, rhos = {}" \
-                .format(learning_method.name, theta_true, theta_start, theta_opt_values[-1], K_opt_values[-1], cost_opt_values[-1], N, t_sim, J_factor_values, capacity, blocking_costs, job_class_rates, rhos)
+    title = "{}".format(params_str) + "\nMethod: {}, Optimum Theta = {}, Theta start = {}, Theta final = {}, K_final = {}, Expected cost = {}" \
+                                      "\nN = {}, T = {:.0f} J = {} Stat.Prob.StartStates = {}" \
+                                      "\nK = {}, Blocking Costs = {}, lambdas = {}, rhos = {}" \
+                .format(learning_method.name, theta_true, theta_start, theta_opt_values[-1], K_opt_values[-1], cost_opt_values[-1],
+                        N, t_sim, J_factor_values, use_stationary_probability_for_start_states,
+                        capacity, [int(c) for c in blocking_costs], job_class_rates, rhos)
     if plot and plot_trajectories:
         "In the case of the MC learner, plot the theta-learning trajectory as well as rewards received during learning"
         assert N == 1, "The simulated system has only one particle (N={})".format(N)
@@ -1052,7 +1060,7 @@ if len(theta_ref_values) == 1:
         ax_objective.plot(-np.array(simul.expected_reward_true), symbol, linestyle='-')
         ax_objective.set_xlabel('Learning step')
         ax_objective.set_ylabel('Expected cost')
-        ax_objective.set_title('Expected cost range: [{}, {}], average = {}'.format(cost_true, cost_max, cost_mean))
+        ax_objective.set_title('Expected cost range: [{:.1f}, {:.1f}], average = {:.1f}'.format(cost_true, cost_max, cost_mean))
         #ax_objective.set_yscale('log')
         ax_objective.xaxis.set_major_locator(MaxNLocator(integer=True))
         #ax_objective.set_aspect(1 / ax_objective.get_data_ratio())

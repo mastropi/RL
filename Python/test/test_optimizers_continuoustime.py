@@ -463,6 +463,7 @@ class Test_EstPolicy_EnvQueueLossNetworkWithJobClasses(unittest.TestCase):
         df_learning = self.runSimulation(agent_gradient, dict_params_simul, dict_params_learn, dict_params_info)
         print("Learning results stored in df_learning:")
         print(df_learning)
+        print(df_learning['gradV'].iloc[0])
         df_learning_expected = pd.DataFrame.from_items([
                                                 ('theta', [[0.1, 0.1, 0.1], [4.9, 4.9, 4.9], [4.9, 4.9, 4.9], [4.9, 4.814151077924854, 8.9], [4.9, 4.814151077924854, 8.9]]),
                                                 ('theta_next', [[4.9, 4.9, 4.9], [4.9, 4.9, 4.9], [4.9, 4.814151077924854, 8.9], [4.9, 4.814151077924854, 8.9], [4.9, 4.814151077924854, 8.9]]),
@@ -474,11 +475,11 @@ class Test_EstPolicy_EnvQueueLossNetworkWithJobClasses(unittest.TestCase):
                                                 ('alpha', [10.0, 10.0, 5.0, 3.33333, 2.5]),
                                                 ('state_coverage', [[0.7777777777777778, 0.6666666666666666, 0.555555],
                                                                     [0.0, 0.0, 0.0],
-                                                                    [0.0, 0.09523809523809523, 0.19047619047619047],
+                                                                    [0.0, 0.13333333333333333, 0.26666666666666666],
                                                                     [0.0, 0.0, 0.0],
                                                                     [0.0, 0.0, 0.0]]),
                                                 ('proba_blocking', [0.350364, 0.0, 0.000405, 0.0, 0.0]),
-                                                ('proba_blocking_true', [0.412838, 0.000174, 0.000174, 0.000015, 0.000015]),
+                                                ('proba_blocking_true', [0.412838, 0.000175, 0.000175, 0.000017, 0.000017]),
                                                 ('expected_reward_true', [-2815.93327, -1.641034, -1.641034, -0.012536, -0.012536]),
                                                 ('n_events_mc', [1500]*5),
                                                 ('n_events_fv', [0]*5),
@@ -538,28 +539,27 @@ class Test_EstPolicy_EnvQueueLossNetworkWithJobClasses(unittest.TestCase):
         # Run the simulation!
         df_learning = self.runSimulation(agent_gradient, dict_params_simul, dict_params_learn, dict_params_info)
         print(df_learning)
-        # [TBD] Expected result when using FVRL with REINFORCE_TRUE strategy
-        # (2023/01/31) FOR NOW THESE ARE INVENTED RESULTS AS I HAVEN'T RUN IT SUCCESSFULLY YET
+        print(df_learning['gradV'].iloc[0])
         df_learning_expected = pd.DataFrame.from_items([
-                                                ('theta', [[0.1, 0.1, 0.1], [4.9, 4.9, 4.9], [4.9, 4.9, 8.9], [4.9, 4.921517163596611, 8.9], [4.9, 4.921517163596611, 8.9]]),
-                                                ('theta_next', [[4.9, 4.9, 4.9], [4.9, 4.9, 8.9], [4.9, 4.921517163596611, 8.9], [4.9, 4.921517163596611, 8.9], [4.9, 5.146475182581449, 8.9]]),
-                                                ('gradV', [ [886.964390, 707.5556326, 2128.28484668],
-                                                            [0.0, 0.0, 5.2583273],
-                                                            [0.0, 0.00430343, 0.0],
-                                                            [0.0, 0.0, 0.0],
-                                                            [0.0, 0.08998320759393537, 0.0]]),
+                                                ('theta', [[0.1, 0.1, 0.1], [4.9, 4.9, 4.9], [4.9, 4.818983985909275, 8.9], [4.9, 4.923198809058585, 8.9], [4.9, 4.872936280953478, 8.9]]),
+                                                ('theta_next', [[4.9, 4.9, 4.9], [4.9, 4.818983985909275, 8.9], [4.9, 4.923198809058585, 8.9], [4.9, 4.872936280953478, 8.9], [4.9, 4.872936280953478, 8.9]]),
+                                                ('gradV', [ [292.342327, 383.859268, 2522.8387238],
+                                                            [0.0, -0.008101601409072515, 15.98133783039745],
+                                                            [0.0, 0.02084296, 0.0],
+                                                            [0.0, -0.0150788, 0.0],
+                                                            [0.0, 0.0, 0.0]]),
                                                 ('alpha', [10.0, 10.0, 5.0, 3.33333, 2.5]),
-                                                ('state_coverage', [[0.7777777, 0.66666666, 0.55555555],
-                                                                    [0.0, 0.0, 0.0952381],
-                                                                    [0.0, 0.0476190, 0.0],
-                                                                    [0.0, 0.0, 0.0],
-                                                                    [0.0, 0.1428571, 0.0]]),
-                                                ('proba_blocking', [0.329208, 0.000033, 1.705043E-6, 0.0, 3.46367E-5]),
-                                                ('proba_blocking_true', [0.412838, 0.000174, 0.000010, 0.000009, 0.000009]),
-                                                ('expected_reward_true', [-2815.93327, -1.641034, -0.012053, -0.011931, -0.011931]),
+                                                ('state_coverage', [[0.66666666, 0.66666666, 0.55555555],
+                                                                    [0.0, 0.066666666, 0.2],
+                                                                    [0.0, 0.133333333, 0.0],
+                                                                    [0.0, 0.133333333, 0.0],
+                                                                    [0.0, 0.0, 0.0]]),
+                                                ('proba_blocking', [0.295619, 0.000307, 0.000015, 0.000002, 0.0]),
+                                                ('proba_blocking_true', [0.412838, 0.000175, 0.000017, 0.000011, 0.000014]),
+                                                ('expected_reward_true', [-2815.93327, -1.641034, -0.012509, -0.011922, -0.012205]),
                                                 ('n_events_mc', [84, 100, 99, 99, 99]),
-                                                ('n_events_fv', [391, 371, 499, 356, 642]),
-                                                ('n_trajectories_Q', [76.333333, 75.0, 71.0, np.nan, 73.333333]),
+                                                ('n_events_fv', [701, 724, 394, 721, 354]),
+                                                ('n_trajectories_Q', [76.272727, 74.25, 75.0, 81.0, np.nan]),
                                                 ('seed', [1727]*5),
                                                 ])
         print("Optimum values found by the optimization process, compared to the true optimum values")

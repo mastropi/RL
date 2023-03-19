@@ -429,9 +429,7 @@ class SimulatorQueue(Simulator):
                 # True stationary probability of a loss network system for ALL possible states
                 # (further down, we will use the true probabilities that are actually checked, i.e. for those states for which an estimated probability is computed)
                 env_effective_capacity, x, dist = compute_stationary_probability_knapsack_when_blocking_by_class(env_original_capacity, self.rhos, Ks)
-                probas_stationary_true = dict()
-                for xx, dd in zip(x, dist):
-                    probas_stationary_true[tuple(xx)] = dd
+                probas_stationary_true = dict([[tuple(xx), dd] for xx, dd in zip(x, dist)])
 
                 # *** IMPORTANT ***
                 # Set the capacity of each environment used for the simulation to the EFFECTIVE capacity computed above
@@ -494,7 +492,7 @@ class SimulatorQueue(Simulator):
                             .format(len(dict_params_simul['t_sim']), self.dict_params_learning['t_learn'])
                     dict_params_simul['T'] = dict_params_simul['t_sim'][t_learn-1]     # `t_learn-1` because t_learn starts at 1, not 0.
                 proba_blocking_mc, expected_reward, probas_stationary_blocking, n_cycles_proba, \
-                    expected_cycle_time, n_cycles, n_events = estimate_blocking_mc(self.env, self.agent, dict_params_simul, dict_params_info)
+                    expected_cycle_time, n_cycles, time_last_event, n_events = estimate_blocking_mc(self.env, self.agent, dict_params_simul, dict_params_info)
                     ## IMPORTANT (2022/10/24) The expected_cycle_time is NOT equal to the denominator used to compute the stationary probabilities
                     ## stored in probas_stationary_blocking when a positive number of burn-in time steps at the beginning of the simulation
                     ## before starting to use cycle times for estimations is considered.
@@ -1623,7 +1621,7 @@ def define_queue_environment_and_agent(dict_params: dict):
         env_queue = env_queues.EnvQueueLossNetworkWithJobClasses(   queue,
                                                                     dict_params_env['reward_func'],
                                                                     dict_params_env['rewards_accept_by_job_class'],
-                                                                    dict_params_env.get('reward_func_params', [-1.0]*len(job_rates_by_server)))
+                                                                    dict_params_env.get('reward_func_params'))
     else:
         raise ValueError("Invalid value for entry 'environment -> queue_system' in `dict_params`: {}\nValid values are (case sensitive): {}" \
                          .format(dict_params_env['queue_system'], ["single-server", "multi-server", "loss-network"]))
@@ -2080,57 +2078,13 @@ def compute_expected_inter_event_time(env):
 
 def compute_proba_blocking(env, agent: AgeQueue, probas_stationary_blocking: dict):
     """
-    Computes the blocking probability of the queue system represented by environment `env`
-
-    Arguments:
-    env: Queue environment
-        Queue environment where the agent acts and blocking can occur.
-        The following blocking possibilities in the queue environment are handled by this function:
-        - single-buffer-based blocking, i.e. when the total occupancy (i.e. the size of the system's single buffer)
-        of the queue system (either single- or multi-server) is at values where blocking may occur (with ANY positive probability).
-        - job-class-based blocking, i.e. where blocking depends on the queue occupancy of an arriving job class.
-
-        In the first case, the blocking probability is computed as:
-            Pr(BLOCK) = sum_{buffer sizes bs with rejection probability Pi > 0} { Pi(reject/bs) * Pr(bs) }
-        where Pr(bs) is the estimated stationary probability for buffer size bs.
-
-        In the second case, the blocking probability is computed as:
-            Pr(BLOCK) = sum_{states s with rejection probability Pi > 0} { Pi(reject/s) * Pr(s) }
-        where,
-            Pr(s) is the estimated stationary probability for state s.
-            P(reject/s) = sum_{arriving job classes j} { Pi(reject/s, job=j) * Pr(job=j) }
-        where,
-            P(job=j) = lambda(j) / sum_{i} { lambda(i) }
-
-    agent: AgeQueue
-        Agent acting on a queue environment where an accept/reject policy is defined.
-
-    probas_stationary_blocking: dict
-        Dictionary with the estimated stationary probability of blocking buffer sizes or states which are the dictionary keys.
-
-    Return: float
-    Estimated blocking probability.
+    Computes the blocking probability of the queue system represented by environment `env`.
+    See the documentation for estimate_expected_reward().
     """
-    proba_blocking = 0.0
-
-    # Iterate on the blocking states stored as keys of the `probas_stationary_blocking` dictionary
-    for s in probas_stationary_blocking.keys():
-        s_tuple = tuple([s]) if is_scalar(s) else s
-        assertConsistencyPolicyLearnerAndAgentPolicy(agent)
-        if agent.getAcceptancePolicyDependenceOnJobClass():
-            proba_arrival_jobclass = np.array(env.getJobClassRates()) / np.sum(env.getJobClassRates())
-            proba_reject = np.sum([agent.getAcceptancePolicies()[i].getPolicyForAction(Actions.REJECT, (occupancy, i)) * proba_arrival_jobclass[i]
-                                    for i, occupancy in enumerate(s_tuple)])
-        else:
-            # We set the job_class of the state to None because its value does not matter in determining the rejection probability
-            state = (s, None)
-            proba_reject = agent.getAcceptancePolicies()[0].getPolicyForAction(Actions.REJECT, state)
-        proba_blocking += proba_reject * \
-                          probas_stationary_blocking[s]
-    return proba_blocking
+    return estimate_expected_reward(env, agent, probas_stationary_blocking, reward=1)
 
 
-def estimate_expected_reward(env, agent, probas_stationary):
+def estimate_expected_reward(env, agent: AgeQueue, probas_stationary: dict, reward=None):
     """
     Estimates the expected reward of the queue system defined in the given environment assuming a non-zero reward
     happens at the states or buffer-sizes/job-occupancies of interest, i.e. those where the policy yields
@@ -2141,10 +2095,12 @@ def estimate_expected_reward(env, agent, probas_stationary):
     Note that both the acceptance policy and the reward may depend on the class of the job arriving to the queue.
     Therefore, the expected reward is estimated as follows:
     a) when the acceptance policy depends on the class of the incoming job:
-        E[R] = sum_{buffer-sizes/job-occupancies s in `probas_stationary`} {
-                    sum_{arriving-job-class i} [ R(s, i) * Pr(reject/s, arriving-job-class i) * Pr(arriving-job-class i) ] * Pr(s) ] }
+        E[R] = sum_{buffer-sizes-or-job-occupancies s in `probas_stationary`}
+                    [ sum_{arriving-job-class i} [ R(s, i) * Pr(reject | s, arriving-job-class i) * Pr(arriving-job-class i) ] * Pr(s) ]
+        where,
+            P(arriving-job-class i) = lambda(i) / sum_{j}{lambda(j)}
     b) otherwise:
-        E[R] = sum_{buffer-sizes/job-occupancies s in `probas_stationary`} { R(s) * Pr(reject/s) * Pr(s) }
+        E[R] = sum_{buffer-sizes | job-occupancies s in `probas_stationary`} { R(s) * Pr(reject | s) * Pr(s) }
 
     where R(s) is the reward associated to a rejection at buffer-size/job-occupancy s defined in the queue environment,
     and Pr(s) is the stationary probability estimate of buffer-size/job-occupancy s.
@@ -2161,6 +2117,11 @@ def estimate_expected_reward(env, agent, probas_stationary):
         Dictionary with the estimated stationary probability of the states or buffer sizes which are assumed to yield
         non-zero rewards. These states or buffer sizes are the dictionary keys.
 
+    reward: (opt) float
+        When given, this value is used as the constant reward assigned to a state present in the dictionary containing
+        the stationary probabilities when an incominb job is REJECTED.
+        This is useful when we are interested in computing the rejection/blocking probability rather than the expected reward.
+
     Return: float
     Estimated expected reward.
     """
@@ -2171,14 +2132,14 @@ def estimate_expected_reward(env, agent, probas_stationary):
         if probas_stationary[s] > 0.0:
             if agent.getAcceptancePolicyDependenceOnJobClass():
                 proba_arrival_jobclass = np.array(env.getJobClassRates()) / np.sum(env.getJobClassRates())
-                expected_reward_reject = np.sum([compute_reward_for_rejection_at_current_state(env, state=(occupancy, i)) * \
+                expected_reward_reject = np.sum([( compute_reward_for_rejection_at_current_state(env, state=(occupancy, i)) if reward is None else reward ) * \
                                                  (agent.getAcceptancePolicies()[i].getPolicyForAction(Actions.REJECT, (occupancy, i)) * int(sum(s_tuple) < env.getCapacity()) + int(sum(s_tuple) >= env.getCapacity())) * \
                                                  proba_arrival_jobclass[i]
                                                     for i, occupancy in enumerate(s_tuple)])
             else:
                 # We set the job_class of the state to None because its value does not matter in determining the rejection probability
                 state = (s, None)
-                expected_reward_reject = compute_reward_for_rejection_at_current_state(env, state=state) * \
+                expected_reward_reject = ( compute_reward_for_rejection_at_current_state(env, state=state) if reward is None else reward ) * \
                                          agent.getAcceptancePolicies()[0].getPolicyForAction(Actions.REJECT, state)
             expected_reward += expected_reward_reject * \
                                probas_stationary[s]
@@ -2662,7 +2623,7 @@ def estimate_blocking_mc(env, agent, dict_params_simul, dict_params_info, start_
     - expected_reward: the estimated expected reward.
     - probas_stationary_blocking: dictionary with the estimated stationary probability for each queue state or buffer size where
     blocking may occur.
-    - n_cycles_used: number of cycles used for the estimation of the stationary probabilities.
+    - n_cycles_used_for_probability_estimation: number of cycles used for the estimation of the stationary probabilities.
     - expected_return_time_to_start_state_or_buffer_size: estimated expected cycle time E(T) of return to the initial
     queue state or buffer size.
     This value coincides with the denominator of the MC estimator of the blocking probabilities (based on renewal theory)
@@ -2671,9 +2632,10 @@ def estimate_blocking_mc(env, agent, dict_params_simul, dict_params_info, start_
     burn-in period, the Markov chain is found at the same queue state or buffer size as the initial queue state or
     buffer size; otherwise it will not be the same.
     - n_cycles_to_start_state_or_buffer_size: number of return cycles observed to estimate E(T). This will most likely NOT
-    coincide with the returned value `n_cycles_used` which contains the number of cycles used in the estimation of
-    the stationary probabilities based on renewal theory.
-    - n_events_mc: number of events observed during the Monte-Carlo simulation used to estimate the stationary
+    coincide with the returned value `n_cycles_used_for_probability_estimation` which contains the number of cycles used
+    in the estimation of the stationary probabilities based on renewal theory.
+    - time_last_event: time of the last event (continuous-time) observed during the Monte-Carlo simulation.
+    - n_events: number of events observed during the Monte-Carlo simulation used to estimate the stationary
     probabilities.
     """
     # -- Parse input parameters
@@ -2707,15 +2669,15 @@ def estimate_blocking_mc(env, agent, dict_params_simul, dict_params_info, start_
                               track_return_cycles=True,
                               seed=dict_params_simul['seed'],
                               verbose=dict_params_info.get('verbose', False), verbose_period=dict_params_info.get('verbose_period', 1))
-    probas_stationary_blocking, expected_cycle_time, n_cycles_used = \
+    probas_stationary_blocking, expected_cycle_time, n_cycles_used_for_probability_estimation = \
         estimate_stationary_probabilities_mc(env, agent,
                                              burnin_time=dict_params_simul['burnin_time'],
                                              min_num_cycles_for_expectations=dict_params_simul['min_num_cycles_for_expectations'])
 
     #-- Compute the other quantities that are returned to the outside world
     # Blocking probability and expected reward
-    n_events_mc = t
-    assert n_events_mc == dict_params_simul['T']
+    n_events = t
+    assert n_events == dict_params_simul['T']
     proba_blocking = compute_proba_blocking(env, agent, probas_stationary_blocking)
     expected_reward = estimate_expected_reward(env, agent, probas_stationary_blocking)
 
@@ -2733,7 +2695,7 @@ def estimate_blocking_mc(env, agent, dict_params_simul, dict_params_info, start_
     #   state or buffer size, which may not happen soon after the burn-in time has passed...
     # 2) The above observation implies that the number of cycles observed in (a) may be completely different from the
     # number of cycles observed in (b) and they are not related (i.e. n_cycles_to_start_state_or_buffer_size computed
-    # in (a) could be larger or smaller than the n_cycles_used value computed in (b)).
+    # in (a) could be larger or smaller than the n_cycles_used_for_probability_estimation value computed in (b)).
     # 3) The two quantities estimated by (a) and by (b) do coincide when the burn-in time parameter is equal to 0.
     # This is asserted below.
     expected_return_time_to_start_state_or_buffer_size, n_cycles_to_start_state_or_buffer_size = \
@@ -2749,8 +2711,9 @@ def estimate_blocking_mc(env, agent, dict_params_simul, dict_params_info, start_
             " (using renewal theory), when the burn-in time is 0.0." \
             .format(start_state, expected_return_time_to_start_state_or_buffer_size, expected_cycle_time)
 
-    return proba_blocking, expected_reward, probas_stationary_blocking, n_cycles_used, \
-                expected_return_time_to_start_state_or_buffer_size, n_cycles_to_start_state_or_buffer_size, n_events_mc
+    return proba_blocking, expected_reward, probas_stationary_blocking, n_cycles_used_for_probability_estimation, \
+                expected_return_time_to_start_state_or_buffer_size, n_cycles_to_start_state_or_buffer_size, \
+                    time_last_event, n_events
 
 
 @measure_exec_time
@@ -2836,7 +2799,7 @@ def run_simulation_mc(env, agent, t_learn, start_state, t_sim_max,
 
     Return: tuple
     If track_return_cycles = False, track_absorptions = False and track_survival = False:
-    - t: the last time step of the simulation process.
+    - t: the last time step (integer-valued) of the simulation process.
     - time_abs: the continuous (absolute) time of the last observed event during the simulation.
 
     If track_return_cycles = True, in addition:

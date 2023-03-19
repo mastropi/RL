@@ -148,7 +148,7 @@ class Test_EstAverageValueV_EnvQueueSingleServer(unittest.TestCase):
             job_rates = self.dict_env_queue_mm_single_server[K].getJobClassRates()
             service_rates = self.dict_env_queue_mm_single_server[K].getServiceRates()
             proba_blocking_mc, expected_reward, probas_stationary, n_cycles_used_for_probas_estimation, \
-                expected_return_time, n_return_cycles, n_events_mc = run_mc_estimation_single_server(   self.dict_env_queue_mm_single_server[K],
+                expected_return_time, n_return_cycles, time_mc, n_events_mc = run_mc_estimation_single_server(   self.dict_env_queue_mm_single_server[K],
                                                                                                        dict_params['K'],
                                                                                                        dict_params['J'],
                                                                                                        dict_params['N'] * dict_params['T'],
@@ -309,7 +309,7 @@ class Test_EstAverageValueV_EnvQueueLossNetworkWithJobClasses(unittest.TestCase)
         min_num_cycles_for_expectations = 5
 
         proba_blocking_mc, expected_reward, probas_stationary, n_cycles_used_for_probas_estimation, \
-            expected_return_time, n_return_cycles, n_events_mc = run_mc_estimation_loss_network(self.env_queue_mm_loss,
+            expected_return_time, n_return_cycles, time_mc, n_events_mc = run_mc_estimation_loss_network(self.env_queue_mm_loss,
                                                                                                 blocking_occupancies_by_jobclass,
                                                                                                 activation_occupancies_by_jobclass,
                                                                                                 nservers,
