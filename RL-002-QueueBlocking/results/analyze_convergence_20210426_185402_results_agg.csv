@@ -1,4 +1,0 @@
-,,,n,n,n,mean,mean,mean,std,std,std,min,min,min,max,max,max,SE,SE,SE
-,,,PMC(K),PFV(K),Pr(K),PMC(K),PFV(K),Pr(K),PMC(K),PFV(K),Pr(K),PMC(K),PFV(K),Pr(K),PMC(K),PFV(K),Pr(K),PMC(K),PFV(K),Pr(K)
-K,buffer_size_activation,nparticles,,,,,,,,,,,,,,,,,,
-40.0,0.75,5.0,2,2,2,0.0,0.0,1.9100425795336106e-07,0.0,0.0,0.0,0.0,0.0,1.9100425795336106e-07,0.0,0.0,1.9100425795336106e-07,0.0,0.0,0.0

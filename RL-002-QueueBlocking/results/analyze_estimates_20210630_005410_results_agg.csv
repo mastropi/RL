@@ -1,4 +1,0 @@
-,,,E(T),E(T),E(T),E(T),E(T),E(T),Pr(MC),Pr(MC),Pr(MC),Pr(MC),Pr(MC),Pr(MC),Pr(FV),Pr(FV),Pr(FV),Pr(FV),Pr(FV),Pr(FV),Pr(K),Pr(K),Pr(K),Pr(K),Pr(K),Pr(K)
-,,,count,mean,std,min,max,SE,count,mean,std,min,max,SE,count,mean,std,min,max,SE,count,mean,std,min,max,SE
-K,buffer_size_activation,nparticles,,,,,,,,,,,,,,,,,,,,,,,,
-40,0.2,3200,8,12.897965066157003,0.44591480930730915,12.15851066656348,13.431783299339623,0.15765469274635224,0,,,,,,8,2.6543031455048884e-06,1.5287774107565843e-06,9.347690908044958e-07,4.4541842114977395e-06,5.405044370353963e-07,8,3.939624007386781e-06,0.0,3.939624007386781e-06,3.939624007386781e-06,0.0
