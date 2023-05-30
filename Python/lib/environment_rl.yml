@@ -1,0 +1,9 @@
+name: rl_toulouse
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - gym==0.12.1
+  - numpy==1.18.3
+  - pandas==0.22.0
+  - pytest==3.3.2
