@@ -88,6 +88,7 @@ class Simulator:
         self.case = case
         self.replication = replication
 
+        # We use the class name + datetime as prefix for the output files
         dt_today_str = generate_datetime_string(prefix=self.__class__.__name__)
         if self.log:
             if logsdir is None:

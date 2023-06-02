@@ -139,6 +139,18 @@ def as_array(x):
 
     return x
 
+def convert_str_argument_to_list_of_type(option, opt, value, parser, type=float):
+    "Function to be used as callback by the optparse.OptionParser class when parsing a user argument that should be interpreted as a list of elements of the given `type` (e.g. '[3.0, 2.1]' or '3.0, 2.1')"
+    # For debugging, uncomment the following print() lines:
+    #print(f"option: {type(option)}, {dir(option)}")
+    #print(f"opt: {opt}")
+    #print(f"value: {value}")
+    #print(f"parser: {parser}")
+    #print(f"parser.values: {parser.values}")
+    if isinstance(value, str):
+        # Set the argument as a list of floats
+        setattr(parser.values, option.dest, convert_str_to_list_of_type(value, type=type))
+
 def convert_str_to_list_of_type(str_value, sep="[, ]", type=float):
     """
     A string representing a list (e.g. of numbers) (e.g. '[3.1, 2.5]') is converted to a list of the given type (default `float`).
@@ -146,7 +158,12 @@ def convert_str_to_list_of_type(str_value, sep="[, ]", type=float):
 
     It is assumed that the values in the string are convertible to the given number type.
     """
-    str_value_as_list = [type(s.replace("[", "").replace("]", "")) for s in re.split(sep, str_value) if len(s) > 0]
+    str_value_as_list = [type(float(s.replace("[", "").replace("]", ""))) for s in re.split(sep, str_value) if len(s) > 0 and s not in ['[', ']']]
+        ## NOTES:
+        ## - We use type(float()) so that when type=int, the conversion of e.g. '3.48' returns 3 instead of an error!
+        ## (the reason is that int('3.48') gives an error whereas float('3.48') does NOT! so we first convert to float and then to integer)
+        ## - The `not in` condition is used because when the string is of the form e.g. '[3.48434049 4.9   ]',
+        ## then the last element of re.split() is ']' which cannot be converted to a number.
     if len(str_value_as_list) == 1:
         return str_value_as_list[0]
     else:
@@ -1009,3 +1026,17 @@ if __name__ == "__main__":
     assert y1f == [4,   4,   3,   3,    3,   4,   5,   5,   5,   5,   4,    3]
     assert y2f == [0,   0,   1,   1,    2,   2,   2,   1,   1,   0,   0,    0]
     #-------------------- merge_values_in_time ------------------------#
+
+
+    #------------------ convert_str_to_list_of_type -------------------#
+    print("\n--- convert_str_to_list_of_type()")
+    # "Normal" case
+    assert np.allclose(convert_str_to_list_of_type('[3.48, -4.9]'), [3.48, -4.9]) # Separated by comma
+    assert np.allclose(convert_str_to_list_of_type('[3.48 -4.9]'), [3.48, -4.9])  # Separated by space
+    # Mix of comma and spaces as separator, of which there can be several, even several commas (which do not separate anything)
+    assert np.allclose(convert_str_to_list_of_type('[3.48    -4.9     , , 34.2]'), [3.48, -4.9, 34.2])
+
+    # Convert to integer
+    assert np.allclose(convert_str_to_list_of_type('[3    4     , , -34]', type=int), [3, 4, -34])
+    assert np.allclose(convert_str_to_list_of_type('[3.48    4.9     , , -34]', type=int), [3, 4, -34])
+    #------------------ convert_str_to_list_of_type -------------------#

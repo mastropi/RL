@@ -422,10 +422,12 @@ class SimulatorQueue(Simulator):
             Ks = get_deterministic_blocking_boundaries(self.agent)
             if self.env.getBufferType() == BufferType.SINGLE:
                 # Compute the true blocking probabilities, so that we know how much error we have in the estimation of Pr(K-1) and Pr(K)
+                Ks = get_deterministic_blocking_boundaries(self.agent, return_int_when_single_policy=True)  # The second parameter is because we want the returned blocking size to be a scalar
                 assert is_scalar(Ks)
                 probas_stationary_true = dict({Ks-1: compute_blocking_probability_birth_death_process(self.rhos, Ks-1),
                                                Ks:   compute_blocking_probability_birth_death_process(self.rhos, Ks)})
             else:
+                Ks = get_deterministic_blocking_boundaries(self.agent, return_int_when_single_policy=False) # The second parameter is because we want the returned blocking size to be ALWAYS a list
                 # True stationary probability of a loss network system for ALL possible states
                 # (further down, we will use the true probabilities that are actually checked, i.e. for those states for which an estimated probability is computed)
                 env_effective_capacity, x, dist = compute_stationary_probability_knapsack_when_blocking_by_class(env_original_capacity, self.rhos, Ks)
@@ -1970,8 +1972,8 @@ def get_blocking_boundaries(agent):
 
     # Sizes at which blocking is deterministic for each 1D-parameterized policy (the K values)
     Ks = get_deterministic_blocking_boundaries(agent, return_int_when_single_policy=False)
-    blocking_boundaries = [[k for k in range(0, Ks[i]+1) if policies[i].getPolicyForAction(Actions.REJECT, (k, i)) > 0]
-                           for i in range(len(policies))]
+    blocking_boundaries = [[k for k in range(0, Ks[p]+1) if policies[p].getPolicyForAction(Actions.REJECT, (k, p)) > 0]
+                           for p in range(len(policies))]
 
     # Check that the list of blocking sizes for each policy does not contain repeated states
     # (i.e. the list elements are [2, 3], [5, 6] but NOT [2, 2], [6, 6], etc.)

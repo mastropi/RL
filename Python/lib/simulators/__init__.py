@@ -143,7 +143,14 @@ class SetOfStates:
             return chosen_states
 
     def getStates(self, exactly_one_dimension_at_boundary=False, at_least_one_dimension_at_boundary=False):
-        "Returns the set of all possible states, explicitly enumerated, regardless of the storage format used in the object"
+        """
+        Returns the set of all possible states, explicitly enumerated, regardless of the storage format used in the object
+
+        Parameters `exactly_one_dimension_at_boundary` and `at_least_one_dimension_at_boundary` can be used to restrict
+        the set of states returned to those satisfying the condition indicated by the parameter.
+
+        They cannot be both True and the same time.
+        """
         if self.getStorageFormat() == "states":
             if len(self.states) == 1:
                 return self.states[0]

@@ -12,7 +12,7 @@ import pandas as pd
 
 from Python.lib.agents.learners import GenericLearner
 from Python.lib.utils.basic import find, is_scalar
-from Python.lib.agents.policies.parameterized import AcceptPolicyType   # NEW: TO IMPLEMENT IN ORDER TO DECIDE WHETHER THE ACCEPTANCE POLICY IS OF THRESHOLD TYPE OR TRUNK-RESERVATION
+#from Python.lib.agents.policies.parameterized import AcceptPolicyType   # NEW: TO IMPLEMENT IN ORDER TO DECIDE WHETHER THE ACCEPTANCE POLICY IS OF THRESHOLD TYPE OR TRUNK-RESERVATION
 
 # Minimum value allowed for the theta parameter of a parameterized policy
 # NOTE: Avoid an integer value as lower bound of theta because the estimated gradient of the average state value
