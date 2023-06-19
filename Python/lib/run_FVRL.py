@@ -228,7 +228,9 @@ def run_simulation_policy_learning(simul, replications, dict_params_simul, dict_
     if is_scalar(theta_opt_values):
         # This happens when only one replication was run
         theta_opt_values = [theta_opt_values]
-    K_opt_values =  get_deterministic_blocking_boundaries(simul.agent, theta_opt_values)
+    # Compute the optimum blocking sizes (using the ROUND function instead of the CEIL function so that we take into account to what integer value is theta closest
+    # (e.g. theta = 3.1 => K = 4 instead of K = 5 (which is too large for theta very close to 3, as when theta = 3, K is 4)
+    K_opt_values =  [get_deterministic_blocking_boundaries(simul.agent, t, exact=False) for t in theta_opt_values]
     # Optimum expected cost.
     # NOTE: This is NOT the expected cost at 'theta_next' just retrieved above but the expected cost at 'theta' i.e. before the update of theta
     # (but still the two values are expected to be similar)
@@ -957,12 +959,14 @@ if len(theta_ref_values) == 1:
         if SET_YLIM:
             ax2.set_ylim((-5, 5))  # Note: grad(V) is expected to be -1 or +1...
         ax2.legend([line_grad, line_gradtrue], ['grad(V)', 'True grad(V)'], loc='upper right')
+        # Note that the optimum true K is computed as round(theta+1) and NOT as ceil(theta+1) because we want that e.g. K = 4 when theta = 3.1
+        # (instead of having K = 5, which is too large, considering the blocking probability is *almost* 1 at 4).
         if is_scalar(t_sim):
             title = "Value function and its gradient as a function of theta and K. " + \
-                    "Optimum K = {}, Theta start = {}, t_sim = {:.0f}".format(np.ceil(theta_true+1), theta_start, t_sim)
+                    "Optimum K = {}, Theta start = {}, t_sim = {:.0f}".format(np.round(theta_true+1), theta_start, t_sim)
         else:
             title = "Value function and its gradient as a function of theta and K. " + \
-                    "Optimum K = {}, Theta start = {}".format(np.ceil(theta_true+1), theta_start)
+                    "Optimum K = {}, Theta start = {}".format(np.round(theta_true+1), theta_start)
         plt.title(title)
 
         # grad(V) vs. V
@@ -1415,7 +1419,7 @@ if PLOT_RESULTS_PAPER:
 
         # IMPORTANT: We assume that the true theta value and the start theta values are ALL the same for all cases
         theta_true = theta_true_values[0] + shift_optimum
-        # K_true = int(np.ceil(theta_true + 1))
+        # K_true = int(np.round(theta_true + 1))
         theta_start = results_fv['theta'].iloc[0]
         K_start = int(np.ceil(theta_start + 1))
 

@@ -358,6 +358,10 @@ class SimulatorQueue(Simulator):
                     .format(dict_params_simul['theta_true'])
             _theta_true = dict_params_simul['theta_true'] if is_scalar(dict_params_simul['theta_true']) else dict_params_simul['theta_true'][0]
             for env in self.envs:
+                # Note: (2023/06/19) As reference buffer size we define ceil(theta_true + 1) and NOT round(theta_true + 1) as is defined elsewhere
+                # when computing the optimum *true* K: the reason we do this is that the optimum K is a little smaller than the reference buffer size value,
+                # so we are in business if we set the reference value (used in the exponential function of the buffer size that models the blocking cost)
+                # as the ceiling and not as round of theta_true+1.
                 env.setParamsRewardFunc(dict({'buffer_size_ref': np.ceil(_theta_true + 1)}))
 
         # Simulation seed
@@ -419,7 +423,6 @@ class SimulatorQueue(Simulator):
             # a signal that leads to estimations of the numerator Phi(t) and the denominator E(T1+T2) in the
             # FV estimation of the stationary probability (found on Fri, 07-Jan-2022 at IRIT-N7 with Matt, Urtzi and
             # Szymon), namely J = K/3.
-            Ks = get_deterministic_blocking_boundaries(self.agent)
             if self.env.getBufferType() == BufferType.SINGLE:
                 # Compute the true blocking probabilities, so that we know how much error we have in the estimation of Pr(K-1) and Pr(K)
                 Ks = get_deterministic_blocking_boundaries(self.agent, return_int_when_single_policy=True)  # The second parameter is because we want the returned blocking size to be a scalar
@@ -1987,7 +1990,7 @@ def get_blocking_boundaries(agent):
         return blocking_boundaries
 
 
-def get_deterministic_blocking_boundaries(agent, thresholds: Union[float, list]=None, return_int_when_single_policy=True):
+def get_deterministic_blocking_boundaries(agent, thresholds: Union[float, list]=None, return_int_when_single_policy=True, exact=True):
     """
     Returns all the deterministic blocking thresholds for each dimension of a multidimensional state system
     where blocking may occur at arrival of the corresponding job class.
@@ -2013,21 +2016,33 @@ def get_deterministic_blocking_boundaries(agent, thresholds: Union[float, list]=
         in the caller of the returned value).
         default: True
 
+    exact: (opt) bool
+        Whether to return the exact deterministic blocking value, i.e. the value where blocking is truly deterministic,
+        or rather the approximate deterministic blocking value, where blocking is almost deterministic.
+        This essentially dictates whether we choose the integer blocking value that is ABOVE theta + 1 (ceil(theta+1), when exact=True)
+        (to use during the optimization process on theta) or the integer blocking value that is CLOSEST to theta + 1 (round(theta+1), when exact=False)
+        (to use at the end of the optimization process, to define the actual integer blocking size to use --so that theta = 3.01 gives the more reasonable K = 4, instead of 5),
+        where theta is the parameter of the linear-step parameterized acceptance policy.
+        default: True
+
     Return: list or int
     Either a list containing the blocking thresholds for each policy defined in the agent when more than one policy
     is defined or a integer with the blocking threshold when only one policy is defined and return_int_when_single_policy = True.
     """
     assertConsistencyPolicyLearnerAndAgentPolicy(agent)
 
+    # Define the function that converts the real-valued theta parameter to an integer blocking size K
+    func_integrable = np.ceil if exact else np.round
+
     if thresholds is None:
-        blocking_boundaries = [policy.getDeterministicBlockingValue() for policy in agent.getAcceptancePolicies()]
+        blocking_boundaries = [policy.getDeterministicBlockingValue(func=func_integrable) for policy in agent.getAcceptancePolicies()]
     else:
         if is_scalar(thresholds):
             # Make the thresholds parameter always a list for easier treatment below
             thresholds = [thresholds]
         if len(thresholds) != len(agent.getAcceptancePolicies()):
             raise ValueError("When given, the length of the `thresholds` parameter must be equal to the number of policies defined in the agent")
-        blocking_boundaries = [policy.getDeterministicBlockingValueFromTheta(thresholds[i]) for i, policy in enumerate(agent.getAcceptancePolicies())]
+        blocking_boundaries = [policy.getDeterministicBlockingValueFromTheta(thresholds[i], func=func_integrable) for i, policy in enumerate(agent.getAcceptancePolicies())]
 
     # Return a scalar when the blocking boundary is only one (i.e. when there is only one policy and return_int_when_single_policy = True)
     # The goal is to facilitate treatment of the K value (the blocking threshold) when the blocking is single-buffer-based blocking)

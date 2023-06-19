@@ -231,7 +231,7 @@ def rewardOnJobRejection_ExponentialCost(env, state, action, next_state, dict_pa
         - buffer_size_ref: the reference buffer size used in the exponential function that defines the reward (negative)
         emitted by the environment when an incoming job is rejected.
         The reference buffer size is normally the buffer size value close to the one where the expected rejection cost
-        (which depends on the exponential cost function) achieves its minimum.
+        (which depends on the exponential cost function) achieves its minimum, which is a little *smaller* than the reference buffer size.
     """
     if dict_params is None:
         dict_params = dict({'buffer_size_ref': COST_EXP_BUFFER_SIZE_REF})

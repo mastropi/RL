@@ -265,14 +265,14 @@ class PolQueueTwoActionsLinearStep(QueueParameterizedPolicyTwoActions):
 
         return policy_value_for_action
 
-    def getDeterministicBlockingValue(self):
-        "Returns K, the first integer greater than the theta parameter stored in the object + 1"
-        return self.getDeterministicBlockingValueFromTheta(self.getThetaParameter())
+    def getDeterministicBlockingValue(self, func=np.ceil):
+        "Returns the K associated to the theta parameter stored in the object as described by method getDeterministicBlockingValueFromTheta()"
+        return self.getDeterministicBlockingValueFromTheta(self.getThetaParameter(), func=func)
 
-    def getDeterministicBlockingValueFromTheta(self, theta):
-        "Returns K, the first integer greater than theta + 1"
+    def getDeterministicBlockingValueFromTheta(self, theta, func=np.ceil):
+        "Returns K, the first integer greater than theta + 1 when func=np.ceil (the default) or the closest integer to theta + 1 when func=np.round"
         assert is_scalar(theta), "Parameter theta must be scalar: {}".format(theta)
-        return int( np.ceil( theta + 1 ) )
+        return int( func( theta + 1 ) )
 
 
 class PolQueueTwoActionsLinearStepOnJobClasses(GenericParameterizedPolicyTwoActions):
