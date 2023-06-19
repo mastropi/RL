@@ -3375,8 +3375,8 @@ def estimate_stationary_probabilities_mc(env, agent, burnin_time=0, min_num_cycl
 
 def get_blocking_states_or_buffer_sizes(env, agent):
     """
-    Returns the states or buffer sizes in the environment that can potentially generate blocking based on the
-    agent's accept/reject policy or policies.
+    Returns the states or buffer sizes in the environment that can potentially (because blocking can be non-deterministic)
+    generate blocking based on the agent's accept/reject policy or policies.
 
     Arguments:
     env: Environment
@@ -3388,12 +3388,13 @@ def get_blocking_states_or_buffer_sizes(env, agent):
 
     Return: list of int or list of tuples
     List containing the states (tuples) (for multidimensional-state blocking) or the buffer sizes (int)
-    (for single-buffer blocking0 that can potentially generate blocking of the system.
+    (for single-buffer blocking) that can potentially generate blocking of the system.
     """
     # Output variable
     states_of_interest = []
 
     blocking_boundaries = get_blocking_boundaries(agent)
+    deterministic_blocking_boundaries = get_deterministic_blocking_boundaries(agent)
     n_policies = len(blocking_boundaries)
     system_capacity = env.getCapacity()
 
@@ -3404,14 +3405,22 @@ def get_blocking_states_or_buffer_sizes(env, agent):
     else:
         # The states or buffer sizes of interest are multidimensional states of the given environment
         # Ex: the environment is a multi-server system with separate queues or a loss network, receiving multi-class jobs.
-        # This means that ANY state having one of the state dimensions equal to the corresponding state boundary
-        # is a potential blocking state (e.g. if state is 3D, and the first state boundary is 4, then the states
-        # [4, s2, s3] for all acceptable s2 and s3 based on the queue's capacity AND the agent's acceptance policy
-        # (e.g. the agent may block an incoming job in the second dimension if s2 = 3)
-        # are of interest.
+        # This means that the following states are of interest:
+        #
+        # A) Any valid state having one of the state dimensions equal to the corresponding state boundary
+        # (where the state boundary is defined by the agent as the blocking size for that dimension)
+        # is a blocking state.
+        # Ex: if the state is 3D, and the first state boundary is 4, then the states (4, s2, s3) for all s2 and s3 that
+        # make the state (4, s2, s3) a valid state based on the system's capacity AND the agent's acceptance policy
+        # (e.g. even if the system's capacity is 10, the agent may block an incoming job when s2 = 3 (this happens when
+        # the state boundary of dimension 2 is 3).
+        #
+        # B) Any state whose sum of its elements is equal to the system's capacity
         assert not np.isinf(system_capacity), "The system's capacity must be finite for non-single-buffer systems"
-        count_blocking_states = 0
-        for idx_policy, boundaries in enumerate(blocking_boundaries):       # E.g. blocking_boundaries = [[3, 4], [7, 8], [1, 2]], which corresponds to a theta policy parameter that is 3D
+
+        # Start with the states in case (A)
+        count_blocking_states_condA = 0
+        for idx_policy, boundaries in enumerate(blocking_boundaries):       # E.g. blocking_boundaries = [[3, 4], [7, 8], [1, 2]] (i.e. [[K0-1,K0], [K1-1,K1], [K2-1,K2]]) which corresponds to a theta policy parameter that is 3D
             for b in boundaries:                                            # E.g. b = 3 when boundaries = [3, 4]
                 # We start by setting the currently processed state dimension (defined by idx_policy) to a blocking state value
                 # (this avoids going over states where no blocking occurs)
@@ -3444,13 +3453,20 @@ def get_blocking_states_or_buffer_sizes(env, agent):
                                     # - We convert the state of interest added to `tuple` because these states are commonly used to index dictionaries
                                     # and only tuples can be used as keys of dictionaries, NOT lists because they are mutable.
                                     states_of_interest += [tuple(state_of_interest_new)]
-                                    count_blocking_states += 1
+                                    count_blocking_states_condA += 1
                         except StopIteration:
                             break
                     combos_generator.close()
 
-        print(f"states_of_interest {len(states_of_interest)}:\n {sorted(states_of_interest)}")
-        assert len(states_of_interest) == len(set(states_of_interest)), "The states in the generated list of states with possible blocking are unique."
+        # Now add the states in case (B)
+        set_of_states_to_check = SetOfStates(set_boundaries=deterministic_blocking_boundaries).getStates()
+        for s in set_of_states_to_check:
+            if np.sum(s) == system_capacity:
+                # Note that we may be adding states that were already added above, but below we take the set() of the generated list of states of interest
+                states_of_interest += [tuple(s)]
+
+        states_of_interest = sorted(set(states_of_interest))
+        print(f"states_of_interest {len(states_of_interest)}:\n {states_of_interest}")
 
         return states_of_interest
 
