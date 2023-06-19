@@ -18,6 +18,11 @@ class PolicyTypes(Enum):
     ACCEPT = 1
     ASSIGN = 2
 
+@unique
+class AcceptPolicyType(Enum):
+    THRESHOLD = 1
+    TRUNK_RESERVATION = 2
+
 
 class GenericParameterizedPolicyTwoActions:
     """

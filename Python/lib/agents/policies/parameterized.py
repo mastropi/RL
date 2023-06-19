@@ -15,22 +15,36 @@ import numpy as np
 
 import Python.lib.queues as queues
 from Python.lib.environments.queues import Actions, BufferType, GenericEnvQueueWithJobClasses, EnvQueueSingleBufferWithJobClasses, rewardOnJobClassAcceptance
-from Python.lib.agents.policies import GenericParameterizedPolicyTwoActions
+from Python.lib.agents.policies import AcceptPolicyType, GenericParameterizedPolicyTwoActions
 from Python.lib.utils.basic import is_scalar
 
 
 class QueueParameterizedPolicyTwoActions(GenericParameterizedPolicyTwoActions):
-    "Superclass that defines common constructor and methods for some parameterized policies with two possible actions and scalar parameter"
+    """
+    Superclass that defines common constructor and methods for some parameterized policies with two possible actions and a scalar parameter
 
-    def __init__(self, env_queue: GenericEnvQueueWithJobClasses, theta: float):
+    Arguments:
+    env_queue: GenericEnvQueueWithJobClasses
+        Queue environment on which the parameterized policy is applied.
+        It should satisfy the conditions described in the documentation for the superclass GenericParameterizedPolicyTwoActions.
+
+    theta: float
+        Initial value for the parameter of the parameterized policy applied on the queue environment.
+
+    accept_policy_type: AcceptPolicyType
+        Type of acceptance policy as defined by the AcceptPolicyType Enum. Examples are: THRESHOLD policy and TRUNK_RESERVATION policy.
+    """
+    def __init__(self, env_queue: GenericEnvQueueWithJobClasses, theta: float, accept_policy_type: AcceptPolicyType=AcceptPolicyType.THRESHOLD):
         super().__init__(env_queue, theta)
 
         if self.getEnv().getCapacity() < np.Inf: # When capacity is Inf, theta is also allowed to be Inf
             assert theta < self.getEnv().getCapacity(), "The value of theta is smaller than the queue capacity"
 
+        self.accept_policy_type = accept_policy_type
+
     def get_x_value_for_policy(self, state):
         """
-        Computes the real-valued value to be used when evaluating the policy or its gradient
+        Computes the real value x to be used when evaluating the policy or its gradient
 
         state: Queue-environment dependent
             State of the environment at which the policy gradient is evaluated.
@@ -42,7 +56,7 @@ class QueueParameterizedPolicyTwoActions(GenericParameterizedPolicyTwoActions):
                 - the QUEUE state is assumed to be a TUPLE.
                 - the value of x is computed by calling getBufferSizeFromState(state).
             2) for BufferType.NOBUFFER:
-                - the QUEUE state is assumed to be a SCALAR.
+                - the QUEUE state is assumed to be a SCALAR, which corresponds to the job occupancy of a given job class in the system.
                 - the value of x is computed by calling getQueueStateFromState(state).
 
         Return: int
@@ -64,6 +78,9 @@ class QueueParameterizedPolicyTwoActions(GenericParameterizedPolicyTwoActions):
 
         assert is_scalar(buffer_size_or_jobclass_occupancy)
         return buffer_size_or_jobclass_occupancy
+
+    def getAcceptPolicyType(self):
+        return self.accept_policy_type
 
 
 class PolQueueTwoActionsLogit(QueueParameterizedPolicyTwoActions):
