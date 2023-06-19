@@ -1726,7 +1726,7 @@ def compute_nparticles_and_narrivals_for_fv_process(rhos: list, capacity: int, b
         Maximum relative error for the estimation of Phi(t, K).
         This is the relative error incurred in the estimation of a binomial probability based on N trials,
         which is equal to sqrt((1-p)/p) / sqrt(N), where p is the blocking probability under the Fleming-Viot process
-        which is proportional to rho^((K-J)/2).
+        which is proportional to rho^((K-J+1)/2).
         Use None if no calculation of N is wished.
         default: 0.50
 
@@ -1775,9 +1775,9 @@ def compute_nparticles_and_narrivals_for_fv_process(rhos: list, capacity: int, b
     if error_rel_phi is not None:
         # Compute N
         # The calculation is based on the blocking probability associated to the Fleming-Viot process, which is
-        # proportional to rho^((K-J)/2). Therefore we compute the blocking probability for a queue with capacity
-        # int( ceil(K-J)/2 )
-        capacity_effective = int( np.ceil((K-J)/2) )
+        # proportional to rho^((K-J+1)/2). Therefore we compute the blocking probability for a queue with capacity
+        # int( ceil(K-J+1)/2 )
+        capacity_effective = int( np.ceil((K-J+1)/2) )
         pK = compute_blocking_probability_birth_death_process(rhos, capacity_effective)
         N = int(np.ceil( (1 - pK) / pK / error_rel_phi**2 ))
 
@@ -1851,7 +1851,7 @@ def compute_rel_errors_for_fv_process(rhos: list, capacity: int, buffer_size_act
     - error_rel_phi: (when N is not None) relative error expected for the estimation of Phi(t, K) given N.
         This is the relative error incurred in the estimation of a binomial probability based on N trials,
         which is equal to sqrt((1-p)/p) / sqrt(N)
-    - error_rel_et: (whne T is not None) approximate relative error expected for the estimation of the expected
+    - error_rel_et: (when T is not None) approximate relative error expected for the estimation of the expected
         reabsorption cycle time E(T_A) when T arrival events are observed during the simulation from which E(T_A)
         is estimated.
         This calculation assumes that the standard deviation of the estimation of E(T_A)
@@ -1874,7 +1874,8 @@ def compute_rel_errors_for_fv_process(rhos: list, capacity: int, buffer_size_act
 
     if N is not None:
         # This is the equivalent of a queue that has the blocking probability observed under the Fleming-Viot process
-        capacity_effective = int( np.ceil((K-J)/2) )
+        # which is proportional to sqrt(K-J+1) * rho^[(K-J+1)/2] (see the Introduction of our paper where this is stated)
+        capacity_effective = int( np.ceil((K-J+1)/2) )
         pK = compute_blocking_probability_birth_death_process(rhos, capacity_effective)
         error_rel_phi = np.sqrt( (1 - pK) / pK / N )
 
