@@ -6,9 +6,12 @@ Created on Sat Mar 11 20:17:48 2023
 @description: Runs the FV estimation of the blocking probability in a Loss Network system receiving multi-class jobs.
 """
 
-import runpy
-runpy.run_path('../../setup.py')
+if __name__ == "__main__":
+    # Only run this when running the script, o.w. it may give an error when importing functions if setup.py is not found
+    import runpy
+    runpy.run_path('../../setup.py')
 
+import os
 import sys
 import copy
 from warnings import warn
@@ -235,22 +238,33 @@ def analyze_convergence(capacity=10, job_class_rates=[0.7], service_rates=[1.0],
     """
     #---------------------------- Auxiliary functions --------------------------
     def compute_blocking_state_coverages(probas_stationary, probas_stationary_true, expected_costs):
-        "All states in probas_stationary should be present in probas_stationary_true and in expected_costs"
-        # Dictionary of weights based on the true stationary probabilities
-        blocking_states = probas_stationary.keys()
+        """
+        Computes the coverage of blocking states by the simulation, computing quantities related to entropy
+        and cost-entropy.
+
+        probas_stationary: dict
+            Dictionary indexed by state with the estimated stationary probability of blocking states.
+
+        probas_stationary_true: dict
+            Dicionary indexed by state with the true stationary probability of states (blocking and non-blocking).
+            But all states in probas_stationary should be present in this dictionary.
+
+        expected_costs: dict
+            Dictionary indexed by state with the expected blocking cost of states (blocking and non-blocking).
+            But all states in probas_stationary should be present in this dictionary.
+        """
+        blocking_states = sorted(probas_stationary.keys())
         dict_prob_blocking_states = dict([(x, p) for x, p in probas_stationary_true.items() if x in blocking_states])
         dict_info_blocking_states = dict([(x, -np.log10(p)) for x, p in probas_stationary_true.items() if x in blocking_states])
         dict_expcosts_blocking_states = dict([(x, c) for x, c in expected_costs.items() if x in blocking_states])
 
         # Data for the coverage computation
-        blocking_states_observed = [x for x, p in probas_stationary.items() if p > 0]
+        blocking_states_observed = [x for x in blocking_states if probas_stationary[x] > 0]
         prob_blocking_states_observed = [p for x, p in dict_prob_blocking_states.items() if x in blocking_states_observed]
         info_blocking_states_observed = [logp for x, logp in dict_info_blocking_states.items() if x in blocking_states_observed]
 
         # Coverages
         n_blocking_states_observed = len(blocking_states_observed)
-        n_blocking_states = len(dict_prob_blocking_states)
-        coverage_blocking_states = n_blocking_states_observed / n_blocking_states
         coverage_prob_blocking_states = np.sum(prob_blocking_states_observed) / sum(dict_prob_blocking_states.values())    # CANNOT np.sum() on the output of dict.values()!!!
         coverage_info_blocking_states = np.sum(info_blocking_states_observed) / sum(dict_info_blocking_states.values())    # CANNOT np.sum() on the output of dict.values()!!!
         # Entropy coverage
@@ -259,7 +273,14 @@ def analyze_convergence(capacity=10, job_class_rates=[0.7], service_rates=[1.0],
         coverage_costentropy_blocking_states = np.sum([expected_costs[x] * probas_stationary[x] * dict_info_blocking_states[x] for x in blocking_states_observed]) / \
                                                np.sum([expected_costs[x] * probas_stationary_true[x] * dict_info_blocking_states[x] for x in blocking_states])
 
-        return coverage_blocking_states, coverage_prob_blocking_states, coverage_info_blocking_states, coverage_entropy_blocking_states, coverage_costentropy_blocking_states, n_blocking_states_observed
+        # Estimated and True distribution of cost-entropy contribution
+        contribution_costentropy_blocking_states = np.array([expected_costs[x] * probas_stationary[x] * dict_info_blocking_states[x] for x in blocking_states]) / \
+                                               np.sum([expected_costs[x] * probas_stationary_true[x] * dict_info_blocking_states[x] for x in blocking_states])
+        contribution_true_costentropy_blocking_states = np.array([expected_costs[x] * probas_stationary_true[x] * dict_info_blocking_states[x] for x in blocking_states]) / \
+                                               np.sum([expected_costs[x] * probas_stationary_true[x] * dict_info_blocking_states[x] for x in blocking_states])
+
+        return coverage_prob_blocking_states, coverage_info_blocking_states, coverage_entropy_blocking_states, coverage_costentropy_blocking_states, \
+                    contribution_costentropy_blocking_states, contribution_true_costentropy_blocking_states, n_blocking_states_observed
     #---------------------------- Auxiliary functions --------------------------
 
     nservers = len(service_rates)
@@ -359,20 +380,26 @@ def analyze_convergence(capacity=10, job_class_rates=[0.7], service_rates=[1.0],
                                         'replication',
                                         'seed',
                                         # Monte-Carlo results
-                                        'Pr(MC)',
-                                        'ExpCost(MC)',       # Expected blocking cost
+                                        'Probas(MC)',        # Estimated stationary probabilities for each blocking state
+                                        'ProbasRatio(MC)',   # Estimated stationary probabilities for each blocking state / True stationary probability
+                                        'Pr(MC)',            # Estimated blocking probability (it doesn't take into account the cost of blocking each job class)
+                                        'ExpCost(MC)',       # Estimated expected blocking cost for the system
                                         'Time(MC)',          # Last continuous time value observed in the MC simulation
                                         'EMC(T)',            # Estimated expected return time E(T) used in the MC probability estimator
                                         '#Events(MC)',
                                         '#Cycles(MC)',       # Number of return cycles on which E(T) is estimated
+                                        '#BlockingStates(MC)',# Number of blocking states observed during the simulation
                                         'Coverage(MC)',      # Proportion of blocking states coverage (where estimated stationary p(x) > 0)
                                         'CoverageProb(MC)',  # Probability-weighted proportion of blocking states coverage (where estimated stationary p(x) > 0, weighted by p)
                                         'CoverageInfo(MC)',  # Information-weighted proportion of blocking states coverage (where estimated stationary p(x) > 0, weighted by -log10(p), so the states with smaller p receive larger weight)
                                         'CoverageEntropy(MC)',      # Entropy coverage (-p*log10(p))
                                         'CoverageCostEntropy(MC)',  # Cost-Entropy coverage (-c*p*log(p))
+                                        'ContributionCostEntropy(MC)',# Contribution to the cost entropy by each blocking state (i.e. c(x) p(x) log(p(x)) / sum(of above over all blocking states)
                                         # Fleming-Viot results
-                                        'Pr(FV)',
-                                        'ExpCost(FV)',       # Expected blocking cost
+                                        'Probas(FV)',        # Estimated stationary probabilities for each blocking state
+                                        'ProbasRatio(FV)',   # Estimated stationary probabilities for each blocking state / True stationary probability
+                                        'Pr(FV)',            # Estimated blocking probability (it doesn't take into account the cost of blocking each job class)
+                                        'ExpCost(FV)',       # Estimated expected blocking cost for the system
                                         'Time(FV)',          # Last continuous time value observed in the FV simulation
                                         'E(T)',              # Estimated expected re-absorption time E(T_A), denominator of the FV probability estimator
                                         '#Cycles(E(T))',
@@ -381,16 +408,23 @@ def analyze_convergence(capacity=10, job_class_rates=[0.7], service_rates=[1.0],
                                         '#Events(FV-Only)',
                                         '#Events(FV)',
                                         '#Samples(S(t))',
+                                        '#BlockingStates(FV)',# Number of blocking states observed during the simulation
                                         'Coverage(FV)',      # Proportion of blocking states coverage (where estimated stationary p(x) > 0)
                                         'CoverageProb(FV)',  # Probability-weighted proportion of blocking states coverage (where estimated stationary p(x) > 0, weighted by p)
                                         'CoverageInfo(FV)',  # Information-weighted proportion of blocking states coverage (where estimated stationary p(x) > 0, weighted by -log10(p), so the states with smaller p receive larger weight)
                                         'CoverageEntropy(FV)',      # Entropy coverage (-p*log10(p))
                                         'CoverageCostEntropy(FV)',  # Cost-Entropy coverage (-c*p*log(p))
+                                        'ContributionCostEntropy(FV)',# Contribution to the cost entropy by each blocking state (i.e. c(x) p(x) log(p(x)) / sum(of above over all blocking states)
                                         # True probability
+                                        'BlockingStates',    # Blocking states
+                                        'Probas(True)',      # True stationary probabilities for each blocking state
                                         'Pr(True)',
-                                        'ExpCost',
-                                        'Entropy',           # Entropy of the blocking event
-                                        'CostEntropy',       # Entropy of the blocking cost
+                                        'Costs',             # Costs c(x) associated to each state x (prior to multiplying by p(x))
+                                        'ExpectedCosts',     # Expected blocking cost for each blocking state: p(x) c(x)
+                                        'ContributionCostEntropy',# Contribution of each expected cost to the cost-based entropy
+                                        'ExpCost',           # Expected blocking cost (one single value associated to the cost of blocking on any possible state by the arrival of any possible job)
+                                        'RelEntropy',        # Entropy of the blocking system relative to its maximum possible entropy
+                                        'RelCostEntropy',    # Entropy of the blocking cost relative to its maximum possible entropy
                                         # Execution times
                                         'exec_time_mc(sec)',
                                         'exec_time_fv(sec)',
@@ -410,10 +444,11 @@ def analyze_convergence(capacity=10, job_class_rates=[0.7], service_rates=[1.0],
     assert proba_blocking_true == compute_blocking_probability_knapsack_from_probabilities_and_job_arrival_rates(probas_stationary_true, effective_capacity, job_class_rates, blocking_sizes)
 
     # Blocking states
-    set_of_valid_states = SetOfStates(set_boundaries=blocking_sizes)
-    blocking_states = set_of_valid_states.getStates(at_least_one_dimension_at_boundary=True).intersection(probas_stationary_true.keys())
+    _set_of_valid_states = SetOfStates(set_boundaries=blocking_sizes)
+    blocking_states = sorted(_set_of_valid_states.getStates(at_least_one_dimension_at_boundary=True).intersection(probas_stationary_true.keys()) \
+                             .union([x for x in probas_stationary_true.keys() if np.sum(x) == effective_capacity]))
     n_blocking_states = len(blocking_states)
-    print("Blocking states: {}".format(blocking_states))
+    print("Blocking states ({}): {}".format(n_blocking_states, blocking_states))
 
     # Expected blocking cost
     expected_blocking_cost = -estimate_expected_reward(env_queue, agent, probas_stationary_true)
@@ -433,8 +468,8 @@ def analyze_convergence(capacity=10, job_class_rates=[0.7], service_rates=[1.0],
     expected_costs_uniform_values = [1/n_blocking_states * \
                                      np.sum([blocking_costs[i] * probas_arrival[i] * int(x[i] == blocking_sizes[i] or np.sum(x) >= effective_capacity) for i, _ in enumerate(job_class_rates)])
                                         for x in blocking_states]
-    entropy_blocking = np.sum([-probas_stationary_true[x] * np.log10(probas_stationary_true[x]) for x in blocking_states]) / np.log10(n_blocking_states)
-    entropy_blocking_cost = np.sum([-expected_costs[x] * probas_stationary_true[x] * np.log10(probas_stationary_true[x]) for x in blocking_states]) / \
+    entropy_blocking_rel = np.sum([-probas_stationary_true[x] * np.log10(probas_stationary_true[x]) for x in blocking_states]) / np.log10(n_blocking_states)
+    entropy_blocking_cost_rel = np.sum([-expected_costs[x] * probas_stationary_true[x] * np.log10(probas_stationary_true[x]) for x in blocking_states]) / \
                             (np.sum(expected_costs_uniform_values) * np.log10(n_blocking_states) / n_blocking_states)
 
     print("System: capacity={}, lambdas={}, mus={}, rhos={}, buffer_size_activation={}, # burn-in time steps={}, min # cycles for expectations={}" \
@@ -545,25 +580,25 @@ def analyze_convergence(capacity=10, job_class_rates=[0.7], service_rates=[1.0],
                 # Compute the frequence-based and probability-based coverage of the blocking states where the estimated stationary probability > 0
                 # The probability-based coverage is computed using the TRUE stationary probabilities as (inverse) weights of the observed states
                 # so that we know the observation of the most important states to
-                coverage_blocking_states_mc, coverage_prob_blocking_states_mc, coverage_info_blocking_states_mc, \
+                coverage_prob_blocking_states_mc, coverage_info_blocking_states_mc, \
                     coverage_entropy_blocking_states_mc, coverage_costentropy_blocking_states_mc, \
-                        n_blocking_states_observed_mc = \
+                        contribution_costentropy_blocking_states_mc, contribution_true_costentropy_blocking_states, n_blocking_states_observed_mc = \
                             compute_blocking_state_coverages(probas_stationary_mc, probas_stationary_true, expected_costs)
                 print("\tP(K) by MC: {:.6f}% (#events: {}, coverage of blocking states: {} of {} {:.1f}%, prob-weighted coverage: {:.1f}%, inverse-prob-weighted coverage: {:.1f}%)" \
-                      .format(proba_blocking_mc*100, n_events_mc, n_blocking_states_observed_mc, n_blocking_states, coverage_blocking_states_mc*100, coverage_prob_blocking_states_mc*100, coverage_info_blocking_states_mc*100))
+                      .format(proba_blocking_mc*100, n_events_mc, n_blocking_states_observed_mc, n_blocking_states, n_blocking_states_observed_mc / n_blocking_states *100, coverage_prob_blocking_states_mc*100, coverage_info_blocking_states_mc*100))
 
             # FV results
-            coverage_blocking_states_fv, coverage_prob_blocking_states_fv, coverage_info_blocking_states_fv, \
+            coverage_prob_blocking_states_fv, coverage_info_blocking_states_fv, \
                 coverage_entropy_blocking_states_fv, coverage_costentropy_blocking_states_fv, \
-                    n_blocking_states_observed_fv = \
-                        compute_blocking_state_coverages(probas_stationary_fv, probas_stationary_true, expected_costs)
+                    contribution_costentropy_blocking_states_fv, _, n_blocking_states_observed_fv = \
+                compute_blocking_state_coverages(probas_stationary_fv, probas_stationary_true, expected_costs)
             print("\tP(K) by FV: {:.6f}%, E(T) = {:.1f} (simulation time for E(T) = {:.1f} ({} steps) (complete cycles span {:.1f}%),"
                     " max survival time = {:.1f}, #events = {} (ET) + {} (FV) = {}), coverage of blocking states = {} of {} {:.1f}%, prob-weighted coverage = {:.1f}%, inverse-prob-weighted coverage = {:.1f}%" \
                   .format(  proba_blocking_fv * 100, expected_absorption_time, time_end_simulation_et, n_events_et,
                             time_last_absorption/time_end_simulation_et*100,
                             max_survival_time,
                             n_events_et, n_events_fv_only, n_events_fv,
-                            n_blocking_states_observed_fv, n_blocking_states, coverage_blocking_states_fv*100, coverage_prob_blocking_states_fv*100, coverage_info_blocking_states_fv*100))
+                            n_blocking_states_observed_fv, n_blocking_states, n_blocking_states_observed_fv / n_blocking_states *100, coverage_prob_blocking_states_fv*100, coverage_info_blocking_states_fv*100))
             print("\tTrue P(K): {:.6f}%".format(proba_blocking_true*100))
 
             # Store the results
@@ -583,18 +618,24 @@ def analyze_convergence(capacity=10, job_class_rates=[0.7], service_rates=[1.0],
                                         r,
                                         dict_params_simul['seed'],
                                         # MC results
+                                        [probas_stationary_mc[x] for x in blocking_states],
+                                        [probas_stationary_mc[x] / probas_stationary_true[x] for x in blocking_states],
                                         proba_blocking_mc,
                                         -expected_reward_mc,
                                         time_mc,
                                         expected_return_time_mc,
                                         n_events_mc,
                                         n_return_observations,
-                                        coverage_blocking_states_mc,
+                                        n_blocking_states_observed_mc,
+                                        n_blocking_states_observed_mc / n_blocking_states,
                                         coverage_prob_blocking_states_mc,
                                         coverage_info_blocking_states_mc,
                                         coverage_entropy_blocking_states_mc,
                                         coverage_costentropy_blocking_states_mc,
+                                        contribution_costentropy_blocking_states_mc,
                                         # FV results
+                                        [probas_stationary_fv[x] for x in blocking_states],
+                                        [probas_stationary_fv[x] / probas_stationary_true[x] for x in blocking_states],
                                         proba_blocking_fv,
                                         -expected_reward_fv,
                                         time_end_simulation_fv,
@@ -605,16 +646,23 @@ def analyze_convergence(capacity=10, job_class_rates=[0.7], service_rates=[1.0],
                                         n_events_fv_only,
                                         n_events_fv,
                                         n_survival_curve_observations,
-                                        coverage_blocking_states_fv,
+                                        n_blocking_states_observed_fv,
+                                        n_blocking_states_observed_fv / n_blocking_states,
                                         coverage_prob_blocking_states_fv,
                                         coverage_info_blocking_states_fv,
                                         coverage_entropy_blocking_states_fv,
                                         coverage_costentropy_blocking_states_fv,
+                                        contribution_costentropy_blocking_states_fv,
                                         # True probability
+                                        blocking_states,
+                                        [probas_stationary_true[x] for x in blocking_states],
                                         proba_blocking_true,
+                                        [expected_costs[x] / probas_stationary_true[x] for x in blocking_states],
+                                        [expected_costs[x] for x in blocking_states],
+                                        contribution_true_costentropy_blocking_states,
                                         expected_blocking_cost,
-                                        entropy_blocking,
-                                        entropy_blocking_cost,
+                                        entropy_blocking_rel,
+                                        entropy_blocking_cost_rel,
                                         # Execution times
                                         exec_time_mc,
                                         exec_time_fv,
@@ -744,17 +792,17 @@ def parse_input_parameters(argv):
     # NOTE: The default values of parameters processed by callbacks should define the value in the type of the `dest` option of the callback!
     parser.set_defaults(queue_system="loss-network",
                         method="FV",
-                        analysis_type="N",
-                        values_parameter_analyzed=[80, 160], #[80, 160, 320, 640],
-                        value_parameter_not_analyzed=200,   #500 #100
-                        J_factor=[0.1, 0.6],
-                        use_stationary_probability_for_start_states=True,
-                        burnin_time_steps=20,
+                        analysis_type="T",
+                        values_parameter_analyzed=[64, 128, 256], #[160, 320, 640], #[640, 1280, 2560], #[80, 160, 320, 640], #[1280, 2560], #[80, 160, 320, 640],
+                        value_parameter_not_analyzed=50, #400 #500 #100
+                        J_factor=[0.2, 0.4],    # [0.1, 0.6]
+                        use_stationary_probability_for_start_states=False,
+                        burnin_time_steps=10,
                         min_num_cycles_for_expectations=5,
-                        replications=5,
+                        replications=10,
                         run_mc=True,
                         seed=1313,
-                        save_results=False,
+                        save_results=True,
                         save_with_dt=True,
                         plot=True)
 
@@ -798,13 +846,25 @@ if __name__ == "__main__":
     print(f"Arguments: {args}")
     print("")
 
+    resultsdir = "../../RL-002-QueueBlocking/results/FV/" + options.queue_system
+
     if options.queue_system == "loss-network":
         capacity = 6 #7 #6 #10
         job_class_rates = [1, 5]
-        rhos = [0.8, 0.6] #[0.8, 0.6] #[0.2, 0.1] #[0.5, 0.3]
+        rhos = [0.3, 0.1] #[0.8, 0.6] #[0.2, 0.1] #[0.5, 0.3]
         service_rates = [l / r for l, r in zip(job_class_rates, rhos)]
         blocking_sizes = [4, 6] #[1, 2] #[4, 6] #[5, 7] #[4, 6]
-        blocking_costs = [180, 600] #[2000, 20000] ([0.5, 0.3]) #[180, 600] ([0.8. 0.6]) # Costs computed in run_FVRL.py from p(x), lambdas and rhos
+
+        #************ BLOCKING COSTS ************
+        # See explanation details in run_FVRL.py
+        adjustment_constant_for_large_enough_cost = 20 # This constant is normally > 1 and is adjusted by eye-ball as a function of rhos (e.g. 20 for rhos = [0.5, 0.3], 2 for rhos = [0.2, 0.1]), based on NOT obtaining costs that are too large (but the final decision comes from observing the magnitude of the obtained gradient, which should not be too large nor too small)
+        blocking_costs = [adjustment_constant_for_large_enough_cost * sum(job_class_rates) * 1/r**(capacity - 1) / l for l, r in zip(job_class_rates, rhos)] #[5000, 1000, 100] (for rho_average = 0.8) #[2E5, 1.5E5, 1E5] #[2E5, 1E2, 1E0] #[1E1, 1E2, 1E4] #[20.0, 10.0, 5.0]
+        # Perturb the costs so that we don't get the trivial optimum at e.g. [6, 6, 6]
+        np.random.seed(1)
+        multiplicative_noise_values = [0.5, 2]
+        #blocking_costs = [int(round(c*n)) if c*n > 1 else c*n for c, n in zip(blocking_costs, multiplicative_noise_values)]
+        blocking_costs = [2.5E3, 4.9E6] #[2000, 20000] ([0.5, 0.3]) #[180, 600] ([0.8. 0.6]) # Costs computed in run_FVRL.py from p(x), lambdas and rhos
+        #************ BLOCKING COSTS ************
     else:
         raise ValueError(f"The queue system ({options.queue_system}) is invalid. Valid queue systems are: 'loss-network'")
 
@@ -819,21 +879,21 @@ if __name__ == "__main__":
         N_values = options.values_parameter_analyzed
         T_values = [options.value_parameter_not_analyzed]
         resultsfile_prefix = "estimates_vs_N"
-        params_str = "K={},block={},costs={},lambdas={},rho={},J={},T={},N_values={},ProbStart={}" \
+        params_str = "K={},block={},costs={},lambdas={},rho={},J={},T={},N={},Prob={}" \
             .format(capacity, blocking_sizes, 1 if blocking_costs is None else blocking_costs, job_class_rates, rhos, J_factor, T_values, N_values, options.use_stationary_probability_for_start_states)
     else:
         N_values = [options.value_parameter_not_analyzed]
         T_values = options.values_parameter_analyzed
         resultsfile_prefix = "estimates_vs_T"
-        params_str = "K={},block={},costs={},lambdas={},rho={},J={},N={},T_values={},ProbStart={}" \
-                .format(capacity, blocking_sizes, 1 if blocking_costs is None else blocking_costs, job_class_rates, rhos, J_factor, N_values, T_values, options.use_stationary_probability_for_start_states)
+        params_str = "K={},block={},costs={},lambdas={},rhos={},J={},N={},T={},Prob={}" \
+                .format(capacity, blocking_sizes, 1 if blocking_costs is None else blocking_costs, job_class_rates, rhos, J_factor, N_values, T_values, options.use_stationary_probability_for_start_states) \
+                .replace(" ", "")
 
-    seed = options.seed
     show_execution_parameters(options)
 
     if options.save_results:
         dt_start, stdout_sys, fh_log, logfile, resultsfile, resultsfile_agg, proba_functions_file, figfile = \
-            createLogFileHandleAndResultsFileNames(prefix=resultsfile_prefix, suffix=params_str, use_dt_suffix=options.save_with_dt)
+            createLogFileHandleAndResultsFileNames(subdir=f"FV/{options.queue_system}", prefix=resultsfile_prefix, suffix=params_str, use_dt_suffix=options.save_with_dt)
         # Show the execution parameters again in the log file
         show_execution_parameters(options)
     else:
@@ -850,7 +910,7 @@ if __name__ == "__main__":
                                                 burnin_time_steps=options.burnin_time_steps, min_num_cycles_for_expectations=options.min_num_cycles_for_expectations,
                                                 method_proba_surv=SurvivalProbabilityEstimation.FROM_N_PARTICLES,
                                                 replications=options.replications, run_mc=options.run_mc,
-                                                seed=seed)
+                                                seed=options.seed)
     end_time = timer()
     elapsed_time = end_time - start_time
     print("\n+++ OVERALL execution time: {:.1f} min, {:.1f} hours".format(elapsed_time / 60, elapsed_time / 3600))
@@ -860,35 +920,95 @@ if __name__ == "__main__":
                      {'df': results_agg, 'file': resultsfile_agg}])
 
     # Plot results
+    fontsize = 20
+    show_title = False
+    savefig = False
+    figmaximize = True
     if options.plot:
-        title = (resultsfile if resultsfile is not None else "") + "\n" + params_str + " (exec. time = {:.0f} min)".format(elapsed_time / 60)
+        title = (resultsfile if resultsfile is not None else "") + "\n" + params_str + " (exec. time = {:.0f} min)".format(elapsed_time / 60) if show_title else None
         if options.analysis_type == "N":
             for T in T_values:
                 # Note: the columns defined in parameters `x` and `x2` are grouping variables that define each violin plot
-                axes1 = plot_results_fv_mc(results, x="N", x2="#Cycles(MC)_mean",
-                                           prob_true="Pr(True)",
-                                          xlabel="# particles", xlabel2="# Return Cycles to absorption set",
-                                          ymin=0.0, plot_mc=options.run_mc, splines=False,
-                                          title=title)
-                axes2 = plot_results_fv_mc(results, x="N", x2="#Cycles(MC)_mean",
-                                          prob_mc="ExpCost(MC)", prob_fv="ExpCost(FV)", prob_true="ExpCost",
-                                          xlabel="# particles", xlabel2="# Return Cycles to absorption set", ylabel="Expected cost",
-                                          ymin=0.0, plot_mc=options.run_mc, splines=False,
-                                          title=title)
+                figfile = os.path.join(resultsdir, f"FV-Conv{options.analysis_type}-{params_str}-Proba-Violin-2Xaxis.png") if savefig else None
+                axes1 = plot_results_fv_mc( results, x="N", x2="#Cycles(MC)_mean",
+                                            prob_true="Pr(True)",
+                                            xlabel="# particles", xlabel2="# Return Cycles to absorption set",
+                                            ymin=0.0, plot_mc=options.run_mc, splines=False,
+                                            fontsize=fontsize,
+                                            figfile=figfile,
+                                            figmaximize=figmaximize,
+                                            title=title)
+                figfile = os.path.join(resultsdir, f"FV-Conv{options.analysis_type}-{params_str}-Cost-Violin-2Xaxis.png") if savefig else None
+                axes2 = plot_results_fv_mc( results, x="N", x2="#Cycles(MC)_mean",
+                                            prob_mc="ExpCost(MC)", prob_fv="ExpCost(FV)", prob_true="ExpCost",
+                                            multiplier=1,
+                                            xlabel="# particles", xlabel2="# Return Cycles to absorption set", ylabel="Expected cost",
+                                            ymin=0.0, plot_mc=options.run_mc, splines=False,
+                                            fontsize=fontsize,
+                                            figfile=figfile,
+                                            figmaximize=figmaximize,
+                                            title=title)
         elif options.analysis_type == "T":
             for N in N_values:
                 # Note: the columns defined in parameters `x` and `x2` are grouping variables that define each violin plot
-                axes1 = plot_results_fv_mc(results, x="T", x2="#Cycles(MC)_mean",
-                                           prob_true="Pr(True)",
-                                          xlabel="# arrival events", xlabel2="# Return Cycles to absorption set",
-                                          ymin=0.0, plot_mc=options.run_mc, splines=False,
-                                          title=title)
-                axes2 = plot_results_fv_mc(results, x="T", x2="#Cycles(MC)_mean",
-                                          prob_mc="ExpCost(MC)", prob_fv="ExpCost(FV)", prob_true="ExpCost",
-                                          xlabel="# particles", xlabel2="# Return Cycles to absorption set",
-                                          ymin=0.0, plot_mc=options.run_mc, splines=False,
-                                          title=title)
+                figfile = os.path.join(resultsdir, f"FV-Conv{options.analysis_type}-{params_str}-Proba-Violin-2Xaxis.png") if savefig else None
+                axes1 = plot_results_fv_mc( results, x="T", x2="#Cycles(MC)_mean",
+                                            prob_true="Pr(True)",
+                                            xlabel="# arrival events", xlabel2="# Return Cycles to absorption set",
+                                            ymin=0.0, plot_mc=options.run_mc, splines=False,
+                                            fontsize=fontsize,
+                                            figfile=figfile,
+                                            figmaximize=figmaximize,
+                                            title=title)
+                figfile = os.path.join(resultsdir, f"FV-Conv{options.analysis_type}-{params_str}-Cost-Violin-2Xaxis.png") if savefig else None
+                axes2 = plot_results_fv_mc( results, x="T", x2="#Cycles(MC)_mean",
+                                            prob_mc="ExpCost(MC)", prob_fv="ExpCost(FV)", prob_true="ExpCost",
+                                            multiplier=1,
+                                            xlabel="# arrival events", xlabel2="# Return Cycles to absorption set", ylabel="Expected cost",
+                                            ymin=0.0, plot_mc=options.run_mc, splines=False,
+                                            fontsize=fontsize,
+                                            figfile=figfile,
+                                            figmaximize=figmaximize,
+                                            title=title)
 
     # Close log file, if any was opened
     if fh_log is not None:
         closeLogFile(fh_log, stdout_sys, dt_start)
+
+    if True:
+        # Split relevant columns that are stored as lists into separate columns
+        columns_to_convert = ['BlockingStates', 'Probas(MC)', 'ProbasRatio(MC)', 'Probas(FV)', 'ProbasRatio(FV)', 'Probas(True)', 'ExpectedCosts']
+        all_columns_converted = []
+        for col in columns_to_convert:
+            n_blocking_states = len(results[col].iloc[0])
+            column_names = [col + '_' + str(j) for j in range(1, n_blocking_states+1)]
+            results[column_names] = pd.DataFrame(results[col].tolist(), index=results.index)
+            all_columns_converted += column_names
+        # Compute statistics on the results associated to the largest parameter value (which is more reliable)
+        msk = results.index == max(results.index)
+        results_mean = results[all_columns_converted][msk].agg(['mean'])
+        results_std = results[all_columns_converted][msk].agg(['mad'])
+        results_mean['id'] = 1  # Needed for the transposition
+        results_std['id'] = 1  # Needed for the transposition
+        results_toplot = pd.wide_to_long(results_mean, columns_to_convert, i='id', j='idx', sep="_")
+        results_toplot.reset_index(inplace=True)
+        results_toplot['BlockingStates'] = results['BlockingStates'].iloc[0]
+        results_toplot_std = pd.wide_to_long(results_std, columns_to_convert, i='id', j='idx', sep="_")
+        results_toplot_std.reset_index(inplace=True)
+        results_toplot_std['BlockingStates'] = results['BlockingStates'].iloc[0]
+        # Sort the values by decreasing true contribution to the expected cost
+        results_toplot['ExpectedCostsRel'] = results_toplot['ExpectedCosts'] / results['ExpCost'].iloc[0]
+        results_toplot['ExpectedCosts(MC)'] = results_toplot['ExpectedCosts'] * results_toplot['ProbasRatio(MC)']
+        results_toplot['ExpectedCostsRel(MC)'] = results_toplot['ExpectedCosts(MC)'] / results['ExpCost'].iloc[0]
+        results_toplot['ExpectedCosts(FV)'] = results_toplot['ExpectedCosts'] * results_toplot['ProbasRatio(FV)']
+        results_toplot['ExpectedCostsRel(FV)'] = results_toplot['ExpectedCosts(FV)'] / results['ExpCost'].iloc[0]
+        results_toplot_std['ExpectedCosts(FV)'] = results_toplot['ExpectedCosts'] * results_toplot_std['ProbasRatio(FV)']
+        results_toplot_std['ExpectedCostsRel(FV)'] = results_toplot_std['ExpectedCosts(FV)'] / results['ExpCost'].iloc[0]
+
+        results_toplot.sort_values(['ExpectedCosts'], ascending=False, inplace=True)
+        results_toplot.reset_index(inplace=True)
+        plt.figure()
+        plt.plot(results_toplot['ExpectedCostsRel'], 'b.--')
+        plt.plot(results_toplot['ExpectedCostsRel(FV)'], 'gx-', markersize=10)
+        plt.plot(results_toplot['ExpectedCostsRel(MC)'], 'rx-', markersize=10)
+        plt.gca().set_yscale('log')
