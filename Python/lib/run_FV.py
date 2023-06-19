@@ -7,8 +7,10 @@ Created on Thu Oct 06 12:15:39 2022
 For queues, and when the reward (cost) for blocking is set equal to 1, it estimates the blocking probability.
 """
 
-import runpy
-runpy.run_path('../../setup.py')
+if __name__ == "__main__":
+    # Only run this when running the script, o.w. it may give an error when importing functions if setup.py is not found
+    import runpy
+    runpy.run_path('../../setup.py')
 
 import os
 import sys
@@ -847,14 +849,19 @@ def analyze_absorption_size(nservers=1,
                     est_fv, est_mc
 
 def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None, y2=None, ylabel="Blocking probability (%)", ylabel2=None,
-                       prob_fv="Pr(FV)", prob_mc="Pr(MC)", prob_true="Pr(K)",
+                       prob_fv="Pr(FV)", prob_mc="Pr(MC)", prob_true="Pr(K)", nevents_fv="#Events(FV)", nevents_mc="#Events(MC)",
+                       multiplier=100,
+                       showmeans=False, showmedians=True,
                        splines=True, use_weights_splines=False,
                        smooth_params={'bias': None, 'variability': None, 'mse': None},
                        xmin=None, xmax=None, ymin=None, ymax=None,
                        title=None,
+                       fontsize=12,
                        subset=None,
                        plot_mc=True,
                        plot_violin_only=True,
+                       figsize=(4, 4),
+                       figmaximize=False,
                        figfile=None):
     """
     Plots the estimated blocking probability by number of particles (FV) and average #Cycles (MC)
@@ -863,7 +870,11 @@ def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None, y2=Non
     List of objects containing the axes of the error bar plot and of the violin plot.
 
     Arguments:
-    df_results:
+    df_results: pandas DataFrame
+        Data frame containing the results of the FV estimation analysis, such as convergence as the number of particles N increases
+        or as the number of arrival events T increases.
+        This data frame should contain the columns whose names are indicated in parameters `prob_fv`, `prob_mc`, `prob_true`,
+        `nevents_fv`, nevents_mc`.
 
     x: str
         Name of the variable for the X-axis of the first plot (FV case).
@@ -886,12 +897,42 @@ def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None, y2=Non
     ylabel2: str
         Label for the secondary axis of the last variability plot (plot #6), which is ONLY plotted when y2 is not None.
 
+    prob_fv, prob_mc, prob_true, nevents_fv, nevents_mc: str
+        Names of the columns in `df_results` containing for each experiment (replication) run respectively:
+        - the estimated blocking probability using FV
+        - the estimated blocking probability using MC
+        - the true blocking probability
+        - the number of events observed by the FV simulation used to compute the FV estimator of the blocking probability (these are shown as labels of a secondary axis on the top of the graph)
+        - the number of events observed by the MC simulation used to compute the MC estimator of the blocking probability (these are shown as labels of a secondary axis on the top of the graph)
+
+    multiplier: float
+        Value to multiply the Y-axis values with.
+        default: 100, because we plot the probability as percent.
+
+    showmeans, showmedians: bool
+        Whether to show the mean and/or the median in each violin plot.
+        default: False, True
+
     title: str
         Title to show in the first plot with the estimated values by each method.
         The other subsequent plots have their title already set.
 
     subset: boolean list or numpy array
         Subset of records in `df_results` to include in the plot.
+
+    figsize: tuple
+        Figure size to use (width, height) when plotting just the FV results.
+        The first dimension of the figure size is multiplied by 2 when plotting the MC results as well (so that we have double width).
+        default: (4, 4)
+
+    figmaximize: bool
+        Whether to maximize the figure.
+        This is specially useful when saving or when using large fontsizes in the plots.
+        default: False
+
+    figfile: str
+        Name of the file where the plots should be saved, if requested by a non None value.
+        default: None
 
     Example: This example uses a secondary axis on the last variability plot (#6) to show the complexity of the algorithm
     [Aug-2021]
@@ -911,24 +952,28 @@ def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None, y2=Non
             x2 = x
         xvars = [x, x2]
         yvars = [prob_fv, prob_mc]
-        figsize = (8, 4)
+        figsize = (figsize[0]*2, figsize[1]) # (8, 4)
         subplots = (1, 2)
         nsubplots = 2
         colors = ["green", "red"]
+        remove_yaxis = True         # The Y-axis for the MC plot is not shown because it has the same scale as the Y-axis of the FV plot
+                                    # In this way we save space and we also avoid the Y-axis tick labels from overlapping with the plot to the left!
+                                    # (specially if the probabilities plotted are very small)
     else:
         xvars = [x]
         yvars = [prob_fv]
-        figsize = (4, 4)
+        figsize = figsize #(4, 4)
         subplots = (1, 1)
         nsubplots = 1
         colors = ["green"]
+        remove_yaxis = False
 
     # Variables to plot
     if y2 == "":
         y2 = None
 
     # Axis limits
-    axis_properties = {'limits': {}}
+    axis_properties = {'fontsize': fontsize, 'limits': {}, 'tickmarks': {'x2': [nevents_fv, nevents_mc]}, 'remove_yaxis': remove_yaxis}
     if xmin is not None:
         axis_properties['limits']['xmin'] = xmin
     if xmax is not None:
@@ -973,8 +1018,9 @@ def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None, y2=Non
                                    yref=prob_true, yref_legend="True value",
                                    figsize=figsize, subplots=subplots,
                                    dict_options={'axis': axis_properties,
-                                                 'multipliers': {'x': 1, 'y': 100, 'error': 2},
-                                                 'labels': {'x': [xlabel, xlabel2], 'y': ylabel},
+                                                 'multipliers': {'x': 1, 'y': multiplier, 'error': 2},
+                                                 'labels': {'x': [xlabel, xlabel2], 'y': ylabel,
+                                                            'x2': ["Average number of events"]*2},
                                                  'properties': {'color': "black", 'color_center': colors},
                                                  'texts': {'title': title}})
 
@@ -983,9 +1029,12 @@ def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None, y2=Non
                                 df_results, xvars, yvars,
                                 yref=prob_true, yref_legend="True value",
                                 figsize=figsize, subplots=subplots,
+                                dict_params={'violin': {'showmeans': showmeans,
+                                                        'showmedians': showmedians}},
                                 dict_options={'axis': axis_properties,
-                                              'multipliers': {'x': 1, 'y': 100},
-                                              'labels': {'x': [xlabel, xlabel2], 'y': ylabel},
+                                              'multipliers': {'x': 1, 'y': multiplier},
+                                              'labels': {'x': [xlabel, xlabel2], 'y': ylabel,
+                                                         'x2': ["Average number of events"]*2},
                                               'properties': {'color': colors, 'color_center': colors},
                                               'texts': {'title': title}})
 
@@ -1180,7 +1229,12 @@ def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None, y2=Non
                 legend_txt += [ylabel2]
                 ax.legend(legend_obj, legend_txt)
 
+    if figmaximize:
+        plt.get_current_fig_manager().window.showMaximized()
     if figfile is not None:
+        # Maximize the figure before saving so that we leverage the maximum space and what is shown in the plot does not get clogged (specially if using large fontsizes for paper publication!)
+        # Apparently this only works for the Qt backend
+        # Ref: https://stackoverflow.com/questions/12439588/how-to-maximize-a-plt-show-window-using-python
         plt.gcf().subplots_adjust(left=0.15, top=0.75)
         plt.savefig(figfile)
 
@@ -1189,17 +1243,53 @@ def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None, y2=Non
     else:
         return df2plot, axes_violin[0]
 
-def createLogFileHandleAndResultsFileNames(path="../../RL-002-QueueBlocking", prefix="run", suffix="", use_dt_suffix=True):
+def createLogFileHandleAndResultsFileNames(path="../../RL-002-QueueBlocking", subdir="", prefix="run", suffix="", use_dt_suffix=True, figfile_type="png"):
     """
     Redirects the standard output to a file which is used to log messages.
-    Creates output filenames for raw results and aggregated results.
+    Creates output filenames for raw results and aggregated results whose names are of the form:
+        <prefix><dt_suffix><suffix>_<description>.csv
+    where <description> is EACH of the following:
+    - results
+    - results_agg
+    - proba_functions
+
+    Ex:
+    run20230320_183548_rho=0.7,K=40,N=100,T=200_results.csv
+    run20230320_183548_rho=0.7,K=40,N=100,T=200_results_agg.csv
+
+    The returned filenames include the path which is:
+    <path>/logs/<subdir> for the log file
+    <path>/results/<subdir> for the result files
 
     Ref: https://www.stackabuse.com/writing-to-a-file-with-pythons-print-function/
 
     Arguments:
-    use_dt_suffix: bool
+    path: (opt) str
+        Path to the `logs` and `results` directories where output files are saved.
+
+    subdir: (opt) str
+        Name of subdirectory within the `logs` and the `results` directories where output files are saved.
+        Ex: "single-server", "loss-network"
+        default: ""
+
+    prefix: (opt) str
+        Prefix to use in the root name used in all filenames.
+        default: "run"
+
+    suffix: (opt) str
+        Suffix to use in the root name used in all filenames.
+        default: ""
+
+    use_dt_suffix: (opt) bool
         Whether to add a suffix showing the execution datetime in the filenames.
+        default: True
+
+    figfile_type: (opt) str
+        Type of the file to be used to store figures.
+        Ex: "png", "jpg", etc.
+        default: "png"
     """
+    # Parse input parameters
     if suffix is not None and suffix != "":
         suffix = "_" + suffix
     dt_start = get_current_datetime_as_string()
@@ -1207,12 +1297,22 @@ def createLogFileHandleAndResultsFileNames(path="../../RL-002-QueueBlocking", pr
         dt_suffix = "_" + get_current_datetime_as_string(format="filename")
     else:
         dt_suffix = ""
-    logfile = "{}/logs/{}{}{}.log".format(path, prefix, dt_suffix, suffix)
-    resultsfile = "{}/results/{}{}{}_results.csv".format(path, prefix, dt_suffix, suffix)
-    resultsfile_agg = "{}/results/{}{}{}_results_agg.csv".format(path, prefix, dt_suffix, suffix)
-    proba_functions_file = "{}/results/{}{}{}_proba_functions.csv".format(path, prefix, dt_suffix, suffix)
-    figfile = re.sub("\.[a-z]*$", ".png", resultsfile)
 
+    # Directories
+    logsdir = f"{path}/logs/{subdir}"
+    resultsdir = f"{path}/results/{subdir}"
+
+    # Root name present in all filenames
+    rootname = f"{prefix}{dt_suffix}{suffix}"
+
+    # Filenames (including path)
+    logfile = os.path.join(logsdir, f"{rootname}.log")
+    resultsfile = os.path.join(resultsdir, f"{rootname}_results.csv")
+    resultsfile_agg = os.path.join(resultsdir, f"{rootname}_results_agg.csv")
+    proba_functions_file = os.path.join(resultsdir, f"{rootname}_proba_functions.csv")
+    figfile = re.sub("\.[a-z]*$", f".{figfile_type}", resultsfile)
+
+    # Create the log file
     fh_log = open(logfile, "w")
     print("Log file '{}' has been open for output.".format(logfile))
     print("Started at: {}".format(dt_start))
@@ -1282,13 +1382,13 @@ def show_execution_parameters():
     print("Activation size J={}".format(J))
     if analysis_type == "N":
         print("# particles N={} (rel. errors = {}%)".format(N_values, errors_rel*100))
-        print("# events T={} (actually required for error in E(T_A) ~ {:.1f}%: T={})".format(T_values, error_rel*100, T_required))
+        print("# arrival events T={} (actually required for error in E(T_A) ~ {:.1f}%: T={})".format(T_values, error_rel*100, T_required))
     elif analysis_type == "T":
         print("# arrival events T={} (rel. errors = {}%)".format(T_values, errors_rel*100))
         print("# particles N={} (actually required for error in phi(t,K) ~ {:.1f}%: N={})".format(N_values, error_rel*100, N_required))
     elif analysis_type == "J":
         print("# particles N={} (actually required for error in phi(t,K) ~ {:.1f}%: N={})".format(N, error_rel*100, N_required))
-        print("# events T={} (actually required for error in E(T_A) ~ {:.1f}%: T={})".format(T, error_rel * 100, T_required))
+        print("# arrival events T={} (actually required for error in E(T_A) ~ {:.1f}%: T={})".format(T, error_rel * 100, T_required))
     print("Burn-in time steps BITS={}".format(burnin_time_steps))
     print("Min #cycles to estimate expectations MINCE={}".format(min_num_cycles_for_expectations))
     print("Replications={}".format(replications))
@@ -1310,25 +1410,25 @@ if __name__ == "__main__":
     if len(sys.argv) == 1:    # Only the execution file name is contained in sys.argv
         sys.argv += [1]       # Number of servers in the system to simulate
         sys.argv += ["N"]     # Type of analysis: either "N" for the impact of number of particles, "T" for the impact of the number of events, or "J" for the impact of buffer size
-        sys.argv += [10]      # K: capacity of the system
-        sys.argv += [0.4]     # J factor: factor such that J = round(factor*K)
+        sys.argv += [40]      # K: capacity of the system
+        sys.argv += [0.25]     # J factor: factor such that J = round(factor*K)
         sys.argv += [0.2]     # Either the value of the parameter that is NOT analyzed (according to parameter "type of analysis", e.g. "N" if "type of analysis" = "T") (if value >= 10), or the relative expected error from which such value is computed (if value < 10).
-        sys.argv += [3]       # Number of replications
+        sys.argv += [8]       # Number of replications
         sys.argv += [1]       # Test number to run: only one is accepted
     if len(sys.argv) == nargs_required + counter_opt_args + 1:
         sys.argv += [False]   # Whether to discard the values to analyze that are less than the minimum specified (e.g. N < N_min) or uplift the values to be larger so that we have enough samples to compute estimates
     counter_opt_args += 1
     if len(sys.argv) == nargs_required + counter_opt_args + 1:
-        sys.argv += [10]      # BITS: Burn-in time steps to consider until stationarity can be assumed for the estimation of expectations (e.g. E(T) (return cycle time) in Monte-Carlo, E(T_A) (reabsorption cycle time) in Fleming-Viot)
+        sys.argv += [20]      # BITS: Burn-in time steps to consider until stationarity can be assumed for the estimation of expectations (e.g. E(T) (return cycle time) in Monte-Carlo, E(T_A) (reabsorption cycle time) in Fleming-Viot)
     counter_opt_args += 1
     if len(sys.argv) == nargs_required + counter_opt_args + 1:
         sys.argv += [5]       # MINCE: Minimum number of cycles to be used for the estimation of expectations (e.g. E(T) in Monte-Carlo and E(T_A) in Fleming-Viot)
     counter_opt_args += 1
     if len(sys.argv) == nargs_required + counter_opt_args + 1:
-        sys.argv += [1]       # Number of methods to run: 1 (only FV), 2 (FV & MC)
+        sys.argv += [2]       # Number of methods to run: 1 (only FV), 2 (FV & MC)
     counter_opt_args += 1
     if len(sys.argv) == nargs_required + counter_opt_args + 1:
-        sys.argv += ["nosave"]  # Either "nosave" or anything else for saving the results and log
+        sys.argv += ["save"]  # Either "nosave" or anything else for saving the results and log
     counter_opt_args += 1
     if len(sys.argv) == nargs_required + counter_opt_args + 1:
         sys.argv += [True]   # Whether to use the execution date and time in the output file name containing the results
@@ -1362,7 +1462,8 @@ if __name__ == "__main__":
     T_min = 50; T_max = 10000
     # We define the relative errors to consider which define the values of the parameter to analyze.
     # Errors are defined in *decreasing* order so that the parameter values are in increasing order.
-    errors_rel = np.r_[np.arange(1.0, 0.0, -0.2), 0.1, 0.05]
+    # They should be given as an ARRAY (because they are multiplied directly by 100 when displaying their values)
+    errors_rel = np.array([1, 0.7, 0.5, 0.2, 0.1, 0.05]) #np.r_[np.arange(1.0, 0.0, -0.2), 0.1, 0.05]
 
     other_parameter = float(sys.argv[5])
     discard_smaller_than_minimum = parse_boolean_parameter(sys.argv[8])
@@ -1479,7 +1580,7 @@ if __name__ == "__main__":
 
     if save_results:
         dt_start, stdout_sys, fh_log, logfile, resultsfile, resultsfile_agg, proba_functions_file, figfile = \
-            createLogFileHandleAndResultsFileNames(prefix=resultsfile_prefix, suffix=resultsfile_suffix, use_dt_suffix=save_with_dt)
+            createLogFileHandleAndResultsFileNames(subdir="FV/single-server", prefix=resultsfile_prefix, suffix=resultsfile_suffix, use_dt_suffix=save_with_dt)
         # Show the execution parameters again in the log file
         show_execution_parameters()
     else:
