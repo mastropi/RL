@@ -460,7 +460,7 @@ def compute_blocking_probability_birth_death_process(rhos: list, capacity: int):
     x, dist = stationary_distribution_product_form(C, rhos, func_prod_birthdeath)
     proba_blocking = 0.0
     for xx, dd in zip(x, dist):
-        if sum(xx) == C:
+        if np.sum(xx) == C:
             proba_blocking += dd
 
     return proba_blocking
@@ -529,7 +529,7 @@ def compute_blocking_probability_knapsack_from_probabilities_and_job_arrival_rat
         ## Note: the stationary probabilities reported in probas_stationary do NOT need to be just the probabilities
         ## for the blocking states, but they should include them. In fact, the blocking condition is defined below
         ## when computing the contribution from each job class arrival.
-        total_x = sum(x)
+        total_x = np.sum(x)
 
         # Before multiplying by the stationary probability,
         # we first compute the contribution from each job class to blocking because this depends on whether just one class
@@ -729,7 +729,7 @@ def compute_expected_cost_knapsack(costs: list, capacity: int, rhos: list, lambd
 
     # Iterate on all possible blocking sizes and compute the expected cost for each of them
     expected_costs = dict()
-    Lambda = sum(lambdas)
+    Lambda = np.sum(lambdas)
     for blocking_sizes in all_blocking_sizes:
         # Compute the stationary probabilities for the valid states x in which the Markov chain can be,
         # *given* the currently considered blocking sizes
@@ -743,7 +743,7 @@ def compute_expected_cost_knapsack(costs: list, capacity: int, rhos: list, lambd
             print("\n------- ", blocking_sizes)
         expected_costs[blocking_sizes] = 0.0
         for idx, x in enumerate(states_valid_when_blocking):
-            total_x = sum(x)
+            total_x = np.sum(x)
             if printFlag:
                 print(x, total_x, capacity_blocking, "p=", probas_stationary_when_blocking[idx], end=":    ")
             # Cost of leaving unused servers in the system: number of unused servers, imputed even if there is no blocking
@@ -792,7 +792,7 @@ def compute_stationary_probability_knapsack_when_blocking_by_class(capacity: int
     if blocking_sizes is None:
         blocking_sizes = [capacity] * len(rhos)
 
-    capacity_blocking = min(capacity, sum(blocking_sizes))  # e.g. min(10, sum([2, 1, 0])) = 3 or min(10, sum([8, 8, 6]) = 10
+    capacity_blocking = min(capacity, np.sum(blocking_sizes))  # e.g. min(10, sum([2, 1, 0])) = 3 or min(10, sum([8, 8, 6]) = 10
     states, p = stationary_distribution_product_form(capacity_blocking, rhos, func_prod_knapsack)
     states_valid_when_blocking, probas_stationary_when_blocking = adjust_stationary_probability_knapsack_when_blocking(states, p, blocking_sizes)
 
@@ -835,11 +835,11 @@ def adjust_stationary_probability_knapsack_when_blocking(states, p, blocking_siz
             states_valid_when_blocking += [x]
             probas_stationary_when_blocking += [p[idx] if not np.isnan(p[idx]) else 0.0]
     # Normalize the stationary probabilities of the valid states
-    p_blocking_sum = sum(probas_stationary_when_blocking)
+    p_blocking_sum = np.sum(probas_stationary_when_blocking)
     if p_blocking_sum > 0:
         probas_stationary_when_blocking = [pp / p_blocking_sum for pp in probas_stationary_when_blocking]
-    assert sum(probas_stationary_when_blocking) == 0.0 or np.isclose(sum(probas_stationary_when_blocking), 1.0), \
-        f"Either all adjusted probabilities are 0 or their sum is equal to 1: sum(probas_stationary_when_blocking) = {sum(probas_stationary_when_blocking)}"
+    assert np.sum(probas_stationary_when_blocking) == 0.0 or np.isclose(np.sum(probas_stationary_when_blocking), 1.0), \
+        f"Either all adjusted probabilities are 0 or their sum is equal to 1: sum(probas_stationary_when_blocking) = {np.sum(probas_stationary_when_blocking)}"
 
     return states_valid_when_blocking, probas_stationary_when_blocking
 

@@ -1,3 +1,6 @@
+# DM-2023/05/30
+# To be used to create a conda virtual environment by running:
+#   conda env create -f environment_rl.yml
 name: rl_toulouse
 channels:
   - conda-forge

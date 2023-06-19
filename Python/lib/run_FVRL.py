@@ -602,1111 +602,1112 @@ def show_execution_parameters(options):
     print("Reward function for accepting: {}".format(rewards_accept_by_job_class))
 #------------------- Functions to parse input arguments ---------------------#
 
-#------ Parse input arguments
-options, args = parse_input_parameters(sys.argv[1:])
+if __name__ == "__main__":
+    #------ Parse input arguments
+    options, args = parse_input_parameters(sys.argv[1:])
 
-print("Parsed user arguments:")
-print(f"Options: {options}")
-print(f"Arguments: {args}")
-print("")
+    print("Parsed user arguments:")
+    print(f"Options: {options}")
+    print(f"Arguments: {args}")
+    print("")
 
-# System's characteristics
-if options.queue_system not in ["single-server", "loss-network"]:
-    raise ValueError(f"Invalid queue system: {options.queue_system}")
-if options.queue_system == "single-server":
-    capacity = +np.Inf
-    assert np.isinf(capacity), "The system's capacity must be infinite for single-buffer systems"
-    job_class_rates = [0.7]  # For multi-server: [0.8, 0.7]
-    service_rates = [1.0]
-    blocking_costs = "exponential"
-elif options.queue_system == "loss-network":
-    capacity = 6 #9 #6 #10
-    job_class_rates = [1, 5] #[1, 5, 8] # When lambda = rho: #[0.8, 0.8, 0.8] #[0.1, 0.5, 0.8] #[2, 8, 15] #[20, 80, 150]
-    rhos = [0.5, 0.3] #[0.8, 0.6] #[0.5, 0.3] #[0.6, 0.4]#[0.5]*len(job_class_rates) #[0.8]*len(job_class_rates)
-    service_rates = [l/r for l, r in zip(job_class_rates, rhos)] #[1.0, 1.0, 1.0]
-    #************ BLOCKING COSTS ************
-    # We should consider the following two conditions to define the blocking cost values:
-    # 1) For a fast-enough learning (i.e. < 30 learning steps) WITHOUT THINKING OF PROBABILITY *ESTIMATION*, i.e. assuming we KNOW the stationary probabilities:
-    #   --> Blocking costs should be such that alpha * gradient ~ "reasonable delta(theta) for learning" ~ 1
-    #   If we think that a natural choice of alpha is 1, then we have gradient ~ 1.
-    #   Since the contribution to the gradient for each job class i (i.e. for each theta dimension i) is of the order of
-    #       sum_{blocking states x for class i} p(x) * Qdiff(x)
-    #   we can think that:
-    #       Qdiff(x) ~ "average cost of blocking ANY of the job classes" = sum_{job class i} c(i) * lambda(i) / Lambda
-    #       (note that the average blocking cost depends on both the (stationary) probability of blocking states for each job class AND the job arrival probability, i.e. the arrival job-class rate is ALSO important)
-    #   We can design the system so that:
-    #       c(i) * lambda(i) / Lambda is about the same for all i.
-    #   We can also choose:
-    #       all rhos to be the same, making p(x) ~ same order regardless of the blocking class we are considering.
-    #   Thus the "sum of the blocking states..." mentioned above would be of the order:
-    #       #blocking-states * rho^(K-1) * c * lambda/Lambda
-    #   which should be ~ 1.
-    #   If we suppose that #blocking-states ~ 10, we can choose c(i) * lambda(i)
-    #
-    # 2) For a realistic problem scenario
-    #   --> The cost should be large enough so as to make the revenue of operating the system negative when blocking occurs.
-    #   In fact, in the problem we want to solve we state that we want to discover rare events (prob < 1E-5) which,
-    #   although rare, if they occur they are "very costly".
-    #   This "very costly" condition should be defined on the basis of the revenue (before costs deduction) under normal operation of the system (i.e. without blocking)
-    #   So, if we say that the expected revenue under normal conditions is 1 (or 1000 dollars, whatever) and we want to operate the system
-    #   in a realm where the expected cost < 50% of those expected revenues (revenues before costs deduction).
-    adjustment_constant_for_large_enough_cost = 20 # This constant is normally > 1 and is adjusted by eye-ball as a function of rhos (e.g. 20 for rhos = [0.5, 0.3], 2 for rhos = [0.2, 0.1]), based on NOT obtaining costs that are too large (but the final decision comes from observing the magnitude of the obtained gradient, which should not be too large nor too small)
-    blocking_costs = [adjustment_constant_for_large_enough_cost * sum(job_class_rates) * 1/r**(capacity - 1) / l for l, r in zip(job_class_rates, rhos)] #[5000, 1000, 100] (for rho_average = 0.8) #[2E5, 1.5E5, 1E5] #[2E5, 1E2, 1E0] #[1E1, 1E2, 1E4] #[20.0, 10.0, 5.0]
-    # Perturb the costs so that we don't get the trivial optimum at e.g. [6, 6, 6]
-    np.random.seed(1)
-    multiplicative_noise_values = [0.5, 2]
-    blocking_costs = [int(round(c*n)) if c*n > 1 else c*n for c, n in zip(blocking_costs, multiplicative_noise_values)]
-    blocking_costs = [2000, 20000] #[2000, 20000] ([0.5, 0.3]) #[180, 600] ([0.8. 0.6]) # Costs computed in run_FVRL.py from p(x), lambdas and rhos
-    #************ BLOCKING COSTS ************
-rhos = [l / m for l, m in zip(job_class_rates, service_rates)]
-nservers = len(service_rates)
+    # System's characteristics
+    if options.queue_system not in ["single-server", "loss-network"]:
+        raise ValueError(f"Invalid queue system: {options.queue_system}")
+    if options.queue_system == "single-server":
+        capacity = +np.Inf
+        assert np.isinf(capacity), "The system's capacity must be infinite for single-buffer systems"
+        job_class_rates = [0.7]  # For multi-server: [0.8, 0.7]
+        service_rates = [1.0]
+        blocking_costs = "exponential"
+    elif options.queue_system == "loss-network":
+        capacity = 6 #9 #6 #10
+        job_class_rates = [1, 5] #[1, 5, 8] # When lambda = rho: #[0.8, 0.8, 0.8] #[0.1, 0.5, 0.8] #[2, 8, 15] #[20, 80, 150]
+        rhos = [0.5, 0.3] #[0.8, 0.6] #[0.5, 0.3] #[0.6, 0.4]#[0.5]*len(job_class_rates) #[0.8]*len(job_class_rates)
+        service_rates = [l/r for l, r in zip(job_class_rates, rhos)] #[1.0, 1.0, 1.0]
+        #************ BLOCKING COSTS ************
+        # We should consider the following two conditions to define the blocking cost values:
+        # 1) For a fast-enough learning (i.e. < 30 learning steps) WITHOUT THINKING OF PROBABILITY *ESTIMATION*, i.e. assuming we KNOW the stationary probabilities:
+        #   --> Blocking costs should be such that alpha * gradient ~ "reasonable delta(theta) for learning" ~ 1
+        #   If we think that a natural choice of alpha is 1, then we have gradient ~ 1.
+        #   Since the contribution to the gradient for each job class i (i.e. for each theta dimension i) is of the order of
+        #       sum_{blocking states x for class i} p(x) * Qdiff(x)
+        #   we can think that:
+        #       Qdiff(x) ~ "average cost of blocking ANY of the job classes" = sum_{job class i} c(i) * lambda(i) / Lambda
+        #       (note that the average blocking cost depends on both the (stationary) probability of blocking states for each job class AND the job arrival probability, i.e. the arrival job-class rate is ALSO important)
+        #   We can design the system so that:
+        #       c(i) * lambda(i) / Lambda is about the same for all i.
+        #   We can also choose:
+        #       all rhos to be the same, making p(x) ~ same order regardless of the blocking class we are considering.
+        #   Thus the "sum of the blocking states..." mentioned above would be of the order:
+        #       #blocking-states * rho^(K-1) * c * lambda/Lambda
+        #   which should be ~ 1.
+        #   If we suppose that #blocking-states ~ 10, we can choose c(i) * lambda(i)
+        #
+        # 2) For a realistic problem scenario
+        #   --> The cost should be large enough so as to make the revenue of operating the system negative when blocking occurs.
+        #   In fact, in the problem we want to solve we state that we want to discover rare events (prob < 1E-5) which,
+        #   although rare, if they occur they are "very costly".
+        #   This "very costly" condition should be defined on the basis of the revenue (before costs deduction) under normal operation of the system (i.e. without blocking)
+        #   So, if we say that the expected revenue under normal conditions is 1 (or 1000 dollars, whatever) and we want to operate the system
+        #   in a realm where the expected cost < 50% of those expected revenues (revenues before costs deduction).
+        adjustment_constant_for_large_enough_cost = 20 # This constant is normally > 1 and is adjusted by eye-ball as a function of rhos (e.g. 20 for rhos = [0.5, 0.3], 2 for rhos = [0.2, 0.1]), based on NOT obtaining costs that are too large (but the final decision comes from observing the magnitude of the obtained gradient, which should not be too large nor too small)
+        blocking_costs = [adjustment_constant_for_large_enough_cost * sum(job_class_rates) * 1/r**(capacity - 1) / l for l, r in zip(job_class_rates, rhos)] #[5000, 1000, 100] (for rho_average = 0.8) #[2E5, 1.5E5, 1E5] #[2E5, 1E2, 1E0] #[1E1, 1E2, 1E4] #[20.0, 10.0, 5.0]
+        # Perturb the costs so that we don't get the trivial optimum at e.g. [6, 6, 6]
+        np.random.seed(1)
+        multiplicative_noise_values = [0.5, 2]
+        blocking_costs = [int(round(c*n)) if c*n > 1 else c*n for c, n in zip(blocking_costs, multiplicative_noise_values)]
+        blocking_costs = [2000, 20000] #[2000, 20000] ([0.5, 0.3]) #[180, 600] ([0.8. 0.6]) # Costs computed in run_FVRL.py from p(x), lambdas and rhos
+        #************ BLOCKING COSTS ************
+    rhos = [l / m for l, m in zip(job_class_rates, service_rates)]
+    nservers = len(service_rates)
 
-learning_method = LearningMethod.FV if options.method == "FV" else LearningMethod.MC
-# NOTE: In unidimensional theta parameters and in blocking by buffer size systems, we the value of theta_ref from the input arguments of the script.
-# In those cases the theta_ref value defines the reference value of the reward function that is an exponential function of the buffer size.
-# In multidimensional theta parameters with blocking by job class (as opposed to blocking by buffer size)
-# the theta_ref has no meaning, therefore we set it to a list of NaN, where the list has length equal to the dimension of the theta parameter to estimate.
-if options.queue_system == "single-server":
-    theta_ref = options.theta_ref
-    # The values of N (#particles) and T (#arrival events) are computed from the expected relative errors wished for the estimation of E(T_A) and Phi(t)
-    N = np.nan; T = np.nan
-    error_rel_phi = options.error_rel_phi
-    error_rel_et = options.error_rel_et
-    use_stationary_probability_for_start_states = None
-elif options.queue_system == "loss-network":
-    theta_ref = [np.nan]*len(job_class_rates)
-    # Values of N (#particles) and T (#arrival events) to use for the simulation used to estimate stationary probabilities
-    if learning_method.name == "MC":
-        # This is ONLY used when there is no benchmark file or if it does not exist
-        # (in order to run an ad-hoc MC learning that is not linked to a previously run FV learning)
-        N = 1; T = options.T #200 * 1000 #50 * 100 #30 * 50 #500 * 100 #1000 * 100
+    learning_method = LearningMethod.FV if options.method == "FV" else LearningMethod.MC
+    # NOTE: In unidimensional theta parameters and in blocking by buffer size systems, we the value of theta_ref from the input arguments of the script.
+    # In those cases the theta_ref value defines the reference value of the reward function that is an exponential function of the buffer size.
+    # In multidimensional theta parameters with blocking by job class (as opposed to blocking by buffer size)
+    # the theta_ref has no meaning, therefore we set it to a list of NaN, where the list has length equal to the dimension of the theta parameter to estimate.
+    if options.queue_system == "single-server":
+        theta_ref = options.theta_ref
+        # The values of N (#particles) and T (#arrival events) are computed from the expected relative errors wished for the estimation of E(T_A) and Phi(t)
+        N = np.nan; T = np.nan
+        error_rel_phi = options.error_rel_phi
+        error_rel_et = options.error_rel_et
         use_stationary_probability_for_start_states = None
-    else:
-        N = options.N; T = options.T #N = 100; T = 100, N = 500; T = 100
-        use_stationary_probability_for_start_states = options.use_stationary_probability_for_start_states
-    error_rel_phi = np.nan
-    error_rel_et = np.nan
-
-# Reward functions
-rewards_accept_by_job_class = [0.0] * len(job_class_rates)
-if options.queue_system == "single-server":
-    reward_func = rewardOnJobRejection_ExponentialCost
-    reward_func_params = dict({'buffer_size_ref': np.nan})   # The value of this parameter will be set at each simulation iteration run in the below LOOP
-    policy_assignment_probabilities = [[1.0]] # For multi-server: [[0.5, 0.5, 0.0], [0.0, 0.5, 0.5]] )
-elif options.queue_system == "loss-network":
-    reward_func = rewardOnJobRejection_ByClass
-    reward_func_params = dict({'reward_at_rejection': [-c for c in blocking_costs]})   # None
-    policy_assignment_probabilities = None
-#------ Parse input arguments
-
-# Look for memory leaks
-# Ref: https://pythonspeed.com/fil/docs/fil/other-tools.html (from the Fil profiler which also seems interesting)
-# Doc: https://docs.python.org/3/library/tracemalloc.html
-# tracemalloc.start()
-
-start_time_all = timer()
-
-# ---------------------- OUTPUT FILES --------------------#
-# create_log = False;    # In case we need to override the parameter received as argument to the script
-logsdir = "../../RL-002-QueueBlocking/logs/RL/" + options.queue_system
-# save_results = True;   # In case we need to override the parameter received as argument to the script
-resultsdir = "../../RL-002-QueueBlocking/results/RL/" + options.queue_system
-# ---------------------- OUTPUT FILES --------------------#
-
-# -- Parameters defining the environment, policies, learners and agent
-# Learning parameters for the value function V
-gamma = 1.0
-
-# Learning parameters for the policy P
-if learning_method == LearningMethod.FV:
-    learnerV = LeaFV
-    benchmark_file = None
-    plot_trajectories = False
-    symbol = 'g-'
-else:
-    # Monte-Carlo learner is the default
-    learnerV = LeaMC
-    if options.benchmark_datetime is not None and options.benchmark_datetime != "" or options.benchmark_filename == "":
-        # Build the benchmark filename from the datetime given and the input parameters
-        # Notes:
-        # - In the call below, we enclose some parameters in brackets because when the benchmark file is saved
-        # those parameters are stored as a LIST of different values tried in the filename
-        # (see below when calling this function using e.g. theta_ref_values, etc.).
-        # - NOT all parameters are used to generate the string of parameters. The parameters that are used depend
-        # on the queue system (e.g. "single-server" or "loss-network").
-        params_str = generate_parameter_string_for_filename(# System parameters
-                                                            options.queue_system, capacity, blocking_costs, rhos,
-                                                            # Policy parameters
-                                                            [theta_ref], options.theta_true, [options.theta_start],
-                                                            # Learning parameters
-                                                            [options.J_factor], [[options.N, options.T]], error_rel_phi, error_rel_et, options.use_stationary_probability_for_start_states)
-        if options.benchmark_datetime != "":
-            sep = "_" + options.benchmark_datetime + "_"
+    elif options.queue_system == "loss-network":
+        theta_ref = [np.nan]*len(job_class_rates)
+        # Values of N (#particles) and T (#arrival events) to use for the simulation used to estimate stationary probabilities
+        if learning_method.name == "MC":
+            # This is ONLY used when there is no benchmark file or if it does not exist
+            # (in order to run an ad-hoc MC learning that is not linked to a previously run FV learning)
+            N = 1; T = options.T #200 * 1000 #50 * 100 #30 * 50 #500 * 100 #1000 * 100
+            use_stationary_probability_for_start_states = None
         else:
-            sep = "_"
-        benchmark_file = os.path.join(resultsdir, "SimulatorQueue" + sep + params_str.replace("MC", "FV") + ".csv")
-    elif options.benchmark_filename is not None:
-        benchmark_file = os.path.join(os.path.abspath(resultsdir), options.benchmark_filename) # "SimulatorQueue_20221018_161552-K0=24-K=35-J=0.3-E1.0,0.2-AlphaConst(B=5)_seed1313.csv") #"benchmark_fv.csv")
-    if options.benchmark_filename is not None and not os.path.exists(benchmark_file):
-        warnings.warn("Benchmark file '{}' does not exist. The Monte-Carlo simulation will run without any reference to a previously run Fleming-Viot simulation".format(benchmark_file))
-        benchmark_file = None
-    plot_trajectories = False
-    symbol = 'r-'
-fixed_window = False
-alpha_start = 1.0  # / t_sim  # Use `/ t_sim` when using update of theta at each simulation step (i.e. LeaPolicyGradient.learn_update_theta_at_each_time_step() is called instead of LeaPolicyGradient.learn_update_theta_at_end_of_episode())
-adjust_alpha = True  # True
-func_adjust_alpha = np.float # np.sqrt
-min_time_to_update_alpha = 0  # int(t_learn / 3)
-alpha_min = 0.01  # 0.1
+            N = options.N; T = options.T #N = 100; T = 100, N = 500; T = 100
+            use_stationary_probability_for_start_states = options.use_stationary_probability_for_start_states
+        error_rel_phi = np.nan
+        error_rel_et = np.nan
 
-show_execution_parameters(options)
-#raise KeyboardInterrupt
+    # Reward functions
+    rewards_accept_by_job_class = [0.0] * len(job_class_rates)
+    if options.queue_system == "single-server":
+        reward_func = rewardOnJobRejection_ExponentialCost
+        reward_func_params = dict({'buffer_size_ref': np.nan})   # The value of this parameter will be set at each simulation iteration run in the below LOOP
+        policy_assignment_probabilities = [[1.0]] # For multi-server: [[0.5, 0.5, 0.0], [0.0, 0.5, 0.5]] )
+    elif options.queue_system == "loss-network":
+        reward_func = rewardOnJobRejection_ByClass
+        reward_func_params = dict({'reward_at_rejection': [-c for c in blocking_costs]})   # None
+        policy_assignment_probabilities = None
+    #------ Parse input arguments
 
-# Create the environment and learning agent
-dict_params = dict({'environment': {'queue_system': options.queue_system,
-                                    'capacity': capacity,
-                                    'nservers': nservers,
-                                    'job_class_rates': job_class_rates,
-                                    'service_rates': service_rates,
-                                    'policy_assignment_probabilities': policy_assignment_probabilities,
-                                    'reward_func': reward_func,
-                                    'reward_func_params': reward_func_params,
-                                    'rewards_accept_by_job_class': rewards_accept_by_job_class,
-                                    },
-                    'policy': {'parameterized_policy': PolQueueTwoActionsLinearStep if is_scalar(options.theta_start) else [PolQueueTwoActionsLinearStep for _ in options.theta_start],
-                               'theta': 1.0 if is_scalar(options.theta_start) else [1.0 for _ in options.theta_start]  # This value is dummy in the sense that it will be updated below
-                               },
-                    'learners': {'V': {'learner': learnerV,
-                                       'params': {'gamma': 1}
-                                       },
-                                 'Q': {'learner': None,
-                                       'params': {}},
-                                 'P': {'learner': LeaPolicyGradient,
-                                       'params': {'alpha_start': alpha_start,
-                                                  'adjust_alpha': adjust_alpha,
-                                                  'func_adjust_alpha': func_adjust_alpha,
-                                                  'min_time_to_update_alpha': min_time_to_update_alpha,
-                                                  'alpha_min': alpha_min,
-                                                  'fixed_window': fixed_window,
-                                                  'clipping': options.clipping,
-                                                  'clipping_value': options.clipping_value,
-                                                  }
-                                       }
-                                 },
-                    'agent': {'agent': AgeQueue}
-                    })
-env_queue, rhos, agent = define_queue_environment_and_agent(dict_params)
+    # Look for memory leaks
+    # Ref: https://pythonspeed.com/fil/docs/fil/other-tools.html (from the Fil profiler which also seems interesting)
+    # Doc: https://docs.python.org/3/library/tracemalloc.html
+    # tracemalloc.start()
 
-# -- Simulation parameters that are common for ALL parameter settings
-# t_learn is now defined as input parameter passed to the script
-# 2022/01/14: t_learn = 10 times the optimum true theta so that we are supposed to reach that optimum under the REINFORCE_TRUE learning mode with decreasing alpha
-# t_learn = 800 #100 #800 #100 #198 - 91 #198 #250 #50
-verbose = False
-dict_params_learning = dict({'mode': LearningMode.REINFORCE_TRUE, 't_learn': options.t_learn})
-dict_params_info = dict({'plot': False, 'log': False})
+    start_time_all = timer()
 
-# Simulator object
-simul = SimulatorQueue(env_queue, agent, dict_params_learning,
-                       log=options.create_log, save=options.save_results, logsdir=logsdir, resultsdir=resultsdir, debug=False)
+    # ---------------------- OUTPUT FILES --------------------#
+    # create_log = False;    # In case we need to override the parameter received as argument to the script
+    logsdir = "../../RL-002-QueueBlocking/logs/RL/" + options.queue_system
+    # save_results = True;   # In case we need to override the parameter received as argument to the script
+    resultsdir = "../../RL-002-QueueBlocking/results/RL/" + options.queue_system
+    # ---------------------- OUTPUT FILES --------------------#
 
-if options.save_results:
-    # Initialize the file to store the results (e.g. add the column names of the file)
-    # NOTE: We initialize the results file at the very beginning and close it at the very end of the simulation run
-    # so that all cases and replications run will be output to the same file! This is convenient as then we will have
-    # all results for all cases and replications gathered together.
-    simul.initialize_results_file()
+    # -- Parameters defining the environment, policies, learners and agent
+    # Learning parameters for the value function V
+    gamma = 1.0
 
-#-------- Define all the values on which simulations will be run
-# The simulations is run, either from parameters defined by a benchmark file or from parameters defined below.
-# Define the parameters on which the non-benchmark simulation will be run
-# These are defined here (even if we are running the simulation based on a benchmark file)
-# because these parameter values are used when naming the results file for both situations.
-
-# In the non-benchmark case (i.e. FVRL) we run the learning method on each set of parameters defined here
-# for as many replications defined as input argument.
-# When defining the theta values we specify the blocking size K and we subtract 1. Recall that K = ceil(theta+1)
-# So, if we want K = 35, we can set theta somewhere between 33+ and 34, so we define e.g. theta = 34.9 - 1
-# Note that the list of theta values can contain more than one value, in which case a simulation will be run for each of them
-theta_ref_values = [theta_ref]  # [24.0 - 1] #[20.0 - 1]  # [32.0-1, 34.0-1, 36.0-1] #[10.0-1, 15.0-1, 20.0-1, 25.0-1, 30.0-1]  # 39.0
-theta_start_values = [options.theta_start]  # [34.9 - 1] #[30.0 - 1] #[20.0 - 1, 25.0 - 1]
-# theta_ref_values = np.linspace(start=1.0, stop=20.0, num=20)
-J_factor_values = [options.J_factor]  # [0.2, 0.3, 0.5]  # [0.2, 0.3, 0.5, 0.7]
-NT_exponents = [0]  # [-2, -1, 0, 1]  # Exponents to consider for different N and T values as in exp(exponent)*N0, where N0 is the reference value to achieve a pre-specified relative error
-NT_values = [[N, T]] if not np.isnan(N) and not np.isnan(T) else None
-# Accepted relative errors for the estimation of Phi and of E(T_A)
-# They define respectively the number of particles N and the number of arrival events T to observe in each learning step.
-error_rel_phi = [error_rel_phi]  # [1.0] #0.5
-error_rel_et = [error_rel_et]  # [1.0] #0.5
-#-------- Define all the values on which simulations will be run
-
-# Run the simulations
-if benchmark_file is None:
-    # Output variables of the simulation
-    case = 0
-    ncases = len(theta_ref_values) * len(theta_start_values) * len(J_factor_values) * len(NT_exponents)
-    theta_opt_values = [[np.nan] * options.replications] * ncases   # List of optimum theta values achieved by the learning algorithm for each replication in each parameter setting
-    K_opt_values = [[np.nan] * options.replications] * ncases       # List of optimum K values where deterministic blocking occurs
-    cost_opt_values = [[np.nan] * options.replications] * ncases    # List of optimum costs found by the learning algorithm
-    for i, theta_ref in enumerate(theta_ref_values):
-        # For single-buffer systems, store the value of theta_ref as parameter of the reward function because,
-        # in those systems, we use it in the next line to compute the TRUE optimum blocking sizes and the optimum expected cost.
-        # In no-buffer systems (e.g. loss networks), the TRUE optimum blocking sizes and optimum expected cost are computed by brute force,
-        # i.e. by trying all possible blocking sizes that can be tried on the system.
-        if simul.getEnv().getBufferType() == BufferType.SINGLE:
-            dict_params['environment']['reward_func_params']['buffer_size_ref'] = theta_ref
-
-        # Compute the optimum blocking sizes and its respective expected cost, i.e. the one this optimization process optimizes
-        K_true, cost_true, cost_mean, cost_max = compute_optimum_blocking_sizes_and_expected_cost(simul, dict_params['environment'])
-        # Update the theta_true value based on the K_true just computed.
-        # We pick ONE of the K-values as in general, although NOT commonly, the optimum K-values (i.e. the array of optimum K)
-        # may be more than one array, which is the case when the optimum expected cost is achieved at several different values.
-        # NOTE: This calculation of theta_true ASSUMES that the parameterized policy is a linear step function of the buffer size or job class occupancy
-        theta_true = [[k-1 for k in K] for K in K_true][0]   # e.g. K_true = [[0, 2, 6]] => theta_true = [-1, 1, 5]
-            ## NOTE THAT A THETA VALUE CAN BE NEGATIVE UP TO -1 (so that we can have a deterministic blocking size equal to K = 0)!
-            ## HOWEVER: what happens in FVRL, when we have to choose J < K... and K = 0...?
-            ## TODO: (2023/03/01) Check if theta can be 0 when using FVRL to learn theta (because of what I just wrote in the line above)
-
-        print("\nSimulating with {} learning on a queue environment with reference theta {} and optimum theta (one less the deterministic blocking size) = {}..." \
-            .format(learning_method.name, theta_ref, theta_true))
-
-        # Set the number of learning steps to double the true theta value
-        # Use this ONLY when looking at the MC method and running the learning process on several true theta values
-        # to see when the MC method breaks... i.e. when it can no longer learn the optimum theta.
-        # The logic behind this choice is that we start at theta = 1.0 and we expect to have a +1 change in
-        # theta at every learning step, so we would expect to reach the optimum value after about a number of
-        # learning steps equal to the true theta value... so in the end, to give some margin, we allow for as
-        # many learning steps as twice the value of true theta parameter.
-        #simul.dict_params_learning['t_learn'] = int(theta_true*2)
-
-        # Iterate on the different start theta parameters tried
-        for theta_start in theta_start_values:
-            # Initial deterministic blocking sizes
-            K = get_deterministic_blocking_boundaries(simul.agent, theta_start)
-            for j, J_factor in enumerate(J_factor_values):
-                if NT_values is None:
-                    # We compute the N, T values from the expected relative errors for the estimation of Phi and E(T_A) given as parameters
-                    N_min = 50; N_max = 500
-                    T_min = 100; T_max = 5000
-                    NT_values = [compute_nparticles_and_narrivals_for_fv_process(rhos, K, J_factor, error_rel_phi=err1, error_rel_et=err2)
-                                 for err1, err2 in zip(error_rel_phi, error_rel_et)]
-                    if learning_method.name == "MC":
-                        # If we are running Monte-Carlo with no benchmark file, set the number of particles to 1 and the # arrival events T to N*T
-                        # where N and T come from the FV-equivalent simulation.
-                        NT_values = [[1, N*T] for N, T in NT_values]
-                        N_min = 1
-                else:
-                    N_min = 1; N_max = np.Inf
-                    T_min = 1; T_max = np.Inf
-                for idx_case, (exponent, (N, T)) in enumerate(zip(NT_exponents, NT_values)):
-                    print("NT values obtained for the requested expected relative errors (BEFORE BOUNDING):")
-                    print("err(phi) = {:.3f}% => N = {}".format(error_rel_phi[idx_case] * 100, NT_values[idx_case][0]))
-                    print("err(E(T)) = {:.3f}% => T = {}".format(error_rel_et[idx_case] * 100, NT_values[idx_case][1]))
-                    # Lower bound for N and T so that we don't have too little particles!
-                    N = min( max(N_min, N), N_max )
-                    T = min( max(T_min, T), T_max )
-                    # Set the parameters for this run
-                    case += 1
-                    t_sim = T  # This is used just for the title of plots done below (after the loop)
-                    dict_params_simul = {
-                        'theta_true': theta_true,
-                        'theta_start': theta_start,
-                        'buffer_size_activation_factor': J_factor,
-                        'nparticles': N,
-                        't_sim': T,     # This is the number of arrival events, NOT the number of time steps to use in the estimation of E(T_A) in FV
-                                        # In fact, the calculation of T on the basis of the expected relative error in the estimation of E(T_A) gives
-                                        # us the number of arrival events (see details in my small dark green notebook in entry dated 06-Nov-2022).
-                        'use_stationary_probability_for_start_states': use_stationary_probability_for_start_states,
-                        'burnin_time_steps': options.burnin_time_steps,
-                        'min_num_cycles_for_expectations': options.min_num_cycles_for_expectations,
-                    }
-                    dict_info = {'case': case,
-                                 'ncases': ncases,
-                                 'learning_method': learning_method.name,
-                                 'exponent': exponent,
-                                 'rhos': rhos,
-                                 'K_true': K_true,
-                                 'cost_true': cost_true,
-                                 'K': K,
-                                 'error_rel_phi': error_rel_phi[idx_case],
-                                 'error_rel_et': error_rel_et[idx_case],
-                                 'N_min': N_min,
-                                 'N_max': N_max,
-                                 'T_min': T_min,
-                                 'T_max': T_max,
-                                 'alpha_start': alpha_start,
-                                 'adjust_alpha': adjust_alpha,
-                                 'min_time_to_update_alpha': min_time_to_update_alpha,
-                                 'alpha_min': alpha_min
-                                 }
-
-                    # Run the simulation process
-                    theta_opt_values[case-1], K_opt_values[case-1], cost_opt_values[case-1], \
-                        df_learning = run_simulation_policy_learning(simul,
-                                                                     options.replications,
-                                                                     dict_params_simul,
-                                                                     dict_info,
-                                                                     dict_params_info=dict_params_info,
-                                                                     seed=options.seed,
-                                                                     verbose=verbose)
-else:
-    # Read the execution parameters from the benchmark file
-    print("Reading benchmark data containing the parameter settings from file\n{}".format(benchmark_file))
-    benchmark = pd.read_csv(benchmark_file, sep="|")
-    # Filter the benchmark data so that we end up with one record per analyzed group
-    # (so that we can extract the parameter settings for each analyzed group -e.g. N, T, J values, etc.)
-    benchmark_groups = benchmark[(benchmark['t_learn'] == 1) & (benchmark['replication'] == 1)]
-    ncases = benchmark_groups.shape[0]
-    theta_true_values = array_of_objects(ncases, value=np.nan) #np.nan * np.ones(ncases) ((2023/03/12) use np.ones() if the array_of_objects() doesn't work when dealing with scalar values of theta_true (e.g. single-server case)
-    theta_opt_values = [[np.nan] * options.replications] * ncases   # List of optimum theta values achieved by the learning algorithm for each replication in each parameter setting
-    K_opt_values = [[np.nan] * options.replications] * ncases       # List of optimum K values where deterministic blocking occurs
-    cost_opt_values = [[np.nan] * options.replications] * ncases    # List of optimum costs found by the learning algorithm
-    idx_case = -1
-    NT_values = []
-    for i in range(ncases):
-        idx_case += 1
-        case = benchmark_groups['case'].iloc[i]
-        replications = len(np.unique(benchmark[benchmark['case'] == case]['replication']))
-
-        # Simulation and estimation parameters that are common for all replications of the current case (group) analyzed
-        theta_true = benchmark_groups['theta_true'].iloc[i]
-        theta_true = convert_str_to_list_of_type(theta_true, type=int)  # Recall that the true theta values are always integer
-        if simul.getEnv().getBufferType() == BufferType.SINGLE:
-            # Store the value of theta_true as parameter of the reward function because we use it below to compute the optimum blocking sizes and optimum expected cost
-            dict_params['environment']['reward_func_params']['buffer_size_ref'] = theta_true
-        theta_true_values[idx_case] = theta_true
-        theta_start = benchmark_groups['theta'].iloc[i]
-        theta_start = convert_str_to_list_of_type(theta_start)
-        J_factor = benchmark_groups['J/K'].iloc[i]
-        J_factor = convert_str_to_list_of_type(J_factor)
-        exponent = benchmark_groups['exponent'].iloc[i]
-        N = benchmark_groups['N'].iloc[i] if learning_method.name == "FV" else 1
-        T = benchmark_groups['T'].iloc[i]   # See NOTE below for entry 't_sim' of dict_params_simul dictionary about the meaning of T which is NOT the simulation time that will be used for the MC learning when a benchmark is available!
-        NT_values += [[N, T]]
-        burnin_time_steps = benchmark_groups['burnin_time_steps'].iloc[i]
-        min_num_cycles_for_expectations = benchmark_groups['min_n_cycles'].iloc[i]
-
-        K_true, cost_true, cost_mean, cost_max = compute_optimum_blocking_sizes_and_expected_cost(simul, dict_params['environment'])
-        K = get_deterministic_blocking_boundaries(simul.agent, theta_start)
-
-        dict_params_simul = {
-            'theta_true': theta_true,
-            'theta_start': theta_start,
-            'buffer_size_activation_factor': J_factor,
-            'nparticles': 1,
-            't_sim': T,         # This is the 'T' parameter used at the first learning step when running FVRL, and is used only as informational purposes inside
-                                # run_simulation_policy_learning() and in the output filename in order for the user to know the characteristics of the case we are currently comparing with MC learning.
-                                # It is NOT the simulation time that will be used for MC learning, as this is defined by the actual #events observed during FVRL.
-            'burnin_time_steps': burnin_time_steps,
-            'min_num_cycles_for_expectations': min_num_cycles_for_expectations,
-        }
-        dict_info = {'case': case,
-                     'ncases': ncases,
-                     'learning_method': learning_method.name,
-                     'exponent': exponent,
-                     'rhos': rhos,
-                     'K_true': K_true,
-                     'cost_true': cost_true,
-                     'K': K,
-                     'error_rel_phi': 0.0,
-                     'error_rel_et': 0.0,
-                     'alpha_start': alpha_start,
-                     'adjust_alpha': adjust_alpha,
-                     'min_time_to_update_alpha': min_time_to_update_alpha,
-                     'alpha_min': alpha_min
-                     }
-
-        # Run the simulation process
-        theta_opt_values[idx_case], K_opt_values[idx_case], cost_opt_values[idx_case], \
-            df_learning = run_simulation_policy_learning(simul,
-                                                         replications,
-                                                         dict_params_simul,
-                                                         dict_info,
-                                                         dict_params_info=dict_params_info,
-                                                         params_read_from_benchmark_file=True,
-                                                         benchmark=benchmark,
-                                                         seed=None,
-                                                         verbose=verbose)
-
-    # Update the value of t_sim so that it stores the number of events observed at each learning step
-    # in the *last* MC learning run (i.e. the last replication of the last analyzed case)
-    # which is shown in the plots below that e.g. show the evolution of the theta parameter as is being learned.
-    t_sim = df_learning['n_events_mc'].iloc[-1] + df_learning['n_events_fv'].iloc[-1]
-
-print("Optimum theta, K's and expected costs found by the learning algorithm for each replication and each parameter setting:\n{}" \
-      .format(pd.DataFrame({'theta_opt': theta_opt_values, 'K_opt': K_opt_values, 'expected cost': cost_opt_values}, index=range(1, ncases+1))))
-print(f"True optima:\nK_opt = {K_true[0]}, expected cost = {cost_true}")
-
-# Closes the object (e.g. any log and result files are closed)
-simul.close()
-
-if options.save_results:
+    # Learning parameters for the policy P
     if learning_method == LearningMethod.FV:
-        # Make a copy of the results benchmark file to be used for a Monte-Carlo learner
-        # so that we can easily refer to it in case we run the MC learning right after the FVRL learner
-        # (to this end, the name used for the filename here should be the same as the default filename defined
-        # as input argument for the variable benchmark_filename).
-        shutil.copyfile(simul.results_file, os.path.join(os.path.dirname(simul.results_file), "benchmark_fv.csv"))
-    # Build the string containing the parameter values that should be included in the output filename
-    params_str = generate_parameter_string_for_filename(options.queue_system,
-                                                        capacity,
-                                                        blocking_costs,
-                                                        rhos,
-                                                        theta_ref_values,
-                                                        theta_true,
-                                                        theta_start_values,
-                                                        J_factor_values,
-                                                        NT_values,
-                                                        error_rel_phi,
-                                                        error_rel_et,
-                                                        use_stationary_probability_for_start_states)
-    # Now rename the results file to include the parameter settings so that it's easier to identify when analyzing results.
-    results_dir = os.path.dirname(simul.results_file)
-    results_filename = os.path.basename(simul.results_file)
-    if options.save_with_dt:
-        # This allows keeping the datetime string in the filename
-        lookfor = ".csv"
+        learnerV = LeaFV
+        benchmark_file = None
+        plot_trajectories = False
+        symbol = 'g-'
     else:
-        # This allows removing the datetime string from the filename
-        lookfor = "_"
-    # Add the parameter settings to the filename, either keeping or removing the execution datetime string
-    results_filename_with_parameters = results_filename[:str.index(results_filename, lookfor)] + "_" + params_str + ".csv"
-    # Rename and if the file with the new file already exists, delete it first
-    results_file_with_parameters = os.path.join(results_dir, results_filename_with_parameters)
-    if os.path.exists(results_file_with_parameters):
-       os.remove(results_file_with_parameters)
-    os.rename(simul.results_file, results_file_with_parameters)
-
-    # Add the parameter settings to the log file as well
-    log_dir = os.path.dirname(simul.logfile)
-    log_filename = os.path.basename(simul.logfile)
-    log_filename_with_parameters = results_filename[:str.index(log_filename, ".log")] + "_" + params_str + ".log"
-    log_file_with_parameters = os.path.join(log_dir, log_filename_with_parameters)
-    os.rename(simul.logfile, log_file_with_parameters)
-else:
-    params_str = "-- No output file --"
-
-if len(theta_ref_values) == 1:
-    if PLOT_GRADIENT and env_queue.getBufferType == BufferType.SINGLE:
-        # Save the estimation of G(t) for the last learning step to a file
-        # file_results_G = "G.csv"
-        # pd.DataFrame({'G': simul.G}).to_csv(file_results_G)
-
-        # -- Plot theta and the gradient of the value function
-        SET_YLIM = False
-
-        # Estimated value function
-        ax, line_est = plotting.plot_colormap(df_learning['theta'], -df_learning['V'], cmap_name="Blues")
-
-        # True value function
-        # Block size for each theta, defined by the fact that K-1 is between theta and theta+1 => K = ceil(theta+1)
-        Ks = [np.int(np.ceil(np.squeeze(t) + 1)) for t in df_learning['theta']]
-        # Blocking probability = Pr(K)
-        p_stationary = [compute_blocking_probability_birth_death_process(rhos, K) for K in Ks]
-        pblock_K = np.array([p[-1] for p in p_stationary])
-        pblock_Km1 = np.array([p[-2] for p in p_stationary])
-        # Blocking probability adjusted for different jump rates between K-1 and K (affected by the non-deterministic probability of blocking at K-1)
-        pblock_K_adj = np.squeeze([pK * (1 - (K-1-theta)) for K, theta, pK in zip(Ks, df_learning['theta'], pblock_K)])
-        pblock_Km1_adj = pblock_Km1  # np.squeeze([pKm1 + pK - pK_adj for pKm1, pK, pK_adj in zip(pblock_Km1, pblock_K, pblock_K_adj)])
-        # assert np.allclose(pblock_K + pblock_Km1, pblock_K_adj + pblock_Km1_adj)
-        # True value function: expected cost at K which is the buffer size where blocking most likely occurs...
-        # (in fact, if theta is say 3.1, the probability of blocking at 4 (= K-1) is small and most blocking
-        # will occur at K; if theta is 3.9, the probability of blocking at 4 (= K-1)
-        # i.e. we compute at K-1 and NOT at K because we want to compare the true value function
-        # with the *estimated* value function when the policy starts blocking at buffer size = theta
-        # Vtrue = np.array([rewardOnJobRejection_ExponentialCost(env_queue, (K, None), Actions.REJECT, (K, None)) * pK for K, pK in zip(Ks, pblock_K)])
-
-        # ACTUAL true value function, which takes into account the probability of blocking at K-1 as well, where the policy is non-deterministic (for non-integer theta)
-        # The problem with this approach is that the stationary distribution of the chain is NOT the same as with chain
-        # where rejection ONLY occurs at s=K... in fact, the transition probabilities to s=K and to s=K-1 when the
-        # initial state is s=K-1 are affected by the non-deterministic probability of blocking when s=K-1...
-        # Qualitatively, the stationary probability of K would be reduced and the stationary probability of K-1 would be
-        # increased by the same amount.
-        Vtrue = np.array(
-            [rewardOnJobRejection_ExponentialCost(env_queue, (K, None), Actions.REJECT, (K, None)) * pK +
-             rewardOnJobRejection_ExponentialCost(env_queue, (K-1, None), Actions.REJECT, (K-1, None)) * (K-1-theta) * pKm1
-             for K, theta, pK, pKm1 in zip(Ks, df_learning['theta'], pblock_K_adj, pblock_Km1_adj)])
-
-        # True grad(V)
-        # Ref: my hand-written notes in Letter-size block of paper with my notes on the general environment - agent setup
-        gradVtrue = [-rewardOnJobRejection_ExponentialCost(env_queue, (K-1, None), Actions.REJECT, (K-1, None)) * pKm1
-                        for K, pKm1 in zip(Ks, pblock_Km1)]
-
-        ord = np.argsort(Ks)
-        # NOTE that we plot the true value function at K-1 (not at K) because K-1 is the value that is closest to theta
-        # and we are plotting the *estimated* value function vs. theta (NOT vs. K).
-        # line_true, = ax.plot([Ks[o]-1 for o in ord], [-Vtrue[o] for o in ord], 'g.-', linewidth=5, markersize=20)
-        line_true, = ax.plot(df_learning['theta'], -Vtrue, 'gx-')  # Use when computing the ACTUAL true Value function V, which also depends on theta!
-        ax.set_xlim((0, ax.get_xlim()[1]))
-        ax.set_yscale('log')
-        # ax.set_ylim((0, 10))
-        ax.set_xlabel('theta (for estimated functions) / K-1 for true value function')
-        ax.set_ylabel('Value function V (cost)')
-        ax.legend([line_est, line_true], ['Estimated V', 'True V'], loc='upper left')
-        ax2 = ax.twinx()
-        ax2, line_grad = plotting.plot_colormap(df_learning['theta'], -df_learning['gradV'], cmap_name="Reds", ax=ax2)
-        line_gradtrue, = ax2.plot([Ks[o] - 1 for o in ord], [-gradVtrue[o] for o in ord], 'k.-', linewidth=3, markersize=12)
-        ax2.axhline(0, color="lightgray")
-        ax2.set_ylabel('grad(V)')
-        if SET_YLIM:
-            ax2.set_ylim((-5, 5))  # Note: grad(V) is expected to be -1 or +1...
-        ax2.legend([line_grad, line_gradtrue], ['grad(V)', 'True grad(V)'], loc='upper right')
-        # Note that the optimum true K is computed as round(theta+1) and NOT as ceil(theta+1) because we want that e.g. K = 4 when theta = 3.1
-        # (instead of having K = 5, which is too large, considering the blocking probability is *almost* 1 at 4).
-        if is_scalar(t_sim):
-            title = "Value function and its gradient as a function of theta and K. " + \
-                    "Optimum K = {}, Theta start = {}, t_sim = {:.0f}".format(np.round(theta_true+1), theta_start, t_sim)
-        else:
-            title = "Value function and its gradient as a function of theta and K. " + \
-                    "Optimum K = {}, Theta start = {}".format(np.round(theta_true+1), theta_start)
-        plt.title(title)
-
-        # grad(V) vs. V
-        plt.figure()
-        plt.plot(-df_learning['V'], -df_learning['gradV'], 'k.')
-        ax = plt.gca()
-        ax.axhline(0, color="lightgray")
-        ax.axvline(0, color="lightgray")
-        ax.set_xscale('log')
-        # ax.set_xlim((-1, 1))
-        if SET_YLIM:
-            ax.set_ylim((-1, 1))
-        ax.set_xlabel('Value function V (cost)')
-        ax.set_ylabel('grad(V)')
-
-    # Plot evolution of theta (for the last analyzed case)
-    title = "{}".format(params_str) + "\nMethod: {}, Optimum Theta = {}, Theta start = {}, Theta final = {}, K_final = {}, Expected cost = {}" \
-                                      "\nN = {}, T = {:.0f} J = {} Stat.Prob.StartStates = {}" \
-                                      "\nK = {}, Blocking Costs = {}, lambdas = {}, rhos = {}" \
-                .format(learning_method.name, theta_true, theta_start, np.mean(theta_opt_values[-1]), np.mean(K_opt_values[-1]), np.mean(cost_opt_values[-1]),
-                        N, t_sim, J_factor_values, use_stationary_probability_for_start_states,
-                        capacity, [int(c) for c in blocking_costs], job_class_rates, rhos)
-    if options.plot and plot_trajectories:
-        "In the case of the MC learner, plot the theta-learning trajectory as well as rewards received during learning"
-        assert N == 1, "The simulated system has only one particle (N={})".format(N)
-        # NOTE: (2021/11/27) I verified that the values of learnerP.getRewards() for the last learning step
-        # are the same to those for learnerV.getRewards() (which only stores the values for the LAST learning step)
-        plt.figure()
-        # Times at which the trajectory of states is recorded
-        times = simul.getLearnerP().getTimes()
-        times_unique = np.unique(times)
-        assert len(times_unique) == len(simul.getLearnerP().getThetas()) - 1, \
-                "The number of unique learning times ({}) is equal to the number of theta updates ({})".format(
-                len(times_unique), len(simul.getLearnerP().getThetas()) - 1)
-        ## Note that we subtract 1 to the number of learning thetas because the first theta stored in the policy object is the initial theta before any update
-        plt.plot(np.r_[0.0, times_unique], simul.getLearnerP().getThetas(), 'b.-')
-        ## We add 0.0 as the first time to plot because the first theta value stored in the policy is the initial theta with which the simulation started
-        ax = plt.gca()
-        # Add vertical lines signalling the BEGINNING of each queue simulation
-        times_sim_starts = range(0, options.t_learn * (t_sim + 1), t_sim + 1)
-        for t in times_sim_starts:
-            ax.axvline(t, color='lightgray', linestyle='dashed')
-
-        # Buffer sizes
-        buffer_sizes = [env_queue.getBufferSizeFromState(s) for s in simul.getLearnerP().getSetBoundaries()]
-        ax.plot(times, buffer_sizes, 'g.', markersize=3)
-        # Mark the start of each queue simulation
-        # DM-2021/11/28: No longer feasible (or easy to do) because the states are recorded twice for the same time step (namely at the first DEATH after a BIRTH event)
-        ax.plot(times_sim_starts, [buffer_sizes[t] for t in times_sim_starts], 'gx')
-        ax.set_xlabel("time step")
-        ax.set_ylabel("theta")
-        ax.yaxis.set_major_locator(MaxNLocator(integer=True))
-
-        # Secondary plot showing the rewards received
-        ax2 = ax.twinx()
-        ax2.plot(times, -np.array(simul.getLearnerP().getRewards()), 'r-', alpha=0.3)
-        # Highlight with points the non-zero rewards
-        ax2.plot(times, [-r if r != 0.0 else None for r in simul.getLearnerP().getRewards()], 'r.')
-        ax2.set_ylabel("Reward")
-        ax2.set_yscale('log')
-        plt.title(title)
-    elif options.plot:
-        # Plot the evolutoin of theta and of the expected cost
-        axes = plt.figure().subplots(1, 2)
-        ax_params, ax_objective = axes
-
-        # Plot of parameters evolution
-        lines = []
-        reflines = []
-        legend_lines = []
-        legend_reflines = []
-        expected_lines = []
-        expected_reflines = []
-        for r in df_learning['replication'].value_counts().index:
-            mask = df_learning['replication'] == r
-            thetas = df_learning['theta'][mask]
-            expected_rewards = df_learning['expected_reward_true'][mask]
-            # Linestyles are sorted so that more continuous line means larger rho
-            linestyles_ref = ['-', '--', '-.', ':']
-            # Rank of rhos in reversed order (largest value has highest rank so that the largest value gets the most solid line in the plot)
-            rank_rhos = list(reversed(np.array(rhos).argsort().argsort()))
-            linestyles = [linestyles_ref[r] for r in rank_rhos]
-            for i in range(len(theta_true)):
-                linestyle_i = linestyles[i % len(linestyles)]
-                lines_i = ax_params.plot([t[i] for t in thetas], symbol, linestyle=linestyle_i)
-                if r == 1:
-                    refline_i = ax_params.axhline(theta_true[i], color='black', linestyle=linestyle_i)
-                    lines += lines_i
-                    reflines += [refline_i]
-                    legend_lines += ["Theta_" + str(i+1)]
-                    legend_reflines += ["True Optimum Theta_" + str(i + 1)]
-
-            # Plot of objective function evolution (i.e. the expected cost)
-            expected_line = ax_objective.plot(-np.array(expected_rewards), symbol, linestyle='-')
-            if r == 1:
-                refline = ax_objective.axhline(cost_true, color="black", linestyle="-")
-                expected_lines += expected_line
-                expected_reflines += [refline]
-
-        # Finalize plots
-        ax_params.set_xlabel("Learning step")
-        ax_params.set_ylabel("theta(s)")
-        ylim = ax_params.get_ylim()
-        ax_params.set_ylim((-1.1, np.max([ylim[1], np.max(np.squeeze(K_true))])))    # lower limit = -1.1 because -1 is the minimum possible theta value that is allowed for the linear step parameterized policy
-        ax_params.xaxis.set_major_locator(MaxNLocator(integer=True))
-        #ax_params.set_aspect(1 / ax_params.get_data_ratio())
-        ax_params.legend(lines + reflines, legend_lines + legend_reflines)
-        #ax_params.set_title("Replications for delta(Q) = 100")
-
-        ax_objective.set_xlabel("Learning step")
-        ax_objective.set_ylabel("Expected cost")
-        ax_objective.set_title("Expected cost range: [{:.1f}, {:.1f}], average = {:.1f}".format(cost_true, cost_max, cost_mean))
-        # ax_objective.set_yscale('log')
-        ax_objective.xaxis.set_major_locator(MaxNLocator(integer=True))
-        # ax_objective.set_aspect(1 / ax_objective.get_data_ratio())
-        ax_objective.legend(expected_lines + expected_reflines, ["Expected cost for the estimated optimum theta(s)", "Optimum expected cost"])
-
-        plt.suptitle(title)
-
-end_time_all = timer()
-elapsed_time_all = end_time_all - start_time_all
-print("\n+++ OVERALL execution time: {:.1f} min, {:.1f} hours".format(elapsed_time_all / 60, elapsed_time_all / 3600))
-
-tracemalloc.stop()
-
-if PLOT_RESULTS_TOGETHER:
-    """
-    The plots of the FVRL and the respective MC execution are plotted on the same graph
-    HOWEVER, THIS IS EXPECTED TO BE RUN MANUALLY AND BY PIECES, AS THE INPUT FILES CONTAINING THE RESULTS TO PLOT
-    NEED TO BE CHANGED EVERY TIME WE WANT TO PLOT THE RESULTS.
-    """
-    # Read the results from files and plot the MC and FV results on the same graph
-    resultsdir = "E:/Daniel/Projects/PhD-RL-Toulouse/projects/RL-002-QueueBlocking/results/RL/" + options.queue_system
-
-    theta_true = 19
-    # IGA results starting at a larger theta value: theta_start = 39, N = 800, t_sim = 800
-    N = 800
-    t_sim = N
-    results_file_fv = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20211230_001050.csv")
-    results_file_mc = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220101_145647.csv")
-
-    # IGA results starting at a small theta value: theta_start = 1, N = 400, t_sim = 400
-    N = 400
-    t_sim = N
-    results_file_fv = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220102_093954.csv")
-    results_file_mc = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220102_173144.csv")
-
-    results_fv = pd.read_csv(results_file_fv)
-    results_mc = pd.read_csv(results_file_mc)
-
-    t_learn = results_fv.shape[0]
-    n_events_mean = np.mean(results_fv['nevents_mc'] + results_fv['nevents_proba'])
-    assert n_events_mean == np.mean(results_mc['nevents_mc'])
-
-    plt.figure()
-    plt.plot(results_fv['theta'], 'g.-')
-    plt.plot(results_mc['theta'], 'r.-')
-    ax = plt.gca()
-    ax.set_xlabel('Learning step')
-    ax.set_ylabel('theta')
-    ax.set_ylim((0, 40))
-    ax.axhline(theta_true, color='black', linestyle='dashed')
-    ax.yaxis.set_major_locator(MaxNLocator(integer=True))
-    ax.set_aspect(1 / ax.get_data_ratio())
-    ax.legend(["Fleming-Viot", "Monte-Carlo", "Optimum theta"])
-    plt.title("# particles N = {}, Simulation time for P(T>t) and E(T_A) = {}, # learning steps = {}, Average number of events per learning step = {:.0f}" \
-                .format(N, t_sim, t_learn, n_events_mean))
-
-if PLOT_RESULTS_PAPER:
-    """
-    The plots to show in the paper are generated.
-    HOWEVER, THIS IS EXPECTED TO BE RUN MANUALLY AND BY PIECES, AS THE INPUT FILES CONTAINING THE RESULTS TO PLOT
-    NEED TO BE CHANGED EVERY TIME WE WANT TO PLOT THE RESULTS.
-    """
-    # Read the results from files and plot the MC and FV results on the same graph
-    resultsdir = "E:/Daniel/Projects/PhD-RL-Toulouse/projects/RL-002-QueueBlocking/results/RL/" + options.queue_system
-
-    # -- Alpha adaptive
-    # results_file_fv = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220121_031815_FV-J=0.5K-K=20.csv")
-    # results_file_mc = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220121_150307_MC-J=0.5K-K=20.csv")
-    results_file_fv = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_025611_FV-K=20-J=0.5K.csv")
-    results_file_mc = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_131828_MC-K=20-J=0.5K.csv")
-    K_true = 19  # Optimum blocking size, the integer-valued K at which the expected cost is minimum
-
-    results_file_fv = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220124_040745_FV-K=30-J=0.5K.csv")
-    results_file_mc = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_161121_MC-K=30-J=0.5K.csv")
-    K_true = 19  # Optimum blocking size, the integer-valued K at which the expected cost is minimum
-
-    # All exponents, K0 = 9
-    # 2022/02/01 --> But this is wrong because of the error about the true theta, which was not updated to the one we set!
-    results_file_fv = os.path.join(os.path.abspath(resultsdir),
-                                   "SimulatorQueue_20220125_025523_FV-K0=40-K=10-AlphaAdaptive.csv")
-    results_file_mc = os.path.join(os.path.abspath(resultsdir), ".csv")
-    K_true = 9  # Optimum blocking size, the integer-valued K at which the expected cost is minimum
-
-    # -- Alpha constant
-    # J/K = 0.5, K0 = 19
-    results_file_fv = os.path.join(os.path.abspath(resultsdir),
-                                   "SimulatorQueue_20220125_121657_FV-K0=20-K=30-J=0.5-AlphaConst.csv")
-    results_file_mc = os.path.join(os.path.abspath(resultsdir),
-                                   "SimulatorQueue_20220125_123300_MC-K0=20-K=30-J=0.5-AlphaConst.csv")
-    K_true = 19  # Optimum blocking size, the integer-valued K at which the expected cost is minimum
-
-    # results_file_fv = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_122700_FV-K0=10-K=30-J=0.5-AlphaConst.csv")
-    # results_file_mc = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_124237_MC-K0=10-K=30-J=0.5-AlphaConst.csv")
-
-    results_file_fv = os.path.join(os.path.abspath(resultsdir),
-                                   "SimulatorQueue_20220125_180636_FV-K0=30-K=5-J=0.5-AlphaConst.csv")
-    results_file_mc = os.path.join(os.path.abspath(resultsdir),
-                                   "SimulatorQueue_20220125_181511_MC-K0=30-K=5-J=0.5-AlphaConst.csv")
-    K_true = 24  # Optimum blocking size, the integer-valued K at which the expected cost is minimum
-
-    # J/K = 0.5, K0 = 9
-    results_file_fv1 = os.path.join(os.path.abspath(resultsdir),
-                                    "SimulatorQueue_20220130_105312_FV-K0=30-K=10-J=0.5-E1.5-AlphaConst(B=5).csv")
-    results_file_mc1 = os.path.join(os.path.abspath(resultsdir),
-                                    "SimulatorQueue_20220130_112523_MC-K0=30-K=10-J=0.5-E1.5-AlphaConst(B=5).csv")
-    K_true = 9  # Optimum blocking size, the integer-valued K at which the expected cost is minimum
-
-    # J/K = 0.5, K0 = 19
-    results_file_fv1 = os.path.join(os.path.abspath(resultsdir),
-                                    "SimulatorQueue_20220125_190830_FV-K0=20-K=30-J=0.5-E1.5-AlphaConst(B=5).csv")
-    results_file_mc1 = os.path.join(os.path.abspath(resultsdir),
-                                    "SimulatorQueue_20220125_192242_MC-K0=20-K=30-J=0.5-E1.5-AlphaConst(B=5).csv")
-    results_file_fv2 = os.path.join(os.path.abspath(resultsdir),
-                                    "SimulatorQueue_20220125_193204_FV-K0=20-K=30-J=0.5-E1.0-AlphaConst(B=5).csv")
-    results_file_mc2 = os.path.join(os.path.abspath(resultsdir),
-                                    "SimulatorQueue_20220125_200859_MC-K0=20-K=30-J=0.5-E1.0-AlphaConst(B=5).csv")
-    results_file_fv3 = os.path.join(os.path.abspath(resultsdir), ".csv")
-    results_file_mc3 = os.path.join(os.path.abspath(resultsdir), ".csv")
-    K_true = 19  # Optimum blocking size, the integer-valued K at which the expected cost is minimum.
-    # NOTE: K_true is NOT exactly theta_true + 1 because theta_true defines xref (if I recall correctly)
-    # and the minimum of the expected cost function of K is not always xref + 1, although it is close to it.
-
-    # J/K = 0.3, K0 = 24
-    # 2022/10/14: A little after the submission to AISTATS-2023 where we were not able to add these plots
-    results_file_fv1 = os.path.join(os.path.abspath(resultsdir),
-                                    "SimulatorQueue_20221013_190126-K0=24-K=35-J=0.3-E1.0-AlphaConst(B=5)_seed1317.csv")
-    results_file_mc1 = os.path.join(os.path.abspath(resultsdir),
-                                    "SimulatorQueue_20221014_082933_MC-K0=24-K=35-J=0.3-E1.0-AlphaConst(B=5)_seed1317.csv")
-    results_file_fv2 = os.path.join(os.path.abspath(resultsdir),
-                                    "SimulatorQueue_20221013_190211-K0=24-K=35-J=0.3-E1.0-AlphaConst(B=5)_seed1717.csv")
-    results_file_mc2 = os.path.join(os.path.abspath(resultsdir),
-                                    "SimulatorQueue_20221014_083614_MC-K0=24-K=35-J=0.3-E1.0-AlphaConst(B=5)_seed1717.csv")
-    K_true = 24  # Optimum blocking size, the integer-valued K at which the expected cost is minimum
-
-    # 2022/10/18: After adding a BURN-IN time (essential for a correct estimation of E(T_A)), with estimation even when the burn-in period CANNOT be satisfied
-    # Errors 20% for N and 20% for T
-    results_file_fv1 = os.path.join(os.path.abspath(resultsdir),
-                                    "SimulatorQueue_20221017_224403-K0=24-K=35-J=0.3-E0.2-AlphaConst(B=5)_seed1717.csv")
-    results_file_mc1 = os.path.join(os.path.abspath(resultsdir),
-                                    "SimulatorQueue_20221018_114036_MC-K0=24-K=35-J=0.3-E0.2-AlphaConst(B=5)_seed1717.csv")
-    results_file_fv2 = os.path.join(os.path.abspath(resultsdir),
-                                    "SimulatorQueue_20221017_224434-K0=24-K=35-J=0.3-E0.2-AlphaConst(B=5)_seed1317.csv")
-    results_file_mc2 = os.path.join(os.path.abspath(resultsdir),
-                                    "SimulatorQueue_20221018_114509_MC-K0=24-K=35-J=0.3-E0.2-AlphaConst(B=5)_seed1317.csv")
-    results_file_fv3 = os.path.join(os.path.abspath(resultsdir),
-                                    "SimulatorQueue_20221017_224514-K0=24-K=35-J=0.3-E0.2-AlphaConst(B=5)_seed1313.csv")
-    results_file_mc3 = os.path.join(os.path.abspath(resultsdir),
-                                    "SimulatorQueue_20221018_114531_MC-K0=24-K=35-J=0.3-E0.2-AlphaConst(B=5)_seed1313.csv")
-    K_true = 24  # Optimum blocking size, the integer-valued K at which the expected cost is minimum
-
-    # 2022/10/18: After adding a BURN-IN time (essential for a correct estimation of E(T_A)), with estimation ONLY when the burn-in period can be satisfied
-    # Errors 100% for N and 100% for T
-    results_file_fv1 = os.path.join(os.path.abspath(resultsdir),
-                                    "SimulatorQueue_20221018_124948-K0=24-K=35-J=0.3-E1.0-AlphaConst(B=5)_seed1717.csv")
-    results_file_mc1 = os.path.join(os.path.abspath(resultsdir),
-                                    "SimulatorQueue_20221018_145520_MC-K0=24-K=35-J=0.3-E1.0-AlphaConst(B=5)_seed1717.csv")
-    results_file_fv2 = os.path.join(os.path.abspath(resultsdir),
-                                    "SimulatorQueue_20221018_125247-K0=24-K=35-J=0.3-E1.0-AlphaConst(B=5)_seed1317.csv")
-    results_file_mc2 = os.path.join(os.path.abspath(resultsdir),
-                                    "SimulatorQueue_20221018_145552_MC-K0=24-K=35-J=0.3-E1.0-AlphaConst(B=5)_seed1317.csv")
-    results_file_fv3 = os.path.join(os.path.abspath(resultsdir),
-                                    "SimulatorQueue_20221018_125307-K0=24-K=35-J=0.3-E1.0-AlphaConst(B=5)_seed1313.csv")
-    results_file_mc3 = os.path.join(os.path.abspath(resultsdir),
-                                    "SimulatorQueue_20221018_145614_MC-K0=24-K=35-J=0.3-E1.0-AlphaConst(B=5)_seed1313.csv")
-    K_true = 24  # Optimum blocking size, the integer-valued K at which the expected cost is minimum
-
-    # 2022/10/18: After adding a BURN-IN time (essential for a correct estimation of E(T_A)), with estimation ONLY when the burn-in period can be satisfied
-    # Errors 100% for N and 20% for T
-    results_file_fv1 = os.path.join(os.path.abspath(resultsdir),
-                                    "SimulatorQueue_20221018_161511-K0=24-K=35-J=0.3-E1.0,0.2-AlphaConst(B=5)_seed1717.csv")
-    results_file_mc1 = os.path.join(os.path.abspath(resultsdir),
-                                    "SimulatorQueue_20221019_175002_MC-K0=24-K=35-J=0.3-E1.0,0.2-AlphaConst(B=5)_seed1717.csv")
-    results_file_fv2 = os.path.join(os.path.abspath(resultsdir),
-                                    "SimulatorQueue_20221018_161526-K0=24-K=35-J=0.3-E1.0,0.2-AlphaConst(B=5)_seed1317.csv")
-    results_file_mc2 = os.path.join(os.path.abspath(resultsdir),
-                                    "SimulatorQueue_20221019_175022_MC-K0=24-K=35-J=0.3-E1.0,0.2-AlphaConst(B=5)_seed1317.csv")
-    results_file_fv3 = os.path.join(os.path.abspath(resultsdir),
-                                    "SimulatorQueue_20221018_161552-K0=24-K=35-J=0.3-E1.0,0.2-AlphaConst(B=5)_seed1313.csv")
-    results_file_mc3 = os.path.join(os.path.abspath(resultsdir),
-                                    "SimulatorQueue_20221019_175034_MC-K0=24-K=35-J=0.3-E1.0,0.2-AlphaConst(B=5)_seed1313.csv")
-    K_true = 24  # Optimum blocking size, the integer-valued K at which the expected cost is minimum
-
-    # J/K = 0.5, K0 = 24
-    # These only simulates for 300 learning steps
-    # results_file_fv1 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_233513_FV-K0=25-K=35-J=0.5-E1.5-AlphaConst(B=5).csv")
-    # results_file_mc1 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220126_004040_MC-K0=25-K=35-J=0.5-E1.5-AlphaConst(B=5).csv")
-    # results_file_fv2 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_235038_FV-K0=25-K=35-J=0.5-E1.0-AlphaConst(B=5).csv")
-    # results_file_mc2 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220126_032802_MC-K0=25-K=35-J=0.5-E1.0-AlphaConst(B=5).csv")
-
-    results_file_fv1 = os.path.join(os.path.abspath(resultsdir),
-                                    "SimulatorQueue_20220126_033710_FV-K0=25-K=35-J=0.5-E1.5-AlphaConst(B=5).csv")
-    results_file_mc1 = os.path.join(os.path.abspath(resultsdir),
-                                    "SimulatorQueue_20220126_133352_MC-K0=25-K=35-K=0.5-E1.5-AlphaConst(B=5).csv")
-    results_file_fv2 = os.path.join(os.path.abspath(resultsdir),
-                                    "SimulatorQueue_20220126_033755_FV-K0=25-K=35-J=0.5-E1.0-AlphaConst(B=5).csv")
-    results_file_mc2 = os.path.join(os.path.abspath(resultsdir),
-                                    "SimulatorQueue_20220126_133409_MC-K0=25-K=35-K=0.5-E1.0-AlphaConst(B=5).csv")
-    results_file_fv3 = os.path.join(os.path.abspath(resultsdir),
-                                    "SimulatorQueue_20220125_235230_FV-K0=25-K=35-J=0.5-E0.5-AlphaConst(B=5).csv")
-    results_file_mc3 = os.path.join(os.path.abspath(resultsdir),
-                                    "SimulatorQueue_20220127_022406_MC-K0=25-K=35-K=0.5-E0.5-AlphaConst(B=5).csv")
-    K_true = 24  # Optimum blocking size, the integer-valued K at which the expected cost is minimum
-
-    # J/K = 0.3, K0 = 19
-    # These only simulates for 300 learning steps
-    # results_file_fv1 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_235638_FV-K0=20-K=30-J=0.3-E1.5-AlphaConst(B=5).csv")
-    # results_file_mc1 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220126_004118_MC-K0=20-K=30-J=0.3-E1.5-AlphaConst(B=5).csv")
-    # results_file_fv2 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_235608_FV-K0=20-K=30-J=0.3-E1.0-AlphaConst(B=5).csv")
-    # results_file_mc2 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220126_023359_MC-K0=20-K=30-J=0.3-E1.0-AlphaConst(B=5).csv")
-
-    results_file_fv1 = os.path.join(os.path.abspath(resultsdir),
-                                    "SimulatorQueue_20220126_135652_FV-K0=20-K=30-J=0.3-E1.5-AlphaConst(B=5).csv")
-    results_file_mc1 = os.path.join(os.path.abspath(resultsdir),
-                                    "SimulatorQueue_20220126_193306_MC-K0=20-K=30-J=0.3-E1.5-AlphaConst(B=5).csv")
-    results_file_fv2 = os.path.join(os.path.abspath(resultsdir),
-                                    "SimulatorQueue_20220126_135719_FV-K0=20-K=30-J=0.3-E1.0-AlphaConst(B=5).csv")
-    results_file_fv2 = os.path.join(os.path.abspath(resultsdir),
-                                    "SimulatorQueue_20220519_165242_FV-K0=20-K=30-J=0.3-E0.5-AlphaConst(B=5)_seed1313.csv")
-    results_file_mc2 = os.path.join(os.path.abspath(resultsdir),
-                                    "SimulatorQueue_20220126_193252_MC-K0=20-K=30-J=0.3-E1.0-AlphaConst(B=5).csv")
-    results_file_mc2 = os.path.join(os.path.abspath(resultsdir),
-                                    "SimulatorQueue_20220519_203152_MC-K0=20-K=30-J=0.3-E0.5-AlphaConst(B=5)_seed1313.csv")
-    K_true = 19  # Optimum blocking size, the integer-valued K at which the expected cost is minimum
-
-    theta_update_strategy = "normal"
-
-    # -- Alpha constant + clipping
-    # results_file_fv = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_125902_FV-K0=20-K=30-J=0.5-AlphaConst-Clipping.csv")
-    # results_file_mc = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_132227_MC-K0=20-K=30-J=0.5-AlphaConst-Clipping.csv")
-
-    # J/K = 0.5, K0 = 19
-    results_file_fv1 = os.path.join(os.path.abspath(resultsdir),
-                                    "SimulatorQueue_20220125_212158_FV-K0=20-K=30-J=0.5-E1.5-Clipping.csv")
-    results_file_mc1 = os.path.join(os.path.abspath(resultsdir),
-                                    "SimulatorQueue_20220125_214819_MC-K0=20-K=30-J=0.5-E1.5-Clipping.csv")
-    results_file_fv2 = os.path.join(os.path.abspath(resultsdir),
-                                    "SimulatorQueue_20220125_212353_FV-K0=20-K=30-J=0.5-E1.0-Clipping.csv")
-    results_file_mc2 = os.path.join(os.path.abspath(resultsdir),
-                                    "SimulatorQueue_20220125_220710_MC-K0=20-K=30-J=0.5-E1.0-Clipping.csv")
-    K_true = 19  # Optimum blocking size, the integer-valued K at which the expected cost is minimum
-
-    # J/K = 0.3, K0 = 19
-    results_file_fv1 = os.path.join(os.path.abspath(resultsdir),
-                                    "SimulatorQueue_20220126_035241_FV-K0=20-K=30-J=0.3-E1.5-Clipping.csv")
-    results_file_mc1 = os.path.join(os.path.abspath(resultsdir),
-                                    "SimulatorQueue_20220126_131153_MC-K0=20-K=30-J=0.3-E1.5-Clipping.csv")
-    results_file_fv2 = os.path.join(os.path.abspath(resultsdir),
-                                    "SimulatorQueue_20220126_035406_FV-K0=20-K=30-J=0.3-E1.0-Clipping.csv")
-    results_file_mc2 = os.path.join(os.path.abspath(resultsdir),
-                                    "SimulatorQueue_20220126_131215_MC-K0=20-K=30-J=0.3-E1.0-Clipping.csv")
-    K_true = 19  # Optimum blocking size, the integer-valued K at which the expected cost is minimum
-
-    # J/K = 0.5, K0 = 24
-    results_file_fv1 = os.path.join(os.path.abspath(resultsdir),
-                                    "SimulatorQueue_20220126_034444_FV-K0=25-K=35-J=0.5-E1.5-Clipping.csv")
-    results_file_mc1 = os.path.join(os.path.abspath(resultsdir),
-                                    "SimulatorQueue_20220126_131125_MC-K0=25-K=35-J=0.5-E1.5-Clipping.csv")
-    results_file_fv2 = os.path.join(os.path.abspath(resultsdir),
-                                    "SimulatorQueue_20220126_034327_FV-K0=25-K=35-J=0.5-E1.0-Clipping.csv")
-    results_file_mc2 = os.path.join(os.path.abspath(resultsdir),
-                                    "SimulatorQueue_20220126_131057_MC-K0=25-K=35-J=0.5-E1.0-Clipping.csv")
-    K_true = 24  # Optimum blocking size, the integer-valued K at which the expected cost is minimum
-
-    theta_update_strategy = "clipping"
-
-    # Read the data
-    results_fv = pd.read_csv(results_file_fv)
-
-    results_fv1 = pd.read_csv(results_file_fv1);
-    results_fv1['case'] = 1
-    results_mc1 = pd.read_csv(results_file_mc1);
-    results_mc1['case'] = 1
-    results_fv2 = pd.read_csv(results_file_fv2);
-    results_fv2['case'] = 2
-    results_mc2 = pd.read_csv(results_file_mc2);
-    results_mc2['case'] = 2
-    results_fv3 = pd.read_csv(results_file_fv3);
-    results_fv3['case'] = 3
-    results_mc3 = pd.read_csv(results_file_mc3);
-    results_mc3['case'] = 3
-
-    results_fv = pd.concat([results_fv1, results_fv2])
-    results_mc = pd.concat([results_mc1, results_mc2])
-
-    results_fv = pd.concat([results_fv1, results_fv2, results_fv3])
-    results_mc = pd.concat([results_mc1, results_mc2, results_mc3])
-
-    results_fv = results_fv1
-    results_mc = results_mc1
-
-    results_fv = results_fv2
-    results_mc = results_mc2
-
-    #-- Parameters used in the plots
-    theta_update_strategy = "normal"
-    error_nominal_phi = 1.0
-    error_nominal_et = 0.2
-
-    # Whether to set specific tick marks for the Y-axis in order to align visually two contiguous plots in the paper
-    set_special_axis_ticks = True
-    # set_special_axis_ticks = False
-
-    # Whether to show the text box with simulation parameters IN THE PLOT
-    show_textbox = True
-
-    t_learn_max = 25
-    if t_learn_max is not None:
-        results_fv = results_fv[results_fv['t_learn'] <= t_learn_max]
-        results_mc = results_mc[results_mc['t_learn'] <= t_learn_max]
-
-
-    # Plotting process starts
-    # (2022/10/18) Note that grouping by N and T have been commented out because N and T could be updated at every learning step
-    # (in order to make learning faster)
-    all_cases = aggregation_bygroups(results_fv, ['case', 'theta_true', 'J/K', 'exponent'], #, 'N', 'T'],
-                                     ['K', 'n_events_mc', 'n_events_fv'],
-                                     stats=['count', 'mean', 'std', 'min', 'max'])
-    n_events_by_case = aggregation_bygroups(results_mc, ['case'], ['n_events_mc'])
-
-    J_factor_values = all_cases.index.get_level_values('J/K')
-    case_values = all_cases.index.get_level_values('case')
-    theta_true_values = all_cases.index.get_level_values('theta_true')
-    exponent_values = all_cases.index.get_level_values('exponent')
-    N_values = [np.max(results_fv.loc[ results_fv['case'] == case, 'N' ]) for case in np.unique(results_fv['case'])]
-    T_values = [np.max(results_fv.loc[ results_fv['case'] == case, 'T' ]) for case in np.unique(results_fv['case'])]
-    # Cases are sorted from larger error to smaller error
-    #case_descs = ['Larger error', 'Mid error', 'Smaller error']
-    colors = ['red', 'blue', 'green']
-    colors = ['black', 'black', 'black']
-    # Linestyles to use for each 'case' stored in results_* data frames
-    #linestyles = ['dotted', 'dashed', 'solid']
-    # linestyles = ['dashed', 'solid', 'solid']
-    linestyles = ['solid', 'dashed', 'solid']
-    # Linestyles to use for each method (FV and MC, in this order)
-    linestyles_method = ['solid', 'dashed']
-    linewidth = 2
-    fontsize = 15
-    # Number of subplots in the figure as follows:
-    # - When subplotting by method, n_subplots = 1 or 2
-    # - When subplotting by case, n_subplots = # cases (i.e. len(np.unique(results_fv['case'])))
-    n_subplots = len(np.unique(results_fv['case']))
-    # Criterion to subplot by: "method" (FV or MC) or case (e.g. one subplot for each replication or for each different parameter setting (e.g. error = 100% and error = 150%)
-    subplotby = "case"
-    # Shift of the optimum theta when we define the cost as an increasing function of the blocking size
-    rho = 0.7
-    b = 3.0
-    shift_optimum = np.log(-np.log(rho) / (np.log(b) + np.log(rho))) / np.log(b)  # ~ -0.66667 when rho = 0.7 and b = 3.0
-    for J_factor in np.unique(J_factor_values):
-        cases = case_values[J_factor_values == J_factor]
-        ncases = len(cases)
-
-        # IMPORTANT: We assume that the true theta value and the start theta values are ALL the same for all cases
-        theta_true = theta_true_values[0] + shift_optimum
-        # K_true = int(np.round(theta_true + 1))
-        theta_start = results_fv['theta'].iloc[0]
-        K_start = int(np.ceil(theta_start + 1))
-
-        axes = plt.figure(figsize=(24, 18)).subplots(1, n_subplots, squeeze=False)
-        legend = [[], []]
-        figfile = os.path.join(os.path.abspath(resultsdir),
-                               "RL-single-FVMC-K0={}-start={}-J={}-E{:.1f},{:.1f}-{}.jpg" \
-                               .format(K_true, K_start, J_factor, error_nominal_phi, error_nominal_et, theta_update_strategy))
-        for idx_case, case in enumerate(cases):
-            print("Plotting case {} with idx_case = {}, K_true={}, K_start={}, J={}K".format(case, idx_case, K_true,
-                                                                                             K_start, J_factor))
-            # The metadata for the title and legend
-            #case_desc = case_descs[idx_case]
-            N = N_values[idx_case]
-            T = T_values[idx_case]
-            n_events_et = all_cases['n_events_mc']['mean'].iloc[idx_case]
-            n_events_fv = all_cases['n_events_fv']['mean'].iloc[idx_case]
-            n_events_mean = n_events_by_case.iloc[idx_case]['n_events_mc']['mean']
-
-            # The data to plot
-            ind_fv = results_fv['case'] == case
-            ind_mc = results_mc['case'] == case
-            K_start = int(np.ceil(theta_start + 1))
-            K_opt_fv = int(np.round(results_fv['theta'][ind_fv].iloc[-1])) + 1  # Optimum K found by the algorithm = closest integer to last theta + 1
-            K_opt_mc = int(np.round(results_mc['theta'][ind_mc].iloc[-1])) + 1  # Optimum K found by the algorithm = closest integer to last theta + 1
-            x_fv = results_fv['t_learn'][ind_fv]
-            x_mc = results_mc['t_learn'][ind_mc]
-            y_fv = results_fv['theta'][ind_fv]
-            y_mc = results_mc['theta'][ind_mc]
-            if subplotby == "method":
-                axes[0][0].plot(x_fv, y_fv, color='green', linestyle=linestyles[idx_case], linewidth=linewidth)
-                axes[0][n_subplots - 1].plot(x_mc, y_mc, color='red', linestyle='dashed', linewidth=linewidth)
+        # Monte-Carlo learner is the default
+        learnerV = LeaMC
+        if options.benchmark_datetime is not None and options.benchmark_datetime != "" or options.benchmark_filename == "":
+            # Build the benchmark filename from the datetime given and the input parameters
+            # Notes:
+            # - In the call below, we enclose some parameters in brackets because when the benchmark file is saved
+            # those parameters are stored as a LIST of different values tried in the filename
+            # (see below when calling this function using e.g. theta_ref_values, etc.).
+            # - NOT all parameters are used to generate the string of parameters. The parameters that are used depend
+            # on the queue system (e.g. "single-server" or "loss-network").
+            params_str = generate_parameter_string_for_filename(# System parameters
+                                                                options.queue_system, capacity, blocking_costs, rhos,
+                                                                # Policy parameters
+                                                                [theta_ref], options.theta_true, [options.theta_start],
+                                                                # Learning parameters
+                                                                [options.J_factor], [[options.N, options.T]], error_rel_phi, error_rel_et, options.use_stationary_probability_for_start_states)
+            if options.benchmark_datetime != "":
+                sep = "_" + options.benchmark_datetime + "_"
             else:
-                assert subplotby == "case"
-                # When setting linestyles by method because each case possibly goes in a different subplot (when n_subplots > 1)
-                axes[0][idx_case].plot(x_fv, y_fv, color='green', linestyle=linestyles_method[0], linewidth=linewidth)
-                axes[0][idx_case].plot(x_mc, y_mc, color='red', linestyle=linestyles_method[1], linewidth=linewidth)
-                axes[0][idx_case].set_title("Replication {}".format(idx_case+1))
+                sep = "_"
+            benchmark_file = os.path.join(resultsdir, "SimulatorQueue" + sep + params_str.replace("MC", "FV") + ".csv")
+        elif options.benchmark_filename is not None:
+            benchmark_file = os.path.join(os.path.abspath(resultsdir), options.benchmark_filename) # "SimulatorQueue_20221018_161552-K0=24-K=35-J=0.3-E1.0,0.2-AlphaConst(B=5)_seed1313.csv") #"benchmark_fv.csv")
+        if options.benchmark_filename is not None and not os.path.exists(benchmark_file):
+            warnings.warn("Benchmark file '{}' does not exist. The Monte-Carlo simulation will run without any reference to a previously run Fleming-Viot simulation".format(benchmark_file))
+            benchmark_file = None
+        plot_trajectories = False
+        symbol = 'r-'
+    fixed_window = False
+    alpha_start = 1.0  # / t_sim  # Use `/ t_sim` when using update of theta at each simulation step (i.e. LeaPolicyGradient.learn_update_theta_at_each_time_step() is called instead of LeaPolicyGradient.learn_update_theta_at_end_of_episode())
+    adjust_alpha = True  # True
+    func_adjust_alpha = np.float # np.sqrt
+    min_time_to_update_alpha = 0  # int(t_learn / 3)
+    alpha_min = 0.01  # 0.1
 
-            # Errors
-            err_phi = results_fv['err_phi'][ind_fv].iloc[0]
-            err_et = results_fv['err_et'][ind_fv].iloc[0]
+    show_execution_parameters(options)
+    #raise KeyboardInterrupt
 
-            # legend[0] += ["{}) {}: FVRL (N={}, T={}, error(Phi)={:.0f}%, error(ET)={:.0f}%)" #, avg #events per learning step={})" \
-            #                .format(idx_case+1, case_desc, N, T, err_phi*100, err_et*100)] #, n_events_et + n_events_fv)]
-            # legend[n_subplots-1] += ["{}) {}: MC (comparable to FVRL case ({})" #, avg #events per learning step={})" \
-            #                .format(idx_case+1, case_desc, idx_case+1)] #, n_events_et + n_events_fv)]
-            # legend[0] += ["FVRL (N={}, T={}, expected error = {:.0f}%)\n(avg #events per learning step={:.0f})" \
-            #                  .format(N, T, error*100, n_events_mean)]
-            # legend[n_subplots-1] += ["MC (avg #events per learning step={:.0f})".format(n_events_mean)]
-            legend[0] += ["N={}, T={}: expected error Phi = {:.0f}%, expected error E(T_A) = {:.0f}%)\n(avg #events per learning step={:.0f})" \
-                              .format(N, T, error_nominal_phi * 100, error_nominal_et*100, n_events_mean)]
+    # Create the environment and learning agent
+    dict_params = dict({'environment': {'queue_system': options.queue_system,
+                                        'capacity': capacity,
+                                        'nservers': nservers,
+                                        'job_class_rates': job_class_rates,
+                                        'service_rates': service_rates,
+                                        'policy_assignment_probabilities': policy_assignment_probabilities,
+                                        'reward_func': reward_func,
+                                        'reward_func_params': reward_func_params,
+                                        'rewards_accept_by_job_class': rewards_accept_by_job_class,
+                                        },
+                        'policy': {'parameterized_policy': PolQueueTwoActionsLinearStep if is_scalar(options.theta_start) else [PolQueueTwoActionsLinearStep for _ in options.theta_start],
+                                   'theta': 1.0 if is_scalar(options.theta_start) else [1.0 for _ in options.theta_start]  # This value is dummy in the sense that it will be updated below
+                                   },
+                        'learners': {'V': {'learner': learnerV,
+                                           'params': {'gamma': 1}
+                                           },
+                                     'Q': {'learner': None,
+                                           'params': {}},
+                                     'P': {'learner': LeaPolicyGradient,
+                                           'params': {'alpha_start': alpha_start,
+                                                      'adjust_alpha': adjust_alpha,
+                                                      'func_adjust_alpha': func_adjust_alpha,
+                                                      'min_time_to_update_alpha': min_time_to_update_alpha,
+                                                      'alpha_min': alpha_min,
+                                                      'fixed_window': fixed_window,
+                                                      'clipping': options.clipping,
+                                                      'clipping_value': options.clipping_value,
+                                                      }
+                                           }
+                                     },
+                        'agent': {'agent': AgeQueue}
+                        })
+    env_queue, rhos, agent = define_queue_environment_and_agent(dict_params)
 
-        for idx in range(n_subplots):
-            axes[0][idx].set_xlabel('Learning step', fontsize=fontsize)
-            axes[0][idx].set_ylabel('theta', fontsize=fontsize)
-            for tick in axes[0][idx].xaxis.get_major_ticks():
-                tick.label.set_fontsize(fontsize)
-            for tick in axes[0][idx].yaxis.get_major_ticks():
-                tick.label.set_fontsize(fontsize)
-            axes[0][idx].set_ylim((0, np.max([axes[0][idx].get_ylim()[1], K_start, K_true])))
-            axes[0][idx].axhline(theta_true, color='gray', linestyle='dashed')
-            axes[0][idx].yaxis.set_major_locator(MaxNLocator(integer=True))
-            axes[0][idx].set_aspect(1 / axes[0][idx].get_data_ratio())
-            if set_special_axis_ticks:
-                axes[0][idx].set_yticks(range(0, 36, 5))
-            # axes[0][idx].legend(legend[idx] + ["Optimum theta"], fontsize='xx-large', loc='lower right')
-            if show_textbox:
-                axes[0][idx].text(axes[0][idx].get_xlim()[1] / 1.7, 5,
-                                  "J/K={}, N={}, T={}\nAvg #events per step = {:.0f}\n\nK* = {}" \
-                                  #\nEstimated K* (FV) = {}\nEstimated K* (MC) = {}" \
-                                  .format(J_factor, N, T, n_events_mean, K_true),
-                                  #.format(J_factor, N, T, n_events_mean, K_true, K_opt_fv, K_opt_mc),
-                                  horizontalalignment='center',
-                                  fontsize=fontsize, bbox={'facecolor': 'none', 'edgecolor': 'black'})
-            # plt.title("# particles N = {}, Simulation time for P(T>t) and E(T_A) = {}, # learning steps = {}, Average number of events per learning step = {:.0f}" \
-            #          .format(N, 0, 0, 0))
+    # -- Simulation parameters that are common for ALL parameter settings
+    # t_learn is now defined as input parameter passed to the script
+    # 2022/01/14: t_learn = 10 times the optimum true theta so that we are supposed to reach that optimum under the REINFORCE_TRUE learning mode with decreasing alpha
+    # t_learn = 800 #100 #800 #100 #198 - 91 #198 #250 #50
+    verbose = False
+    dict_params_learning = dict({'mode': LearningMode.REINFORCE_TRUE, 't_learn': options.t_learn})
+    dict_params_info = dict({'plot': False, 'log': False})
 
-        # To avoid cut off of vertical axis label!!
-        # Ref: https://stackoverflow.com/questions/6774086/why-is-my-xlabel-cut-off-in-my-matplotlib-plot
-        plt.gcf().subplots_adjust(left=0.15)
-        # Save leaving just a little margin (pad_inches=0.1), otherwise we would need to crop the generated figure
-        # before including it in a paper.
-        # Ref: https://stackoverflow.com/questions/36203597/remove-margins-from-a-matplotlib-figure
-        plt.savefig(figfile, bbox_inches="tight", pad_inches=0.1)
-        print("Figure saved to file {}".format(figfile))
+    # Simulator object
+    simul = SimulatorQueue(env_queue, agent, dict_params_learning,
+                           log=options.create_log, save=options.save_results, logsdir=logsdir, resultsdir=resultsdir, debug=False)
+
+    if options.save_results:
+        # Initialize the file to store the results (e.g. add the column names of the file)
+        # NOTE: We initialize the results file at the very beginning and close it at the very end of the simulation run
+        # so that all cases and replications run will be output to the same file! This is convenient as then we will have
+        # all results for all cases and replications gathered together.
+        simul.initialize_results_file()
+
+    #-------- Define all the values on which simulations will be run
+    # The simulations is run, either from parameters defined by a benchmark file or from parameters defined below.
+    # Define the parameters on which the non-benchmark simulation will be run
+    # These are defined here (even if we are running the simulation based on a benchmark file)
+    # because these parameter values are used when naming the results file for both situations.
+
+    # In the non-benchmark case (i.e. FVRL) we run the learning method on each set of parameters defined here
+    # for as many replications defined as input argument.
+    # When defining the theta values we specify the blocking size K and we subtract 1. Recall that K = ceil(theta+1)
+    # So, if we want K = 35, we can set theta somewhere between 33+ and 34, so we define e.g. theta = 34.9 - 1
+    # Note that the list of theta values can contain more than one value, in which case a simulation will be run for each of them
+    theta_ref_values = [theta_ref]  # [24.0 - 1] #[20.0 - 1]  # [32.0-1, 34.0-1, 36.0-1] #[10.0-1, 15.0-1, 20.0-1, 25.0-1, 30.0-1]  # 39.0
+    theta_start_values = [options.theta_start]  # [34.9 - 1] #[30.0 - 1] #[20.0 - 1, 25.0 - 1]
+    # theta_ref_values = np.linspace(start=1.0, stop=20.0, num=20)
+    J_factor_values = [options.J_factor]  # [0.2, 0.3, 0.5]  # [0.2, 0.3, 0.5, 0.7]
+    NT_exponents = [0]  # [-2, -1, 0, 1]  # Exponents to consider for different N and T values as in exp(exponent)*N0, where N0 is the reference value to achieve a pre-specified relative error
+    NT_values = [[N, T]] if not np.isnan(N) and not np.isnan(T) else None
+    # Accepted relative errors for the estimation of Phi and of E(T_A)
+    # They define respectively the number of particles N and the number of arrival events T to observe in each learning step.
+    error_rel_phi = [error_rel_phi]  # [1.0] #0.5
+    error_rel_et = [error_rel_et]  # [1.0] #0.5
+    #-------- Define all the values on which simulations will be run
+
+    # Run the simulations
+    if benchmark_file is None:
+        # Output variables of the simulation
+        case = 0
+        ncases = len(theta_ref_values) * len(theta_start_values) * len(J_factor_values) * len(NT_exponents)
+        theta_opt_values = [[np.nan] * options.replications] * ncases   # List of optimum theta values achieved by the learning algorithm for each replication in each parameter setting
+        K_opt_values = [[np.nan] * options.replications] * ncases       # List of optimum K values where deterministic blocking occurs
+        cost_opt_values = [[np.nan] * options.replications] * ncases    # List of optimum costs found by the learning algorithm
+        for i, theta_ref in enumerate(theta_ref_values):
+            # For single-buffer systems, store the value of theta_ref as parameter of the reward function because,
+            # in those systems, we use it in the next line to compute the TRUE optimum blocking sizes and the optimum expected cost.
+            # In no-buffer systems (e.g. loss networks), the TRUE optimum blocking sizes and optimum expected cost are computed by brute force,
+            # i.e. by trying all possible blocking sizes that can be tried on the system.
+            if simul.getEnv().getBufferType() == BufferType.SINGLE:
+                dict_params['environment']['reward_func_params']['buffer_size_ref'] = theta_ref
+
+            # Compute the optimum blocking sizes and its respective expected cost, i.e. the one this optimization process optimizes
+            K_true, cost_true, cost_mean, cost_max = compute_optimum_blocking_sizes_and_expected_cost(simul, dict_params['environment'])
+            # Update the theta_true value based on the K_true just computed.
+            # We pick ONE of the K-values as in general, although NOT commonly, the optimum K-values (i.e. the array of optimum K)
+            # may be more than one array, which is the case when the optimum expected cost is achieved at several different values.
+            # NOTE: This calculation of theta_true ASSUMES that the parameterized policy is a linear step function of the buffer size or job class occupancy
+            theta_true = [[k-1 for k in K] for K in K_true][0]   # e.g. K_true = [[0, 2, 6]] => theta_true = [-1, 1, 5]
+                ## NOTE THAT A THETA VALUE CAN BE NEGATIVE UP TO -1 (so that we can have a deterministic blocking size equal to K = 0)!
+                ## HOWEVER: what happens in FVRL, when we have to choose J < K... and K = 0...?
+                ## TODO: (2023/03/01) Check if theta can be 0 when using FVRL to learn theta (because of what I just wrote in the line above)
+
+            print("\nSimulating with {} learning on a queue environment with reference theta {} and optimum theta (one less the deterministic blocking size) = {}..." \
+                .format(learning_method.name, theta_ref, theta_true))
+
+            # Set the number of learning steps to double the true theta value
+            # Use this ONLY when looking at the MC method and running the learning process on several true theta values
+            # to see when the MC method breaks... i.e. when it can no longer learn the optimum theta.
+            # The logic behind this choice is that we start at theta = 1.0 and we expect to have a +1 change in
+            # theta at every learning step, so we would expect to reach the optimum value after about a number of
+            # learning steps equal to the true theta value... so in the end, to give some margin, we allow for as
+            # many learning steps as twice the value of true theta parameter.
+            #simul.dict_params_learning['t_learn'] = int(theta_true*2)
+
+            # Iterate on the different start theta parameters tried
+            for theta_start in theta_start_values:
+                # Initial deterministic blocking sizes
+                K = get_deterministic_blocking_boundaries(simul.agent, theta_start)
+                for j, J_factor in enumerate(J_factor_values):
+                    if NT_values is None:
+                        # We compute the N, T values from the expected relative errors for the estimation of Phi and E(T_A) given as parameters
+                        N_min = 50; N_max = 500
+                        T_min = 100; T_max = 5000
+                        NT_values = [compute_nparticles_and_narrivals_for_fv_process(rhos, K, J_factor, error_rel_phi=err1, error_rel_et=err2)
+                                     for err1, err2 in zip(error_rel_phi, error_rel_et)]
+                        if learning_method.name == "MC":
+                            # If we are running Monte-Carlo with no benchmark file, set the number of particles to 1 and the # arrival events T to N*T
+                            # where N and T come from the FV-equivalent simulation.
+                            NT_values = [[1, N*T] for N, T in NT_values]
+                            N_min = 1
+                    else:
+                        N_min = 1; N_max = np.Inf
+                        T_min = 1; T_max = np.Inf
+                    for idx_case, (exponent, (N, T)) in enumerate(zip(NT_exponents, NT_values)):
+                        print("NT values obtained for the requested expected relative errors (BEFORE BOUNDING):")
+                        print("err(phi) = {:.3f}% => N = {}".format(error_rel_phi[idx_case] * 100, NT_values[idx_case][0]))
+                        print("err(E(T)) = {:.3f}% => T = {}".format(error_rel_et[idx_case] * 100, NT_values[idx_case][1]))
+                        # Lower bound for N and T so that we don't have too little particles!
+                        N = min( max(N_min, N), N_max )
+                        T = min( max(T_min, T), T_max )
+                        # Set the parameters for this run
+                        case += 1
+                        t_sim = T  # This is used just for the title of plots done below (after the loop)
+                        dict_params_simul = {
+                            'theta_true': theta_true,
+                            'theta_start': theta_start,
+                            'buffer_size_activation_factor': J_factor,
+                            'nparticles': N,
+                            't_sim': T,     # This is the number of arrival events, NOT the number of time steps to use in the estimation of E(T_A) in FV
+                                            # In fact, the calculation of T on the basis of the expected relative error in the estimation of E(T_A) gives
+                                            # us the number of arrival events (see details in my small dark green notebook in entry dated 06-Nov-2022).
+                            'use_stationary_probability_for_start_states': use_stationary_probability_for_start_states,
+                            'burnin_time_steps': options.burnin_time_steps,
+                            'min_num_cycles_for_expectations': options.min_num_cycles_for_expectations,
+                        }
+                        dict_info = {'case': case,
+                                     'ncases': ncases,
+                                     'learning_method': learning_method.name,
+                                     'exponent': exponent,
+                                     'rhos': rhos,
+                                     'K_true': K_true,
+                                     'cost_true': cost_true,
+                                     'K': K,
+                                     'error_rel_phi': error_rel_phi[idx_case],
+                                     'error_rel_et': error_rel_et[idx_case],
+                                     'N_min': N_min,
+                                     'N_max': N_max,
+                                     'T_min': T_min,
+                                     'T_max': T_max,
+                                     'alpha_start': alpha_start,
+                                     'adjust_alpha': adjust_alpha,
+                                     'min_time_to_update_alpha': min_time_to_update_alpha,
+                                     'alpha_min': alpha_min
+                                     }
+
+                        # Run the simulation process
+                        theta_opt_values[case-1], K_opt_values[case-1], cost_opt_values[case-1], \
+                            df_learning = run_simulation_policy_learning(simul,
+                                                                         options.replications,
+                                                                         dict_params_simul,
+                                                                         dict_info,
+                                                                         dict_params_info=dict_params_info,
+                                                                         seed=options.seed,
+                                                                         verbose=verbose)
+    else:
+        # Read the execution parameters from the benchmark file
+        print("Reading benchmark data containing the parameter settings from file\n{}".format(benchmark_file))
+        benchmark = pd.read_csv(benchmark_file, sep="|")
+        # Filter the benchmark data so that we end up with one record per analyzed group
+        # (so that we can extract the parameter settings for each analyzed group -e.g. N, T, J values, etc.)
+        benchmark_groups = benchmark[(benchmark['t_learn'] == 1) & (benchmark['replication'] == 1)]
+        ncases = benchmark_groups.shape[0]
+        theta_true_values = array_of_objects(ncases, value=np.nan) #np.nan * np.ones(ncases) ((2023/03/12) use np.ones() if the array_of_objects() doesn't work when dealing with scalar values of theta_true (e.g. single-server case)
+        theta_opt_values = [[np.nan] * options.replications] * ncases   # List of optimum theta values achieved by the learning algorithm for each replication in each parameter setting
+        K_opt_values = [[np.nan] * options.replications] * ncases       # List of optimum K values where deterministic blocking occurs
+        cost_opt_values = [[np.nan] * options.replications] * ncases    # List of optimum costs found by the learning algorithm
+        idx_case = -1
+        NT_values = []
+        for i in range(ncases):
+            idx_case += 1
+            case = benchmark_groups['case'].iloc[i]
+            replications = len(np.unique(benchmark[benchmark['case'] == case]['replication']))
+
+            # Simulation and estimation parameters that are common for all replications of the current case (group) analyzed
+            theta_true = benchmark_groups['theta_true'].iloc[i]
+            theta_true = convert_str_to_list_of_type(theta_true, type=int)  # Recall that the true theta values are always integer
+            if simul.getEnv().getBufferType() == BufferType.SINGLE:
+                # Store the value of theta_true as parameter of the reward function because we use it below to compute the optimum blocking sizes and optimum expected cost
+                dict_params['environment']['reward_func_params']['buffer_size_ref'] = theta_true
+            theta_true_values[idx_case] = theta_true
+            theta_start = benchmark_groups['theta'].iloc[i]
+            theta_start = convert_str_to_list_of_type(theta_start)
+            J_factor = benchmark_groups['J/K'].iloc[i]
+            J_factor = convert_str_to_list_of_type(J_factor)
+            exponent = benchmark_groups['exponent'].iloc[i]
+            N = benchmark_groups['N'].iloc[i] if learning_method.name == "FV" else 1
+            T = benchmark_groups['T'].iloc[i]   # See NOTE below for entry 't_sim' of dict_params_simul dictionary about the meaning of T which is NOT the simulation time that will be used for the MC learning when a benchmark is available!
+            NT_values += [[N, T]]
+            burnin_time_steps = benchmark_groups['burnin_time_steps'].iloc[i]
+            min_num_cycles_for_expectations = benchmark_groups['min_n_cycles'].iloc[i]
+
+            K_true, cost_true, cost_mean, cost_max = compute_optimum_blocking_sizes_and_expected_cost(simul, dict_params['environment'])
+            K = get_deterministic_blocking_boundaries(simul.agent, theta_start)
+
+            dict_params_simul = {
+                'theta_true': theta_true,
+                'theta_start': theta_start,
+                'buffer_size_activation_factor': J_factor,
+                'nparticles': 1,
+                't_sim': T,         # This is the 'T' parameter used at the first learning step when running FVRL, and is used only as informational purposes inside
+                                    # run_simulation_policy_learning() and in the output filename in order for the user to know the characteristics of the case we are currently comparing with MC learning.
+                                    # It is NOT the simulation time that will be used for MC learning, as this is defined by the actual #events observed during FVRL.
+                'burnin_time_steps': burnin_time_steps,
+                'min_num_cycles_for_expectations': min_num_cycles_for_expectations,
+            }
+            dict_info = {'case': case,
+                         'ncases': ncases,
+                         'learning_method': learning_method.name,
+                         'exponent': exponent,
+                         'rhos': rhos,
+                         'K_true': K_true,
+                         'cost_true': cost_true,
+                         'K': K,
+                         'error_rel_phi': 0.0,
+                         'error_rel_et': 0.0,
+                         'alpha_start': alpha_start,
+                         'adjust_alpha': adjust_alpha,
+                         'min_time_to_update_alpha': min_time_to_update_alpha,
+                         'alpha_min': alpha_min
+                         }
+
+            # Run the simulation process
+            theta_opt_values[idx_case], K_opt_values[idx_case], cost_opt_values[idx_case], \
+                df_learning = run_simulation_policy_learning(simul,
+                                                             replications,
+                                                             dict_params_simul,
+                                                             dict_info,
+                                                             dict_params_info=dict_params_info,
+                                                             params_read_from_benchmark_file=True,
+                                                             benchmark=benchmark,
+                                                             seed=None,
+                                                             verbose=verbose)
+
+        # Update the value of t_sim so that it stores the number of events observed at each learning step
+        # in the *last* MC learning run (i.e. the last replication of the last analyzed case)
+        # which is shown in the plots below that e.g. show the evolution of the theta parameter as is being learned.
+        t_sim = df_learning['n_events_mc'].iloc[-1] + df_learning['n_events_fv'].iloc[-1]
+
+    print("Optimum theta, K's and expected costs found by the learning algorithm for each replication and each parameter setting:\n{}" \
+          .format(pd.DataFrame({'theta_opt': theta_opt_values, 'K_opt': K_opt_values, 'expected cost': cost_opt_values}, index=range(1, ncases+1))))
+    print(f"True optima:\nK_opt = {K_true[0]}, expected cost = {cost_true}")
+
+    # Closes the object (e.g. any log and result files are closed)
+    simul.close()
+
+    if options.save_results:
+        if learning_method == LearningMethod.FV:
+            # Make a copy of the results benchmark file to be used for a Monte-Carlo learner
+            # so that we can easily refer to it in case we run the MC learning right after the FVRL learner
+            # (to this end, the name used for the filename here should be the same as the default filename defined
+            # as input argument for the variable benchmark_filename).
+            shutil.copyfile(simul.results_file, os.path.join(os.path.dirname(simul.results_file), "benchmark_fv.csv"))
+        # Build the string containing the parameter values that should be included in the output filename
+        params_str = generate_parameter_string_for_filename(options.queue_system,
+                                                            capacity,
+                                                            blocking_costs,
+                                                            rhos,
+                                                            theta_ref_values,
+                                                            theta_true,
+                                                            theta_start_values,
+                                                            J_factor_values,
+                                                            NT_values,
+                                                            error_rel_phi,
+                                                            error_rel_et,
+                                                            use_stationary_probability_for_start_states)
+        # Now rename the results file to include the parameter settings so that it's easier to identify when analyzing results.
+        results_dir = os.path.dirname(simul.results_file)
+        results_filename = os.path.basename(simul.results_file)
+        if options.save_with_dt:
+            # This allows keeping the datetime string in the filename
+            lookfor = ".csv"
+        else:
+            # This allows removing the datetime string from the filename
+            lookfor = "_"
+        # Add the parameter settings to the filename, either keeping or removing the execution datetime string
+        results_filename_with_parameters = results_filename[:str.index(results_filename, lookfor)] + "_" + params_str + ".csv"
+        # Rename and if the file with the new file already exists, delete it first
+        results_file_with_parameters = os.path.join(results_dir, results_filename_with_parameters)
+        if os.path.exists(results_file_with_parameters):
+           os.remove(results_file_with_parameters)
+        os.rename(simul.results_file, results_file_with_parameters)
+
+        # Add the parameter settings to the log file as well
+        log_dir = os.path.dirname(simul.logfile)
+        log_filename = os.path.basename(simul.logfile)
+        log_filename_with_parameters = results_filename[:str.index(log_filename, ".log")] + "_" + params_str + ".log"
+        log_file_with_parameters = os.path.join(log_dir, log_filename_with_parameters)
+        os.rename(simul.logfile, log_file_with_parameters)
+    else:
+        params_str = "-- No output file --"
+
+    if len(theta_ref_values) == 1:
+        if PLOT_GRADIENT and env_queue.getBufferType == BufferType.SINGLE:
+            # Save the estimation of G(t) for the last learning step to a file
+            # file_results_G = "G.csv"
+            # pd.DataFrame({'G': simul.G}).to_csv(file_results_G)
+
+            # -- Plot theta and the gradient of the value function
+            SET_YLIM = False
+
+            # Estimated value function
+            ax, line_est = plotting.plot_colormap(df_learning['theta'], -df_learning['V'], cmap_name="Blues")
+
+            # True value function
+            # Block size for each theta, defined by the fact that K-1 is between theta and theta+1 => K = ceil(theta+1)
+            Ks = [np.int(np.ceil(np.squeeze(t) + 1)) for t in df_learning['theta']]
+            # Blocking probability = Pr(K)
+            p_stationary = [compute_blocking_probability_birth_death_process(rhos, K) for K in Ks]
+            pblock_K = np.array([p[-1] for p in p_stationary])
+            pblock_Km1 = np.array([p[-2] for p in p_stationary])
+            # Blocking probability adjusted for different jump rates between K-1 and K (affected by the non-deterministic probability of blocking at K-1)
+            pblock_K_adj = np.squeeze([pK * (1 - (K-1-theta)) for K, theta, pK in zip(Ks, df_learning['theta'], pblock_K)])
+            pblock_Km1_adj = pblock_Km1  # np.squeeze([pKm1 + pK - pK_adj for pKm1, pK, pK_adj in zip(pblock_Km1, pblock_K, pblock_K_adj)])
+            # assert np.allclose(pblock_K + pblock_Km1, pblock_K_adj + pblock_Km1_adj)
+            # True value function: expected cost at K which is the buffer size where blocking most likely occurs...
+            # (in fact, if theta is say 3.1, the probability of blocking at 4 (= K-1) is small and most blocking
+            # will occur at K; if theta is 3.9, the probability of blocking at 4 (= K-1)
+            # i.e. we compute at K-1 and NOT at K because we want to compare the true value function
+            # with the *estimated* value function when the policy starts blocking at buffer size = theta
+            # Vtrue = np.array([rewardOnJobRejection_ExponentialCost(env_queue, (K, None), Actions.REJECT, (K, None)) * pK for K, pK in zip(Ks, pblock_K)])
+
+            # ACTUAL true value function, which takes into account the probability of blocking at K-1 as well, where the policy is non-deterministic (for non-integer theta)
+            # The problem with this approach is that the stationary distribution of the chain is NOT the same as with chain
+            # where rejection ONLY occurs at s=K... in fact, the transition probabilities to s=K and to s=K-1 when the
+            # initial state is s=K-1 are affected by the non-deterministic probability of blocking when s=K-1...
+            # Qualitatively, the stationary probability of K would be reduced and the stationary probability of K-1 would be
+            # increased by the same amount.
+            Vtrue = np.array(
+                [rewardOnJobRejection_ExponentialCost(env_queue, (K, None), Actions.REJECT, (K, None)) * pK +
+                 rewardOnJobRejection_ExponentialCost(env_queue, (K-1, None), Actions.REJECT, (K-1, None)) * (K-1-theta) * pKm1
+                 for K, theta, pK, pKm1 in zip(Ks, df_learning['theta'], pblock_K_adj, pblock_Km1_adj)])
+
+            # True grad(V)
+            # Ref: my hand-written notes in Letter-size block of paper with my notes on the general environment - agent setup
+            gradVtrue = [-rewardOnJobRejection_ExponentialCost(env_queue, (K-1, None), Actions.REJECT, (K-1, None)) * pKm1
+                            for K, pKm1 in zip(Ks, pblock_Km1)]
+
+            ord = np.argsort(Ks)
+            # NOTE that we plot the true value function at K-1 (not at K) because K-1 is the value that is closest to theta
+            # and we are plotting the *estimated* value function vs. theta (NOT vs. K).
+            # line_true, = ax.plot([Ks[o]-1 for o in ord], [-Vtrue[o] for o in ord], 'g.-', linewidth=5, markersize=20)
+            line_true, = ax.plot(df_learning['theta'], -Vtrue, 'gx-')  # Use when computing the ACTUAL true Value function V, which also depends on theta!
+            ax.set_xlim((0, ax.get_xlim()[1]))
+            ax.set_yscale('log')
+            # ax.set_ylim((0, 10))
+            ax.set_xlabel('theta (for estimated functions) / K-1 for true value function')
+            ax.set_ylabel('Value function V (cost)')
+            ax.legend([line_est, line_true], ['Estimated V', 'True V'], loc='upper left')
+            ax2 = ax.twinx()
+            ax2, line_grad = plotting.plot_colormap(df_learning['theta'], -df_learning['gradV'], cmap_name="Reds", ax=ax2)
+            line_gradtrue, = ax2.plot([Ks[o] - 1 for o in ord], [-gradVtrue[o] for o in ord], 'k.-', linewidth=3, markersize=12)
+            ax2.axhline(0, color="lightgray")
+            ax2.set_ylabel('grad(V)')
+            if SET_YLIM:
+                ax2.set_ylim((-5, 5))  # Note: grad(V) is expected to be -1 or +1...
+            ax2.legend([line_grad, line_gradtrue], ['grad(V)', 'True grad(V)'], loc='upper right')
+            # Note that the optimum true K is computed as round(theta+1) and NOT as ceil(theta+1) because we want that e.g. K = 4 when theta = 3.1
+            # (instead of having K = 5, which is too large, considering the blocking probability is *almost* 1 at 4).
+            if is_scalar(t_sim):
+                title = "Value function and its gradient as a function of theta and K. " + \
+                        "Optimum K = {}, Theta start = {}, t_sim = {:.0f}".format(np.round(theta_true+1), theta_start, t_sim)
+            else:
+                title = "Value function and its gradient as a function of theta and K. " + \
+                        "Optimum K = {}, Theta start = {}".format(np.round(theta_true+1), theta_start)
+            plt.title(title)
+
+            # grad(V) vs. V
+            plt.figure()
+            plt.plot(-df_learning['V'], -df_learning['gradV'], 'k.')
+            ax = plt.gca()
+            ax.axhline(0, color="lightgray")
+            ax.axvline(0, color="lightgray")
+            ax.set_xscale('log')
+            # ax.set_xlim((-1, 1))
+            if SET_YLIM:
+                ax.set_ylim((-1, 1))
+            ax.set_xlabel('Value function V (cost)')
+            ax.set_ylabel('grad(V)')
+
+        # Plot evolution of theta (for the last analyzed case)
+        title = "{}".format(params_str) + "\nMethod: {}, Optimum Theta = {}, Theta start = {}, Theta final = {}, K_final = {}, Expected cost = {}" \
+                                          "\nN = {}, T = {:.0f} J = {} Stat.Prob.StartStates = {}" \
+                                          "\nK = {}, Blocking Costs = {}, lambdas = {}, rhos = {}" \
+                    .format(learning_method.name, theta_true, theta_start, np.mean(theta_opt_values[-1]), np.mean(K_opt_values[-1]), np.mean(cost_opt_values[-1]),
+                            N, t_sim, J_factor_values, use_stationary_probability_for_start_states,
+                            capacity, [int(c) for c in blocking_costs], job_class_rates, rhos)
+        if options.plot and plot_trajectories:
+            "In the case of the MC learner, plot the theta-learning trajectory as well as rewards received during learning"
+            assert N == 1, "The simulated system has only one particle (N={})".format(N)
+            # NOTE: (2021/11/27) I verified that the values of learnerP.getRewards() for the last learning step
+            # are the same to those for learnerV.getRewards() (which only stores the values for the LAST learning step)
+            plt.figure()
+            # Times at which the trajectory of states is recorded
+            times = simul.getLearnerP().getTimes()
+            times_unique = np.unique(times)
+            assert len(times_unique) == len(simul.getLearnerP().getThetas()) - 1, \
+                    "The number of unique learning times ({}) is equal to the number of theta updates ({})".format(
+                    len(times_unique), len(simul.getLearnerP().getThetas()) - 1)
+            ## Note that we subtract 1 to the number of learning thetas because the first theta stored in the policy object is the initial theta before any update
+            plt.plot(np.r_[0.0, times_unique], simul.getLearnerP().getThetas(), 'b.-')
+            ## We add 0.0 as the first time to plot because the first theta value stored in the policy is the initial theta with which the simulation started
+            ax = plt.gca()
+            # Add vertical lines signalling the BEGINNING of each queue simulation
+            times_sim_starts = range(0, options.t_learn * (t_sim + 1), t_sim + 1)
+            for t in times_sim_starts:
+                ax.axvline(t, color='lightgray', linestyle='dashed')
+
+            # Buffer sizes
+            buffer_sizes = [env_queue.getBufferSizeFromState(s) for s in simul.getLearnerP().getSetBoundaries()]
+            ax.plot(times, buffer_sizes, 'g.', markersize=3)
+            # Mark the start of each queue simulation
+            # DM-2021/11/28: No longer feasible (or easy to do) because the states are recorded twice for the same time step (namely at the first DEATH after a BIRTH event)
+            ax.plot(times_sim_starts, [buffer_sizes[t] for t in times_sim_starts], 'gx')
+            ax.set_xlabel("time step")
+            ax.set_ylabel("theta")
+            ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+
+            # Secondary plot showing the rewards received
+            ax2 = ax.twinx()
+            ax2.plot(times, -np.array(simul.getLearnerP().getRewards()), 'r-', alpha=0.3)
+            # Highlight with points the non-zero rewards
+            ax2.plot(times, [-r if r != 0.0 else None for r in simul.getLearnerP().getRewards()], 'r.')
+            ax2.set_ylabel("Reward")
+            ax2.set_yscale('log')
+            plt.title(title)
+        elif options.plot:
+            # Plot the evolutoin of theta and of the expected cost
+            axes = plt.figure().subplots(1, 2)
+            ax_params, ax_objective = axes
+
+            # Plot of parameters evolution
+            lines = []
+            reflines = []
+            legend_lines = []
+            legend_reflines = []
+            expected_lines = []
+            expected_reflines = []
+            for r in df_learning['replication'].value_counts().index:
+                mask = df_learning['replication'] == r
+                thetas = df_learning['theta'][mask]
+                expected_rewards = df_learning['expected_reward_true'][mask]
+                # Linestyles are sorted so that more continuous line means larger rho
+                linestyles_ref = ['-', '--', '-.', ':']
+                # Rank of rhos in reversed order (largest value has highest rank so that the largest value gets the most solid line in the plot)
+                rank_rhos = list(reversed(np.array(rhos).argsort().argsort()))
+                linestyles = [linestyles_ref[r] for r in rank_rhos]
+                for i in range(len(theta_true)):
+                    linestyle_i = linestyles[i % len(linestyles)]
+                    lines_i = ax_params.plot([t[i] for t in thetas], symbol, linestyle=linestyle_i)
+                    if r == 1:
+                        refline_i = ax_params.axhline(theta_true[i], color='black', linestyle=linestyle_i)
+                        lines += lines_i
+                        reflines += [refline_i]
+                        legend_lines += ["Theta_" + str(i+1)]
+                        legend_reflines += ["True Optimum Theta_" + str(i + 1)]
+
+                # Plot of objective function evolution (i.e. the expected cost)
+                expected_line = ax_objective.plot(-np.array(expected_rewards), symbol, linestyle='-')
+                if r == 1:
+                    refline = ax_objective.axhline(cost_true, color="black", linestyle="-")
+                    expected_lines += expected_line
+                    expected_reflines += [refline]
+
+            # Finalize plots
+            ax_params.set_xlabel("Learning step")
+            ax_params.set_ylabel("theta(s)")
+            ylim = ax_params.get_ylim()
+            ax_params.set_ylim((-1.1, np.max([ylim[1], np.max(np.squeeze(K_true))])))    # lower limit = -1.1 because -1 is the minimum possible theta value that is allowed for the linear step parameterized policy
+            ax_params.xaxis.set_major_locator(MaxNLocator(integer=True))
+            #ax_params.set_aspect(1 / ax_params.get_data_ratio())
+            ax_params.legend(lines + reflines, legend_lines + legend_reflines)
+            #ax_params.set_title("Replications for delta(Q) = 100")
+
+            ax_objective.set_xlabel("Learning step")
+            ax_objective.set_ylabel("Expected cost")
+            ax_objective.set_title("Expected cost range: [{:.1f}, {:.1f}], average = {:.1f}".format(cost_true, cost_max, cost_mean))
+            # ax_objective.set_yscale('log')
+            ax_objective.xaxis.set_major_locator(MaxNLocator(integer=True))
+            # ax_objective.set_aspect(1 / ax_objective.get_data_ratio())
+            ax_objective.legend(expected_lines + expected_reflines, ["Expected cost for the estimated optimum theta(s)", "Optimum expected cost"])
+
+            plt.suptitle(title)
+
+    end_time_all = timer()
+    elapsed_time_all = end_time_all - start_time_all
+    print("\n+++ OVERALL execution time: {:.1f} min, {:.1f} hours".format(elapsed_time_all / 60, elapsed_time_all / 3600))
+
+    tracemalloc.stop()
+
+    if PLOT_RESULTS_TOGETHER:
+        """
+        The plots of the FVRL and the respective MC execution are plotted on the same graph
+        HOWEVER, THIS IS EXPECTED TO BE RUN MANUALLY AND BY PIECES, AS THE INPUT FILES CONTAINING THE RESULTS TO PLOT
+        NEED TO BE CHANGED EVERY TIME WE WANT TO PLOT THE RESULTS.
+        """
+        # Read the results from files and plot the MC and FV results on the same graph
+        resultsdir = "E:/Daniel/Projects/PhD-RL-Toulouse/projects/RL-002-QueueBlocking/results/RL/" + options.queue_system
+
+        theta_true = 19
+        # IGA results starting at a larger theta value: theta_start = 39, N = 800, t_sim = 800
+        N = 800
+        t_sim = N
+        results_file_fv = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20211230_001050.csv")
+        results_file_mc = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220101_145647.csv")
+
+        # IGA results starting at a small theta value: theta_start = 1, N = 400, t_sim = 400
+        N = 400
+        t_sim = N
+        results_file_fv = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220102_093954.csv")
+        results_file_mc = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220102_173144.csv")
+
+        results_fv = pd.read_csv(results_file_fv)
+        results_mc = pd.read_csv(results_file_mc)
+
+        t_learn = results_fv.shape[0]
+        n_events_mean = np.mean(results_fv['nevents_mc'] + results_fv['nevents_proba'])
+        assert n_events_mean == np.mean(results_mc['nevents_mc'])
+
+        plt.figure()
+        plt.plot(results_fv['theta'], 'g.-')
+        plt.plot(results_mc['theta'], 'r.-')
+        ax = plt.gca()
+        ax.set_xlabel('Learning step')
+        ax.set_ylabel('theta')
+        ax.set_ylim((0, 40))
+        ax.axhline(theta_true, color='black', linestyle='dashed')
+        ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+        ax.set_aspect(1 / ax.get_data_ratio())
+        ax.legend(["Fleming-Viot", "Monte-Carlo", "Optimum theta"])
+        plt.title("# particles N = {}, Simulation time for P(T>t) and E(T_A) = {}, # learning steps = {}, Average number of events per learning step = {:.0f}" \
+                    .format(N, t_sim, t_learn, n_events_mean))
+
+    if PLOT_RESULTS_PAPER:
+        """
+        The plots to show in the paper are generated.
+        HOWEVER, THIS IS EXPECTED TO BE RUN MANUALLY AND BY PIECES, AS THE INPUT FILES CONTAINING THE RESULTS TO PLOT
+        NEED TO BE CHANGED EVERY TIME WE WANT TO PLOT THE RESULTS.
+        """
+        # Read the results from files and plot the MC and FV results on the same graph
+        resultsdir = "E:/Daniel/Projects/PhD-RL-Toulouse/projects/RL-002-QueueBlocking/results/RL/" + options.queue_system
+
+        # -- Alpha adaptive
+        # results_file_fv = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220121_031815_FV-J=0.5K-K=20.csv")
+        # results_file_mc = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220121_150307_MC-J=0.5K-K=20.csv")
+        results_file_fv = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_025611_FV-K=20-J=0.5K.csv")
+        results_file_mc = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_131828_MC-K=20-J=0.5K.csv")
+        K_true = 19  # Optimum blocking size, the integer-valued K at which the expected cost is minimum
+
+        results_file_fv = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220124_040745_FV-K=30-J=0.5K.csv")
+        results_file_mc = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_161121_MC-K=30-J=0.5K.csv")
+        K_true = 19  # Optimum blocking size, the integer-valued K at which the expected cost is minimum
+
+        # All exponents, K0 = 9
+        # 2022/02/01 --> But this is wrong because of the error about the true theta, which was not updated to the one we set!
+        results_file_fv = os.path.join(os.path.abspath(resultsdir),
+                                       "SimulatorQueue_20220125_025523_FV-K0=40-K=10-AlphaAdaptive.csv")
+        results_file_mc = os.path.join(os.path.abspath(resultsdir), ".csv")
+        K_true = 9  # Optimum blocking size, the integer-valued K at which the expected cost is minimum
+
+        # -- Alpha constant
+        # J/K = 0.5, K0 = 19
+        results_file_fv = os.path.join(os.path.abspath(resultsdir),
+                                       "SimulatorQueue_20220125_121657_FV-K0=20-K=30-J=0.5-AlphaConst.csv")
+        results_file_mc = os.path.join(os.path.abspath(resultsdir),
+                                       "SimulatorQueue_20220125_123300_MC-K0=20-K=30-J=0.5-AlphaConst.csv")
+        K_true = 19  # Optimum blocking size, the integer-valued K at which the expected cost is minimum
+
+        # results_file_fv = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_122700_FV-K0=10-K=30-J=0.5-AlphaConst.csv")
+        # results_file_mc = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_124237_MC-K0=10-K=30-J=0.5-AlphaConst.csv")
+
+        results_file_fv = os.path.join(os.path.abspath(resultsdir),
+                                       "SimulatorQueue_20220125_180636_FV-K0=30-K=5-J=0.5-AlphaConst.csv")
+        results_file_mc = os.path.join(os.path.abspath(resultsdir),
+                                       "SimulatorQueue_20220125_181511_MC-K0=30-K=5-J=0.5-AlphaConst.csv")
+        K_true = 24  # Optimum blocking size, the integer-valued K at which the expected cost is minimum
+
+        # J/K = 0.5, K0 = 9
+        results_file_fv1 = os.path.join(os.path.abspath(resultsdir),
+                                        "SimulatorQueue_20220130_105312_FV-K0=30-K=10-J=0.5-E1.5-AlphaConst(B=5).csv")
+        results_file_mc1 = os.path.join(os.path.abspath(resultsdir),
+                                        "SimulatorQueue_20220130_112523_MC-K0=30-K=10-J=0.5-E1.5-AlphaConst(B=5).csv")
+        K_true = 9  # Optimum blocking size, the integer-valued K at which the expected cost is minimum
+
+        # J/K = 0.5, K0 = 19
+        results_file_fv1 = os.path.join(os.path.abspath(resultsdir),
+                                        "SimulatorQueue_20220125_190830_FV-K0=20-K=30-J=0.5-E1.5-AlphaConst(B=5).csv")
+        results_file_mc1 = os.path.join(os.path.abspath(resultsdir),
+                                        "SimulatorQueue_20220125_192242_MC-K0=20-K=30-J=0.5-E1.5-AlphaConst(B=5).csv")
+        results_file_fv2 = os.path.join(os.path.abspath(resultsdir),
+                                        "SimulatorQueue_20220125_193204_FV-K0=20-K=30-J=0.5-E1.0-AlphaConst(B=5).csv")
+        results_file_mc2 = os.path.join(os.path.abspath(resultsdir),
+                                        "SimulatorQueue_20220125_200859_MC-K0=20-K=30-J=0.5-E1.0-AlphaConst(B=5).csv")
+        results_file_fv3 = os.path.join(os.path.abspath(resultsdir), ".csv")
+        results_file_mc3 = os.path.join(os.path.abspath(resultsdir), ".csv")
+        K_true = 19  # Optimum blocking size, the integer-valued K at which the expected cost is minimum.
+        # NOTE: K_true is NOT exactly theta_true + 1 because theta_true defines xref (if I recall correctly)
+        # and the minimum of the expected cost function of K is not always xref + 1, although it is close to it.
+
+        # J/K = 0.3, K0 = 24
+        # 2022/10/14: A little after the submission to AISTATS-2023 where we were not able to add these plots
+        results_file_fv1 = os.path.join(os.path.abspath(resultsdir),
+                                        "SimulatorQueue_20221013_190126-K0=24-K=35-J=0.3-E1.0-AlphaConst(B=5)_seed1317.csv")
+        results_file_mc1 = os.path.join(os.path.abspath(resultsdir),
+                                        "SimulatorQueue_20221014_082933_MC-K0=24-K=35-J=0.3-E1.0-AlphaConst(B=5)_seed1317.csv")
+        results_file_fv2 = os.path.join(os.path.abspath(resultsdir),
+                                        "SimulatorQueue_20221013_190211-K0=24-K=35-J=0.3-E1.0-AlphaConst(B=5)_seed1717.csv")
+        results_file_mc2 = os.path.join(os.path.abspath(resultsdir),
+                                        "SimulatorQueue_20221014_083614_MC-K0=24-K=35-J=0.3-E1.0-AlphaConst(B=5)_seed1717.csv")
+        K_true = 24  # Optimum blocking size, the integer-valued K at which the expected cost is minimum
+
+        # 2022/10/18: After adding a BURN-IN time (essential for a correct estimation of E(T_A)), with estimation even when the burn-in period CANNOT be satisfied
+        # Errors 20% for N and 20% for T
+        results_file_fv1 = os.path.join(os.path.abspath(resultsdir),
+                                        "SimulatorQueue_20221017_224403-K0=24-K=35-J=0.3-E0.2-AlphaConst(B=5)_seed1717.csv")
+        results_file_mc1 = os.path.join(os.path.abspath(resultsdir),
+                                        "SimulatorQueue_20221018_114036_MC-K0=24-K=35-J=0.3-E0.2-AlphaConst(B=5)_seed1717.csv")
+        results_file_fv2 = os.path.join(os.path.abspath(resultsdir),
+                                        "SimulatorQueue_20221017_224434-K0=24-K=35-J=0.3-E0.2-AlphaConst(B=5)_seed1317.csv")
+        results_file_mc2 = os.path.join(os.path.abspath(resultsdir),
+                                        "SimulatorQueue_20221018_114509_MC-K0=24-K=35-J=0.3-E0.2-AlphaConst(B=5)_seed1317.csv")
+        results_file_fv3 = os.path.join(os.path.abspath(resultsdir),
+                                        "SimulatorQueue_20221017_224514-K0=24-K=35-J=0.3-E0.2-AlphaConst(B=5)_seed1313.csv")
+        results_file_mc3 = os.path.join(os.path.abspath(resultsdir),
+                                        "SimulatorQueue_20221018_114531_MC-K0=24-K=35-J=0.3-E0.2-AlphaConst(B=5)_seed1313.csv")
+        K_true = 24  # Optimum blocking size, the integer-valued K at which the expected cost is minimum
+
+        # 2022/10/18: After adding a BURN-IN time (essential for a correct estimation of E(T_A)), with estimation ONLY when the burn-in period can be satisfied
+        # Errors 100% for N and 100% for T
+        results_file_fv1 = os.path.join(os.path.abspath(resultsdir),
+                                        "SimulatorQueue_20221018_124948-K0=24-K=35-J=0.3-E1.0-AlphaConst(B=5)_seed1717.csv")
+        results_file_mc1 = os.path.join(os.path.abspath(resultsdir),
+                                        "SimulatorQueue_20221018_145520_MC-K0=24-K=35-J=0.3-E1.0-AlphaConst(B=5)_seed1717.csv")
+        results_file_fv2 = os.path.join(os.path.abspath(resultsdir),
+                                        "SimulatorQueue_20221018_125247-K0=24-K=35-J=0.3-E1.0-AlphaConst(B=5)_seed1317.csv")
+        results_file_mc2 = os.path.join(os.path.abspath(resultsdir),
+                                        "SimulatorQueue_20221018_145552_MC-K0=24-K=35-J=0.3-E1.0-AlphaConst(B=5)_seed1317.csv")
+        results_file_fv3 = os.path.join(os.path.abspath(resultsdir),
+                                        "SimulatorQueue_20221018_125307-K0=24-K=35-J=0.3-E1.0-AlphaConst(B=5)_seed1313.csv")
+        results_file_mc3 = os.path.join(os.path.abspath(resultsdir),
+                                        "SimulatorQueue_20221018_145614_MC-K0=24-K=35-J=0.3-E1.0-AlphaConst(B=5)_seed1313.csv")
+        K_true = 24  # Optimum blocking size, the integer-valued K at which the expected cost is minimum
+
+        # 2022/10/18: After adding a BURN-IN time (essential for a correct estimation of E(T_A)), with estimation ONLY when the burn-in period can be satisfied
+        # Errors 100% for N and 20% for T
+        results_file_fv1 = os.path.join(os.path.abspath(resultsdir),
+                                        "SimulatorQueue_20221018_161511-K0=24-K=35-J=0.3-E1.0,0.2-AlphaConst(B=5)_seed1717.csv")
+        results_file_mc1 = os.path.join(os.path.abspath(resultsdir),
+                                        "SimulatorQueue_20221019_175002_MC-K0=24-K=35-J=0.3-E1.0,0.2-AlphaConst(B=5)_seed1717.csv")
+        results_file_fv2 = os.path.join(os.path.abspath(resultsdir),
+                                        "SimulatorQueue_20221018_161526-K0=24-K=35-J=0.3-E1.0,0.2-AlphaConst(B=5)_seed1317.csv")
+        results_file_mc2 = os.path.join(os.path.abspath(resultsdir),
+                                        "SimulatorQueue_20221019_175022_MC-K0=24-K=35-J=0.3-E1.0,0.2-AlphaConst(B=5)_seed1317.csv")
+        results_file_fv3 = os.path.join(os.path.abspath(resultsdir),
+                                        "SimulatorQueue_20221018_161552-K0=24-K=35-J=0.3-E1.0,0.2-AlphaConst(B=5)_seed1313.csv")
+        results_file_mc3 = os.path.join(os.path.abspath(resultsdir),
+                                        "SimulatorQueue_20221019_175034_MC-K0=24-K=35-J=0.3-E1.0,0.2-AlphaConst(B=5)_seed1313.csv")
+        K_true = 24  # Optimum blocking size, the integer-valued K at which the expected cost is minimum
+
+        # J/K = 0.5, K0 = 24
+        # These only simulates for 300 learning steps
+        # results_file_fv1 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_233513_FV-K0=25-K=35-J=0.5-E1.5-AlphaConst(B=5).csv")
+        # results_file_mc1 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220126_004040_MC-K0=25-K=35-J=0.5-E1.5-AlphaConst(B=5).csv")
+        # results_file_fv2 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_235038_FV-K0=25-K=35-J=0.5-E1.0-AlphaConst(B=5).csv")
+        # results_file_mc2 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220126_032802_MC-K0=25-K=35-J=0.5-E1.0-AlphaConst(B=5).csv")
+
+        results_file_fv1 = os.path.join(os.path.abspath(resultsdir),
+                                        "SimulatorQueue_20220126_033710_FV-K0=25-K=35-J=0.5-E1.5-AlphaConst(B=5).csv")
+        results_file_mc1 = os.path.join(os.path.abspath(resultsdir),
+                                        "SimulatorQueue_20220126_133352_MC-K0=25-K=35-K=0.5-E1.5-AlphaConst(B=5).csv")
+        results_file_fv2 = os.path.join(os.path.abspath(resultsdir),
+                                        "SimulatorQueue_20220126_033755_FV-K0=25-K=35-J=0.5-E1.0-AlphaConst(B=5).csv")
+        results_file_mc2 = os.path.join(os.path.abspath(resultsdir),
+                                        "SimulatorQueue_20220126_133409_MC-K0=25-K=35-K=0.5-E1.0-AlphaConst(B=5).csv")
+        results_file_fv3 = os.path.join(os.path.abspath(resultsdir),
+                                        "SimulatorQueue_20220125_235230_FV-K0=25-K=35-J=0.5-E0.5-AlphaConst(B=5).csv")
+        results_file_mc3 = os.path.join(os.path.abspath(resultsdir),
+                                        "SimulatorQueue_20220127_022406_MC-K0=25-K=35-K=0.5-E0.5-AlphaConst(B=5).csv")
+        K_true = 24  # Optimum blocking size, the integer-valued K at which the expected cost is minimum
+
+        # J/K = 0.3, K0 = 19
+        # These only simulates for 300 learning steps
+        # results_file_fv1 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_235638_FV-K0=20-K=30-J=0.3-E1.5-AlphaConst(B=5).csv")
+        # results_file_mc1 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220126_004118_MC-K0=20-K=30-J=0.3-E1.5-AlphaConst(B=5).csv")
+        # results_file_fv2 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_235608_FV-K0=20-K=30-J=0.3-E1.0-AlphaConst(B=5).csv")
+        # results_file_mc2 = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220126_023359_MC-K0=20-K=30-J=0.3-E1.0-AlphaConst(B=5).csv")
+
+        results_file_fv1 = os.path.join(os.path.abspath(resultsdir),
+                                        "SimulatorQueue_20220126_135652_FV-K0=20-K=30-J=0.3-E1.5-AlphaConst(B=5).csv")
+        results_file_mc1 = os.path.join(os.path.abspath(resultsdir),
+                                        "SimulatorQueue_20220126_193306_MC-K0=20-K=30-J=0.3-E1.5-AlphaConst(B=5).csv")
+        results_file_fv2 = os.path.join(os.path.abspath(resultsdir),
+                                        "SimulatorQueue_20220126_135719_FV-K0=20-K=30-J=0.3-E1.0-AlphaConst(B=5).csv")
+        results_file_fv2 = os.path.join(os.path.abspath(resultsdir),
+                                        "SimulatorQueue_20220519_165242_FV-K0=20-K=30-J=0.3-E0.5-AlphaConst(B=5)_seed1313.csv")
+        results_file_mc2 = os.path.join(os.path.abspath(resultsdir),
+                                        "SimulatorQueue_20220126_193252_MC-K0=20-K=30-J=0.3-E1.0-AlphaConst(B=5).csv")
+        results_file_mc2 = os.path.join(os.path.abspath(resultsdir),
+                                        "SimulatorQueue_20220519_203152_MC-K0=20-K=30-J=0.3-E0.5-AlphaConst(B=5)_seed1313.csv")
+        K_true = 19  # Optimum blocking size, the integer-valued K at which the expected cost is minimum
+
+        theta_update_strategy = "normal"
+
+        # -- Alpha constant + clipping
+        # results_file_fv = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_125902_FV-K0=20-K=30-J=0.5-AlphaConst-Clipping.csv")
+        # results_file_mc = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220125_132227_MC-K0=20-K=30-J=0.5-AlphaConst-Clipping.csv")
+
+        # J/K = 0.5, K0 = 19
+        results_file_fv1 = os.path.join(os.path.abspath(resultsdir),
+                                        "SimulatorQueue_20220125_212158_FV-K0=20-K=30-J=0.5-E1.5-Clipping.csv")
+        results_file_mc1 = os.path.join(os.path.abspath(resultsdir),
+                                        "SimulatorQueue_20220125_214819_MC-K0=20-K=30-J=0.5-E1.5-Clipping.csv")
+        results_file_fv2 = os.path.join(os.path.abspath(resultsdir),
+                                        "SimulatorQueue_20220125_212353_FV-K0=20-K=30-J=0.5-E1.0-Clipping.csv")
+        results_file_mc2 = os.path.join(os.path.abspath(resultsdir),
+                                        "SimulatorQueue_20220125_220710_MC-K0=20-K=30-J=0.5-E1.0-Clipping.csv")
+        K_true = 19  # Optimum blocking size, the integer-valued K at which the expected cost is minimum
+
+        # J/K = 0.3, K0 = 19
+        results_file_fv1 = os.path.join(os.path.abspath(resultsdir),
+                                        "SimulatorQueue_20220126_035241_FV-K0=20-K=30-J=0.3-E1.5-Clipping.csv")
+        results_file_mc1 = os.path.join(os.path.abspath(resultsdir),
+                                        "SimulatorQueue_20220126_131153_MC-K0=20-K=30-J=0.3-E1.5-Clipping.csv")
+        results_file_fv2 = os.path.join(os.path.abspath(resultsdir),
+                                        "SimulatorQueue_20220126_035406_FV-K0=20-K=30-J=0.3-E1.0-Clipping.csv")
+        results_file_mc2 = os.path.join(os.path.abspath(resultsdir),
+                                        "SimulatorQueue_20220126_131215_MC-K0=20-K=30-J=0.3-E1.0-Clipping.csv")
+        K_true = 19  # Optimum blocking size, the integer-valued K at which the expected cost is minimum
+
+        # J/K = 0.5, K0 = 24
+        results_file_fv1 = os.path.join(os.path.abspath(resultsdir),
+                                        "SimulatorQueue_20220126_034444_FV-K0=25-K=35-J=0.5-E1.5-Clipping.csv")
+        results_file_mc1 = os.path.join(os.path.abspath(resultsdir),
+                                        "SimulatorQueue_20220126_131125_MC-K0=25-K=35-J=0.5-E1.5-Clipping.csv")
+        results_file_fv2 = os.path.join(os.path.abspath(resultsdir),
+                                        "SimulatorQueue_20220126_034327_FV-K0=25-K=35-J=0.5-E1.0-Clipping.csv")
+        results_file_mc2 = os.path.join(os.path.abspath(resultsdir),
+                                        "SimulatorQueue_20220126_131057_MC-K0=25-K=35-J=0.5-E1.0-Clipping.csv")
+        K_true = 24  # Optimum blocking size, the integer-valued K at which the expected cost is minimum
+
+        theta_update_strategy = "clipping"
+
+        # Read the data
+        results_fv = pd.read_csv(results_file_fv)
+
+        results_fv1 = pd.read_csv(results_file_fv1);
+        results_fv1['case'] = 1
+        results_mc1 = pd.read_csv(results_file_mc1);
+        results_mc1['case'] = 1
+        results_fv2 = pd.read_csv(results_file_fv2);
+        results_fv2['case'] = 2
+        results_mc2 = pd.read_csv(results_file_mc2);
+        results_mc2['case'] = 2
+        results_fv3 = pd.read_csv(results_file_fv3);
+        results_fv3['case'] = 3
+        results_mc3 = pd.read_csv(results_file_mc3);
+        results_mc3['case'] = 3
+
+        results_fv = pd.concat([results_fv1, results_fv2])
+        results_mc = pd.concat([results_mc1, results_mc2])
+
+        results_fv = pd.concat([results_fv1, results_fv2, results_fv3])
+        results_mc = pd.concat([results_mc1, results_mc2, results_mc3])
+
+        results_fv = results_fv1
+        results_mc = results_mc1
+
+        results_fv = results_fv2
+        results_mc = results_mc2
+
+        #-- Parameters used in the plots
+        theta_update_strategy = "normal"
+        error_nominal_phi = 1.0
+        error_nominal_et = 0.2
+
+        # Whether to set specific tick marks for the Y-axis in order to align visually two contiguous plots in the paper
+        set_special_axis_ticks = True
+        # set_special_axis_ticks = False
+
+        # Whether to show the text box with simulation parameters IN THE PLOT
+        show_textbox = True
+
+        t_learn_max = 25
+        if t_learn_max is not None:
+            results_fv = results_fv[results_fv['t_learn'] <= t_learn_max]
+            results_mc = results_mc[results_mc['t_learn'] <= t_learn_max]
+
+
+        # Plotting process starts
+        # (2022/10/18) Note that grouping by N and T have been commented out because N and T could be updated at every learning step
+        # (in order to make learning faster)
+        all_cases = aggregation_bygroups(results_fv, ['case', 'theta_true', 'J/K', 'exponent'], #, 'N', 'T'],
+                                         ['K', 'n_events_mc', 'n_events_fv'],
+                                         stats=['count', 'mean', 'std', 'min', 'max'])
+        n_events_by_case = aggregation_bygroups(results_mc, ['case'], ['n_events_mc'])
+
+        J_factor_values = all_cases.index.get_level_values('J/K')
+        case_values = all_cases.index.get_level_values('case')
+        theta_true_values = all_cases.index.get_level_values('theta_true')
+        exponent_values = all_cases.index.get_level_values('exponent')
+        N_values = [np.max(results_fv.loc[ results_fv['case'] == case, 'N' ]) for case in np.unique(results_fv['case'])]
+        T_values = [np.max(results_fv.loc[ results_fv['case'] == case, 'T' ]) for case in np.unique(results_fv['case'])]
+        # Cases are sorted from larger error to smaller error
+        #case_descs = ['Larger error', 'Mid error', 'Smaller error']
+        colors = ['red', 'blue', 'green']
+        colors = ['black', 'black', 'black']
+        # Linestyles to use for each 'case' stored in results_* data frames
+        #linestyles = ['dotted', 'dashed', 'solid']
+        # linestyles = ['dashed', 'solid', 'solid']
+        linestyles = ['solid', 'dashed', 'solid']
+        # Linestyles to use for each method (FV and MC, in this order)
+        linestyles_method = ['solid', 'dashed']
+        linewidth = 2
+        fontsize = 15
+        # Number of subplots in the figure as follows:
+        # - When subplotting by method, n_subplots = 1 or 2
+        # - When subplotting by case, n_subplots = # cases (i.e. len(np.unique(results_fv['case'])))
+        n_subplots = len(np.unique(results_fv['case']))
+        # Criterion to subplot by: "method" (FV or MC) or case (e.g. one subplot for each replication or for each different parameter setting (e.g. error = 100% and error = 150%)
+        subplotby = "case"
+        # Shift of the optimum theta when we define the cost as an increasing function of the blocking size
+        rho = 0.7
+        b = 3.0
+        shift_optimum = np.log(-np.log(rho) / (np.log(b) + np.log(rho))) / np.log(b)  # ~ -0.66667 when rho = 0.7 and b = 3.0
+        for J_factor in np.unique(J_factor_values):
+            cases = case_values[J_factor_values == J_factor]
+            ncases = len(cases)
+
+            # IMPORTANT: We assume that the true theta value and the start theta values are ALL the same for all cases
+            theta_true = theta_true_values[0] + shift_optimum
+            # K_true = int(np.round(theta_true + 1))
+            theta_start = results_fv['theta'].iloc[0]
+            K_start = int(np.ceil(theta_start + 1))
+
+            axes = plt.figure(figsize=(24, 18)).subplots(1, n_subplots, squeeze=False)
+            legend = [[], []]
+            figfile = os.path.join(os.path.abspath(resultsdir),
+                                   "RL-single-FVMC-K0={}-start={}-J={}-E{:.1f},{:.1f}-{}.jpg" \
+                                   .format(K_true, K_start, J_factor, error_nominal_phi, error_nominal_et, theta_update_strategy))
+            for idx_case, case in enumerate(cases):
+                print("Plotting case {} with idx_case = {}, K_true={}, K_start={}, J={}K".format(case, idx_case, K_true,
+                                                                                                 K_start, J_factor))
+                # The metadata for the title and legend
+                #case_desc = case_descs[idx_case]
+                N = N_values[idx_case]
+                T = T_values[idx_case]
+                n_events_et = all_cases['n_events_mc']['mean'].iloc[idx_case]
+                n_events_fv = all_cases['n_events_fv']['mean'].iloc[idx_case]
+                n_events_mean = n_events_by_case.iloc[idx_case]['n_events_mc']['mean']
+
+                # The data to plot
+                ind_fv = results_fv['case'] == case
+                ind_mc = results_mc['case'] == case
+                K_start = int(np.ceil(theta_start + 1))
+                K_opt_fv = int(np.round(results_fv['theta'][ind_fv].iloc[-1])) + 1  # Optimum K found by the algorithm = closest integer to last theta + 1
+                K_opt_mc = int(np.round(results_mc['theta'][ind_mc].iloc[-1])) + 1  # Optimum K found by the algorithm = closest integer to last theta + 1
+                x_fv = results_fv['t_learn'][ind_fv]
+                x_mc = results_mc['t_learn'][ind_mc]
+                y_fv = results_fv['theta'][ind_fv]
+                y_mc = results_mc['theta'][ind_mc]
+                if subplotby == "method":
+                    axes[0][0].plot(x_fv, y_fv, color='green', linestyle=linestyles[idx_case], linewidth=linewidth)
+                    axes[0][n_subplots - 1].plot(x_mc, y_mc, color='red', linestyle='dashed', linewidth=linewidth)
+                else:
+                    assert subplotby == "case"
+                    # When setting linestyles by method because each case possibly goes in a different subplot (when n_subplots > 1)
+                    axes[0][idx_case].plot(x_fv, y_fv, color='green', linestyle=linestyles_method[0], linewidth=linewidth)
+                    axes[0][idx_case].plot(x_mc, y_mc, color='red', linestyle=linestyles_method[1], linewidth=linewidth)
+                    axes[0][idx_case].set_title("Replication {}".format(idx_case+1))
+
+                # Errors
+                err_phi = results_fv['err_phi'][ind_fv].iloc[0]
+                err_et = results_fv['err_et'][ind_fv].iloc[0]
+
+                # legend[0] += ["{}) {}: FVRL (N={}, T={}, error(Phi)={:.0f}%, error(ET)={:.0f}%)" #, avg #events per learning step={})" \
+                #                .format(idx_case+1, case_desc, N, T, err_phi*100, err_et*100)] #, n_events_et + n_events_fv)]
+                # legend[n_subplots-1] += ["{}) {}: MC (comparable to FVRL case ({})" #, avg #events per learning step={})" \
+                #                .format(idx_case+1, case_desc, idx_case+1)] #, n_events_et + n_events_fv)]
+                # legend[0] += ["FVRL (N={}, T={}, expected error = {:.0f}%)\n(avg #events per learning step={:.0f})" \
+                #                  .format(N, T, error*100, n_events_mean)]
+                # legend[n_subplots-1] += ["MC (avg #events per learning step={:.0f})".format(n_events_mean)]
+                legend[0] += ["N={}, T={}: expected error Phi = {:.0f}%, expected error E(T_A) = {:.0f}%)\n(avg #events per learning step={:.0f})" \
+                                  .format(N, T, error_nominal_phi * 100, error_nominal_et*100, n_events_mean)]
+
+            for idx in range(n_subplots):
+                axes[0][idx].set_xlabel('Learning step', fontsize=fontsize)
+                axes[0][idx].set_ylabel('theta', fontsize=fontsize)
+                for tick in axes[0][idx].xaxis.get_major_ticks():
+                    tick.label.set_fontsize(fontsize)
+                for tick in axes[0][idx].yaxis.get_major_ticks():
+                    tick.label.set_fontsize(fontsize)
+                axes[0][idx].set_ylim((0, np.max([axes[0][idx].get_ylim()[1], K_start, K_true])))
+                axes[0][idx].axhline(theta_true, color='gray', linestyle='dashed')
+                axes[0][idx].yaxis.set_major_locator(MaxNLocator(integer=True))
+                axes[0][idx].set_aspect(1 / axes[0][idx].get_data_ratio())
+                if set_special_axis_ticks:
+                    axes[0][idx].set_yticks(range(0, 36, 5))
+                # axes[0][idx].legend(legend[idx] + ["Optimum theta"], fontsize='xx-large', loc='lower right')
+                if show_textbox:
+                    axes[0][idx].text(axes[0][idx].get_xlim()[1] / 1.7, 5,
+                                      "J/K={}, N={}, T={}\nAvg #events per step = {:.0f}\n\nK* = {}" \
+                                      #\nEstimated K* (FV) = {}\nEstimated K* (MC) = {}" \
+                                      .format(J_factor, N, T, n_events_mean, K_true),
+                                      #.format(J_factor, N, T, n_events_mean, K_true, K_opt_fv, K_opt_mc),
+                                      horizontalalignment='center',
+                                      fontsize=fontsize, bbox={'facecolor': 'none', 'edgecolor': 'black'})
+                # plt.title("# particles N = {}, Simulation time for P(T>t) and E(T_A) = {}, # learning steps = {}, Average number of events per learning step = {:.0f}" \
+                #          .format(N, 0, 0, 0))
+
+            # To avoid cut off of vertical axis label!!
+            # Ref: https://stackoverflow.com/questions/6774086/why-is-my-xlabel-cut-off-in-my-matplotlib-plot
+            plt.gcf().subplots_adjust(left=0.15)
+            # Save leaving just a little margin (pad_inches=0.1), otherwise we would need to crop the generated figure
+            # before including it in a paper.
+            # Ref: https://stackoverflow.com/questions/36203597/remove-margins-from-a-matplotlib-figure
+            plt.savefig(figfile, bbox_inches="tight", pad_inches=0.1)
+            print("Figure saved to file {}".format(figfile))
