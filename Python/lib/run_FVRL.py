@@ -6,8 +6,10 @@ Created on Sun Jul 11 08:42:57 2022
 @description: Runs the FVRL algorithm to learn the optimum parameter of a parameterized policy.
 """
 
-import runpy
-runpy.run_path('../../setup.py')
+if __name__ == "__main__":
+    # Only run this when running the script, o.w. it may give an error when importing functions if setup.py is not found
+    import runpy
+    runpy.run_path('../../setup.py')
 
 import os
 import sys
@@ -37,7 +39,7 @@ from Python.lib.simulators.queues import compute_nparticles_and_narrivals_for_fv
     compute_rel_errors_for_fv_process, define_queue_environment_and_agent, get_deterministic_blocking_boundaries, \
     LearningMode, SimulatorQueue
 
-from Python.lib.utils.basic import aggregation_bygroups, array_of_objects, \
+from Python.lib.utils.basic import aggregation_bygroups, array_of_objects, convert_str_argument_to_list_of_type, \
     convert_str_to_list_of_type, is_scalar, show_exec_params
 from Python.lib.utils.computing import compute_blocking_probability_birth_death_process, compute_expected_cost_knapsack
 import Python.lib.utils.plotting as plotting
@@ -338,75 +340,289 @@ def compute_optimum_blocking_sizes_and_expected_cost(simul: SimulatorQueue, dict
 #---------------------------- Auxiliary functions ---------------------------#
 
 
-# Default execution parameters when no arguments are given in the command line
-# Example of execution from the command line:
-# python simulators.py 50 FV False 1.0 23.0 33.9 0.5 1.0 1.0
-print("User arguments: {}".format(sys.argv))
-nargs_required = 3
-counter_opt_args = 0
-if len(sys.argv) == 1:  # Only the execution file name is contained in sys.argv
-    sys.argv += [30]    # t_learn: Number of learning steps
-    sys.argv += ["MC"]  # learning_method: estimation method: "FV" or "MC";
-                        # when learning_method = "MC", we expect there exists a benchmark file called benchmark_fv.csv
-                        # that defines how many events were observed during the equivalent FV learning method
-                        # (for fair comparison). If one does not exist, the Monte-Carlo simulation wil be run
-                        # no its own and no comparison is expected to be carried out with a previously FV simulation.
-    sys.argv += [1]     # Number of replications to run
-if len(sys.argv) == nargs_required + counter_opt_args + 1:
-    sys.argv += ["benchmark_fv.csv"] #["nonexistent"] #["benchmark_fv.csv"] # Benchmark filename relative to the resultsdir directory defined below when the learning method is MC (instead of FVRL)
-counter_opt_args += 1
-if len(sys.argv) == nargs_required + counter_opt_args + 1:
-    sys.argv += [False] # clipping: whether to use clipping: False or True
-counter_opt_args += 1
-if len(sys.argv) == nargs_required + counter_opt_args + 1:
-    sys.argv += [1.0]   # clipping_value: clipping value when clipping = True
-counter_opt_args += 1
-if len(sys.argv) == nargs_required + counter_opt_args + 1:
-    sys.argv += [5.0]   # 18.0, 23.0]  # theta_ref: reference theta used in the exponential cost function for single-buffer systems (only one value is allowed). NOTE: For single-buffer systems this value is close to the optimum theta value, called theta_true below; theta_ref defines the sref value on which the exponential cost is centered. For more details see the notes in the costBlockingExponential() function defined in environments/queues.py.
-counter_opt_args += 1
-if len(sys.argv) == nargs_required + counter_opt_args + 1:
-    sys.argv += [2.1]   # 29.1, 34.1]   # theta_start: non-integral initial theta value for the learning process (only one value is allowed)
-counter_opt_args += 1
-if len(sys.argv) == nargs_required + counter_opt_args + 1:
-    sys.argv += [0.3]   # J_factor: fraction J/K to use in the FV learning method
-counter_opt_args += 1
-if len(sys.argv) == nargs_required + counter_opt_args + 1:
-    sys.argv += [1.5]   # error_rel_phi: expected relative error for the estimation of Phi(t,K) in the FV learning method (1.0 means 100%) --> it defines the number of particles to use
-counter_opt_args += 1
-if len(sys.argv) == nargs_required + counter_opt_args + 1:
-    sys.argv += [1.5]   # error_rel_et: expected relative error for the estimation of E(T) in the FV learning method (1.0 means 100%) --> it defines the number of arrival events to observe in the MC-based simulation to estimate E(T)
-counter_opt_args += 1
-if len(sys.argv) == nargs_required + counter_opt_args + 1:
-    sys.argv += ["save"]  # Either "nosave" or anything else for saving the results and log
-counter_opt_args += 1
-if len(sys.argv) == nargs_required + counter_opt_args + 1:
-    sys.argv += [True]  # Whether to save with the datetime in the file name
-counter_opt_args += 1
-if len(sys.argv) == nargs_required + counter_opt_args + 1:
-    sys.argv += [True]  # Whether to plot the learning trajectory (for theta)
-counter_opt_args += 1
-print("Parsed user arguments: {}".format(sys.argv))
+#------------------- Functions to parse input arguments ---------------------#
+def parse_input_parameters(argv):
+    # Written for uugot.it project in Apr-2021
+    # Parse input parameters
+    # Ref: https://docs.python.org/3.7/library/optparse.html
+    # Main steps:
+    # 1) The option parser is initialized with optparse.OptionParser(), where we can specify the usage= and version=,
+    # as e.g. `optparse.OptionParser(usage="%prog [-v] [-p]", version="%prog 1.0")`
+    # 2) New options to parse are added with parser.add_option(), where the metavar= argument (e.g. `metavar="input file"`)
+    # is used to indicate that the option expects a value and gives a short description of its content
+    # (e.g. `--filename="file.txt"` as opposed to `--verbose`, which expects no value).
+    # We can also define:
+    #    a) the default value of the option (although this is more clearly done with parser.set_defaults().
+    #    b) the action to take with the option value read with the action= argument, e.g. "store_true", "store_false",
+    #       which are actually needed for FLAG options that do NOT require any option value (e.g. -v for verbose, etc.),
+    #       and ***whose default value (i.e. when the flag is not given) is specified by the default= parameter***.
+    #       The default action is "store" which is used for options accepting a value as in `--file="file.txt".
+    #       --> NOTE that the action can be "callback" meaning that a callback function with the signature callback(option, opt, value, parser)
+    #       is called to parse the argument value.
+    #       If the value of the argument needs to be processed by the callback (most likely) we need to:
+    #       - specify its type via the `type=` option of the parser.add_option() function. Otherwise, the argument value will be set to None.
+    #       If the value of the argument needs to be updated (e.g. a string converted to a list) we need to:
+    #       - define the name of the argument to set with the `dest=` option of the parser.add_option() method.
+    #       - set the value of the argument in the callback by calling `setattr(parser.values, option.dest, <value>)`.
+    #       Ref: https://docs.python.org/3.7/library/optparse.html#option-callbacks
+    #    b) the type of the option value expected with the type= argument (e.g. type="int"), which defaults to "string".
+    #    c) the store destination with the dest= argument defining the attribute name of the `options` object
+    #       created when running parser.parse_args() (see next item) where the option value is stored.
+    #       See more details about the default value of dest= below.
+    # 3) Options are parsed with parser.parse_args() into a tuple (options, args), where `options` is an object
+    # that contains all the name-value pair options and `args` is an object containing the positional parameters
+    # that come after all other options have been passed (e.g. `-v --file="file.txt" arg1 arg2`).
+    # 4) Every option read is stored as an attribute of the `options` object created by parser.parse_args()
+    # whose name is the value specified by the dest= parameter of the parser.add_option() method, or its
+    # (intelligent) default if none is specified (e.g. the option '--model_pos' is stored as options.model_pos by default)
+    usage = "usage: %prog [options]"
+    parser = optparse.OptionParser(usage="%prog "
+                                         "[--queue_system] "
+                                         "[--method] "
+                                         "[--t_learn] "
+                                         "[--replications] "
+                                         "[--benchmark_filename] "
+                                         "[--benchmark_datetime] "
+                                         "[--clipping] "
+                                         "[--clipping_value] "
+                                         "[--theta_ref] "
+                                         "[--theta_true] "
+                                         "[--theta_start] "
+                                         "[--J_factor] "
+                                         "[--use_stationary_probability_for_start_states "
+                                         "[-N] "
+                                         "[-T] "
+                                         "[--error_rel_et] "
+                                         "[--error_rel_phi] "
+                                         "[--seed] "
+                                         "[--create_log] "
+                                         "[--save_results] "
+                                         "[--plot] "
+                                         )
+    parser.add_option("--queue_system",
+                      type="str",
+                      metavar="Queue system",
+                      help="Queue system defining the environment on which learning takes place [default: %default]")
+    parser.add_option("--method",
+                      type="str",
+                      metavar="Learning method",
+                      help="Learning method [default: %default]")
+    parser.add_option("--t_learn",
+                      type="int",
+                      metavar="# Learning steps",
+                      help="Number of learning steps [default: %default]")
+    parser.add_option("--replications",
+                      type="int",
+                      metavar="# Replications",
+                      help="Number of replications to run [default: %default]")
+    parser.add_option("--benchmark_filename",
+                      type="str",
+                      metavar="Benchmark file",
+                      help="File from where the value of execution parameters (e.g. theta_start, T, etc.) that need to be defined in order to perform a fair comparison between the MC and the FV methods [default: %default]")
+    parser.add_option("--benchmark_datetime",
+                      type="str",
+                      metavar="Benchmark datetime",
+                      help="Datetime in format <yymmdd>_<hhmmss> that appears in the name of the file to use as benchmark from where the value of execution parameters is read [default: %default]")
+    parser.add_option("--clipping",
+                      action="store_true",
+                      help="Whether to clip the changes of the theta parameter during learning [default: %default]")
+    parser.add_option("--clipping_value",
+                      type="float",
+                      metavar="Clipping value",
+                      help="Value to which the changes of the theta parameter during learning are clipped to [default: %default]")
+    parser.add_option("--theta_ref",
+                      type="float",
+                      metavar="Reference theta value",
+                      help="Reference theta value used in the blocking cost function of the buffer size in single-buffer systems [default: %default]")
+    parser.add_option("--theta_true",
+                      action="callback",
+                      callback=convert_str_argument_to_list_of_type,
+                      metavar="True theta value(s) (only used to define the benchmark file when parameter `benchmark_datetime` is given)",
+                      help="True theta values of the problem to optimize that is used to identify the benchmark file where the value of execution parameters is read [default: %default]")
+    parser.add_option("--theta_start", dest="theta_start",
+                      type="str",
+                      action="callback",
+                      callback=convert_str_argument_to_list_of_type,
+                      metavar="Initial theta",
+                      help="Initial theta parameter for the learning process [default: %default]")
+    parser.add_option("--J_factor", dest="J_factor",
+                      type="str",
+                      action="callback",
+                      callback=convert_str_argument_to_list_of_type,
+                      metavar="J/K factors", default="0.3, 0.3, 0.3",
+                      help="Factors that define the absorption set size J [default: %default]")
+    parser.add_option("--use_stationary_probability_for_start_states",
+                      action="store_true",
+                      help="Whether to use the stationary probability distribution for the start states in Fleming-Viot simulation [default: %default]")
+    parser.add_option("-N",
+                      type="int",
+                      metavar="# particles",
+                      help="Number of Fleming-Viot particles [default: %default]")
+    parser.add_option("-T",
+                      type="int",
+                      metavar="# arrival events",
+                      help="Number of arrival events to observe before ending the simulation [default: %default]")
+    parser.add_option("--error_rel_et",
+                      type="float",
+                      metavar="Expected error for E(T_A)",
+                      help="Expected error for the estimation of E(T_A) [default: %default]")
+    parser.add_option("--error_rel_phi",
+                      type="float",
+                      metavar="Expected error for Phi(t)",
+                      help="Expected error for the estimation of Phi(t) [default: %default]")
+    parser.add_option("--burnin_time_steps",
+                      type="int",
+                      metavar="Burn-in time steps",
+                      help="Number of time steps to leave as burn-in period until the Markov process is assumed to be in stationary regime and proceed to the estimation of stationary measures [default: %default]")
+                            ## Note that blocking probability would be OVERESTIMATED when the number of burn-in steps is too small
+                            ## because the return time T (in MC) and the re-absorption time T_A (in FV) will be underestimated,
+                            ## as the simulated queues start close to the state defining the cycles of interest (i.e. J-1),
+                            ## so returning to those states at the beginning of the simulation will take shorter time
+                            ## than the respective stationary return times.
+    parser.add_option("--min_num_cycles_for_expectations",
+                      type="int",
+                      metavar="Min. number of cycles for expectation estimations",
+                      help="Minimum number of observed cycles needed for what is considered a reliable estimation of expectations (such as the estimation of expected cycle times or the MC-based estimation of the stationary probability) [default: %default]")
+    parser.add_option("--seed",
+                      type="int",
+                      metavar="Seed",
+                      help="Seed value to use for the simulations [default: %default]")
+    parser.add_option("--create_log",
+                      action="store_true",
+                      help="Whether to create a log file [default: %default]")
+    parser.add_option("--save_results",
+                      action="store_true",
+                      help="Whether to save the results into a CSV file [default: %default]")
+    parser.add_option("--save_with_dt",
+                      action="store_true",
+                      help="Whether to use the execution datetime as suffix of output file names [default: %default]")
+    parser.add_option("--plot",
+                      action="store_true",
+                      help="Whether to plot the learning process (e.g. theta estimates and objective function) [default: %default]")
+    if False:
+        parser.add_option("-d", "--debug", dest="debug", default=False,
+                          action="store_true",
+                          help="debug mode")
+        parser.add_option("-v", "--verbose", dest="verbose", default=False,
+                          action="store_true",
+                          help="verbose: show relevant messages in the log")
+
+    # NOTE: The default values of parameters processed by callbacks should define the value in the type of the `dest` option of the callback!
+    default_queue_system = "loss-network" #"single-server" #"loss-network"
+    default_create_output_files = True
+    parser.set_defaults(queue_system=default_queue_system,
+                        method="MC",
+                        t_learn=30,
+                        replications=20,
+                        benchmark_filename="benchmark_fv.csv", # Not used when benchmark_datetime is given (i.e. not empty or None)
+                        benchmark_datetime=None, #"20230410_102003", #"20230409_163723",  # Format: "<yymmdd>_<hhmmss>". Use this parameter ONLY when method = "MC" and we want to automatically generate the benchmark filename to read the benchmark data from
+                        clipping=False,
+                        clipping_value=1.0,
+                        theta_ref=18, #COST_EXP_BUFFER_SIZE_REF (this value should coincide with the optimum K, meaning that the optimum theta (theta_true) is theta_ref - 1)
+                        theta_true=[3, 5], #17,          # Use this parameter ONLY when method = "MC" and we want to automatically generate the benchmark filename to read the benchmark data from
+                        # TODO: (2023/03/19) Make the process work on a SINGLE-CLASS loss network
+                        theta_start=[0.1, 0.1], #28.1, #[0.1, 0.1],  # For loss-network: [4.1, 4.1] #[7.1, 7.1] #[3.1, 3.1] #[0.1, 0.1]
+                        J_factor=[0.3, 0.5], #0.3, #[0.5, 0.5], #[0.3, 0.5]
+                        use_stationary_probability_for_start_states=True,
+                        N=np.nan if default_queue_system == "single-server" else 200,   #100 #500
+                        T=np.nan if default_queue_system == "single-server" else 400,  #500 #1000
+                        error_rel_et=0.5 if default_queue_system == "single-server" else np.nan,
+                        error_rel_phi=0.5 if default_queue_system == "single-server" else np.nan,
+                        burnin_time_steps=10,   #10 #20
+                        min_num_cycles_for_expectations=5,
+                        seed=1313,  # 1317 #1717 #1313
+                        create_log=default_create_output_files,
+                        save_results=default_create_output_files,
+                        save_with_dt=True,
+                        plot=True)
+
+    (options, args) = parser.parse_args(argv)
+
+    print("Parsed command line options: " + repr(options))
+
+    # options: `Values` object whose parameters are referred with the dot notation (e.g. options.x)
+    # args: argument values (which do not require an argument name
+    return options, args
+
+def generate_parameter_string_for_filename(queue_system,
+                                           capacity,
+                                           blocking_costs,
+                                           rhos,
+                                           theta_ref,
+                                           theta_true,
+                                           theta_start,
+                                           J_factor,
+                                           NT_values,
+                                           error_rel_phi,
+                                           error_rel_et,
+                                           use_stationary_probability_for_start_states):
+    if queue_system == "loss-network":
+        params_str = learning_method.name + \
+                     "-K={}-costs={}-rhos={},theta0={}-theta={}-J={}-NT={}-ProbStart={}" \
+                         .format(capacity, [int(c) for c in blocking_costs], rhos, theta_true, theta_start, J_factor, NT_values, use_stationary_probability_for_start_states)
+    else:
+        params_str = learning_method.name + \
+                     "-theta_ref={}-theta={}-J={}-E={},{}".format(theta_ref, theta_start, J_factor, error_rel_phi, error_rel_et)
+
+    return params_str
+
+def show_execution_parameters(options):
+    print("Execution parameters:")
+    print("learning_method={}".format(learning_method.name))
+    if learning_method.name == "MC":
+        print("Benchmark file: {}".format(benchmark_file))
+    print("t_learn={}".format(options.t_learn))
+    print("#replications={}".format(options.replications))
+    print("clipping={}".format(options.clipping))
+    print("clipping_value={}".format(options.clipping_value))
+    print("theta_ref={}".format(theta_ref))
+    print("theta_start={}".format(options.theta_start))
+    print("J_factor={}".format(options.J_factor))
+    print("use_stationary_probability_for_start_states={}".format(use_stationary_probability_for_start_states))
+    print("#particles(N)= {}".format(N))
+    print("#learning_steps(T)={}".format(T))
+    print("error_rel_phi={} (only used when N and T are not defined)".format(error_rel_phi))
+    print("error_rel_et={} (only used when N and T are not defined)".format(error_rel_et))
+    print("burnin_time_steps={}".format(options.burnin_time_steps))
+    print("min_num_cycles_for_expectations={}".format(options.min_num_cycles_for_expectations))
+    print("create_log={}".format(options.create_log))
+    print("save_results={}".format(options.save_results))
+    print("seed={}".format(options.seed))
+
+    print("\nSystem's characteristics:")
+    print("Queue system: {}".format(options.queue_system))
+    print("Capacity: {}".format(capacity))
+    print("Blocking costs: {}".format(blocking_costs))
+    print("Job arrival rates by class: {}".format(job_class_rates))
+    print("Service rates by class: {}".format(service_rates))
+    print("Loads by class: {}".format(rhos))
+    print("Number of servers: {}".format(nservers))
+    print("Policy assignment probabilities (from job class to server): {}".format(policy_assignment_probabilities))
+    print("Reward function for blocking: {}".format(reward_func.__name__ if reward_func is not None else None))
+    print("Reward function for accepting: {}".format(rewards_accept_by_job_class))
+#------------------- Functions to parse input arguments ---------------------#
+
+#------ Parse input arguments
+options, args = parse_input_parameters(sys.argv[1:])
+
+print("Parsed user arguments:")
+print(f"Options: {options}")
+print(f"Arguments: {args}")
 print("")
 
-# -- Parse user arguments
-# This function parses a boolean input parameter which, depending on where this script is called from, may be a boolean
-# value already (if run from e.g. PyCharm) or may be a string value (if run from the command line).
-parse_boolean_parameter = lambda x: isinstance(x, bool) and x or isinstance(x, str) and x == "True"
-
 # System's characteristics
-queue_system = "loss-network"   # "single-server"
-if queue_system not in ["single-server", "loss-network"]:
-    raise ValueError(f"Invalid queue system: {queue_system}")
-if queue_system == "single-server":
+if options.queue_system not in ["single-server", "loss-network"]:
+    raise ValueError(f"Invalid queue system: {options.queue_system}")
+if options.queue_system == "single-server":
     capacity = +np.Inf
     assert np.isinf(capacity), "The system's capacity must be infinite for single-buffer systems"
     job_class_rates = [0.7]  # For multi-server: [0.8, 0.7]
     service_rates = [1.0]
     blocking_costs = "exponential"
-elif queue_system == "loss-network":
-    capacity = 6 #6 #10
+elif options.queue_system == "loss-network":
+    capacity = 6 #9 #6 #10
     job_class_rates = [1, 5] #[1, 5, 8] # When lambda = rho: #[0.8, 0.8, 0.8] #[0.1, 0.5, 0.8] #[2, 8, 15] #[20, 80, 150]
-    rhos = [0.8, 0.6] #[0.8, 0.6] #[0.5, 0.3] #[0.6, 0.4]#[0.5]*len(job_class_rates) #[0.8]*len(job_class_rates)
+    rhos = [0.5, 0.3] #[0.8, 0.6] #[0.5, 0.3] #[0.6, 0.4]#[0.5]*len(job_class_rates) #[0.8]*len(job_class_rates)
     service_rates = [l/r for l, r in zip(job_class_rates, rhos)] #[1.0, 1.0, 1.0]
     #************ BLOCKING COSTS ************
     # We should consider the following two conditions to define the blocking cost values:
@@ -439,95 +655,49 @@ elif queue_system == "loss-network":
     # Perturb the costs so that we don't get the trivial optimum at e.g. [6, 6, 6]
     np.random.seed(1)
     multiplicative_noise_values = [0.5, 2]
-    blocking_costs = [c * n for c, n in zip(blocking_costs, multiplicative_noise_values)]
+    blocking_costs = [int(round(c*n)) if c*n > 1 else c*n for c, n in zip(blocking_costs, multiplicative_noise_values)]
+    blocking_costs = [2000, 20000] #[2000, 20000] ([0.5, 0.3]) #[180, 600] ([0.8. 0.6]) # Costs computed in run_FVRL.py from p(x), lambdas and rhos
     #************ BLOCKING COSTS ************
 rhos = [l / m for l, m in zip(job_class_rates, service_rates)]
 nservers = len(service_rates)
 
-#------ Parse input arguments
-t_learn = int(sys.argv[1])
-learning_method = LearningMethod.FV if sys.argv[2] == "FV" else LearningMethod.MC
-replications = int(sys.argv[3])
-benchmark_filename = sys.argv[4]
-clipping = parse_boolean_parameter(sys.argv[5])
-clipping_value = float(sys.argv[6])
+learning_method = LearningMethod.FV if options.method == "FV" else LearningMethod.MC
 # NOTE: In unidimensional theta parameters and in blocking by buffer size systems, we the value of theta_ref from the input arguments of the script.
 # In those cases the theta_ref value defines the reference value of the reward function that is an exponential function of the buffer size.
-# Otherwise, we hard-code its value here because it is difficult to parse a parameter whose value is a list, tuple or array...
-# Nevertheless, in multidimensional theta parameters with blocking by job class (as opposed to blocking by buffer size)
+# In multidimensional theta parameters with blocking by job class (as opposed to blocking by buffer size)
 # the theta_ref has no meaning, therefore we set it to a list of NaN, where the list has length equal to the dimension of the theta parameter to estimate.
-if queue_system == "single-server":
-    theta_ref = [float(sys.argv[7])]
-    theta_start = [float(sys.argv[8])]
-    J_factor = float(sys.argv[9])
+if options.queue_system == "single-server":
+    theta_ref = options.theta_ref
     # The values of N (#particles) and T (#arrival events) are computed from the expected relative errors wished for the estimation of E(T_A) and Phi(t)
     N = np.nan; T = np.nan
-    error_rel_phi = float(sys.argv[10])
-    error_rel_et = float(sys.argv[11])
-elif queue_system == "loss-network":
-    theta_ref = [np.nan, np.nan, np.nan]
-    theta_start = [4.1]*len(job_class_rates) #[4.1, 4.1, 4.1] #[7.1, 7.1, 7.1] #[3.1, 3.1, 3.1] #[0.1, 0.1, 0.1]
-    J_factor = [0.1, 0.6] #[0.1, 0.6] #[0.3]*len(job_class_rates)
+    error_rel_phi = options.error_rel_phi
+    error_rel_et = options.error_rel_et
+    use_stationary_probability_for_start_states = None
+elif options.queue_system == "loss-network":
+    theta_ref = [np.nan]*len(job_class_rates)
     # Values of N (#particles) and T (#arrival events) to use for the simulation used to estimate stationary probabilities
     if learning_method.name == "MC":
         # This is ONLY used when there is no benchmark file or if it does not exist
         # (in order to run an ad-hoc MC learning that is not linked to a previously run FV learning)
-        N = 1; T = 200 * 1000 #50 * 100 #30 * 50 #500 * 100 #1000 * 100
+        N = 1; T = options.T #200 * 1000 #50 * 100 #30 * 50 #500 * 100 #1000 * 100
         use_stationary_probability_for_start_states = None
     else:
-        N = 30; T = 100 #N = 500; T = 100
-        use_stationary_probability_for_start_states = False
+        N = options.N; T = options.T #N = 100; T = 100, N = 500; T = 100
+        use_stationary_probability_for_start_states = options.use_stationary_probability_for_start_states
     error_rel_phi = np.nan
     error_rel_et = np.nan
-create_log = sys.argv[12] != "nosave"
-save_results = sys.argv[12] != "nosave"
-save_with_dt = parse_boolean_parameter(sys.argv[13])
-plot = parse_boolean_parameter(sys.argv[14])
-#------ Parse input arguments
-
-seed = 1313 # 1317 #1717 #1313  #1859 (for learning step 53+91=144) #1769 (for learning step 53, NOT 52 because it took too long) #1717
 
 # Reward functions
 rewards_accept_by_job_class = [0.0] * len(job_class_rates)
-if queue_system == "single-server":
+if options.queue_system == "single-server":
     reward_func = rewardOnJobRejection_ExponentialCost
     reward_func_params = dict({'buffer_size_ref': np.nan})   # The value of this parameter will be set at each simulation iteration run in the below LOOP
     policy_assignment_probabilities = [[1.0]] # For multi-server: [[0.5, 0.5, 0.0], [0.0, 0.5, 0.5]] )
-elif queue_system == "loss-network":
+elif options.queue_system == "loss-network":
     reward_func = rewardOnJobRejection_ByClass
     reward_func_params = dict({'reward_at_rejection': [-c for c in blocking_costs]})   # None
     policy_assignment_probabilities = None
-
-print("Execution parameters:")
-print("learning_method={}".format(learning_method.name))
-print("t_learn={}".format(t_learn))
-print("#replications={}".format(replications))
-print("clipping={}".format(clipping))
-print("clipping_value={}".format(clipping_value))
-print("theta_ref={}".format(theta_ref))
-print("theta_start={}".format(theta_start))
-print("J_factor={}".format(J_factor))
-print("#particles(N)= {}".format(N))
-print("#learning_steps(T)={}".format(T))
-print("use_stationary_probability_for_start_states={}".format(use_stationary_probability_for_start_states))
-print("error_rel_phi={} (only used when N and T are not defined)".format(error_rel_phi))
-print("error_rel_et={} (only used when N and T are not defined)".format(error_rel_et))
-print("benchmark file: {}".format(benchmark_filename))
-print("create_log={}".format(create_log))
-print("save_results={}".format(save_results))
-print("seed={}".format(seed))
-
-print("\nSystem's characteristics:")
-print("Queue system: {}".format(queue_system))
-print("Capacity: {}".format(capacity))
-print("Blocking costs: {}".format(blocking_costs))
-print("Job arrival rates by class: {}".format(job_class_rates))
-print("Service rates by class: {}".format(service_rates))
-print("Loads by class: {}".format(rhos))
-print("Number of servers: {}".format(nservers))
-print("Policy assignment probabilities (from job class to server): {}".format(policy_assignment_probabilities))
-print("Reward function for blocking: {}".format(reward_func.__name__ if reward_func is not None else None))
-print("Reward function for accepting: {}".format(rewards_accept_by_job_class))
+#------ Parse input arguments
 
 # Look for memory leaks
 # Ref: https://pythonspeed.com/fil/docs/fil/other-tools.html (from the Fil profiler which also seems interesting)
@@ -538,9 +708,9 @@ start_time_all = timer()
 
 # ---------------------- OUTPUT FILES --------------------#
 # create_log = False;    # In case we need to override the parameter received as argument to the script
-logsdir = "../../RL-002-QueueBlocking/logs/RL/" + queue_system
+logsdir = "../../RL-002-QueueBlocking/logs/RL/" + options.queue_system
 # save_results = True;   # In case we need to override the parameter received as argument to the script
-resultsdir = "../../RL-002-QueueBlocking/results/RL/" + queue_system
+resultsdir = "../../RL-002-QueueBlocking/results/RL/" + options.queue_system
 # ---------------------- OUTPUT FILES --------------------#
 
 # -- Parameters defining the environment, policies, learners and agent
@@ -556,22 +726,32 @@ if learning_method == LearningMethod.FV:
 else:
     # Monte-Carlo learner is the default
     learnerV = LeaMC
-    benchmark_file = os.path.join(os.path.abspath(resultsdir), benchmark_filename) # "SimulatorQueue_20221018_161552-K0=24-K=35-J=0.3-E1.0,0.2-AlphaConst(B=5)_seed1313.csv") #"benchmark_fv.csv")
-    if not os.path.exists(benchmark_file):
-        warnings.warn("Benchmark file {} does not exist. The Monte-Carlo simulation will run without any reference to a previously run Fleming-Viot simulation".format(benchmark_filename))
+    if options.benchmark_datetime is not None and options.benchmark_datetime != "" or options.benchmark_filename == "":
+        # Build the benchmark filename from the datetime given and the input parameters
+        # Notes:
+        # - In the call below, we enclose some parameters in brackets because when the benchmark file is saved
+        # those parameters are stored as a LIST of different values tried in the filename
+        # (see below when calling this function using e.g. theta_ref_values, etc.).
+        # - NOT all parameters are used to generate the string of parameters. The parameters that are used depend
+        # on the queue system (e.g. "single-server" or "loss-network").
+        params_str = generate_parameter_string_for_filename(# System parameters
+                                                            options.queue_system, capacity, blocking_costs, rhos,
+                                                            # Policy parameters
+                                                            [theta_ref], options.theta_true, [options.theta_start],
+                                                            # Learning parameters
+                                                            [options.J_factor], [[options.N, options.T]], error_rel_phi, error_rel_et, options.use_stationary_probability_for_start_states)
+        if options.benchmark_datetime != "":
+            sep = "_" + options.benchmark_datetime + "_"
+        else:
+            sep = "_"
+        benchmark_file = os.path.join(resultsdir, "SimulatorQueue" + sep + params_str.replace("MC", "FV") + ".csv")
+    elif options.benchmark_filename is not None:
+        benchmark_file = os.path.join(os.path.abspath(resultsdir), options.benchmark_filename) # "SimulatorQueue_20221018_161552-K0=24-K=35-J=0.3-E1.0,0.2-AlphaConst(B=5)_seed1313.csv") #"benchmark_fv.csv")
+    if options.benchmark_filename is not None and not os.path.exists(benchmark_file):
+        warnings.warn("Benchmark file '{}' does not exist. The Monte-Carlo simulation will run without any reference to a previously run Fleming-Viot simulation".format(benchmark_file))
         benchmark_file = None
     plot_trajectories = False
     symbol = 'r-'
-burnin_time_steps = 20  # Number of burn-in time steps until the Markov process is assumed to be in stationarity regime
-                        # (this has an impact in the estimation of expectations --e.g. E(T) in Monte-Carlo simulation
-                        # and E(T_A) in Fleming-Viot. In particular, blocking probability would be OVERESTIMATED when
-                        # the number of burn-in steps is too small, because the return times T and T_A will be
-                        # underestimated, as particles (simulated queues) start close to the state defining the cycles
-                        # of interest (i.e. J-1), so returning to those states will take shorter time than the stationary
-                        # return time at the beginning of the simulation.
-                ### NOTE THAT THIS VALUE burnin_time_steps IS OPTIONAL AS IT IS SET TO A DEFAULT VALUE IN SimulatorQueue.run(). ###
-min_num_cycles_for_expectations = 5 # Minimum number of observed cycles to consider that the estimation of expectations
-                                    # (such as the expected cycle time or the stationary probability) is reliable.
 fixed_window = False
 alpha_start = 1.0  # / t_sim  # Use `/ t_sim` when using update of theta at each simulation step (i.e. LeaPolicyGradient.learn_update_theta_at_each_time_step() is called instead of LeaPolicyGradient.learn_update_theta_at_end_of_episode())
 adjust_alpha = True  # True
@@ -579,7 +759,11 @@ func_adjust_alpha = np.float # np.sqrt
 min_time_to_update_alpha = 0  # int(t_learn / 3)
 alpha_min = 0.01  # 0.1
 
-dict_params = dict({'environment': {'queue_system': queue_system,
+show_execution_parameters(options)
+#raise KeyboardInterrupt
+
+# Create the environment and learning agent
+dict_params = dict({'environment': {'queue_system': options.queue_system,
                                     'capacity': capacity,
                                     'nservers': nservers,
                                     'job_class_rates': job_class_rates,
@@ -589,8 +773,8 @@ dict_params = dict({'environment': {'queue_system': queue_system,
                                     'reward_func_params': reward_func_params,
                                     'rewards_accept_by_job_class': rewards_accept_by_job_class,
                                     },
-                    'policy': {'parameterized_policy': PolQueueTwoActionsLinearStep if is_scalar(theta_start) else [PolQueueTwoActionsLinearStep for _ in theta_start],
-                               'theta': 1.0 if is_scalar(theta_start) else [1.0 for _ in theta_start]  # This value is dummy in the sense that it will be updated below
+                    'policy': {'parameterized_policy': PolQueueTwoActionsLinearStep if is_scalar(options.theta_start) else [PolQueueTwoActionsLinearStep for _ in options.theta_start],
+                               'theta': 1.0 if is_scalar(options.theta_start) else [1.0 for _ in options.theta_start]  # This value is dummy in the sense that it will be updated below
                                },
                     'learners': {'V': {'learner': learnerV,
                                        'params': {'gamma': 1}
@@ -604,8 +788,8 @@ dict_params = dict({'environment': {'queue_system': queue_system,
                                                   'min_time_to_update_alpha': min_time_to_update_alpha,
                                                   'alpha_min': alpha_min,
                                                   'fixed_window': fixed_window,
-                                                  'clipping': clipping,
-                                                  'clipping_value': clipping_value,
+                                                  'clipping': options.clipping,
+                                                  'clipping_value': options.clipping_value,
                                                   }
                                        }
                                  },
@@ -618,14 +802,14 @@ env_queue, rhos, agent = define_queue_environment_and_agent(dict_params)
 # 2022/01/14: t_learn = 10 times the optimum true theta so that we are supposed to reach that optimum under the REINFORCE_TRUE learning mode with decreasing alpha
 # t_learn = 800 #100 #800 #100 #198 - 91 #198 #250 #50
 verbose = False
-dict_params_learning = dict({'mode': LearningMode.REINFORCE_TRUE, 't_learn': t_learn})
+dict_params_learning = dict({'mode': LearningMode.REINFORCE_TRUE, 't_learn': options.t_learn})
 dict_params_info = dict({'plot': False, 'log': False})
 
 # Simulator object
 simul = SimulatorQueue(env_queue, agent, dict_params_learning,
-                       log=create_log, save=save_results, logsdir=logsdir, resultsdir=resultsdir, debug=False)
+                       log=options.create_log, save=options.save_results, logsdir=logsdir, resultsdir=resultsdir, debug=False)
 
-if save_results:
+if options.save_results:
     # Initialize the file to store the results (e.g. add the column names of the file)
     # NOTE: We initialize the results file at the very beginning and close it at the very end of the simulation run
     # so that all cases and replications run will be output to the same file! This is convenient as then we will have
@@ -640,13 +824,13 @@ if save_results:
 
 # In the non-benchmark case (i.e. FVRL) we run the learning method on each set of parameters defined here
 # for as many replications defined as input argument.
-# When defining the theta values we specify the blocking size K and we substract 1. Recall that K = ceil(theta+1)
+# When defining the theta values we specify the blocking size K and we subtract 1. Recall that K = ceil(theta+1)
 # So, if we want K = 35, we can set theta somewhere between 33+ and 34, so we define e.g. theta = 34.9 - 1
 # Note that the list of theta values can contain more than one value, in which case a simulation will be run for each of them
 theta_ref_values = [theta_ref]  # [24.0 - 1] #[20.0 - 1]  # [32.0-1, 34.0-1, 36.0-1] #[10.0-1, 15.0-1, 20.0-1, 25.0-1, 30.0-1]  # 39.0
-theta_start_values = [theta_start]  # [34.9 - 1] #[30.0 - 1] #[20.0 - 1, 25.0 - 1]
+theta_start_values = [options.theta_start]  # [34.9 - 1] #[30.0 - 1] #[20.0 - 1, 25.0 - 1]
 # theta_ref_values = np.linspace(start=1.0, stop=20.0, num=20)
-J_factor_values = [J_factor]  # [0.2, 0.3, 0.5]  # [0.2, 0.3, 0.5, 0.7]
+J_factor_values = [options.J_factor]  # [0.2, 0.3, 0.5]  # [0.2, 0.3, 0.5, 0.7]
 NT_exponents = [0]  # [-2, -1, 0, 1]  # Exponents to consider for different N and T values as in exp(exponent)*N0, where N0 is the reference value to achieve a pre-specified relative error
 NT_values = [[N, T]] if not np.isnan(N) and not np.isnan(T) else None
 # Accepted relative errors for the estimation of Phi and of E(T_A)
@@ -660,9 +844,9 @@ if benchmark_file is None:
     # Output variables of the simulation
     case = 0
     ncases = len(theta_ref_values) * len(theta_start_values) * len(J_factor_values) * len(NT_exponents)
-    theta_opt_values = [[np.nan] * replications] * ncases   # List of optimum theta values achieved by the learning algorithm for each replication in each parameter setting
-    K_opt_values = [[np.nan] * replications] * ncases       # List of optimum K values where deterministic blocking occurs
-    cost_opt_values = [[np.nan] * replications] * ncases    # List of optimum costs found by the learning algorithm
+    theta_opt_values = [[np.nan] * options.replications] * ncases   # List of optimum theta values achieved by the learning algorithm for each replication in each parameter setting
+    K_opt_values = [[np.nan] * options.replications] * ncases       # List of optimum K values where deterministic blocking occurs
+    cost_opt_values = [[np.nan] * options.replications] * ncases    # List of optimum costs found by the learning algorithm
     for i, theta_ref in enumerate(theta_ref_values):
         # For single-buffer systems, store the value of theta_ref as parameter of the reward function because,
         # in those systems, we use it in the next line to compute the TRUE optimum blocking sizes and the optimum expected cost.
@@ -732,8 +916,8 @@ if benchmark_file is None:
                                         # In fact, the calculation of T on the basis of the expected relative error in the estimation of E(T_A) gives
                                         # us the number of arrival events (see details in my small dark green notebook in entry dated 06-Nov-2022).
                         'use_stationary_probability_for_start_states': use_stationary_probability_for_start_states,
-                        'burnin_time_steps': burnin_time_steps,
-                        'min_num_cycles_for_expectations': min_num_cycles_for_expectations,
+                        'burnin_time_steps': options.burnin_time_steps,
+                        'min_num_cycles_for_expectations': options.min_num_cycles_for_expectations,
                     }
                     dict_info = {'case': case,
                                  'ncases': ncases,
@@ -758,22 +942,24 @@ if benchmark_file is None:
                     # Run the simulation process
                     theta_opt_values[case-1], K_opt_values[case-1], cost_opt_values[case-1], \
                         df_learning = run_simulation_policy_learning(simul,
-                                                                     replications,
+                                                                     options.replications,
                                                                      dict_params_simul,
                                                                      dict_info,
                                                                      dict_params_info=dict_params_info,
-                                                                     seed=seed,
+                                                                     seed=options.seed,
                                                                      verbose=verbose)
 else:
     # Read the execution parameters from the benchmark file
     print("Reading benchmark data containing the parameter settings from file\n{}".format(benchmark_file))
     benchmark = pd.read_csv(benchmark_file, sep="|")
+    # Filter the benchmark data so that we end up with one record per analyzed group
+    # (so that we can extract the parameter settings for each analyzed group -e.g. N, T, J values, etc.)
     benchmark_groups = benchmark[(benchmark['t_learn'] == 1) & (benchmark['replication'] == 1)]
     ncases = benchmark_groups.shape[0]
     theta_true_values = array_of_objects(ncases, value=np.nan) #np.nan * np.ones(ncases) ((2023/03/12) use np.ones() if the array_of_objects() doesn't work when dealing with scalar values of theta_true (e.g. single-server case)
-    theta_opt_values = [[np.nan] * replications] * ncases   # List of optimum theta values achieved by the learning algorithm for each replication in each parameter setting
-    K_opt_values = [[np.nan] * replications] * ncases       # List of optimum K values where deterministic blocking occurs
-    cost_opt_values = [[np.nan] * replications] * ncases    # List of optimum costs found by the learning algorithm
+    theta_opt_values = [[np.nan] * options.replications] * ncases   # List of optimum theta values achieved by the learning algorithm for each replication in each parameter setting
+    K_opt_values = [[np.nan] * options.replications] * ncases       # List of optimum K values where deterministic blocking occurs
+    cost_opt_values = [[np.nan] * options.replications] * ncases    # List of optimum costs found by the learning algorithm
     idx_case = -1
     NT_values = []
     for i in range(ncases):
@@ -783,7 +969,7 @@ else:
 
         # Simulation and estimation parameters that are common for all replications of the current case (group) analyzed
         theta_true = benchmark_groups['theta_true'].iloc[i]
-        theta_true = convert_str_to_list_of_type(theta_true)
+        theta_true = convert_str_to_list_of_type(theta_true, type=int)  # Recall that the true theta values are always integer
         if simul.getEnv().getBufferType() == BufferType.SINGLE:
             # Store the value of theta_true as parameter of the reward function because we use it below to compute the optimum blocking sizes and optimum expected cost
             dict_params['environment']['reward_func_params']['buffer_size_ref'] = theta_true
@@ -797,6 +983,7 @@ else:
         T = benchmark_groups['T'].iloc[i]   # See NOTE below for entry 't_sim' of dict_params_simul dictionary about the meaning of T which is NOT the simulation time that will be used for the MC learning when a benchmark is available!
         NT_values += [[N, T]]
         burnin_time_steps = benchmark_groups['burnin_time_steps'].iloc[i]
+        min_num_cycles_for_expectations = benchmark_groups['min_n_cycles'].iloc[i]
 
         K_true, cost_true, cost_mean, cost_max = compute_optimum_blocking_sizes_and_expected_cost(simul, dict_params['environment'])
         K = get_deterministic_blocking_boundaries(simul.agent, theta_start)
@@ -852,26 +1039,30 @@ print(f"True optima:\nK_opt = {K_true[0]}, expected cost = {cost_true}")
 # Closes the object (e.g. any log and result files are closed)
 simul.close()
 
-if save_results:
+if options.save_results:
     if learning_method == LearningMethod.FV:
         # Make a copy of the results benchmark file to be used for a Monte-Carlo learner
         # so that we can easily refer to it in case we run the MC learning right after the FVRL learner
         # (to this end, the name used for the filename here should be the same as the default filename defined
         # as input argument for the variable benchmark_filename).
         shutil.copyfile(simul.results_file, os.path.join(os.path.dirname(simul.results_file), "benchmark_fv.csv"))
-
-    if queue_system == "loss-network":
-        params_str = learning_method.name + \
-            "-K={}-costs={}-rhos={},theta0={}-theta={}-J={}-NT={}-ProbStart={}" \
-                .format(capacity, [int(c) for c in blocking_costs], rhos, theta_true, theta_start_values, J_factor_values, NT_values, use_stationary_probability_for_start_states)
-    else:
-        params_str = learning_method.name + \
-            "-theta0={}-theta={}-J={}-E={},{}".format(theta_ref_values, theta_start_values, J_factor_values, error_rel_phi, error_rel_et)
-
+    # Build the string containing the parameter values that should be included in the output filename
+    params_str = generate_parameter_string_for_filename(options.queue_system,
+                                                        capacity,
+                                                        blocking_costs,
+                                                        rhos,
+                                                        theta_ref_values,
+                                                        theta_true,
+                                                        theta_start_values,
+                                                        J_factor_values,
+                                                        NT_values,
+                                                        error_rel_phi,
+                                                        error_rel_et,
+                                                        use_stationary_probability_for_start_states)
     # Now rename the results file to include the parameter settings so that it's easier to identify when analyzing results.
     results_dir = os.path.dirname(simul.results_file)
     results_filename = os.path.basename(simul.results_file)
-    if save_with_dt:
+    if options.save_with_dt:
         # This allows keeping the datetime string in the filename
         lookfor = ".csv"
     else:
@@ -986,10 +1177,10 @@ if len(theta_ref_values) == 1:
     title = "{}".format(params_str) + "\nMethod: {}, Optimum Theta = {}, Theta start = {}, Theta final = {}, K_final = {}, Expected cost = {}" \
                                       "\nN = {}, T = {:.0f} J = {} Stat.Prob.StartStates = {}" \
                                       "\nK = {}, Blocking Costs = {}, lambdas = {}, rhos = {}" \
-                .format(learning_method.name, theta_true, theta_start, theta_opt_values[-1], K_opt_values[-1], cost_opt_values[-1],
+                .format(learning_method.name, theta_true, theta_start, np.mean(theta_opt_values[-1]), np.mean(K_opt_values[-1]), np.mean(cost_opt_values[-1]),
                         N, t_sim, J_factor_values, use_stationary_probability_for_start_states,
                         capacity, [int(c) for c in blocking_costs], job_class_rates, rhos)
-    if plot and plot_trajectories:
+    if options.plot and plot_trajectories:
         "In the case of the MC learner, plot the theta-learning trajectory as well as rewards received during learning"
         assert N == 1, "The simulated system has only one particle (N={})".format(N)
         # NOTE: (2021/11/27) I verified that the values of learnerP.getRewards() for the last learning step
@@ -1006,7 +1197,7 @@ if len(theta_ref_values) == 1:
         ## We add 0.0 as the first time to plot because the first theta value stored in the policy is the initial theta with which the simulation started
         ax = plt.gca()
         # Add vertical lines signalling the BEGINNING of each queue simulation
-        times_sim_starts = range(0, t_learn * (t_sim + 1), t_sim + 1)
+        times_sim_starts = range(0, options.t_learn * (t_sim + 1), t_sim + 1)
         for t in times_sim_starts:
             ax.axvline(t, color='lightgray', linestyle='dashed')
 
@@ -1028,48 +1219,61 @@ if len(theta_ref_values) == 1:
         ax2.set_ylabel("Reward")
         ax2.set_yscale('log')
         plt.title(title)
-    elif plot:
-        # The evolution of theta is plotted for the LAST replication run on the LAST case considered
-        # (as the simul object and the value of K_true used below contain the information about precisely such LAST execution)
+    elif options.plot:
+        # Plot the evolutoin of theta and of the expected cost
         axes = plt.figure().subplots(1, 2)
         ax_params, ax_objective = axes
 
         # Plot of parameters evolution
-        thetas = df_learning['theta']
-        # Linestyles are sorted so that more continuous line means larger rho
-        linestyles_ref = ['-', '--', '-.', ':']
-        # Rank of rhos in reversed order (largest value has highest rank so that the largest value gets the most solid line in the plot)
-        rank_rhos = list(reversed(np.array(rhos).argsort().argsort()))
-        linestyles = [linestyles_ref[r] for r in rank_rhos]
         lines = []
         reflines = []
         legend_lines = []
         legend_reflines = []
-        for i in range(len(theta_true)):
-            linestyle_i = linestyles[i % len(linestyles)]
-            lines += ax_params.plot([t[i] for t in thetas], symbol, linestyle=linestyle_i)
-            reflines += [ax_params.axhline(theta_true[i], color='black', linestyle=linestyle_i)]
-            legend_lines += ["Theta_" + str(i+1)]
-            legend_reflines += ["True Optimum Theta_" + str(i + 1)]
-        ax_params.set_xlabel('Learning step')
-        ax_params.set_ylabel('theta(s)')
+        expected_lines = []
+        expected_reflines = []
+        for r in df_learning['replication'].value_counts().index:
+            mask = df_learning['replication'] == r
+            thetas = df_learning['theta'][mask]
+            expected_rewards = df_learning['expected_reward_true'][mask]
+            # Linestyles are sorted so that more continuous line means larger rho
+            linestyles_ref = ['-', '--', '-.', ':']
+            # Rank of rhos in reversed order (largest value has highest rank so that the largest value gets the most solid line in the plot)
+            rank_rhos = list(reversed(np.array(rhos).argsort().argsort()))
+            linestyles = [linestyles_ref[r] for r in rank_rhos]
+            for i in range(len(theta_true)):
+                linestyle_i = linestyles[i % len(linestyles)]
+                lines_i = ax_params.plot([t[i] for t in thetas], symbol, linestyle=linestyle_i)
+                if r == 1:
+                    refline_i = ax_params.axhline(theta_true[i], color='black', linestyle=linestyle_i)
+                    lines += lines_i
+                    reflines += [refline_i]
+                    legend_lines += ["Theta_" + str(i+1)]
+                    legend_reflines += ["True Optimum Theta_" + str(i + 1)]
+
+            # Plot of objective function evolution (i.e. the expected cost)
+            expected_line = ax_objective.plot(-np.array(expected_rewards), symbol, linestyle='-')
+            if r == 1:
+                refline = ax_objective.axhline(cost_true, color="black", linestyle="-")
+                expected_lines += expected_line
+                expected_reflines += [refline]
+
+        # Finalize plots
+        ax_params.set_xlabel("Learning step")
+        ax_params.set_ylabel("theta(s)")
         ylim = ax_params.get_ylim()
-        ax_params.set_ylim((-1.1, np.max([ylim[1], np.max(np.squeeze(K_true))])))    # -1 is the minimum possible theta value that is allowed for the linear step parameterized policy
+        ax_params.set_ylim((-1.1, np.max([ylim[1], np.max(np.squeeze(K_true))])))    # lower limit = -1.1 because -1 is the minimum possible theta value that is allowed for the linear step parameterized policy
         ax_params.xaxis.set_major_locator(MaxNLocator(integer=True))
         #ax_params.set_aspect(1 / ax_params.get_data_ratio())
         ax_params.legend(lines + reflines, legend_lines + legend_reflines)
         #ax_params.set_title("Replications for delta(Q) = 100")
 
-        # Plot of objective function evolution (i.e. the expected cost)
-        ax_objective.plot(-np.array(simul.expected_reward_true), symbol, linestyle='-')
-        ax_objective.set_xlabel('Learning step')
-        ax_objective.set_ylabel('Expected cost')
-        ax_objective.set_title('Expected cost range: [{:.1f}, {:.1f}], average = {:.1f}'.format(cost_true, cost_max, cost_mean))
-        #ax_objective.set_yscale('log')
+        ax_objective.set_xlabel("Learning step")
+        ax_objective.set_ylabel("Expected cost")
+        ax_objective.set_title("Expected cost range: [{:.1f}, {:.1f}], average = {:.1f}".format(cost_true, cost_max, cost_mean))
+        # ax_objective.set_yscale('log')
         ax_objective.xaxis.set_major_locator(MaxNLocator(integer=True))
-        #ax_objective.set_aspect(1 / ax_objective.get_data_ratio())
-        ax_objective.axhline(cost_true, color='black', linestyle="-")
-        ax_objective.legend(["Expected cost for the estimated optimum theta(s)", "Optimum expected cost"])
+        # ax_objective.set_aspect(1 / ax_objective.get_data_ratio())
+        ax_objective.legend(expected_lines + expected_reflines, ["Expected cost for the estimated optimum theta(s)", "Optimum expected cost"])
 
         plt.suptitle(title)
 
@@ -1086,7 +1290,7 @@ if PLOT_RESULTS_TOGETHER:
     NEED TO BE CHANGED EVERY TIME WE WANT TO PLOT THE RESULTS.
     """
     # Read the results from files and plot the MC and FV results on the same graph
-    resultsdir = "E:/Daniel/Projects/PhD-RL-Toulouse/projects/RL-002-QueueBlocking/results/RL/" + queue_system
+    resultsdir = "E:/Daniel/Projects/PhD-RL-Toulouse/projects/RL-002-QueueBlocking/results/RL/" + options.queue_system
 
     theta_true = 19
     # IGA results starting at a larger theta value: theta_start = 39, N = 800, t_sim = 800
@@ -1129,7 +1333,7 @@ if PLOT_RESULTS_PAPER:
     NEED TO BE CHANGED EVERY TIME WE WANT TO PLOT THE RESULTS.
     """
     # Read the results from files and plot the MC and FV results on the same graph
-    resultsdir = "E:/Daniel/Projects/PhD-RL-Toulouse/projects/RL-002-QueueBlocking/results/RL/" + queue_system
+    resultsdir = "E:/Daniel/Projects/PhD-RL-Toulouse/projects/RL-002-QueueBlocking/results/RL/" + options.queue_system
 
     # -- Alpha adaptive
     # results_file_fv = os.path.join(os.path.abspath(resultsdir), "SimulatorQueue_20220121_031815_FV-J=0.5K-K=20.csv")
@@ -1505,4 +1709,4 @@ if PLOT_RESULTS_PAPER:
         # before including it in a paper.
         # Ref: https://stackoverflow.com/questions/36203597/remove-margins-from-a-matplotlib-figure
         plt.savefig(figfile, bbox_inches="tight", pad_inches=0.1)
-        print("Save figure to file {}".format(figfile))
+        print("Figure saved to file {}".format(figfile))
