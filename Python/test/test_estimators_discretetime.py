@@ -454,7 +454,7 @@ class Test_EstStateValueV_EnvGridworlds(unittest.TestCase, test_utils.EpisodeSim
         # - the plot_results() call at the end fails because the alpha_mean_by_episode_mean variable used when calling
         # plt.plot() inside plot_results() has zero length.
         # So, it seems that nothing is really done or learned by the learner_mclambda_adaptive object.
-        print("\nTesting " + self.id())
+        print("\n*** Testing " + self.id())
 
         # Simulation setup
         seed = 1717
@@ -504,11 +504,11 @@ class Test_EstStateValueV_EnvGridworlds(unittest.TestCase, test_utils.EpisodeSim
     # ------------------------ TESTS OF MC(LAMBDA): MC as lambda-return ---------------------------#
 
     def test_EnvGridworld1D_PolRandomWalk_MetTDLambda_TestSeveralAlphasLambdas(self):
-        """This test intends to reproduce the results in Sutton 2018 on the TD(lambda) algorithm applied to learn
+        """
+        This test intends to reproduce the results in Sutton 2018 on the TD(lambda) algorithm applied to learn
         the state value function in a 1D gridworld
         """
-        print("\n")
-        print("Running test {}...".format(self.id()))
+        print("\n*** Testing " + self.id())
 
         # Possible policies and learners for agents
         pol_rw = random_walks.PolRandomWalkDiscrete(self.env1d)
@@ -652,7 +652,8 @@ class Test_EstStateValueV_EnvGridworlds(unittest.TestCase, test_utils.EpisodeSim
         # - seed = 1717
         # - nepisodes = 10
         # -
-        print("Average RMSE and its standard error at last episode by lambda (rows) and alpha (columns):\n{}".format(np.c_[rmse_episodes_mean, rmse_episodes_se]))
+        print("Average RMSE (first 3 columns) and its standard error (last 3 columns) at last episode by lambda (rows) and alpha (columns):\n{}" \
+              .format(np.c_[rmse_episodes_mean, rmse_episodes_se]))
         assert self.nS == 19 and \
                seed == 1717 and \
                nexperiments == 3 and \
@@ -662,14 +663,14 @@ class Test_EstStateValueV_EnvGridworlds(unittest.TestCase, test_utils.EpisodeSim
                gamma == 1.0 and \
                lambdas == [0, 0.4, 0.7, 0.8] and \
                alphas == [0.2, 0.4, 0.8]
-        assert np.allclose(rmse_episodes_mean, [[0.45538468, 0.40588784, 0.35134918],
-                                                [0.41605814, 0.33990824, 0.30015009],
-                                                [0.34587065, 0.28262690, 0.37674099],
-                                                [0.30984734, 0.30718626, 0.46807331]])
-        assert np.allclose(rmse_episodes_se,   [[0.01260557, 0.02211615, 0.03213792],
-                                                [0.02009345, 0.03399665, 0.03352152],
-                                                [0.03244298, 0.0368028 , 0.02015556],
-                                                [0.03680285, 0.02787032, 0.01874832]])
+        assert np.allclose(rmse_episodes_mean, [[0.45592716, 0.40840256, 0.36065968],
+                                                [0.42083822, 0.35093946, 0.29653623],
+                                                [0.35946782, 0.28547410, 0.32950694],
+                                                [0.32520426, 0.28876721, 0.45260387]])
+        assert np.allclose(rmse_episodes_se,   [[0.01244143, 0.02139052, 0.02996329],
+                                                [0.01891116, 0.03116384, 0.03592948],
+                                                [0.02941829, 0.03871512, 0.02411244],
+                                                [0.03452769, 0.03385807, 0.02151384]])
 
 
 class Test_EstValueFunctionV_MetMCLambda_EnvMountainCar(unittest.TestCase, test_utils.EpisodeSimulation):
@@ -972,11 +973,11 @@ if __name__ == '__main__':
     test_suite_gw1d.addTest(Test_EstStateValueV_EnvGridworlds("test_EnvGridworld1D_PolRandomWalk_MetMC_TestRMSETwice"))
     test_suite_gw1d.addTest(Test_EstStateValueV_EnvGridworlds("test_EnvGridworld1D_PolRandomWalk_MetLambdaReturn_TestSeveralAlphasLambdasAlphaAdjustments"))
     test_suite_gw1d.addTest(Test_EstStateValueV_EnvGridworlds("test_EnvGridworld1D_PolRandomWalk_MetLambdaReturn_TestGammaLessThan1"))
+    test_suite_gw1d.addTest(Test_EstStateValueV_EnvGridworlds("test_EnvGridworld1D_PolRandomWalk_MetTDLambda_TestSeveralAlphasLambdas"))
 
     # --- Mountain Car tests
     test_suite_mountain = unittest.TestSuite()
     test_suite_mountain.addTest(Test_EstValueFunctionV_MetMCLambda_EnvMountainCar("test_Env_PolRandomWalk_MetMCLambdaReturn_TestMCvsLambdaReturn"))
-    test_suite_mountain.addTest(Test_EstStateValueV_EnvGridworlds("test_EnvGridworld1D_PolRandomWalk_MetTDLambda_TestSeveralAlphasLambdas"))
 
     # Run the test suites
     runner.run(test_suite_offline)

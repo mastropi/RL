@@ -15,11 +15,31 @@ import io
 import numpy as np
 import sys
 
+from enum import Enum, unique
+
 # Imports a class defined in __init__.py
 from . import EnvironmentDiscrete
 
+from Python.lib.utils.basic import index_linear2multi, index_multi2linear
+
 #__all__ = [ "EnvGridworld2D",
 #            "EnvGridworld1D" ]
+
+
+@unique
+class Direction1D(Enum):
+    # The values should be defined so that summing len(enum)/2 to any of the actions MOD len(enum) gives the action of the opposite direction
+    LEFT = 0
+    RIGHT = 1
+
+@unique
+class Direction2D(Enum):
+    # The values should be defined so that summing len(enum)/2 to any of the actions MOD len(enum) gives the action of the opposite direction
+    UP = 0
+    RIGHT = 1
+    DOWN = 2
+    LEFT = 3
+
 
 class EnvGridworld1D(EnvironmentDiscrete):
     """
@@ -40,10 +60,6 @@ class EnvGridworld1D(EnvironmentDiscrete):
 
         nS = length
         nA = 2
-
-        # Possible actions (i.e. we simply NAME the action values (indices) by defining constants)
-        LEFT = 0
-        RIGHT = 1
 
         # We substract 1 because the state are base 0 (i.e. they represent indices)
         MAX_S = nS - 1
@@ -91,15 +107,15 @@ class EnvGridworld1D(EnvironmentDiscrete):
             if is_terminal(s):
                 # Terminal states are assigned value 0 (i.e. they receive 0 reward by convention)
                 # Also, with probability 1 the next state is the same state `s`.
-                P[s][LEFT] = [(1.0, s, 0.0, True)]
-                P[s][RIGHT] = [(1.0, s, 0.0, True)]
+                P[s][Direction1D.LEFT.value] = [(1.0, s, 0.0, True)]
+                P[s][Direction1D.RIGHT.value] = [(1.0, s, 0.0, True)]
             else:
                 # Not a terminal state
                 # ns = Next State!
                 ns_left = np.max([0, s-1])
                 ns_right = np.min([s+1, MAX_S])
-                P[s][LEFT] = [(1.0, ns_left, reward(ns_left), is_terminal(ns_left))]
-                P[s][RIGHT] = [(1.0, ns_right, reward(ns_right), is_terminal(ns_right))]
+                P[s][Direction1D.LEFT.value] = [(1.0, ns_left, reward(ns_left), is_terminal(ns_left))]
+                P[s][Direction1D.RIGHT.value] = [(1.0, ns_right, reward(ns_right), is_terminal(ns_right))]
 
             it.iternext()
 
@@ -150,10 +166,6 @@ class EnvGridworld1D_OneTerminalState(EnvironmentDiscrete):
         nS = length
         nA = 2
 
-        # Possible actions (i.e. we simply NAME the action values (indices) by defining constants)
-        LEFT = 0
-        RIGHT = 1
-
         # We substract 1 because the state are base 0 (i.e. they represent indices)
         MAX_S = nS - 1
 
@@ -190,21 +202,21 @@ class EnvGridworld1D_OneTerminalState(EnvironmentDiscrete):
             if is_terminal(s):
                 # Terminal states are assigned value 0 (i.e. they receive 0 reward by convention)
                 # Also, with probability 1 the next state is the same state `s`.
-                P[s][LEFT] = [(1.0, s, 0.0, True)]
-                P[s][RIGHT] = [(1.0, s, 0.0, True)]
+                P[s][Direction1D.LEFT.value] = [(1.0, s, 0.0, True)]
+                P[s][Direction1D.RIGHT.value] = [(1.0, s, 0.0, True)]
             else:
                 if s > 0:
                     # Not a terminal state, nor the transient state
                     # ns = Next State!
                     ns_left = np.max([0, s - 1])
                     ns_right = np.min([s + 1, MAX_S])
-                    P[s][LEFT] = [(1.0, ns_left, reward(ns_left), is_terminal(ns_left))]
-                    P[s][RIGHT] = [(1.0, ns_right, reward(ns_right), is_terminal(ns_right))]
+                    P[s][Direction1D.LEFT.value] = [(1.0, ns_left, reward(ns_left), is_terminal(ns_left))]
+                    P[s][Direction1D.RIGHT.value] = [(1.0, ns_right, reward(ns_right), is_terminal(ns_right))]
                 else:
                     # Transient state: the state transitions to the right with probability 1
                     # i.e. the LEFT action is not possible (transition probability = 0.0)
-                    P[s][LEFT] = [(0.0, 0, 0.0, False)]
-                    P[s][RIGHT] = [(1.0, 1, 0.0, False)]
+                    P[s][Direction1D.LEFT.value] = [(0.0, 0, 0.0, False)]
+                    P[s][Direction1D.RIGHT.value] = [(1.0, 1, 0.0, False)]
 
             it.iternext()
 
@@ -255,7 +267,7 @@ class EnvGridworld2D(EnvironmentDiscrete):
     States are 1D indexed by row starting at index = 0 at the top-left corner
     up to nS-1 at the bottom-right corner, where nS = #rows * #cols.
 
-    The agent can take actions in each direction (UP=0, RIGHT=1, DOWN=2, LEFT=3).
+    The agent can take actions in each direction (UP, RIGHT, DOWN, LEFT) as defined in enum `Direction`.
     Actions going off the edge leave you in your current state.
     The agent receives a reward of 0 at each step until it reaches a terminal state
     in which case it receives reward -1 at the top-left cell, and +1 at the bottom-right cell.
@@ -303,12 +315,6 @@ class EnvGridworld2D(EnvironmentDiscrete):
         elif not isinstance(terminal_states, set):
             terminal_states = set(terminal_states)
 
-        # Possible actions (i.e. we simply NAME the action values (indices) by defining constants)
-        UP = 0
-        RIGHT = 1
-        DOWN = 2
-        LEFT = 3
-
         # We substract 1 because the x and y values are base 0 (as they represent indices)
         MAX_Y = shape[0] - 1
         MAX_X = shape[1] - 1
@@ -345,10 +351,10 @@ class EnvGridworld2D(EnvironmentDiscrete):
 
             # We're stuck in a terminal state
             if is_terminal(s):
-                P[s][UP] = [(1.0, s, reward(s), True)]
-                P[s][RIGHT] = [(1.0, s, reward(s), True)]
-                P[s][DOWN] = [(1.0, s, reward(s), True)]
-                P[s][LEFT] = [(1.0, s, reward(s), True)]
+                P[s][Direction2D.UP.value] = [(1.0, s, reward(s), True)]
+                P[s][Direction2D.RIGHT.value] = [(1.0, s, reward(s), True)]
+                P[s][Direction2D.DOWN.value] = [(1.0, s, reward(s), True)]
+                P[s][Direction2D.LEFT.value] = [(1.0, s, reward(s), True)]
             # Not a terminal state
             else:
                 # ns = Next State!
@@ -356,10 +362,10 @@ class EnvGridworld2D(EnvironmentDiscrete):
                 ns_right = s if x == MAX_X else s + 1
                 ns_down = s if y == MAX_Y else s + (MAX_X + 1)
                 ns_left = s if x == 0 else s - 1
-                P[s][UP] = [(1.0, ns_up, reward(ns_up), is_terminal(ns_up))]
-                P[s][RIGHT] = [(1.0, ns_right, reward(ns_right), is_terminal(ns_right))]
-                P[s][DOWN] = [(1.0, ns_down, reward(ns_down), is_terminal(ns_down))]
-                P[s][LEFT] = [(1.0, ns_left, reward(ns_left), is_terminal(ns_left))]
+                P[s][Direction2D.UP.value] = [(1.0, ns_up, reward(ns_up), is_terminal(ns_up))]
+                P[s][Direction2D.RIGHT.value] = [(1.0, ns_right, reward(ns_right), is_terminal(ns_right))]
+                P[s][Direction2D.DOWN.value] = [(1.0, ns_down, reward(ns_down), is_terminal(ns_down))]
+                P[s][Direction2D.LEFT.value] = [(1.0, ns_left, reward(ns_left), is_terminal(ns_left))]
 
             it.iternext()
 
@@ -376,7 +382,8 @@ class EnvGridworld2D(EnvironmentDiscrete):
                                              terminal_rewards=[reward(s) for s in terminal_states])
 
     def _render(self, mode='human', close=False):
-        """ Renders the current gridworld layout
+        """
+        Renders the current gridworld layout
          For example, a 4x4 grid with the mode="human" looks like:
             T  o  o  o
             o  x  o  o
@@ -413,7 +420,7 @@ class EnvGridworld2D(EnvironmentDiscrete):
                 outfile.write("\n")
 
             it.iternext()
-    
+
     #--- Getters
     def getShape(self):
         return self.shape
