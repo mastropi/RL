@@ -485,7 +485,7 @@ class Simulator:
                     plt.figure(fig_V.number)
                     (ax_V, ax_C) = fig_V.subplots(1, 2)
                     shape = self.env.getShape()
-                    terminal_rewards = [r for (_, r) in self.env.getTerminalStatesAndRewards()]
+                    terminal_rewards = self.env.getTerminalRewards()
 
                     state_values = np.asarray(learner.getV().getValues()).reshape(shape)
                     if len(terminal_rewards) > 0:
@@ -702,11 +702,11 @@ class Simulator:
         # of terminal states at the end of each episode to the reward received when transitioning to the terminal state,
         # for reasons explained when computing the true value function in the Gridworld1D environment (essentially
         # because the TD error observed when reaching the terminal state would count the observed reward as DOUBLE,
-        # one time from R(T) and one time from the terminal state value which we set it equal to R(T) as well!)
+        # one time from R(T) and one time from the terminal state value which we set equal to R(T) as well!)
         #
         ## Set the value of terminal states to their reward, both the True values and estimated values
         ## (just to make plots of the state value function more understandable, specially in environments > 1D)
-        #for s, r in self.env.getTerminalStatesAndRewards():
+        #for s, r in self.env.getTerminalRewardsDict():
         #    self.agent.getLearner().getV().setWeight(s, r)
         #    if self.env.getV() is not None:
         #        self.env.getV()[s] = r

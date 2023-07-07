@@ -133,7 +133,7 @@ class EnvGridworld1D(EnvironmentDiscrete):
         super(EnvGridworld1D, self).__init__(nS, nA, P, isd,
                                              dim=1,
                                              terminal_states=set([i for i, s in enumerate(range(nS)) if is_terminal(s)]),
-                                             terminal_rewards=[reward(s) for s in terminal_states])
+                                             terminal_rewards=dict([(s, reward(s)) for s in terminal_states]))
 
     def getV(self):
         "Returns the true state value function for a particular policy (not explicitly informed)"
@@ -234,7 +234,7 @@ class EnvGridworld1D_OneTerminalState(EnvironmentDiscrete):
                                                              dim=1,
                                                              terminal_states=set(
                                                                  [i for i, s in enumerate(range(nS)) if is_terminal(s)]),
-                                                             terminal_rewards=[reward(s) for s in terminal_states])
+                                                              terminal_rewards=dict([(s, reward(s)) for s in terminal_states]))
 
     def getV(self):
         "Returns the true state value function for a particular policy (not explicitly informed)"
@@ -379,7 +379,7 @@ class EnvGridworld2D(EnvironmentDiscrete):
         super(EnvGridworld2D, self).__init__(nS, nA, P, isd,
                                              dim=2,
                                              terminal_states=terminal_states,
-                                             terminal_rewards=[reward(s) for s in terminal_states])
+                                             terminal_rewards=dict([(s, reward(s)) for s in terminal_states]))
 
     def _render(self, mode='human', close=False):
         """

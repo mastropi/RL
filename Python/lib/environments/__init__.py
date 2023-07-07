@@ -37,10 +37,13 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
     - isd: initial state distribution
     - dim: environment dimension (e.g. 1D gridworld, 2D gridworld, etc.), which is just informative 
     - terminal_states: set containing the terminal states of the environment
-    - terminal_rewards: list containing the values of the rewards at the terminal states
+    - terminal_rewards: dictionary indexed by the terminal states containing the rewards as values.
+        The number of elements in this dictionary does NOT need to coincide with the number of terminal states.
+        If a terminal state is not found among the keys of the dictionary, its associated reward is returned as 0
+        by the corresponding method.
     """
 
-    def __init__(self, nS, nA, P, isd, dim=1, terminal_states=set(), terminal_rewards=[]):
+    def __init__(self, nS, nA, P, isd, dim=1, terminal_states=set(), terminal_rewards=dict()):
         super().__init__(nS, nA, P, isd)
 
         # Dimension of the environment (e.g. 1D (gridworld), 2D (gridworld), etc.)
@@ -50,13 +53,7 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
         self.all_states = list( range(self.getNumStates()) )
         self.terminal_states = terminal_states
         self.non_terminal_states = set(self.all_states).difference( set( self.terminal_states ) )
-        if len(terminal_rewards) != len(terminal_states):
-            warnings.warn("The number of rewards given for the terminal states ({}) is" \
-                          " different than the number of terminal states ({}). The rewards are left undefined." \
-                          .format(len(terminal_rewards), len(terminal_states)))
-            self.terminal_rewards = []
-        else:
-            self.terminal_rewards = terminal_rewards
+        self.terminal_rewards = terminal_rewards
 
     #--- Getters
     def getDimension(self):
@@ -84,8 +81,19 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
         "Returns the list of terminal states"
         return list(self.terminal_states)
 
-    def getTerminalStatesAndRewards(self):
-        return zip( self.terminal_states, self.terminal_rewards )
+    def getTerminalRewards(self):
+        "Returns the terminal rewards (only their values, not the states where they occur, for this use getTerminalRewardsDict())"
+        return self.getTerminalRewardsDict().values()
+
+    def getTerminalRewardsDict(self):
+        "Returns the dictionary containing the terminal rewards, indexed by the terminal state"
+        return self.terminal_rewards
+
+    def getTerminalReward(self, s):
+        "Returns the reward for the given terminal state"
+        if s not in self.terminal_rewards.keys():
+            warnings.warn(f"The given state s={s} is not present in the terminal rewards dictionary. Have you forgotten to include it? A zero reward is returned.")
+        return self.terminal_rewards.get(s, 0.0)
 
     def getNonTerminalStates(self):
         "Returns the list of non terminal states"

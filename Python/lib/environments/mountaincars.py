@@ -177,7 +177,7 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
 
         self.non_terminal_states = set(self.get_indices_for_non_terminal_states())
         self.terminal_states = set(self.all_states).difference( set( self.non_terminal_states ) )
-        self.terminal_rewards = []      # TODO: (2022/05/06) Define the terminal rewards, as done in my EnvironmentDiscrete class, from which this class derives
+        self.terminal_rewards = dict()  # TODO: (2022/05/06) Define the terminal rewards, as done in my EnvironmentDiscrete class, from which this class derives
 
         # State of the environment
         # Duple (x, v) containing the car's position and velocity
