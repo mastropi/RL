@@ -33,13 +33,12 @@ class PolRandomWalkDiscrete():
         self.env = env
 
     def choose_action(self):
-        # Use np.random.choice() if the seed has been set using np.random.seed()
-        # Otherwise, use the np_random.choice() method from the mtrand.RandomState object np_random stored in the environment
-        # (coming from the gym DiscreteEnv class), which is already used when resetting and stepping the environment)
+        # Note: we should NOT use np.random.choice() to select the random value but instead the np_random.choice() method
+        # from the mtrand.RandomState object np_random stored in the environment (coming from the gym DiscreteEnv class)
+        # which is already used when resetting and stepping through the environment).
         # This is important for repeatability, because if the environment uses np_random.rand() to step
         # and here we use np.random.choice() to choose the action, we would be using two different seeds!
         # (and if we only set the np_random seed but not the np.random seed then the choice here
         # with np.random would NOT be deterministic...)
-        #action = np.random.choice(self.env.getNumActions())
         action = self.env.np_random.choice(self.env.getNumActions())
         return action

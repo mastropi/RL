@@ -9,6 +9,14 @@ starting point)
 Every environment should define the following methods:
     - getNumActions()
     - getNumStates()
+
+Note that the action space is defined ALWAYS as an integer action space because this is how gym defines the
+`action_space` attribute of their DiscreteEnv environment in envs/toy_text/discrete.py, i.e. by instantiating action_space
+as a Discrete object of type int (the default type). If we wanted to instantiate the `action_space` of the gridworld environments
+defined here as an action space of type e.g. Direciont2D (defined below), we would need to re-write the constructor
+of DiscreteEnv (i.e. override it via a subclass) and change the instatiation of the `action_space` attribute...
+and I find this too much of a hassle for gaining almost nothing (and probably for losing performance, as indexing
+a dictionary with an Enum is probably slower than indexing it with an integer).
 """
 
 import io
@@ -64,7 +72,7 @@ class EnvGridworld1D(EnvironmentDiscrete):
         # We substract 1 because the state are base 0 (i.e. they represent indices)
         MAX_S = nS - 1
 
-        # Terminal states
+        # Terminal states and reward obtained when reaching each possible state
         terminal_states = set([0, nS-1])
         rewards_dict = dict({0: -1.0, nS-1: +1.0})
 
@@ -169,7 +177,7 @@ class EnvGridworld1D_OneTerminalState(EnvironmentDiscrete):
         # We substract 1 because the state are base 0 (i.e. they represent indices)
         MAX_S = nS - 1
 
-        # Terminal states
+        # Terminal states and reward obtained when reaching each possible state
         terminal_states = set([nS - 1])
         rewards_dict = dict({nS - 1: 0.0})
 
@@ -308,7 +316,7 @@ class EnvGridworld2D(EnvironmentDiscrete):
         nS = np.prod(shape)         # Number of states
         nA = 4                      # Number of actions (one in each cardinal point)
 
-        # Terminal states
+        # Terminal states and reward obtained when reaching any possible state
         if terminal_states is None:
             terminal_states = set([0, nS-1])
             rewards_dict = dict({0: -1.0, nS-1: 1.0})
@@ -369,8 +377,7 @@ class EnvGridworld2D(EnvironmentDiscrete):
 
             it.iternext()
 
-        assert np.isclose(np.sum(isd), 1.0), \
-                "The initial state probabilities sum up to 1 ({})".format(np.sum(isd))
+        assert np.isclose(np.sum(isd), 1.0), "The initial state probabilities sum up to 1 ({})".format(np.sum(isd))
 
         self.P = P
         #print("P")
@@ -432,3 +439,159 @@ class EnvGridworld2D(EnvironmentDiscrete):
     def getQ(self):
         "Returns the true state-action value function"
         return None
+
+
+class EnvGridworld2D_WithObstacles(EnvGridworld2D):
+    """
+    2D Grid World environment with obstacles that inherits from class EnvGridworld2D.
+
+    The constructor receives the following parameters:
+
+    shape: list/tuple
+        Size of the 2D gridworld given as #rows x #cols.
+        default: [5, 5]
+
+    terminal_states: set
+        Set with the 1D state numbers considered as terminal states.
+        default: set([0, 5*5-1])
+
+    rewards_dict: dict
+        Reward values for a subset of states in the grid. The 1D state number is used as dictionary key.
+        default: {0: -1.0, 5*5-1: +1.0}
+
+    obstacles_set: set
+        Set with the 1D state numbers (cells) where the agent cannot go.
+        Normally a "good" number of obstacles for a grid of size N is int(log(N)).
+        default: None
+    """
+
+    def __init__(self, shape=[5, 5], terminal_states=None, rewards_dict=None, obstacles_set=None):
+        super().__init__(shape=shape, terminal_states=terminal_states, rewards_dict=rewards_dict)
+
+        # Treat the obstacles by setting the transition probability of the adjacent cells when moving towards the obstacle
+        self.obstacles_set = obstacles_set
+        for s_obstacle in self.obstacles_set:
+            # Get the 4 states that are adjacent to the obstacle set, in each of the geographical directions (N, S, E, W)
+            # so that we can set their transition probabilities to 0 when taking the action that intends to go to the obstacle cell.
+            set_adjacent_states = self.get_adjacent_states(s_obstacle)
+            for ss, d in set_adjacent_states:
+                if ss is not None:
+                    minusd = self.get_opposite_direction(d)
+                    # We state that the probability of staying in state ss when the agent wants to move in the opposite direction to where ss is w.r.t. s_obstacle (d) is 1,
+                    # i.e. the agent cannot move from ss in the opposite direction to `d`.
+                    # Ex: d = UP => the agent cannot come from the state ss that is above s_obstacle when going DOWN (`minusd`)
+                    self.P[ss][minusd.value] = [(1, ss, rewards_dict.get(ss, 0.0), self.isTerminalState(ss))]
+
+    def state_adjacent(self, state: int, direction: Direction2D):
+        "Computes the 1D state that is adjacent to the given 1D `state` towards `direction`"
+        y, x = index_linear2multi(state, self.getShape())
+
+        ymax = self.getShape()[0] - 1
+        xmax = self.getShape()[1] - 1
+
+        if direction == Direction2D.UP:
+            s_adjacent = None if y == 0 else (y-1, x)
+        elif direction == Direction2D.RIGHT:
+            s_adjacent = None if x == xmax else (y, x+1)
+        elif direction == Direction2D.DOWN:
+            s_adjacent = None if y == ymax else (y+1, x)
+        elif direction == Direction2D.LEFT:
+            s_adjacent = None if x == 0 else (y, x-1)
+        else:
+            raise ValueError(f"Invalid direction {direction}")
+
+        if s_adjacent is None:
+            return None
+        else:
+            return index_multi2linear(s_adjacent, self.getShape())
+
+    def isObstacleState(self, s):
+        return s in self.obstacles_set
+
+    def _render(self, mode='human', close=False):
+        """
+        Renders the current gridworld with obstacles layout
+        For example, a 4x4 grid with the mode="human" looks like:
+            T  o  o  o
+            o  x  o  o
+            o  P  P  o
+            o  o  o  T
+        where x is the agent's position, P is the position of the obstacles (Prohibited) and T represents the terminal states.
+        """
+        if close:
+            return
+
+        outfile = io.StringIO() if mode == 'ansi' else sys.stdout
+
+        grid = np.arange(self.nS).reshape(self.shape)
+        it = np.nditer(grid, flags=['multi_index'])
+        while not it.finished:
+            s = it.iterindex
+            y, x = [idx + 1 for idx in it.multi_index]
+
+            if self.s == s:
+                output = " ({:2d}) x ".format(s)
+            elif self.isTerminalState(s):
+                output = " ({:2d}) T ".format(s)
+            elif self.isObstacleState(s):
+                # Check that the transition probabilities of every adjacent state going to the obstacle state is 0
+                set_adjacent_states = self.get_adjacent_states(s)
+                for ss, d in set_adjacent_states:
+                    if ss is not None:
+                        minusd = self.get_opposite_direction(d)
+                        assert self.P[ss][minusd.value][0][0] == 1 and self.P[ss][minusd.value][0][1] == ss, \
+                            "The transition probability going {} to obstacle state s={} from the adjacent state {} ss={} is 0: P[{}][{}] = {}, P(ss->s) = {}" \
+                            .format(minusd.name, s, d.name, ss, ss, minusd.name, self.P[ss][minusd.value][0], 1 - self.P[ss][minusd.value][0][0])
+                output = " ({:2d}) P ".format(s)
+            else:
+                output = " ({:2d}) o ".format(s)
+
+            if x == 1:
+                output = output.lstrip()
+            if x == self.shape[1]:
+                output = output.rstrip()
+
+            outfile.write(output)
+
+            if x == self.shape[1]:
+                outfile.write("\n")
+
+            it.iternext()
+
+        return outfile
+
+    def get_adjacent_states(self, s: int):
+        """
+        Returns all the adjacent states to a state of interest s and the direction from s to which each is located
+
+        Arguments:
+        s: int
+            1D index of the state of interest.
+
+        Return: set
+        Set of the tuples (t, d) containing:
+        - t: an adjacent state to s in direction `d`. If there is no adjacent state because `s` is at the border, t = None.
+        - d: the direction from s to which state `t` is located, even if t is None.
+        The considered directions are all those indicated in the `Direction` enum.
+        """
+        adjacent_states = []    # List of tuples (s_adj, direction) where s_adj is the 1D index of the state adjacent to s and direction is the direction w.r.t. s where the adjacent state was found
+        for direction in Direction2D.__members__.values():
+            adjacent_states += [(self.state_adjacent(s, direction), direction)]
+
+        return set(adjacent_states)
+
+    def get_opposite_direction(self, d: Direction2D):
+        """
+        The direction opposite to a direction of interest d
+
+        Arguments:
+        d: Direction
+            Direction of interest.
+
+        Return: Direction2D
+        The direction that is opposite to `d` which is computed as (d + #directions/2) mod #directions.
+        Ex: when there are 4 directions: UP (0), DOWN (2), RIGHT (1), LEFT (3), it is computed as (d + 2) mod 4 so that
+        the opposite of UP is DOWN and the opposite of RIGHT is LEFT, and viceversa.
+        """
+        minusd = (d.value + len(Direction2D) // 2) % len(Direction2D)
+        return Direction2D(minusd)

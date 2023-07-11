@@ -127,8 +127,7 @@ class Test_EstStateValueV_EnvGridworlds(unittest.TestCase, test_utils.EpisodeSim
     # See the only answer by Navy Cheng.
 
     # Expected results of tests that need to be the same in different tests
-    # (typically when checking that the result of running MC is the same as running
-    # MC(lambda=1.0))
+    # (typically when checking that the result of running MC is the same as running MC(lambda=1.0))
     # The numbers at the end of the name correspond to the case numbers in the
     # data provider lambda functions where the respective expected values are used.
     EXPECTED_TEST_RANDOM_WALK_1 = [-0.000000, -0.683051, -0.683051, -0.583526, -0.555566, -0.555566, -0.555566,
@@ -673,16 +672,72 @@ class Test_EstStateValueV_EnvGridworlds(unittest.TestCase, test_utils.EpisodeSim
                                                 [0.03452769, 0.03385807, 0.02151384]])
 
 
+class Test_EstStateValueV_EnvGridworldsWithObstacles(unittest.TestCase, test_utils.EpisodeSimulation):
+
+    @classmethod
+    def setUpClass(cls):
+        #-- Environment characteristics
+        shape = [3, 4]
+        cls.nS = np.prod(shape)
+        cls.env2d = gridworlds.EnvGridworld2D_WithObstacles(shape=shape, terminal_states=set({3}), rewards_dict=dict({3: +1}), obstacles_set=set({5}))
+
+        #-- Cycle characteritics
+        # Set of absorbing states, used to define a cycle as re-entrance into the set
+        # which is used to estimate the expected return (i.e. the value function)
+        cls.A = set({8})
+
+        #-- Policy characteristics
+        # Random walk policy
+        cls.policy_rw = random_walks.PolRandomWalkDiscrete(cls.env2d)
+
+        #-- Plotting parameters
+        cls.colormap = cm.get_cmap("jet")
+
+    def setUp(self):
+        # Simulation setup for ALL tests
+        self.seed = 1717
+        self.nepisodes = 20
+        self.start_state = 8
+
+        learner_mclambda = mc.LeaMCLambda(self.env2d, alpha=1.0,
+                                          gamma=0.9,
+                                          adjust_alpha=False,
+                                          adjust_alpha_by_episode=False,
+                                          alpha_min=0.0,
+                                          learner_type=mc.LearnerType.MC,
+                                          debug=False)
+        self.agent_rw_mc = agents.GenericAgent(self.policy_rw, learner_mclambda)
+        self.sim = DiscreteSimulator(self.env2d, self.agent_rw_mc, debug=False)
+
+        # Expected state values for all tests
+        self.expected = [0.348678, 0.205891, 0.531441, 0.000000, 0.047101, 0.000000, 0.254187, 0.282430, 0.016423, 0.030903, 0.088629, 0.348678]
+
+    def test_Env_PolRandomWalk_MetMC(self):
+        print(f"\n*** Running testing #{self.id()}")
+
+        state_value, state_counts, _, _, learning_info = \
+            self.sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
+                    compute_rmse=False, state_observe=None,
+                    verbose=True, verbose_period=100,
+                    plot=False, pause=0.1)
+        observed = self.agent_rw_mc.getLearner().getV().getValues()
+        print("\nObserved state value function: " + test_utils.array2str(observed))
+
+        assert self.nS == 3*4 and \
+               self.seed == 1717 and \
+               self.nepisodes == 20 and \
+               self.start_state == 8
+        assert np.allclose(observed, self.expected, atol=1E-6)
+
+
 class Test_EstValueFunctionV_MetMCLambda_EnvMountainCar(unittest.TestCase, test_utils.EpisodeSimulation):
 
     def __init__(self, *args, **kwargs):
         self.seed = kwargs.pop('seed', 1717)
         self.nepisodes = kwargs.pop('nepisodes', 30)  # 20000) #100000) #30000) #200) #2000)
         self.max_time_steps = kwargs.pop('max_time_steps', 500)  # Maximum number of steps to run per episode
-        self.normalizer = kwargs.pop('normalizer',
-                                     1)  # Normalize for the plots: Set it to max_time_steps when the rewards are NOT sparse (i.e. are -1 every where except at terminal states), o.w. set it to 1 (when rewards are sparse, i.e. they occur at terminal states)
-        self.start_state = kwargs.pop('start_state',
-                                      None)  # (0.4, 0.07)) #None) #(0.4, 0.07))       # Position and velocity
+        self.normalizer = kwargs.pop('normalizer', 1)  # Normalize for the plots: Set it to max_time_steps when the rewards are NOT sparse (i.e. are -1 every where except at terminal states), o.w. set it to 1 (when rewards are sparse, i.e. they occur at terminal states)
+        self.start_state = kwargs.pop('start_state', None)  # (0.4, 0.07)) #None) #(0.4, 0.07))       # Position and velocity
         self.plot = kwargs.pop('plot', True)
         super().__init__(*args, **kwargs)
 
@@ -975,6 +1030,9 @@ if __name__ == '__main__':
     test_suite_gw1d.addTest(Test_EstStateValueV_EnvGridworlds("test_EnvGridworld1D_PolRandomWalk_MetLambdaReturn_TestGammaLessThan1"))
     test_suite_gw1d.addTest(Test_EstStateValueV_EnvGridworlds("test_EnvGridworld1D_PolRandomWalk_MetTDLambda_TestSeveralAlphasLambdas"))
 
+    test_suite_gw2dobstacles = unittest.TestSuite()
+    test_suite_gw2dobstacles.addTest(Test_EstStateValueV_EnvGridworldsWithObstacles("test_Env_PolRandomWalk_MetMC"))
+
     # --- Mountain Car tests
     test_suite_mountain = unittest.TestSuite()
     test_suite_mountain.addTest(Test_EstValueFunctionV_MetMCLambda_EnvMountainCar("test_Env_PolRandomWalk_MetMCLambdaReturn_TestMCvsLambdaReturn"))
@@ -982,6 +1040,7 @@ if __name__ == '__main__':
     # Run the test suites
     runner.run(test_suite_offline)
     runner.run(test_suite_gw1d)
+    runner.run(test_suite_gw2dobstacles)
     runner.run(test_suite_mountain)
 else:
     # Use this when we want to recover the output of the test in the Python session and analyze it
