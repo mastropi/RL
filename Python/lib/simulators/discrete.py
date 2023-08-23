@@ -123,7 +123,7 @@ class Simulator:
         self.seed = seed
 
         # _isd_orig may store a copy of the Initial State Distribution of the environment in case we need to change it
-        # at some point and so that we can restore it a some later point.
+        # at some point, so that we can restore it a some later point, e.g. when a simulation finishes.
         self._isd_orig = None
         self.reset()
 
@@ -244,6 +244,10 @@ class Simulator:
                         - 'deltaV_rel_abs_mean': array with length nepisodes+1 containing mean|delta_rel(V)| over all states at each episode.
                         - 'deltaV_rel_abs_median': array with length nepisodes+1 containing median|delta_rel(V)| over all states at each episode.
         """
+
+        # Reset the simulator (i.e. prepare it for a fresh new simulation with all learning memory erased)
+        self.reset()
+
         #--- Parse input parameters
         # Define initial state
         nS = self.env.getNumStates()
@@ -312,8 +316,8 @@ class Simulator:
         # Define the policy and the learner
         policy = self.agent.getPolicy()
         learner = self.agent.getLearner()
-        # Reset the simulator (i.e. prepare it for a fresh new simulation with all learning memory erased)
-        self.reset()
+
+        # Environment seed
         if seed is not None:
             if seed != 0:
                 self.env.seed(seed)

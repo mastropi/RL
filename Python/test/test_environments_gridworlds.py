@@ -20,6 +20,8 @@ from Python.lib.environments.gridworlds import Direction2D, EnvGridworld2D_WithO
 
 class Test_Support_EnvGridworld2D_WithObstacles(unittest.TestCase):
 
+    gridworld = None
+
     @classmethod
     def setUpClass(cls):
         cls.gridworld = EnvGridworld2D_WithObstacles(shape=[3, 4], terminal_states=set({3, 7}), rewards_dict=dict({3: +1, 7: -1}), obstacles_set=set({5, 6}))

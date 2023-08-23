@@ -131,8 +131,7 @@ class EnvGridworld1D(EnvironmentDiscrete):
         isd = np.ones(nS) / num_nonterminal_states
         isd[0] = 0.0
         isd[nS-1] = 0.0
-        assert np.isclose(np.sum(isd), 1.0), \
-                "The initial state probabilities sum up to 1 ({})".format(np.sum(isd))
+        assert np.isclose(np.sum(isd), 1.0), "The initial state probabilities sum up to 1 ({})".format(np.sum(isd))
 
         self.P = P
         #print("P")

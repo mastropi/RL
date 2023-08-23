@@ -185,7 +185,7 @@ class Test_EstStateValueV_EnvGridworlds(unittest.TestCase, test_utils.EpisodeSim
                                                                                      params_alpha_gamma,
                                                                                      adjust_alpha, adjust_alpha_by_episode,
                                                                                      alpha_min):
-        print("\n*** Testing {0}, case number {1} '{2}' ***".format(self.id(), casenum, desc))
+        print("\n*** Running test {0}, case number {1} '{2}' ***".format(self.id(), casenum, desc))
 
         # Simulation setup
         seed = 1717
@@ -216,7 +216,7 @@ class Test_EstStateValueV_EnvGridworlds(unittest.TestCase, test_utils.EpisodeSim
         assert np.allclose(observed, expected, atol=1E-6)
 
     def test_EnvGridworld1D_PolRandomWalk_MetMC_TestGammaSmallerThan1(self):
-        print("\n*** Testing " + self.id() + " ***")
+        print("\n*** Running test " + self.id() + " ***")
 
         # Simulation setup
         seed = 1717
@@ -268,7 +268,7 @@ class Test_EstStateValueV_EnvGridworlds(unittest.TestCase, test_utils.EpisodeSim
 
     def test_EnvGridworld1D_PolRandomWalk_MetMC_TestRMSETwice(self):
         # -- All tests are run using seed = 1717, nepisodes = 20, start_state = 10
-        print("\n*** Testing " + self.id() + " ***")
+        print("\n*** Running test " + self.id() + " ***")
 
         # Simulation setup
         seed = 1717
@@ -361,7 +361,7 @@ class Test_EstStateValueV_EnvGridworlds(unittest.TestCase, test_utils.EpisodeSim
                                                                                                    adjust_alpha,
                                                                                                    adjust_alpha_by_episode,
                                                                                                    alpha_min):
-        print("\n*** Testing {0}, case number {1} ***".format(self.id(), casenum))
+        print("\n*** Running test {0}, case number {1} ***".format(self.id(), casenum))
 
         # Simulation setup
         seed = 1717
@@ -395,7 +395,7 @@ class Test_EstStateValueV_EnvGridworlds(unittest.TestCase, test_utils.EpisodeSim
 
     def test_EnvGridworld1D_PolRandomWalk_MetLambdaReturn_TestGammaLessThan1(self):
         # -- All tests are run using seed = 1717, nepisodes = 20, start_state = 10
-        print("\n*** Testing " + self.id() + " ***")
+        print("\n*** Running test " + self.id() + " ***")
 
         # Simulation setup
         seed = 1717
@@ -453,7 +453,7 @@ class Test_EstStateValueV_EnvGridworlds(unittest.TestCase, test_utils.EpisodeSim
         # - the plot_results() call at the end fails because the alpha_mean_by_episode_mean variable used when calling
         # plt.plot() inside plot_results() has zero length.
         # So, it seems that nothing is really done or learned by the learner_mclambda_adaptive object.
-        print("\n*** Testing " + self.id())
+        print("\n*** Running test " + self.id())
 
         # Simulation setup
         seed = 1717
@@ -504,10 +504,19 @@ class Test_EstStateValueV_EnvGridworlds(unittest.TestCase, test_utils.EpisodeSim
 
     def test_EnvGridworld1D_PolRandomWalk_MetTDLambda_TestSeveralAlphasLambdas(self):
         """
-        This test intends to reproduce the results in Sutton 2018 on the TD(lambda) algorithm applied to learn
-        the state value function in a 1D gridworld
+        This test intends to reproduce the results in Sutton 2018 (pag. 295) on the TD(lambda) algorithm applied to learn
+        the state value function in a 1D gridworld. The results shown in Sutton correspond to the episode always starting
+        at the same state in the 1D gridworld, namely at the middle state (in our case at state 10).
+        HOWEVER, here I consider a RANDOM start state, just to use a random start state in one of the tests.
+        ([2023/08/23] In fact, thanks to using this random start state, I discovered that there was an error in the implementation of
+        Simulator.run() where I was resetting the simulator *after* setting the initial state distribution that selects
+        the initial state (to e.g. a fixed state) and this made the private attribute self._ids_orig be reset to None,
+        thus erasing the original state distribution stored in the environment, which was actually needed
+        in order to be reset at the end of the simulation process and thus avoid altering the environment in the outside
+        world that had been passed to the constructor of the Simulator object, which in the end changed the results of this
+        test depending on whether *other* tests were run together with it or not.)
         """
-        print("\n*** Testing " + self.id())
+        print("\n*** Running test " + self.id())
 
         # Possible policies and learners for agents
         pol_rw = random_walks.PolRandomWalkDiscrete(self.env1d)
@@ -567,7 +576,7 @@ class Test_EstStateValueV_EnvGridworlds(unittest.TestCase, test_utils.EpisodeSim
                 idx_simul += 1
                 if verbose:
                     print("\nParameter set {} of {}: lambda = {:.2g}, alpha = {:.2g}" \
-                          .format(idx_simul, n_simul, lmbda, alpha))
+                          .format(idx_simul+1, n_simul, lmbda, alpha))
 
                 # Reset learner and agent (i.e. erase all memory from a previous run!)
                 learner.setParams(alpha=alpha, gamma=gamma, lmbda=lmbda)
@@ -647,10 +656,6 @@ class Test_EstStateValueV_EnvGridworlds(unittest.TestCase, test_utils.EpisodeSim
         fig.suptitle("{}: gamma = {:.2g}, #experiments = {}, #episodes = {}"\
                      .format(learner.__class__.__name__, gamma, nexperiments, nepisodes))
 
-        # The following results are for the following setup:
-        # - seed = 1717
-        # - nepisodes = 10
-        # -
         print("Average RMSE (first 3 columns) and its standard error (last 3 columns) at last episode by lambda (rows) and alpha (columns):\n{}" \
               .format(np.c_[rmse_episodes_mean, rmse_episodes_se]))
         assert self.nS == 19 and \
@@ -713,7 +718,7 @@ class Test_EstStateValueV_EnvGridworldsWithObstacles(unittest.TestCase, test_uti
         self.expected = [0.348678, 0.205891, 0.531441, 0.000000, 0.047101, 0.000000, 0.254187, 0.282430, 0.016423, 0.030903, 0.088629, 0.348678]
 
     def test_Env_PolRandomWalk_MetMC(self):
-        print(f"\n*** Running testing #{self.id()}")
+        print(f"\n*** Running test #{self.id()}")
 
         state_value, state_counts, _, _, learning_info = \
             self.sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
@@ -757,7 +762,7 @@ class Test_EstValueFunctionV_MetMCLambda_EnvMountainCar(unittest.TestCase, test_
         cls.policy_rw = random_walks.PolRandomWalkDiscrete(cls.env)
 
     def no_test_Env_PolRandomWalk_MetMC_TestOneCase(self, params=None, verbose_convergence=False):
-        print("\nTesting " + self.id())
+        print(f"\n*** Running test #{self.id()}")
 
         # Learner and agent
         if params is None:
@@ -900,7 +905,7 @@ class Test_EstValueFunctionV_MetMCLambda_EnvMountainCar(unittest.TestCase, test_
         return observed, state_counts, params, sim, learning_info
 
     def test_Env_PolRandomWalk_MetMCLambdaReturn_TestMCvsLambdaReturn(self, verbose_convergence=False):
-        print("\nTesting " + self.id())
+        print(f"\n*** Running test #{self.id()}")
 
         # Learner and agent
         params = dict({'alpha': 1.0,
