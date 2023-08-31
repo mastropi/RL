@@ -26,7 +26,7 @@ class LeaFV(LeaMC):
                  V_start=0.0, Q_start=0.0,
                  # TODO: (2021/10/25) Decide the purpose of V_start and Q_start... currently they are not used and I am not sure how they would be used for the estimation of V or the calculation of G
                  debug=False):
-        super().__init__(env, alpha, gamma, adjust_alpha, alpha_update_type, alpha_min, V_start, Q_start, debug)
+        super().__init__(env, alpha=alpha, gamma=gamma, adjust_alpha=adjust_alpha, alpha_min=alpha_min, V_start=V_start, Q_start=Q_start, debug=debug)
         # Dictionary that stores the stationary probability of states of interest, which are the keys of the dictionary
         self.probas_stationary = dict()
 

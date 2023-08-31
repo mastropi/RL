@@ -55,61 +55,67 @@ class Test_EstAverageValueV_EnvQueueSingleServer(unittest.TestCase):
 
     # -------- DATA -------
     # Case number, description, expected value, parameters
-    # These are the same tests 1, 2 and 3 from data_test_lambda_return_random_walk
     data_test_EnvQueueSingleServer_MetMCFV_TestSeveralCapacities = lambda DEFAULT_EXECUTION = True: (
         # Note: True blocking probability for different K values when rho = 0.7
         # Pr(K) = rho^K * (1 - rho) / (1 - rho^(K+1))
         # K = 5: Pr(K) = 5.71%
         # K = 20: Pr(K) = 0.0239% = 2.39E-4
         # K = 40: Pr(K) = 0.000019% = 1.9E-7
+
+        # First set of results
         # Not so good estimation because:
-        # (a) P(T>t) is estimated from M reabsorption cycles of the single particle simulation
+        # (a) P(T>t) is estimated from M reabsorption cycles of the single particle simulation (instead of from the N particles, which gives a good estimate for any size of the absorption set, J)
         # (b) No burn-in period is used.
         # (c) No minimum number of cycles are required for the estimation of expectations.
-        # TODO: (2023/02/12) Fill in the missing expected values for the MC estimation: Pr(MC), E(T) MC, #E(T) (MC), #events_MC
+
+        # Currently (30-Aug-2023), on 9 tests for the FV approach in 3 tests of 3 tests with SMALL, MODERATE and LARGE K values,
+        # the execution takes about 5 minutes.
         (1, DEFAULT_EXECUTION, 'Small K',
          {'K': 5, 'J': 2, 'N': 5, 'T': 20,
           'burnin_time_steps': 0, 'min_num_cycles_for_expectations': 0, 'method_survival_probability_estimation': SurvivalProbabilityEstimation.FROM_M_CYCLES},
-         {'Pr(MC)': np.nan, 'E(T) (MC)': np.nan, '#E(T) (MC)': np.nan, '#events_MC': np.nan,
-          'Pr(FV)': 0.0598497, 'E(T)': 5.70, '#E(T)': 8, 'Tmax': 45.6, 'Tend': 50.3, 'Smax': 5.6,
-          '#events_ET': 40, '#events_FV': 47}),
+         {'Pr(MC)': 0.0, 'E(T) (MC)': 1.98926, '#E(T) (MC)': 44, '#events_MC': 100,
+          'Pr(FV)': 0.0103065, 'E(T)': 7.06, '#E(T)': 4, 'Tmax': 28.2, 'Tend': 41.2, 'Smax': 4.6,
+          '#events_ET': 39, '#events_FV': 44}),
         (2, DEFAULT_EXECUTION, 'Moderate K',
          {'K': 20, 'J': 10, 'N': 100, 'T': 2000,
           'burnin_time_steps': 0, 'min_num_cycles_for_expectations': 0, 'method_survival_probability_estimation': SurvivalProbabilityEstimation.FROM_M_CYCLES},
-         {'Pr(MC)': np.nan, 'E(T) (MC)': np.nan, '#E(T) (MC)': np.nan, '#events_MC': np.nan,
-          'Pr(FV)': 0.00040698, 'E(T)': 40.14, '#E(T)': 70, 'Tmax': 2809.5, 'Tend': 2840.9, 'Smax': 37.1,
-          '#events_ET': 4003, '#events_FV': 6370}),
+         {'Pr(MC)': 0.00031823, 'E(T) (MC)': 50.02, '#E(T) (MC)': 2866, '#events_MC': 200E3,
+          'Pr(FV)': 0.00047179, 'E(T)': 243.54, '#E(T)': 11, 'Tmax': 2678.9, 'Tend': 2900.6, 'Smax': 47.3,
+          '#events_ET': 4004, '#events_FV': 8164}),
         (3, DEFAULT_EXECUTION, 'Large K',
          {'K': 40, 'J': 35, 'N': 400, 'T': 2000,
           'burnin_time_steps': 0, 'min_num_cycles_for_expectations': 0, 'method_survival_probability_estimation': SurvivalProbabilityEstimation.FROM_M_CYCLES},
-         {'Pr(MC)': np.nan, 'E(T) (MC)': np.nan, '#E(T) (MC)': np.nan, '#events_MC': np.nan,
-          'Pr(FV)': 0.0059430, 'E(T)': 6.09, '#E(T)': 1, 'Tmax': 6.1, 'Tend': 2849.5, 'Smax': 3.2,
-          '#events_ET': 4033, '#events_FV': 2239}),
+         {'Pr(MC)': 0.0, 'E(T) (MC)': 3.9979, '#E(T) (MC)': 1, '#events_MC': 800E3,
+          'Pr(FV)': 9.619e-05, 'E(T)': 3.99, '#E(T)': 1, 'Tmax': 4.0, 'Tend': 2809.3, 'Smax': 1.1,
+          '#events_ET': 4029, '#events_FV': 792}),
 
+        # Second set of results
         # Better estimation than above because items (b) and (c) are no longer true
         (4, DEFAULT_EXECUTION, 'Small K',
          {'K': 5, 'J': 2, 'N': 5, 'T': 20,
           'burnin_time_steps': 10, 'min_num_cycles_for_expectations': 5,
           'method_survival_probability_estimation': SurvivalProbabilityEstimation.FROM_M_CYCLES},
-         {'Pr(MC)': np.nan, 'E(T) (MC)': np.nan, '#E(T) (MC)': np.nan, '#events_MC': np.nan,
-          'Pr(FV)': 0.0604309, 'E(T)': 5.65, '#E(T)': 7, 'Tmax': 45.6, 'Tend': 50.3, 'Smax': 5.6,
-          '#events_ET': 40, '#events_FV': 47}),
+         {'Pr(MC)': 0.0, 'E(T) (MC)': 1.99389, '#E(T) (MC)': 40, '#events_MC': 100,
+          'Pr(FV)': np.nan, 'E(T)': np.nan, '#E(T)': 2, 'Tmax': 28.2, 'Tend': 41.2, 'Smax': 4.6,
+          '#events_ET': 39, '#events_FV': 0}),
         (5, DEFAULT_EXECUTION, 'Moderate K',
          {'K': 20, 'J': 10, 'N': 100, 'T': 2000,
           'burnin_time_steps': 10, 'min_num_cycles_for_expectations': 5,
           'method_survival_probability_estimation': SurvivalProbabilityEstimation.FROM_M_CYCLES},
-         {'Pr(MC)': np.nan, 'E(T) (MC)': np.nan, '#E(T) (MC)': np.nan, '#events_MC': np.nan,
-          'Pr(FV)': 0.00040203, 'E(T)': 40.63, '#E(T)': 69, 'Tmax': 2809.5, 'Tend': 2840.9, 'Smax': 37.1,
-          '#events_ET': 4003, '#events_FV': 6370}),
+         {'Pr(MC)': 0.00031819, 'E(T) (MC)': 49.99, '#E(T) (MC)': 2864, '#events_MC': 200E3,
+          'Pr(FV)': 0.000418716, 'E(T)': 274.41, '#E(T)': 9, 'Tmax': 2678.9, 'Tend': 2900.6, 'Smax': 47.3,
+          '#events_ET': 4004, '#events_FV': 8164}),
         (6, DEFAULT_EXECUTION, 'Large K',
-         {'K': 40, 'J': 35, 'N': 400, 'T': 2000,
+         {'K': 40, 'J': 12, 'N': 400, 'T': 2000,
           'burnin_time_steps': 10, 'min_num_cycles_for_expectations': 5,
           'method_survival_probability_estimation': SurvivalProbabilityEstimation.FROM_M_CYCLES},
-         {'Pr(MC)': np.nan, 'E(T) (MC)': np.nan, '#E(T) (MC)': np.nan, '#events_MC': np.nan,
-          'Pr(FV)': np.nan, 'E(T)': np.nan, '#E(T)': 0, 'Tmax': 6.1, 'Tend': 2849.5, 'Smax': 3.2,
-          '#events_ET': 4033, '#events_FV': 0}),
+         {'Pr(MC)': 0.0, 'E(T) (MC)': 100.71, '#E(T) (MC)': 5681, '#events_MC': 800E3,
+          'Pr(FV)': 0.0, 'E(T)': 188.35, '#E(T)': 13, 'Tmax': 2676.9, 'Tend': 2899.0, 'Smax': 21.9,
+          '#events_ET': 4005, '#events_FV': 14758}),
 
+        # Third set of results
         # Better estimation than above because in addition item (a) is no longer true, i.e. now P(T>t) is estimated from the *N particles* used in the FV simulation
+        # (and in some cases because the parameter values are larger, e.g. larger number of particles)
         (7, DEFAULT_EXECUTION, 'Small K',
          {'K': 5, 'J': 3, 'N': 80, 'T': 200,
           'burnin_time_steps': 20, 'min_num_cycles_for_expectations': 5,
@@ -117,25 +123,24 @@ class Test_EstAverageValueV_EnvQueueSingleServer(unittest.TestCase):
             # NOTE: (2022/11/01) The estimated probability is too small compared to the true value...
             # And this is most likely due to a large estimated E(T) value... which should have been ~ 5 (see above tests),
             # but it turned out to be 8.65... why??
-         {'Pr(MC)': np.nan, 'E(T) (MC)': np.nan, '#E(T) (MC)': np.nan, '#events_MC': np.nan,
-          'Pr(FV)': 0.02774982, 'E(T)': 8.65, '#E(T)': 25, 'Tmax': 269.5, 'Tend': 291.2, 'Smax': 8.2,
-          '#events_ET': 387, '#events_FV': 1126}),
+         {'Pr(MC)': 0.0617052, 'E(T) (MC)': 3.49, '#E(T) (MC)': 3330, '#events_MC': 16000,
+          'Pr(FV)': 0.0408603, 'E(T)': 6.98, '#E(T)': 32, 'Tmax': 287.8, 'Tend': 288.9, 'Smax': 12.7,
+          '#events_ET': 382, '#events_FV': 1723}),
         (8, DEFAULT_EXECUTION, 'Moderate K',
          {'K': 20, 'J': 10, 'N': 200, 'T': 2000,
           'burnin_time_steps': 10, 'min_num_cycles_for_expectations': 5,
           'method_survival_probability_estimation': SurvivalProbabilityEstimation.FROM_N_PARTICLES},
-         {'Pr(MC)': np.nan, 'E(T) (MC)': np.nan, '#E(T) (MC)': np.nan, '#events_MC': np.nan,
-          'Pr(FV)': 0.000880075, 'E(T)': 40.26, '#E(T)': 69, 'Tmax': 2809.5, 'Tend': 2840.9, 'Smax': 77.0,
-          '#events_ET': 4003, '#events_FV': 26250}),
+         {'Pr(MC)': 0.000242275, 'E(T) (MC)': 48.66, '#E(T) (MC)': 5865, '#events_MC': 400E3,
+          'Pr(FV)': 0.000163620, 'E(T)': 268.36, '#E(T)': 9, 'Tmax': 2678.9, 'Tend': 2900.6, 'Smax': 74.5,
+          '#events_ET': 4004, '#events_FV': 25386}),
         (9, DEFAULT_EXECUTION, 'Large K',
-         {'K': 40, 'J': 20, 'N': 400, 'T': 2000,
+         {'K': 40, 'J': 12, 'N': 400, 'T': 2000,    # The value of J was tuned here in order to obtain sufficient samples for the estimation of E(T) so that the estimated probability is NOT NaN
           'burnin_time_steps': 10, 'min_num_cycles_for_expectations': 4,
           'method_survival_probability_estimation': SurvivalProbabilityEstimation.FROM_N_PARTICLES},
-         {'Pr(MC)': np.nan, 'E(T) (MC)': np.nan, '#E(T) (MC)': np.nan, '#events_MC': np.nan,
-          'Pr(FV)': 2.47624615E-06, 'E(T)': 585.21, '#E(T)': 4, 'Tmax': 2339.7, 'Tend': 2842.5, 'Smax': 100.2,
-          '#events_ET': 4017, '#events_FV': 68224}),
+         {'Pr(MC)': 0.0, 'E(T) (MC)': 100.71, '#E(T) (MC)': 5681, '#events_MC': 800E3,
+          'Pr(FV)': 9.83671e-08, 'E(T)': 188.10, '#E(T)': 13, 'Tmax': 2676.9, 'Tend': 2899.0, 'Smax': 65.0,
+          '#events_ET': 4005, '#events_FV': 44191}),
     )
-
     # -------- DATA -------
 
     @data_provider(data_test_EnvQueueSingleServer_MetMCFV_TestSeveralCapacities)
@@ -191,15 +196,15 @@ class Test_EstAverageValueV_EnvQueueSingleServer(unittest.TestCase):
             assert list(service_rates) == [1.0], "Service rate is 1.0"
 
             # Assertions
-            #assert np.isnan(proba_blocking_mc) and np.isnan(dict_expected['Pr(MC)']) or \
-            #       np.isclose(proba_blocking_mc, dict_expected['Pr(MC)'])
-            #assert np.isnan(expected_return_time) and np.isnan(dict_expected['E(T) (MC)']) or \
-            #       np.isclose(expected_return_time, dict_expected['E(T) (MC)'], atol=0.01)
-            #self.assertEqual(n_return_cycles, dict_expected['#E(T) (MC)'])
-            #self.assertEqual(n_events_mc, dict_expected['#events_MC'])
+            assert np.isnan(proba_blocking_mc) and np.isnan(dict_expected['Pr(MC)']) or \
+                   np.isclose(proba_blocking_mc, dict_expected['Pr(MC)'])
+            assert np.isnan(expected_return_time) and np.isnan(dict_expected['E(T) (MC)']) or \
+                   np.isclose(expected_return_time, dict_expected['E(T) (MC)'], atol=0.01)
+            self.assertEqual(n_return_cycles, dict_expected['#E(T) (MC)'])
+            self.assertEqual(n_events_mc, dict_expected['#events_MC'])
             # Consistency assertions
-            #assert np.isnan(proba_blocking_mc) and np.isnan(probas_stationary[K]) or \
-            #       np.isclose(proba_blocking_mc, probas_stationary[K])
+            assert np.isnan(proba_blocking_mc) and np.isnan(probas_stationary[K]) or \
+                   np.isclose(proba_blocking_mc, probas_stationary[K])
 
     @data_provider(data_test_EnvQueueSingleServer_MetMCFV_TestSeveralCapacities)
     def test_EnvQueueSingleServer_MetFV_TestSeveralCapacities(self, casenum, run, desc, dict_params, dict_expected):

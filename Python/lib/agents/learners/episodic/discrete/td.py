@@ -38,7 +38,7 @@ class LeaTDLambda(Learner):
                  adjust_alpha_by_episode=False, alpha_min=0.,
                  reset_method=ResetMethod.ALLZEROS, reset_params=None, reset_seed=None,
                  debug=False):
-        super().__init__(env, alpha, adjust_alpha, alpha_update_type, adjust_alpha_by_episode, alpha_min,
+        super().__init__(env, alpha=alpha, adjust_alpha=adjust_alpha, alpha_update_type=alpha_update_type, adjust_alpha_by_episode=adjust_alpha_by_episode, alpha_min=alpha_min,
                          reset_method=reset_method, reset_params=reset_params, reset_seed=reset_seed)
         self.debug = debug
 
@@ -269,7 +269,7 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
             # about the state value function coming from the next state
             # => Do NOT do an adaptive lambda yet... so that some learning still happens.
             # In fact, the adaptive lambda may suggest NO learning due to the absence of innovation
-            # in case the reward of the current step is 0 (e.g. in gridworlds receiving reward only at terminal states
+            # in case the reward of the current step is 0 (e.g. in gridworlds receiving reward only at terminal states)
             lambda_adaptive = self.lmbda
             #print("episode: {}, t: {}, lambda (fixed) = {}".format(self.episode, t, lambda_adaptive))
             #print("episode: {}, t: {}, next_state: {}, state_counts[{}] = {} \n\tstate counts: {}\n\tlambda(adap)={}" \

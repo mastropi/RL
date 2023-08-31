@@ -3648,7 +3648,7 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info, proba
         print("Fleming-Viot process is NOT run because the estimation of the expected absorption time E(T_A) cannot be reliably performed"
               " because of an insufficient number of observed cycles after the burn-in period of {} time steps: {} < {}" \
               "\nThe estimated stationary probabilities, estimated blocking probability and estimated expected reward will be set to NaN." \
-              .format(dict_params_simul['burnin_time_steps'], n_cycles_absorption, dict_params_simul['min_num_cycles_for_expectations']))
+              .format(dict_params_simul['burnin_time_steps'], n_cycles_absorption_used, dict_params_simul['min_num_cycles_for_expectations']))
         proba_blocking = np.nan
         expected_reward = np.nan
         _states_or_buffer_sizes_of_interest = get_blocking_states_or_buffer_sizes(envs[0], agent)

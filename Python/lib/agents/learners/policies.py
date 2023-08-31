@@ -72,7 +72,7 @@ class LeaPolicyGradient(GenericLearner):
                  fixed_window=False,
                  clipping=False, clipping_value=+1.0,
                  debug=False):
-        super().__init__(env, alpha, adjust_alpha, func_adjust_alpha, min_count_to_update_alpha, min_time_to_update_alpha, alpha_min)
+        super().__init__(env, alpha=alpha, adjust_alpha=adjust_alpha, func_adjust_alpha=func_adjust_alpha, min_count_to_update_alpha=min_count_to_update_alpha, min_time_to_update_alpha=min_time_to_update_alpha, alpha_min=alpha_min)
         self.debug = debug
 
         self.fixed_window = fixed_window is None and False or fixed_window
@@ -669,13 +669,13 @@ class LeaPolicyGradient(GenericLearner):
                 print("[LeaPolicyGradient.learn_linear_theoretical_from_estimated_values] Delta(theta) = alpha * grad(V) = {:.3f} * {:e} = {:.6f}".format(alpha, gradV[0], delta_theta))
 
                 theta_lower = THETA_MIN
-                theta = np.max([theta_lower, theta + delta_theta])
+                theta = np.max([theta_lower, theta + delta_theta])  # NOTE: When theta is an array, this returns a scalar!
 
                 # Update the policy on the new theta and record it into the history of its updates
                 if self.is_multi_policy:
-                    self.setThetaParameter([theta])
-                else:
-                    self.setThetaParameter(theta)
+                    # Convert back theta to an array
+                    theta = np.array([theta])
+                self.setThetaParameter(theta)
         else:
             # theta and gradV are multidimensional arrays
             if not any(np.isnan([g for g in gradV])):

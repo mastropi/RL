@@ -44,7 +44,6 @@ class Test_EstPolicy_EnvQueueSingleServer(unittest.TestCase):
     # See the only answer by Navy Cheng.
 
     # TODO: (2023/02/02) Setup the class by calling function define_queue_environment_and_agent() defined in simulators/queues.py (instead of using the classmethod createAgentWithPolicyGradientLearner()) which takes care of everything I do here, and in addition we initialize objects in a consistent manner!
-    # TODO: (2023/03/08) Adapt all expected results for the df_learning data frame to the new structure of the data frame returned by the FVRL optimizer (e.g. 'proba_blocking' instead of 'Pr(K-1)' and 'Pr(K)') once the correctness of the probability estimation process is checked (recall that the estimated probability changed from version in commit 89d0b1f5 dated 01-Jan-2023)
     @classmethod
     def setUpClass(cls):
         # Define the queue environment
@@ -116,8 +115,8 @@ class Test_EstPolicy_EnvQueueSingleServer(unittest.TestCase):
         return df_learning
 
     def test_Env_MetMCwithReinforceTrue(self):
-        print("\n")
         print("".join(np.repeat("*", 20)))
+        print("\nRunning test " + self.id())
         print("Testing the MC algorithm on a single server system using the REINFORCE_TRUE learning strategy...")
 
         # Light execution parameters
@@ -153,22 +152,18 @@ class Test_EstPolicy_EnvQueueSingleServer(unittest.TestCase):
         # Expected result when using MC with REINFORCE_TRUE strategy
         # (2023/02/02) Today these results have been carefully copied from the observed result of the test and checked that they are verified!
         df_learning_expected = pd.DataFrame.from_items([
-                                                ('theta', [1.1, 6.450352, 6.685442, 6.792059, 6.761383]),
-                                                ('theta_next', [6.450352, 6.685442, 6.792059, 6.761383, 7.615656]),
-                                                ('Pr(K-1)', [0.209818, 0.015167, 0.053310, 0.010225, 0.031064]),
-                                                ('Pr(K)', [0.0]*5),
-                                                ('Error(K-1)', [-0.062243, -0.421494, 1.033354, -0.609999, 0.184868]),
-                                                ('Error(K)', [-1.0]*5),
-                                                ('Q_diff(K-1)', [2.55, 1.549996, 0.199995, -0.300008, 2.749998]),
-                                                ('Q_diff(K)', [0.0]*5),
+                                                ('theta', [1.1, 5.941948, 6.389987, 6.269116, 6.716095]),
+                                                ('theta_next', [5.941948, 6.389987, 6.269116, 6.716095, 7.517759]),
+                                                ('proba_blocking', [0.188836, 0.001935, 0.028018, 0.016008, 0.008819]),
+                                                ('error_proba_blocking', [-0.439294, -0.931983, -0.176295, -0.569493, -0.653667]),
+                                                ('expected_reward', [-0.944180, -0.009676, -0.140091, -0.080039, -0.044097]),
+                                                ('error_reward', [-1.560706, -1.068017, -1.823705, -1.430506, -1.346333]),
                                                 ('alpha', [10.0]*5),
-                                                ('gradV', [0.535035, 0.023509, 0.010662, -0.003068, 0.085427]),
-                                                ('n_events_mc', [1500, 1500, 1500, 1500, 1500]),
+                                                ('gradV', [[0.48419478693402257], [0.04480394277065356], [-0.012087160327577427], [0.04469796225393303], [0.08016635442577162]]),
+                                                ('n_events_mc', [1500]*5),
                                                 ('n_events_fv', [0]*5),
-                                                ('n_trajectories_Q', [100.0]*5)
+                                                ('n_trajectories_Q', [91, 93, 95, 98, 93])
                                                 ])
-
-        assert_equal_data_frames(df_learning, df_learning_expected, df_learning_expected.columns, atol=1E-6)
         # Check execution parameters
         assert  dict_params_learn['mode'] == LearningMode.REINFORCE_TRUE and \
                 dict_params_learn['t_learn'] == 5
@@ -181,9 +176,12 @@ class Test_EstPolicy_EnvQueueSingleServer(unittest.TestCase):
                 dict_params_simul['burnin_time_steps'] == 20 and \
                 dict_params_simul['min_num_cycles_for_expectations'] == 5
 
+        # Check results
+        assert_equal_data_frames(df_learning, df_learning_expected, df_learning_expected.columns, atol=1E-6)
+
     def test_Env_MetFVRLwithReinforceTrue(self):
-        print("\n")
         print("".join(np.repeat("*", 20)))
+        print("\nRunning test " + self.id())
         print("Testing the FVRL algorithm on a single server system using the REINFORCE_TRUE learning strategy...")
 
         # Light execution parameters
@@ -219,22 +217,18 @@ class Test_EstPolicy_EnvQueueSingleServer(unittest.TestCase):
         # Expected result when using FVRL with REINFORCE_TRUE strategy
         # (2023/02/02) Today these results have been carefully copied from the observed result of the test and checked that they are verified!
         df_learning_expected = pd.DataFrame.from_items([
-                                                ('theta', [1.1, 8.484077, 8.484077, 8.484070, 8.519243]),
-                                                ('theta_next', [8.484077, 8.484077, 8.484070, 8.519243, 8.785301]),
-                                                ('Pr(K-1)', [0.289572, 0.0000, 0.013527, 0.001327, 0.017738]),
-                                                ('Pr(K)', [0.0]*5),
-                                                ('Error(K-1)', [0.294208, -1.0, 0.085777, -0.893459, 0.423790]),
-                                                ('Error(K)', [-1.0]*5),
-                                                ('Q_diff(K-1)', [2.55, 0.00, -0.000050, 2.649980, 1.499969]),
-                                                ('Q_diff(K)', [0.0]*5),
+                                                ('theta', [1.1, 7.782423, 7.782423, 7.970238, 7.968525]),
+                                                ('theta_next', [7.782423, 7.782423, 7.970238, 7.968525, 8.178420]),
+                                                ('proba_blocking', [0.260614, 0.0, 0.008446, 0.000092, 0.000374]),
+                                                ('error_proba_blocking', [-0.226164, -1.0, -0.484370, -0.992941, -0.971317]),
+                                                ('expected_reward', [-1.303072, -0.0, -0.042228, -0.000459, -0.001868]),
+                                                ('error_reward', [-1.773836, -1.0, -1.515628, -1.007059, -1.028683]),
                                                 ('alpha', [10.0]*5),
-                                                ('gradV', [0.738408, 0.0, -6.7195E-7, 0.0035173, 0.026606]),
+                                                ('gradV', [[0.6682422813177087], [0.0], [0.018781526951805034], [-0.00017128367010005866], [0.020989455330044243]]),
                                                 ('n_events_mc', [87, 100, 99, 99, 99]),
-                                                ('n_events_fv', [431, 0, 793, 511, 2353]),
-                                                ('n_trajectories_Q', [100.0, 0.0, 100.0, 100.0, 100.0])
+                                                ('n_events_fv', [431, 0, 1573, 561, 688]),
+                                                ('n_trajectories_Q', [91, 0, 93, 90, 82])
                                                 ])
-
-        assert_equal_data_frames(df_learning, df_learning_expected, df_learning_expected.columns, atol=1E-6)
         # Check execution parameters
         assert  dict_params_learn['mode'] == LearningMode.REINFORCE_TRUE and \
                 dict_params_learn['t_learn'] == 5
@@ -247,6 +241,9 @@ class Test_EstPolicy_EnvQueueSingleServer(unittest.TestCase):
                 dict_params_simul['burnin_time_steps'] == 20 and \
                 dict_params_simul['min_num_cycles_for_expectations'] == 5
 
+        # Check results
+        assert_equal_data_frames(df_learning, df_learning_expected, df_learning_expected.columns, atol=1E-6)
+
     # -------- DATA -------
     # Case number, description, parameters, expected value
     # These are the same tests 1, 2 and 3 from data_test_lambda_return_random_walk
@@ -258,9 +255,9 @@ class Test_EstPolicy_EnvQueueSingleServer(unittest.TestCase):
          'alpha_start': 10.0, 'adjust_alpha': True, 'func_adjust_alpha': np.float, 'min_time_to_update_alpha': 0, 'alpha_min': 0.01,
          'mode': LearningMode.REINFORCE_TRUE, 't_learn': 5},
          # In the following "expected" dictionary we should include the value of columns in the df_learning output yielded by self.runSimulation() that we would like to test
-         {'theta_next': [2.59211708, 6.0807596, 5.08841629, 4.22018097, 4.6207499],
-          'Pr(K-1)': [0.154502, 0.105127, 0.019458, 0.044148, 0.076299],
-          'Q_diff(K-1)': [0.318519, 3.318519, -10.2, -5.9, 2.1]}),
+         {'theta_next': [1.938283, 8.873832, -0.90, -0.90, -0.90],
+          'proba_blocking': [0.139052, 0.014933, 0.002926, 0.0, 0.0],
+          'n_events_fv': [620, 591, 3467, 728, 477]}),
 
         (2, DEFAULT_EXECUTION, '1D-theta as list',
          {'seed': 1313, 'theta_true': [5.0], 'theta_start': [2.1], 'nparticles': 50, 't_sim': 100,
@@ -272,15 +269,17 @@ class Test_EstPolicy_EnvQueueSingleServer(unittest.TestCase):
           'alpha_min': 0.01,
           'mode': LearningMode.REINFORCE_TRUE, 't_learn': 5},
          # In the following "expected" dictionary we should include the value of columns in the df_learning output yielded by self.runSimulation() that we would like to test
-         {'theta_next': [2.59211708, 6.0807596, 5.08841629, 4.22018097, 4.6207499],
-          'Pr(K-1)': [0.154502, 0.105127, 0.019458, 0.044148, 0.076299],
-          'Q_diff(K-1)': [0.318519, 3.318519, -10.2, -5.9, 2.1]}),
+         {'theta_next': [np.array([1.938283]), np.array([8.873832]), np.array([-0.90]), np.array([-0.90]), np.array([-0.90])],
+          'proba_blocking': [0.139052, 0.014933, 0.002926, 0.0, 0.0],
+          'n_events_fv': [620, 591, 3467, 728, 477]}),
     )
     # -------- DATA -------
 
     @data_provider(data_test_Env_MetFVRL)
     def test_Env_MetFVRL_TestSeveralCases(self, casenum, run, desc, dict_params_simul, dict_params_learn, dict_expected):
         "Test the FVRL implementation that learns the optimum parameter theta of a parameterized policy on the single-server queue system"
+        print("\nRunning test " + self.id())
+
         dict_params_info = dict({'plot': False, 'log': False, 'symbol': 'r.-'})
         assert dict_params_learn['method'] == LearningMethod.FV
         if run:
@@ -294,7 +293,13 @@ class Test_EstPolicy_EnvQueueSingleServer(unittest.TestCase):
             print(df_learning)
 
             for column, expected_value in dict_expected.items():
-                assert np.allclose(df_learning[column], expected_value, atol=1E-6, equal_nan=True)
+                try:
+                    assert np.allclose(df_learning[column], expected_value, atol=1E-6, equal_nan=True)
+                except:
+                    # The data in the column to analyze is too complex for np.allclose() (e.g. each element is a list or an array of values)
+                    # => Compare each element separately
+                    for i, observed_row in enumerate(df_learning[column]):
+                        assert np.isclose(observed_row, expected_value[i], atol=1E-6, equal_nan=True)
 
 
 class Test_EstPolicy_EnvQueueLossNetworkWithJobClasses(unittest.TestCase):
@@ -425,8 +430,8 @@ class Test_EstPolicy_EnvQueueLossNetworkWithJobClasses(unittest.TestCase):
         print("**************")
 
     def test_Env_MetMCwithReinforceTrue(self):
-        print("\n")
         print("".join(np.repeat("*", 20)))
+        print("\nRunning test " + self.id())
         print("Testing the MC algorithm on a loss network system receiving multi-class jobs using the REINFORCE_TRUE learning strategy...")
 
         # Light execution parameters
@@ -489,7 +494,6 @@ class Test_EstPolicy_EnvQueueLossNetworkWithJobClasses(unittest.TestCase):
         print("Optimum values found by the optimization process, compared to the true optimum values")
         self.showResults(agent_gradient)
 
-        assert_equal_data_frames(df_learning, df_learning_expected, df_learning_expected.columns, printFlag=False)
         # Check execution parameters
         assert  dict_params_learn['mode'] == LearningMode.REINFORCE_TRUE and \
                 dict_params_learn['t_learn'] == 5
@@ -503,9 +507,12 @@ class Test_EstPolicy_EnvQueueLossNetworkWithJobClasses(unittest.TestCase):
                 dict_params_simul['burnin_time_steps'] == 20 and \
                 dict_params_simul['min_num_cycles_for_expectations'] == 5
 
+        # Check results
+        assert_equal_data_frames(df_learning, df_learning_expected, df_learning_expected.columns, printFlag=False)
+
     def test_Env_MetFVRLwithReinforceTrue(self):
-        print("\n")
         print("".join(np.repeat("*", 20)))
+        print("\nRunning test " + self.id())
         print("Testing the FVRL algorithm on a loss network system receiving multi-class jobs using the REINFORCE_TRUE learning strategy...")
         print("Optimum theta and expected cost for loss network system: {}".format(self.dict_optimum_expected_cost))
 
@@ -565,7 +572,6 @@ class Test_EstPolicy_EnvQueueLossNetworkWithJobClasses(unittest.TestCase):
         print("Optimum values found by the optimization process, compared to the true optimum values")
         self.showResults(agent_gradient)
 
-        assert_equal_data_frames(df_learning, df_learning_expected, df_learning_expected.columns, printFlag=False)
         # Check execution parameters
         assert  dict_params_learn['mode'] == LearningMode.REINFORCE_TRUE and \
                 dict_params_learn['t_learn'] == 5
@@ -578,6 +584,9 @@ class Test_EstPolicy_EnvQueueLossNetworkWithJobClasses(unittest.TestCase):
                 dict_params_simul['buffer_size_activation_factor'] == [0.3, 0.3, 0.3] and \
                 dict_params_simul['burnin_time_steps'] == 0 and \
                 dict_params_simul['min_num_cycles_for_expectations'] == 0
+
+        # Check results
+        assert_equal_data_frames(df_learning, df_learning_expected, df_learning_expected.columns, printFlag=False)
 
 
 if __name__ == "__main__":

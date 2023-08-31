@@ -24,12 +24,12 @@ class LeaMC(GenericLearner):
     """
 
     def __init__(self, env, alpha=1.0, gamma=1.0,
-                 adjust_alpha=False, alpha_update_type=AlphaUpdateType.FIRST_STATE_VISIT,
+                 adjust_alpha=False,
                  alpha_min=0.,
                  V_start=0.0, Q_start=0.0,
                  # TODO: (2021/10/25) Decide the purpose of V_start and Q_start... currently they are not used and I am not sure how they would be used for the estimation of V or the calculation of G
                  debug=False):
-        super().__init__(env, alpha, adjust_alpha, alpha_update_type, alpha_min)
+        super().__init__(env, alpha=alpha, adjust_alpha=adjust_alpha, alpha_min=alpha_min)
         self.debug = debug
 
         self.gamma = gamma

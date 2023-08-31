@@ -40,6 +40,9 @@ class LeaMCLambda(Learner):
     Monte Carlo learning algorithm using step size `alpha`, discount `gamma`, and decay parameter `lmbda`  
     applied to a discrete-state environment defined with the DiscreteEnv class of openAI's gym module.
 
+    The decay parameter `lmbda` is only used when the learner_type is LearnerType.LAMBDA_RETURN, o.w. if
+    learner_type is LearnerType.MC, the decay parameter `lmbda` is set to None.
+
     Arguments:
     env: EnvironmentDiscrete
         The discrete-(state, action) environment where the learning takes place.
@@ -51,7 +54,7 @@ class LeaMCLambda(Learner):
                  reset_method=ResetMethod.ALLZEROS, reset_params=None, reset_seed=None,
                  learner_type=LearnerType.MC,
                  debug=False):
-        super().__init__(env, alpha, adjust_alpha, alpha_update_type, adjust_alpha_by_episode, alpha_min,
+        super().__init__(env, alpha=alpha, adjust_alpha=adjust_alpha, alpha_update_type=alpha_update_type, adjust_alpha_by_episode=adjust_alpha_by_episode, alpha_min=alpha_min,
                          reset_method=reset_method, reset_params=reset_params, reset_seed=reset_seed)
         self.debug = debug
 

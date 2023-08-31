@@ -157,7 +157,8 @@ class Simulator:
             plot=False, colormap="seismic", pause=0):
         # TODO: (2020/04/11) Convert the plotting parameters to a dictionary named plot_options or similar.
         # The goal is to group OPTIONAL parameters by their function/concept.
-        """Runs an episodic Reinforcement Learning experiment.
+        """
+        Runs an episodic Reinforcement Learning experiment.
         No reset of the learning history is done at the onset of the first episode to run.
         It is assumed that this reset, when needed, is done by the calling function.
 
@@ -334,7 +335,7 @@ class Simulator:
             print("Value function at start of experiment: {}".format(V))
 
         # Average state values and average change of V by episode for plotting purposes
-        V_abs_mean = np.nan*np.ones(nepisodes+1)
+        V_abs_mean = np.nan*np.ones(nepisodes+1)            # mean|V|
         V_abs_mean_weighted = np.nan*np.ones(nepisodes+1)   # mean|V| weighted by the state count
         V_abs_min = np.nan*np.ones(nepisodes+1)             # To evaluate the smallest divisor when computing the relative change in V
         deltaV_abs_mean = np.nan*np.ones(nepisodes+1)

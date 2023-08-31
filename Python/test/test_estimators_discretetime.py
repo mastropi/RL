@@ -530,7 +530,7 @@ class Test_EstStateValueV_EnvGridworlds(unittest.TestCase, test_utils.EpisodeSim
         seed = 1717
         nexperiments = 3
         nepisodes = 10
-        start = None
+        start_state = None
         useGrid = False
         verbose = True
         debug = False
@@ -596,7 +596,7 @@ class Test_EstStateValueV_EnvGridworlds(unittest.TestCase, test_utils.EpisodeSim
                 N_mean, rmse_mean, rmse_se, rmse_n, rmse_episodes, _, mape_episodes, _, _, learning_info = \
                                     sim.simulate(nexperiments=nexperiments,
                                                  nepisodes=nepisodes,
-                                                 start=start,
+                                                 start=start_state,
                                                  verbose=verbose)
                 results_list += [{'lmbda': lmbda,
                                   'alpha': alpha,
@@ -662,7 +662,7 @@ class Test_EstStateValueV_EnvGridworlds(unittest.TestCase, test_utils.EpisodeSim
                seed == 1717 and \
                nexperiments == 3 and \
                nepisodes == 10 and \
-               start is None and \
+               start_state is None and \
                useGrid == False and \
                gamma == 1.0 and \
                lambdas == [0, 0.4, 0.7, 0.8] and \
@@ -709,7 +709,7 @@ class Test_EstStateValueV_EnvGridworldsWithObstacles(unittest.TestCase, test_uti
                                           adjust_alpha=False,
                                           adjust_alpha_by_episode=False,
                                           alpha_min=0.0,
-                                          learner_type=mc.LearnerType.MC,
+                                          learner_type=mc.LearnerType.MC,   # This implies that we use the standard Monte-Carlo learner, as opposed to the lambda-decayed Monte-Carlo learner.
                                           debug=False)
         self.agent_rw_mc = agents.GenericAgent(self.policy_rw, learner_mclambda)
         self.sim = DiscreteSimulator(self.env2d, self.agent_rw_mc, debug=False)
