@@ -3,18 +3,17 @@
 Created on Fri Apr 10 10:15:04 2020
 
 @author: Daniel Mastropietro
-@description: Definition of classes that are common to all episodic discrete learners,
-                i.e. all learners on episodic tasks on environments with discrete states and accepted actions.
+@description: Definition of classes that are common to all episodic discrete-time learners on discrete FINITELY many
+and FIXED states and actions. This includes learning on environments defined typically in the gym.envs.toy_text.discrete
+module. On the contrary, any environment whose states may vary along learning of a policy (e.g. queues with variable
+capacity) are excluded from this set of environments where learners inheriting from this class can learn on.
 
-All learner classes defined in the current package should:
-a) Implement the following attributes:
-    - env --> the environment on which the learning takes place
+All learner classes inheriting from this class:
+a) SHOULD implement the following attributes:
     - V --> an object containing the information on how the state value function is ESTIMATED.
     - Q --> an object containing the information on how the state-action value function is ESTIMATED.
-    - alpha --> the learning rate
     - gamma --> the reward discount parameter
-b) Implement the following methods:
-All learners are assumed to have the following methods defined:
+b) COULD implement the following methods:
     - reset() --> resets the state of the learner to start learning anew
         (e.g. all the estimates of the value functions are reset to 0)
     - setParams() --> set the parameters of the learner (if any)
@@ -31,7 +30,7 @@ from enum import Enum, unique
 import numpy as np
 
 from Python.lib.environments import EnvironmentDiscrete
-from Python.lib.agents.learners import ResetMethod
+from Python.lib.agents.learners import GenericLearner, LearningCriterion, ResetMethod
 
 MIN_COUNT = 1  # Minimum state count to start shrinking alpha
 MIN_EPISODE = 1  # Minimum episode count to start shrinking alpha
@@ -44,8 +43,7 @@ class AlphaUpdateType(Enum):
     EVERY_STATE_VISIT = 2
 
 
-class Learner:
-    # TODO: (2021/12/20) Try to make this class Learner inherit from the GenericLearner which has methods defined for ANY learner, not only learners for a discrete episodic task which is the case here.
+class Learner(GenericLearner):
     """
     Class defining methods that are generic to ALL learners.
 
@@ -57,7 +55,7 @@ class Learner:
     and once prior to the first simulation, making e.g. the episode method be equal to 2 at
     the first simulation as opposed to the correct value 1.
     """
-    def __init__(self, env, alpha,
+    def __init__(self, env, alpha: float=1.0,
                  adjust_alpha=False, alpha_update_type=AlphaUpdateType.FIRST_STATE_VISIT, adjust_alpha_by_episode=False,
                  alpha_min=0.,
                  reset_method=ResetMethod.ALLZEROS, reset_params=None, reset_seed=None):
@@ -65,9 +63,11 @@ class Learner:
         Parameters:
         env: EnvironmentDiscrete
             Environment where learning takes place.
+            It should have method getNumStates() defined, retrieving the number of fixed states in the environment.
 
         alpha: positive float
             Learning rate.
+            default: 1.0
 
         learner_type: LearnerType *** NOT YET IMPLEMENTED BUT COULD BE A GOOD IDEA TO AVOID DEFINING THE AlphaUpdateType...? ***
             Type of learner. E.g. LearnerType.TD, LearnerType.MC.
@@ -94,23 +94,15 @@ class Learner:
         #        if not isinstance(alpha_update_type, AlphaUpdateType):
         #            raise TypeError("The alpha_update_type of learner must be of type {} from the {} module ({})" \
         #                            .format(AlphaUpdateType.__name__, AlphaUpdateType.__module__, alpha_update_type.__class__))
-
-        self.env = env
-        self.alpha = alpha
-        self.adjust_alpha = adjust_alpha
+        super().__init__(env, criterion=LearningCriterion.DISCOUNTED, alpha=alpha, adjust_alpha=adjust_alpha)
         self.alpha_update_type = alpha_update_type
         self.adjust_alpha_by_episode = adjust_alpha_by_episode
         self.alpha_min = alpha_min  # Used when adjust_alpha=True
 
-        # Information of the observed trajectory available at the END of the episode
-        # (so that it can be retrieved by the user if needed as a piece of information)
-        self.states = []
-        self.rewards = []
-
         # Episode counter
         self.episode = 0
 
-        # Learning rates info
+        # Current learning rate across states
         self._alphas = self.alpha * np.ones(self.env.getNumStates())
         # Learning rate at episode = MAX_EPISODE_FOR_ALPHA_MIN so that we can continue applying a non-bounded alpha
         self._alphas_at_max_episode = None
@@ -118,8 +110,8 @@ class Learner:
         self.alpha_mean_by_episode = []
 
         # State counts over ALL episodes run after reset, and state counts of just their first visits
-        self._state_counts_overall = np.zeros(self.env.getNumStates())
-        self._state_counts_first_visit_overall = np.zeros(self.env.getNumStates())
+        self._state_counts_over_all_episodes = np.zeros(self.env.getNumStates())
+        self._state_counts_first_visit_over_all_episodes = np.zeros(self.env.getNumStates())
 
         # Instructions for resetting the value function
         self.reset_method = reset_method
@@ -140,9 +132,9 @@ class Learner:
         if reset_episode:
             self.episode = 0
             self.alpha_mean_by_episode = []
-            del self._state_counts_overall, self._state_counts_first_visit_overall, self._alphas
-            self._state_counts_overall = np.zeros(self.env.getNumStates())
-            self._state_counts_first_visit_overall = np.zeros(self.env.getNumStates())
+            del self._state_counts_over_all_episodes, self._state_counts_first_visit_over_all_episodes, self._alphas
+            self._state_counts_over_all_episodes = np.zeros(self.env.getNumStates())
+            self._state_counts_first_visit_over_all_episodes = np.zeros(self.env.getNumStates())
             self._alphas = self.alpha * np.ones(self.env.getNumStates())
             self._alphas_at_max_episode = None
 
@@ -201,22 +193,22 @@ class Learner:
         # Keep track of state first visits
         # print("t: {}, visit to state: {}".format(t, state))
         if np.isnan(self._states_first_visit_time[state]):
-            self._state_counts_first_visit_overall[state] += 1
+            self._state_counts_first_visit_over_all_episodes[state] += 1
             # print("\tFIRST VISIT!")
-            # print("\tcounts first visit after: {}".format(self._state_counts_first_visit_overall[state]))
-            # print("\tall counts fv: {}".format(self._state_counts_first_visit_overall))
+            # print("\tcounts first visit after: {}".format(self._state_counts_first_visit_over_all_episodes[state]))
+            # print("\tall counts fv: {}".format(self._state_counts_first_visit_over_all_episodes))
         self._states_first_visit_time[state] = np.nanmin([t, self._states_first_visit_time[state]])
 
         # Keep track of state every-visit counts
         self._state_counts[state] += 1  # Counts per-episode
-        self._state_counts_overall[state] += 1  # Counts over all episodes
+        self._state_counts_over_all_episodes[state] += 1  # Counts over all episodes
 
     def _update_alphas(self, state):
         assert self.env.isTerminalState(state) == False, \
             "The state on which alpha is computed is NOT a terminal state ({})".format(state)
         # with np.printoptions(precision=4):
         #    print("Before updating alpha: episode {}, state {}: state_count={:.0f}, alpha>={}: alpha={}\n{}" \
-        #          .format(self.episode, state, self._state_counts_overall[state], self.alpha_min, self._alphas[state], np.array(self._alphas)))
+        #          .format(self.episode, state, self._state_counts_over_all_episodes[state], self.alpha_min, self._alphas[state], np.array(self._alphas)))
 
         # NOTE that we store the alpha value BEFORE its update, as this is the value that was used to learn prior to
         # updating alpha!
@@ -229,9 +221,9 @@ class Learner:
                 ## o.w. alpha would not be changed for the next update iteration
             else:
                 if self.alpha_update_type == AlphaUpdateType.FIRST_STATE_VISIT:
-                    state_count = self._state_counts_first_visit_overall[state]
+                    state_count = self._state_counts_first_visit_over_all_episodes[state]
                 else:
-                    state_count = self._state_counts_overall[state]
+                    state_count = self._state_counts_over_all_episodes[state]
                 time_divisor = np.max([1, state_count - MIN_COUNT + 2])
                 ## +2 => when state_count = MIN_COUNT, time_divisor is > 1,
                 ## o.w. alpha would not be changed for the next update iteration
@@ -290,15 +282,15 @@ class Learner:
         ax.set_ylabel("alpha")
         ax.set_title("Learning rate (alpha) for each state (episode {}, t={})".format(self.episode, t))
         ax2 = ax.twinx()  # Create a secondary axis sharing the same x axis
-        ax2.bar(self.env.all_states, self._state_counts_overall, color="blue", alpha=0.3)
+        ax2.bar(self.env.all_states, self._state_counts_over_all_episodes, color="blue", alpha=0.3)
         plt.sca(ax)  # Go back to the primary axis
 
     def getStateCounts(self, first_visit=False):
         "Returns the array of state counts, either the first-visit state counts or the every-visit state counts"
         if first_visit:
-            return self._state_counts_first_visit_overall
+            return self._state_counts_first_visit_over_all_episodes
         else:
-            return self._state_counts_overall
+            return self._state_counts_over_all_episodes
 
     def getV(self):
         "Returns the object containing information about the state value function estimation"

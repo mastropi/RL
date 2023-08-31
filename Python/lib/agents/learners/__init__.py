@@ -3,12 +3,13 @@
 Created on Wed Oct 20 17:37:08 2021
 
 @author: Daniel Mastropietro
-@description: Definition of classes that are common to all generic learners, where 'generic' means that they do not
-belong to e.g. a continuing or episodic learning task.
-
-This class stores the following attributes as part of the object:
-- env: the environment on which the learning takes place
-- alpha: the learning rate
+@description: Definition of classes that are common to all generic learners on discrete-time discrete state and actions,
+where 'generic' means that:
+- they could either be part of a continuing or episodic task.
+- the number of states and actions of the environment where they learn may not be fixed (e.g. capacity of a queue).
+- the times observed during the trajectory experienced by the agent interacting with the environment could be either
+continuous or discrete (these are normally stored in attribute self.times).
+HOWEVER, the learning time is ALWAYS discrete (normally stored in attribute self._t).
 
 Classes inheriting from this class should define the following methods:
 - reset_value_functions()
@@ -39,6 +40,17 @@ class LearnerTypes(Enum):
     Q = 'state_action_value'
     P = 'policy'
 
+@unique
+class LearningCriterion(Enum):
+    """
+    Whether the learning criterion is the discounted return (episodic tasks) or the average reward (continuous tasks)
+
+    When learning is by the average criterion, the value functions learned are the *bias* or *difference* values.
+    Ref: Sutton (2018), pag. 250
+    """
+    DISCOUNTED = 1
+    AVERAGE = 2
+
 # Identity function: used to define the default transformation function of the counter (n) that adjusts alpha
 identity = lambda x: x
 
@@ -55,7 +67,7 @@ class GenericLearner:
     and once prior to the first simulation.
     """
 
-    def __init__(self, env, alpha: float=1.0,
+    def __init__(self, env, criterion=LearningCriterion.DISCOUNTED, alpha: float=1.0,
                  adjust_alpha=False,
                  func_adjust_alpha=None,
                  min_count_to_update_alpha=0, min_time_to_update_alpha=0,
@@ -66,6 +78,11 @@ class GenericLearner:
             Environment where learning takes place.
             The environment needs not be "discrete" in the sense the gym package uses discrete, namely that there is
             a pre-defined number of states (as is the case in the EnvironmentDiscrete environment of gym).
+
+        criterion: LearningCriterion
+            The criterion used to learn the value functions, either DISCOUNTED (for episodic tasks) or AVERAGE,
+            for the average reward criterion (for continuous tasks).
+            default: LearningCriterion.DISCOUNTED
 
         alpha: (opt) positive float
             Initial learning rate.
@@ -82,14 +99,16 @@ class GenericLearner:
             default: None, in which case the identity function is applied to n when dividing alpha
 
         min_count_to_update_alpha: int
-            Minimum count of a state-action pair at which alpha starts to be updated by the update_learning_rate(s,a) method.
+            Minimum count of a state-action pair at which alpha starts to be updated by the update_learning_rate_by_state_action_count(s,a) method.
 
         min_time_to_update_alpha: int
-            Minimum learning time step at which alpha starts to be updated by the update_learning_rate_by_episode() method.
+            Minimum learning time step at which alpha starts to be updated by the update_learning_rate_by_learning_epoch() method.
         """
         self.env = env
+        self.criterion = criterion
         self.alpha = alpha is None and 1.0 or alpha          # Initial and maximum learning rate
         self.adjust_alpha = adjust_alpha is None and False or adjust_alpha
+
         self.func_adjust_alpha = func_adjust_alpha is None and identity or func_adjust_alpha
         self.min_count_to_update_alpha = min_count_to_update_alpha is None and 0 or min_count_to_update_alpha
         self.min_time_to_update_alpha = min_time_to_update_alpha is None and 0 or min_time_to_update_alpha
@@ -105,7 +124,7 @@ class GenericLearner:
         self.times = []         # This time is either a DISCRETE time or a CONTINUOUS time depending on what
                                 # type of process (discrete or continuous) is used to model the evolution of the environment
                                 # where the learner takes place.
-                                # The time si associated to the state, action and reward stored in the respective attributes
+                                # The time is associated to the state, action and reward stored in the respective attributes
         self.states = []        # Stores S(t), the state at each time t stored in `times`
         self.actions = []       # Stores A(t), the action taken at state S(t)
         self.rewards = []       # Stores R(t) = R(S(t), A(t)), the reward received after taking action A(t) on state S(t)
@@ -200,24 +219,24 @@ class GenericLearner:
 
         Note that the values of the self.alphas list may be indexed by many different things...
         For instance, if learning takes place at every visited state-action, then there will probably be an alpha
-        for each visited state-action. But if learning happens at the end of an episode, the stored alphas
-        will probably be indexed by episode number.
+        for each visited state-action. But if learning happens at the end of an epoch or episode, the stored alphas
+        will probably be indexed by epoch number.
         It is however difficult to store the index together with the alpha, because the index structure may change
         from one situation to the other, as just described.
         """
         self.alphas += [self._alpha]
 
-    def update_learning_time(self):
+    def update_learning_epoch(self):
         """
-        Increments the count of learning time by one.
+        Increments the count of learning epoch by one
 
         This method is expected to be called by the user whenever they want to record that learning took place.
-        It can be used to update the learning rate alpha by the number of learning episodes
-        (see update_learning_rate_by_episode()).
+        It can be used to update the learning rate alpha by the number of learning epochs
+        (see update_learning_rate_by_learning_epoch()).
         """
         self._t += 1
 
-    def update_learning_rate(self, state, action):
+    def update_learning_rate_by_state_action_count(self, state, action):
         """
         Updates the learning rate at the current learning time, given the visit count of the given state and action
 
@@ -237,7 +256,7 @@ class GenericLearner:
         #    print("Before updating alpha: state {}: state_action_count={:.0f}, alpha>={}: alpha={}\n{}" \
         #          .format(state, self.dict_state_action_count[str(state)], self.alpha_min, self.alphas[str(state)]))
         if self.adjust_alpha:
-            state_action_count = self.getCount(state, action)
+            state_action_count = self.getStateActionCount(state, action)
             time_divisor = self.func_adjust_alpha( np.max([1, state_action_count - self.min_count_to_update_alpha]) )
                 ## Note: We don't sum anything to the difference count - min_count because we want to have the same
                 ## time_divisor value when min_count = 0, in which case the first update occurs when count = 2
@@ -252,7 +271,7 @@ class GenericLearner:
 
         return self._alpha
 
-    def update_learning_rate_by_episode(self):
+    def update_learning_rate_by_learning_epoch(self):
         """
         Updates the learning rate at the current learning time by the number of times learning took place already,
         independently of the visit count of each state and action.
@@ -264,8 +283,8 @@ class GenericLearner:
         """
         if self.adjust_alpha:
             time_divisor = self.func_adjust_alpha( max(1, self._t - self.min_time_to_update_alpha) )
-                ## See comment in method update_learning_rate() about not adding any constant to the difference time - min_time
-            print("\tUpdating alpha by learning episode: time divisor = {}".format(time_divisor))
+                ## See comment in method update_learning_rate_by_state_action_count() about not adding any constant to the difference time - min_time
+            print("\tUpdating alpha by learning epoch: time divisor = {}".format(time_divisor))
             alpha_prev = self._alpha
             self._alpha = max( self.alpha_min, self.alpha / time_divisor )
             print("\t\talpha: {} -> {}".format(alpha_prev, self._alpha))
@@ -301,7 +320,7 @@ class GenericLearner:
         self.actions += [self.action]
         self.rewards += [self.reward]
 
-    def update_counts(self, state, action):
+    def update_state_action_counts(self, state, action):
         "Updates the number of times the given state and action have been visited during the learning process"
         # Create a string version of the state, so that we can store lists as dictionary keys
         # which are actually not accepted as dictionary keys (with the error message "list type is unhashable").
@@ -324,11 +343,11 @@ class GenericLearner:
     def getInitialLearningRate(self):
         return self.alpha
 
-    def getLearningTime(self):
-        "Returns the number of times learning took place according to the learning time attribute"
+    def getLearningEpoch(self):
+        "Returns the number of epochs at which learning took place according to the learning epoch attribute"
         return self._t
 
-    def getCount(self, state, action):
+    def getStateActionCount(self, state, action):
         "Returns the number of times the given state and action has been visited during the learning process"
         key = str( (state, action) )
         return self.dict_state_action_counts.get(key, 0)

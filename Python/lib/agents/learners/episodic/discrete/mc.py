@@ -41,7 +41,8 @@ class LeaMCLambda(Learner):
     applied to a discrete-state environment defined with the DiscreteEnv class of openAI's gym module.
 
     The decay parameter `lmbda` is only used when the learner_type is LearnerType.LAMBDA_RETURN, o.w. if
-    learner_type is LearnerType.MC, the decay parameter `lmbda` is set to None.
+    learner_type is LearnerType.MC, the decay parameter `lmbda` is set to None. In this case, the learner is the
+    traditional Monte-Carlo method.
 
     Arguments:
     env: EnvironmentDiscrete
@@ -61,7 +62,6 @@ class LeaMCLambda(Learner):
         # Attributes that MUST be presented for all MC methods
         self.V = ValueFunctionApprox(self.env.getNumStates(), self.env.getTerminalStates())
         self.Q = None
-        self.alpha = alpha
         self.gamma = gamma
         
         #-- Attributes specific to the current MC method

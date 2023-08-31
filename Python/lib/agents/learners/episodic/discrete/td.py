@@ -45,7 +45,6 @@ class LeaTDLambda(Learner):
         # Attributes that MUST be present for all TD methods
         self.V = ValueFunctionApprox(self.env.getNumStates(), self.env.getTerminalStates())
         self.Q = None
-        self.alpha = alpha
         self.gamma = gamma
         
         # Attributes specific to the current TD method
@@ -78,7 +77,7 @@ class LeaTDLambda(Learner):
         self._update_trajectory(t, state, reward)
         self._updateZ(state, self.lmbda)
         delta = reward + self.gamma * self.V.getValue(next_state) - self.V.getValue(state)
-        #print("episode {}, state {}: count = {}, alpha = {}".format(self.episode, state, self._state_counts_overall[state], self._alphas[state]))
+        #print("episode {}, state {}: count = {}, alpha = {}".format(self.episode, state, self._state_counts_over_all_episodes[state], self._alphas[state]))
         self._alphas_effective = np.r_[self._alphas_effective, (self._alphas * self._z).reshape(1, len(self._z))]
             ## NOTE: We need to reshape the product alpha*z because _alphas_effective is a 2D array with as many rows as
             ## the number of episodes run so far and as many columns as the number of states. The length of alpha*z
@@ -518,7 +517,7 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
         for e in episodes_to_consider(0, nepisodes-1):
             for s in self.env.all_states:
                 lambdas_by_state[s] += self._all_lambdas_by_episode[e][s]
-        states2plot = [s for s in self.env.getNonTerminalStates() if self._state_counts_overall[s] > 0] 
+        states2plot = [s for s in self.env.getNonTerminalStates() if self._state_counts_over_all_episodes[s] > 0] 
         #print("lambdas_by_state for plotting:")
         #print([lambdas_by_state[s] for s in states2plot])
 

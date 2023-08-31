@@ -97,7 +97,7 @@ class SimulatorQueue(Simulator):
     """
 
     def __init__(self, env, agent, dict_params_learning, case=1, replication=1, N=1, seed=None, log=False, save=False, logsdir=None, resultsdir=None, debug=False):
-        super().__init__(env, agent, case, replication, seed, log, save, logsdir, resultsdir, debug)
+        super().__init__(env, agent, case=case, replication=replication, seed=seed, log=log, save=save, logsdir=logsdir, resultsdir=resultsdir, debug=debug)
         self.dict_params_learning = dict_params_learning
         # Attributes used during Fleming-Viot simulation (each env in envs is one of the N particles)
         self.N = N
@@ -1277,7 +1277,7 @@ class SimulatorQueue(Simulator):
 
         Arguments:
         agent: Agent
-            Agent that is responsible of performing the actions on the environment and learning from.
+            Agent that is responsible of performing the actions on the environment and learning from them.
 
         t: int
             Time (iteration) in the queue simulation time scale at which learning takes place.
@@ -1426,9 +1426,9 @@ class SimulatorQueue(Simulator):
         self.n_events_fv += [n_events_fv]
         self.n_trajectories_Q += [n_trajectories_Q]
 
-        agent.getLearnerP().update_learning_time()
-        #print("*** Learning time updated: time = {} ***".format(agent.getLearnerP().getLearningTime()))
-        agent.getLearnerP().update_learning_rate_by_episode()
+        agent.getLearnerP().update_learning_epoch()
+        #print("*** Learning time updated: time = {} ***".format(agent.getLearnerP().getLearningEpoch()))
+        agent.getLearnerP().update_learning_rate_by_learning_epoch()
         #print("*** Learning rate updated: alpha = {} ***".format(agent.getLearnerP().getLearningRate()))
 
         if self.save:

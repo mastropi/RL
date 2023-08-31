@@ -491,11 +491,11 @@ class LeaPolicyGradient(GenericLearner):
                     # This is why we need to update it BEFORE learning, because the
                     # alpha currently stored in the learner may be an alpha for a completely different state-action
                     # to the one on which we are learning now.
-                    alpha = self.update_learning_rate(state, action)
+                    alpha = self.update_learning_rate_by_state_action_count(state, action)
                     # Store the alpha that is going to be used for learning next
                     self.store_learning_rate()
 
-                    print("\t[LeaPolicyGradient.learn_update_theta_at_each_time_step] t={}: alpha(state={}, action={} (n={})) = {}".format(t, state, action, self.getCount(state, action), alpha))
+                    print("\t[LeaPolicyGradient.learn_update_theta_at_each_time_step] t={}: alpha(state={}, action={} (n={})) = {}".format(t, state, action, self.getStateActionCount(state, action), alpha))
 
                     # Note that we bound the delta theta to avoid too large changes!
                     #theta += self.getLearningRate() * delta * self.getGradientLog(action, state)
@@ -507,7 +507,7 @@ class LeaPolicyGradient(GenericLearner):
                     # Only update the visit count of the state and action when delta(theta) != 0.0 because this means that
                     # the state and action have actually been used to learn the policy.
                     if delta_theta != 0.0:
-                        self.update_counts(state, action)
+                        self.update_state_action_counts(state, action)
                     theta_lower = THETA_MIN
                     theta = np.max([theta_lower, theta + delta_theta])
 
