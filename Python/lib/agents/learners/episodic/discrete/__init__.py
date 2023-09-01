@@ -47,7 +47,7 @@ class Learner(GenericLearner):
     """
     Class defining methods that are generic to ALL learners.
 
-    NOTE: Before using any learner the simulation program should call the reset() method!
+    IMPORTANT: Before using any learner, the simulation program should call the reset() method!
     Otherwise, the simulation process will most likely fail (because variables that are
     defined in the reset method to track the simulation process will not be defined).
     In addition, the *specific* Learner constructor should NOT call the reset() method
@@ -161,8 +161,8 @@ class Learner(GenericLearner):
 
     def _reset_at_start_of_episode(self):
         """
-        Resets internal structures used during learning in each episode
-        (all attributes reset here should start with an underscore, i.e. they should be private)
+        Resets internal structures that store information about EACH episode
+        (all attributes referring to the current episode should start with an underscore)
         """
 
         # Store the _states visited in the episode and their count
@@ -184,13 +184,13 @@ class Learner(GenericLearner):
         self._values_next_state = [np.nan]
 
     def _update_trajectory(self, t, state, reward):
-        "Updates the trajectory and related information based on the current time, current state and the observed reward"
+        "Updates the trajectory of the CURRENT episode"
         self._states += [state]
         self._rewards += [reward]
         self._update_state_counts(t, state)
 
     def _update_state_counts(self, t, state):
-        # Keep track of state first visits
+        "Updates the count that keeps track of the state's first visit within the CURRENT episode"
         # print("t: {}, visit to state: {}".format(t, state))
         if np.isnan(self._states_first_visit_time[state]):
             self._state_counts_first_visit_over_all_episodes[state] += 1
@@ -246,7 +246,7 @@ class Learner(GenericLearner):
 
     def store_trajectory(self, state):
         """
-        Stores the trajectory observed during the episode and updates the state counts with the given final state.
+        Stores the trajectory observed during the current episode and updates the state counts with the given final state
 
         Arguments:
         state: int

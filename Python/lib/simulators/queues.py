@@ -198,9 +198,9 @@ class SimulatorQueue(Simulator):
             # learning step or queue simulation episode), but we do NOT reset the time and alphas of the policy
             # learner because the learning step here is defined by a new queue simulation episode.
             if self.agent.getLearnerV() is not None:
-                self.agent.getLearnerV().reset(reset_time=True,  reset_alphas=True,  reset_value_functions=reset_value_functions, reset_trajectory=True, reset_counts=reset_counts)
+                self.agent.getLearnerV().reset(reset_learning_epoch=True,  reset_alphas=True,  reset_value_functions=reset_value_functions, reset_trajectory=True, reset_counts=reset_counts)
             if self.agent.getLearnerP() is not None:
-                self.agent.getLearnerP().reset(reset_time=False, reset_alphas=False, reset_value_functions=reset_value_functions, reset_trajectory=reset_policy_trajectory, reset_counts=reset_counts)
+                self.agent.getLearnerP().reset(reset_learning_epoch=False, reset_alphas=False, reset_value_functions=reset_value_functions, reset_trajectory=reset_policy_trajectory, reset_counts=reset_counts)
             if not reset_value_functions:
                 # Set the start value of the value functions to their current estimate
                 # Goal: we can use the current estimated values in the next learning step,

@@ -80,8 +80,8 @@ class GenericLearner:
             a pre-defined number of states (as is the case in the EnvironmentDiscrete environment of gym).
 
         criterion: LearningCriterion
-            The criterion used to learn the value functions, either DISCOUNTED (for episodic tasks) or AVERAGE,
-            for the average reward criterion (for continuous tasks).
+            The criterion used to learn the value functions, either DISCOUNTED (for episodic tasks with discount factor gamma < 1)
+            or AVERAGE, for the average reward criterion (for continuing tasks, with discount factor gamma = 1).
             default: LearningCriterion.DISCOUNTED
 
         alpha: (opt) positive float
@@ -123,18 +123,20 @@ class GenericLearner:
         # (so that we can be retrieve it for e.g. analysis or plotting)
         self.times = []         # This time is either a DISCRETE time or a CONTINUOUS time depending on what
                                 # type of process (discrete or continuous) is used to model the evolution of the environment
-                                # where the learner takes place.
-                                # The time is associated to the state, action and reward stored in the respective attributes
+                                # with which the learner interacts.
+                                # The time is associated to the state, action and reward stored in the respective attributes.
         self.states = []        # Stores S(t), the state at each time t stored in `times`
         self.actions = []       # Stores A(t), the action taken at state S(t)
-        self.rewards = []       # Stores R(t) = R(S(t), A(t)), the reward received after taking action A(t) on state S(t)
+        self.rewards = [0]      # Stores R(t+1) = R(S(t), A(t)), the reward received after taking action A(t) on state S(t)
+                                # Note that we initialize the rewards array with ONE element set to 0, so that we can refer to the
+                                # sequence S(0), A(0), R(1), S(1), A(1), R(2), ... and we define R(0) as 0.
 
         # Count of visited states and visited state-actions
         # Depending on the type of learner (e.g. learner of V or learner of Q) one ore the other will be updated.
         self.dict_state_counts = dict()
         self.dict_state_action_counts = dict()
 
-        # Learning time and learning rate at that time
+        # Learning epoch and learning rate at that epoch
         self._t = 0              # Int: this value is expected to be updated by the user, whenever learning takes place
         self._alpha = self.alpha # Float: current learning rate (at the learning time `self._t`)
 
@@ -142,12 +144,12 @@ class GenericLearner:
         self.alpha_mean = []    # Average alpha
         self.alphas = []        # List of alphas used during the learning process.
 
-    def reset(self, reset_time=True, reset_alphas=True, reset_value_functions=True, reset_trajectory=True, reset_counts=True):
+    def reset(self, reset_learning_epoch=True, reset_alphas=True, reset_value_functions=True, reset_trajectory=True, reset_counts=True):
         """
         Resets the variables that store information about the learning process
 
         Parameters:
-        reset_time: (opt) bool
+        reset_learning_epoch: (opt) bool
             Whether to reset the learning time counter.
             default: True
 
@@ -175,7 +177,7 @@ class GenericLearner:
         # Reset the return G
         self.reset_return()
 
-        if reset_time:
+        if reset_learning_epoch:
             self._t = 0
 
         if reset_alphas:

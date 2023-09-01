@@ -21,7 +21,7 @@ from enum import Enum, unique
 import numpy as np
 import pandas as pd
 
-from Python.lib.agents.learners import ResetMethod
+from Python.lib.agents.learners import LearningCriterion, ResetMethod
 from Python.lib.agents.learners.episodic.discrete import Learner, AlphaUpdateType
 from Python.lib.agents.learners.value_functions import ValueFunctionApprox
 
@@ -107,6 +107,7 @@ class LeaMCLambda(Learner):
     #------------- Method that is called by the outside world to learn V(s) ----------------------#
     # Here we choose what method of this class to call internally
     def learn_pred_V(self, t, state, action, next_state, reward, done, info):
+        "Learn the state value function V(s) with information collected at discrete time t"
         if self.learner_type == LearnerType.LAMBDA_RETURN:
             self.learn_pred_V_lambda_return(t, state, action, next_state, reward, done, info)
         else:
@@ -187,7 +188,7 @@ class LeaMCLambda(Learner):
         if done:
             # Store the trajectory and rewards
             self.store_trajectory(next_state)
-            self._update_state_counts(t+1, next_state)            
+            self._update_state_counts(t+1, next_state)
 
             # This means t+1 is the terminal time T
             # (recall we WERE in time t and we STEPPED INTO time t+1, so T = t+1)
@@ -203,7 +204,7 @@ class LeaMCLambda(Learner):
 
         This is the straight implementation of first-visit Monte Carlo, i.e. it does NOT use the equivalence of
         Monte Carlo with the lambda-return with lambda = 1, which is what method learn_lambda_return() does.
-        In fact, in this function there is not evene mention to lambda. 
+        In fact, in this function there is not even a mention to lambda.
 
         Arguments:
         T: int
@@ -211,7 +212,13 @@ class LeaMCLambda(Learner):
         """
         #-- Compute the observed return for each state in the trajectory for EVERY visit to it
         # Initialize the observed return to the value of the end state
-        # (in case it is not a terminal state which has value 0 --this would happen if the episode is terminated early)
+        # This is ONLY relevant when the end state is NOT a terminal state (which by definition has value 0)
+        # in which case the state value is an estimate of the return that would be observed should the trajectory
+        # continue until a terminal state is reached.
+        # A non-terminal state as end state happens only when the episode is terminated early because the maximum
+        # number of steps has been reached (this is set by e.g. parameter max_time_steps in Simulation.run() in order
+        # to avoid that a simulation runs forever without reaching a terminal state which might be very rare
+        # --as in the Mountain Car example when the next action is chosen uniformly at random)
         # Note that we don't affect the initial G with gamma, because gamma comes into play in the recursive formula
         # used below to compute the final G)
         G = self.V.getValue(self.states[-1])
@@ -226,7 +233,7 @@ class LeaMCLambda(Learner):
         # first visit that does NOT require a special data structure storage.
         for tt in np.arange(T,0,-1) - 1:     # This is T-1, T-2, ..., 0
             state = self.states[tt]
-            G = self.gamma*G + self._rewards[tt+1]
+            G = self.gamma*G + self.rewards[tt+1]
             # First-visit MC: We only update the value function estimation at the first visit of the state
             if self._states_first_visit_time[state] == tt:
                 delta = G - self.V.getValue(state)
