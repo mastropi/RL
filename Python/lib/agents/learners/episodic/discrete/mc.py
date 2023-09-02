@@ -49,13 +49,13 @@ class LeaMCLambda(Learner):
         The discrete-(state, action) environment where the learning takes place.
     """
 
-    def __init__(self, env, alpha=0.1, gamma=1.0, lmbda=0.8,
+    def __init__(self, env, criterion=LearningCriterion.DISCOUNTED, alpha=0.1, gamma=1.0, lmbda=0.8,
                  adjust_alpha=False, alpha_update_type=AlphaUpdateType.FIRST_STATE_VISIT,
                  adjust_alpha_by_episode=False, alpha_min=0.,
                  reset_method=ResetMethod.ALLZEROS, reset_params=None, reset_seed=None,
                  learner_type=LearnerType.MC,
                  debug=False):
-        super().__init__(env, alpha=alpha, adjust_alpha=adjust_alpha, alpha_update_type=alpha_update_type, adjust_alpha_by_episode=adjust_alpha_by_episode, alpha_min=alpha_min,
+        super().__init__(env, criterion=criterion, alpha=alpha, adjust_alpha=adjust_alpha, alpha_update_type=alpha_update_type, adjust_alpha_by_episode=adjust_alpha_by_episode, alpha_min=alpha_min,
                          reset_method=reset_method, reset_params=reset_params, reset_seed=reset_seed)
         self.debug = debug
 
@@ -183,6 +183,9 @@ class LeaMCLambda(Learner):
     #----------------------------- Traditional Monte Carlo ---------------------------------------#
     def learn_pred_V_mc(self, t, state, action, next_state, reward, done, info):
         "Learn the prediction problem (estimate the state value function) using explicitly MC"
+        # Update the full trajectory (over all episodes)
+        self.update_trajectory(t, state, action, reward)
+        # Update the trajectory of the current episode only
         self._update_trajectory(t, state, reward)
 
         if done:
@@ -234,9 +237,17 @@ class LeaMCLambda(Learner):
         for tt in np.arange(T,0,-1) - 1:     # This is T-1, T-2, ..., 0
             state = self.states[tt]
             G = self.gamma*G + self.rewards[tt+1]
+            if self.criterion == LearningCriterion.AVERAGE:
+                # Compute the differential return
+                # Ref: Sutton (2018), pag. 250
+                G -= self.getAverageReward()
             # First-visit MC: We only update the value function estimation at the first visit of the state
             if self._states_first_visit_time[state] == tt:
                 delta = G - self.V.getValue(state)
+                if self.criterion == LearningCriterion.AVERAGE:
+                    # Compute the differential delta which should be used to update the differential value function
+                    # Ref: Sutton (2018), pag. 250
+                    delta -= self.getAverageReward()
                 self.updateV(state, delta)
                 nupdates[state] += 1
 
@@ -255,6 +266,9 @@ class LeaMCLambda(Learner):
         This means that every time this function is called before the end of the episode, the value function remains
         constant.
         """
+        # Update the full trajectory (over all episodes)
+        self.update_trajectory(t, state, action, reward)
+        # Update the trajectory of the current episode only
         self._update_trajectory(t, state, reward)
         self._updateG(t, state, next_state, reward, done)
 

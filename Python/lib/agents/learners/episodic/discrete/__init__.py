@@ -55,7 +55,7 @@ class Learner(GenericLearner):
     and once prior to the first simulation, making e.g. the episode method be equal to 2 at
     the first simulation as opposed to the correct value 1.
     """
-    def __init__(self, env, alpha: float=1.0,
+    def __init__(self, env, criterion: LearningCriterion=LearningCriterion.DISCOUNTED, alpha: float=1.0,
                  adjust_alpha=False, alpha_update_type=AlphaUpdateType.FIRST_STATE_VISIT, adjust_alpha_by_episode=False,
                  alpha_min=0.,
                  reset_method=ResetMethod.ALLZEROS, reset_params=None, reset_seed=None):
@@ -64,6 +64,11 @@ class Learner(GenericLearner):
         env: EnvironmentDiscrete
             Environment where learning takes place.
             It should have method getNumStates() defined, retrieving the number of fixed states in the environment.
+
+        criterion: LearningCriterion
+            The criterion used to learn the value functions, either DISCOUNTED (for episodic tasks with discount factor gamma < 1)
+            or AVERAGE, for the average reward criterion (for continuing tasks, with discount factor gamma = 1).
+            default: LearningCriterion.DISCOUNTED
 
         alpha: positive float
             Learning rate.
@@ -94,7 +99,7 @@ class Learner(GenericLearner):
         #        if not isinstance(alpha_update_type, AlphaUpdateType):
         #            raise TypeError("The alpha_update_type of learner must be of type {} from the {} module ({})" \
         #                            .format(AlphaUpdateType.__name__, AlphaUpdateType.__module__, alpha_update_type.__class__))
-        super().__init__(env, criterion=LearningCriterion.DISCOUNTED, alpha=alpha, adjust_alpha=adjust_alpha)
+        super().__init__(env, criterion=criterion, alpha=alpha, adjust_alpha=adjust_alpha)
         self.alpha_update_type = alpha_update_type
         self.adjust_alpha_by_episode = adjust_alpha_by_episode
         self.alpha_min = alpha_min  # Used when adjust_alpha=True

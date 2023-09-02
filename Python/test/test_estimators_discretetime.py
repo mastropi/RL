@@ -21,7 +21,7 @@ from Python.lib import estimators
 
 import Python.lib.agents as agents
 from Python.lib.agents import GenericAgent
-from Python.lib.agents.learners import ResetMethod
+from Python.lib.agents.learners import LearningCriterion, ResetMethod
 from Python.lib.agents.learners.episodic.discrete import mc, td, AlphaUpdateType
 from Python.lib.agents.policies import random_walks
 
@@ -709,19 +709,35 @@ class Test_EstStateValueV_EnvGridworldsWithObstacles(unittest.TestCase, test_uti
                                           adjust_alpha=False,
                                           adjust_alpha_by_episode=False,
                                           alpha_min=0.0,
-                                          learner_type=mc.LearnerType.MC,   # This implies that we use the standard Monte-Carlo learner, as opposed to the lambda-decayed Monte-Carlo learner.
+                                          learner_type=mc.LearnerType.MC,
+                                            ## This implies that we use the standard Monte-Carlo learner, as opposed to the lambda-decayed Monte-Carlo learner.
+                                            ## Recall that the approach is equivalent to using LeanerType.LAMBDA_RETURN with lambda = 1.0 (just verified in practice)
                                           debug=False)
         self.agent_rw_mc = agents.GenericAgent(self.policy_rw, learner_mclambda)
-        self.sim = DiscreteSimulator(self.env2d, self.agent_rw_mc, debug=False)
+        self.sim_mc = DiscreteSimulator(self.env2d, self.agent_rw_mc, debug=False)
+
+        learner_tdlambda = td.LeaTDLambda(self.env2d, alpha=1.0,
+                                          gamma=0.9, lmbda=0.0,
+                                          adjust_alpha=False,
+                                          adjust_alpha_by_episode=False,
+                                          alpha_min=0.0,
+                                          debug=False)
+        self.agent_rw_td = agents.GenericAgent(self.policy_rw, learner_tdlambda)
+        self.sim_td = DiscreteSimulator(self.env2d, self.agent_rw_td, debug=False)
 
         # Expected state values for all tests
-        self.expected = [0.348678, 0.205891, 0.531441, 0.000000, 0.047101, 0.000000, 0.254187, 0.282430, 0.016423, 0.030903, 0.088629, 0.348678]
+        self.expected_mc = [ 0.348678, 0.205891, 0.531441, 0.000000,
+                             0.047101, 0.000000, 0.254187, 0.282430,
+                             0.016423, 0.030903, 0.088629, 0.348678]
+        self.expected_td = [0.042391, 0.313811, 0.810000, 0.000000,
+                            0.038152, 0.000000, 0.729000, 1.000000,
+                            0.022528, 0.109419, 0.430467, 0.387420]
 
     def test_Env_PolRandomWalk_MetMC(self):
         print(f"\n*** Running test #{self.id()}")
 
         state_value, state_counts, _, _, learning_info = \
-            self.sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
+            self.sim_mc.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
                     compute_rmse=False, state_observe=None,
                     verbose=True, verbose_period=100,
                     plot=False, pause=0.1)
@@ -732,7 +748,159 @@ class Test_EstStateValueV_EnvGridworldsWithObstacles(unittest.TestCase, test_uti
                self.seed == 1717 and \
                self.nepisodes == 20 and \
                self.start_state == 8
-        assert np.allclose(observed, self.expected, atol=1E-6)
+        assert np.allclose(observed, self.expected_mc, atol=1E-6)
+
+    def test_Env_PolRandomWalk_MetTDLambda(self):
+        print(f"\n*** Running test #{self.id()}")
+
+        state_value, state_counts, _, _, learning_info = \
+            self.sim_td.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
+                    compute_rmse=False, state_observe=None,
+                    verbose=True, verbose_period=100,
+                    plot=False, pause=0.1)
+        observed = self.agent_rw_td.getLearner().getV().getValues()
+        print("\nObserved state value function: " + test_utils.array2str(observed))
+
+        assert self.nS == 3*4 and \
+               self.seed == 1717 and \
+               self.nepisodes == 20 and \
+               self.start_state == 8
+        assert np.allclose(observed, self.expected_td, atol=1E-6)
+
+
+class Test_EstDifferentialStateValueV_EnvGridworldsWithObstacles(unittest.TestCase, test_utils.EpisodeSimulation):
+    """
+    Test the estimation of the differential value function, i.e. the value function under the average reward setting
+
+    Under this setup, the value of the discount parameter gamma is equal to 1.
+
+    Ref on average reward setting: Sutton, chapter 10, pag. 249.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        # -- Environment characteristics
+        shape = [3, 4]
+        cls.nS = np.prod(shape)
+        cls.env2d = gridworlds.EnvGridworld2D_WithObstacles(shape=shape, terminal_states=set({3}),
+                                                            rewards_dict=dict({3: +1}), obstacles_set=set({5}))
+
+        # -- Cycle characteritics
+        # Set of absorbing states, used to define a cycle as re-entrance into the set
+        # which is used to estimate the expected return (i.e. the value function)
+        cls.A = set({8})
+
+        # -- Policy characteristics
+        # Random walk policy
+        cls.policy_rw = random_walks.PolRandomWalkDiscrete(cls.env2d)
+
+        # -- Plotting parameters
+        cls.colormap = cm.get_cmap("jet")
+
+    def setUp(self):
+        # Simulation setup for ALL tests
+        self.seed = 1717
+        # We use a large number of episodes (200) so that we can test that the results with MC and with TD(lambda) are similar and close to the true ones
+        # at least when the MC learner is ready... which currently is not because both the state value and the average reward are based on episodic learning,
+        # NOT on the average reward criterion.
+        self.nepisodes = 200
+        self.start_state = 8
+
+        learner_mclambda = mc.LeaMCLambda(self.env2d, criterion=LearningCriterion.AVERAGE, alpha=1.0,
+                                          gamma=1.0,
+                                          adjust_alpha=True,
+                                          adjust_alpha_by_episode=False,
+                                          alpha_min=0.0,
+                                          learner_type=mc.LearnerType.MC,
+                                          debug=False)
+        self.agent_rw_mc = agents.GenericAgent(self.policy_rw, learner_mclambda)
+        self.sim_mc = DiscreteSimulator(self.env2d, self.agent_rw_mc, debug=False)
+
+        learner_tdlambda = td.LeaTDLambda(self.env2d, criterion=LearningCriterion.AVERAGE, alpha=1.0,
+                                          gamma=1.0, lmbda=0.0,
+                                          adjust_alpha=True,
+                                          adjust_alpha_by_episode=False,
+                                          alpha_min=0.0,
+                                          debug=False)
+        self.agent_rw_td = agents.GenericAgent(self.policy_rw, learner_tdlambda)
+        self.sim_td = DiscreteSimulator(self.env2d, self.agent_rw_td, debug=False)
+
+        # Expected state values for all tests
+        self.expected_mc = [0.250013, 0.429546, 0.624561, 0.000000,
+                            0.131218, 0.000000, 0.528836, 0.645549,
+                            0.053294, 0.188015, 0.358143, 0.462491]
+        self.expected_mc_average_reward = 0.00861585 # This value is currently (02-Sep-2023) WRONG because the average reward calculation is NOT based on the whole trajectory history, over all episodes.
+
+        self.expected_td = [-0.001574, 0.115563, 0.368777, 0.000000,
+                            -0.046231, 0.000000, 0.179900, 0.337746,
+                            -0.058120, -0.050822, 0.011813, 0.060337]
+        self.expected_td_average_reward = 0.0225759 # This value should be similar to expected_mc_average_reward
+
+    def test_Env_PolRandomWalk_MetMC(self):
+        print(f"\n*** Running test #{self.id()}")
+
+        state_value, state_counts, _, _, learning_info = \
+            self.sim_mc.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
+                         compute_rmse=False, state_observe=None,
+                         verbose=True, verbose_period=100,
+                         plot=False, pause=0.1)
+        observed = self.agent_rw_mc.getLearner().getV().getValues()
+        observed_average_reward = self.agent_rw_mc.getLearner().getAverageReward()
+        print("\nObserved state value function: " + test_utils.array2str(observed))
+        print(f"\nAverage reward: {observed_average_reward}")
+
+        assert self.nS == 3 * 4 and \
+               self.seed == 1717 and \
+               self.nepisodes == 200 and \
+               self.start_state == 8
+        assert np.allclose(observed, self.expected_mc, atol=1E-6)
+        assert np.isclose(observed_average_reward, self.expected_mc_average_reward, atol=1E-6)
+
+    def test_Env_PolRandomWalk_MetMC_FromCycles(self):
+        print(f"\n*** Running test #{self.id()}")
+
+        # TODO: (2023/07/17) Implement a simulation that keeps track of cycles and estimates the expected return as the average return over those cycles
+        # Ref: See picture taken of Urtzi's whiteboards on 30-May-2023: ownCloud/Toulouse-IRIT-RL/docs/Meetings/FV-2023-05-30-ExtensionToReturnWithDiscount.jpg
+        # The first thing to do would be to modify the sim_mc.run() method so that it keeps track of this piece of information.
+        # Although, if we are later on going to use Fleming-Viot to estimate the expected return, perhaps we could define a new method that implements FV
+        # and the above situation would be a special case of the FV-based estimation...??
+        # (For now, the code below does exactly the same as regular MC estimation done in above method test_Env_PolRandomWalk_MetMC(), so the test should pass)
+        state_value, state_counts, _, _, learning_info = \
+            self.sim_mc.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
+                    compute_rmse=False, state_observe=None,
+                    verbose=True, verbose_period=100,
+                    plot=False, pause=0.1)
+        observed = self.agent_rw_mc.getLearner().getV().getValues()
+        observed_average_reward = self.agent_rw_mc.getLearner().getAverageReward()
+        print("\nObserved state value function: " + test_utils.array2str(observed))
+        print(f"\nAverage reward: {observed_average_reward}")
+
+        assert self.nS == 3*4 and \
+               self.seed == 1717 and \
+               self.nepisodes == 200 and \
+               self.start_state == 8
+        assert np.allclose(observed, self.expected_mc, atol=1E-6)
+        assert np.isclose(observed_average_reward, self.expected_mc_average_reward, atol=1E-6)
+
+    def test_Env_PolRandomWalk_MetTDLambda(self):
+        print(f"\n*** Running test #{self.id()}")
+
+        state_value, state_counts, _, _, learning_info = \
+            self.sim_td.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
+                         compute_rmse=False, state_observe=None,
+                         verbose=True, verbose_period=100,
+                         plot=False, pause=0.1)
+        observed = self.agent_rw_td.getLearner().getV().getValues()
+        observed_average_reward = self.agent_rw_td.getLearner().getAverageReward()
+        print("\nObserved state value function: " + test_utils.array2str(observed))
+        print(f"\nAverage reward: {observed_average_reward}")
+
+        assert self.nS == 3 * 4 and \
+               self.seed == 1717 and \
+               self.nepisodes == 200 and \
+               self.start_state == 8
+        assert np.allclose(observed, self.expected_td, atol=1E-6)
+        assert np.isclose(observed_average_reward, self.expected_td_average_reward, atol=1E-6)
 
 
 class Test_EstValueFunctionV_MetMCLambda_EnvMountainCar(unittest.TestCase, test_utils.EpisodeSimulation):
@@ -1009,46 +1177,50 @@ if __name__ == '__main__':
 
     test = True  # Use test=False when we want to recover the output of the test in the Python session and analyze it
 
-    runner = unittest.TextTestRunner()
+    if test:
+        runner = unittest.TextTestRunner()
 
-    # unittest.getTestCaseNames()
+        # unittest.getTestCaseNames()
 
-    # Run all tests
-    #unittest.main()
+        # Run all tests
+        #unittest.main()
 
-    # Create the test suites
-    # --- Offline learning on Gridworld
-    test_suite_offline = unittest.TestSuite()
-    test_suite_offline.addTest(Test_EstStateValueV_MetOffline_EnvDeterministicNextState("test_EnvGridworld1D_PolRandomWalk_Met_TestOneCase"))
-    test_suite_offline.addTest(Test_EstStateValueV_MetOffline_EnvDeterministicNextState("test_EnvGridworld1DOneTerminal_PolRandomWalk_Met_TestOneCase"))
-    # DM-2022/06: For now we skip the test on the Mountain Car because the estimation takes too long to converge because
-    # we are using a random policy and reaching the reward under this policy is very rare...
-    # We will reactivate this test when we find the optimum policy and then we estimate the value function under the optimum policy.
-    #test_suite_offline.addTest(Test_EstStateValueV_MetOffline_EnvDeterministicNextState("test_EnvMountainCarDiscreteActions_PolRandomWalk_Met_TestOneCase"))
+        # Create the test suites
+        # --- Offline learning on Gridworld
+        test_suite_offline = unittest.TestSuite()
+        test_suite_offline.addTest(Test_EstStateValueV_MetOffline_EnvDeterministicNextState("test_EnvGridworld1D_PolRandomWalk_Met_TestOneCase"))
+        test_suite_offline.addTest(Test_EstStateValueV_MetOffline_EnvDeterministicNextState("test_EnvGridworld1DOneTerminal_PolRandomWalk_Met_TestOneCase"))
+        # DM-2022/06: For now we skip the test on the Mountain Car because the estimation takes too long to converge because
+        # we are using a random policy and reaching the reward under this policy is very rare...
+        # We will reactivate this test when we find the optimum policy and then we estimate the value function under the optimum policy.
+        #test_suite_offline.addTest(Test_EstStateValueV_MetOffline_EnvDeterministicNextState("test_EnvMountainCarDiscreteActions_PolRandomWalk_Met_TestOneCase"))
 
-    # --- Gridworld tests
-    test_suite_gw1d = unittest.TestSuite()
-    test_suite_gw1d.addTest(Test_EstStateValueV_EnvGridworlds("test_EnvGridworld1D_PolRandomWalk_MetMC_TestSeveralAlphasAndAlphaAdjustments"))
-    test_suite_gw1d.addTest(Test_EstStateValueV_EnvGridworlds("test_EnvGridworld1D_PolRandomWalk_MetMC_TestGammaSmallerThan1"))
-    test_suite_gw1d.addTest(Test_EstStateValueV_EnvGridworlds("test_EnvGridworld1D_PolRandomWalk_MetMC_TestRMSETwice"))
-    test_suite_gw1d.addTest(Test_EstStateValueV_EnvGridworlds("test_EnvGridworld1D_PolRandomWalk_MetLambdaReturn_TestSeveralAlphasLambdasAlphaAdjustments"))
-    test_suite_gw1d.addTest(Test_EstStateValueV_EnvGridworlds("test_EnvGridworld1D_PolRandomWalk_MetLambdaReturn_TestGammaLessThan1"))
-    test_suite_gw1d.addTest(Test_EstStateValueV_EnvGridworlds("test_EnvGridworld1D_PolRandomWalk_MetTDLambda_TestSeveralAlphasLambdas"))
+        # --- Gridworld tests
+        test_suite_gw1d = unittest.TestSuite()
+        test_suite_gw1d.addTest(Test_EstStateValueV_EnvGridworlds("test_EnvGridworld1D_PolRandomWalk_MetMC_TestSeveralAlphasAndAlphaAdjustments"))
+        test_suite_gw1d.addTest(Test_EstStateValueV_EnvGridworlds("test_EnvGridworld1D_PolRandomWalk_MetMC_TestGammaSmallerThan1"))
+        test_suite_gw1d.addTest(Test_EstStateValueV_EnvGridworlds("test_EnvGridworld1D_PolRandomWalk_MetMC_TestRMSETwice"))
+        test_suite_gw1d.addTest(Test_EstStateValueV_EnvGridworlds("test_EnvGridworld1D_PolRandomWalk_MetLambdaReturn_TestSeveralAlphasLambdasAlphaAdjustments"))
+        test_suite_gw1d.addTest(Test_EstStateValueV_EnvGridworlds("test_EnvGridworld1D_PolRandomWalk_MetLambdaReturn_TestGammaLessThan1"))
+        test_suite_gw1d.addTest(Test_EstStateValueV_EnvGridworlds("test_EnvGridworld1D_PolRandomWalk_MetTDLambda_TestSeveralAlphasLambdas"))
 
-    test_suite_gw2dobstacles = unittest.TestSuite()
-    test_suite_gw2dobstacles.addTest(Test_EstStateValueV_EnvGridworldsWithObstacles("test_Env_PolRandomWalk_MetMC"))
+        test_suite_gw2dobstacles = unittest.TestSuite()
+        test_suite_gw2dobstacles.addTest(Test_EstStateValueV_EnvGridworldsWithObstacles("test_Env_PolRandomWalk_MetMC"))
+        test_suite_gw2dobstacles.addTest(Test_EstDifferentialStateValueV_EnvGridworldsWithObstacles("test_Env_PolRandomWalk_MetMC"))
+        test_suite_gw2dobstacles.addTest(Test_EstStateValueV_EnvGridworldsWithObstacles("test_Env_PolRandomWalk_MetTDLambda"))
+        test_suite_gw2dobstacles.addTest(Test_EstDifferentialStateValueV_EnvGridworldsWithObstacles("test_Env_PolRandomWalk_MetTDLambda"))
 
-    # --- Mountain Car tests
-    test_suite_mountain = unittest.TestSuite()
-    test_suite_mountain.addTest(Test_EstValueFunctionV_MetMCLambda_EnvMountainCar("test_Env_PolRandomWalk_MetMCLambdaReturn_TestMCvsLambdaReturn"))
+        # --- Mountain Car tests
+        test_suite_mountain = unittest.TestSuite()
+        test_suite_mountain.addTest(Test_EstValueFunctionV_MetMCLambda_EnvMountainCar("test_Env_PolRandomWalk_MetMCLambdaReturn_TestMCvsLambdaReturn"))
 
-    # Run the test suites
-    runner.run(test_suite_offline)
-    runner.run(test_suite_gw1d)
-    runner.run(test_suite_gw2dobstacles)
-    runner.run(test_suite_mountain)
-else:
-    # Use this when we want to recover the output of the test in the Python session and analyze it
-    test_obj = Test_EstValueFunctionV_MetMCLambda_EnvMountainCar()
-    test_obj.setUpClass()
-    state_values, state_counts, params, sim, learning_info = test_obj.no_test_Env_PolRandomWalk_MetMC_TestOneCase()
+        # Run the test suites
+        runner.run(test_suite_offline)
+        runner.run(test_suite_gw1d)
+        runner.run(test_suite_gw2dobstacles)
+        runner.run(test_suite_mountain)
+    else:
+        # Use this when we want to recover the output of the test in the Python session and analyze it
+        test_obj = Test_EstValueFunctionV_MetMCLambda_EnvMountainCar()
+        test_obj.setUpClass()
+        state_values, state_counts, params, sim, learning_info = test_obj.no_test_Env_PolRandomWalk_MetMC_TestOneCase()

@@ -12,7 +12,7 @@ from enum import Enum, unique
 import numpy as np
 from matplotlib import pyplot as plt, cm
 
-from Python.lib.agents.learners import ResetMethod
+from Python.lib.agents.learners import LearningCriterion, ResetMethod
 from Python.lib.agents.learners.episodic.discrete import Learner, AlphaUpdateType
 from Python.lib.agents.learners.value_functions import ValueFunctionApprox
 import Python.lib.utils.plotting as plotting
@@ -33,12 +33,12 @@ class LeaTDLambda(Learner):
         The environment where the learning takes place.
     """
 
-    def __init__(self, env, alpha=0.1, gamma=1.0, lmbda=0.8,
+    def __init__(self, env, criterion=LearningCriterion.DISCOUNTED, alpha=0.1, gamma=1.0, lmbda=0.8,
                  adjust_alpha=False, alpha_update_type=AlphaUpdateType.EVERY_STATE_VISIT,
                  adjust_alpha_by_episode=False, alpha_min=0.,
                  reset_method=ResetMethod.ALLZEROS, reset_params=None, reset_seed=None,
                  debug=False):
-        super().__init__(env, alpha=alpha, adjust_alpha=adjust_alpha, alpha_update_type=alpha_update_type, adjust_alpha_by_episode=adjust_alpha_by_episode, alpha_min=alpha_min,
+        super().__init__(env, criterion=criterion, alpha=alpha, adjust_alpha=adjust_alpha, alpha_update_type=alpha_update_type, adjust_alpha_by_episode=adjust_alpha_by_episode, alpha_min=alpha_min,
                          reset_method=reset_method, reset_params=reset_params, reset_seed=reset_seed)
         self.debug = debug
 
@@ -74,9 +74,16 @@ class LeaTDLambda(Learner):
         self.lmbda = lmbda if lmbda is not None else self.lmbda
 
     def learn_pred_V(self, t, state, action, next_state, reward, done, info):
+        self.update_trajectory(t, state, action, reward)
         self._update_trajectory(t, state, reward)
         self._updateZ(state, self.lmbda)
         delta = reward + self.gamma * self.V.getValue(next_state) - self.V.getValue(state)
+
+        # Check whether we are learning the differential value function (average reward criterion) and adjust delta accordingly
+        # Ref: Sutton, pag. 250
+        if self.criterion == LearningCriterion.AVERAGE:
+            delta -= self.getAverageReward()
+
         #print("episode {}, state {}: count = {}, alpha = {}".format(self.episode, state, self._state_counts_over_all_episodes[state], self._alphas[state]))
         self._alphas_effective = np.r_[self._alphas_effective, (self._alphas * self._z).reshape(1, len(self._z))]
             ## NOTE: We need to reshape the product alpha*z because _alphas_effective is a 2D array with as many rows as
@@ -105,8 +112,7 @@ class LeaTDLambda(Learner):
             if self.debug: #and self.episode > 45: # Use the condition on `episode` in order to plot just the last episodes 
                 self._plotZ()
                 self._plotAlphasEffective()
-            self.store_trajectory(next_state)
-            self._update_state_counts(t+1, next_state)            
+            self._update_state_counts(t+1, next_state)
 
             # Update alpha for the next iteration for "by episode" updates
             if self.adjust_alpha_by_episode:
@@ -169,13 +175,13 @@ class LeaTDLambda(Learner):
 
 class LeaTDLambdaAdaptive(LeaTDLambda):
     
-    def __init__(self, env, alpha=0.1, gamma=1.0, lmbda=0.8,
+    def __init__(self, env, criterion=LearningCriterion.DISCOUNTED, alpha=0.1, gamma=1.0, lmbda=0.8,
                  adjust_alpha=False, alpha_update_type=AlphaUpdateType.EVERY_STATE_VISIT,
                  adjust_alpha_by_episode=True, alpha_min=0.,
                  lambda_min=0., lambda_max=0.99, adaptive_type=AdaptiveLambdaType.ATD,
                  reset_method=ResetMethod.ALLZEROS, reset_params=None, reset_seed=None,
                  burnin=False, plotwhat="boxplots", fontsize=15, debug=False):
-        super().__init__(env, alpha, gamma, lmbda, adjust_alpha, alpha_update_type, adjust_alpha_by_episode, alpha_min,
+        super().__init__(env, criterion=criterion, alpha=alpha, gamma=gamma, lmbda=lmbda, adjust_alpha=adjust_alpha, alpha_update_type=alpha_update_type, adjust_alpha_by_episode=adjust_alpha_by_episode, alpha_min=alpha_min,
                          reset_method=reset_method, reset_params=reset_params, reset_seed=reset_seed,
                          debug=debug)
         
@@ -254,11 +260,16 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
         self.burnin = burnin if burnin is not None else self.burnin
 
     def learn_pred_V(self, t, state, action, next_state, reward, done, info):
+        self.update_trajectory(t, state, action, reward)
         self._update_trajectory(t, state, reward)
 
         self.state_counts_noreset[state] += 1
         state_value = self.V.getValue(state)
         delta = reward + self.gamma * self.V.getValue(next_state) - state_value
+
+        # Check whether we are learning the differential value function (average reward criterion) and adjust delta accordingly
+        if self.criterion == LearningCriterion.AVERAGE:
+            delta -= self.getAverageReward()
 
         # Decide whether we do adaptive or non-adaptive lambda at this point
         # (depending on whether there is bootstrap information available or not)
@@ -320,9 +331,8 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
             if self.debug: # and self.episode > 45:
                 self._plotZ()
                 self._plotAlphasEffective()
-            self.store_trajectory(next_state)
             self._update_state_counts(t+1, next_state)
-            self._store_lambdas_in_episode()            
+            self._store_lambdas_in_episode()
 
             # Update alpha for the next episode for "by episode" updates
             if self.adjust_alpha_by_episode:

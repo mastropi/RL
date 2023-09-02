@@ -119,6 +119,10 @@ class GenericLearner:
         self.action = None          # A(t): action taken at state S(t)
         self.reward = None          # R(t+1): reward received by the agent when taking action A(t) on state S(t)
 
+        # Average reward for contiuing tasks
+        # Only used when criterion = LearningCriterion.AVERAGE
+        self.average_reward = 0     # Average reward observed observed so far: useful for continuing tasks where the average reward is used to compute the differential value functions
+
         # Trajectory history: information of the times, states, actions, and rewards stored as part of the learning process
         # (so that we can be retrieve it for e.g. analysis or plotting)
         self.times = []         # This time is either a DISCRETE time or a CONTINUOUS time depending on what
@@ -308,6 +312,9 @@ class GenericLearner:
         self.action = action
         self.reward = reward
         self._update_trajectory_history(t)
+        # NOTE: # We need to update the average reward AFTER updating the trajectory because the average reward update
+        # uses the length of the historic rewards stored (as the number of sampled rewards on which the average is computed).
+        self.update_average_reward()
 
     def _update_trajectory_history(self, time):
         """
@@ -332,6 +339,11 @@ class GenericLearner:
             self.dict_state_action_counts[state_action_str] += 1
         else:
             self.dict_state_action_counts[state_action_str] = 1
+
+    def update_average_reward(self):
+        # TODO: (2023/08/31) According to the algorithm for learning the average reward presented in Sutton (2018), pag. 251, a better learner of the average reward uses a separate learning rate which is applied on the delta error... Implement this.
+        # I think this should probably be implemented within each learner inheriting from this class...(?) because they store the delta error value to use.
+        self.average_reward += (self.reward - self.average_reward) / len(self.rewards)
 
     def getAverageLearningRates(self):
         return self.alpha_mean
@@ -365,3 +377,6 @@ class GenericLearner:
 
     def getRewards(self):
         return self.rewards
+
+    def getAverageReward(self):
+        return self.average_reward
