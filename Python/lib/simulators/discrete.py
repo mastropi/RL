@@ -152,7 +152,7 @@ class Simulator:
             print("------> {}".format(self.results_file))
 
     def run(self, nepisodes, max_time_steps=+np.Inf, start=None, seed=None, compute_rmse=False, weights_rmse=None,
-            state_observe=None,
+            state_observe=None, set_cycle=None,
             verbose=False, verbose_period=1, verbose_convergence=False,
             plot=False, colormap="seismic", pause=0):
         # TODO: (2020/04/11) Convert the plotting parameters to a dictionary named plot_options or similar.
@@ -193,6 +193,14 @@ class Simulator:
         state_observe: int, optional
             A state index whose RMSE should be observed as the episode progresses.
             Only used when compute_rmse = True
+            default: None
+
+        set_cycle: set
+            Set of states whose entrance from the complement set defines a cycle.
+            Note that the set should include ALL the states, NOT only the boundary states through which the system can enter the set.
+            The reason is that the set is used to determine which states are tracked for their visit frequency for the computation
+            of their stationary probability using renewal theory.
+            default: None
 
         verbose: bool, optional
             Whether to show the experiment that is being run and the episodes for each experiment.
@@ -225,26 +233,34 @@ class Simulator:
             of the value function estimates.
 
         Returns: tuple
-            Tuple containing the following elements:
-                - state value function estimate for each state at the end of the last episode (`nepisodes`).
-                - number of visits to each state at the end of the last episode.
-                - RMSE (when `compute_rmse` is not None), an array of length `nepisodes` containing the
-                Root Mean Square Error after each episode, of the estimated value function averaged
-                over all states. Otherwise, None.
-                - a dictionary containing additional relevant information, as follows:
-                    - 'alphas_at_episode_end': the value of the learning parameter `alpha` for each state
-                    at the end of the last episode run.
-                    - 'alphas_by_episode': (average) learning parameter `alpha` by episode
-                    (averaged over visited states in each episode)
-                    - a set of estimation statistics such as the average absolute value function or the relative
-                    change of the value function between episodes. A sample of these summary statistics are:
-                        - 'V_abs_mean': array with length nepisodes+1 containing mean|V| over all states at each episode.
-                        - 'V_abs_median': array with length nepisodes+1 containing median|V| over all states at each episode.
-                        - 'deltaV_abs_mean': array with length nepisodes+1 containing mean|delta(V)| over all states at each episode.
-                        - 'deltaV_abs_median': array with length nepisodes+1 containing median|delta(V)| over all states at each episode.
-                        - 'deltaV_rel_abs_mean': array with length nepisodes+1 containing mean|delta_rel(V)| over all states at each episode.
-                        - 'deltaV_rel_abs_median': array with length nepisodes+1 containing median|delta_rel(V)| over all states at each episode.
+        Tuple containing the following elements:
+        - state value function estimate for each state at the end of the last episode (`nepisodes`).
+        - number of visits to each state at the end of the last episode.
+        - RMSE (when `compute_rmse` is not None), an array of length `nepisodes` containing the
+        Root Mean Square Error after each episode, of the estimated value function averaged
+        over all states. Otherwise, None.
+        - MAPE (when `compute_rmse` is not None): same as RMSE but with the Mean Absolute Percent Error information.
+        - a dictionary containing additional relevant information, as follows:
+            - 'alphas_at_episode_end': the value of the learning parameter `alpha` for each state
+            at the end of the last episode run.
+            - 'alphas_by_episode': (average) learning parameter `alpha` by episode
+            (averaged over visited states in each episode)
+            - a set of estimation statistics such as the average absolute value function or the relative
+            change of the value function between episodes. A sample of these summary statistics are:
+                - 'V_abs_mean': array with length nepisodes+1 containing mean|V| over all states at each episode.
+                - 'V_abs_median': array with length nepisodes+1 containing median|V| over all states at each episode.
+                - 'deltaV_abs_mean': array with length nepisodes+1 containing mean|delta(V)| over all states at each episode.
+                - 'deltaV_abs_median': array with length nepisodes+1 containing median|delta(V)| over all states at each episode.
+                - 'deltaV_rel_abs_mean': array with length nepisodes+1 containing mean|delta_rel(V)| over all states at each episode.
+                - 'deltaV_rel_abs_median': array with length nepisodes+1 containing median|delta_rel(V)| over all states at each episode.
+            - when parameter set_cycle is not None, two pieces of information that can be used to compute the stationary probability of states
+            using renewal theory:
+                - the number of cycles observed.
+                - the expected cycle time, i.e. the average cycle time where a cycle is defined by entering the cycle set after its latest exit.
+                - an array with the visit count of all states.
         """
+        # Auxiliary functions
+        entered_set_cycle = lambda s, ns: s not in set_cycle and ns in set_cycle
 
         # Reset the simulator (i.e. prepare it for a fresh new simulation with all learning memory erased)
         self.reset()
@@ -304,13 +320,25 @@ class Simulator:
                               .format(state_observe, type(state_observe), nS-1))
                 state_observe = int(nS/2)
 
+        # Setup the information needed when cycles are used to estimate the stationary distribution of states using renewal theory
+        if set_cycle is not None:
+            cycle_times = []  # Note that the first cycle time will include a time that may not be a cycle time because the cycle may have not initiated at the sytem's start state. So the first cycle time will be considered a delay time.
+            num_cycles = 0
+            last_cycle_entrance_time = 0.0       # We set the last cycle time (i.e. the moment when the system enters the cycle set) to 0 (even if it is unknown) so that we can easily compute the FIRST cycle time below as "t - last_cycle_entrance_time"
+            expected_cycle_time = 0.0  # We set the expected cycle time so that we can compute the expected cycle time recursively
+
+            # Array of state counts WITHIN cycles, i.e. the count is increased ONLY when the state is visited within a TRUE cycle
+            # (not during the first "cycle" which may be degenerate)
+            # This can be used to estimate the stationary probability of the states using renewal theory
+            arr_state_counts_within_cycles = np.zeros(self.env.getNumStates(), dtype=int)
+
         # Plotting setup
         if plot:
             fig_V = plt.figure()
             colors = cm.get_cmap(colormap, lut=nepisodes)
             if self.env.getDimension() == 1:
                 # Plot the true state value function (to have it as a reference already
-                plt.plot(self.env.all_states, self.env.getV(), '.-', color="blue")
+                plt.plot(self.env.getAllStates(), self.env.getV(), '.-', color="blue")
                 if state_observe is not None:
                     fig_RMSE_state = plt.figure()
 
@@ -358,7 +386,13 @@ class Simulator:
 
         # Iterate on the episodes to run
         nepisodes_max_steps_reached = 0
+        t_over_all_episodes = -1            # This time index is used when a cycle set has been given
+                                            # so that we can estimate the stationary probability of states using renewal theory,
+                                            # as in that case (of a given cycle set), we assume that learning occurs under the average criterion
+                                            # (o.w. cycles may not be well defined, as cycles assume a continuing task, NOT episodic task).
         for episode in range(nepisodes):
+            t_over_all_episodes += 1
+
             # Reset the environment
             self.env.reset()
             done = False
@@ -375,6 +409,7 @@ class Simulator:
             t = -1
             while not done:
                 t += 1
+                t_over_all_episodes += 1
 
                 # Current state and action on that state leading to the next state
                 state = self.env.getState()
@@ -399,9 +434,31 @@ class Simulator:
 
                 # Learn: i.e. update the value function (stored in the learner) with the new observation
                 learner.learn_pred_V(t, state, action, next_state, reward, done, info)
+
+                # Observation state
                 if state_observe is not None:
                     # Store the value function of the state just estimated
                     V_state_observe += [learner.getV().getValue(state_observe)]
+
+                # Check if the system has entered the set of states defining a cycle
+                if set_cycle is not None:
+                    if entered_set_cycle(state, next_state):
+                        #print(f"Entered cycle set: (t, t_total, s, ns) = ({t}, {t_over_all_episodes}, {state}, {next_state})")
+                        # Note that we sum +1 to t_over_all_episodes because the next_state happens at the NEXT time step, which is t+1
+                        # (in fact, note that the very first t value is 0, therefore we should not consider the first entry
+                        # time to be 0 if the system enters the cycle set at the very first step...)
+                        cycle_times += [t_over_all_episodes + 1 - last_cycle_entrance_time]
+                        last_cycle_entrance_time = t_over_all_episodes + 1   # We mark the time the system entered the cycle set, so that we can compute the next cycle time
+                        if len(cycle_times) > 1:
+                            # We disregard the first cycle time from the computation of the average
+                            # because the first entering event may not represent a cycle as the system may have not previously exited the set.
+                            num_cycles += 1
+                            expected_cycle_time += (cycle_times[-1] - expected_cycle_time) / num_cycles
+
+                    # Update the count of the state ONLY after the first "cycle time"
+                    # so that we make sure that the counts are measured during a TRUE cycle (as the first one may be a degenerate cycle)
+                    if num_cycles > 0:
+                        arr_state_counts_within_cycles[state] += 1
 
             #------- EPISODE FINISHED --------#
             if verbose and np.mod(episode, verbose_period) == 0:
@@ -484,6 +541,10 @@ class Simulator:
                     RMSE[episode+1] = rmse(self.env.getV(), learner.getV().getValues(), weights=weights)
                     MAPE[episode+1] = mape(self.env.getV(), learner.getV().getValues(), weights=weights)
 
+            # Update the count within cycles of the terminal state
+            if set_cycle is not None and num_cycles > 0:
+                arr_state_counts_within_cycles[next_state] += 1
+
             if plot and np.mod(episode, verbose_period) == 0:
                 # Plot the estimated value function at the end of the episode
                 if self.env.getDimension() == 2:
@@ -511,7 +572,7 @@ class Simulator:
                 else:
                     #print("episode: {} (T={}), color: {}".format(episode, t, colors(episode/nepisodes)))
                     plt.figure(fig_V.number)
-                    plt.plot(self.env.all_states, learner.getV().getValues(), linewidth=0.5, color=colors(episode/nepisodes))
+                    plt.plot(self.env.getAllStates(), learner.getV().getValues(), linewidth=0.5, color=colors(episode/nepisodes))
                     plt.title("Episode {} of {}".format(episode+1, nepisodes))
                     if pause > 0:
                         plt.pause(pause)
@@ -596,7 +657,7 @@ class Simulator:
                 plt.figure(fig_V.number)
                 ax = plt.gca()
                 ax2 = ax.twinx()    # Create a secondary axis sharing the same x axis
-                ax2.bar(self.env.all_states, learner.getStateCounts(), color="blue", alpha=0.3)
+                ax2.bar(self.env.getAllStates(), learner.getStateCounts(), color="blue", alpha=0.3)
                 plt.sca(ax) # Go back to the primary axis
                 #plt.figure(fig_V.number)
 
@@ -627,6 +688,9 @@ class Simulator:
                     'V_abs_n': V_abs_n,
                     'prop_states_deltaV_relevant': prop_states_deltaV_relevant,
                     'prop_episodes_max_steps_reached': nepisodes_max_steps_reached / nepisodes,
+                    'num_cycles': num_cycles if set_cycle is not None else None,
+                    'expected_cycle_time': expected_cycle_time if set_cycle is not None else None,
+                    'state_counts_within_cycles': arr_state_counts_within_cycles if set_cycle is not None else None,
                 }
 
     def initialize_run_with_learner_status(self, nepisodes, learner, compute_rmse, weights, state_observe):

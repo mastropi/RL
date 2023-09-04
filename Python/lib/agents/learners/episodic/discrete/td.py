@@ -58,7 +58,7 @@ class LeaTDLambda(Learner):
         # Goal: Compare the rate of convergence of the non-adaptive vs. the adaptive TD(lambda)
         # by keeping track of the effective alpha as a FUNCTION of the episode number for EACH STATE
         # Each episode is a different row of the _alphas_effective array and the states are across the columns.
-        self._times_nonzero_update = [[] for _ in self.env.all_states]
+        self._times_nonzero_update = [[] for _ in self.env.getAllStates()]
         self._alphas_effective = np.zeros((0, self.env.getNumStates()))
 
     def _reset_at_start_of_episode(self):
@@ -216,7 +216,7 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
 
         #-- Variables for lambda statistics over all episodes
         # List of lists to store the lambdas used for each state in each episode
-        self._lambdas_in_episode = [[] for _ in self.env.all_states]
+        self._lambdas_in_episode = [[] for _ in self.env.getAllStates()]
         # Store all the lambdas over all episodes
         # This is a 3D list indexed by:
         # - episode number
@@ -247,7 +247,7 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
         super()._reset_at_start_of_episode()
         self._gradient_V_all = np.zeros((0, self.env.getNumStates()))
         self._lambdas = []
-        self._lambdas_in_episode = [[] for _ in self.env.all_states]
+        self._lambdas_in_episode = [[] for _ in self.env.getAllStates()]
 
     def setParams(self, alpha=None, gamma=None, lmbda=None, adjust_alpha=None, alpha_update_type=None,
                   adjust_alpha_by_episode=None, alpha_min=None,
@@ -398,7 +398,7 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
     def _store_lambdas_in_episode(self):
         #print("lambdas in episode {}:".format(self.episode))
         #print(self._lambdas_in_episode)
-        self._all_lambdas_by_episode += [[self._lambdas_in_episode[s] for s in self.env.all_states]]
+        self._all_lambdas_by_episode += [[self._lambdas_in_episode[s] for s in self.env.getAllStates()]]
 
     def final_report(self, T):
         super().final_report(T)
@@ -443,7 +443,7 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
         def finalize_plot_1D(ax, state_counts, title="Lambda by state for selected episodes / State count distribution"):
             ax.set_title(title)
 
-            ax.set_xticks(self.env.all_states)
+            ax.set_xticks(self.env.getAllStates())
             ax.set_xlim((0, self.env.getNumStates()-1))
             ax.set_ylim((0, 1.02))
             ax.set_ylabel("Lambda")
@@ -452,7 +452,7 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
 
             # State count distribution
             ax1sec = ax.twinx()
-            ax1sec.bar(self.env.all_states, state_counts, color="blue", alpha=0.2)
+            ax1sec.bar(self.env.getAllStates(), state_counts, color="blue", alpha=0.2)
             ax1sec.tick_params(axis='y', colors="blue")
             ax1sec.yaxis.label.set_color("blue")
             ax1sec.set_ylabel("State count")
@@ -505,9 +505,9 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
         #(lambdas_n, lambdas_mean, lambdas_std) = self.compute_lambda_statistics_by_state()
         #print("lambda statistics by state:")
         #with np.printoptions(precision=3, suppress=True):
-        #    print(np.c_[self.env.all_states, lambdas_n, lambdas_mean, lambdas_std])
-        #ax1.plot(self.env.all_states, lambdas_mean, '.-', color="orange")
-        #ax1.errorbar(self.env.all_states, lambdas_mean, yerr=lambdas_std, capsize=4, color="orange")
+        #    print(np.c_[self.env.getAllStates(), lambdas_n, lambdas_mean, lambdas_std])
+        #ax1.plot(self.env.getAllStates(), lambdas_mean, '.-', color="orange")
+        #ax1.errorbar(self.env.getAllStates(), lambdas_mean, yerr=lambdas_std, capsize=4, color="orange")
 
         if nepisodes < 4:
             print("NOTE: No plots by episode number group are generated: at least 4 episodes are needed.")
@@ -523,9 +523,9 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
         #    print("Plotting lambdas for episode {}:".format(e))
         #    print(self._all_lambdas_by_episode[e])
         #    ax1.violinplot(self._all_lambdas_by_episode[e], showmeans=True)
-        lambdas_by_state = [[] for _ in self.env.all_states]
+        lambdas_by_state = [[] for _ in self.env.getAllStates()]
         for e in episodes_to_consider(0, nepisodes-1):
-            for s in self.env.all_states:
+            for s in self.env.getAllStates():
                 lambdas_by_state[s] += self._all_lambdas_by_episode[e][s]
         states2plot = [s for s in self.env.getNonTerminalStates() if self._state_counts_over_all_episodes[s] > 0] 
         #print("lambdas_by_state for plotting:")
@@ -561,10 +561,10 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
             episode_end = episode_begin + episode_step - 1 if idx_ax < nplots - 1 else nepisodes - 1
                 ## Ex: 11, 23, 35, 49 (for the last block of episodes, include ALL remaining episodes)
             #print("Plotting lambdas for episodes from {} to {}...".format(episode_begin+1, episode_end+1))
-            lambdas_by_state = [[] for _ in self.env.all_states]
+            lambdas_by_state = [[] for _ in self.env.getAllStates()]
             nvisits_by_state = np.zeros(self.env.getNumStates())
             for e in episodes_to_consider(episode_begin, episode_end):
-                for s in self.env.all_states:
+                for s in self.env.getAllStates():
                     lambdas_by_state[s] += self._all_lambdas_by_episode[e][s]
                     nvisits_by_state[s] += len(self._all_lambdas_by_episode[e][s])
             states2plot = [s for s in self.env.getNonTerminalStates() if nvisits_by_state[s] > 0]
@@ -593,10 +593,10 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
                 # Average lambda values by state
                 lambda_mean_by_state = [np.mean(lambdas_by_state[s]) if s in states2plot
                                                                      else np.nan
-                                                                     for s in self.env.all_states]
+                                                                     for s in self.env.getAllStates()]
                 lambda_se_by_state = [np.std(lambdas_by_state[s]) / np.sqrt(nvisits_by_state[s]) if s in states2plot
                                                                                                  else np.nan
-                                                                                                 for s in self.env.all_states]
+                                                                                                 for s in self.env.getAllStates()]
                 if self.env.getDimension() == 2:
                     # Prepare data to plot 
                     shape = self.env.getShape()

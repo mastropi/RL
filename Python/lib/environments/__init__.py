@@ -77,6 +77,9 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
         # Same comment as for getNumActions() and super()
         return self.nS
 
+    def getAllStates(self):
+        return self.all_states
+
     def getTerminalStates(self):
         "Returns the list of terminal states"
         return list(self.terminal_states)

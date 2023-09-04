@@ -530,7 +530,7 @@ if run_mc:
     if False:
         # Distribution of state counts
         plt.figure()
-        plt.bar(env.all_states, N_mean, color="red", alpha=0.2)
+        plt.bar(env.getAllStates(), N_mean, color="red", alpha=0.2)
         ax = plt.gca()
         ax.set_xlabel("states")
         ax.set_ylabel("Distribution over non-terminal states")
@@ -538,7 +538,7 @@ if run_mc:
         ax.tick_params(axis='y', colors="red")
         ax.yaxis.label.set_color("red")
         ax2 = ax.twinx()
-        ax2.bar(np.array(env.all_states)[[0,nstates+1]], N_mean[[0,nstates+1]], color="blue")
+        ax2.bar(np.array(env.getAllStates())[[0,nstates+1]], N_mean[[0,nstates+1]], color="blue")
         ax2.set_ylabel("Distribution over terminal states")
         ax2.spines['right'].set_color("blue")
         ax2.tick_params(axis='y', colors="blue")

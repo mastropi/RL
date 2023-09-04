@@ -459,7 +459,7 @@ class LeaMCLambdaAdaptive(LeaMCLambda):
             mean_abs_delta_state_rewards = np.mean( abs_delta_state_rewards )
             self.state_lambdas[ visited_states ] = self.lmbda * np.exp( abs_delta_state_rewards - mean_abs_delta_state_rewards )
             LambdaAdapt = pd.DataFrame.from_items([
-                                ('visited', self.all_states[ visited_states ]),
+                                ('visited', self.getAllStates()[ visited_states ]),
                                 ('count', self.state_counts[ visited_states ]),
                                 ('rewards_prev_epi', state_rewards_prev[ visited_states ]),
                                 ('rewards_curr_epi', self.state_rewards[ visited_states ]),

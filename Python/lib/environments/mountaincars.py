@@ -176,7 +176,7 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
         self.isd = None                 # From my EnvironmentDiscrete class which in turn is inherited from the discrete environment in toy_text
 
         self.non_terminal_states = set(self.get_indices_for_non_terminal_states())
-        self.terminal_states = set(self.all_states).difference( set( self.non_terminal_states ) )
+        self.terminal_states = set(self.getAllStates()).difference( set( self.non_terminal_states ) )
         self.terminal_rewards = dict()  # TODO: (2022/05/06) Define the terminal rewards, as done in my EnvironmentDiscrete class, from which this class derives
 
         # State of the environment
