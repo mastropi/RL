@@ -33,7 +33,7 @@ from Python.lib.agents.queues import AgeQueue
 
 from Python.lib.environments.queues import rewardOnJobRejection_Constant
 
-import Python.lib.estimators as estimators
+import Python.lib.deprecated_estimators as estimators
 
 from Python.lib.simulators.queues import compute_nparticles_and_narrivals_for_fv_process, \
     compute_nparticles_and_nsteps_for_fv_process_many_settings, compute_rel_errors_for_fv_process, \
@@ -47,7 +47,7 @@ import Python.lib.utils.plotting as plotting
 
 @unique
 class Process(Enum):
-    "What process is used by Fleming-Viot, the one defined in estimators.py or the one defined in simulators/queues.py"
+    "What process is used by Fleming-Viot, the one defined in deprecated_estimators.py or the one defined in simulators/queues.py"
     Estimators = 1
     Simulators = 2
 
@@ -184,7 +184,7 @@ def analyze_convergence(estimation_process=Process.Simulators,
     Arguments:
     estimation_process: (opt) Process
         The estimation process that should be used to estimate the blocking probability, whether the estimator
-        defined in estimators.py (Process.Estimators) or the estimator defined in simulators/queues.py
+        defined in deprecated_estimators.py (Process.Estimators) or the estimator defined in simulators/queues.py
         (Process.Simulators).
         default: Process.Simulators
 

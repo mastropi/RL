@@ -31,8 +31,8 @@ import Python.lib.queues as queues  # The keyword `queues` is used in the code
 from Python.lib.queues import Event
 from Python.lib.environments.queues import EnvQueueSingleBufferWithJobClasses, rewardOnJobRejection_ExponentialCost
 
-import Python.lib.estimators as estimators
-from Python.lib.estimators import FinalizeType
+import Python.lib.deprecated_estimators as estimators
+from Python.lib.deprecated_estimators import FinalizeType
 
 from Python.lib.utils.computing import get_server_loads, compute_job_rates_by_server, compute_blocking_probability_birth_death_process
 

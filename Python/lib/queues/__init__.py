@@ -424,7 +424,7 @@ class QueueMM(GenericQueue):
         in the servers-- with the largest time).
         
         Note that we return the last change for ALL servers, because this is needed
-        for processing purposes (in e.g. estimators.py) when the last change was due to
+        for processing purposes (in e.g. deprecated_estimators.py) when the last change was due to
         a RESIZE, because in such case, the size in the server selected here as the server
         having the event with largest time (which is any of them because a RESIZE happens
         for all servers at once, i.e. at the same time), may NOT have changed at all,

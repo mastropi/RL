@@ -17,7 +17,7 @@ from timeit import default_timer as timer
 import numpy as np
 from matplotlib import pyplot as plt, cm
 
-from Python.lib import estimators
+from Python.lib.estimators import miscellanea as estimators_miscellanea
 
 import Python.lib.agents as agents
 from Python.lib.agents import GenericAgent
@@ -48,7 +48,7 @@ class Test_EstStateValueV_MetOffline_EnvDeterministicNextState(unittest.TestCase
 
     def test_EnvGridworld1D_PolRandomWalk_Met_TestOneCase(self):
         max_iter = 1000
-        estimator = estimators.EstimatorValueFunctionOfflineDeterministicNextState(self.env_grid, gamma=1.0)
+        estimator = estimators_miscellanea.EstValueFunctionOfflineDeterministicNextState(self.env_grid, gamma=1.0)
         niter, mean_deltaV_abs, max_deltaV_abs, max_deltaV_rel_abs = estimator.estimate_state_values_random_walk(synchronous=True, max_delta=1E-6, max_delta_rel=np.nan, max_iter=max_iter)
 
         state_values = estimator.getV().getValues()
@@ -64,7 +64,7 @@ class Test_EstStateValueV_MetOffline_EnvDeterministicNextState(unittest.TestCase
 
     def test_EnvGridworld1DOneTerminal_PolRandomWalk_Met_TestOneCase(self):
         max_iter = 100
-        estimator = estimators.EstimatorValueFunctionOfflineDeterministicNextState(self.env_grid_oneterminal, gamma=1.0)
+        estimator = estimators_miscellanea.EstValueFunctionOfflineDeterministicNextState(self.env_grid_oneterminal, gamma=1.0)
         niter, mean_deltaV_abs, max_deltaV_abs, max_deltaV_rel_abs = estimator.estimate_state_values_random_walk(synchronous=True, max_delta=1E-1, max_delta_rel=np.nan, max_iter=max_iter)
 
         state_values = estimator.getV().getValues()
@@ -80,7 +80,7 @@ class Test_EstStateValueV_MetOffline_EnvDeterministicNextState(unittest.TestCase
 
     def test_EnvMountainCarDiscreteActions_PolRandomWalk_Met_TestOneCase(self):
         max_iter = 100
-        estimator = estimators.EstimatorValueFunctionOfflineDeterministicNextState(self.env_mountain, gamma=1.0)
+        estimator = estimators_miscellanea.EstValueFunctionOfflineDeterministicNextState(self.env_mountain, gamma=1.0)
         niter, mean_deltaV_abs, max_deltaV_abs, max_deltaV_rel_abs = \
             estimator.estimate_state_values_random_walk(synchronous=True, max_delta=np.nan, max_delta_rel=1E-5, max_iter=max_iter,
                                                         reset_method=ResetMethod.ALLZEROS, reset_params=dict({'min': 0.2, 'max': 0.8}), reset_seed=1713)

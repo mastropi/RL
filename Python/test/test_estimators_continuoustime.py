@@ -55,7 +55,7 @@ class Test_EstAverageValueV_EnvQueueSingleServer(unittest.TestCase):
 
     # -------- DATA -------
     # Case number, description, expected value, parameters
-    data_test_EnvQueueSingleServer_MetMCFV_TestSeveralCapacities = lambda DEFAULT_EXECUTION = True: (
+    data_test_EnvQueueSingleServer_MetMCFV_SeveralCapacities = lambda DEFAULT_EXECUTION = True: (
         # Note: True blocking probability for different K values when rho = 0.7
         # Pr(K) = rho^K * (1 - rho) / (1 - rho^(K+1))
         # K = 5: Pr(K) = 5.71%
@@ -143,8 +143,8 @@ class Test_EstAverageValueV_EnvQueueSingleServer(unittest.TestCase):
     )
     # -------- DATA -------
 
-    @data_provider(data_test_EnvQueueSingleServer_MetMCFV_TestSeveralCapacities)
-    def test_EnvQueueSingleServer_MetMC_TestSeveralCapacities(self, casenum, run, desc, dict_params, dict_expected):
+    @data_provider(data_test_EnvQueueSingleServer_MetMCFV_SeveralCapacities)
+    def test_EnvQueueSingleServer_MetMC_SeveralCapacities(self, casenum, run, desc, dict_params, dict_expected):
         "Test the Monte-Carlo implementation of the blocking probability of a single-server queue system"
         if run:
             print("\n*** Testing {}, case number {}: '{}' ***".format(self.id(), casenum, desc))
@@ -206,8 +206,8 @@ class Test_EstAverageValueV_EnvQueueSingleServer(unittest.TestCase):
             assert np.isnan(proba_blocking_mc) and np.isnan(probas_stationary[K]) or \
                    np.isclose(proba_blocking_mc, probas_stationary[K])
 
-    @data_provider(data_test_EnvQueueSingleServer_MetMCFV_TestSeveralCapacities)
-    def test_EnvQueueSingleServer_MetFV_TestSeveralCapacities(self, casenum, run, desc, dict_params, dict_expected):
+    @data_provider(data_test_EnvQueueSingleServer_MetMCFV_SeveralCapacities)
+    def test_EnvQueueSingleServer_MetFV_SeveralCapacities(self, casenum, run, desc, dict_params, dict_expected):
         "Test the Fleming-Viot implementation of the blocking probability of a single-server queue system"
         if run:
             print("\n*** Testing {}, case number {}: '{}' ***".format(self.id(), casenum, desc))
@@ -479,8 +479,8 @@ if __name__ == '__main__':
 
     # Create the test suites
     test_suite = unittest.TestSuite()
-    test_suite.addTest(Test_EstAverageValueV_EnvQueueSingleServer("test_EnvQueueSingleServer_MetMC_TestSeveralCapacities"))
-    test_suite.addTest(Test_EstAverageValueV_EnvQueueSingleServer("test_EnvQueueSingleServer_MetFV_TestSeveralCapacities"))
+    test_suite.addTest(Test_EstAverageValueV_EnvQueueSingleServer("test_EnvQueueSingleServer_MetMC_SeveralCapacities"))
+    test_suite.addTest(Test_EstAverageValueV_EnvQueueSingleServer("test_EnvQueueSingleServer_MetFV_SeveralCapacities"))
     test_suite.addTest(Test_EstAverageValueV_EnvQueueLossNetworkWithJobClasses("test_EnvQueueLossNetwork_MetMC_SingleCapacity"))
     test_suite.addTest(Test_EstAverageValueV_EnvQueueLossNetworkWithJobClasses("test_EnvQueueLossNetwork_MetFV_SingleCapacity"))
 
