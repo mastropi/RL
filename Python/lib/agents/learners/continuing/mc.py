@@ -40,6 +40,9 @@ class LeaMC(GenericLearner):
         self.V = self.V_start   # Average reward over the simulation time
         self.Q = self.Q_start
         self.G = None           # Baseline-corrected cumulative reward for every time step (Trunk Reservation paper, pag. 4)
+        # TODO: (2023/09/05) At some point we should use the attribute average_reward recently added to the GenericLearner class
+        # The main problem to solve is the way the average reward is updated... here in LeaMC it is updated by the updateAverageReward() method that receives two parameters: t, reward, where t defines the divisor used to update the average reward.
+        # However, in GenericLearner, the average reward is updated by the update_average_reward() method that receives just the reward; the value of t to use as divisor (containing the number of learning steps already observed) is computed as len(rewards), where rewards contains the history of all previously observed rewards (including the last one `reward`)
         self.averageReward = 0.0     # Average return (used as baseline to correct the reward in G)
 
         # Historic values of the value functions

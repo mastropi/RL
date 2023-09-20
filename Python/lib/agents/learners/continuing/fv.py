@@ -31,15 +31,9 @@ class LeaFV(LeaMC):
         self.probas_stationary = dict()
 
     #----- SETTERS -----#
-    def setAverageReward(self, averageReward):
-        self.averageReward = averageReward
-
     def setProbasStationary(self, probas_stationary):
         self.probas_stationary = probas_stationary
 
     #----- GETTERS -----#
-    def getAverageReward(self):
-        return self.averageReward
-
     def getProbasStationary(self):
         return self.probas_stationary

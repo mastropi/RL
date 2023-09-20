@@ -209,8 +209,9 @@ class Learner(GenericLearner):
         self._state_counts_over_all_episodes[state] += 1  # Counts over all episodes
 
     def _update_alphas(self, state):
-        assert self.env.isTerminalState(state) == False, \
-            "The state on which alpha is computed is NOT a terminal state ({})".format(state)
+        # TODO: (2023/09/06) The following assertion was commented out when I was implementing the FV estimator on discrete environments (e.g. labyrinth) because the system can be in a terminal state when updating alpha (e.g. the labyrinth's exit)... I don't think updating alpha in a terminal state is wrong... is it?
+        #assert not self.env.isTerminalState(state), \
+        #    "The state on which alpha is computed must NOT be a terminal state ({})".format(state)
         # with np.printoptions(precision=4):
         #    print("Before updating alpha: episode {}, state {}: state_count={:.0f}, alpha>={}: alpha={}\n{}" \
         #          .format(self.episode, state, self._state_counts_over_all_episodes[state], self.alpha_min, self._alphas[state], np.array(self._alphas)))

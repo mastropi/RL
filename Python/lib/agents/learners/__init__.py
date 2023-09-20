@@ -121,7 +121,7 @@ class GenericLearner:
 
         # Average reward for contiuing tasks
         # Only used when criterion = LearningCriterion.AVERAGE
-        self.average_reward = 0     # Average reward observed observed so far: useful for continuing tasks where the average reward is used to compute the differential value functions
+        self.average_reward = 0.0   # Average reward observed so far: useful for continuing tasks where the average reward is used to compute the differential value functions
 
         # Trajectory history: information of the times, states, actions, and rewards stored as part of the learning process
         # (so that we can be retrieve it for e.g. analysis or plotting)
@@ -380,3 +380,6 @@ class GenericLearner:
 
     def getAverageReward(self):
         return self.average_reward
+
+    def setAverageReward(self, average_reward):
+        self.average_reward = average_reward

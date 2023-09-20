@@ -27,7 +27,8 @@ from gym.envs.toy_text import discrete
 class EnvironmentDiscrete(discrete.DiscreteEnv):
     """
     Class defining methods that are generic to ALL environments with discrete state and actions
-    optionally having terminal states which are suitable for episodic learning tasks.
+    optionally having terminal states which are suitable for episodic learning tasks. Rewards are only accepted
+    at terminal states.
 
     Constructor parameters:
     - nS: number of possible states

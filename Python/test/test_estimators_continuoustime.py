@@ -18,7 +18,7 @@ import numpy as np
 from Python.lib.environments import queues as env_queues
 from Python.lib.environments.queues import rewardOnJobRejection_Constant
 import Python.lib.queues as queues
-from Python.lib.simulators.queues import SurvivalProbabilityEstimation
+from Python.lib.estimators.fv import SurvivalProbabilityEstimation
 
 from Python.lib.utils.basic import get_current_datetime_as_string
 from Python.lib.utils.computing import stationary_distribution_product_form, func_prod_birthdeath, func_prod_knapsack

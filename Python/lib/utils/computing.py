@@ -163,8 +163,7 @@ def comb(n, k):
     does for e.g. C = 400, K = 70
     The actual error is "OverflowError: integer division result too large for a float".
     """
-    if  not isinstance(n, int) and not isinstance(n, np.int32) and not isinstance(n, np.int64) and \
-        not isinstance(k, int) and not isinstance(k, np.int32) and not isinstance(k, np.int64):
+    if  not is_integer(n) and not is_integer(k):
         raise ValueError("n and k must be integer (n={}, k={})".format(n,k))
     if (n < k):
         raise ValueError("n cannot be smaller than k (n={}, k={})".format(n,k))
@@ -229,7 +228,7 @@ def all_combos_with_sum(R, C):
             assert sum(v) == C, "The elements of v sum up to C={} (v={})".format(C, v)
             yield v
 
-    if C < 0 or not isinstance(C, int):
+    if C < 0 or not is_integer(C):
         raise ValueError("Parameter `C` specifying the sum to be satisfied by each valid combinations should be a non-negative integer: {}".format(C))
 
     # Initialize the list on the combination that is valid for sure (i.e. list with all zeros, as the sum C must be at least 0)

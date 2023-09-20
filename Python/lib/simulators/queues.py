@@ -25,46 +25,50 @@ from Python.lib.agents.policies.parameterized import PolQueueTwoActionsLinearSte
 from Python.lib.agents.queues import AgeQueue
 import Python.lib.environments.queues as env_queues
 from Python.lib.environments.queues import Actions, BufferType
-from Python.lib.simulators import analyze_event_times, check_done, show_messages, step, update_trajectory, SetOfStates
+from Python.lib.estimators import DEBUG_ESTIMATORS, estimate_expected_cycle_time, estimate_expected_stopping_time_in_cycle
+from Python.lib.estimators.fv import initialize_phi, update_phi, estimate_stationary_probabilities, SurvivalProbabilityEstimation
+
+from Python.lib.simulators import BURNIN_TIME_STEPS, MIN_NUM_CYCLES_FOR_EXPECTATIONS, DEBUG_TRAJECTORIES, \
+    analyze_event_times, check_done, choose_state_from_setofstates_based_on_distribution, is_state_in_setofstates, parse_simulation_parameters, \
+    show_messages, step, update_trajectory, SetOfStates
 from Python.lib.simulators.discrete import Simulator
-from Python.lib.simulators.fv import ReactivateMethod
+from Python.lib.simulators.fv import ReactivateMethod, reactivate_particle
 from Python.lib.queues import Event, QueueMM
 
-from Python.lib.utils.basic import array_of_objects, find_last, get_current_datetime_as_string, \
+from Python.lib.utils.basic import array_of_objects, get_current_datetime_as_string, \
     get_datetime_from_string, is_scalar, index_linear2multi, measure_exec_time, merge_values_in_time
 from Python.lib.utils.computing import compute_job_rates_by_server, compute_number_of_burnin_cycles_from_burnin_time, \
     compute_blocking_probability_birth_death_process, compute_survival_probability, generate_min_exponential_time, \
     all_combos_with_sum, compute_stationary_probability_knapsack_when_blocking_by_class
 
-
 @unique
 class LearningMode(Enum):
     "Learning mode of theta in the parameterized policy in SimulatorQueue.learn()"
-    REINFORCE_RETURN = 1        # When learning is based on the observed return, which estimates the expected value giving grad(V)
-    REINFORCE_TRUE = 2          # When learning is based on the expected value giving grad(V)
+    REINFORCE_RETURN = 1        # When learning is based on the observed return G(t),
+                                # which is an ESTIMATE of the true gradient of the average reward
+                                # (which is equal to the gradient of the average state value as proved in section 13.6 of Sutton)
+                                # as given by expression 13.8 in Sutton, pag. 327 or expression (9) in Massaro et al.
+                                # This is the REINFORCE algorithm.
+    REINFORCE_TRUE = 2          # When learning is based on the TRUE expected value of the gradient of the average reward (or of the average state value)
+                                # as given in expression (8) in Massaro et al.
+                                # Note that the GRADIENTS of the average reward and of the average state value coincide... NOT the values before the calculation of the gradient.
+                                # (i.e. in general the average reward is DIFFERENT from the average state value, although in some cases they may coincide --e.g. exercise 10.6 in Sutton, pag. 251)
     IGA = 3                     # When learning is based on Integer Gradient Ascent, where delta(theta) is +/- 1 or 0.
-
-@unique
-class SurvivalProbabilityEstimation(Enum):
-    FROM_N_PARTICLES = 1
-    FROM_M_CYCLES = 2
-
-# Default number of burn-in time steps to exclude from the estimation of expectations
-# (e.g. E(T) in Monte-Carlo estimation and E(T_A) in Fleming-Viot estimation) in order to assume the process is stationary
-BURNIN_TIME_STEPS = 20
-# Default minimum number of observed cycles (under assumed stationarity) that should be used to estimate expectations under
-# stationarity (e.g. stationary probabilities, E(T) in Monte-Carlo, E(T_A) in Fleming-Viot)
-MIN_NUM_CYCLES_FOR_EXPECTATIONS = 5
-
-DEBUG_ESTIMATORS = False
-DEBUG_TRAJECTORIES = False
 
 
 class SimulatorQueue(Simulator):
     """
     Simulator class that runs a Reinforcement Learning simulation on a given Queue environment `env` and an `agent`
-    using the learning mode, number of learning steps, and number of simulation steps/arrival events per learning step
+    (which contains the characteristics of value functions and policies to be learned during the simulation)
+    using:
+    - the learning mode (e.g. REINFORCE_TRUE or REINFORCE_RETURN)
+    - the number of learning steps
+    - the number of simulation steps or arrival events per learning step
     specified in the `dict_params_learning` dictionary.
+    Note that here the learning step refers to a step towards learning the optimal POLICY, not the learning step towards learning
+    the value functions. I.e. we are in the context of two time steps for learning and in this context, the policy learning step
+    is slower (i.e. learning happens less often) than the value function learning step (which happens at every simulation step
+    in which the queue experiences an event).
 
     Arguments:
     env: Environment
@@ -2132,7 +2136,7 @@ def estimate_expected_reward(env, agent: AgeQueue, probas_stationary: dict, rewa
 
     reward: (opt) float
         When given, this value is used as the constant reward assigned to a state present in the dictionary containing
-        the stationary probabilities when an incominb job is REJECTED.
+        the stationary probabilities when an incoming job is REJECTED.
         This is useful when we are interested in computing the rejection/blocking probability rather than the expected reward.
 
     Return: float
@@ -2157,131 +2161,6 @@ def estimate_expected_reward(env, agent: AgeQueue, probas_stationary: dict, rewa
             expected_reward += expected_reward_reject * \
                                probas_stationary[s]
     return expected_reward
-
-
-def estimate_expected_cycle_time(n_cycles: int, time_end_last_cycle: float,
-                                 cycle_times: list=None, burnin_time: float=0.0,
-                                 min_num_cycles_for_expectations: int=1):
-    """
-    Estimates the expected cycle time from observed cycles in a simulation.
-
-    The function is written so that the expected cycle time can be estimated from very little data, namely the
-    number of observed cycles and the time of the end of the last cycle.
-
-    This calculation is enough unless a burn-in period is required for the estimation, in which case more information
-    is needed than simply the above two pieces. In that case, the whole list of observed cycle times observed is
-    required so that a number of initial burn-in cycles can be excluded from the calculation.
-
-    If the number of cycles observed after the burn-in period is smaller than the value of parameter
-    `min_num_cycles_for_expectations`, the value of the estimated expectation is set to NaN.
-
-    Arguments:
-    n_cycles: int
-        Number of cycles observed.
-
-    time_end_last_cycle: non-negative float
-        Continuous time at which the last cycle ends.
-
-    cycle_times: (opt) list
-        List containing the observed cycle times.
-        default: None
-
-    burnin_time: (opt) float
-        Continuous time to allow as burn-in at the beginning of the simulation.
-        default: 0.0
-
-    min_num_cycles_for_expectations: (opt) int
-        Minimum number of observed cycles that are considered enough to obtain a reliable estimation of the expected
-        cycle time.
-        default: 1
-
-    Return: Tuple
-    Duple containing the following two elements:
-    - expected_cycle_time: the estimated expected cycle time based on the cycles observed after the burn-in period.
-    This value is set to NaN if the resulting number of cycles is smaller than the value of parameter
-    `min_num_cycles_for_expectations`.
-    - n_cycles_after_burnin: the number of cycles left after the initial burn-in period.
-    """
-    assert time_end_last_cycle >= 0.0   # time_end_last_cycle could be 0... namely when no cycle is observed.
-                                        # In any case, a value of 0 (actually a value that is smaller than burnin_time)
-                                        # does not generate problems in the calculation of the expected cycle time below,
-                                        # because its value is lower bounded by 0.
-    assert cycle_times is None and burnin_time == 0.0 or \
-           cycle_times is not None and len(cycle_times) == n_cycles
-    if burnin_time == 0:
-        burnin_cycles = 0
-        time_end_burnin_cycles = 0.0
-        n_cycles_after_burnin = n_cycles
-    else:
-        burnin_cycles = compute_number_of_burnin_cycles_from_burnin_time(cycle_times, burnin_time)
-        time_end_burnin_cycles = np.sum(cycle_times[:burnin_cycles])
-        n_cycles_after_burnin = len(cycle_times) - burnin_cycles
-    if n_cycles_after_burnin < min_num_cycles_for_expectations:
-        warnings.warn("The number of calculated burn-in cycles ({}) is too large,".format(burnin_cycles) +
-                      " as the number of observed cycle times left to estimate the expected cycle time ({}) is less than the minimum allowed ({})." \
-                      .format(len(cycle_times), min_num_cycles_for_expectations) +
-                      "The estimated expected cycle time will be set to NaN.")
-        return np.nan, n_cycles_after_burnin
-    if False:
-        print("Expected cycle time estimated on {} cycles out of available {}:\nALL cycle times: {}\nCUM cycle times: {} (CUM)\nburnin_time = {:.3f}\nburnin_cycles = {}" \
-              .format(n_cycles - burnin_cycles, len(cycle_times), cycle_times,
-                      list(np.cumsum(cycle_times)), burnin_time, burnin_cycles))
-
-    expected_cycle_time = max(0, time_end_last_cycle - time_end_burnin_cycles) / max(1, (n_cycles - burnin_cycles))  # max(1, ...) to avoid division by 0 when burnin_cycles coincides with the number of cycles observed
-    assert expected_cycle_time > 0.0
-
-    return expected_cycle_time, n_cycles_after_burnin
-
-
-def estimate_expected_stopping_time_in_cycle(stopping_times, cycle_times, burnin_time: float=0.0, min_num_cycles_for_expectations: int=1):
-    """
-    Computes the estimated expected stopping time based on stopping times observed within a cycle
-
-    Arguments:
-    stopping_times: list
-        List containing the observed stopping times on which the expectation is based.
-
-    cycle_times: list
-        List containing the observed cycle times within which the stopping times are observed.
-        Each stopping time in `stopping_times` should be <= the corresponding cycle time in `cycle_times`
-        stored at the same index, except for the last stopping time which may not have any corresponding cycle time,
-        as the latter may not have been measured because the simulation stopped before the cycle completed.
-        The length of the list should be either equal to the length of `stopping_times` or one less.
-
-    burnin_time: (opt) float
-        Continuous time to allow as burn-in at the beginning of the simulation.
-        default: 0.0
-
-    min_num_cycles_for_expectations: (opt) int
-        Minimum number of observed cycles that are considered enough to obtain a reliable estimation of the expected
-        cycle time.
-        default: 1
-
-    Return: Tuple
-    Duple containing the following two elements:
-    - expected_stopping_time: the estimated expected stopping time based on the stopping times observed after the
-    burn-in period. This value is set to NaN if the resulting number of stopping times is smaller than the value of
-    parameter `min_num_cycles_for_expectations`.
-    - n_stopping_times_after_burnin: the number of stopping times left after the initial burn-in period.
-    """
-    assert len(stopping_times) == len(cycle_times) or len(stopping_times) == len(cycle_times) + 1, \
-        "The number of observed stopping times ({}) is either equal to the number of reabsorption times ({}) or one more" \
-            .format(len(stopping_times), len(cycle_times))
-
-    burnin_cycles = compute_number_of_burnin_cycles_from_burnin_time(cycle_times, burnin_time)
-    n_stopping_times_after_burnin = len(stopping_times) - burnin_cycles
-    if n_stopping_times_after_burnin < min_num_cycles_for_expectations:
-        warnings.warn("The number of observed stopping times left after the burn-in period of {} cycles to estimate the expected stopping time ({}) is smaller than the minimum allowed ({})." \
-                      .format(burnin_cycles, n_stopping_times_after_burnin, min_num_cycles_for_expectations) +
-                      "The estimated expected stopping time will be set to NaN.")
-        expected_stopping_time = np.nan
-    else:
-        expected_stopping_time = np.mean(stopping_times[burnin_cycles:])
-    if False:
-        print("Expected stopping time estimated on {} cycles out of available {} (burnin_time = {:.3f} burnin_cycles = {})" \
-              .format(len(stopping_times[burnin_cycles:]), len(stopping_times), burnin_time, burnin_cycles))
-
-    return expected_stopping_time, n_stopping_times_after_burnin
 
 
 def generate_event(envs):
@@ -2477,126 +2356,6 @@ def manage_service(env, agent, state, server):
     return action, next_state, reward
 
 
-def parse_estimate_blocking_parameters(dict_params_simul, env):
-    """
-    Parses input parameters received by the estimate_blocking_*() functions
-
-    Arguments:
-    dict_params_simul: dict
-        Dictionary of simulation parameters to parse.
-        It should contain at least the following keys:
-        - T: either the number of simulation steps to use in the Monte-Carlo simulation when estimating the blocking
-        probability using Monte-Carlo or the number of arrival events to use in the Monte-Carlo simulation used in
-        the FV estimator of the blocking probability to estimate E(T_A), i.e. the expected reabsorption time of a single queue.
-        and one of the following set of keys:
-        a) suitable for systems with a single buffer governing blocking (e.g. single-server, multi-server with single buffer)
-            - buffer_size_activation: the overall system's buffer size for activation for systems with a single buffer
-        holding jobs that await being served. If we call this value J, then J-1 is the absorption buffer size.
-        b) suitable for systems where blocking occurs at multi-dimensional states (e.g. loss network with multi-class jobs)
-            - absorption_set: SetOfStates object defining the set of absorption states.
-            - activation_set: SetOfStates object defining the set of activation states.
-        When both (a) and (b) are given in the dictionary, precedence is given to the information provided in (a).
-
-        The following keys are optional:
-        - burnin_time_steps: number of burn-in time steps to allow at the beginning of the simulation in order to
-        consider that the Markov process is in stationary regime.
-        default: BURNIN_TIME_STEPS
-        - min_num_cycles_for_expectations: minimum number of observed reabsorption cycles to consider that the expected
-        reabsorption cycle time, E(T_A), can be reliably estimated.
-        default: MIN_NUM_CYCLES_FOR_EXPECTATIONS
-        - method_survival_probability_estimation: method to use to estimate the survival probability P(T>t)
-        in the Fleming-Viot estimation approach, which can be either:
-            - SurvivalProbabilityEstimation.FROM_N_PARTICLES, where the survival probability is estimated from the first
-            absorption times of each of the N particles used in the FV simulation, or
-            - SurvivalProbabilityEstimation.FROM_M_CYCLES, where the survival probability is estimated from the M cycles
-            defined by the return to the absorption set A of a single particle being simulated. The number M is a
-            function of the number of arrival events T and of J, the size of the absorption set A. For a fixed
-            T value, M decreases as J increases as the queue has less probability of visiting a state further away from 0.
-            Because of the non-control of the number of cycles M, the preferred method to estimate the survival probability
-            is FROM_N_PARTICLES because N is controlled by the number of particles used in the FV simulation. If we
-            increase N, the simulation time for FV will be larger as this is determined by the maximum observed survival time
-            (as no contribution to the integral appearing in the FV estimator (int{P(T>t)*phi(t)}) is received from
-            blocking events happening past the maximum observed survival time).
-        default: SurvivalProbabilityEstimation.FROM_N_PARTICLES
-        - seed: the seed to use for the pseudo-random number generation.
-        default: None
-
-    env: Queue Environment
-        Environment that should be used to compute the burn-in time (i.e. absolute time) from parameter 'burnin_time_steps',
-        which is done using the compute_burnin_time_from_burnin_time_steps() function that uses the expected inter-event time
-        computed from the job arrival rates and service rates of the queue.
-
-    Return: dict
-    Input dictionary with the following parsed parameters that are normally used in the simulation process:
-    - absorption_set
-    - activation_set
-    - T
-    - burnin_time_steps
-    - burnin_time
-    - min_num_cycles_for_expectations
-    - method_survival_probability_estimation
-    - seed
-    """
-    if 'buffer_size_activation' in dict_params_simul.keys():
-        if dict_params_simul['buffer_size_activation'] < 1:
-            raise ValueError("The activation buffer size must be at least 1: {}".format(dict_params_simul['buffer_size_activation']))
-        # Define the simulation parameters that will be used from now on below in a unified estimation process that
-        # encompasses both the case where blocking occurs at a single buffer size (e.g. single-server system or
-        # multi-server system with single buffer) or when it occurs at a set of states (e.g. loss network with multi-class jobs).
-        dict_params_simul['absorption_set'] = SetOfStates(set_boundaries=dict_params_simul['buffer_size_activation'] - 1)
-        dict_params_simul['activation_set'] = SetOfStates(set_boundaries=dict_params_simul['buffer_size_activation'])
-    set_required_simul_params = {'absorption_set', 'activation_set', 'T'}
-    if not set_required_simul_params.issubset(dict_params_simul.keys()):
-        raise ValueError("Not all required parameters were given in `dict_params_simul`, which requires: {}\nGiven: {}".format(set_required_simul_params, dict_params_simul.keys()))
-
-    # Parse the remaining simulation parameters
-    dict_params_simul['burnin_time_steps'] = dict_params_simul.get('burnin_time_steps', BURNIN_TIME_STEPS)
-    # Continuous burn-in time used to filter the continuous-time cycle times observed during the single-particle simulation
-    # that is used to estimate the expected reabsorption cycle time, E(T_A).
-    dict_params_simul['burnin_time'] = compute_burnin_time_from_burnin_time_steps(env, dict_params_simul['burnin_time_steps'])
-    print("Computed burn-in time from parameter burnin_time_steps = {}: {}".format(dict_params_simul['burnin_time_steps'], dict_params_simul['burnin_time']))
-    dict_params_simul['min_num_cycles_for_expectations'] = dict_params_simul.get('min_num_cycles_for_expectations', MIN_NUM_CYCLES_FOR_EXPECTATIONS)
-    dict_params_simul['method_survival_probability_estimation'] = dict_params_simul.get('method_survival_probability_estimation', SurvivalProbabilityEstimation.FROM_N_PARTICLES)
-    dict_params_simul['seed'] = dict_params_simul.get('seed')
-
-    return dict_params_simul
-
-
-def choose_state_based_on_distribution( set_of_states: SetOfStates, dist_proba: dict,
-                                        exactly_one_dimension_at_boundary=False,
-                                        at_least_one_dimension_at_boundary=False):
-    "Chooses a state from the set of states using the given probability distribution, truncated to those states"
-    if exactly_one_dimension_at_boundary and at_least_one_dimension_at_boundary:
-        raise ValueError("Parameters exactly_one_dimension_at_boundary and at_least_one_dimension_at_boundary cannot be both True")
-
-    all_states = set_of_states.getStates(   exactly_one_dimension_at_boundary=exactly_one_dimension_at_boundary,
-                                            at_least_one_dimension_at_boundary=at_least_one_dimension_at_boundary)
-    if not all_states.issubset(set(dist_proba.keys())):
-        raise ValueError("All states to select from must be present in the dictionary containing their probability distribution: {}".format(all_states))
-
-    # Truncate the given distribution to the given set of states
-    states, dist_states = zip(*filter(lambda state_proba_pair: state_proba_pair[0] in all_states, dist_proba.items()))
-    dist = dist_states / np.sum(dist_states)
-    assert np.isclose(np.sum(dist), 1.0), \
-        "The probabilities in the distribution on which start states in the activation set are sampled sums up to 1: {}" \
-        .format(np.sum(dist))
-
-    # Choose a state following the given distribution
-    idx_selected_value = np.random.choice(len(states), p=dist)
-    chosen_state = states[idx_selected_value]
-
-    if exactly_one_dimension_at_boundary:
-        assert sum(np.array(chosen_state) == np.array(set_of_states.getSetBoundaries())) == 1, \
-            "Exactly ONE dimension of the start state must be at its limit value (boundary) defined by {}: {}" \
-                .format(set_of_states.getSetBoundaries(), chosen_state)
-    elif at_least_one_dimension_at_boundary:
-        assert np.sum(np.array(chosen_state) == np.array(set_of_states.getSetBoundaries())) >= 1, \
-            "At least one dimension must be at its limit (boundary) defined by the absorption set ({}): {}" \
-            .format(set_of_states.getSetBoundaries(), chosen_state)
-
-    return chosen_state
-
-
 def estimate_blocking_mc(env, agent, dict_params_simul, dict_params_info, start_queue_state=None):
     """
     Estimates the blocking probability using Monte-Carlo
@@ -2614,7 +2373,7 @@ def estimate_blocking_mc(env, agent, dict_params_simul, dict_params_info, start_
 
     dict_params_simul: dict
         Dictionary containing simulation and estimation parameters.
-        The dictionary should contain the keys described in function `parse_estimate_blocking_parameters()`.
+        The dictionary should contain the keys described in function `parse_simulation_parameters()`.
 
     dict_params_info: dict
         Dictionary containing information to display, or parameters to deal with the information to display.
@@ -2652,7 +2411,7 @@ def estimate_blocking_mc(env, agent, dict_params_simul, dict_params_info, start_
     probabilities.
     """
     # -- Parse input parameters
-    dict_params_simul = parse_estimate_blocking_parameters(dict_params_simul, env)
+    dict_params_simul = parse_simulation_parameters(dict_params_simul, env)
 
     # Set the simulation seed
     # Note that, although the seed is set by the queue environment (via its set_seed() method which is called by run_simulation_mc() below)
@@ -2930,7 +2689,7 @@ def run_simulation_mc(env, agent, t_learn, start_state, t_sim_max,
             #   is already at the boundary of the activation set (first and third components).
             # Note that the state of the environment has been updated by the manage_service() function, that's why env.getQueueState() returns the value of `next_state` above
             assert env.getQueueStateFromState(next_state) == env.getQueueState()
-            if is_state_in_set(env.getQueueStateFromState(state), absorption_set) and is_state_in_set(env.getQueueState(), activation_set):
+            if is_state_in_setofstates(env.getQueueStateFromState(state), absorption_set) and is_state_in_setofstates(env.getQueueState(), activation_set):
                 # Record the exit times, i.e. time elapsed since the latest absorption
                 n_exit_times += 1
                 exit_times += [time_abs - time_last_absorption]
@@ -2963,7 +2722,7 @@ def run_simulation_mc(env, agent, t_learn, start_state, t_sim_max,
             # Check ABSORPTION
             # Note that the state of the environment has been updated by the manage_service() function, that's why env.getQueueState() returns the value of `next_state` above
             assert env.getQueueStateFromState(next_state) == env.getQueueState()
-            if is_state_in_set(env.getQueueStateFromState(state), activation_set) and is_state_in_set(env.getQueueState(), absorption_set):
+            if is_state_in_setofstates(env.getQueueStateFromState(state), activation_set) and is_state_in_setofstates(env.getQueueState(), absorption_set):
                 n_cycles_absorption += 1
                 absorption_times += [time_abs - time_last_absorption]
                 if False and DEBUG_ESTIMATORS:
@@ -3495,7 +3254,7 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info, proba
 
     dict_params_simul: dict
         Dictionary containing simulation and estimation parameters.
-        The dictionary should contain the keys described in function `parse_estimate_blocking_parameters()`.
+        The dictionary should contain the keys described in function parse_simulation_parameters()`.
 
     dict_params_info: dict
         Dictionary containing information to display or parameters to deal with the information to display.
@@ -3530,7 +3289,7 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info, proba
     # -- Auxiliary functions
 
     # -- Parse input parameters
-    dict_params_simul = parse_estimate_blocking_parameters(dict_params_simul, envs[0])
+    dict_params_simul = parse_simulation_parameters(dict_params_simul, envs[0])
 
     # Set the simulation seed
     # Note that, although the seed is set by the queue environment (via its set_seed() method which is called by run_simulation_mc() below)
@@ -3549,13 +3308,7 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info, proba
     # -- Parse input parameters
 
     # -- Step 1: Simulate a single queue to estimate P(T>t) and E(T_A)
-    # DM-2023/01/09: The next line that calls choose_state_for_buffe_size() was commented out
-    # because it corresponds to the scenario where the system has a SINGLE queue buffer and this is the one
-    # defining when the system is blocked. Now however, we are generalizing the system to a blocking condition
-    # that may not depend only on a single buffer being full, but on reaching a set of multi-dimensinoal states
-    # (e.g. a queue system accepting multi-class jobs).
-    #start_queue_state_boundary_A = choose_state_for_buffer_size(envs[0], dict_params_simul['buffer_size_activation'] - 1)
-    # DM-2023/01/09: This is the new line that chooses the start state among a set of absorption states
+    # The start state is chosen among a set of absorption states
     # Note that the set of absorption states is easy to define in the single-server context but in a multi-server context
     # the set may be very large... I don't think there is an alternative for a concise definition of the absorption set
     # in such multi-server situation.
@@ -3566,9 +3319,9 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info, proba
         start_queue_state_boundary_A = dict_params_simul['absorption_set'].random_choice()
     else:
         # Sample the start state using the given distribution of the states
-        start_queue_state_boundary_A = choose_state_based_on_distribution(dict_params_simul['absorption_set'],
-                                                                          probas_stationary,
-                                                                          at_least_one_dimension_at_boundary=True)
+        start_queue_state_boundary_A = choose_state_from_setofstates_based_on_distribution(dict_params_simul['absorption_set'],
+                                                                                           probas_stationary,
+                                                                                           at_least_one_dimension_at_boundary=True)
     if dict_params_simul['method_survival_probability_estimation'] == SurvivalProbabilityEstimation.FROM_M_CYCLES:
         track_survival_in_single_particle_simulation = True
         t, time_end_simulation, n_cycles_absorption, time_last_absorption, exit_times, absorption_times, survival_times = \
@@ -3607,10 +3360,12 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info, proba
         df_proba_surv = compute_survival_probability(survival_times)
         max_survival_time = np.max(survival_times)
     else:
-        # Both E(T_A) and P(T>t) will be estimated once we have completed the FV simulation.
-        # In particular, the survival probability will be estimated from the first absorption times observed
-        # for each of the N particles used in the FV simulation.
-        # However, in this case we need to estimate the expected exit time, E(T_E) which will be used to estimate E(T_A)
+        # Both E(T_A) and P(T>t) will be estimated once we have completed the FV simulation, as follows:
+        # - The survival probability will be estimated from the first absorption times observed for each of the N particles used in the FV simulation.
+        # - E(T_A) will be estimated as the same of E(T_E), the expected exit time (from the absorption set) +
+        # the expected killing (re-absorption) time, after the system exists from the absorption set.
+        # This is a little better estimator than estimating E(T_A) directly as the average reabsorption cycle time because
+        # in this way we guarantee that E(T_A) is larger than the expected exit time from the absorption set, E(T_E).
         expected_exit_time, n_exit_times_used = estimate_expected_stopping_time_in_cycle(exit_times, absorption_times,
                                                                             burnin_time=dict_params_simul['burnin_time'],
                                                                             min_num_cycles_for_expectations=dict_params_simul['min_num_cycles_for_expectations'])
@@ -3651,8 +3406,6 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info, proba
         for s in _states_or_buffer_sizes_of_interest:
             probas_stationary_blocking[s] = np.nan
         expected_absorption_time = np.nan
-        time_last_absorption = time_last_absorption
-        time_end_simulation_et = time_end_simulation_et
         if not track_survival_in_single_particle_simulation:
             max_survival_time = np.nan
         time_end_simulation_fv = 0.0
@@ -3721,9 +3474,11 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
 
     absorption_set: SetOfStates
         Set with the entrance states to the zero-reward set of states A.
+        This set is needed to measure the killing times used to estimate the survival probability P(T > t).
 
     activation_set: SetOfStates
         Set with the entrance states to the complement of the zero-reward set of states A.
+        This set is needed to define the start state of the Fleming-Viot simulation.
 
     dist_proba_for_start_state: dict
         Probability distribution from which the start state for each FV particle is chosen.
@@ -4168,6 +3923,8 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
                         print(stat)
 
             return proba_stationary, integral
+
+    only_one_dimension_of_state_is_at_boundary = lambda state, _set: np.sum(np.array(state) == np.array(_set.getSetBoundaries())) == 1
     # ---------------------------------- Auxiliary functions ------------------------------#
 
     # ---------------------------- Check input parameters ---------------------------------#
@@ -4185,6 +3942,8 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
     # Compatibility check (dimension)
     if absorption_set.getStateDimension() != activation_set.getStateDimension():
         raise ValueError("The absorption and activation sets must be compatible, i.e. either both should contain scalar states or both should have the same state dimension")
+    if expected_absorption_time is None and expected_exit_time is None:
+        raise ValueError("Parameter `expected_exit_time` must be provided when `expected_absorption_time` is None")
     if envs[0].getBufferType() == BufferType.SINGLE:
         assert absorption_set.getStateDimension() == 1 and \
                absorption_set.getNumStates() == 1 and \
@@ -4208,12 +3967,7 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
                              "(when at least one particle has been absorbed) ({})".format(df_proba_surv['P(T>t)'].iloc[-1]))
     # ---------------------------- Check input parameters ---------------------------------#
 
-    # -- Parse input parameters
     N = len(envs)
-
-    if expected_absorption_time is None and expected_exit_time is None:
-        raise ValueError("Parameter `expected_exit_time` must be provided when `expected_absorption_time` is None")
-    # -- Parse input parameters
 
     # Set the start state of each environment/particle to an activation state, as this is a requirement
     # for the empirical distribution Phi(t).
@@ -4241,15 +3995,16 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
         # where rewards occur more often.
         if dist_proba_for_start_state is None:
             # The start state is chosen uniformly at random from the set of (valid) activation states
+            # (for the definition of "valid activation state" see the comment above)
             is_valid_start_state = False
             while not is_valid_start_state:
                 start_queue_state = activation_set.random_choice()
-                if np.sum(np.array(start_queue_state) == np.array(activation_set.getSetBoundaries())) == 1:
+                if only_one_dimension_of_state_is_at_boundary(start_queue_state, activation_set):
                     is_valid_start_state = True
         else:
             # Sample the start state following the given distribution of the states
-            start_queue_state = choose_state_based_on_distribution(activation_set, dist_proba_for_start_state,
-                                                                   exactly_one_dimension_at_boundary=True)
+            start_queue_state = choose_state_from_setofstates_based_on_distribution(activation_set, dist_proba_for_start_state,
+                                                                                    exactly_one_dimension_at_boundary=True)
 
         env.setState((start_queue_state, None))
 
@@ -4259,9 +4014,6 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
 
     # Phi(t, x): Empirical probability of the states or buffer sizes of interest (x)
     # at each time t when a variation in Phi(t, x) is observed.
-    from Python.lib.estimators.fv import initialize_phi, update_phi, estimate_stationary_probabilities
-    from Python.lib.simulators.fv import reactivate_particle
-
     dict_phi = initialize_phi(envs, agent, t=event_times[0])
 
     # Time step in the queue trajectory (the first time step is t = 0)
@@ -4356,7 +4108,7 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
             # It's IMPORTANT to check that the previous state is part of the activation set
             # Note that the state of the environment has been updated by the manage_service() function, that's why env.getQueueState() returns the value of `next_state` above
             assert envs[idx_particle].getQueueStateFromState(next_state) == envs[idx_particle].getQueueState()
-            if is_state_in_set(env.getQueueStateFromState(state), activation_set) and is_state_in_set(envs[idx_particle].getQueueState(), absorption_set):
+            if is_state_in_setofstates(env.getQueueStateFromState(state), activation_set) and is_state_in_setofstates(envs[idx_particle].getQueueState(), absorption_set):
                 # The particle has been absorbed
                 # => Reactivate it to any of the other particles
                 # => If the survival probability function is not given as input parameter,
@@ -4368,8 +4120,9 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
                     # Mark the particle as "absorbed once" so that we don't use any other absorption time from this
                     # particle to estimate the survival probability, because the absorption times coming after the first
                     # absorption time should NOT contribute to the survival probability, because their initial state
-                    # is NOT the correct one --i.e. it is not a state in the activation set, which is a requirement
-                    # for the estimation of the survival probability distribution.
+                    # is NOT the correct one --i.e. it is not a state in the activation set
+                    # (because the particle has been reactivated to any other state)
+                    # which is a requirement for the estimation of the survival probability distribution.
                     has_particle_been_absorbed_once[idx_particle] = True
                     if False:
                         print("Survival times observed so far: {}".format(sum(has_particle_been_absorbed_once)))
@@ -4479,25 +4232,6 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
                                                                      expected_absorption_time)
 
     return t, event_times, dict_phi, probas_stationary, expected_absorption_time, max_survival_time
-
-
-def is_state_in_set(state, set_of_interest: SetOfStates):
-    "Check whether the QUEUE state of the system is in the set of queue states of interest"
-    assert set_of_interest is not None
-    if set_of_interest.getStorageFormat() == "states":
-        states_of_interest = set_of_interest.getStates()
-        return set(state.issubset(states_of_interest))
-    else:
-        # The set is assumed to be defined by its boundaries in each dimension and include all states whose dimension value is smaller than or equal to the respective boundary
-        set_of_interest_boundaries = set_of_interest.getSetBoundaries()
-        # Note: we convert lists to arrays in order to perform an element-wise comparison of their elements
-        particle_state = np.array([state]) if is_scalar(state) else np.array(state)
-        set_boundaries = np.array([set_of_interest_boundaries]) if is_scalar(set_of_interest_boundaries) else np.array(set_of_interest_boundaries)
-        if  any(particle_state == set_boundaries) and \
-            all(particle_state <= set_boundaries):
-            return True
-        else:
-            return False
 
 
 def plot_update_trajectory(ax, p, N, K, J, x0, y0, x1, y1, marker='-', r=None):

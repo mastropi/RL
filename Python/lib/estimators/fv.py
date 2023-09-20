@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Created on Sun Sep 4 16:05:33 2023
+Created on Mon Sep 4 16:05:33 2023
 
 @author: Daniel Mastropietro
 @description: Functions for Fleming-Viot-based estimators. Ex: Queue blocking, labyrinth exit, etc.
@@ -9,6 +9,7 @@ They are expected to be applicable to:
 - discrete-time/state/action environments
 """
 
+from enum import Enum, unique
 from typing import Union
 import tracemalloc
 
@@ -18,10 +19,15 @@ import matplotlib.pyplot as plt
 
 from Python.lib.environments import EnvironmentDiscrete
 from Python.lib.environments.queues import GenericEnvQueueWithJobClasses
-from Python.lib.simulators.queues import get_blocking_states_or_buffer_sizes
+
+from Python.lib.estimators import DEBUG_ESTIMATORS
+
 from Python.lib.utils.basic import is_scalar, measure_exec_time, merge_values_in_time
 
-DEBUG_ESTIMATORS = False
+@unique
+class SurvivalProbabilityEstimation(Enum):
+    FROM_N_PARTICLES = 1
+    FROM_M_CYCLES = 2
 
 
 def initialize_phi(envs, agent, t: float = 0.0, states_of_interest: set=set()):
@@ -63,6 +69,8 @@ def initialize_phi(envs, agent, t: float = 0.0, states_of_interest: set=set()):
     if len(states_of_interest) > 0:
         states_or_buffer_sizes_of_interest = states_of_interest
     elif isinstance(envs[0], GenericEnvQueueWithJobClasses):
+        # TODO: (2023/09/06) Try to remove the circular import that this import implies (because simulators.queues imports functions or constants from this file (e.g. BURNIN_TIME_STEPS)
+        from Python.lib.simulators.queues import get_blocking_states_or_buffer_sizes
         # TODO: (2023/03/12) When using the linear step policy, limit the states of interests to those where the derivative is not zero, as we don't need to estimate the probability of the other blocking states (e.g. K-1 is of interest but K is NOT)
         states_or_buffer_sizes_of_interest = get_blocking_states_or_buffer_sizes(envs[0], agent)
     elif isinstance(envs[0], EnvironmentDiscrete):
@@ -85,16 +93,19 @@ def initialize_phi(envs, agent, t: float = 0.0, states_of_interest: set=set()):
 
 
 def empirical_mean(envs: list, state_or_buffer_size: Union[list, int]):
-    "Compute the proportion of environments/particles at the given buffer size"
-    if is_scalar(state_or_buffer_size):
-        return np.mean([int(x == state_or_buffer_size) for x in [env.getBufferSize() for env in envs]])
+    "Compute the proportion of environments/particles at the given state or buffer size"
+    if isinstance(envs[0], GenericEnvQueueWithJobClasses):
+        if is_scalar(state_or_buffer_size):
+            return np.mean([int(x == state_or_buffer_size) for x in [env.getBufferSize() for env in envs]])
+        else:
+            return np.mean([int(x == state_or_buffer_size) for x in [tuple(env.getQueueState()) for env in envs]])
     else:
-        return np.mean([int(x == state_or_buffer_size) for x in [tuple(env.getQueueState()) for env in envs]])
+        return np.mean([int(x == state_or_buffer_size) for x in [env.getState() for env in envs]])
 
 
 def update_phi(env, N: int, t: float, dict_phi: dict, state_prev, state_cur):
     """
-    Updates the conditional probability Phi of each buffer size of interest, which are stored by the keys
+    Updates the conditional probability Phi of each state of interest, which are stored by the keys
     of the dictionary of input parameter dict_phi
 
     Arguments:
@@ -115,21 +126,23 @@ def update_phi(env, N: int, t: float, dict_phi: dict, state_prev, state_cur):
 
     state_prev: State
         The previous state of the particle that just changed state given as a valid state of the `env` environment.
-        Normally this is a tuple containing (queue_state, job_class) and NOT simply the queue state.
-        (see e.g. the classes defined in environments/queues.py).
+        The value of this depends on the environment type.
+        - For `GenericEnvQueueWithJobClasses`, this is normally a tuple containing (queue_state, job_class)
+        (and NOT simply the queue state, see e.g. the classes defined in environments/queues.py).
         The important thing is that the actual quantity that should be evaluated when updating Phi(t, x)
-        is obtained by one of the following methods defined in `env`:
-        - getBufferSizeFromState(state) in 1D problems, which returns the single buffer size of the system.
-        - getQueueStateFromState(state) in multidimensional problems, which returns the occupancy level of
-        each job class in the queue system.
+        is obtained by one of the following methods assumed defined in `env`:
+            - getBufferSizeFromState(state) in 1D problems, which returns the single buffer size of the system.
+            - getQueueStateFromState(state) in multidimensional problems, which returns the occupancy level of
+            each job class in the queue system.
+        - For `EnvironmentDiscrete`, this is normally an integer indexing the states of the environment.
 
     state: State
         The current state of the particle that just changed state.
         The same considerations apply as those described for parameter `state_prev`.
 
     Return: dict
-    The updated input dictionary which contains a new row for each buffer size for which the value Phi(t, x) changes
-    w.r.t. the last value stored in the data frame for that buffer size.
+    The updated input dictionary which contains a new row for each state or buffer size for which the value Phi(t, x)
+    changes w.r.t. the last value stored in the data frame for that state or buffer size.
     """
     # Parse parameters state_prev, state_cur
     if isinstance(env, GenericEnvQueueWithJobClasses):
@@ -174,25 +187,29 @@ def empirical_mean_update(mean_value: float,
                           state_or_buffer_size_cur: Union[int, tuple],
                           N: int):
     """
-    Updates the proportion of environments/particles at the given queue state or buffer size based on the previous and current
-    queue state or buffer size of the particle that experienced an event last.
+    Updates the proportion of environments/particles at the given state or buffer size based on the previous and current
+    state or buffer size of the particle that experienced an event last.
 
-    Note that the particle may have experienced an event, but NO change of state observed because either:
-    - the event was an arrival event and the particle was at its full capacity.
-    - the event was a service event and the particle was reactivated to the same state or buffer size as it was before.
+    Note that the particle may have experienced an event or action on it, but NO change of state observed because of
+    environment constraints, such as:
+    - for queue systems, the event was an arrival event and the particle was at its full capacity.
+    - for queue systems, the event was a service event and the particle was reactivated to the same state or buffer size
+    as it was before.
+    - for labyrinths, the particle was at the border and moved in the direction of the wall.
+    - etc.
 
     Arguments:
     mean_value: float
         The current mean value to be updated.
 
     state_or_buffer_size: int or tuple
-        The queue state or buffer size at which the empirical mean should be updated.
+        The state or buffer size at which the empirical mean should be updated.
 
     state_or_buffer_size_prev: int or tuple
-        The previous queue state or buffer size of the particle that just "changed" state.
+        The previous state or buffer size of the particle that just "changed" state.
 
     state_or_buffer_size_cur: int or tuple
-        The current queue state or buffer size of the particle that just "changed" state.
+        The current state or buffer size of the particle that just "changed" state.
 
     N: int
         Number of particles in the Fleming-Viot system.
@@ -211,11 +228,13 @@ def empirical_mean_update(mean_value: float,
     # - +1/N: when the current state or buffer size IS state_or_buffer_size and the previous state or buffer size was NOT state_or_buffer_size.
     # - -1/N: when the current state or buffer size is NOT state_or_buffer_size and the previous state or buffer size WAS state_or_buffer_size
     # print("prev: {}, cur: {}, s: {}".format(state_or_buffer_size_prev, state_or_buffer_size_cur, state_or_buffer_size))
-    return mean_value + (int(state_or_buffer_size_cur == state_or_buffer_size) - int(state_or_buffer_size_prev == state_or_buffer_size)) / N
+
+    # Note that the mean value must be between 0 and 1 as it represents a probability
+    return min( max(0, mean_value + (int(state_or_buffer_size_cur == state_or_buffer_size) - int(state_or_buffer_size_prev == state_or_buffer_size)) / N), 1 )
 
 
 @measure_exec_time
-def estimate_stationary_probabilities(dict_phi, df_proba_surv, expected_absorption_time):
+def estimate_stationary_probabilities(dict_phi, df_proba_surv, expected_absorption_time, uniform_jump_rate=1):
     """
     Estimates the stationary probability for each buffer size of interest in phi using the Fleming-Viot estimator
 
@@ -235,13 +254,26 @@ def estimate_stationary_probabilities(dict_phi, df_proba_surv, expected_absorpti
         Estimated expected absorption cycle time, i.e. the expected time the queue system takes in a
         reabsorption cycle when starting at the stationary absorption distribution of states.
 
+    uniform_jump_rate: (opt) positive float
+        Uniform jump rate used to discretize the underlying continuous-time Markov process represented by the
+        Fleming-Viot system.
+        This must be given when the Fleming-Viot estimator is used in the context of discrete-time Markov chains,
+        in which case the N-particle continuous-time Markov process associated to the Fleming-Viot system is discretized
+        at intervals of size 1/uniform_jump_rate. Typically (for simplicity) this uniform jump rate is equal to the
+        number of particles in the Fleming-Viot system, N, which allows us to change the discrete-time Markov chain at
+        integer steps by changing ONE particle at a time, which in turn represents the uniformization of the original
+        continuous-time Fleming-Viot process where the jump rate of the underlying Markov process (governing the dynamics
+        of each particle) is considered to be equal to 1 (this is the jump rate of jumping to ANY other state of the Markov process),
+        which makes the jump rate of the Fleming-Viot process to be equal to N (i.e. N expected events per unit time,
+        equivalent to one event for a time interval equal to 1/N).
+        default: 1
+
     Return: tuple of dict
     Duple with two dictionaries indexed by the states or buffer sizes (x) of interest with the following content:
     - the stationary probability of the state or buffer size x
     - the value of the integral P(T>t) * Phi(t, x)
    """
-    states_or_buffer_sizes_of_interest = sorted(list(
-        dict_phi.keys()))  # Note that sorted() still works when the keys, i.e. the elements of the list that is being sorted, are in turn a *list* of values
+    states_or_buffer_sizes_of_interest = sorted(list(dict_phi.keys()))  # Note that sorted() still works when the keys, i.e. the elements of the list that is being sorted, are in turn a *list* of values
     # (e.g. sorted( [(2, 2, 0), (1, 2, 3), (0, 1, 5)] ) returns [(0, 1, 5), (1, 2, 3), (2, 2, 0)]
     probas_stationary = dict()
     integrals = dict()
@@ -255,14 +287,15 @@ def estimate_stationary_probabilities(dict_phi, df_proba_surv, expected_absorpti
             df_phi_proba_surv = merge_proba_survival_and_phi(df_proba_surv, dict_phi[x])
 
             # Stationary probability for each buffer size of interest
-            probas_stationary[x], integrals[x] = estimate_proba_stationary(df_phi_proba_surv, expected_absorption_time)
+            probas_stationary[x], integrals[x] = estimate_proba_stationary(df_phi_proba_surv, expected_absorption_time, interval_size=1/uniform_jump_rate)
 
             if DEBUG_ESTIMATORS:
                 plt.figure()
-                plt.step(df_phi_proba_surv['t'], df_phi_proba_surv['P(T>t)'], color="blue", where='post')
-                plt.step(df_phi_proba_surv['t'], df_phi_proba_surv['Phi'], color="red", where='post')
-                plt.step(df_phi_proba_surv['t'], df_phi_proba_surv['Phi'] * df_phi_proba_surv['P(T>t)'], color="green",
-                         where='post')
+                ax = plt.gca()
+                ax.step(df_phi_proba_surv['t'], df_phi_proba_surv['P(T>t)'], color="blue", where='post')
+                ax2 = ax.twinx()
+                ax2.step(df_phi_proba_surv['t'], df_phi_proba_surv['Phi'], color="red", where='post')
+                ax2.step(df_phi_proba_surv['t'], df_phi_proba_surv['Phi'] * df_phi_proba_surv['P(T>t)'], color="green", where='post')
                 plt.title("P(T>t) (blue) and Phi(t,x) (red) and their product (green) for state or buffer size x = {}\n(Integral = Area under the green curve = {:.3f})".format(x, integrals[x]))
 
     return probas_stationary, integrals
@@ -305,18 +338,27 @@ def merge_proba_survival_and_phi(df_proba_surv, df_phi):
 
 
 # @measure_exec_time
-def estimate_proba_stationary(df_phi_proba_surv, expected_absorption_time):
+def estimate_proba_stationary(df_phi_proba_surv, expected_absorption_time, interval_size=1):
     """
-    Computes the stationary probability for a buffer size of interest via Approximation 1 in Matt's draft
+    Computes the stationary probability for states of interest via Approximation 1 in Matt's draft for the Fleming-Viot estimation approach
 
     Arguments:
     df_phi_proba_surv: pandas data frame
-        Data frame with the survival probability P(T>t) and the empirical distribution for each buffer size
+        Data frame with the survival probability P(T>t) and the empirical distribution for each state
         of interest on which the integral that leads to the Fleming-Viot estimation of the stationary
-        probability of the buffer size is computed.
+        probability of the state is computed.
 
     expected_absorption_time: float
         Estimated expected absorption cycle time.
+
+    interval_size: (opt) positive float
+        Factor by which the integral of the Fleming-Viot estimator should be adjusted (i.e. multiplied by) in order to
+        take into account the interval size at which the originally continuous-time Markov chain is sampled.
+        This is useful when Fleming-Viot is used in the context of discrete-time Markov chains, which are considered
+        as the result of sampling an underlying continuous-time Markov chain (on which Fleming-Viot is actually applied,
+        since Fleming-Viot is defined for continuous-time processes) at such interval sizes.
+        In such cases, interval_size should be set to 1/N, where N is the number of particles in the Fleming-Viot system.
+        default: 1
 
     Return: tuple
     Duple with the following content:
@@ -340,7 +382,7 @@ def estimate_proba_stationary(df_phi_proba_surv, expected_absorption_time):
         pd.set_option('display.max_rows', max_rows)
 
     df_phi_proba_surv_Phi_gt0 = df_phi_proba_surv.loc[df_phi_proba_surv['Phi'] > 0,]
-    integral = np.sum(df_phi_proba_surv_Phi_gt0['P(T>t)'] * df_phi_proba_surv_Phi_gt0['Phi'] * df_phi_proba_surv_Phi_gt0['dt'])
+    integral = interval_size * np.sum(df_phi_proba_surv_Phi_gt0['P(T>t)'] * df_phi_proba_surv_Phi_gt0['Phi'] * df_phi_proba_surv_Phi_gt0['dt'])
 
     if DEBUG_ESTIMATORS:
         print("integral = {:.3f}, E(T) = {:.3f}".format(integral, expected_absorption_time))
@@ -356,3 +398,39 @@ def estimate_proba_stationary(df_phi_proba_surv, expected_absorption_time):
             print(stat)
 
     return proba_stationary, integral
+
+
+def estimate_expected_reward(env, probas_stationary: dict, reward=None):
+    """
+    Estimates the expected reward (a.k.a. long-run average reward) of the Markov Reward Process defined in the given environment,
+    assuming a non-zero reward ONLY happens at the states stored in the probas_stationary dictionary.
+
+    Arguments:
+    env: EnvironmentDiscrete
+        Discrete-time/state/action environment where the Markov Reward Process is defined.
+
+    probas_stationary: dict
+        Dictionary with the estimated stationary probability of the states or buffer sizes which are assumed to yield
+        non-zero rewards. These states or buffer sizes are the dictionary keys.
+
+    reward: (opt) float
+        When given, this value is used as the constant reward associated to a state present in the dictionary containing
+        non-zero stationary probabilities, instead of the rewards stored in the environment.
+
+    Return: float
+    Estimated expected reward a.k.a. long-run average reward.
+    """
+    expected_reward = 0.0
+
+    if reward is None:
+        assert isinstance(env, EnvironmentDiscrete)
+        dict_terminal_rewards = env.getTerminalRewardsDict()
+        if not set(dict_terminal_rewards.keys()).issubset(set(probas_stationary.keys())):
+            raise ValueError("The terminal states with non-zero rewards ({}) should all be present in the dictionary of estimated stationary probability ({})." \
+                             .format(set(dict_terminal_rewards.keys()), set(probas_stationary.keys())))
+
+    for s in probas_stationary.keys():
+        if probas_stationary[s] > 0.0:  # Note that nan > 0 returns False (OK)
+            expected_reward += (dict_terminal_rewards[s] if reward is None else reward) * probas_stationary[s]
+
+    return expected_reward

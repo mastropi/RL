@@ -31,6 +31,8 @@ from gym import spaces
 
 from Python.lib.queues import QueueMM
 
+from Python.lib.utils.basic import is_integer
+
 # NOTE: We use IntEnum instead of Enum because of the problem of comparison described here!!
 # https://stackoverflow.com/questions/28125055/enum-in-python-doesnt-work-as-expected
 # The problem of using Enum has to do with the fact that the comparison between two Enum values
@@ -595,7 +597,7 @@ class EnvQueueSingleBufferWithJobClasses(GenericEnvQueueWithJobClasses):
             assert self.getJobClass() is not None, "The job class of the arrived job is defined"
 
             # Convert the action to an ActionTypes class if given as integer
-            if isinstance(action, int) or isinstance(action, np.int32) or isinstance(action, np.int64):
+            if is_integer(action):
                 # Convert the action to an ActionTypes value
                 action = Actions(action)
 
@@ -752,7 +754,7 @@ class EnvQueueLossNetworkWithJobClasses(GenericEnvQueueWithJobClasses):
         assert self.getJobClass() is not None, "The job class of the arrived job is defined"
 
         # Convert the action to an ActionTypes class if given as integer
-        if isinstance(action, int) or isinstance(action, np.int32) or isinstance(action, np.int64):
+        if is_integer(action):
             # Convert the action to an ActionTypes value
             action = Actions(action)
 

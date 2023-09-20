@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Created on Sun Sep 4 17:09:10 2023
+Created on Mon Sep 4 17:09:10 2023
 
 @author: Daniel Mastropietro
 @description: Estimators of different types and purposes that cannot be clearly classed into any of the other estimators
@@ -13,8 +13,7 @@ import numpy as np
 
 from Python.lib.agents.learners import ResetMethod
 from Python.lib.agents.learners.value_functions import ValueFunctionApprox
-
-DEBUG_ESTIMATORS = False
+from Python.lib.estimators import DEBUG_ESTIMATORS
 
 
 class EstValueFunctionOfflineDeterministicNextState:

@@ -15,6 +15,9 @@ from matplotlib import pyplot as plt
 from Python.lib.agents import GenericAgent
 from Python.lib.agents.policies import PolicyTypes
 
+from Python.lib.environments.queues import GenericEnvQueueWithJobClasses
+from Python.lib.estimators.fv import SurvivalProbabilityEstimation
+
 from Python.lib.utils.basic import is_scalar, is_integer
 from Python.lib.utils.computing import all_combos_with_max_limits
 
@@ -23,6 +26,15 @@ from Python.lib.utils.computing import all_combos_with_max_limits
 class LearningMethod(Enum):
     MC = 1
     FV = 2
+
+# Default number of burn-in time steps to exclude from the estimation of expectations
+# (e.g. E(T) in Monte-Carlo estimation and E(T_A) in Fleming-Viot estimation) in order to assume the process is stationary
+BURNIN_TIME_STEPS = 20
+# Default minimum number of observed cycles (under assumed stationarity) that should be used to estimate expectations under
+# stationarity (e.g. stationary probabilities, E(T) in Monte-Carlo, E(T_A) in Fleming-Viot)
+MIN_NUM_CYCLES_FOR_EXPECTATIONS = 5
+
+DEBUG_TRAJECTORIES = False
 
 
 class SetOfStates:
@@ -240,6 +252,94 @@ class SetOfStates:
     def __str__(self):
         return self.getStates()
 
+
+#-------------------------------------------- FUNCTIONS --------------------------------------#
+def choose_state_from_setofstates_based_on_distribution(set_of_states: SetOfStates, dist_proba: dict,
+                                                        exactly_one_dimension_at_boundary=False,
+                                                        at_least_one_dimension_at_boundary=False):
+    "Chooses a state from the set of states using the given probability distribution, truncated to those states"
+    if exactly_one_dimension_at_boundary and at_least_one_dimension_at_boundary:
+        raise ValueError("Parameters exactly_one_dimension_at_boundary and at_least_one_dimension_at_boundary cannot be both True")
+
+    all_states = set_of_states.getStates(   exactly_one_dimension_at_boundary=exactly_one_dimension_at_boundary,
+                                            at_least_one_dimension_at_boundary=at_least_one_dimension_at_boundary)
+    if not all_states.issubset(set(dist_proba.keys())):
+        raise ValueError("All states to select from must be present in the dictionary containing their probability distribution: {}".format(all_states))
+
+    # Truncate the given distribution to the given set of states
+    states, dist_states = zip(*filter(lambda state_proba_pair: state_proba_pair[0] in all_states, dist_proba.items()))
+    dist = dist_states / np.sum(dist_states)
+    assert np.isclose(np.sum(dist), 1.0), \
+        "The probabilities in the distribution on which start states in the activation set are sampled sums up to 1: {}" \
+        .format(np.sum(dist))
+
+    # Choose a state following the given distribution
+    idx_selected_value = np.random.choice(len(states), p=dist)
+    chosen_state = states[idx_selected_value]
+
+    if exactly_one_dimension_at_boundary:
+        assert sum(np.array(chosen_state) == np.array(set_of_states.getSetBoundaries())) == 1, \
+            "Exactly ONE dimension of the start state must be at its limit value (boundary) defined by {}: {}" \
+                .format(set_of_states.getSetBoundaries(), chosen_state)
+    elif at_least_one_dimension_at_boundary:
+        assert np.sum(np.array(chosen_state) == np.array(set_of_states.getSetBoundaries())) >= 1, \
+            "At least one dimension must be at its limit (boundary) defined by the absorption set ({}): {}" \
+            .format(set_of_states.getSetBoundaries(), chosen_state)
+
+    return chosen_state
+
+
+def is_state_in_setofstates(state, set_of_interest: SetOfStates):
+    "Check whether the QUEUE state of the system is in the set of queue states of interest"
+    assert set_of_interest is not None
+    if set_of_interest.getStorageFormat() == "states":
+        states_of_interest = set_of_interest.getStates()
+        return state in states_of_interest
+    else:
+        # The set is assumed to be defined by its boundaries in each dimension and include all states whose dimension value is smaller than or equal to the respective boundary
+        set_of_interest_boundaries = set_of_interest.getSetBoundaries()
+        # Note: we convert lists to arrays in order to perform an element-wise comparison of their elements
+        particle_state = np.array([state]) if is_scalar(state) else np.array(state)
+        set_boundaries = np.array([set_of_interest_boundaries]) if is_scalar(set_of_interest_boundaries) else np.array(set_of_interest_boundaries)
+        if  any(particle_state == set_boundaries) and \
+            all(particle_state <= set_boundaries):
+            return True
+        else:
+            return False
+
+
+def choose_state_from_set(_set, dist_proba: dict=None):
+    """
+    Chooses a state from a set, optionally following a given distribution
+
+    Arguments:
+    _set: set
+        Set from where a state must be chosen.
+
+    dist_proba: dict
+        Dictionary indexed by the states in `_set`.
+        When given, it must have the same number of elements as `_set`.
+        default: None
+
+    Return: state in _set
+    The state chosen from the set of states `_set`, which is chosen uniformly at random when dist_proba=None or
+    following the distribution in the `dist_proba` dictionary otherwise.
+    """
+    if not isinstance(_set, set):
+        raise ValueError("Parameter `_set_` must be a set ({})".format(type(_set)))
+
+    if dist_proba is None:
+        # Uniformly selected state
+        start_state = np.random.choice(list(_set))
+    else:
+        # State is selected following the given distribution
+        # Note that we sort the dictionary keys because `list(_set)` returns the elements in `_set` sorted.
+        if not isinstance(dist_proba, dict):
+            raise ValueError("The probability distribution of states must be a dictionary ({})".format(type(dist_proba)))
+        start_state = np.random.choice(list(_set), 1, p=[dist_proba[k] for k in sorted(dist_proba.keys())])[0]  # `[0]` because the returned value is an array of one element
+    return start_state
+
+
 def check_done(tmax, t, state, action, reward):
     """
     Checks whether the simulation is done
@@ -248,7 +348,7 @@ def check_done(tmax, t, state, action, reward):
         Maximum discrete time allowed for the simulation.
 
     t: int
-        Current queue simulation time.
+        Current simulation time.
 
     state: Environment dependent
         S(t): state of the environment at time t, BEFORE the action is taken.
@@ -260,7 +360,7 @@ def check_done(tmax, t, state, action, reward):
         R(t+1): reward yielded by the environment after taking action A(t) at state S(t).
 
     Return: bool
-        Whether the queue simulation is done because the maximum number of iterations has been reached.
+        Whether the simulation is done because the maximum number of iterations has been reached.
     """
     if t < tmax:
         done = False
@@ -293,7 +393,7 @@ def step(t, env, agent: GenericAgent, policy_type: PolicyTypes):
     Return: tuple
     Tuple containing the following elements:
     - action: the action taken by the agent on the given policy
-    - observation: the next state on which the queue transitions to after the action taken
+    - observation: the next state of the environment after the action is taken
     - reward: the reward received by the agent after taking the action and transitioning to the next state
     - info: dictionary with relevant additional information
     """
@@ -401,3 +501,97 @@ def analyze_event_times(rates: Union[list, tuple, np.ndarray], times, groups, gr
             axes[0][j].hist(_times)
             axes[0][j].set_title("Dist. event times: " + group_name + " {}, n = {}, mean = {:.3f}, std = {:.3f}, SE = {:.3f}" \
                                  .format(j, len(_times), np.mean(_times), np.std(_times), np.std(_times)/np.sqrt(len(_times))))
+
+
+def parse_simulation_parameters(dict_params_simul, env):
+    """
+    Parses input parameters received by the estimate_blocking_*() functions
+
+    Arguments:
+    dict_params_simul: dict
+        Dictionary of simulation and estimation parameters to parse.
+        It should contain at least the following keys:
+        - T: either the number of simulation steps to use in the Monte-Carlo simulation when estimating probabilities
+        using Monte-Carlo or the number of arrival events to use in the Monte-Carlo simulation used in
+        the FV estimator of probabilities to estimate E(T_A), i.e. the expected reabsorption time of a single Markov chain,
+        - One of the following set of keys:
+            a) for queue systems with a single buffer governing blocking (e.g. single-server, multi-server with single buffer)
+            holding jobs that await being served. If we call this value J, then J-1 is the absorption buffer size.
+                - buffer_size_activation: the overall system's "buffer size for activation" for systems with a single buffer.
+            b) for all other systems (e.g. network systems where blocking occurs at multi-dimensional states, such as a loss network with multi-class jobs):
+                - absorption_set: SetOfStates object defining the set of absorption states.
+                - activation_set: SetOfStates object defining the set of activation states.
+            When both (a) and (b) are given in the dictionary, and the system is a queue system, precedence is given to
+            the information provided in (a).
+
+        The following keys are optional:
+        - burnin_time_steps: number of burn-in time steps to allow at the beginning of the simulation in order to
+        consider that the Markov process is in stationary regime.
+        default: BURNIN_TIME_STEPS
+        - min_num_cycles_for_expectations: minimum number of observed reabsorption cycles to consider that the expected
+        reabsorption cycle time, E(T_A), can be reliably estimated.
+        default: MIN_NUM_CYCLES_FOR_EXPECTATIONS
+        - method_survival_probability_estimation: method to use to estimate the survival probability P(T>t)
+        in the Fleming-Viot estimation approach, which can be either:
+            - SurvivalProbabilityEstimation.FROM_N_PARTICLES, where the survival probability is estimated from the first
+            absorption times of each of the N particles used in the FV simulation, or
+            - SurvivalProbabilityEstimation.FROM_M_CYCLES, where the survival probability is estimated from the M cycles
+            defined by the return to the absorption set A of a single particle being simulated. The number M is a
+            function of the number of arrival events T and of J, the size of the absorption set A. For a fixed
+            T value, M decreases as J increases as the queue has less probability of visiting a state further away from 0.
+
+            ***FROM_N_PARTICLES is the the preferred method*** because of the non-control of the number of cycles M in
+            the other case, whereas N is controlled by the parameter defining the number of particles used in the FV simulation.
+            If we increase N, the simulation time for FV will be larger as this is determined by the maximum observed survival time
+            (as no contribution to the integral appearing in the FV estimator (int{P(T>t)*phi(t)}) is received from
+            events happening past the maximum observed survival time).
+        default: SurvivalProbabilityEstimation.FROM_N_PARTICLES
+        - seed: the seed to use for the pseudo-random number generation.
+        default: None
+
+    env: Environment object
+        Environment that should be used to compute the burn-in time (i.e. absolute time) from parameter 'burnin_time_steps',
+        which is done using the compute_burnin_time_from_burnin_time_steps() function that uses the expected inter-event time
+        computed from the job arrival rates and service rates of the queue.
+
+    Return: dict
+    Input dictionary with the following parsed parameters that are normally used in the simulation process, depending on the environment:
+    - T                                         (all environments)
+    - absorption_set                            (all environments)
+    - activation_set                            (all environments)
+    - burnin_time_steps                         (all environments)
+    - burnin_time                               (queue environment)
+    - min_num_cycles_for_expectations           (all environments)
+    - method_survival_probability_estimation    (all environments)
+    - seed                                      (all environments)
+    """
+    set_required_simul_params = set({'T', 'absorption_set', 'activation_set'})
+
+    if isinstance(env, GenericEnvQueueWithJobClasses):
+        if 'buffer_size_activation' in dict_params_simul.keys():
+            if dict_params_simul['buffer_size_activation'] < 1:
+                raise ValueError("The activation buffer size must be at least 1: {}".format(dict_params_simul['buffer_size_activation']))
+            # Define the simulation parameters that will be used from now on below in a unified estimation process that
+            # encompasses both the case where blocking occurs at a single buffer size (e.g. single-server system or
+            # multi-server system with single buffer) or when it occurs at a set of states (e.g. loss network with multi-class jobs).
+            dict_params_simul['absorption_set'] = SetOfStates(set_boundaries=dict_params_simul['buffer_size_activation'] - 1)
+            dict_params_simul['activation_set'] = SetOfStates(set_boundaries=dict_params_simul['buffer_size_activation'])
+    if not set_required_simul_params.issubset(dict_params_simul.keys()):
+        raise ValueError("Not all required parameters were given in `dict_params_simul`, which requires: {}\nGiven: {}".format(set_required_simul_params, dict_params_simul.keys()))
+
+    # Parse the remaining (optional) simulation parameters
+    dict_params_simul['burnin_time_steps'] = dict_params_simul.get('burnin_time_steps', BURNIN_TIME_STEPS)
+    # Continuous burn-in time used to filter the continuous-time cycle times observed during the single-particle simulation
+    # that is used to estimate the expected reabsorption cycle time, E(T_A).
+    if isinstance(env, GenericEnvQueueWithJobClasses):
+        # TODO: (2023/09/06) Try to remove the circular import that this import implies (because simulators.queues imports functions or constants from this file (e.g. BURNIN_TIME_STEPS)
+        from Python.lib.simulators.queues import compute_burnin_time_from_burnin_time_steps
+        dict_params_simul['burnin_time'] = compute_burnin_time_from_burnin_time_steps(env, dict_params_simul['burnin_time_steps'])
+        print("Computed burn-in time from parameter burnin_time_steps = {}: {}".format(dict_params_simul['burnin_time_steps'], dict_params_simul['burnin_time']))
+
+    dict_params_simul['min_num_cycles_for_expectations'] = dict_params_simul.get('min_num_cycles_for_expectations', MIN_NUM_CYCLES_FOR_EXPECTATIONS)
+    dict_params_simul['method_survival_probability_estimation'] = dict_params_simul.get('method_survival_probability_estimation', SurvivalProbabilityEstimation.FROM_N_PARTICLES)
+    dict_params_simul['seed'] = dict_params_simul.get('seed')
+
+    return dict_params_simul
+#-------------------------------------------- FUNCTIONS --------------------------------------#

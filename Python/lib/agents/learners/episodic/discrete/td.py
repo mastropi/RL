@@ -268,6 +268,7 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
         delta = reward + self.gamma * self.V.getValue(next_state) - state_value
 
         # Check whether we are learning the differential value function (average reward criterion) and adjust delta accordingly
+        # Ref: Sutton, pag. 250
         if self.criterion == LearningCriterion.AVERAGE:
             delta -= self.getAverageReward()
 
