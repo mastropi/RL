@@ -23,7 +23,7 @@ import pandas as pd
 
 from Python.lib.agents.learners import LearningCriterion, ResetMethod
 from Python.lib.agents.learners.episodic.discrete import Learner, AlphaUpdateType
-from Python.lib.agents.learners.value_functions import ValueFunctionApprox
+from Python.lib.agents.learners.value_functions import StateValueFunctionApprox
 
 DEFAULT_NUMPY_PRECISION = np.get_printoptions().get('precision')
 DEFAULT_NUMPY_SUPPRESS = np.get_printoptions().get('suppress')
@@ -53,14 +53,15 @@ class LeaMCLambda(Learner):
                  adjust_alpha=False, alpha_update_type=AlphaUpdateType.FIRST_STATE_VISIT,
                  adjust_alpha_by_episode=False, alpha_min=0.,
                  reset_method=ResetMethod.ALLZEROS, reset_params=None, reset_seed=None,
+                 store_history_over_all_episodes=False,
                  learner_type=LearnerType.MC,
                  debug=False):
         super().__init__(env, criterion=criterion, alpha=alpha, adjust_alpha=adjust_alpha, alpha_update_type=alpha_update_type, adjust_alpha_by_episode=adjust_alpha_by_episode, alpha_min=alpha_min,
-                         reset_method=reset_method, reset_params=reset_params, reset_seed=reset_seed)
+                         reset_method=reset_method, reset_params=reset_params, reset_seed=reset_seed, store_history_over_all_episodes=store_history_over_all_episodes)
         self.debug = debug
 
         # Attributes that MUST be presented for all MC methods
-        self.V = ValueFunctionApprox(self.env.getNumStates(), self.env.getTerminalStates())
+        self.V = StateValueFunctionApprox(self.env.getNumStates(), self.env.getTerminalStates())
         self.Q = None
         self.gamma = gamma
         
@@ -122,14 +123,15 @@ class LeaMCLambda(Learner):
     # For more information, see the entry on 13-Apr-2022 in my Tasks-Projects.xlsx file.
     def deprecated_learn_pred_V_slow(self, t, state, action, next_state, reward, done, info):
         # This learner updates the estimate of the value function V ONLY at the end of the episode
-        self._update_trajectory(t, state, reward)
+        self._update_trajectory(t, state, action, reward)
         if done:
-            # Store the trajectory and rewards
-            self.store_trajectory(next_state)
-            self._update_state_counts(t+1, next_state)
-
             # Terminal time
             T = t + 1
+
+            # Store the trajectory
+            self.store_trajectory_at_end_of_episode(T, next_state, debug=self.debug)
+            self._update_state_counts(t+1, next_state)
+
             assert len(self._states) == T and len(self._rewards) == T + 1, \
                     "The number of _states visited ({}) is equal to T ({}) " \
                     .format(len(self._states), T) + \
@@ -157,8 +159,6 @@ class LeaMCLambda(Learner):
                 delta = gtlambda - self.V.getValue(state)
                 self.updateV(state, delta)
 
-            self.final_report(t)
-
     def deprecated_gt2tn(self, start, end):
         """
         @param start:       start time, t
@@ -174,7 +174,7 @@ class LeaMCLambda(Learner):
             # The end time is NOT the end of the episode
             # => Add all return coming after the final time considered here (`end`) as the current estimate of
             # the value function at the end state.
-            G += self.gamma**(end - start) * self.getV().getValue(self._states[end])
+            G += self.gamma**(end - start) * self.V.getValue(self._states[end])
 
         return G
     #--------------------- MC(lambda): lambda-return Monte Carlo (SLOW) --------------------------#
@@ -183,22 +183,20 @@ class LeaMCLambda(Learner):
     #----------------------------- Traditional Monte Carlo ---------------------------------------#
     def learn_pred_V_mc(self, t, state, action, next_state, reward, done, info):
         "Learn the prediction problem (estimate the state value function) using explicitly MC"
-        # Update the full trajectory (over all episodes)
-        self.update_trajectory(t, state, action, reward)
         # Update the trajectory of the current episode only
-        self._update_trajectory(t, state, reward)
+        self._update_trajectory(t, state, action, reward)
 
         if done:
-            # Store the trajectory and rewards
-            self.store_trajectory(next_state)
-            self._update_state_counts(t+1, next_state)
-
             # This means t+1 is the terminal time T
             # (recall we WERE in time t and we STEPPED INTO time t+1, so T = t+1)
             T = t + 1
-            self.learn_mc(T)
 
-            self.final_report(T)
+            # Store the trajectory
+            self.store_trajectory_at_end_of_episode(T, next_state, debug=self.debug)
+            self._update_state_counts(t+1, next_state)
+
+            # Learn the value functions!
+            self.learn_mc(T)
 
     def learn_mc(self, T):
         """
@@ -224,7 +222,7 @@ class LeaMCLambda(Learner):
         # --as in the Mountain Car example when the next action is chosen uniformly at random)
         # Note that we don't affect the initial G with gamma, because gamma comes into play in the recursive formula
         # used below to compute the final G)
-        G = self.V.getValue(self.states[-1])
+        G = self.V.getValue(self._states[-1])
 
         # Keep track of the number of updates to the value function at each state
         # so that we can assert that there is at most one update for the first-visit MC algorithm
@@ -235,19 +233,19 @@ class LeaMCLambda(Learner):
         # we trade data structure creation and maintenance with easier algorithmic implementation of
         # first visit that does NOT require a special data structure storage.
         for tt in np.arange(T,0,-1) - 1:     # This is T-1, T-2, ..., 0
-            state = self.states[tt]
-            G = self.gamma*G + self.rewards[tt+1]
+            state = self._states[tt]
+            G = self.gamma*G + self._rewards[tt+1]      # This is the reward of going from state `state` observed at time tt to the state observed at the next time tt+1
             if self.criterion == LearningCriterion.AVERAGE:
                 # Compute the differential return
                 # Ref: Sutton (2018), pag. 250
-                G -= self.getAverageReward()
+                G -= self._average_reward_in_episode
             # First-visit MC: We only update the value function estimation at the first visit of the state
             if self._states_first_visit_time[state] == tt:
                 delta = G - self.V.getValue(state)
                 if self.criterion == LearningCriterion.AVERAGE:
                     # Compute the differential delta which should be used to update the differential value function
                     # Ref: Sutton (2018), pag. 250
-                    delta -= self.getAverageReward()
+                    delta -= self._average_reward_in_episode
                 self.updateV(state, delta)
                 nupdates[state] += 1
 
@@ -256,34 +254,33 @@ class LeaMCLambda(Learner):
 
 
     #---------------------- MC(lambda): lambda-return Monte Carlo ----------------------------------#
+    # TODO: (2023/10/21) Implement the correction of the lambda-return needed in the average reward criterion case, as done above in learn_mc()
+    # In principle the values in _G_lambda_list (computed in _updateG()) should be corrected with the average reward.
     def learn_pred_V_lambda_return(self, t, state, action, next_state, reward, done, info):
         """
         Learn the prediction problem: estimate the state value function.
 
         This function is expected to be called ONLINE, i.e. at each visit to a state, as opposed to OFFLINE,
         i.e. at the end of an episode.
-        HOWEVER, learning, i.e. the update of the value function happens ONLY at the end of the episode.
+        HOWEVER, learning, i.e. the update of the value function, happens ONLY at the end of the episode.
         This means that every time this function is called before the end of the episode, the value function remains
         constant.
         """
-        # Update the full trajectory (over all episodes)
-        self.update_trajectory(t, state, action, reward)
         # Update the trajectory of the current episode only
-        self._update_trajectory(t, state, reward)
+        self._update_trajectory(t, state, action, reward)
         self._updateG(t, state, next_state, reward, done)
 
         if done:
-            #-- Learn the new value of the state value function
-            # Store the trajectory and rewards
-            self.store_trajectory(next_state)
-            self._update_state_counts(t+1, next_state)            
-
             # This means t+1 is the terminal time T
             # (recall we WERE in time t and we STEPPED INTO time t+1, so T = t+1)
             T = t + 1
-            self.learn_lambda_return(T)
 
-            self.final_report(T)
+            # Store the trajectory
+            self.store_trajectory_at_end_of_episode(T, next_state, debug=self.debug)
+            self._update_state_counts(t+1, next_state)            
+
+            # Learn the value functions!
+            self.learn_lambda_return(T)
 
     def _updateG(self, t, state, next_state, reward, done):
         times_reversed = np.arange(t, -1, -1)  # This is t, t-1, ..., 0
@@ -390,7 +387,7 @@ class LeaMCLambda(Learner):
         if self.debug:
             print("DONE:")
         for tt in np.arange(T):
-            state = self.states[tt]
+            state = self._states[tt]
             # First-visit MC: We only update the value function estimation at the first visit of the state
             if self._states_first_visit_time[state] == tt:
                 # Value of the error (delta) where the lambda-return is used as the current value function estimate,
@@ -420,6 +417,13 @@ class LeaMCLambda(Learner):
         self._update_alphas(state)
     #------------------- Auxiliary function: value function udpate -------------------------------#
 
+    #-- Getters
+    def getV(self):
+        return self.V
+
+    def getQ(self):
+        return self.Q
+
 
 class LeaMCLambdaAdaptive(LeaMCLambda):
     
@@ -427,9 +431,10 @@ class LeaMCLambdaAdaptive(LeaMCLambda):
                  adjust_alpha=False, alpha_update_type=AlphaUpdateType.FIRST_STATE_VISIT,
                  adjust_alpha_by_episode=True, alpha_min=0.,
                  reset_method=ResetMethod.ALLZEROS, reset_params=None, reset_seed=None,
+                 store_history_over_all_episodes=False,
                  debug=False):
         super().__init__(env, alpha, gamma, lmbda, adjust_alpha, alpha_update_type, adjust_alpha_by_episode, alpha_min,
-                         reset_method=reset_method, reset_params=reset_params, reset_seed=reset_seed,
+                         reset_method=reset_method, reset_params=reset_params, reset_seed=reset_seed, store_history_over_all_episodes=store_history_over_all_episodes,
                          debug=debug)
 
         # Arrays that keep track of previous _rewards for each state
@@ -440,12 +445,16 @@ class LeaMCLambdaAdaptive(LeaMCLambda):
 
     def learn_pred_V(self, t, state, action, next_state, reward, done, info):
         "Learn the prediction problem: estimate the state value function"
-        self._update_trajectory(t, state, reward)
+        self._update_trajectory(t, state, action, reward)
         self._updateG(t, state, next_state, reward, done)
 
         if done:
-            # Store the trajectory and rewards
-            self.store_trajectory(next_state)
+            # This means t+1 is the terminal time T
+            # (recall we WERE in time t and we STEPPED INTO time t+1, so T = t+1)
+            T = t + 1
+
+            # Store the trajectory
+            self.store_trajectory_at_end_of_episode(T, next_state, debug=self.debug)
             self._update_state_counts(t+1, next_state)            
             
             # Compute the gamma-discounted _rewards for each state visited in the episode
@@ -459,7 +468,7 @@ class LeaMCLambdaAdaptive(LeaMCLambda):
             mean_abs_delta_state_rewards = np.mean( abs_delta_state_rewards )
             self.state_lambdas[ visited_states ] = self.lmbda * np.exp( abs_delta_state_rewards - mean_abs_delta_state_rewards )
             LambdaAdapt = pd.DataFrame.from_items([
-                                ('visited', self.getAllStates()[ visited_states ]),
+                                ('visited', self.env.getAllStates()[ visited_states ]),
                                 ('count', self.state_counts[ visited_states ]),
                                 ('rewards_prev_epi', state_rewards_prev[ visited_states ]),
                                 ('rewards_curr_epi', self.state_rewards[ visited_states ]),
@@ -470,14 +479,12 @@ class LeaMCLambdaAdaptive(LeaMCLambda):
             print(LambdaAdapt)
             #input("Press Enter to continue...")
 
-            # This means t+1 is the terminal time T
-            # (recall we WERE in time t and we STEPPED INTO time t+1, so T = t+1)
-            T = t + 1
+            # TODO: (2023/10/21) Fix this call, because currently this learn() method is not found
             self.learn(T)
 
     def _computeStateRewards(self, terminal_state):
         # Length of the episode
-        T = len(self.states)
+        T = len(self._states)
         
         # Reset the state rewards and the state counts to 0
         # so that we can compute them fresh for the current episode
@@ -488,12 +495,12 @@ class LeaMCLambdaAdaptive(LeaMCLambda):
         # (iteratively from the end of the episode to its beginning) 
         next_state = terminal_state     # Recall that the state reward for the terminal state is defined as 0
         for t in np.arange(T, 0, -1) - 1: # this is T-1, T-2, ..., 0 (the first element is included, the last one is not)
-            state = self.states[t]
+            state = self._states[t]
 
             # In the computation of the discounted reward for the current state
             # we use _rewards[t+1] and this is ok even for t = T-1 because we have constructed
             # the rewards array to have one more element than the states array.
-            discounted_reward_for_state = self.rewards[t+1] + self.gamma * self.state_rewards[next_state]
+            discounted_reward_for_state = self._rewards[t+1] + self.gamma * self.state_rewards[next_state]
 
             # Update the stored state _rewards which is set to the average discounted _rewards
             self._updateStateRewards(state, discounted_reward_for_state)

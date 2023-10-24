@@ -1,6 +1,6 @@
 # DM-2023/05/30
-# Package required for the WHOLE environment running the RL project (including Python-3.6, etc.)
-# To be used by pip by running the following command within a virtual environment created with virtualenv:
+# Packages required for the WHOLE environment running the RL project (including Python-3.6, etc.)
+# To be used to reproduce the environment using pip, by running the following command within a virtual environment created with virtualenv:
 #   pip install -r requirements.txt
 alabaster==0.7.10
 anaconda-client==1.6.9

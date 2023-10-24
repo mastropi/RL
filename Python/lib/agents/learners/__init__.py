@@ -59,7 +59,7 @@ class GenericLearner:
     """
     Class defining methods that are generic to ALL learners.
 
-    NOTE: Before using any learner the simulation program should call the reset() method!
+    IMPORTANT: Before using any learner the simulation program should call the reset() method!
     Otherwise, the simulation process will most likely fail (because variables that are
     defined in the reset method to track the simulation process will not be defined).
     In addition, the *specific* Learner constructor should NOT call the reset() method
@@ -79,7 +79,7 @@ class GenericLearner:
             The environment needs not be "discrete" in the sense the gym package uses discrete, namely that there is
             a pre-defined number of states (as is the case in the EnvironmentDiscrete environment of gym).
 
-        criterion: LearningCriterion
+        criterion: (opt) LearningCriterion
             The criterion used to learn the value functions, either DISCOUNTED (for episodic tasks with discount factor gamma < 1)
             or AVERAGE, for the average reward criterion (for continuing tasks, with discount factor gamma = 1).
             default: LearningCriterion.DISCOUNTED
@@ -88,21 +88,23 @@ class GenericLearner:
             Initial learning rate.
             default: 1.0
 
-        adjust_alpha: bool
+        adjust_alpha: (opt) bool
             Whether alpha should be updated when the methods that are responsible for updating alpha are called.
             default: False
 
-        func_adjust_alpha: func
+        func_adjust_alpha: (opt) callable
             Function that is used on the counter of whatever KPI is used to divide the initial alpha
             when the methods responsible for updating alpha perform the update operation.
             Ex: `np.sqrt`, in which case alpha is updated as alpha_start / np.sqrt(n) where n is the counter of the KPI
             default: None, in which case the identity function is applied to n when dividing alpha
 
-        min_count_to_update_alpha: int
+        min_count_to_update_alpha: (opt) int
             Minimum count of a state-action pair at which alpha starts to be updated by the update_learning_rate_by_state_action_count(s,a) method.
+            default: 0
 
-        min_time_to_update_alpha: int
+        min_time_to_update_alpha: (opt) int
             Minimum learning time step at which alpha starts to be updated by the update_learning_rate_by_learning_epoch() method.
+            default: 0
         """
         self.env = env
         self.criterion = criterion
@@ -133,7 +135,14 @@ class GenericLearner:
         self.actions = []       # Stores A(t), the action taken at state S(t)
         self.rewards = [0]      # Stores R(t+1) = R(S(t), A(t)), the reward received after taking action A(t) on state S(t)
                                 # Note that we initialize the rewards array with ONE element set to 0, so that we can refer to the
-                                # sequence S(0), A(0), R(1), S(1), A(1), R(2), ... and we define R(0) as 0.
+                                # sequence S(0), A(0), R(1), S(1), A(1), R(2), ... by referring to the CORRESPONDING indices
+                                # in the self.states, self.actions, self.rewards lists, respectively.
+                                # NOTE: In episodic tasks, it is expected that at the end of each episode, the lengths of these lists
+                                # be the same; this situation would be obtained by adding, once the episode has ended,
+                                # the terminal state to the end of the list self.states, and adding np.nan to the end of self.actions
+                                # (which indicates that no action is taken after the terminal state is reached).
+                                # Having all of these three lists of equal length should help the implementation
+                                # of certain computations, such as returns at different time steps, G(t).
 
         # Count of visited states and visited state-actions
         # Depending on the type of learner (e.g. learner of V or learner of Q) one ore the other will be updated.
@@ -192,6 +201,8 @@ class GenericLearner:
         if reset_value_functions:
             # Only reset the initial estimates of the value functions when requested
             self.reset_value_functions()
+            # Reset the average reward
+            self.average_reward = 0.0
 
         if reset_trajectory:
             self.reset_trajectory()
@@ -343,7 +354,8 @@ class GenericLearner:
     def update_average_reward(self):
         # TODO: (2023/08/31) According to the algorithm for learning the average reward presented in Sutton (2018), pag. 251, a better learner of the average reward uses a separate learning rate which is applied on the delta error... Implement this.
         # I think this should probably be implemented within each learner inheriting from this class...(?) because they store the delta error value to use.
-        self.average_reward += (self.reward - self.average_reward) / len(self.rewards)
+        n_rewards_observed_so_far = len(self.rewards) - 1   # We subtract 1 to the length of self.rewards because the first element in self.rewards is a fictitious reward of 0 (see its initialization in the constructor)
+        self.average_reward += (self.reward - self.average_reward) / max(1, n_rewards_observed_so_far)  # `max(1, ...)` to avoid division by 0 if we are storing the very first reward
 
     def getAverageLearningRates(self):
         return self.alpha_mean

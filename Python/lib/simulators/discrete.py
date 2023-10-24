@@ -34,12 +34,18 @@ class Simulator:
 
     Arguments:
     env: Environment
-        Environment that is assumed to have the following getters and setters defined:
+        Environment that is assumed to have the following methods, getters and setters defined:
+        - seed(): to set the random generator seed
+        - reset(): to reset the environment's state
         - getNumStates()
         - getNumActions()
         - getInitialStateDistribution() --> returns an array that is a COPY of the initial state distribution
             (responsible for defining the initial state when running the simulation)
         - getState() --> returns the current state of the environment
+        - getDimension()
+        - getAllState()
+        - getTerminalStates()
+        - getInitialStateDistribution()
         - setInitialStateDistribution()
 
     agent: Agent
@@ -507,7 +513,7 @@ class Simulator:
                 # because we have updated Phi(t,x), therefore the t value at which Phi changed must be a time step that is counted as such.
             else:
                 # Step on the selected particle
-                action = policy.choose_action()
+                action = policy.choose_action(state)
                 next_state, reward, done_episode, info = envs[idx_particle].step(action)
 
                 # Learn: i.e. update the value function (stored in the learner) with the new observation
@@ -707,6 +713,7 @@ class Simulator:
         self.reset()
 
         #--- Parse input parameters
+        # TODO: (2023/10/21) Now that the classes defining gridworld environments in environments/gridworlds.py accept the initial state distribution as parameter, consider passing that information when defining the environment so that we don't need to do this setup here which is a little cumbersome...
         # Define initial state
         nS = self.env.getNumStates()
         if start is not None:
@@ -849,7 +856,7 @@ class Simulator:
                 print("\t[DEBUG] Starts at state {}".format(self.env.getState()))
                 print("\t[DEBUG] State value function at start of episode:\n\t{}".format(learner.getV().getValues()))
 
-            # Time step in the episode (the first time step is t_episode = 0
+            # Time step within the current episode (the first time step is t_episode = 0
             t_episode = -1
             while not done:
                 t += 1
@@ -857,7 +864,7 @@ class Simulator:
 
                 # Current state and action on that state leading to the next state
                 state = self.env.getState()
-                action = policy.choose_action()
+                action = policy.choose_action(state)
                 next_state, reward, done, info = self.env.step(action)
                 # Set `done` to True when the maximum number of steps to run has been reached
                 # This is important because a set of operations are done when the episode ends,
@@ -912,7 +919,7 @@ class Simulator:
 
             #------- EPISODE FINISHED --------#
             if verbose and np.mod(episode, verbose_period) == 0:
-                print(", agent ENDS at state: {})".format(self.env.getState()), end=" ")
+                print(", agent ENDS at state: {} at time step {})".format(self.env.getState(), t_episode), end=" ")
                 print("")
 
             # Change of V w.r.t. previous episode (to monitor convergence)
@@ -1387,10 +1394,11 @@ class Simulator:
             MAPE_by_episode = np.zeros(nepisodes+1)
             MAPE_by_episode2 = np.zeros(nepisodes+1)
 
-        # IMPORTANT: We should use the seed of the environment and NOT another seed setting mechanism
-        # (such as np.random.seed()) because the EnvironmentDiscrete class used to simulate the process
-        # (defined in the gym package) sets its seed to None when constructed.
-        # This seed is then used for the environment evolution realized with the reset() and step() methods.
+        # IMPORTANT: Besides the numpy seed, We set the seed of the environment
+        # because normally the environment on which the simulation takes place inherits from the DiscreteEnv
+        # environment defined in the gym.envs.toy_text.discrete, which defines its own random number generator
+        # (np_random) which is used when calling its reset() and step() methods.
+        np.random.seed(self.seed)
         [seed] = self.env.seed(self.seed)
         for exp in np.arange(nexperiments):
             if verbose:

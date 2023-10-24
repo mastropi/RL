@@ -1,6 +1,7 @@
-# Python 3 standard library includes the packages listed here: https://docs.python.org/3/library/index.html
+# Packages required specifically for the core RL part of the project, assuming that we are working on top of an Anaconda distribution of Python
+# Hence, all Python 3 standard packages are assumed to be installed, which includes the packages listed here: https://docs.python.org/3/library/index.html
 
-# Required packages listed in alphabetical order
+# Packages listed in alphabetical order
 # WARNING: Some of the packages are only available via `pip install` and NOT via `conda install` because conda does not have access to the PyPI repository
 # (or it's not compatible with PyPI), which is where those packages are stored.
 # Ref: https://stackoverflow.com/questions/48138836/conda-cant-find-packages-at-pypi-org-simple
@@ -10,6 +11,8 @@ numpy==1.18.3	# --> Use version 1.14 if running the process at IRIT's cluster, s
                 # using v1.14 we need to adapt the code to the older way of changing the print options (already done in my code as of Jul-2021)
                 # (Ref: https://numpy.org/doc/1.14/reference/generated/numpy.printoptions.html --> but now (~ Oct-2021) gives Error 404)
 pandas==0.22.0
+pytorch==1.10.2 # To fit neural network models (this is the latest version available via the pytorch channel in anaconda.org that is compatible with Python-3.6
+                # Installed on 04-Oct-2023 with `conda install pytorch==1.10.2 cpuonly -c pytorch` run from an Anaconda prompt with ADMINISTRATION privileges.
 
 # Suggested packages listed in alphabetical order
 pytest==3.3.2

@@ -60,9 +60,18 @@ class EnvGridworld1D(EnvironmentDiscrete):
     For example, a 10-long grid looks as follows:
     T  o  o  o  o  x  o  o  o  T
     x is your position and T are the two terminal states.
+
+    Arguments:
+    length: (opt) int
+        Number of states in the gridworld.
+        default: 21
+
+    initial_state_distribution: (opt) 1D list or array
+        See definition in super class.
+        default: None
     """
 
-    def __init__(self, length=21):
+    def __init__(self, length=21, initial_state_distribution=None):
         if length < 3:
             raise ValueError('the length of the grid must be at least 3')
 
@@ -128,9 +137,17 @@ class EnvGridworld1D(EnvironmentDiscrete):
             it.iternext()
 
         # Initial state distribution is uniform, excluding terminal state which have zero probability
-        isd = np.ones(nS) / num_nonterminal_states
-        isd[0] = 0.0
-        isd[nS-1] = 0.0
+        if initial_state_distribution is None:
+            isd = np.ones(nS) / num_nonterminal_states
+            isd[0] = 0.0
+            isd[nS-1] = 0.0
+        else:
+            if initial_state_distribution is not None:
+                if not isinstance(initial_state_distribution, (list, tuple, np.ndarray)) or len(initial_state_distribution) != length:
+                    raise ValueError("The initial state distribution must be a list, tuple or numpy array with as many elements as the number of states in the environment")
+                if not all(np.array(initial_state_distribution) >= 0) or not np.isclose(np.sum(initial_state_distribution), 1.0):
+                    raise ValueError(f"The values in the initial state distribution must sum up to 1 (sum = {np.sum(initial_state_distribution)})")
+            isd = initial_state_distribution
         assert np.isclose(np.sum(isd), 1.0), "The initial state probabilities sum up to 1 ({})".format(np.sum(isd))
 
         self.P = P
@@ -164,6 +181,11 @@ class EnvGridworld1D_OneTerminalState(EnvironmentDiscrete):
     For example, a 10-long grid looks as follows:
     t  o  o  o  o  x  o  o  o  T
     where t = "transient, T = "Terminal", and "x" is the current state of the environment.
+
+    Arguments:
+    length: (opt) int
+        Number of states in the gridworld.
+        default: 21
     """
 
     def __init__(self, length=21):
@@ -298,17 +320,30 @@ class EnvGridworld2D(EnvironmentDiscrete):
     rewards_dict: dict
         Reward values for a subset of states in the grid. The 1D state number is used as dictionary key.
         default: {0: -1.0, 5*5-1: +1.0}
+
+    initial_state_distribution: (opt) 1D list or array
+        Probability distribution defining how to choose the initial state when the environment is
+        initialized or reset.
+        It should have the same length as the number of states in the environment and terminal states
+        must have probability 0, while the sum of the probability on all other states should equal 1.
+        This value is passed to the super class constructor as parameter `isd`.
+        default: None
     """
 
     metadata = {'render.modes': ['human', 'ansi']}
 
-    def __init__(self, shape=[5,5], terminal_states=None, rewards_dict=None):
+    def __init__(self, shape=[5,5], terminal_states=None, rewards_dict=None, initial_state_distribution=None):
         if not isinstance(shape, (list, tuple)) or len(shape) != 2:
             raise ValueError("Shape argument must be a list/tuple of length 2")
         if terminal_states is not None and len(terminal_states) == 0:
             raise ValueError("There must be at least one terminal state")
         if rewards_dict is not None and not isinstance(rewards_dict, dict):
             raise ValueError("The rewards information must be a dictionary indexed by the 1D state number")
+        if initial_state_distribution is not None:
+            if not isinstance(initial_state_distribution, (list, tuple, np.ndarray)) or len(initial_state_distribution) != np.prod(shape):
+                raise ValueError("The initial state distribution must be a list, tuple or numpy array with as many elements as the number of states in the environment")
+            if not all(np.array(initial_state_distribution) >= 0) or not np.isclose(np.sum(initial_state_distribution), 1.0):
+                raise ValueError(f"The values in the initial state distribution must sum up to 1 (sum = {np.sum(initial_state_distribution)})")
 
         # Environment geometry
         self.shape = shape
@@ -321,6 +356,9 @@ class EnvGridworld2D(EnvironmentDiscrete):
             rewards_dict = dict({0: -1.0, nS-1: 1.0})
         elif not isinstance(terminal_states, set):
             terminal_states = set(terminal_states)
+
+        if initial_state_distribution is not None and not all([p == 0 for s, p in enumerate(initial_state_distribution) if s in terminal_states]):
+            raise ValueError(f"The initial state distribution must be 0 at the terminal states ({terminal_states}): given distribution = {initial_state_distribution}")
 
         # We substract 1 because the x and y values are base 0 (as they represent indices)
         MAX_Y = shape[0] - 1
@@ -339,14 +377,18 @@ class EnvGridworld2D(EnvironmentDiscrete):
         # Initialize the initial state distribution matrix to 0
         # This matrix will be updated as we go along constructing the environment below
         # and will be set to a uniform distribution on the NON-terminal states.
-        isd = np.zeros(nS)
+        if initial_state_distribution is None:
+            isd = np.zeros(nS)
+        else:
+            isd = initial_state_distribution
         while not it.finished:
             s = it.iterindex
             y, x = it.multi_index   # 0 <= y <= shape[0]-1, 0 <= x <= shape[1]-1
 
             # Initial state distribution
-            if not is_terminal(s):
-                isd[s] = 1 / num_nonterminal_states
+            if initial_state_distribution is None:
+                if not is_terminal(s):
+                    isd[s] = 1 / num_nonterminal_states
 
             # Transition matrix and rewards: P[s][a] = (prob, next_state, reward, is_terminal)
             # Given that we are state 's' and take action 'a':
@@ -376,7 +418,7 @@ class EnvGridworld2D(EnvironmentDiscrete):
 
             it.iternext()
 
-        assert np.isclose(np.sum(isd), 1.0), "The initial state probabilities sum up to 1 ({})".format(np.sum(isd))
+        assert np.isclose(np.sum(isd), 1.0), "The initial state probabilities must sum up to 1 ({})".format(np.sum(isd))
 
         self.P = P
         #print("P")
@@ -462,10 +504,23 @@ class EnvGridworld2D_WithObstacles(EnvGridworld2D):
         Set with the 1D state numbers (cells) where the agent cannot go.
         Normally a "good" number of obstacles for a grid of size N is int(log(N)).
         default: None
+
+    initial_state_distribution: (opt) 1D list or array
+        See definition in super class.
+        default: None
     """
 
-    def __init__(self, shape=[5, 5], terminal_states=None, rewards_dict=None, obstacles_set=None):
-        super().__init__(shape=shape, terminal_states=terminal_states, rewards_dict=rewards_dict)
+    def __init__(self, shape=[5, 5], terminal_states=None, rewards_dict=None, obstacles_set=None, initial_state_distribution=None):
+        super().__init__(shape=shape, terminal_states=terminal_states, rewards_dict=rewards_dict, initial_state_distribution=initial_state_distribution)
+
+        # Check the initial state distribution because the state cannot start at an obstacle state!
+        if initial_state_distribution is None and obstacles_set is not None and len(obstacles_set) > 0:
+            set_terminal_and_obstacles_states = set.union(terminal_states, obstacles_set)
+            num_nonterminal_and_nonobstacles_states = self.nS - len( set_terminal_and_obstacles_states )
+            self.isd = np.ones(self.nS) / num_nonterminal_and_nonobstacles_states
+            for s in set_terminal_and_obstacles_states:
+                self.isd[s] = 0.0
+        assert np.isclose(np.sum(self.isd), 1.0), "The initial state probabilities sum up to 1 ({})".format(np.sum(self.isd))
 
         # Treat the obstacles by setting the transition probability of the adjacent cells when moving towards the obstacle
         self.obstacles_set = obstacles_set

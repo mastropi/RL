@@ -32,7 +32,15 @@ class PolRandomWalkDiscrete():
 #                            .format(EnvironmentDiscrete.__name__, EnvironmentDiscrete.__module__, env.__class__))
         self.env = env
 
-    def choose_action(self):
+    def choose_action(self, state):
+        """
+        Choose an action of the random walk
+
+        Note: Even if the state is not used, actions in general depend on the state of the system,
+        therefore conceptually this method should receive an state on which the action will act,
+        and also to have a signature that is compatible with the other choose_action() methods
+        that are defined by other policies.
+        """
         # Note: we should NOT use np.random.choice() to select the random value but instead the np_random.choice() method
         # from the mtrand.RandomState object np_random stored in the environment (coming from the gym DiscreteEnv class)
         # which is already used when resetting and stepping through the environment).

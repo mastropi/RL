@@ -26,14 +26,14 @@ import numpy as np
 
 from Python.lib.agents.learners import ResetMethod
 
-# TODO: (2020/04/10) This class should cover ALL value functions whose estimation is done via approximation (linear or non-linear)
+# TODO: (2020/04/10) This class should cover ALL state value functions whose estimation is done via approximation (linear or non-linear)
 # (i.e. using a parameterized expression whose parameters are materialized as a vector of weights)
 # So the constructor should receive:
 # - the dimension of the weights
 # - the features x that are affected by the weights (possibly in a linear manner or perhaps in a nonlinear manner as well!)
-class ValueFunctionApprox:
+class StateValueFunctionApprox:
     """
-    Class that contains information about the estimation of the state value function
+    Class that contains information about the estimation of a state value function, V(s)
 
     Arguments:
     nS: int
@@ -44,9 +44,7 @@ class ValueFunctionApprox:
         This is used by the reset() method which can reset the value function to different initial guesses
         (e.g. random values), so that the value of terminal states is always reset to 0.
     """
-
     def __init__(self, nS: int, terminal_states: list):
-        "nS is the number of states"
         self.nS = nS
         self.terminal_states = terminal_states
         self.weights = np.zeros(nS)
@@ -70,7 +68,7 @@ class ValueFunctionApprox:
             Method to use to reset the weights.
             Currently the following methods are implemented: ResetMethod.ALLZEROS, ResetMethod.RANDOM_UNIFORM,
             ResetMethod.RANDOM_NORMAL.
-            None is equivalent to ResetMethod.ALLZEROS.
+            `None` is equivalent to ResetMethod.ALLZEROS.
             If none of these methods is given, the np.random.rand() method is used which generates a random number
             in [0, 1).
 
@@ -100,13 +98,13 @@ class ValueFunctionApprox:
             if method == ResetMethod.RANDOM_UNIFORM:
                 min = params_random['min'] if 'min' in params_random.keys() else 0.0
                 max = params_random['max'] if 'max' in params_random.keys() else 1.0
-                self.weights[:] = np.random.uniform(min, max, size=self.nS)
+                self.weights[:] = np.random.uniform(min, max, size=len(self.weights))
             elif method == ResetMethod.RANDOM_NORMAL:
                 loc = params_random['loc'] if 'loc' in params_random.keys() else 0.0
                 scale = params_random['scale'] if 'scale' in params_random.keys() else 1.0
-                self.weights[:] = np.random.normal(loc, scale, size=self.nS)
+                self.weights[:] = np.random.normal(loc, scale, size=len(self.weights))
             else:
-                self.weights[:] = np.random.rand(size=self.nS)
+                self.weights[:] = np.random.rand(len(self.weights))
 
             # Set the value of terminal states to 0 (this is the definition of the value of terminal states)
             for s in self.terminal_states:
@@ -126,6 +124,9 @@ class ValueFunctionApprox:
 
     #--- SETTERS
     def setWeight(self, state: int, weight: float):
+        "Sets the weight of the given state-action in the case where the features are dummy features"
+        # NOTE that in the general case of function approximation, the weight would have a reduced dimension
+        # and thus would be indexed by something else, whose meaning depends on what the reduction dimension consists of.
         if not self.isValidState(state):
             return -1
         self.weights[state] = weight
@@ -179,5 +180,178 @@ class ValueFunctionApprox:
         "Checks if a state is valid by assuming it is an index between 0 and one less the number of states"
         if not (0 <= state < self.nS):
             warnings.warn("Invalid state ({}). It should be between 0 and {}. Nothing to do.".format(state, self.nS-1))
+            return False
+        return True
+
+
+# TODO: (2023/10/12) Make this class inherit from a super class where the main methods that are common to all value function approximations (e.g. for V(s) and Q(s,a)) are defined
+# Example of such method that is common to all value function approximation classes: all methods related to weights, such as getWeights(), setWeights(), etc.
+class ActionValueFunctionApprox:
+    """
+    Class that contains information about the estimation of a action value function, Q(s,a)
+
+    Arguments:
+    nS: int
+        Number of states on which the action value function is defined.
+
+    nA: int
+        Number of actions on which the action value function is defined.
+
+    terminal_states: list
+        List containing the indices of the terminal states, whose value should always be 0.
+        This is used by the reset() method which can reset the value function to different initial guesses
+        (e.g. random values), so that the value of terminal states is always reset to 0.
+    """
+    def __init__(self, nS: int, nA: int, terminal_states: list):
+        self.nS = nS
+        self.nA = nA
+        self.terminal_states = terminal_states
+        # For now we define full dimensional weights, i.e. as many as the number of all possible state-actions.
+        # In general, the dimension of the weights would be smaller than the number of state-actions, but for now
+        # we are implementing the tabular setting.
+        self.weights = np.zeros(self.nS * self.nA)
+        # Accordingly to the full dimensional weights, we define a full dimensional features matrix X
+        self.X = np.eye(self.nS * self.nA)
+
+    def reset(self, method=ResetMethod.ALLZEROS, params_random: dict=dict(), seed: int=None):
+        """
+        Resets the action value function using the specified reset method
+
+        Arguments:
+        method: ResetMethod
+            Method to use to reset the action values.
+            Currently the following methods are implemented: ResetMethod.ALLZEROS, ResetMethod.RANDOM_UNIFORM,
+            ResetMethod.RANDOM_NORMAL.
+            `None` is equivalent to ResetMethod.ALLZEROS.
+            If none of these methods is given, the np.random.rand() method is used which generates a random number
+            in [0, 1).
+
+        params_random: (opt) dict
+            Dictionary with the relevant parameters for the distribution to use for the pseudo-random generator
+            when method is not ResetMethod.ALLZEROS.
+            For ResetMethod.RANDOM_UNIFORM: 'min', 'max'
+            For ResetMethod.RANDOM_NORMAL: 'loc', 'scale'
+            default: None, in which case the default values of the pseudo-random generation method are used.
+
+        seed: (opt) int
+            Seed to use for the pseudo-random number generator.
+            Note that, when seed != None, the set of random numbers generated by this method is always the same.
+            This useful so that the state values can be always reset to the same set of values at e.g. the beginning
+            of an experiment.
+        """
+        if method is None or method == ResetMethod.ALLZEROS:
+            self.weights[:] = 0.0
+        else:
+            # Random weights generation
+            # NOTE: We use np.random() as opposed to e.g. np_random() because the latter function
+            # (defined in gym.utils.seeding) is mostly called from within environments,
+            # e.g. in gym.envs.toy_text.discrete.seed(), and this class defines value functions approximations.
+            # In addition, we keep separately the pseudo-random number generation affecting the trajectories
+            # from the pseudo-random generation affecting the value function initialization.
+            np.random.seed(seed)
+            if method == ResetMethod.RANDOM_UNIFORM:
+                min = params_random['min'] if 'min' in params_random.keys() else 0.0
+                max = params_random['max'] if 'max' in params_random.keys() else 1.0
+                self.weights[:] = np.random.uniform(min, max, size=len(self.weights))
+            elif method == ResetMethod.RANDOM_NORMAL:
+                loc = params_random['loc'] if 'loc' in params_random.keys() else 0.0
+                scale = params_random['scale'] if 'scale' in params_random.keys() else 1.0
+                self.weights[:] = np.random.normal(loc, scale, size=len(self.weights))
+            else:
+                self.weights[:] = np.random.rand(len(self.weights))
+
+            # Set the value of terminal states to 0 (for all actions), as this is the definition of the value of terminal states
+            for s in self.terminal_states:
+                for a in range(self.nA):
+                    self.setValue(s, a, 0.0)
+
+    #--- GETTERS
+    def getLinearIndex(self, state, action):
+        """
+        Returns the linear index to access the feature vector associated to the given state-action in the X matrix of features.
+        """
+        # State-actions are grouped by state across the columns of the X matrix of features
+        # (i.e. as (s, a0), (s, a1), (s, a2), ... are placed in contiguous columns for each state s)
+        return action*self.nS + state
+
+    def getWeights(self):
+        return self.weights
+
+    def getValue(self, state: int, action: int):
+        if not self.isValidState(state) or not self.isValidAction(state, action):
+            return None
+        # Inner product between the weights and the features corresponding to the given state-action
+        return np.dot(self.weights, self.X[:, self.getLinearIndex(state, action)])
+
+    def getValues(self):
+        "Returns the values of all possible state-actions"
+        return np.dot(self.weights, self.X)
+
+    #--- SETTERS
+    def setWeight(self, state: int, action: int, weight: float):
+        "Sets the weight of the given state-action in the case where the features are dummy features"
+        # NOTE that in the general case of function approximation, the weight would have a reduced dimension
+        # and thus would be indexed by something else, whose meaning depends on what the reduction dimension consists of.
+        if not self.isValidState(state) or not self.isValidAction(state, action):
+            return -1
+        self.weights[self.getLinearIndex(state, action)] = weight
+
+    def setWeights(self, weights: np.ndarray):
+        self.weights = weights
+
+    def setValue(self, state: int, action: int, value: float):
+        """
+        Sets the value of the state-action to the given value.
+
+        Since the value function is computed as the inner product between the weights and the features vector,
+        in the general non-dummy-features case, there are several options for the weights so that its inner
+        product with the features vector is equal to the given value.
+
+        The choice is done to set all weights to 0 except the weight for the "first" feature in the features vector
+        of the given state, which is set equal to value / first_non_zero_feature_value. The "first" condition is
+        determined by sweeping the features in the order they are stored in the feature matrix X stored in the object.
+
+        This function is used to set the value of terminal states to 0 (which is the case by definition of terminal states).
+
+        Arguments:
+        state: int
+            State for which the value should be set.
+
+        action: int
+            Action for which the value should be set.
+
+        value: float
+            Value to set.
+        """
+        if self.isValidState(state) and self.isValidAction(state, action):
+            # Look for the first non-zero feature component for the given state (i.e. the first non-zero value of X[:, (state, action)])
+            # and use it to set its weight equal to value / X[feature, (state, action)]
+            is_weight_set = False
+            for feature in range(self.X.shape[0]):
+                if self.X[feature, self.getLinearIndex(state, action)] != 0.0:
+                    self.weights[feature] = value / self.X[feature, self.getLinearIndex(state, action)]
+                    is_weight_set = True
+                    break
+
+            if not is_weight_set:
+                warnings.warn("No feature for state-action ({}, {}) was found to be non-zero. The state value was NOT set to {}." \
+                              .format(state, action, value))
+
+    def isValidState(self, state):
+        "Checks if a state is valid by assuming it is an index between 0 and one less the number of states"
+        if not (0 <= state < self.nS):
+            warnings.warn("Invalid state ({}). It should be between 0 and {}. Nothing to do.".format(state, self.nS-1))
+            return False
+        return True
+
+    def isValidAction(self, state, action):
+        """
+        Checks if an action is valid for the given state
+
+        Currently, it is assumed that the possible actions are all the same for any states and that they
+        are an index between 0 and one less the number of actions. So, the state information is NOT used.
+        """
+        if not (0 <= action < self.nA):
+            warnings.warn("Invalid action ({}). It should be between 0 and {}. Nothing to do.".format(action, self.nA-1))
             return False
         return True

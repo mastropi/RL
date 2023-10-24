@@ -69,7 +69,7 @@ class LeaMC(GenericLearner):
 
     def learn(self, T):
         """
-        Computes the average reward V and the return G(t) for every simulation time t as the sum of the difference of\
+        Computes the average reward V and the return G(t) for every simulation time t as the sum of the difference of
         each reward at t and the baseline value, chosen as the average reward V, observed over the whole simulation period.
 
         Arguments:

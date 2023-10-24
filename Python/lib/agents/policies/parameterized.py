@@ -4,7 +4,11 @@ Created on 22 Mar 2021
 
 @author: Daniel Mastropietro
 @description: Definition of policy for queues in terms of acceptance of new job of a given class
+@reference: For the policy learned via a neural network (typically PolNN), I used Francisco Robledo's GitHub project,
+https://github.com/frrobledo/LPQL_NN, in particular the file main/tools_nn.py where he defines a Q neural network
+and then trains it.
 """
+
 
 if __name__ == "__main__":
     # Needed to run tests (see end of program)
@@ -13,9 +17,16 @@ if __name__ == "__main__":
 
 import numpy as np
 
+from gym.envs.toy_text.discrete import categorical_sample, DiscreteEnv
+
+import torch.nn as nn
+
 import Python.lib.queues as queues
-from Python.lib.environments.queues import Actions, BufferType, GenericEnvQueueWithJobClasses, EnvQueueSingleBufferWithJobClasses, rewardOnJobClassAcceptance
 from Python.lib.agents.policies import AcceptPolicyType, GenericParameterizedPolicyTwoActions
+
+from Python.lib.environments.queues import Actions, BufferType, GenericEnvQueueWithJobClasses, EnvQueueSingleBufferWithJobClasses, rewardOnJobClassAcceptance
+from Python.lib.environments import EnvironmentDiscrete
+
 from Python.lib.utils.basic import is_scalar
 
 
@@ -151,8 +162,8 @@ class PolQueueTwoActionsLogit(QueueParameterizedPolicyTwoActions):
             For more information about its expected type, see the documentation for the
             `QueueParameterizedPolicyTwoActions.get_x_value_for_policy()` method.
 
-        Return: float
-        Value of the policy for the given action given the environment's state.
+        Return: float in [0, 1]
+        Value of the policy (probability) for the given action at the given environment's state.
         """
         buffer_size_or_jobclass_occupancy = super().get_x_value_for_policy(state)
 
@@ -253,8 +264,8 @@ class PolQueueTwoActionsLinearStep(QueueParameterizedPolicyTwoActions):
             For more information about its expected type, see the documentation for the
             `QueueParameterizedPolicyTwoActions.get_x_value_for_policy()` method.
 
-        Return: float
-        Value of the policy for the given action given the environment's state.
+        Return: float in [0, 1]
+        Value of the policy (probability) for the given action at the given environment's state.
         """
         buffer_size_or_jobclass_occupancy = super().get_x_value_for_policy(state)
 
@@ -401,8 +412,8 @@ class PolQueueTwoActionsLinearStepOnJobClasses(GenericParameterizedPolicyTwoActi
             State of the environment at which the policy is evaluated.
             It should be a duple containing the queue's buffer size and the job class of the latest arriving job.
 
-        Return: float
-        Gradient of the policy for the given action given the environment's state.
+        Return: float in [0, 1]
+        Value of the policy (probability) for the given action at the given environment's state.
         """
         buffer_size, job_class = state
 
@@ -417,6 +428,133 @@ class PolQueueTwoActionsLinearStepOnJobClasses(GenericParameterizedPolicyTwoActi
 
     def getAcceptancePolicy(self):
         return self.policy_accept
+
+
+class PolNN():
+    """
+    Parameterized policy that is the output of a neural network model fitted with PyTorch
+    which is assumed to output one preference for each possible action in the environment.
+
+    env: EnvironmentDiscrete
+        Discrete-state/action environment on which the agent acts.
+
+    nn_model: Neural network inheriting from torch.nn.Module
+        Neural network model typically defined in nn_models.py.
+        The network should have one input neuron representing the environment state
+        and as many output neurons as the number of possible actions over all possible states in the environment.
+        Note: The parameters of the model can be retrieved with nn_model.parameters().
+    """
+    def __init__(self, env: EnvironmentDiscrete, nn_model: nn.Module):
+        self.env = env
+        self.nn_model = nn_model
+
+        if self.nn_model.getNumInputs() != 1 and self.nn_model.getNumInputs() != self.env.getNumStates():
+            raise ValueError(f"The number of input values to the neural network model must be either 1 or as many as the number of states in the environment ({self.env.getNumStates()}): {self.nn_model.getNumInputs()}")
+        if self.nn_model.getNumOutputs() != self.env.getNumActions():
+            raise ValueError("The environment where the model is to be applied and the model itself are incompatible in the number of actions they deal with."
+                             f"\n# environment actions = {self.env.getNumActions()}"
+                             f"\n# model actions = {self.nn_model.getNumOutputs()}")
+
+    def reset(self):
+        "Resets the policy to the random walk"
+        self.init_random_policy()
+
+    def init_random_policy(self, eps=1E-2):
+        """
+        Initializes the parameters of the neural network so that the output is almost constant over all actions for all input states
+
+        The parameters are initialized to achieve "almost" constant output because if all parameters are initialized to 0, their values
+        never change during the learning process!! WHY??
+
+        The parameters (weights and biases) are initialized using a zero-mean normal distribution with a small standard deviation
+        (compared to 1) given by `eps`.
+        """
+        # Inspired by the weights_init() function in this code:
+        # https://github.com/pytorch/examples/blob/main/dcgan/main.py
+        # Note also the use of Module.apply() method which calls a function on each submodule of a module (e.g. of a neural network).
+
+        for i, component in enumerate(self.nn_model.modules()):
+            # Use the following if we want to filter out specific module types. But the problem is that this is not an exhaustive list!
+            # So, I think using `try` is better (as done below)
+            #if component.__class__.__name__ not in [self.nn_model.__class__.__name__, "ModuleList"]:
+            try:
+                # Only actual layers containing weights are capable of being initialized
+                # Initializing all parameters to 0 prevents their update during learning as they are always stuck at 0!
+                #nn.init.zeros_(component.weight)
+                #nn.init.zeros_(component.bias)
+                nn.init.normal_(component.weight, 0, eps)
+                nn.init.normal_(component.bias, 0, eps)
+            except:
+                pass
+
+        # Set the bias of the neurons in the output layer (which is the last module referenced in the above loop)
+        # to 1 so that we get a constant probability for each action
+        nn.init.ones_(component.bias)
+
+    def choose_action(self, state):
+        """
+        Choose an action given the state
+
+        state: int
+            Environment state at which the action should be chosen.
+
+        Return: int
+        Index of the action chosen by the policy.
+        """
+        # Probability of choosing each possible action represented by each neuron of the output layer of the neural network
+        if self.nn_model.getNumInputs() == 1:
+            exp_preferences = np.exp(self.nn_model([state]).tolist())  # We use tolist() to avoid the error message "Numpy not found"
+        elif self.nn_model.getNumInputs() == self.env.getNumStates():
+            input = np.zeros(self.env.getNumStates(), dtype=int)
+            input[state] = 1
+            exp_preferences = np.exp(self.nn_model(input).tolist())
+        probs_actions = exp_preferences / np.sum( exp_preferences )
+            ## Note: we could compute the probability of the different actions using the torch function `F.softmax(self.nn_model([state]), dim=0).tolist()`
+            ## but astonishingly this gives probabilities that do not sum up to 1!!!
+            ## (not exactly at least, they sum up to e.g. 0.999999723, but this makes the call np.random.choice() fail)
+        #print(f"State: {state}, Prob. Actions = {probs_actions}")
+
+        # Choose the action
+        if isinstance(self.env, DiscreteEnv):
+            # Use the random number generator defined in the environment (using the function defined in gym.envs.discrete.toy_text.discrete)
+            # to choose an action, so that we use the same generator that has been used elsewhere.
+            action = categorical_sample(probs_actions, self.env.np_random)
+        else:
+            # Use np.random.choice to choose an action
+            action = np.random.choice(range(self.env.getNumActions()), p=probs_actions)
+
+        return action
+
+    def getPolicyForAction(self, action, state):
+        """
+        Returns the value of the policy for the given action when the environment is at the given state
+
+        action: int
+            Valid value of the environment's action space
+
+        state: int
+            Valid value for the environment's state space
+
+        Return: float in [0, 1]
+        Value of the policy (probability) for the given action at the given environment's state.
+        """
+        if self.nn_model.getNumInputs() == 1:
+            preferences = self.nn_model([state]).tolist()
+        elif self.nn_model.getNumInputs() == self.env.getNumStates():
+            input = np.zeros(self.env.getNumStates(), dtype=int)
+            input[state] = 1
+            preferences = self.nn_model(input).tolist()
+        else:
+            raise ValueError(f"The number of inputs in the neural network ({self.policy.nn_model.getNumInputs()}) cannot be handled by the policy learner. It must be either 1 or as many as the number of states in the environment.")
+
+        # Compute the policy as the soft-max of the preferences on the given state and action
+        policy_value_for_action = np.exp(preferences[action]) / np.sum( np.exp(preferences) )
+
+        return policy_value_for_action
+
+    def getThetaParameter(self):
+        "Returns the parameters of the neural network"
+        return self.nn_model.parameters()
 
 
 if __name__ == "__main__":

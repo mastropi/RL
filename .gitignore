@@ -6,9 +6,12 @@ Python/lib/GitHub/
 .Rproj.user
 *Archive/
 *.aux
+*.lnk
 *.pdf
 *.xlsx
 *.synctex*
 *.bbl
 *.blg
 *results/
+Yao/
+toulouse-rl-commits.txt

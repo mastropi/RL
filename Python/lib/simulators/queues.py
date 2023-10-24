@@ -2612,7 +2612,7 @@ def run_simulation_mc(env, agent, t_learn, start_state, t_sim_max,
               .format(env.getState(), buffer_size_start))
 
     # Store the initial position as part of the trajectory
-    update_trajectory(agent, (t_learn - 1) * (t_max + 1) + 0, 0.0, env.getState(), None, np.nan)
+    update_trajectory(agent, (t_learn - 1) * (t_max + 1) + 0, 0.0, env.getState(), None, 0.0)
 
     # Time step in the queue trajectory (the first time step is t = 0)
     done = False

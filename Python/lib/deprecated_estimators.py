@@ -36,7 +36,7 @@ if __name__ == "__main__":
 
 from Python.lib.environments.queues import EnvQueueSingleBufferWithJobClasses, rewardOnJobClassAcceptance, ActionTypes
 from Python.lib.agents.learners import ResetMethod
-from Python.lib.agents.learners.value_functions import ValueFunctionApprox
+from Python.lib.agents.learners.value_functions import StateValueFunctionApprox
 from Python.lib.agents.queues import AgeQueue
 from Python.lib.agents.policies import PolicyTypes
 from Python.lib.agents.policies.job_assignment import PolJobAssignmentProbabilistic

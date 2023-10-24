@@ -12,7 +12,7 @@ import warnings
 import numpy as np
 
 from Python.lib.agents.learners import ResetMethod
-from Python.lib.agents.learners.value_functions import ValueFunctionApprox
+from Python.lib.agents.learners.value_functions import StateValueFunctionApprox
 from Python.lib.estimators import DEBUG_ESTIMATORS
 
 
@@ -40,7 +40,7 @@ class EstValueFunctionOfflineDeterministicNextState:
     def __init__(self, env, gamma=1.0):
         self.env = env
         self.gamma = gamma
-        self.V = ValueFunctionApprox(self.env.getNumStates(), self.env.getTerminalStates())
+        self.V = StateValueFunctionApprox(self.env.getNumStates(), self.env.getTerminalStates())
 
     def reset(self, reset_method, reset_params, reset_seed):
         self.env.reset()

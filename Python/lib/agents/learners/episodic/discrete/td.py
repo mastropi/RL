@@ -14,7 +14,7 @@ from matplotlib import pyplot as plt, cm
 
 from Python.lib.agents.learners import LearningCriterion, ResetMethod
 from Python.lib.agents.learners.episodic.discrete import Learner, AlphaUpdateType
-from Python.lib.agents.learners.value_functions import ValueFunctionApprox
+from Python.lib.agents.learners.value_functions import ActionValueFunctionApprox, StateValueFunctionApprox
 import Python.lib.utils.plotting as plotting
 
 @unique  # Unique enumeration values (i.e. on the RHS of the equal sign)
@@ -31,20 +31,30 @@ class LeaTDLambda(Learner):
     Arguments:
     env: gym.envs.toy_text.discrete.DiscreteEnv
         The environment where the learning takes place.
+
+    store_history_over_all_episodes: (opt) bool
+        Whether to store in the attributes of the generic super class storing the trajectory
+        (e.g. states, actions, rewards) the whole trajectory history, over all episodes.
+        If this is requested, the trajectory is stored in lists of lists, where each sublist is
+        the trajectory observed in an episode.
+        This is useful if we need to compute something using the whole trajectory history or whether
+        we want to know what the trajectories were on all episodes.
+        default: False
     """
 
     def __init__(self, env, criterion=LearningCriterion.DISCOUNTED, alpha=0.1, gamma=1.0, lmbda=0.8,
                  adjust_alpha=False, alpha_update_type=AlphaUpdateType.EVERY_STATE_VISIT,
                  adjust_alpha_by_episode=False, alpha_min=0.,
                  reset_method=ResetMethod.ALLZEROS, reset_params=None, reset_seed=None,
+                 store_history_over_all_episodes=False,
                  debug=False):
         super().__init__(env, criterion=criterion, alpha=alpha, adjust_alpha=adjust_alpha, alpha_update_type=alpha_update_type, adjust_alpha_by_episode=adjust_alpha_by_episode, alpha_min=alpha_min,
-                         reset_method=reset_method, reset_params=reset_params, reset_seed=reset_seed)
+                         reset_method=reset_method, reset_params=reset_params, reset_seed=reset_seed, store_history_over_all_episodes=store_history_over_all_episodes)
         self.debug = debug
 
         # Attributes that MUST be present for all TD methods
-        self.V = ValueFunctionApprox(self.env.getNumStates(), self.env.getTerminalStates())
-        self.Q = None
+        self.V = StateValueFunctionApprox(self.env.getNumStates(), self.env.getTerminalStates())
+        self.Q = ActionValueFunctionApprox(self.env.getNumStates(), self.env.getNumActions(), self.env.getTerminalStates())
         self.gamma = gamma
         
         # Attributes specific to the current TD method
@@ -74,15 +84,20 @@ class LeaTDLambda(Learner):
         self.lmbda = lmbda if lmbda is not None else self.lmbda
 
     def learn_pred_V(self, t, state, action, next_state, reward, done, info):
-        self.update_trajectory(t, state, action, reward)
-        self._update_trajectory(t, state, reward)
+        self._update_trajectory(t, state, action, reward)               # This method is defined in the Learner super class for episodic.discrete learners
         self._updateZ(state, self.lmbda)
-        delta = reward + self.gamma * self.V.getValue(next_state) - self.V.getValue(state)
+        self.Q.setWeight(state, action, reward + self.gamma * self.V.getValue(next_state))  # This call to setWeight() (where we reference the state and the action associated to the weight!) assumes a tabular setting
+        delta = self.Q.getValue(state, action) - self.V.getValue(state) # This is also known as the advantage function and, in this case, the advantage function is estimated using the TD(lambda) learner
+                                                                        # because the state value function is estimated using the TD(lambda) learner.
+                                                                        # Note that the action value function Q(s,a) directly "inherits" the estimation method from the state value function estimation method!
+                                                                        # (because Q(s,a) is estimated as "reward observed after taking action `a` at state `s`"  + V(s)
+                                                                        # where V(s) is the TD(lambda) estimate of the state value function at state s => thus,
+                                                                        # how we estimate V(s) defines how we estimate Q(s,a)!)
 
         # Check whether we are learning the differential value function (average reward criterion) and adjust delta accordingly
         # Ref: Sutton, pag. 250
         if self.criterion == LearningCriterion.AVERAGE:
-            delta -= self.getAverageReward()
+            delta -= self._average_reward_in_episode
 
         #print("episode {}, state {}: count = {}, alpha = {}".format(self.episode, state, self._state_counts_over_all_episodes[state], self._alphas[state]))
         self._alphas_effective = np.r_[self._alphas_effective, (self._alphas * self._z).reshape(1, len(self._z))]
@@ -109,9 +124,13 @@ class LeaTDLambda(Learner):
             self._update_alphas(state)
 
         if done:
-            if self.debug: #and self.episode > 45: # Use the condition on `episode` in order to plot just the last episodes 
+            # Terminal time (recall that we were at time t and stepped into time t+1 when reaching the terminal state)
+            T = t + 1
+
+            if self.debug: #and self.episode > 45: # Use the condition on `episode` in order to plot just the last episodes
                 self._plotZ()
                 self._plotAlphasEffective()
+            self.store_trajectory_at_end_of_episode(T, next_state, debug=self.debug)
             self._update_state_counts(t+1, next_state)
 
             # Update alpha for the next iteration for "by episode" updates
@@ -119,8 +138,6 @@ class LeaTDLambda(Learner):
                 for state in range(self.env.getNumStates()):
                     if not self.env.isTerminalState(state):
                         self._update_alphas(state)
-
-            self.final_report(t)
 
     def _updateZ(self, state, lmbda):
         # Gradient of V: it must have the same size as the weights
@@ -169,9 +186,17 @@ class LeaTDLambda(Learner):
             states2plot = list(range(100, 104))
         else:
             # Choose the states around the middle state
-            states2plot = list(range(int(self.nS/2)-1, int(self.nS/2)+2))
+            states2plot = list(range(int(self.env.getNumStates()/2)-1, int(self.env.getNumStates()/2)+2))
 
         return states2plot
+
+    #-- Getters
+    def getV(self):
+        return self.V
+
+    def getQ(self):
+        return self.Q
+
 
 class LeaTDLambdaAdaptive(LeaTDLambda):
     
@@ -180,9 +205,10 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
                  adjust_alpha_by_episode=True, alpha_min=0.,
                  lambda_min=0., lambda_max=0.99, adaptive_type=AdaptiveLambdaType.ATD,
                  reset_method=ResetMethod.ALLZEROS, reset_params=None, reset_seed=None,
+                 store_history_over_all_episodes=False,
                  burnin=False, plotwhat="boxplots", fontsize=15, debug=False):
         super().__init__(env, criterion=criterion, alpha=alpha, gamma=gamma, lmbda=lmbda, adjust_alpha=adjust_alpha, alpha_update_type=alpha_update_type, adjust_alpha_by_episode=adjust_alpha_by_episode, alpha_min=alpha_min,
-                         reset_method=reset_method, reset_params=reset_params, reset_seed=reset_seed,
+                         reset_method=reset_method, reset_params=reset_params, reset_seed=reset_seed, store_history_over_all_episodes=store_history_over_all_episodes,
                          debug=debug)
         
         # List that keeps the history of ALL lambdas used at EVERY TIME STEP
@@ -260,17 +286,17 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
         self.burnin = burnin if burnin is not None else self.burnin
 
     def learn_pred_V(self, t, state, action, next_state, reward, done, info):
-        self.update_trajectory(t, state, action, reward)
-        self._update_trajectory(t, state, reward)
+        self._update_trajectory(t, state, action, reward)
 
         self.state_counts_noreset[state] += 1
         state_value = self.V.getValue(state)
-        delta = reward + self.gamma * self.V.getValue(next_state) - state_value
+        self.Q.setWeight(state, action, reward + self.gamma * self.V.getValue(next_state))  # This call to setWeight() (where we reference the state and the action associated to the weight!) assumes a tabular setting
+        delta = self.Q.getValue(state, action) - state_value
 
         # Check whether we are learning the differential value function (average reward criterion) and adjust delta accordingly
         # Ref: Sutton, pag. 250
         if self.criterion == LearningCriterion.AVERAGE:
-            delta -= self.getAverageReward()
+            delta -= self._average_reward_in_episode
 
         # Decide whether we do adaptive or non-adaptive lambda at this point
         # (depending on whether there is bootstrap information available or not)
@@ -329,9 +355,13 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
             self._update_alphas(state)
 
         if done:
+            # Terminal time (recall that we were at time t and stepped into time t+1 when reaching the terminal state)
+            T = t + 1
+
             if self.debug: # and self.episode > 45:
                 self._plotZ()
                 self._plotAlphasEffective()
+            self.store_trajectory_at_end_of_episode(T, next_state, debug=self.debug)
             self._update_state_counts(t+1, next_state)
             self._store_lambdas_in_episode()
 
@@ -340,8 +370,6 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
                 for state in range(self.env.getNumStates()):
                     if not self.env.isTerminalState(state):
                         self._update_alphas(state)
-                
-            self.final_report(t)
 
         if self.debug:
             print("t: {}, delta = {:.3g} --> lambda = {:.3g}".format(t, delta, lambda_adaptive))
@@ -397,16 +425,16 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
             print(self._lambdas_in_episode)
 
     def _store_lambdas_in_episode(self):
-        #print("lambdas in episode {}:".format(self.episode))
-        #print(self._lambdas_in_episode)
+        if self.debug:
+            print("lambdas in episode {}:".format(self.episode))
+            print(self._lambdas_in_episode)
         self._all_lambdas_by_episode += [[self._lambdas_in_episode[s] for s in self.env.getAllStates()]]
 
-    def final_report(self, T):
-        super().final_report(T)
         # Store the (average) _lambdas by episode
-        #print("lambdas in episode {}".format(self.episode))
-        #with np.printoptions(precision=3, suppress=True):
-        #    print(np.c_[self.states[:-1], self._lambdas]) 
+        if self.debug:
+            print("lambdas in episode {}".format(self.episode))
+            with np.printoptions(precision=3, suppress=True):
+                print(np.c_[self.states[:-1], self._lambdas])
         self.lambda_mean_by_episode += [np.mean(self._lambdas)]
 
     def compute_lambda_statistics_by_state(self):

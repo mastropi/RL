@@ -37,6 +37,7 @@ class LeaFV(LeaTDLambda):
         super().__init__(env, criterion=LearningCriterion.AVERAGE, alpha=alpha,  gamma=1.0, lmbda=lmbda, adjust_alpha=adjust_alpha,
                          alpha_update_type=alpha_update_type, adjust_alpha_by_episode=adjust_alpha_by_episode,
                          alpha_min=alpha_min,
+                         store_history_over_all_episodes=True,
                          reset_method=reset_method, reset_params=reset_params, reset_seed=reset_seed, debug=debug)
 
         # Fleming-Viot simulation parameters

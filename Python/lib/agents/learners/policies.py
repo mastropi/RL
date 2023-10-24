@@ -10,7 +10,13 @@ import copy
 import numpy as np
 import pandas as pd
 
+import torch
+import torch.optim as optim
+from torch.distributions import Categorical
+from torch.functional import F
+
 from Python.lib.agents.learners import GenericLearner
+from Python.lib.environments import EnvironmentDiscrete
 from Python.lib.utils.basic import find, is_scalar
 #from Python.lib.agents.policies.parameterized import AcceptPolicyType   # NEW: TO IMPLEMENT IN ORDER TO DECIDE WHETHER THE ACCEPTANCE POLICY IS OF THRESHOLD TYPE OR TRUNK-RESERVATION
 
@@ -929,6 +935,273 @@ class LeaPolicyGradient(GenericLearner):
                 pol.reset()
         else:
             self.policy.reset()
+
+
+class LeaActorCriticNN(GenericLearner):
+    """
+    Class that is used to learn a neural-network-parameterized policy using the actor-critic approach,
+    i.e. where a critic (made up of the state and action value functions) is learned using bootstrap.
+    Ref: Lectures at RLVS-2021 days by Olivier Sigaud: https://rl-vs.github.io/rlvs2021/pg.html
+
+    Ref for a starting point of this class: ActorCritic class defined in nikhilbarhate99's GitHub:
+    https://github.com/nikhilbarhate99/Actor-Critic-PyTorch/blob/master/model.py
+
+    Arguments:
+    env: EnvironmentDiscrete
+        Environment on which learning takes place.
+        Note: At each new episode that is run under the current policy, the environment is reset to a
+        state following the initial state distribution stored in this object.
+        Therefore, the initial state distribution should be defined at the moment of the environment creation.
+
+    policy: Neural-network-parameterized policy to learn
+
+    learner_value_functions: GenericLearner
+        Learner used to learn the state and action value functions.
+        Ex: LeaTDLambda
+
+    optimizer_learning_rate: (opt) float
+        Learning rate for the policy parameter learner which is automatically adapted by the optimizer used.
+        default: 0.1
+
+    seed: (opt) int
+        Seed to be used to generate the trajectories under the current policy to perform one-step learning
+        of the policy parameter.
+        Note that this learner requires a seed because it is a learner of the policy and to learn the policy
+        it needs data that is generated from a simulation of an agent interacting with the environment.
+        At each learning step of the policy parameter the seed value is increased by 1 to avoid generating
+        the same sequence of random numbers every time trajectories are simulated.
+        default: None
+    """
+    def __init__(self, env: EnvironmentDiscrete, policy, learner_value_functions, optimizer_learning_rate=0.1, seed=None, debug=False):
+        # SEE ALSO ALL THE OTHER LEARNING PARAMETERS DEFINED IN LeaPolicyGradient (e.g. learning rate alpha, etc.)
+        super().__init__(env)
+        self.policy = policy
+        self.optimizer_learning_rate = optimizer_learning_rate
+        self.learner_value_functions = learner_value_functions
+        self.seed = seed
+        self.debug = debug
+
+        self.reset(reset_value_functions=True, reset_policy=True)
+
+    def reset(self, reset_value_functions=True, reset_policy=False):
+        # Performance measures: the average reward and length of episodes observed over the different episode run on the same policy
+        self.average_reward_over_episodes = 0.0
+        self.se_average_reward_over_episodes = np.nan
+        self.average_episode_length = 0.0
+
+        # Reset any estimates of the value functions that may be stored in the value functions learner object
+        if reset_value_functions:
+            self.learner_value_functions.reset()
+
+        # Reset the policy learner and learning process
+        if reset_policy:
+            # Policy learning step
+            self.t_learn = 0
+            # Reset the policy (to a random walk)
+            self.policy.reset()
+            # Neural network optimizer
+            # NOTE: The default learning rate of the Adam optimizer is 0.03 (so, quite small!)
+            self.optimizer = optim.Adam(self.policy.getThetaParameter(), lr=self.optimizer_learning_rate, betas=(0.9, 0.999))
+                ## Note: the betas parameter are "coefficients used for computing running averages of gradient and its square" (ref: help(optim.Adam)) and (0.9, 0.999) is the default
+            # self.optimizer = optim.SGD(self.policy.getThetaParameter(), lr=alpha/10, momentum=0.9)
+                ## This optimizer gives very bad results (the average reward under the learned policy tends to 0!),
+                ## if lr is too large (i.e. lr = 1.0, it works with lr = 0.1)!!
+                ## If we use lr=0.1, momentum=0.9, we get similar results to the Adam optimizer.
+
+    def learn(self, nepisodes, max_time_steps=+np.Inf, prob_include_in_train=0.5):
+        """
+        Perform a one step learning of the policy parameter
+
+        This one step learning is based on using the current policy to learn the state and action value functions
+        that are used as a critic in the loss function that feeds the neural network defining the theta parameter of the policy.
+
+        Note: This method implements the process that is carried out within each `i_episode` loop of the
+        train.py script in the reference ActorCritic code: https://github.com/nikhilbarhate99/Actor-Critic-PyTorch/blob/master/train.py
+        This makes sense (in terms of isolating different parts of a process --e.g. policy definition and learning of the policy)
+        because the ActorCritic class here is a LEARNER (i.e. it learns) as opposed to a Policy (as is the case in the implementation by nikhilbarhate99);
+        in addition, since it learns a policy, it needs to simulate trajectories under the current policy
+        in order to first learn the value functions that feeds the one-step learning of the policy parameter.
+
+        Arguments:
+        nepisodes: int
+            Number of episodes on which the one-step learning of the policy parameter is based.
+            This is the number of episodes that are run to learn the value functions under the current
+            policy parameter.
+
+        prob_include_in_train: (opt) float in (0, 1]
+            Probability of making each state of the observed trajectories contribute to the loss function.
+            This can be used to increase the independence among the observations that are included in
+            the loss calculation, which is what a neural network training process normally expects.
+            default: 0.50
+        """
+        self.t_learn += 1
+        seed = self.seed + self.t_learn - 1
+
+        # Set the seed of ALL random number generators used in the process!
+        self.env.seed(seed)
+        torch.manual_seed(seed)
+
+        if self.debug:
+            print("Policy for each state and action at the current parameter value:")
+            probs_actions = np.nan * np.ones((self.env.getNumStates(), self.env.getNumActions()))
+            for s in self.env.getAllStates():
+                for a in range(self.env.getNumActions()):
+                    probs_actions[s][a] = self.policy.getPolicyForAction(a, s)
+            print(probs_actions)
+
+        # Reset the information that has to do with the value functions learning and with attributes stored in the object about the performance of the policy
+        self.reset(reset_value_functions=True, reset_policy=False)
+
+        # Loss function to minimize when learning the optimum policy parameter
+        loss = 0.0
+        variance_average_reward = 0.0
+        nepisodes_max_steps_reached = 0
+        for episode in range(1, nepisodes+1):
+            self.env.reset()
+            done_episode = False
+            t = -1
+
+            if False and self.debug:
+                print(f"\n[DEBUG] *** NEW EPISODE #{episode} ***")
+                print("[DEBUG] States = [", end="")
+            while not done_episode:
+                t += 1
+
+                # Current state
+                state = self.env.getState()
+                if False and self.debug:
+                    print(f"{state}", end=", ")
+
+                # Choose an action and compute the log-probability of that action given the current state
+                # The log-probability is used in the computation of the loss function that is minimized when learning the optimum policy parameters
+                if self.policy.nn_model.getNumInputs() == 1:
+                    action_probs = F.softmax(self.policy.nn_model([state]), dim=0)
+                elif self.policy.nn_model.getNumInputs() == self.env.getNumStates():
+                    input = np.zeros(self.env.getNumStates(), dtype=int)
+                    input[state] = 1
+                    action_probs = F.softmax(self.policy.nn_model(input), dim=0)
+                else:
+                    raise ValueError(f"The number of inputs in the neural network ({self.policy.nn_model.getNumInputs()}) cannot be handled by the policy learner. It must be either 1 or as many as the number of states in the environment.")
+                action_distribution = Categorical(action_probs)
+                action = action_distribution.sample().item()
+                    ## NOTE: We cannot use self.policy.choose_action(state) to select an action because we need to know the action distribution
+                    ## in order to compute the log-probability of the selected action that is needed for the loss function
+                    ## which should be a tensor on which derivatives can be computed... (when calling loss.backward() used to learn the neural network parameters)
+
+                # Step
+                next_state, reward, done_episode, info = self.env.step(action)
+
+                if not done_episode and t >= max_time_steps - 1:    # `-1` because t_episode starts at 0 and max_time_steps counts the number of steps
+                    nepisodes_max_steps_reached += 1
+                    done_episode = True
+                    if self.debug:
+                        print(f"[DEBUG] Episode {episode}: MAX TIME STEP = {max_time_steps} REACHED!")
+
+                # Learn: i.e. update the value functions stored in the learner with the new observation
+                self.learner_value_functions.learn_pred_V(t, state, action, next_state, reward, done_episode, info)
+
+                advantage = self.learner_value_functions.getQ().getValue(state, action) - self.learner_value_functions.getV().getValue(state)
+                logprob = action_distribution.log_prob(torch.tensor(action))
+                if np.random.uniform() <= prob_include_in_train:
+                    loss += -advantage * logprob
+            episode_length = t + 1  # `+1` because t goes from 0 to (T-1), where T is the episode's length
+            if False and self.debug:
+                print(f"{state}]")
+
+            # Update the average reward observed over all episodes run
+            self.average_episode_length += (episode_length - self.average_episode_length) / episode
+            average_reward_current_episode = self.learner_value_functions.getAverageRewardByEpisode()[-1]
+            self.average_reward_over_episodes += (average_reward_current_episode - self.average_reward_over_episodes) / episode
+            if episode >= 2:
+                variance_average_reward = (episode - 2) / (episode - 1) * variance_average_reward + (average_reward_current_episode - self.average_reward_over_episodes)**2 / episode
+            if (episode - 1) % max(1, (nepisodes // 10)) == 0:      # max(1, ...) to avoid "modulo 0" if nepisodes < 10
+                print("[{:.0f}%]".format(episode/nepisodes*100) + f" Episode = {episode} of {nepisodes}: " +
+                      f"Average reward over episodes: {self.average_reward_over_episodes}, " +
+                      "Average episode length: {:.1f}".format(self.average_episode_length))
+
+        self.se_average_reward_over_episodes = np.sqrt(variance_average_reward / max(1, (episode - 1)))
+        print("---> FINAL AVERAGE REWARD AT LEARNING STEP {:d}: {:.3f} (+/- {:.3f}, {:.1f}%) on episodes of {:.1f} steps on average (% episodes max time reached = {:.1f}%)\n" \
+              .format(self.t_learn, self.average_reward_over_episodes, self.se_average_reward_over_episodes, self.se_average_reward_over_episodes / self.average_reward_over_episodes * 100,
+                      self.average_episode_length, nepisodes_max_steps_reached / nepisodes * 100))
+
+        # Learn
+        self.optimizer.zero_grad()      # We can easily look at the neural network parameters by printing self.optimizer.param_groups
+        loss.backward()
+        self.optimizer.step()
+        #print(f"New network parameters:\n{self.optimizer.param_groups}")
+
+    def deprecated_loss(self, Vs, Qs, logprobs) -> float:
+        """
+        The criterion (loss) of the actor-critic to be minimized is the sum of the log probabilities of all
+         observed actions given the respective observed states weighted by the advantage function on those same state-actions, that is:
+
+            criterion = sum_over_sampled_S(t)_A(t)( logprob(A(t)|S(t)) * Advantage(S(t), A(t)) )
+
+        where the advantage is the advantage of taking action A(t) over the average state-action value (over all possible actions at state S(t)), i.e. over V(S(t))), namely:
+            Advantage(S(t), A(t)) = Q(S(t), A(t)) - V(S(t))
+
+        and
+            Q(S(t), A(t)) = R(S(t), A(t), S(t+1)) + gamma * V(S(t+1))
+
+        Arguments:
+        Vs: array-like
+            Array or list containing the returns on which the criterion is computed.
+
+        Gs: array-like
+            Array or list containing the returns on which the criterion is computed.
+
+        logprobs: array-like
+            Array or list containing the returns on which the criterion is computed.
+
+        Return: float
+        Value of the criterion as described in the description of this method.
+        """
+        # Normalize the returns (what for??)
+        #Gs_std = (Gs - Gs.mean()) / (Gs.std() + 1E-9)
+
+        loss = 0.0
+        for V, Q, logprob in zip(Vs, Qs, logprobs):
+            advantage = Q - V
+            action_loss = -logprob * advantage
+            loss += action_loss
+
+        return loss
+
+    # TODO: (2023/10/06) The computation of the return should be responsibility of the learner object that should be passed as argument to the constructor
+    def deprecated_compute_returns(self) -> list:
+        """
+        Computes the returns G(t) at each time of the trajectory stored in the object using its definition
+
+        Note that this is also the Monte-Carlo estimate of the value functions (either V(s) or Q(s,a)).
+        Other estimates exist, such as the n-step return, the lambda-return, etc., which might be better
+        than the Monte-Carlo estimate.
+
+        The returns are computed either as the sum of the (discounted) rewards --corrected by the average reward
+        in the case when the learning criterion is the average reward criterion (where the discount gamma is asserted to be 1)--
+        from each time t until the end of the episode or until the end of the simulation (if infinite horizon or continuing task learning).
+
+        Note that we can use these computed returns to either estimate the state value function V(s) or
+        the action value function Q(s,a). What distinguishes what we are estimating is what we average the returns over:
+        - If we average all the returns observed for a given state s, we are estimating V(s).
+        - If we average all the returns observed for a given state-action (s, a), we are estimating Q(s,a).
+        NICE!
+        """
+        Gs = []
+        G = 0
+        for reward in self.getRewards()[::-1]:
+            G = reward + self.gamma * G
+            # Insert the newly calculated return at the beginning of the list so that we can read the returns
+            # from left to right as if we swept the trajectory in the order in which the states and actions were visited.
+            Gs.insert(0, G)
+
+        return Gs
+
+    #-- Getters
+    def getValueFunctionsLearner(self):
+        return self.learner_value_functions
+
+    def getPolicy(self):
+        return self.policy
 
 
 if __name__ == "__main__":

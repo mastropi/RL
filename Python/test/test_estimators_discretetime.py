@@ -697,13 +697,12 @@ class Test_EstStateValueV_EnvGridworldsWithObstacles(unittest.TestCase, test_uti
         #-- Plotting parameters
         cls.colormap = cm.get_cmap("jet")
 
-    def setUp(self):
-        # Simulation setup for ALL tests
-        self.seed = 1717
-        self.nepisodes = 20
-        self.start_state = 8
+        #-- Simulation setup
+        cls.seed = 1717
+        cls.nepisodes = 20
+        cls.start_state = 8
 
-        learner_mclambda = mc.LeaMCLambda(self.env2d, alpha=1.0,
+        learner_mclambda = mc.LeaMCLambda(cls.env2d, alpha=1.0,
                                           gamma=0.9,
                                           adjust_alpha=False,
                                           adjust_alpha_by_episode=False,
@@ -712,23 +711,23 @@ class Test_EstStateValueV_EnvGridworldsWithObstacles(unittest.TestCase, test_uti
                                             ## This implies that we use the standard Monte-Carlo learner, as opposed to the lambda-decayed Monte-Carlo learner.
                                             ## Recall that the approach is equivalent to using LeanerType.LAMBDA_RETURN with lambda = 1.0 (just verified in practice)
                                           debug=False)
-        self.agent_rw_mc = agents.GenericAgent(self.policy_rw, learner_mclambda)
-        self.sim_mc = DiscreteSimulator(self.env2d, self.agent_rw_mc, debug=False)
+        cls.agent_rw_mc = agents.GenericAgent(cls.policy_rw, learner_mclambda)
+        cls.sim_mc = DiscreteSimulator(cls.env2d, cls.agent_rw_mc, debug=False)
 
-        learner_tdlambda = td.LeaTDLambda(self.env2d, alpha=1.0,
+        learner_tdlambda = td.LeaTDLambda(cls.env2d, alpha=1.0,
                                           gamma=0.9, lmbda=0.0,
                                           adjust_alpha=False,
                                           adjust_alpha_by_episode=False,
                                           alpha_min=0.0,
                                           debug=False)
-        self.agent_rw_td = agents.GenericAgent(self.policy_rw, learner_tdlambda)
-        self.sim_td = DiscreteSimulator(self.env2d, self.agent_rw_td, debug=False)
+        cls.agent_rw_td = agents.GenericAgent(cls.policy_rw, learner_tdlambda)
+        cls.sim_td = DiscreteSimulator(cls.env2d, cls.agent_rw_td, debug=False)
 
         # Expected state values for all tests
-        self.expected_mc = [ 0.348678, 0.205891, 0.531441, 0.000000,
+        cls.expected_mc = [ 0.348678, 0.205891, 0.531441, 0.000000,
                              0.047101, 0.000000, 0.254187, 0.282430,
                              0.016423, 0.030903, 0.088629, 0.348678]
-        self.expected_td = [0.042391, 0.313811, 0.810000, 0.000000,
+        cls.expected_td = [0.042391, 0.313811, 0.810000, 0.000000,
                             0.038152, 0.000000, 0.729000, 1.000000,
                             0.022528, 0.109419, 0.430467, 0.387420]
 
@@ -742,6 +741,7 @@ class Test_EstStateValueV_EnvGridworldsWithObstacles(unittest.TestCase, test_uti
                     plot=False, pause=0.1)
         observed = self.agent_rw_mc.getLearner().getV().getValues()
         print("\nObserved state value function: " + test_utils.array2str(observed))
+        print("Expected state value function: " + test_utils.array2str(self.expected_mc))
 
         assert self.nS == 3*4 and \
                self.seed == 1717 and \
@@ -754,11 +754,12 @@ class Test_EstStateValueV_EnvGridworldsWithObstacles(unittest.TestCase, test_uti
 
         state_value, state_counts, _, _, learning_info = \
             self.sim_td.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
-                    compute_rmse=False, state_observe=None,
-                    verbose=True, verbose_period=100,
-                    plot=False, pause=0.1)
+                            compute_rmse=False, state_observe=None,
+                            verbose=True, verbose_period=100,
+                            plot=False, pause=0.1)
         observed = self.agent_rw_td.getLearner().getV().getValues()
         print("\nObserved state value function: " + test_utils.array2str(observed))
+        print("Expected state value function: " + test_utils.array2str(self.expected_td))
 
         assert self.nS == 3*4 and \
                self.seed == 1717 and \
@@ -801,42 +802,43 @@ class Test_EstDifferentialStateValueV_EnvGridworldsWithObstacles(unittest.TestCa
         #-- Plotting parameters
         cls.colormap = cm.get_cmap("jet")
 
-    def setUp(self):
-        # Simulation setup for ALL tests
-        self.seed = 1717
+        #-- Simulation setup
+        cls.seed = 1717
         # We use a large number of episodes (200) so that we can test that the results with MC and with TD(lambda) are similar and close to the true ones
         # at least when the MC learner is ready... which currently is not because both the state value and the average reward are based on episodic learning,
         # NOT on the average reward criterion.
-        self.nepisodes = 200
-        self.start_state = 8
+        cls.nepisodes = 200
+        cls.start_state = 8
 
         # Monte-Carlo learner
-        learner_mclambda = mc.LeaMCLambda(self.env2d, criterion=LearningCriterion.AVERAGE, alpha=1.0,
+        learner_mclambda = mc.LeaMCLambda(cls.env2d, criterion=LearningCriterion.AVERAGE, alpha=1.0,
                                           gamma=1.0,
                                           adjust_alpha=True,
                                           adjust_alpha_by_episode=False,
                                           alpha_min=0.0,
+                                          store_history_over_all_episodes=True,
                                           learner_type=mc.LearnerType.MC,
                                           debug=False)
-        self.agent_rw_mc = agents.GenericAgent(self.policy_rw, learner_mclambda)
-        self.sim_mc = DiscreteSimulator(self.env2d, self.agent_rw_mc, debug=False)
+        cls.agent_rw_mc = agents.GenericAgent(cls.policy_rw, learner_mclambda)
+        cls.sim_mc = DiscreteSimulator(cls.env2d, cls.agent_rw_mc, debug=False)
 
         # TD(lambda) learner
-        learner_tdlambda = td.LeaTDLambda(self.env2d, criterion=LearningCriterion.AVERAGE, alpha=1.0,
+        learner_tdlambda = td.LeaTDLambda(cls.env2d, criterion=LearningCriterion.AVERAGE, alpha=1.0,
                                           gamma=1.0, lmbda=0.0,
                                           adjust_alpha=True,
                                           adjust_alpha_by_episode=False,
                                           alpha_min=0.0,
+                                          store_history_over_all_episodes=True,
                                           debug=False)
-        self.agent_rw_td = agents.GenericAgent(self.policy_rw, learner_tdlambda)
-        self.sim_td = DiscreteSimulator(self.env2d, self.agent_rw_td, debug=False)
+        cls.agent_rw_td = agents.GenericAgent(cls.policy_rw, learner_tdlambda)
+        cls.sim_td = DiscreteSimulator(cls.env2d, cls.agent_rw_td, debug=False)
 
         # Fleming-Viot learner
         N = 100
         T = 1000
-        absorption_set = self.A
-        activation_set = self.B
-        learner_fv = fv.LeaFV(  self.env2d,
+        absorption_set = cls.A
+        activation_set = cls.B
+        learner_fv = fv.LeaFV(  cls.env2d,
                                 N, T, absorption_set, activation_set, probas_stationary_start_state=None,
                                 alpha=1.0,
                                 lmbda=0.0,
@@ -844,44 +846,58 @@ class Test_EstDifferentialStateValueV_EnvGridworldsWithObstacles(unittest.TestCa
                                 adjust_alpha_by_episode=False,
                                 alpha_min=0.0,
                                 debug=False)
-        self.agent_rw_fv = agents.GenericAgent(self.policy_rw, learner_fv)
-        self.sim_fv = DiscreteSimulator(self.env2d, self.agent_rw_fv, debug=False)
+        cls.agent_rw_fv = agents.GenericAgent(cls.policy_rw, learner_fv)
+        cls.sim_fv = DiscreteSimulator(cls.env2d, cls.agent_rw_fv, debug=False)
 
         # Expected state values for all tests
-        self.expected_mc = [0.250013, 0.429546, 0.624561, 0.000000,
-                            0.131218, 0.000000, 0.528836, 0.645549,
-                            0.053294, 0.188015, 0.358143, 0.462491]
-        self.expected_mc_average_reward = 0.00861585 # This value is currently (02-Sep-2023) WRONG because the average reward calculation is NOT based on the whole trajectory history, over all episodes, as it should be.
+        cls.expected_mc = [ 0.267278, 0.454330, 0.636666, 0.000000,
+                            0.116715, 0.000000, 0.530371, 0.665812,
+                            -0.040664, 0.147061, 0.337491, 0.481214]
+        cls.expected_mc_average_reward = 0.0225778
 
-        self.expected_td = [-0.001574, 0.115563, 0.368777, 0.000000,
-                            -0.046231, 0.000000, 0.179900, 0.337746,
-                            -0.058120, -0.050822, 0.011813, 0.060337]
-        self.expected_td_average_reward = 0.0225759
-        self.expected_td_average_reward_from_cycles = 0.0226629
-        self.expected_td_cycle_time = 13.724
-        self.expected_td_n_cycles = 643
+        cls.expected_td = [0.057923, 0.171950, 0.409192, 0.000000,
+                           0.014885, 0.000000, 0.244464, 0.384719,
+                           0.006412, 0.021146, 0.088868, 0.135981]
+        cls.expected_td_average_reward = 0.0225778
+        cls.expected_td_average_reward_from_cycles = 0.0226629
+        cls.expected_td_cycle_time = 13.724
+        cls.expected_td_n_cycles = 643
 
         # DM-2023/09/20: The expected value function (expected_fv) is similar to the expected value function under TD
         # because the problem is small... However, in problems where FV really observes more often the rare states with
         # rewards, the value function computed as done now (i.e. using the REGULAR average reward estimation as correction
         # value to compute the differential value function) is expected to diverge largely from the correct value function
         # which should use the FV estimator of the average reward as correction value.
-        self.expected_fv = [-0.004597, 0.133369, 0.397396, 0.000000,
-                            -0.066898, 0.000000, 0.219216, 0.382436,
-                            -0.082800, -0.060741, 0.039938, 0.116177]
-        self.expected_fv_average_reward = 0.0179877
-        self.expected_fv_cycle_time = 10.765
-        self.expected_fv_n_cycles = 4166
+        # IMPORTANT: The value of V(s) for the states in the *absorption set* are estimated from the single Markov chain
+        # simulation that estimates E(T_A) NOT from the FV simulation! This is ok, because by definition the set of
+        # absorption states are those that are visited often... hence their rewards would be estimated accurately...
+        # ALTHOUGH... no impact from the large and rare rewards would be seen for those states because the rare reward
+        # would almost NEVER be observed! Hmmm... We would need some way of leveraging FV to estimate the value of those
+        # states more accurately (i.e. an estimate that also observes the rare reward that is observed by the states OUTSIDE
+        # the absorption set...). Perhaps we could do that by starting the Fleming-Viot simulation (on ALL N particles)
+        # ALSO at those states... when ALL the N trajectories leave the set... (which at some point should leave), we start applying Fleming-Viot.
+        # Will this be too slow to launch the FV process??
+        # AN IMPROVEMENT ON THIS IDEA IS THE FOLLOWING: We start all N particles INSIDE the absorption set, and as they
+        # start getting out of A we start the FV process ON THE PARTICLES THAT ARE AVAILABLE FOR IT! So, the number of
+        # particles varies as time progresses (it goes up as new particles exit the absorption set A, and it goes down
+        # as the particles reach a terminal state --in which case they are restarted inside A, e.g. at the START of the labyrinth).
+        # The maximum number of particles in the system is N.
+        cls.expected_fv = [0.088771, 0.218236, 0.456348, 0.000000,
+                           0.030690, 0.000000, 0.305923, 0.447482,
+                           0.018997, 0.045394, 0.143903, 0.214104]
+        cls.expected_fv_average_reward = 0.0179877
+        cls.expected_fv_cycle_time = 10.765
+        cls.expected_fv_n_cycles = 4166
 
         # Expected stationary distribution of states, using regular estimation and using renewal theory (the results should be similar)
         # These results do NOT depend on the learning method for the value functions (be it Monte-Carlo or TD(lambda) or be it under the discounted or average criterion)
-        self.expected_p = [ 0.124200, 0.090417, 0.048576, 0.022080,
+        cls.expected_p = [ 0.124200, 0.090417, 0.048576, 0.022080,
                             0.150696, 0.000000, 0.055641, 0.040958,
                             0.187459, 0.132480, 0.083352, 0.064142]
-        self.expected_p_from_cycles = [0.127479, 0.092805, 0.049858, 0.022663,
+        cls.expected_p_from_cycles = [0.127479, 0.092805, 0.049858, 0.022663,
                                        0.154448, 0.000000, 0.057110, 0.042040,
                                        0.192068, 0.135977, 0.085552, 0.065836]
-        self.expected_p_fv = [  np.nan, np.nan, np.nan, 0.0179877,
+        cls.expected_p_fv = [  np.nan, np.nan, np.nan, 0.0179877,
                                 np.nan, np.nan, np.nan, np.nan,
                                 np.nan, np.nan, np.nan, np.nan]
 
@@ -896,6 +912,7 @@ class Test_EstDifferentialStateValueV_EnvGridworldsWithObstacles(unittest.TestCa
         observed = self.agent_rw_mc.getLearner().getV().getValues()
         observed_average_reward = self.agent_rw_mc.getLearner().getAverageReward()
         print("\nObserved state value function: " + test_utils.array2str(observed))
+        print("Expected state value function: " + test_utils.array2str(self.expected_mc))
         print(f"Average reward: {observed_average_reward}")
 
         assert self.nS == 3 * 4 and \
@@ -916,10 +933,12 @@ class Test_EstDifferentialStateValueV_EnvGridworldsWithObstacles(unittest.TestCa
         observed = self.agent_rw_mc.getLearner().getV().getValues()
         observed_average_reward = self.agent_rw_mc.getLearner().getAverageReward()
         print("\nObserved state value function: " + test_utils.array2str(observed))
+        print("Expected state value function: " + test_utils.array2str(self.expected_mc))
         print(f"Average reward: {observed_average_reward}")
 
         observed_p = state_counts / np.sum(state_counts)
         print("\nState probability distribution (usual calculation as relative frequency): " + test_utils.array2str(observed_p))
+        print("Expected state probability distribution: " + test_utils.array2str(self.expected_p))
 
         observed_p_from_cycles = learning_info['state_counts_within_cycles'] / learning_info['num_cycles'] / learning_info['expected_cycle_time']
         print("\nState probability distribution using renewal theory: " + test_utils.array2str(observed_p_from_cycles))
@@ -947,10 +966,12 @@ class Test_EstDifferentialStateValueV_EnvGridworldsWithObstacles(unittest.TestCa
         observed = self.agent_rw_td.getLearner().getV().getValues()
         observed_average_reward = self.agent_rw_td.getLearner().getAverageReward()
         print("\nObserved state value function: " + test_utils.array2str(observed))
+        print("Expected state value function: " + test_utils.array2str(self.expected_td))
         print(f"Average reward: {observed_average_reward}")
 
         observed_p = state_counts / np.sum(state_counts)
         print("\nState probability distribution: " + test_utils.array2str(observed_p))
+        print("Expected state probability distribution: " + test_utils.array2str(self.expected_p))
 
         assert self.nS == 3*4 and \
                self.seed == 1717 and \
@@ -972,13 +993,16 @@ class Test_EstDifferentialStateValueV_EnvGridworldsWithObstacles(unittest.TestCa
         observed = self.agent_rw_td.getLearner().getV().getValues()
         observed_average_reward = self.agent_rw_td.getLearner().getAverageReward()
         print("\nObserved state value function (learned by TD): " + test_utils.array2str(observed))
+        print("Expected state value function: " + test_utils.array2str(self.expected_td))
 
         observed_p = state_counts / np.sum(state_counts)
         observed_p_from_cycles = learning_info['state_counts_within_cycles'] / learning_info['num_cycles'] / learning_info['expected_cycle_time']
+        # The following calculation of the average reward from cycles assumes that rewards are only observed at terminal states
         observed_average_reward_from_cycles = sum([p*self.env2d.getTerminalReward(x) for x, p in enumerate(observed_p_from_cycles) if x in self.env2d.getTerminalStates()])
 
         print("\nState probability distribution (usual calculation as relative frequency): " + test_utils.array2str(observed_p))
         print("State probability distribution (using renewal theory): " + test_utils.array2str(observed_p_from_cycles))
+        print("Expected state probability distribution: " + test_utils.array2str(self.expected_p))
         print("(state counts within cycles: " + test_utils.array2str(learning_info['state_counts_within_cycles']) + ")")
         print(f"(expected cycle time = {learning_info['expected_cycle_time']} on {learning_info['num_cycles']} cycles)")
 
@@ -1027,8 +1051,10 @@ class Test_EstDifferentialStateValueV_EnvGridworldsWithObstacles(unittest.TestCa
 
         print("\nObserved state value function (WITHOUT correction of average reward): " + test_utils.array2str(observed_values_uncorrected))
         #print("\nObserved state value function (corrected by FV's average reward): " + test_utils.array2str(observed_values))
-        print("\nState frequency distribution (observed during FV simulation):\n{}".format(observed_p))
-        print("\nState probability distribution using FV:\n{}".format(observed_p_fv))
+        print("Expected state value function: " + test_utils.array2str(self.expected_fv))
+        print("\nState frequency distribution (observed during FV simulation): " + test_utils.array2str(observed_p))
+        print("\nState probability distribution using FV: " + test_utils.array2str(observed_p_fv))
+        print("Expected state probability distribution using FV: " + test_utils.array2str(self.expected_p_fv))
         print(f"(expected cycle time = {expected_cycle_time} on {n_cycles} cycles)")
         print(f"\nAverage reward (using TD learner --this is OVERESTIMATED because of FV process!): {observed_average_reward_inflated_by_fv}")
         print(f"Average reward using FV: {observed_average_reward}")

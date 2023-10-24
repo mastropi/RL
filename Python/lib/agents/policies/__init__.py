@@ -3,7 +3,7 @@
 Created on 09 Oct 2021
 
 @author: Daniel Mastropietro
-@description: Definition of the attributes and methods that are needed for any parameterized policy with two possible actions
+@description: Definition of the generic classes for policies.
 """
 
 from enum import Enum, unique
