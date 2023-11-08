@@ -10,6 +10,91 @@ runpy.run_path('../../setup.py')
 
 import sys
 
+
+########
+# 2023/10/12: Learn an actor-critic policy using neural networks (with the torch package)
+# Learning happens with the ActorCriticNN learner which defines a loss of type `tensor` which can be minimized using the backward() method of torch Tensors
+# IT WORKS!
+import numpy as np
+from  matplotlib import pyplot as plt, cm
+from Python.test.test_optimizers_discretetime import InputLayer, Test_EstPolicy_EnvGridworldsWithObstacles
+from Python.lib.agents.learners.policies import LeaActorCriticNN
+
+seed = 1317
+test_ac = Test_EstPolicy_EnvGridworldsWithObstacles()
+test_ac.setUpClass(shape=(3, 4), nn_input=InputLayer.ONEHOT, nn_hidden_layer_sizes=[8], seed=seed, debug=False)
+test_ac.setUp()
+print(test_ac.policy_nn.nn_model)
+
+# Actor-Critic policy learner with TD(0) as value functions learner
+learner_ac = LeaActorCriticNN(test_ac.env2d, test_ac.agent_nn_td.getPolicy(), test_ac.agent_nn_td.getLearner(), optimizer_learning_rate=0.1, seed=test_ac.seed, debug=True)
+n_learning_steps = 20
+max_time_steps = learner_ac.env.getNumStates()*100
+n_episodes_per_learning_step = 30
+for t_learn in range(1, n_learning_steps+1):
+    print(f"\n\n*** Running learning step {t_learn}...")
+    learner_ac.learn(n_episodes_per_learning_step, max_time_steps=max_time_steps)
+
+# Actor-Critic policy learner with FV as value functions learner
+learner_ac = LeaActorCriticNN(test_ac.env2d, test_ac.agent_nn_fv.getPolicy(), test_ac.agent_nn_fv.getLearner(), optimizer_learning_rate=0.1, seed=test_ac.seed, debug=True)
+n_learning_steps = 100
+max_time_steps = learner_ac.env.getNumStates()*100
+n_episodes_per_learning_step = 30
+for t_learn in range(1, n_learning_steps+1):
+    print(f"\n\n*** Running learning step {t_learn}...")
+    # Learn the value functions using the FV simulator
+    #V, Q, probas_stationary, expected_reward, expected_absorption_time, n_cycles_absorption_used, n_events_et, n_events_fv = \
+    #    test_ac.sim_fv.run(seed=test_ac.seed, verbose=True, verbose_period=test_ac.agent_nn_fv.getLearner().T // 10)
+    # Check if things work using the TD(0) learner for the value functions
+    V, Q, state_counts, _, _, _ = \
+        test_ac.sim_td.run(nepisodes=n_episodes_per_learning_step, max_time_steps=max_time_steps, start=test_ac.start_state, seed=test_ac.seed, verbose=True, verbose_period=test_ac.agent_nn_fv.getLearner().T // 10)
+    learner_ac.learn_from_estimated_value_functions(V, Q)
+
+env = test_ac.env2d
+gridworld_shape = env.shape
+policy = learner_ac.getPolicy()
+learner = learner_ac.getValueFunctionsLearner()
+print("Final network parameters:")
+print(list(policy.getThetaParameter()))
+
+#-- Plots
+colormap = cm.get_cmap("rainbow")  # useful colormaps are "jet", "rainbow", seismic"
+colornorm = None
+
+# Plot a few weights of the neural network
+# TBD
+
+# Policy for each action at each state
+axes = plt.figure().subplots(*gridworld_shape)
+probs_actions_toplot = np.nan*np.ones((3, 3))
+for i in range(axes.shape[0]):
+    for j in range(axes.shape[1]):
+        state_1d = np.ravel_multi_index((i, j), gridworld_shape)
+        print("")
+        for action in range(env.getNumActions()):
+            print(f"Computing policy Pr(a={action}|s={(i,j)})...", end= " ")
+            idx_2d = (0, 1) if action == 0 else (1, 2) if action == 1 else (2, 1) if action == 2 else (1, 0)
+            probs_actions_toplot[idx_2d] = policy.getPolicyForAction(action, state_1d)
+            print("p = {:.3f}".format(probs_actions_toplot[idx_2d]))
+        img = axes[i,j].imshow(probs_actions_toplot, cmap=colormap, vmin=0, vmax=1)
+plt.colorbar(img)
+
+# Distribution of state counts at last learning step run
+state_counts = learner.getStateCounts()
+state_counts_2d = np.array(state_counts).reshape(*gridworld_shape)
+print(state_counts_2d)
+print(state_counts_2d / np.sum(state_counts_2d.reshape(-1)))
+ax = plt.figure().subplots(1,1)
+img = ax.imshow(state_counts_2d, cmap=colormap, norm=colornorm)
+plt.colorbar(img)
+
+# Let's look at the trajectories of the learner (it works when constructing the learner with store_history_over_all_episodes=True)
+print(len(learner.getStates()))
+print([len(trajectory) for trajectory in learner.getStates()])
+
+raise KeyboardInterrupt
+
+
 ########
 # 2023/03/08: Test the package optparse to parse arguments when calling a script from the command prompt, specially
 # its capabilities of parsing an argument that should be interpreted as a list.

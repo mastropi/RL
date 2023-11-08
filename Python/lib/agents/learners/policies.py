@@ -954,6 +954,9 @@ class LeaActorCriticNN(GenericLearner):
         Therefore, the initial state distribution should be defined at the moment of the environment creation.
 
     policy: Neural-network-parameterized policy to learn
+        That is, the policy cannot be ANY parameterized policy... it has to be a policy parameterized
+        by a neural network implemented with torch, because learning the optimum parameter involves
+        computing a loss that is injected into the torch backward learner and this requires that the loss be a tensor...
 
     learner_value_functions: GenericLearner
         Learner used to learn the state and action value functions.
@@ -1003,7 +1006,7 @@ class LeaActorCriticNN(GenericLearner):
             # NOTE: The default learning rate of the Adam optimizer is 0.03 (so, quite small!)
             self.optimizer = optim.Adam(self.policy.getThetaParameter(), lr=self.optimizer_learning_rate, betas=(0.9, 0.999))
                 ## Note: the betas parameter are "coefficients used for computing running averages of gradient and its square" (ref: help(optim.Adam)) and (0.9, 0.999) is the default
-            # self.optimizer = optim.SGD(self.policy.getThetaParameter(), lr=alpha/10, momentum=0.9)
+            #self.optimizer = optim.SGD(self.policy.getThetaParameter(), lr=alpha/10, momentum=0.9)
                 ## This optimizer gives very bad results (the average reward under the learned policy tends to 0!),
                 ## if lr is too large (i.e. lr = 1.0, it works with lr = 0.1)!!
                 ## If we use lr=0.1, momentum=0.9, we get similar results to the Adam optimizer.
@@ -1028,6 +1031,10 @@ class LeaActorCriticNN(GenericLearner):
             This is the number of episodes that are run to learn the value functions under the current
             policy parameter.
 
+        max_time_steps: (opt) int
+            Maximum number of time steps to perform within an episode until it is considered `done`.
+            default: +np.Inf
+
         prob_include_in_train: (opt) float in (0, 1]
             Probability of making each state of the observed trajectories contribute to the loss function.
             This can be used to increase the independence among the observations that are included in
@@ -1046,7 +1053,7 @@ class LeaActorCriticNN(GenericLearner):
             probs_actions = np.nan * np.ones((self.env.getNumStates(), self.env.getNumActions()))
             for s in self.env.getAllStates():
                 for a in range(self.env.getNumActions()):
-                    probs_actions[s][a] = self.policy.getPolicyForAction(a, s)
+                    probs_actions[s][a] = np.round(self.policy.getPolicyForAction(a, s), 2)
             print(probs_actions)
 
         # Reset the information that has to do with the value functions learning and with attributes stored in the object about the performance of the policy
@@ -1129,6 +1136,53 @@ class LeaActorCriticNN(GenericLearner):
         loss.backward()
         self.optimizer.step()
         #print(f"New network parameters:\n{self.optimizer.param_groups}")
+
+    def learn_from_estimated_value_functions(self, state_values, action_values):
+        """
+        Perform a one step learning of the policy parameter using the FV simulator to learn the value functions that contribute to the loss
+
+        This one step learning is based on using the current policy to learn the state and action value functions
+        that are used as a critic in the loss function that feeds the neural network defining the theta parameter of the policy.
+
+        Arguments:
+        state_values, action_values: estimated state and action value functions that is used here to compute the advantage function
+        """
+        # Iterate on all possible states and actions and compute the loss function
+        # as the product of the advantage function times the log-policy.
+        loss = 0.0
+        for state in range(self.env.getStateSpace().n):
+            for action in range(self.env.getActionSpace().n):
+                # Compute the log-probability of the action given the state by inputting the current state to the neural network
+                if self.policy.nn_model.getNumInputs() == 1:
+                    action_probs = F.softmax(self.policy.nn_model([state]), dim=0)
+                elif self.policy.nn_model.getNumInputs() == self.env.getNumStates():
+                    input = np.zeros(self.env.getNumStates(), dtype=int)
+                    input[state] = 1
+                    action_probs = F.softmax(self.policy.nn_model(input), dim=0)
+                else:
+                    raise ValueError(f"The number of inputs in the neural network ({self.policy.nn_model.getNumInputs()}) cannot be handled by the policy learner. It must be either 1 or as many as the number of states in the environment.")
+                action_distribution = Categorical(action_probs)
+
+                # TODO: (2023/11/07) Use V and Q, the objects of type StateValueFunctionApprox and ActionValueFunctionApprox, respectively, defined in value_functions.py
+                # For now we don't use these classes because the discrete.Simulator._run_single() and discrete.Simulator._run_fv() methods return arrays with the state values and action values, NOT the aforementioned classes.
+                #advantage = Q.getValue(state, action) - V.getValue(state)
+                advantage = action_values[state*self.env.getActionSpace().n + action] - state_values[state]
+                    ## Note that the way to access the action value corresponds to how the ActionValueFunctionApprox.getLinearIndex() method computes the linear index
+                logprob = action_distribution.log_prob(torch.tensor(action))
+                loss += -advantage * logprob
+
+        # Learn (i.e. update the parameters of the neural network)
+        self.optimizer.zero_grad()      # We can easily look at the neural network parameters by printing self.optimizer.param_groups
+        loss.backward()
+        self.optimizer.step()
+
+        if self.debug:
+            #print(f"New network parameters:\n{self.optimizer.param_groups}")
+            proba_policy = np.nan * np.ones((self.env.getNumStates(), self.env.getNumActions()))
+            for s in range(self.env.getStateSpace().n):
+                for a in range(self.env.getActionSpace().n):
+                    proba_policy[s][a] = np.round(self.policy.getPolicyForAction(a, s), 2)
+            print(f"Policy:\n{proba_policy}")
 
     def deprecated_loss(self, Vs, Qs, logprobs) -> float:
         """
