@@ -27,6 +27,7 @@ class GenericAgent:
     For instance the AgeQueue subclass defines policies and learners as dictionaries of policies and learners,
     respectively, because e.g. there are two policies at least that could be defined on a queue: the job acceptance
     policy, and the assignment policy of a job to a server in the queue.
+    Likewise, the learner could contain two types of learners, the value functions learner and the policy learner.
     """
 
     # TODO: (2021/10/18) Probably we should define the attributes as `policies` and `learners` because the agent may have different policies and differen learners
@@ -36,7 +37,7 @@ class GenericAgent:
         self.learner = learner
         self.action = None
 
-    def act(self, env, policy_types):
+    def act(self, env, policy_type):
         raise NotImplementedError
 
     #----- GETTERS -----#

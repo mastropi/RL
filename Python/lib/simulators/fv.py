@@ -3,7 +3,7 @@
 Created on Mon Sep 4 16:32:28 2023
 
 @author: Daniel Mastropietro
-@description: Support functions used in Fleming-Viot simulations.
+@description: Support functions used in Fleming-Viot simulations for both discrete-time and continuous-time contexts.
 They are expected to be applicable to:
 - queue environments
 - discrete-time/state/action environments

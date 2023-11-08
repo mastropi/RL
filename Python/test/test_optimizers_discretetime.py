@@ -24,13 +24,9 @@ from matplotlib import pyplot as plt, cm
 from torch import nn
 
 import Python.lib.agents as agents
-from Python.lib.agents.learners import LearnerTypes
-from Python.lib.agents.learners.continuing.fv import LeaFV
-from Python.lib.agents.learners.continuing.mc import LeaMC
-#from Python.lib.agents.learners.policies import LeaPolicyGradientNN
 
 from Python.lib.agents.learners import LearningCriterion
-from Python.lib.agents.learners.episodic.discrete import fv, td, AlphaUpdateType
+from Python.lib.agents.learners.episodic.discrete import fv, td
 
 from Python.lib.agents.policies.parameterized import PolNN
 
@@ -38,7 +34,6 @@ from Python.lib.environments import gridworlds
 
 from Python.lib.estimators.nn_models import nn_backprop
 
-from Python.lib.simulators import LearningMethod
 from Python.lib.simulators.discrete import Simulator as DiscreteSimulator
 
 from Python.lib.utils.basic import assert_equal_data_frames, is_scalar, show_exec_params

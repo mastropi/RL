@@ -3,7 +3,8 @@
 Created on Mon Sep 4 16:05:33 2023
 
 @author: Daniel Mastropietro
-@description: Functions for Fleming-Viot-based estimators. Ex: Queue blocking, labyrinth exit, etc.
+@description: Functions for Fleming-Viot-based estimators for both discrete-time and continuous-time contexts.
+Ex: estimator of the queue blocking probability, estimator of the average reward in classical RL environments (e.g. labyrinth), etc.
 They are expected to be applicable to:
 - queue environments
 - discrete-time/state/action environments

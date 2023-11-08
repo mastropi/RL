@@ -202,7 +202,7 @@ class Learner(GenericLearner):
             # Reset all the learning information by calling the super class reset, which is generic, i.e. it does NOT assume episodic tasks
             # Note that such super class calls the reset_value_function() method defined in the specific class that is inheriting from the super class!
             # So, in this case, it ends up calling the reset_value_functions() defined below!!
-            super().reset(reset_learning_epoch=True, reset_alphas=True, reset_value_functions=True, reset_trajectory=True, reset_counts=True)
+            super().reset(reset_learning_epoch=True, reset_alphas=True, reset_value_functions=reset_value_functions, reset_trajectory=True, reset_counts=True)
 
     def setParams(self, alpha, adjust_alpha, alpha_update_type, adjust_alpha_by_episode, alpha_min):
         self.alpha = alpha if alpha is not None else self.alpha
