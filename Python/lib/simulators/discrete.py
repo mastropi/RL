@@ -206,18 +206,18 @@ class Simulator:
         # Create the particles as copies of the main environment
         envs = [self.env if i == 0 else copy.deepcopy(self.env) for i in range(dict_params_simul['N'])]
 
-        state_values, probas_stationary, expected_reward, expected_absorption_time, n_cycles_absorption_used, \
+        state_values, action_values, probas_stationary, expected_reward, expected_absorption_time, n_cycles_absorption_used, \
             time_last_absorption, max_survival_time, n_events_et, n_events_fv = \
                 self._estimate_state_value_function_and_expected_reward_fv( envs, dict_params_simul, dict_params_info,
                                                                             probas_stationary_start_state=self.agent.getLearner().getProbasStationaryStartState())
 
-        return state_values, probas_stationary, expected_reward, expected_absorption_time, n_cycles_absorption_used, n_events_et, n_events_fv
+        return state_values, action_values, probas_stationary, expected_reward, expected_absorption_time, n_cycles_absorption_used, n_events_et, n_events_fv
 
     def _estimate_state_value_function_and_expected_reward_fv(self, envs, dict_params_simul, dict_params_info,
                                                               probas_stationary_start_state: dict=None):
         """
-        Estimates the differential state values, the stationary state probabilities, and the expected reward
-        (a.k.a. long-run average reward) using the Fleming-Viot approach
+        Estimates the differential state values and action values, the stationary state probabilities,
+        and the expected reward (a.k.a. long-run average reward) using the Fleming-Viot approach.
 
         Arguments:
         envs: List
@@ -242,6 +242,7 @@ class Simulator:
         Return: tuple
         Tuple with the following elements:
         - state_values: the estimated differential state value function V(s).
+        - action_values: the estimated action value function Q(s,a).
         - probas_stationary: dictionary with the estimated stationary probability for each state of interest.
         - expected_reward: the estimated expected reward.
         - expected_absorption_time: estimated expected absorption time E(T_A) used in the denominator of the FV estimator
@@ -269,7 +270,7 @@ class Simulator:
 
         # -- Step 1: Simulate a single Markov chain to estimate the expected cycle time of return to A, E(T_A)
         start_state_boundary_A = choose_state_from_set(dict_params_simul['absorption_set'], probas_stationary_start_state)
-        state_values, state_counts, _, _, learning_info = \
+        state_values, action_values, state_counts, _, _, learning_info = \
             self._run_single(dict_params_simul['T'],                    # Number of episodes to run (it is still NOT clear how to define this, as we want to run the simulation until T number of steps are observed IN TOTAL, so how do we define the number of episodes??)
                             max_time_steps=dict_params_simul['T'],      # Max simulation time per episode (it is still NOT clear how to define this, as we want to run the simulation until T number of steps are observed IN TOTAL, as opposed to "per episode")
                             start=start_state_boundary_A,
@@ -303,7 +304,7 @@ class Simulator:
             N = len(envs)
             assert N > 1, "The simulation system has more than one particle in Fleming-Viot mode ({})".format(N)
             expected_absorption_time = learning_info['expected_cycle_time']
-            t, state_values, phi, df_proba_surv, expected_absorption_time, max_survival_time = \
+            t, state_values, action_values, phi, df_proba_surv, expected_absorption_time, max_survival_time = \
                 self._run_simulation_fv(dict_params_info.get('t_learn', 0), envs,
                                         dict_params_simul['absorption_set'],
                                         dict_params_simul['activation_set'],
@@ -333,7 +334,7 @@ class Simulator:
                 print("Stationary probabilities: {}".format(probas_stationary))
                 print("Expected reward = {}".format(expected_reward))
 
-        return state_values, probas_stationary, expected_reward, expected_absorption_time, n_cycles_absorption_used, \
+        return state_values, action_values, probas_stationary, expected_reward, expected_absorption_time, n_cycles_absorption_used, \
                time_last_absorption, max_survival_time, n_events_et, n_events_fv
 
     @measure_exec_time
@@ -348,7 +349,7 @@ class Simulator:
         - P(T > t): the survival (non-absorption) probability.
         - E(T_A): expected reabsorption probability to set A, only computed by this function when its parameter is None.
         Otherwise, the input parameter value is returned.
-        In addition, the differential value function V(s) is also estimated, from possibly an initial estimation
+        In addition, the differential value functions V(s) and Q(s,a) are also estimated, from possibly an initial estimation
         obtained from the simulation of a single Markov chain (run by e.g. self._run_single()).
 
         Arguments:
@@ -402,6 +403,7 @@ class Simulator:
         Tuple with the following elements:
         - t: the last (discrete) time step of the simulation process.
         - state_values: state value function V(s) estimated by the process.
+        - action_values: action value function Q(s,a) estimated by the process.
         - dict_phi: dictionary of lists with the empirical distribution of the states of interest (e.g. where a non-zero rewards occurs)
         which are an estimate of the probability of those states conditional to survival (not absorption).
         - df_proba_surv: data frame with the estimated survival probability P(T > t).
@@ -517,6 +519,9 @@ class Simulator:
                 next_state, reward, done_episode, info = envs[idx_particle].step(action)
 
                 # Learn: i.e. update the value function (stored in the learner) with the new observation
+                # NOTE that learning ONLY happens when the particle is NOT reactivated.
+                # This makes total sense because reactivation sets the next state of the particle to a state
+                # that is normally not reachable by the underlying Markov chain on which the FV process is built.
                 learner.learn_pred_V(t, state, action, next_state, reward, done, info)
 
             if done_episode or next_state in absorption_set:
@@ -597,7 +602,7 @@ class Simulator:
             print("Phi:\n{}".format(dict_phi))
             pd.set_option('display.max_rows', max_rows)
 
-        return t, learner.getV().getValues(), dict_phi, df_proba_surv, expected_absorption_time, max_survival_time
+        return t, learner.getV().getValues(), learner.getQ().getValues(), dict_phi, df_proba_surv, expected_absorption_time, max_survival_time
 
     def _run_single(self, nepisodes, max_time_steps=+np.Inf, start=None, seed=None, compute_rmse=False, weights_rmse=None,
                     state_observe=None, set_cycle=None,
@@ -1124,7 +1129,7 @@ class Simulator:
 
         self.finalize_run()
 
-        return  learner.getV().getValues(), learner.getStateCounts(), RMSE, MAPE, \
+        return  learner.getV().getValues(), learner.getQ().getValues(), learner.getStateCounts(), RMSE, MAPE, \
                 {   't': t,   # Simulation time, i.e. number of discrete steps taken during the whole simulation
                     # Value of alpha for each state at the end of the LAST episode run
                     'alphas_at_last_episode': learner._alphas,
@@ -1237,7 +1242,7 @@ class Simulator:
         ## Set the value of terminal states to their reward, both the True values and estimated values
         ## (just to make plots of the state value function more understandable, specially in environments > 1D)
         #for s, r in self.env.getTerminalRewardsDict():
-        #    self.agent.getLearner().getV().setWeight(s, r)
+        #    self.agent.getLearner().getV()._setWeight(s, r)
         #    if self.env.getV() is not None:
         #        self.env.getV()[s] = r
 
@@ -1404,7 +1409,7 @@ class Simulator:
             if verbose:
                 print("Running experiment {} of {} (#episodes = {})..." \
                       .format(exp+1, nexperiments, nepisodes), end=" ")
-            V, n_visits_i, RMSE_by_episode_i, MAPE_by_episode_i, learning_info = \
+            V, Q, n_visits_i, RMSE_by_episode_i, MAPE_by_episode_i, learning_info = \
                     self.run(nepisodes=nepisodes, max_time_steps=max_time_steps,
                              start=start, seed=None,    # We pass seed=None so that the seed is NOT set by this experiment
                                                         # Otherwise ALL experiments would have the same outcome!

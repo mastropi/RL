@@ -48,7 +48,7 @@ class AgeQueue(GenericAgent):
     learners: dict
         Dictionary of learners, with the following elements:
         'V': GenericLearner used by the agent to learn the state value function.
-        'Q': GenericLearner used by the agent to learn the action-state value function.
+        'Q': GenericLearner used by the agent to learn the action value function.
     """
     def __init__(self, env, policies: dict, learners: dict, debug=False):
         super().__init__(policies, learners)

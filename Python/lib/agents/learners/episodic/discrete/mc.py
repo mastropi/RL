@@ -23,7 +23,7 @@ import pandas as pd
 
 from Python.lib.agents.learners import LearningCriterion, ResetMethod
 from Python.lib.agents.learners.episodic.discrete import Learner, AlphaUpdateType
-from Python.lib.agents.learners.value_functions import StateValueFunctionApprox
+from Python.lib.agents.learners.value_functions import ActionValueFunctionApprox, StateValueFunctionApprox
 
 DEFAULT_NUMPY_PRECISION = np.get_printoptions().get('precision')
 DEFAULT_NUMPY_SUPPRESS = np.get_printoptions().get('suppress')
@@ -62,7 +62,7 @@ class LeaMCLambda(Learner):
 
         # Attributes that MUST be presented for all MC methods
         self.V = StateValueFunctionApprox(self.env.getNumStates(), self.env.getTerminalStates())
-        self.Q = None
+        self.Q = ActionValueFunctionApprox(self.env.getNumStates(), self.env.getNumActions(), self.env.getTerminalStates())
         self.gamma = gamma
         
         #-- Attributes specific to the current MC method
@@ -158,6 +158,9 @@ class LeaMCLambda(Learner):
 
                 delta = gtlambda - self.V.getValue(state)
                 self.updateV(state, delta)
+                self.updateQ(state, action, delta)
+                # Update the learning rate alpha for the next iteration
+                self._update_alphas(state)
 
     def deprecated_gt2tn(self, start, end):
         """
@@ -234,6 +237,7 @@ class LeaMCLambda(Learner):
         # first visit that does NOT require a special data structure storage.
         for tt in np.arange(T,0,-1) - 1:     # This is T-1, T-2, ..., 0
             state = self._states[tt]
+            action = self._actions[tt]
             G = self.gamma*G + self._rewards[tt+1]      # This is the reward of going from state `state` observed at time tt to the state observed at the next time tt+1
             if self.criterion == LearningCriterion.AVERAGE:
                 # Compute the differential return
@@ -247,6 +251,9 @@ class LeaMCLambda(Learner):
                     # Ref: Sutton (2018), pag. 250
                     delta -= self._average_reward_in_episode
                 self.updateV(state, delta)
+                self.updateQ(state, action, delta)
+                # Update the learning rate alpha for the next iteration
+                self._update_alphas(state)
                 nupdates[state] += 1
 
         assert all(nupdates <= 1), "Each state has been updated at most once"
@@ -388,6 +395,7 @@ class LeaMCLambda(Learner):
             print("DONE:")
         for tt in np.arange(T):
             state = self._states[tt]
+            action = self._actions[tt]
             # First-visit MC: We only update the value function estimation at the first visit of the state
             if self._states_first_visit_time[state] == tt:
                 # Value of the error (delta) where the lambda-return is used as the current value function estimate,
@@ -399,22 +407,27 @@ class LeaMCLambda(Learner):
                           .format(tt, Glambda[tt], state, self.V.getValue(state), delta))
 
                 self.updateV(state, delta)
+                self.updateQ(state, action, delta)
+
+                # Update the learning rate alpha for the next iteration
+                # Note that the update is based ONLY on the state visit frequency, NOT on the state-action visit frequency...
+                # This may not be the best approach for the estimation of Q(s,a) if, for instance, certain actions of a given state
+                # are not visited often, their learning rate will be decreased even if the action was never visited!
+                # TODO: (2023/11/08) We might need to update alphas ALSO by the action visit frequency in order to have an appropriate estimation of Q(s,a)...
+                self._update_alphas(state)
     #---------------------- MC(lambda): lambda-return Monte Carlo --------------------------------#
 
 
     #------------------- Auxiliary function: value function udpate -------------------------------#
     def updateV(self, state, delta):
-        # Gradient of V: it must have the same size as the weights
-        # In the linear case the gradient is equal to the feature associated to state s,
-        # which is stored at column s of the feature matrix X.
-        gradient_V = self.V.X[:,state]  
-            ## Note: the above returns a ROW vector which is good because the weights are stored as a ROW vector
-
-        # Update the weights based on the error observed at each time step and the gradient of the value function
+        "Updates the state value function V(s) for the given state and action using the given delta on the gradient computed assuming a linear approximation function"
+        gradient_V = self.V.X[:, state] # row vector
         self.V.setWeights( self.V.getWeights() + self._alphas[state] * delta * gradient_V )
 
-        # Update alpha for the next iteration, once we have already updated the value function for the current state
-        self._update_alphas(state)
+    def updateQ(self, state, action, delta):
+        "Updates the action value function Q(s,a) for the given state and action using the given delta on the gradient computed assuming a linear approximation function"
+        gradient_Q = self.Q.X[:, self.Q.getLinearIndex(state, action)]  # row vector
+        self.Q.setWeights( self.Q.getWeights() + self._alphas[state] * delta * gradient_Q )
     #------------------- Auxiliary function: value function udpate -------------------------------#
 
     #-- Getters

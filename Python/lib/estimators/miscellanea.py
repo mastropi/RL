@@ -115,7 +115,7 @@ class EstValueFunctionOfflineDeterministicNextState:
                     # Reset the state to the original state before the transition, so that the next action is applied to the same state
                     self.env.setState(s)
                 # Update the state value of the currently analyzed state, V(s)
-                self.V.setWeight(s, V_mean_over_actions)
+                self.V._setWeight(s, V_mean_over_actions)
                 if DEBUG_ESTIMATORS:
                     if reward != 0:
                         print("--> New value for state s={} after taking all {} actions: {}".format(s, self.env.getNumStates(), self.V.getValue(s)))

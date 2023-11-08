@@ -86,7 +86,11 @@ class LeaTDLambda(Learner):
     def learn_pred_V(self, t, state, action, next_state, reward, done, info):
         self._update_trajectory(t, state, action, reward)               # This method is defined in the Learner super class for episodic.discrete learners
         self._updateZ(state, self.lmbda)
-        self.Q.setWeight(state, action, reward + self.gamma * self.V.getValue(next_state))  # This call to setWeight() (where we reference the state and the action associated to the weight!) assumes a tabular setting
+        self.Q._setWeight(state, action, reward + self.gamma * self.V.getValue(next_state))
+            ## This call to _setWeight() (where we reference the state and the action associated to the weight!) assumes a tabular setting
+            ## TODO: (2023/11/08) Try to use the self.Q.setWeights() method to generalize to the case of non-dummy features
+            ## TODO: (2023/11/08) Properly update the Q-value of the state-action by computing the appropriate delta for Q. For instance, if we use Expected SARSA, delta = reward + gamma * \sum{policy(a|next_state) * Q(next_state, a)} - Q(state, action). If we do not use expected SARSA, we would need to compute the next action using e.g. an epsilon-greedy or a greedy approach.
+            ## Note that what we are doing here is simply setting the value of Q(s,a) to the bootstrap estimate of the *state* value V(s)! Note however that the information about the state is somehow present in the reward value that contributes to this delta...
         delta = self.Q.getValue(state, action) - self.V.getValue(state) # This is also known as the advantage function and, in this case, the advantage function is estimated using the TD(lambda) learner
                                                                         # because the state value function is estimated using the TD(lambda) learner.
                                                                         # Note that the action value function Q(s,a) directly "inherits" the estimation method from the state value function estimation method!
@@ -290,7 +294,8 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
 
         self.state_counts_noreset[state] += 1
         state_value = self.V.getValue(state)
-        self.Q.setWeight(state, action, reward + self.gamma * self.V.getValue(next_state))  # This call to setWeight() (where we reference the state and the action associated to the weight!) assumes a tabular setting
+        self.Q._setWeight(state, action, reward + self.gamma * self.V.getValue(next_state))
+            ## See comment in this same line in learn_pred_V() method of the suprer class
         delta = self.Q.getValue(state, action) - state_value
 
         # Check whether we are learning the differential value function (average reward criterion) and adjust delta accordingly

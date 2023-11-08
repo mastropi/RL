@@ -20,6 +20,7 @@ import warnings
 import numpy as np
 
 from gym.envs.toy_text import discrete
+from gym import spaces
 
 #__all__ = [ 'EnvironmentDiscrete' ]
 
@@ -36,7 +37,7 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
     - P: 2D dictionary with entries all possible states of the environment and for each state all possible actions
       for that state. Each dictionary entry value is a list of tuples of the form:
       (prob_going_to_next_state, next_state, reward(next_state), is_terminal(next_state))
-    - isd: initial state distribution
+    - isd: (array-like, i.e. list is also possible) initial state distribution
     - dim: environment dimension (e.g. 1D gridworld, 2D gridworld, etc.), which is just informative 
     - terminal_states: set containing the terminal states of the environment
     - terminal_rewards: dictionary indexed by the terminal states containing the rewards as values.
@@ -50,6 +51,17 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
 
         # Dimension of the environment (e.g. 1D (gridworld), 2D (gridworld), etc.)
         self.dim = dim
+
+        #--- 2023/10/04 ---
+        # State and action space (possibly used sometimes as I migrate to defining states and actions as integers to defining them as gym.spaces.Discrete
+        # which ***are still integers*** but encapsulated as part of the gym.spaces.Discrete class.
+        # Particularly useful are methods contains(x) to check whether element x is in the space and sample() that retrieves a random sample
+        # according to the internal random number generator whose seed can be set with seed() (e.g. `action_space.seed(1313)`).
+        # Note that in order to *iterate* on all possible states or actions, we CANNOT do `for s in state_space` as it says that state_space is not iterable!!!
+        # We need to do instead: `for s in range(state_space.n)`... I can't believe it.
+        self.state_space = spaces.Discrete(nS)
+        self.action_space = spaces.Discrete(nA)
+        #--- 2023/10/04 ---
 
         # All states
         self.all_states = list( range(self.getNumStates()) )
@@ -66,6 +78,12 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
 
     def getState(self):
         return self.s
+
+    def getStateSpace(self):
+        return self.state_space
+
+    def getActionSpace(self):
+        return self.action_space
 
     def getNumActions(self):
         # This nA attribute is in the super class, but using

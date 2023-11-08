@@ -15,7 +15,7 @@ b) Have the following methods defined:
 - reset(): resets the vector w of weigths to their initial estimates 
 - getWeights(): reads the vector w of weights
 - setWeights(): updates the vector w of weights
-- setWeight(): updates the value of the weight for a particular state
+- _setWeight(): updates the value of the weight for a particular state or state-action assuming dummy features
 - getValue(): reads the value function for a particular state or state-action
 - getValues(): reads the value function for ALL states or state-actions
 """
@@ -123,10 +123,16 @@ class StateValueFunctionApprox:
         return np.dot(self.weights, self.X)
 
     #--- SETTERS
-    def setWeight(self, state: int, weight: float):
-        "Sets the weight of the given state-action in the case where the features are dummy features"
-        # NOTE that in the general case of function approximation, the weight would have a reduced dimension
-        # and thus would be indexed by something else, whose meaning depends on what the reduction dimension consists of.
+    def _setWeight(self, state: int, weight: float):
+        """
+        Sets the weight of the given state in the case where the features are dummy features
+
+        NOTE that in the general case of function approximation, the weight would have a reduced dimension
+        and thus would be indexed by something else, whose meaning depends on what the reduction dimension consists of.
+        In those cases we should use the setWeights() method which does not assume dummy features.
+
+        Because of the assumption of dummy features by this method, we use an underscore at the front of its name.
+        """
         if not self.isValidState(state):
             return -1
         self.weights[state] = weight
@@ -188,7 +194,21 @@ class StateValueFunctionApprox:
 # Example of such method that is common to all value function approximation classes: all methods related to weights, such as getWeights(), setWeights(), etc.
 class ActionValueFunctionApprox:
     """
-    Class that contains information about the estimation of a action value function, Q(s,a)
+    Class that contains information about the estimation of an action value function, Q(s,a)
+
+    The current implementation delivers only a TABULAR value function where the matrix of features X is
+    a the identity matrix of size nS*nA x nS*nA.
+    (In a general setting the number of columns in the X matrix represents the number of all possible state-actions
+    and the number of rows represents the number of features, which is normaly less than the number of all possible state-actions.)
+
+    Likewise the vector of weights has size nS*nA (but normally it would have a smaller size) and each entry
+    directly gives the action value for each state-action (s,a).
+
+    The order in which the action values are stored is "grouped by state", e.g. if there are nS = 3 states and nA = 4 actions,
+    the first 4 diagonal elements correspond to state = 0 and actions = 0, 1, 2, 3;
+    the second 4 diagonal elements correspond to state = 1 and actions = 0, 1, 2, 3;
+    and so forth.
+    (This order is defined by the getLinearIndex() method.)
 
     Arguments:
     nS: int
@@ -268,11 +288,10 @@ class ActionValueFunctionApprox:
     #--- GETTERS
     def getLinearIndex(self, state, action):
         """
-        Returns the linear index to access the feature vector associated to the given state-action in the X matrix of features.
+        Returns the linear index to access the feature vector associated to the given state-action in the X matrix of features,
+        which is a COLUMN of X.
         """
-        # State-actions are grouped by state across the columns of the X matrix of features
-        # (i.e. as (s, a0), (s, a1), (s, a2), ... are placed in contiguous columns for each state s)
-        return action*self.nS + state
+        return state*self.nA + action
 
     def getWeights(self):
         return self.weights
@@ -288,10 +307,16 @@ class ActionValueFunctionApprox:
         return np.dot(self.weights, self.X)
 
     #--- SETTERS
-    def setWeight(self, state: int, action: int, weight: float):
-        "Sets the weight of the given state-action in the case where the features are dummy features"
-        # NOTE that in the general case of function approximation, the weight would have a reduced dimension
-        # and thus would be indexed by something else, whose meaning depends on what the reduction dimension consists of.
+    def _setWeight(self, state: int, action: int, weight: float):
+        """
+        Sets the weight of the given state-action in the case where the features are dummy features
+
+        NOTE that in the general case of function approximation, the weight would have a reduced dimension
+        and thus would be indexed by something else, whose meaning depends on what the reduction dimension consists of.
+        In those cases we should use the setWeights() method which does not assume dummy features.
+
+        Because of the assumption of dummy features by this method, we use an underscore at the front of its name.
+        """
         if not self.isValidState(state) or not self.isValidAction(state, action):
             return -1
         self.weights[self.getLinearIndex(state, action)] = weight
