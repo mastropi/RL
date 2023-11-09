@@ -891,13 +891,13 @@ class Test_EstDifferentialStateValueV_EnvGridworldsWithObstacles(unittest.TestCa
 
         # Expected stationary distribution of states, using regular estimation and using renewal theory (the results should be similar)
         # These results do NOT depend on the learning method for the value functions (be it Monte-Carlo or TD(lambda) or be it under the discounted or average criterion)
-        cls.expected_p = [ 0.124200, 0.090417, 0.048576, 0.022080,
+        cls.expected_p = [  0.124200, 0.090417, 0.048576, 0.022080,
                             0.150696, 0.000000, 0.055641, 0.040958,
                             0.187459, 0.132480, 0.083352, 0.064142]
-        cls.expected_p_from_cycles = [0.127479, 0.092805, 0.049858, 0.022663,
+        cls.expected_p_from_cycles = [ 0.127479, 0.092805, 0.049858, 0.022663,
                                        0.154448, 0.000000, 0.057110, 0.042040,
                                        0.192068, 0.135977, 0.085552, 0.065836]
-        cls.expected_p_fv = [  np.nan, np.nan, np.nan, 0.0179877,
+        cls.expected_p_fv = [   np.nan, np.nan, np.nan, 0.0179877,
                                 np.nan, np.nan, np.nan, np.nan,
                                 np.nan, np.nan, np.nan, np.nan]
 
@@ -1026,7 +1026,7 @@ class Test_EstDifferentialStateValueV_EnvGridworldsWithObstacles(unittest.TestCa
         "Tests the differential value function estimation using Fleming-Viot"
         print(f"\n*** Running test #{self.id()}")
 
-        state_values, action_values, probas_stationary, expected_reward, expected_cycle_time, n_cycles, n_events_et, n_events_fv = \
+        state_values, action_values, state_counts, probas_stationary, expected_reward, expected_cycle_time, n_cycles, n_events_et, n_events_fv = \
            self.sim_fv.run(seed=self.seed, verbose=True, verbose_period=100)
         # The following are the state values (value function) calculated using the average reward observed during the Fleming-Viot excursion...
         # i.e. it is an average reward that is inflated, therefore the state values are NOT the correct ones because we should

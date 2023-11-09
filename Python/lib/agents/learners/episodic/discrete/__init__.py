@@ -17,7 +17,7 @@ b) COULD implement the following methods:
     - reset() --> resets the state of the learner to start learning anew
         (e.g. all the estimates of the value functions are reset to 0)
     - setParams() --> set the parameters of the learner (if any)
-    - learn_pred_V() --> prediction problem: learns the state value function under the current policy (V(s))
+    - learn() --> prediction problem: learns the state value function under the current policy (V(s))
     - learn_pred_Q() --> prediction problem: learns the action-value function under the current policy (Q(s,a))
     - learn_ctrl_policy() --> control problem: learns the optimal policy
     - getStateCounts(first_visit) --> returns the state counts over all run episodes, optionally the first visit counts.
@@ -419,9 +419,16 @@ class Learner(GenericLearner):
             # therefore we might be interested in the average reward over all episodes.
             # Note that the update formula is the generalization of the usual update formula with just one new value
             # with the difference that here the update comes from T newly observed rewards (as opposed to 1),
-            # therefore the update formula becomes:
+            # i.e. what we need to sum to the current average reward is \sum{t=1}{T} R(t)
+            # (and we note that the average reward over E episodes is defined as: \sum{e=1}{E} \sum{t=1}{T} R_e(t) / \sum{e=1}{E} T_e
+            # where T_e is the length of episode e).
+            # Deducing the update formula is a little bit trickier than in the one-new-reward-observation case but it is perfectly doable --I just did it!
+            # Therefore the update formula becomes:
             #   average <- average + (new_average_value - average) * T / (sample_size_for(average) + T)
-            # Note that this information is an attribute of the super class (which is a generic learner, i.e. not only for learners on episodic tasks)
+            # Note also that, in the tests run in test_estimators_discretetime.py we observe that the average reward
+            # computed like this is very close to the average reward computed from cycles.
+            # Note finally that the attribute updated by this call to setAverageReward() is an attribute of the super class
+            # (which is a generic learner, i.e. not only for learners on episodic tasks)
             self.setAverageReward(self.getAverageReward() + (self._average_reward_in_episode - self.getAverageReward()) * self.times_at_episode_end[-1] / np.sum(self.times_at_episode_end))
         else:
             self.states = self._states.copy()

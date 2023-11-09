@@ -992,9 +992,8 @@ class LeaActorCriticNN(GenericLearner):
         self.se_average_reward_over_episodes = np.nan
         self.average_episode_length = 0.0
 
-        # Reset any estimates of the value functions that may be stored in the value functions learner object
-        if reset_value_functions:
-            self.learner_value_functions.reset()
+        # Reset the value functions learner with the option of resetting the learned value functions or not
+        self.learner_value_functions.reset(reset_episode=True, reset_value_functions=reset_value_functions)
 
         # Reset the policy learner and learning process
         if reset_policy:
@@ -1137,7 +1136,9 @@ class LeaActorCriticNN(GenericLearner):
         self.optimizer.step()
         #print(f"New network parameters:\n{self.optimizer.param_groups}")
 
-    def learn_from_estimated_value_functions(self, state_values, action_values):
+        return loss.float()
+
+    def learn_from_estimated_value_functions(self, state_values, action_values, state_counts):
         """
         Perform a one step learning of the policy parameter using the FV simulator to learn the value functions that contribute to the loss
 
@@ -1145,8 +1146,15 @@ class LeaActorCriticNN(GenericLearner):
         that are used as a critic in the loss function that feeds the neural network defining the theta parameter of the policy.
 
         Arguments:
-        state_values, action_values: estimated state and action value functions that is used here to compute the advantage function
+        state_values, action_values: np.ndarray
+            Estimated state and action value functions that is used here to compute the advantage function
+
+        state_counts: np.ndarray
+            State visit frequency observed during the estimation of the given value functions.
+            This is used to compute the state distribution probability that is used as weight in the loss function calculation.
         """
+        prob_states = state_counts / np.sum(state_counts)
+
         # Iterate on all possible states and actions and compute the loss function
         # as the product of the advantage function times the log-policy.
         loss = 0.0
@@ -1154,8 +1162,10 @@ class LeaActorCriticNN(GenericLearner):
             for action in range(self.env.getActionSpace().n):
                 # Compute the log-probability of the action given the state by inputting the current state to the neural network
                 if self.policy.nn_model.getNumInputs() == 1:
+                    # Single input neural network, with the state index
                     action_probs = F.softmax(self.policy.nn_model([state]), dim=0)
                 elif self.policy.nn_model.getNumInputs() == self.env.getNumStates():
+                    # Multi-input neural network, one-hot encoding of the state (this should give more flexibility for learning)
                     input = np.zeros(self.env.getNumStates(), dtype=int)
                     input[state] = 1
                     action_probs = F.softmax(self.policy.nn_model(input), dim=0)
@@ -1169,7 +1179,7 @@ class LeaActorCriticNN(GenericLearner):
                 advantage = action_values[state*self.env.getActionSpace().n + action] - state_values[state]
                     ## Note that the way to access the action value corresponds to how the ActionValueFunctionApprox.getLinearIndex() method computes the linear index
                 logprob = action_distribution.log_prob(torch.tensor(action))
-                loss += -advantage * logprob
+                loss += -advantage * logprob * prob_states[state]
 
         # Learn (i.e. update the parameters of the neural network)
         self.optimizer.zero_grad()      # We can easily look at the neural network parameters by printing self.optimizer.param_groups
@@ -1183,6 +1193,8 @@ class LeaActorCriticNN(GenericLearner):
                 for a in range(self.env.getActionSpace().n):
                     proba_policy[s][a] = np.round(self.policy.getPolicyForAction(a, s), 2)
             print(f"Policy:\n{proba_policy}")
+
+        return loss.float()
 
     def deprecated_loss(self, Vs, Qs, logprobs) -> float:
         """

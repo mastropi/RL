@@ -167,7 +167,7 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
                                           adjust_alpha=True,
                                           adjust_alpha_by_episode=False,
                                           alpha_min=0.0,
-                                          store_history_over_all_episodes=False,
+                                          store_history_over_all_episodes=True, # Set it to True when we want to store the average reward over all episodes altogether
                                           debug=cls.debug)
         cls.agent_nn_td = agents.GenericAgent(cls.policy_nn, learner_tdlambda)
         cls.sim_td = DiscreteSimulator(cls.env2d, cls.agent_nn_td, debug=False)

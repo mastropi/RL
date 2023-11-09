@@ -184,6 +184,8 @@ class Simulator:
         Return: tuple
         Tuple with the following elements:
         - state_values: the estimated differential state value function V(s).
+        - action_values: the estimated action value function Q(s,a).
+        - state_counts: visit frequency of states under the single Markov chain simulation that estimates E(T_A).
         - probas_stationary: dictionary with the estimated stationary probability for each state of interest.
         - expected_reward: the estimated expected reward.
         - n_events_et: number of events observed during the simulation of the single Markov chain used to estimate E(T_A) and P(T>t).
@@ -206,12 +208,12 @@ class Simulator:
         # Create the particles as copies of the main environment
         envs = [self.env if i == 0 else copy.deepcopy(self.env) for i in range(dict_params_simul['N'])]
 
-        state_values, action_values, probas_stationary, expected_reward, expected_absorption_time, n_cycles_absorption_used, \
+        state_values, action_values, state_counts_from_single_markov_chain, probas_stationary, expected_reward, expected_absorption_time, n_cycles_absorption_used, \
             time_last_absorption, max_survival_time, n_events_et, n_events_fv = \
                 self._estimate_state_value_function_and_expected_reward_fv( envs, dict_params_simul, dict_params_info,
                                                                             probas_stationary_start_state=self.agent.getLearner().getProbasStationaryStartState())
 
-        return state_values, action_values, probas_stationary, expected_reward, expected_absorption_time, n_cycles_absorption_used, n_events_et, n_events_fv
+        return state_values, action_values, state_counts_from_single_markov_chain, probas_stationary, expected_reward, expected_absorption_time, n_cycles_absorption_used, n_events_et, n_events_fv
 
     def _estimate_state_value_function_and_expected_reward_fv(self, envs, dict_params_simul, dict_params_info,
                                                               probas_stationary_start_state: dict=None):
@@ -243,6 +245,7 @@ class Simulator:
         Tuple with the following elements:
         - state_values: the estimated differential state value function V(s).
         - action_values: the estimated action value function Q(s,a).
+        - state_counts: visit frequency of states under the single Markov chain simulation that estimates E(T_A).
         - probas_stationary: dictionary with the estimated stationary probability for each state of interest.
         - expected_reward: the estimated expected reward.
         - expected_absorption_time: estimated expected absorption time E(T_A) used in the denominator of the FV estimator
@@ -334,7 +337,7 @@ class Simulator:
                 print("Stationary probabilities: {}".format(probas_stationary))
                 print("Expected reward = {}".format(expected_reward))
 
-        return state_values, action_values, probas_stationary, expected_reward, expected_absorption_time, n_cycles_absorption_used, \
+        return state_values, action_values, state_counts, probas_stationary, expected_reward, expected_absorption_time, n_cycles_absorption_used, \
                time_last_absorption, max_survival_time, n_events_et, n_events_fv
 
     @measure_exec_time

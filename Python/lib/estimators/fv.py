@@ -417,6 +417,8 @@ def estimate_expected_reward(env, probas_stationary: dict, reward=None):
     reward: (opt) float
         When given, this value is used as the constant reward associated to a state present in the dictionary containing
         non-zero stationary probabilities, instead of the rewards stored in the environment.
+        This could be useful when we are interested in computing a probability rather than the expected reward,
+        and avoid having to define a reward landscape in the environment just to tell that the non-zero rewards are constant.
 
     Return: float
     Estimated expected reward a.k.a. long-run average reward.
