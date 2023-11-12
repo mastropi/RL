@@ -22,6 +22,9 @@ class AdaptiveLambdaType(Enum):
     ATD = 1     # (full) Adaptive TD(lambda)
     HATD = 2    # Homogeneously Adaptive TD(lambda)
 
+DEFAULT_NUMPY_PRECISION = np.get_printoptions().get('precision')
+DEFAULT_NUMPY_SUPPRESS = np.get_printoptions().get('suppress')
+
 
 class LeaTDLambda(Learner):
     """
@@ -59,10 +62,13 @@ class LeaTDLambda(Learner):
         
         # Attributes specific to the current TD method
         self.lmbda = lmbda
-        # Eligibility traces
-        self._z = np.zeros(self.env.getNumStates())
-        self._z_all = np.zeros((0, self.env.getNumStates()))
-        
+        # Eligibility traces for learning V
+        self._z_V = np.zeros(self.env.getNumStates())
+        self._z_V_all = np.zeros((0, self.env.getNumStates()))                            # Historic information
+        # Eligibility traces for learning Q
+        self._z_Q = np.zeros(self.env.getNumStates() * self.env.getNumActions())
+        self._z_Q_all = np.zeros((0, self.env.getNumStates() * self.env.getNumActions())) # Historic information
+
         # (Nov-2020) Product of alpha and z (the eligibility trace)
         # which gives the EFFECTIVE alpha value of the Stochastic Approximation algorithm
         # Goal: Compare the rate of convergence of the non-adaptive vs. the adaptive TD(lambda)
@@ -73,8 +79,13 @@ class LeaTDLambda(Learner):
 
     def _reset_at_start_of_episode(self):
         super()._reset_at_start_of_episode()
-        self._z[:] = 0.
-        self._z_all = np.zeros((0, self.env.getNumStates()))
+        self._z_V[:] = 0.
+        self._z_V_all = np.zeros((0, self.env.getNumStates()))
+        self._z_Q[:] = 0.
+        self._z_Q_all = np.zeros((0, self.env.getNumStates() * self.env.getNumActions()))
+
+        # The effective alphas are only computed for the learning of V, not of Q
+        # (as this is only stored for information purposes --e.g. plots of the eligibility traces to check if things are working properly)
         self._alphas_effective = np.zeros((0, self.env.getNumStates()))
 
     def setParams(self, alpha=None, gamma=None, lmbda=None, adjust_alpha=None, alpha_update_type=None,
@@ -83,44 +94,27 @@ class LeaTDLambda(Learner):
         self.gamma = gamma if gamma is not None else self.gamma
         self.lmbda = lmbda if lmbda is not None else self.lmbda
 
-    def learn_pred_V(self, t, state, action, next_state, reward, done, info):
-        self._update_trajectory(t, state, action, reward)               # This method is defined in the Learner super class for episodic.discrete learners
-        self._updateZ(state, self.lmbda)
-        self.Q._setWeight(state, action, reward + self.gamma * self.V.getValue(next_state))
-            ## This call to _setWeight() (where we reference the state and the action associated to the weight!) assumes a tabular setting
-            ## TODO: (2023/11/08) Try to use the self.Q.setWeights() method to generalize to the case of non-dummy features
-            ## TODO: (2023/11/08) Properly update the Q-value of the state-action by computing the appropriate delta for Q. For instance, if we use Expected SARSA, delta = reward + gamma * \sum{policy(a|next_state) * Q(next_state, a)} - Q(state, action). If we do not use expected SARSA, we would need to compute the next action using e.g. an epsilon-greedy or a greedy approach.
-            ## Note that what we are doing here is simply setting the value of Q(s,a) to the bootstrap estimate of the *state* value V(s)! Note however that the information about the state is somehow present in the reward value that contributes to this delta...
-        delta = self.Q.getValue(state, action) - self.V.getValue(state) # This is also known as the advantage function and, in this case, the advantage function is estimated using the TD(lambda) learner
-                                                                        # because the state value function is estimated using the TD(lambda) learner.
-                                                                        # Note that the action value function Q(s,a) directly "inherits" the estimation method from the state value function estimation method!
-                                                                        # (because Q(s,a) is estimated as "reward observed after taking action `a` at state `s`"  + V(s)
-                                                                        # where V(s) is the TD(lambda) estimate of the state value function at state s => thus,
-                                                                        # how we estimate V(s) defines how we estimate Q(s,a)!)
+    def learn(self, t, state, action, next_state, reward, done, info):
+        self._update_trajectory(t, state, action, reward)  # This method belongs to the Learner super class defined in learners.episodic.discrete
 
-        # Check whether we are learning the differential value function (average reward criterion) and adjust delta accordingly
-        # Ref: Sutton, pag. 250
-        if self.criterion == LearningCriterion.AVERAGE:
-            delta -= self._average_reward_in_episode
+        # Compute the delta values used for the update of each value function
+        # NOTE: We compute the delta separately, and NOT inside the functions that update the value functions,
+        # because the delta information is needed by the adaptive TD(lambda) learner and implementing a specific
+        # function that computes the delta values increases DRY implementation.
+        delta_V, delta_Q = self._compute_deltas(state, action, next_state, reward)
 
         #print("episode {}, state {}: count = {}, alpha = {}".format(self.episode, state, self._state_counts_over_all_episodes[state], self._alphas[state]))
-        self._alphas_effective = np.r_[self._alphas_effective, (self._alphas * self._z).reshape(1, len(self._z))]
+        self._updateZ(state, action, self.lmbda)
+        self._updateV(delta_V)
+        self._updateQ(delta_Q)
+
+        # We store the effective learning rates alpha
+        # (effective in terms of  the eligibility trace that affects the delta values used when updating V and Q above)
+        self._alphas_effective = np.r_[self._alphas_effective, (self._alphas * self._z_V).reshape(1, len(self._z_V))]
             ## NOTE: We need to reshape the product alpha*z because _alphas_effective is a 2D array with as many rows as
             ## the number of episodes run so far and as many columns as the number of states. The length of alpha*z
             ## is the number of states which should be laid out across the columns when appending a new row to
             ## _alphas_effective using np.r_[].
-        if delta != 0.0:
-            # IMPORTANT: (2020/11/11) if we use _alphas[state] as the learning rate alpha in the following update,
-            # we are using the SAME learning rate alpha for the update of ALL states, namely the
-            # learning rate value associated to the state that is being visited now.
-            # This is NOT how the alpha value should be updated for each state
-            # (as we should apply the alpha associated to the state that decreases with the number of visits
-            # to EACH state --which happens differently). However, this seems to give slightly faster convergence
-            # than the theoretical alpha strategy just mentioned, at least in the gridworld environment!
-            # If we wanted to use the strategy that should be applied in theory, we should simply
-            # replace `self._alphas[state]` with `self._alphas` in the below expression. 
-            #self.V.setWeights( self.V.getWeights() + self._alphas[state] * delta * self._z )
-            self.V.setWeights( self.V.getWeights() + self._alphas * delta * self._z )
 
         # Update alpha for the next iteration for "by state counts" update
         #print("Learn: state = {}, next_state = {}, done = {}".format(state, next_state, done))
@@ -143,20 +137,88 @@ class LeaTDLambda(Learner):
                     if not self.env.isTerminalState(state):
                         self._update_alphas(state)
 
-    def _updateZ(self, state, lmbda):
-        # Gradient of V: it must have the same size as the weights
-        # In the linear case the gradient is equal to the feature associated to state s,
-        # which is stored at column s of the feature matrix X.
-        gradient_V = self.V.X[:,state]
-        self._z = self.gamma * lmbda * self._z + \
+    def _compute_deltas(self, state, action, next_state, reward):
+        """
+        Computes the delta values to be used for the state value and action value functions update
+
+        The delta value of the action value function is computed using the Expected SARSA approach,
+        i.e. the expected Q-value over all possible next actions is used. This is theoretically equal to
+        the state value function of the next state and thus its current estimate is used.
+
+        Note that, since we use an *estimate* of the state value function V, as opposed to the true state value function,
+        the result will most likely NOT be the same as computing the expected value of the estimated Q-values over all actions,
+        as such computation does not necessarily produce a value that coincides with the estimated state value function.
+        """
+        # Note that for the Q value of the next state and next action we use its expected value
+        # (over all possible actions) as it is done by the Expected SARSA learning of the Q function.
+        # This avoids having to choose a particular next action for which we would require a new parameter
+        # such as the epsilon value of the epsilon-greedy next action strategy.
+        delta_V = reward + self.gamma * self.V.getValue(next_state) - self.V.getValue(state)
+        delta_Q = reward + self.gamma * self._expected_next_Q(next_state) - self.Q.getValue(state, action)
+
+        # Check whether we are learning the differential value function (average reward criterion) and adjust delta accordingly
+        # Ref: Sutton, pag. 250
+        if self.criterion == LearningCriterion.AVERAGE:
+            delta_V -= self._average_reward_in_episode
+            delta_Q -= self._average_reward_in_episode
+
+        return delta_V, delta_Q
+
+    def _updateZ(self, state, action, lmbda):
+        "Updates the eligibility traces used for learning V and those used for learning Q"
+        # The gradients of V and Q are computed assuming the function approximation is linear, where
+        # the gradient is equal to the feature associated to state s or state-action (s,a),
+        # stored at the corresponding column of the feature matrix X.
+        gradient_V = self.V.X[:, state]
+        gradient_Q = self.Q.X[:, self.Q.getLinearIndex(state, action)]
+
+        self._z_V = self.gamma * lmbda * self._z_V + \
                     gradient_V                                    # For every-visit TD(lambda)
                     #gradient_V * (self._state_counts[state] == 1)  # For first-visit TD(lambda)
-        self._z_all = np.r_[self._z_all, self._z.reshape(1, len(self._z))]
+        self._z_V_all = np.r_[self._z_V_all, self._z_V.reshape(1, len(self._z_V))]
+
+        self._z_Q = self.gamma * lmbda * self._z_Q + \
+                    gradient_Q
+        self._z_Q_all = np.r_[self._z_Q_all, self._z_Q.reshape(1, len(self._z_Q))]
+
+    def _updateV(self, delta):
+        if delta != 0.0:
+            # IMPORTANT: (2020/11/11) if we use _alphas[state] as the learning rate alpha in the following update,
+            # we are using the SAME learning rate alpha for the update of ALL states, namely the
+            # learning rate value associated to the state that is being visited now.
+            # This is NOT how the alpha value should be updated for each state
+            # (as we should apply the alpha associated to the state that decreases with the number of visits
+            # to EACH state --which happens differently). However, this seems to give slightly faster convergence
+            # than the theoretical alpha strategy just mentioned, at least in the gridworld environment!
+            # If we wanted to use the strategy that should be applied in theory, we should simply
+            # replace `self._alphas[state]` with `self._alphas` in the below expression,
+            # as self._alphas is an array containing the alpha value to be used for each state.
+            #self.V.setWeights( self.V.getWeights() + self._alphas[state] * delta * self._z_V )
+            self.V.setWeights( self.V.getWeights() + self._alphas * delta * self._z_V )
+
+    def _updateQ(self, delta):
+        if delta != 0.0:
+            # Repeat the alpha for each state as many times as the number of possible actions in the environment
+            # Note that this repeat each value as we need it based on how state and actions are stored in the feature matrix used in self.Q,
+            # namely grouped by state (e.g. if alphas = [2.5, 4.1, 3.0], the repeat by 2 generates [2.5, 2.5, 4.1, 4.1, 3.0, 3.0]
+            # i.e. the same alpha for all actions associated to the same state (which is what we want, i.e. alphas on different actions grouped by state).
+            _alphas = np.repeat(self._alphas, self.env.getNumActions())
+            self.Q.setWeights( self.Q.getWeights() + _alphas * delta * self._z_Q )
+
+    def _expected_next_Q(self, next_state):
+        """
+        Computes the expected Q value for the next state and next action.
+        The estimated value V of the next state is used for this, which is similar to computing the expected Q value.
+        However, to compute the expected Q value of the next state and next action (which is what is done
+        by the Expected SARSA learner of the Q function) we need to have access to the policy...
+        but we don't have access to it here (because it is not passed to the constructor of the class).
+        """
+        return self.V.getValue(next_state)
 
     def _plotZ(self):
         states2plot = self._choose_states2plot()
         plt.figure()
-        plt.plot(self._z_all[:,states2plot], '.-')
+        plt.plot(self._z_V_all[:,states2plot], '.-')
         plt.legend(states2plot)
         ax = plt.gca()
         ax.set_xlabel("time step")
@@ -236,7 +298,7 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
         self.fontsize = fontsize
 
         # Counter of state visits WITHOUT resetting the count after each episode
-        # (This is used to decide whether we should use the adaptive or non-adaptive lambda
+        # (This MIGHT be used to decide whether we should use the adaptive or non-adaptive lambda
         # based on whether the delta information from which the agent learns already contains
         # bootstrapping information about the value function at the next state)  
         self.state_counts_noreset = np.zeros(self.env.getNumStates())
@@ -276,6 +338,7 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
     def _reset_at_start_of_episode(self):
         super()._reset_at_start_of_episode()
         self._gradient_V_all = np.zeros((0, self.env.getNumStates()))
+        self._gradient_Q_all = np.zeros((0, self.env.getNumStates() * self.env.getNumActions()))
         self._lambdas = []
         self._lambdas_in_episode = [[] for _ in self.env.getAllStates()]
 
@@ -289,23 +352,19 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
         self.adaptive_type = adaptive_type if adaptive_type is not None else self.adaptive_type
         self.burnin = burnin if burnin is not None else self.burnin
 
-    def learn_pred_V(self, t, state, action, next_state, reward, done, info):
-        self._update_trajectory(t, state, action, reward)
+    def learn(self, t, state, action, next_state, reward, done, info):
+        self._update_trajectory(t, state, action, reward)  # This method belongs to the Learner super class defined in learners.episodic.discrete
 
+        # See comment in the constructor of the meaning of this attribute, which is exclusively used in the adaptive lambda learner
         self.state_counts_noreset[state] += 1
-        state_value = self.V.getValue(state)
-        self.Q._setWeight(state, action, reward + self.gamma * self.V.getValue(next_state))
-            ## See comment in this same line in learn_pred_V() method of the suprer class
-        delta = self.Q.getValue(state, action) - state_value
 
-        # Check whether we are learning the differential value function (average reward criterion) and adjust delta accordingly
-        # Ref: Sutton, pag. 250
-        if self.criterion == LearningCriterion.AVERAGE:
-            delta -= self._average_reward_in_episode
+        delta_V, delta_Q = self._compute_deltas(state, action, next_state, reward)
 
         # Decide whether we do adaptive or non-adaptive lambda at this point
         # (depending on whether there is bootstrap information available or not)
         # TODO: (2020/04/21) Adapt the check on whether a value function has been modified at least once that works also for the case when the initial state value function is not 0 (e.g. it is random).
+        # (2023/11/12) The implementation of the above TO-DO would be in the line of using the state_counts_noreset attribute, which for some reason is now commented out.
+        delta = delta_V
         if not done and self.burnin and self.V.getValue(next_state) == 0: # self.state_counts_noreset[next_state] == 0:
             # The next state is non terminal and there is still no bootstrap information
             # about the state value function coming from the next state
@@ -318,42 +377,45 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
             #      .format(self.episode, t, next_state, next_state, self.state_counts_noreset[next_state], self.state_counts_noreset, lambda_adaptive))
         else:
             #-- Adaptive lambda
-            # Define the relative target error delta by dividing delta to a reference value defined below
-            #ref_value = state_value        # reference value is the value of the current state
-            #ref_value = np.mean( np.abs(self.V.getValues()) )   # reference value is the average value over all states
-            ref_value = np.mean( np.abs(self.V.getValues()[self.env.getNonTerminalStates()]) )   # reference value is the average value over NON-TERMINAL states (whose value is always 0, so they should no te included in the average
+            # Define the relative target error delta by dividing the bootstrap delta (for now only for V, not for Q) to a reference value defined below
+            #ref_value = self.V.getValue(state)                                         # reference value is the value of the current state
+            #ref_value = np.mean( np.abs(self.V.getValues()) )                          # reference value is the average value over all states
+            ref_value = np.mean( np.abs(self.V.getValues()[self.env.getNonTerminalStates()]) )     # reference value is the average value over NON-TERMINAL states (whose value is always 0, so they should no te included in the average)
             delta_relative = delta / ref_value if ref_value != 0 \
                                                else 0. if delta == 0. \
                                                else np.Inf
             # Relative delta that prevents division by 0 (i.e. delta_relative = exp(|delta|) / exp(|value|))
-            #delta_relative = np.exp( np.abs(delta) - np.abs(state_value) )
+            #delta_relative = np.exp( np.abs(delta) - np.abs(self.V.getValue(state)) )
 
             # Compute lambda as a function of delta or relative delta
             lambda_adaptive = min( 1 - (1 - self.lambda_min) * np.exp( -np.abs(delta_relative) ), self.lambda_max )
             #lambda_adaptive = min( 1 - (1 - self.lambda_min) * np.exp( -np.abs(delta) ), self.lambda_max )
 
-        # Keep history of used lambdas
-        self._lambdas += [lambda_adaptive]
-        # Update the history of lambdas used
-        self._lambdas_in_episode[state] += [lambda_adaptive]
-        self._all_lambdas_n[state] += 1 
-        self._all_lambdas_sum[state] += lambda_adaptive 
-        self._all_lambdas_sum2[state] += lambda_adaptive**2 
-
-        # Update the eligibility trace
-        self._updateZ(state, lambda_adaptive)
-        # Update the weights
-        self._alphas_effective = np.r_[self._alphas_effective, (self._alphas * self._z).reshape(1, len(self._z))]
-            ## NOTE: We need to reshape the product alpha*z because _alphas_effective is a 2D array with as many rows as
-            ## the number of episodes run so far and as many columns as the number of states. The length of alpha*z
-            ## is the number of states which should be laid out across the columns when appending a new row to
-            ## _alphas_effective using np.r_[].
-        if delta != 0.0:
-            self.V.setWeights( self.V.getWeights() + self._alphas * delta * self._z )
             if self.debug:
                 print("episode: {}, t: {}: TD ERROR != 0 => delta = {}, delta_rel = {}, lambda (adaptive) = {}\n" \
                         "trajectory so far: {}" \
                         "--> V(s): {}".format(self.episode, t, delta, delta_relative, lambda_adaptive, self._states, self.V.getValues()))
+
+        # Update the eligibility trace
+        self._updateZ(state, action, lambda_adaptive)
+        self._updateV(delta_V)
+        self._updateQ(delta_Q)
+
+        # The effective alphas are only computed for the learning of V, not of Q
+        # (as this is only stored for information purposes --e.g. plots of the eligibility traces to check if things are working properly)
+        self._alphas_effective = np.r_[self._alphas_effective, (self._alphas * self._z_V).reshape(1, len(self._z_V))]
+            ## NOTE: We need to reshape the product alpha*z because _alphas_effective is a 2D array with as many rows as
+            ## the number of episodes run so far and as many columns as the number of states. The length of alpha*z
+            ## is the number of states which should be laid out across the columns when appending a new row to
+            ## _alphas_effective using np.r_[].
+
+        # Keep history of used lambdas
+        self._lambdas += [lambda_adaptive]
+        # Update the history of lambdas used
+        self._lambdas_in_episode[state] += [lambda_adaptive]
+        self._all_lambdas_n[state] += 1
+        self._all_lambdas_sum[state] += lambda_adaptive
+        self._all_lambdas_sum2[state] += lambda_adaptive**2
 
         # Update alpha for the next iteration for "by state counts" update
         if not self.adjust_alpha_by_episode:
@@ -382,24 +444,26 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
             if done:
                 import pandas as pd
                 pd.options.display.float_format = '{:,.2f}'.format
-                print(pd.DataFrame( np.c_[self._z, self.V.getValues()].T, index=['_z', 'V'] ))
+                print(pd.DataFrame( np.c_[self._z_V, self.V.getValues()].T, index=['_z', 'V'] ))
     
             #input("Press Enter...")
 
-    def _updateZ(self, state, lmbda):
+    def _updateZ(self, state, action, lmbda):
         if self.debug and False:
             print("")
             print("state = {}: lambda = {:.2f}".format(state, lmbda))
         if self.adaptive_type == AdaptiveLambdaType.ATD:
-            super()._updateZ(state, lmbda)
+            super()._updateZ(state, action, lmbda)
         else:
             # In the HOMOGENEOUS adaptive lambda we need to store the HISTORY of the gradient
             # (because we need to retroactively apply the newly computed lambda to previous eligibility traces)
-            gradient_V = self.V.X[:,state]      # Note: this is returned as a ROW vector, even when we retrieve the `state` COLUMN of matrix X
+            gradient_V = self.V.X[:, state]      # Note: this is returned as a ROW vector, even when we retrieve the `state` COLUMN of matrix X
+            gradient_Q = self.V.X[:, self.Q.getLinearIndex(state, action)]
             # Use the following calculation of the gradient for FIRST-VISIT TD(lambda)
             # (i.e. the gradient is set to 0 if the current visit of `state` is not the first one)
             #gradient_V * (self._state_counts[state] == 1)  # For first-visit TD(lambda)
             self._gradient_V_all = np.r_[self._gradient_V_all, gradient_V.reshape(1, len(gradient_V))]
+            self._gradient_Q_all = np.r_[self._gradient_Q_all, gradient_Q.reshape(1, len(gradient_Q))]
 
             if self.debug and False:
                 print("Gradients:")
@@ -407,6 +471,9 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
 
             # Compute the exponents of gamma*lambda, which go from n_trace_length-1 down to 0
             # starting with the oldest gradient.
+            # Note that the trace length is the same for both V and Q,
+            # as it is simply the number of rows in _gradient_V_all, which coincides with the number of rows in _gradient_Q_all.
+            assert self._gradient_V_all.shape[0] == self._gradient_Q_all.shape[0]
             n_trace_length = self._gradient_V_all.shape[0]
             exponents = np.array( range(n_trace_length-1, -1, -1) ).reshape(n_trace_length, 1)
                 ## The exponents are e.g. (3, 2, 1, 0) when n_trace_length = 4
@@ -418,15 +485,17 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
                 ## and so forth...
 
             # New eligibility trace using the latest computed lambda as weight for ALL past time steps
-            self._z = np.sum( (self.gamma * lmbda)**exponents * self._gradient_V_all, axis=0 )
-            self._z_all = np.r_[self._z_all, self._z.reshape(1, len(self._z))]
+            self._z_V = np.sum( (self.gamma * lmbda)**exponents * self._gradient_V_all, axis=0 )
+            self._z_V_all = np.r_[self._z_V_all, self._z_V.reshape(1, len(self._z_V))]
+            self._z_Q = np.sum( (self.gamma * lmbda)**exponents * self._gradient_Q_all, axis=0 )
+            self._z_Q_all = np.r_[self._z_Q_all, self._z_Q.reshape(1, len(self._z_Q))]
 
             if self.debug and False:
                 print("Exponents: {}".format((self.gamma * lmbda)**exponents))
 
         if self.debug and False:
             print("Z's & lambda's by state:")
-            print(self._z_all)
+            print(self._z_V_all)
             print(self._lambdas_in_episode)
 
     def _store_lambdas_in_episode(self):
@@ -438,8 +507,9 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
         # Store the (average) _lambdas by episode
         if self.debug:
             print("lambdas in episode {}".format(self.episode))
-            with np.printoptions(precision=3, suppress=True):
-                print(np.c_[self.states[:-1], self._lambdas])
+            np.set_printoptions(precision=3, suppress=True)
+            print(np.c_[self.states[:-1], self._lambdas])
+            np.set_printoptions(precision=DEFAULT_NUMPY_PRECISION, suppress=DEFAULT_NUMPY_SUPPRESS)
         self.lambda_mean_by_episode += [np.mean(self._lambdas)]
 
     def compute_lambda_statistics_by_state(self):
@@ -650,7 +720,7 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
                     colornorm = plt.Normalize(vmin=np.min(nvisits_by_state), vmax=np.max(nvisits_by_state))
                     axc = axes_counts[int(idx_ax/2), idx_ax%2]
                     axc.imshow(nvisits_by_state_2D, cmap=colormap, norm=colornorm)
-                    finalize_plot_2D(axc, None, nvisits_by_state_2D, fontsize=self.fontsize*1.5, title="Episodes {} thru {}\nstate count: (min, mean, max) = ({:.0f}, {:.1f}, {:.0f})" \
+                    finalize_plot_2D(axc, None, nvisits_by_state_2D, fontsize=int(self.fontsize*1.5), title="Episodes {} thru {}\nstate count: (min, mean, max) = ({:.0f}, {:.1f}, {:.0f})" \
                                  .format(episode_begin+1, episode_end+1, nvisits_min_episodes, nvisits_mean_episodes, nvisits_max_episodes))
                 else:
                     # For 1D or dimensions higher than 2, just plot lambdas in terms of the 1D state numbers

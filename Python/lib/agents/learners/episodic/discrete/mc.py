@@ -3,7 +3,7 @@
 Created on Fri Apr 10 10:36:13 2020
 
 @author: Daniel Mastropietro
-@description: Definition of Monte Carlo algorithms that are allowed to depend on the lambda parameter of lambda-returns.
+@description:   Definition of Monte Carlo algorithms that are allowed to depend on the lambda parameter of lambda-returns.
                 Here we use Monte Carlo to mean that the update of the value functions is done AT THE END OF THE EPISODE,
                 i.e. OFFLINE, as opposed to at every step of the trajectory (or nearly), i.e. ONLINE, which would be
                 the case for the TD(0) algorithm or an n-step TD algorithm.
@@ -11,10 +11,10 @@ Created on Fri Apr 10 10:36:13 2020
                 - an implementation of traditional Monte Carlo, where the target value function in the TD error (V_hat(s))
                 is the observed return for the visited state at which the TD error is calculated.
                 In this update strategy, there is NO mention to lambda whatsoever:
-                See methods learn_pred_V_mc() and learn_mc() in LeaMCLambda.
+                See methods learn_mc() and learn_mc_at_episode_end() in LeaMCLambda.
                 - an implementation of generalized Monte Carlo, which we call MC(lambda), where the target value function
                 in the TD error (V_hat(s)) is equal to the lambda-return, for ANY value of lambda between 0 and 1.
-                See methods learn_pred_V_lambda() and learn_lambda_return() in LeaMCLambda.
+                See methods learn_lambda_return() and learn_lambda_return_at_episode_end() in LeaMCLambda.
 """
 
 from enum import Enum, unique
@@ -107,12 +107,12 @@ class LeaMCLambda(Learner):
 
     #------------- Method that is called by the outside world to learn V(s) ----------------------#
     # Here we choose what method of this class to call internally
-    def learn_pred_V(self, t, state, action, next_state, reward, done, info):
+    def learn(self, t, state, action, next_state, reward, done, info):
         "Learn the state value function V(s) with information collected at discrete time t"
         if self.learner_type == LearnerType.LAMBDA_RETURN:
-            self.learn_pred_V_lambda_return(t, state, action, next_state, reward, done, info)
+            self.learn_lambda_return(t, state, action, next_state, reward, done, info)
         else:
-            self.learn_pred_V_mc(t, state, action, next_state, reward, done, info)
+            self.learn_mc(t, state, action, next_state, reward, done, info)
     #------------- Method that is called by the outside world to learn V(s) ----------------------#
 
 
@@ -121,7 +121,7 @@ class LeaMCLambda(Learner):
     # calculation of the return as G(t) = R(t+1) + G(t+1).
     # This piece of code was initially taken from MJeremy's GitHub.
     # For more information, see the entry on 13-Apr-2022 in my Tasks-Projects.xlsx file.
-    def deprecated_learn_pred_V_slow(self, t, state, action, next_state, reward, done, info):
+    def deprecated_learn_slow(self, t, state, action, next_state, reward, done, info):
         # This learner updates the estimate of the value function V ONLY at the end of the episode
         self._update_trajectory(t, state, action, reward)
         if done:
@@ -157,8 +157,8 @@ class LeaMCLambda(Learner):
                 #    gtlambda += lambda_power * self.reward
 
                 delta = gtlambda - self.V.getValue(state)
-                self.updateV(state, delta)
-                self.updateQ(state, action, delta)
+                self._updateV(state, delta)
+                self._updateQ(state, action, delta)
                 # Update the learning rate alpha for the next iteration
                 self._update_alphas(state)
 
@@ -184,7 +184,7 @@ class LeaMCLambda(Learner):
 
 
     #----------------------------- Traditional Monte Carlo ---------------------------------------#
-    def learn_pred_V_mc(self, t, state, action, next_state, reward, done, info):
+    def learn_mc(self, t, state, action, next_state, reward, done, info):
         "Learn the prediction problem (estimate the state value function) using explicitly MC"
         # Update the trajectory of the current episode only
         self._update_trajectory(t, state, action, reward)
@@ -199,15 +199,15 @@ class LeaMCLambda(Learner):
             self._update_state_counts(t+1, next_state)
 
             # Learn the value functions!
-            self.learn_mc(T)
+            self.learn_mc_at_episode_end(T)
 
-    def learn_mc(self, T):
+    def learn_mc_at_episode_end(self, T):
         """
         Updates the value function based on a new observed EPISODE using first-visit Monte Carlo.
         That is, this function is expected to be called when the episode ends.
 
         This is the straight implementation of first-visit Monte Carlo, i.e. it does NOT use the equivalence of
-        Monte Carlo with the lambda-return with lambda = 1, which is what method learn_lambda_return() does.
+        Monte Carlo with the lambda-return with lambda = 1, which is what method learn_lambda_return_at_episode_end() does.
         In fact, in this function there is not even a mention to lambda.
 
         Arguments:
@@ -250,8 +250,8 @@ class LeaMCLambda(Learner):
                     # Compute the differential delta which should be used to update the differential value function
                     # Ref: Sutton (2018), pag. 250
                     delta -= self._average_reward_in_episode
-                self.updateV(state, delta)
-                self.updateQ(state, action, delta)
+                self._updateV(state, delta)
+                self._updateQ(state, action, delta)
                 # Update the learning rate alpha for the next iteration
                 self._update_alphas(state)
                 nupdates[state] += 1
@@ -261,9 +261,9 @@ class LeaMCLambda(Learner):
 
 
     #---------------------- MC(lambda): lambda-return Monte Carlo ----------------------------------#
-    # TODO: (2023/10/21) Implement the correction of the lambda-return needed in the average reward criterion case, as done above in learn_mc()
+    # TODO: (2023/10/21) Implement the correction of the lambda-return needed in the average reward criterion case, as done above in learn_mc_at_episode_end()
     # In principle the values in _G_lambda_list (computed in _updateG()) should be corrected with the average reward.
-    def learn_pred_V_lambda_return(self, t, state, action, next_state, reward, done, info):
+    def learn_lambda_return(self, t, state, action, next_state, reward, done, info):
         """
         Learn the prediction problem: estimate the state value function.
 
@@ -287,7 +287,7 @@ class LeaMCLambda(Learner):
             self._update_state_counts(t+1, next_state)            
 
             # Learn the value functions!
-            self.learn_lambda_return(T)
+            self.learn_lambda_return_at_episode_end(T)
 
     def _updateG(self, t, state, next_state, reward, done):
         times_reversed = np.arange(t, -1, -1)  # This is t, t-1, ..., 0
@@ -372,12 +372,12 @@ class LeaMCLambda(Learner):
                 print(np.c_[np.arange(t+1), self._rewards[1:], self._values_next_state[1:], self._Glambda_list, check, diff])
                 np.set_printoptions(precision=DEFAULT_NUMPY_PRECISION, suppress=DEFAULT_NUMPY_SUPPRESS)
 
-    def learn_lambda_return(self, T):
+    def learn_lambda_return_at_episode_end(self, T):
         """
         Updates the value function based on a new observed EPISODE using first-visit Monte Carlo on any value of lambda.
         That is, this function is expected to be called when the episode ends.
 
-        It differs from learn_mc() in that this method:
+        It differs from learn_mc_at_episode_end() in that this method:
         - uses the lambda return values G(t,lambda) stored in the object, self._Glambda_list,
         which is a list because there is an entry for each time step in the trajectory.
         - can handle any value of lambda, not only lambda = 1, which is the actual definition of Monte Carlo update,
@@ -406,28 +406,29 @@ class LeaMCLambda(Learner):
                     print("t: {} \tG(t,lambda): {} \tV({}): {} \tdelta: {}" \
                           .format(tt, Glambda[tt], state, self.V.getValue(state), delta))
 
-                self.updateV(state, delta)
-                self.updateQ(state, action, delta)
+                self._updateV(state, delta)
+                self._updateQ(state, action, delta)
 
                 # Update the learning rate alpha for the next iteration
                 # Note that the update is based ONLY on the state visit frequency, NOT on the state-action visit frequency...
                 # This may not be the best approach for the estimation of Q(s,a) if, for instance, certain actions of a given state
                 # are not visited often, their learning rate will be decreased even if the action was never visited!
-                # TODO: (2023/11/08) We might need to update alphas ALSO by the action visit frequency in order to have an appropriate estimation of Q(s,a)...
+                # TODO: (2023/11/08) We might need to update alphas ALSO by the ACTION visit frequency in order to have an appropriate estimation of Q(s,a)...
                 self._update_alphas(state)
     #---------------------- MC(lambda): lambda-return Monte Carlo --------------------------------#
 
 
     #------------------- Auxiliary function: value function udpate -------------------------------#
-    def updateV(self, state, delta):
-        "Updates the state value function V(s) for the given state and action using the given delta on the gradient computed assuming a linear approximation function"
+    def _updateV(self, state, delta):
+        "Updates the state value function V(s) for the given state using the given delta on the gradient computed assuming a linear approximation function"
         gradient_V = self.V.X[:, state] # row vector
-        self.V.setWeights( self.V.getWeights() + self._alphas[state] * delta * gradient_V )
+        self.V.setWeights( self.V.getWeights() + self._alphas * delta * gradient_V )
 
-    def updateQ(self, state, action, delta):
+    def _updateQ(self, state, action, delta):
         "Updates the action value function Q(s,a) for the given state and action using the given delta on the gradient computed assuming a linear approximation function"
         gradient_Q = self.Q.X[:, self.Q.getLinearIndex(state, action)]  # row vector
-        self.Q.setWeights( self.Q.getWeights() + self._alphas[state] * delta * gradient_Q )
+        _alphas = np.repeat(self._alphas, self.env.getNumActions()) # We use the same alpha on all the actions associated to each state
+        self.Q.setWeights( self.Q.getWeights() + _alphas * delta * gradient_Q )
     #------------------- Auxiliary function: value function udpate -------------------------------#
 
     #-- Getters
@@ -440,13 +441,13 @@ class LeaMCLambda(Learner):
 
 class LeaMCLambdaAdaptive(LeaMCLambda):
     
-    def __init__(self, env, alpha=0.1, gamma=1.0, lmbda=0.8,
+    def __init__(self, env, criterion=LearningCriterion.DISCOUNTED, alpha=0.1, gamma=1.0, lmbda=0.8,
                  adjust_alpha=False, alpha_update_type=AlphaUpdateType.FIRST_STATE_VISIT,
                  adjust_alpha_by_episode=True, alpha_min=0.,
                  reset_method=ResetMethod.ALLZEROS, reset_params=None, reset_seed=None,
                  store_history_over_all_episodes=False,
                  debug=False):
-        super().__init__(env, alpha, gamma, lmbda, adjust_alpha, alpha_update_type, adjust_alpha_by_episode, alpha_min,
+        super().__init__(env, criterion=criterion, alpha=alpha, gamma=gamma, lmbda=lmbda, adjust_alpha=adjust_alpha, alpha_update_type=alpha_update_type, adjust_alpha_by_episode=adjust_alpha_by_episode, alpha_min=alpha_min,
                          reset_method=reset_method, reset_params=reset_params, reset_seed=reset_seed, store_history_over_all_episodes=store_history_over_all_episodes,
                          debug=debug)
 
@@ -456,7 +457,7 @@ class LeaMCLambdaAdaptive(LeaMCLambda):
         self.state_counts = np.zeros(self.env.getNumStates())
         self.state_lambdas = self.lmbda * np.ones(self.env.getNumStates())
 
-    def learn_pred_V(self, t, state, action, next_state, reward, done, info):
+    def learn(self, t, state, action, next_state, reward, done, info):
         "Learn the prediction problem: estimate the state value function"
         self._update_trajectory(t, state, action, reward)
         self._updateG(t, state, next_state, reward, done)

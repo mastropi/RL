@@ -82,7 +82,7 @@ class Test_EstAverageValueV_EnvQueueSingleServer(unittest.TestCase):
          {'Pr(MC)': 0.00031823, 'E(T) (MC)': 50.02, '#E(T) (MC)': 2866, '#events_MC': 200E3,
           'Pr(FV)': 0.00047179, 'E(T)': 243.54, '#E(T)': 11, 'Tmax': 2678.9, 'Tend': 2900.6, 'Smax': 47.3,
           '#events_ET': 4004, '#events_FV': 8164}),
-        (3, DEFAULT_EXECUTION, 'Large K',
+        (3, False, 'Large K',   # (2023/11/12) We do NOT execute the simulation for large K because it takes too long and it is essentially the same as for moderate K... The only difference would be to consider cases where there are not enough samples to estimate quantities (but this already pass as of today)
          {'K': 40, 'J': 35, 'N': 400, 'T': 2000,
           'burnin_time_steps': 0, 'min_num_cycles_for_expectations': 0, 'method_survival_probability_estimation': SurvivalProbabilityEstimation.FROM_M_CYCLES},
          {'Pr(MC)': 0.0, 'E(T) (MC)': 3.9979, '#E(T) (MC)': 1, '#events_MC': 800E3,
@@ -105,7 +105,7 @@ class Test_EstAverageValueV_EnvQueueSingleServer(unittest.TestCase):
          {'Pr(MC)': 0.00031819, 'E(T) (MC)': 49.99, '#E(T) (MC)': 2864, '#events_MC': 200E3,
           'Pr(FV)': 0.000418716, 'E(T)': 274.41, '#E(T)': 9, 'Tmax': 2678.9, 'Tend': 2900.6, 'Smax': 47.3,
           '#events_ET': 4004, '#events_FV': 8164}),
-        (6, DEFAULT_EXECUTION, 'Large K',
+        (6, False, 'Large K',   # (2023/11/12) We do NOT execute the simulation for large K because it takes too long and it is essentially the same as for moderate K... The only difference would be to consider cases where there are not enough samples to estimate quantities (but this already pass as of today)
          {'K': 40, 'J': 12, 'N': 400, 'T': 2000,
           'burnin_time_steps': 10, 'min_num_cycles_for_expectations': 5,
           'method_survival_probability_estimation': SurvivalProbabilityEstimation.FROM_M_CYCLES},
@@ -133,7 +133,7 @@ class Test_EstAverageValueV_EnvQueueSingleServer(unittest.TestCase):
          {'Pr(MC)': 0.000242275, 'E(T) (MC)': 48.66, '#E(T) (MC)': 5865, '#events_MC': 400E3,
           'Pr(FV)': 0.000163620, 'E(T)': 268.36, '#E(T)': 9, 'Tmax': 2678.9, 'Tend': 2900.6, 'Smax': 74.5,
           '#events_ET': 4004, '#events_FV': 25386}),
-        (9, DEFAULT_EXECUTION, 'Large K',
+        (9, False, 'Large K',   # (2023/11/12) We do NOT execute the simulation for large K because it takes too long and it is essentially the same as for moderate K... The only difference would be to consider cases where there are not enough samples to estimate quantities (but this already pass as of today)
          {'K': 40, 'J': 12, 'N': 400, 'T': 2000,    # The value of J was tuned here in order to obtain sufficient samples for the estimation of E(T) so that the estimated probability is NOT NaN
           'burnin_time_steps': 10, 'min_num_cycles_for_expectations': 4,
           'method_survival_probability_estimation': SurvivalProbabilityEstimation.FROM_N_PARTICLES},

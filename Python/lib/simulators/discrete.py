@@ -525,7 +525,7 @@ class Simulator:
                 # NOTE that learning ONLY happens when the particle is NOT reactivated.
                 # This makes total sense because reactivation sets the next state of the particle to a state
                 # that is normally not reachable by the underlying Markov chain on which the FV process is built.
-                learner.learn_pred_V(t, state, action, next_state, reward, done, info)
+                learner.learn(t, state, action, next_state, reward, done, info)
 
             if done_episode or next_state in absorption_set:
                 # The particle reached a terminal state or has been absorbed.
@@ -877,7 +877,7 @@ class Simulator:
                 # Set `done` to True when the maximum number of steps to run has been reached
                 # This is important because a set of operations are done when the episode ends,
                 # such as storing the learning rates alpha used in the episode
-                # (see the learner object for more details, in particular de learn_pred_V() method called below
+                # (see the learner object for more details, in particular de learn() method called below
                 # that learns the state value function V)
                 if max_time_steps is not None and t_episode >= max_time_steps - 1:     # `-1` because t_episode starts at 0 and max_time_steps counts the number of steps
                     nepisodes_max_steps_reached += 1
@@ -892,7 +892,7 @@ class Simulator:
                     print("\t[DEBUG] Updating the value function at the end of the episode...")
 
                 # Learn: i.e. update the value function (stored in the learner) with the new observation
-                learner.learn_pred_V(t_episode, state, action, next_state, reward, done, info)
+                learner.learn(t_episode, state, action, next_state, reward, done, info)
 
                 # Observation state
                 if state_observe is not None:
