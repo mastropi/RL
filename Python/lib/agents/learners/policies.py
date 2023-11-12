@@ -1104,9 +1104,22 @@ class LeaActorCriticNN(GenericLearner):
                         print(f"[DEBUG] Episode {episode}: MAX TIME STEP = {max_time_steps} REACHED!")
 
                 # Learn: i.e. update the value functions stored in the learner with the new observation
-                self.learner_value_functions.learn_pred_V(t, state, action, next_state, reward, done_episode, info)
+                self.learner_value_functions.learn(t, state, action, next_state, reward, done_episode, info)
 
-                advantage = self.learner_value_functions.getQ().getValue(state, action) - self.learner_value_functions.getV().getValue(state)
+                # Option 1: (better) The state value is computed as the policy-weighted average of the Q-values
+                # so that the advantage function is not biased because of an incorrect estimation of V(s)
+                state_value = 0.0
+                for a in range(self.env.getActionSpace().n):
+                    state_value += self.learner_value_functions.getQ().getValue(state, a)
+                state_value /= self.env.getActionSpace().n
+
+                # Option 2: (worse) The state value is directly the estimate of V(s)
+                # HOWEVER, this may give incorrect advantage function values because the value of V(s) is
+                # theoretically the average of the action values Q(s,a) over all actions weighted by the policy(a|s).
+                #state_value = self.learner_value_functions.getV().getValue(state)
+
+                # Update loss
+                advantage = self.learner_value_functions.getQ().getValue(state, action) - state_value
                 logprob = action_distribution.log_prob(torch.tensor(action))
                 if np.random.uniform() <= prob_include_in_train:
                     loss += -advantage * logprob
@@ -1159,6 +1172,19 @@ class LeaActorCriticNN(GenericLearner):
         # as the product of the advantage function times the log-policy.
         loss = 0.0
         for state in range(self.env.getStateSpace().n):
+            #-- Compute the state value V(s)
+            # Option 1: (better) The state value is computed as the policy-weighted average of the Q-values
+            # so that the advantage function is not biased because of an incorrect estimation of V(s)
+            state_value = 0.0
+            for a in range(self.env.getActionSpace().n):
+                state_value += action_values[state * self.env.getActionSpace().n + a]
+            state_value /= self.env.getActionSpace().n
+
+            # Option 2: (worse) The state value is directly the estimate of V(s)
+            # HOWEVER, this may give incorrect advantage function values because the value of V(s) is
+            # theoretically the average of the action values Q(s,a) over all actions weighted by the policy(a|s).
+            #state_value = state_values[state]
+
             for action in range(self.env.getActionSpace().n):
                 # Compute the log-probability of the action given the state by inputting the current state to the neural network
                 if self.policy.nn_model.getNumInputs() == 1:
@@ -1173,10 +1199,11 @@ class LeaActorCriticNN(GenericLearner):
                     raise ValueError(f"The number of inputs in the neural network ({self.policy.nn_model.getNumInputs()}) cannot be handled by the policy learner. It must be either 1 or as many as the number of states in the environment.")
                 action_distribution = Categorical(action_probs)
 
+                # Update loss
                 # TODO: (2023/11/07) Use V and Q, the objects of type StateValueFunctionApprox and ActionValueFunctionApprox, respectively, defined in value_functions.py
                 # For now we don't use these classes because the discrete.Simulator._run_single() and discrete.Simulator._run_fv() methods return arrays with the state values and action values, NOT the aforementioned classes.
                 #advantage = Q.getValue(state, action) - V.getValue(state)
-                advantage = action_values[state*self.env.getActionSpace().n + action] - state_values[state]
+                advantage = action_values[state * self.env.getActionSpace().n + action] - state_value
                     ## Note that the way to access the action value corresponds to how the ActionValueFunctionApprox.getLinearIndex() method computes the linear index
                 logprob = action_distribution.log_prob(torch.tensor(action))
                 loss += -advantage * logprob * prob_states[state]
