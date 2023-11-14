@@ -17,31 +17,40 @@ import numpy as np
 from  matplotlib import pyplot as plt, cm
 from matplotlib.ticker import MaxNLocator
 from Python.test.test_optimizers_discretetime import InputLayer, Test_EstPolicy_EnvGridworldsWithObstacles
+from Python.lib.agents.learners import LearningCriterion
 from Python.lib.agents.learners.policies import LeaActorCriticNN
+
+learning_criterion = LearningCriterion.AVERAGE  #LearningCriterion.DISCOUNTED
 
 seed = 1317
 test_ac = Test_EstPolicy_EnvGridworldsWithObstacles()
-test_ac.setUpClass(shape=(3, 4), nn_input=InputLayer.ONEHOT, nn_hidden_layer_sizes=[8], seed=seed, debug=False)
+test_ac.setUpClass(shape=(3, 4), nn_input=InputLayer.ONEHOT, nn_hidden_layer_sizes=[8], learning_criterion=learning_criterion, seed=seed, debug=False)
 test_ac.setUp()
 print(test_ac.policy_nn.nn_model)
 
-method = "online"
-method = "td"
-method = "fv"
+# Learning method (of the value functions and the policy)
+# Both value functions and policy are learned online using the same simulation
+learning_method = "all_online"
+# Value functions are learned separately from the policy
+# Policy learning can happen online or OFFLINE
+learning_method = "values_td"; td_simulator = test_ac.sim_td      # TD(lambda)
+learning_method = "values_tda"; td_simulator = test_ac.sim_tda    # Adaptive TD(lambda)
+learning_method = "values_fv"
 
 n_learning_steps = 50
-if method == "online":
-    # Actor-Critic policy learner with TD(0) as value functions learner
+n_episodes_per_learning_step = 30
+policy_learning_mode = "online"     # Whether the policy is learned online or OFFLINE (only used when value functions are learned separately from the policy)
+if learning_method == "all_online":
+    # Online Actor-Critic policy learner with TD(lambda) as value functions learner and value functions learning happens at the same time as policy learning
     learner_ac = LeaActorCriticNN(test_ac.env2d, test_ac.agent_nn_td.getPolicy(), test_ac.agent_nn_td.getLearner(), optimizer_learning_rate=0.1, seed=test_ac.seed, debug=True)
     max_time_steps = test_ac.env2d.getNumStates()*100
-    n_episodes_per_learning_step = 30
     V_all = np.zeros((n_learning_steps, test_ac.env2d.getNumStates()))
     Q_all = np.zeros((n_learning_steps, test_ac.env2d.getNumStates(), test_ac.env2d.getNumActions()))
     R_all = np.zeros((n_learning_steps,))
     loss_all = np.nan * np.ones((n_learning_steps,))
     for t_learn in range(1, n_learning_steps+1):
         print(f"\n\n*** Running learning step {t_learn}...")
-        loss_all[t_learn-1] = learner_ac.learn(n_episodes_per_learning_step, max_time_steps=max_time_steps, prob_include_in_train=1.0)
+        loss_all[t_learn-1] = learner_ac.learn(n_episodes_per_learning_step, max_time_steps=max_time_steps, prob_include_in_train=0.5)
 
         V_all[t_learn-1, :] = learner_ac.learner_value_functions.getV().getValues()
         Q_all[t_learn-1, :, :] = learner_ac.learner_value_functions.getQ().getValues().reshape(test_ac.env2d.getNumStates(), test_ac.env2d.getNumActions())
@@ -49,10 +58,14 @@ if method == "online":
         # Could also retrieve the average reward from the Actor-Critic learner (if store_trajectory_history=False in the constructor of the value functions learner)
         #R_all[t_learn-1] = learner_ac.average_reward_over_episodes
 else:
-    # Actor-Critic policy learner with FV as value functions learner
-    learner_ac = LeaActorCriticNN(test_ac.env2d, test_ac.agent_nn_fv.getPolicy(), test_ac.agent_nn_fv.getLearner(), optimizer_learning_rate=0.1, seed=test_ac.seed, debug=True)
+    # Values are learned separately from policy and the policy may be learned OFFLINE or online
+    if learning_method == "values_fv":
+        # Actor-Critic policy learner with FV as value functions learner
+        learner_ac = LeaActorCriticNN(test_ac.env2d, test_ac.agent_nn_fv.getPolicy(), test_ac.agent_nn_fv.getLearner(), optimizer_learning_rate=0.1, seed=test_ac.seed, debug=True)
+    else:
+        # Actor-Critic policy learner with TD(lambda) related methods as value function learner
+        learner_ac = LeaActorCriticNN(test_ac.env2d, td_simulator.getAgent().getPolicy(), td_simulator.getAgent().getLearner(), optimizer_learning_rate=0.1, seed=test_ac.seed, debug=True)
     max_time_steps = test_ac.env2d.getNumStates()*100
-    n_episodes_per_learning_step = 30
     V_all = np.zeros((n_learning_steps, test_ac.env2d.getNumStates()))
     Q_all = np.zeros((n_learning_steps, test_ac.env2d.getNumStates(), test_ac.env2d.getNumActions()))
     R_all = np.zeros((n_learning_steps,))
@@ -61,30 +74,41 @@ else:
         print(f"\n\n*** Running learning step {t_learn}...")
 
         # Learn the value functions using the FV simulator
-        if method == "fv":
+        if learning_method == "values_fv":
             V, Q, state_counts, probas_stationary, expected_reward, expected_absorption_time, n_cycles_absorption_used, n_events_et, n_events_fv = \
                 test_ac.sim_fv.run(seed=test_ac.seed, verbose=True, verbose_period=test_ac.agent_nn_fv.getLearner().T // 10)
             #average_reward = test_ac.agent_nn_fv.getLearner().getAverageReward()  # This average reward should not be used because it is inflated by the FV process that visits the states with rewards more often
             average_reward = expected_reward
         else:
-            # Check if things work using the TD(0) learner for the value functions
+            # TD learners
             V, Q, state_counts, _, _, _ = \
-                test_ac.sim_td.run(nepisodes=n_episodes_per_learning_step, max_time_steps=max_time_steps, start=test_ac.start_state, seed=test_ac.seed, verbose=True, verbose_period=test_ac.agent_nn_fv.getLearner().T // 10)
-            average_reward = test_ac.agent_nn_td.getLearner().getAverageReward()
+                td_simulator.run(nepisodes=n_episodes_per_learning_step, max_time_steps=max_time_steps, start=test_ac.start_state, seed=test_ac.seed, verbose=True, verbose_period=test_ac.agent_nn_fv.getLearner().T // 10)
+            average_reward = td_simulator.getAgent().getLearner().getAverageReward()
 
         V_all[t_learn-1, :] = V
         Q_all[t_learn-1, :, :] = Q.reshape(test_ac.env2d.getNumStates(), test_ac.env2d.getNumActions())
         R_all[t_learn-1] = average_reward
-        loss_all[t_learn-1] = learner_ac.learn_from_estimated_value_functions(V, Q, state_counts)
+
+        # Policy learning
+        if policy_learning_mode == "online":
+            # ONLINE with critic provided by the action values learned above using the TD simulator
+            loss_all[t_learn - 1] = learner_ac.learn(n_episodes_per_learning_step, max_time_steps=max_time_steps, prob_include_in_train=0.5,
+                                                     action_values=Q)
+        else:
+            # OFFLINE learner where ALL states and actions are swept and the loss computed on all of them using the state distribution as weights
+            loss_all[t_learn-1] = learner_ac.learn_from_estimated_value_functions(V, Q, state_counts)
 
 # Make a copy of the measures that we would like to compare (on the same plot)
-if method == "online":
+if learning_method == "all_online":
     loss_all_online = loss_all.copy()
     R_all_online = R_all.copy()
-elif method == "td":
+elif learning_method == "values_td":
     loss_all_td = loss_all.copy()
     R_all_td = R_all.copy()
-elif method == "fv":
+elif learning_method == "values_tda":
+    loss_all_tda = loss_all.copy()
+    R_all_tda = R_all.copy()
+elif learning_method == "values_fv":
     loss_all_fv = loss_all.copy()
     R_all_fv = R_all.copy()
 
@@ -96,7 +120,7 @@ ax_loss.set_ylabel("Loss")
 ax_R = ax_loss.twinx()
 ax_R.plot(range(1, n_learning_steps+1), R_all[:n_learning_steps], marker='.', color="green")
 ax_R.set_ylabel("Average reward")
-ax_loss.set_title(f"{method.upper()}\nEvolution of the LOSS (left, red) and Average Reward (right, green) with the learning step")
+ax_loss.set_title(f"{learning_method.upper()}\nEvolution of the LOSS (left, red) and Average Reward (right, green) with the learning step")
 ax_loss.xaxis.set_major_locator(MaxNLocator(integer=True))
 
 # Plot the value functions for the currently analyzed learner
@@ -108,7 +132,7 @@ for i, ax in enumerate(axes.reshape(-1)):
     ax.set_xlabel("Learning step")
     ax.xaxis.set_major_locator(MaxNLocator(integer=True))
 plt.legend(["V(s)"] + ["Q(s," + str(a) + ")" for a in range(Q_all.shape[2])])
-plt.suptitle(f"{method.upper()}\nEvolution of the value functions V(s) and Q(s,a) with the learning step by state")
+plt.suptitle(f"{learning_method.upper()}\nEvolution of the value functions V(s) and Q(s,a) with the learning step by state")
 
 #-- ALTOGETHER
 # Plot all average rewards together (to compare methods)
@@ -116,24 +140,26 @@ plt.suptitle(f"{method.upper()}\nEvolution of the value functions V(s) and Q(s,a
 # We normalize the average reward plots so that they converge to 1.0 (easier interpretation of the plot)
 max_avg_reward = 0.2    # This value is problem dependent
 ax_loss, ax_R = plt.figure().subplots(1,2)
-ax_loss.plot(range(1, n_learning_steps+1), loss_all_online[:n_learning_steps], '-.', marker='.', color="darkred")
-ax_loss.plot(range(1, n_learning_steps+1), loss_all_td[:n_learning_steps], marker='.', color="red")
-ax_loss.plot(range(1, n_learning_steps+1), loss_all_fv[:n_learning_steps], marker='.', color="orangered")
+ax_loss.plot(range(1, n_learning_steps+1), loss_all_online[:n_learning_steps], '-.', marker='.', color="darkred") if 'loss_all_online' in locals() else None
+ax_loss.plot(range(1, n_learning_steps+1), loss_all_td[:n_learning_steps], marker='.', color="red") if 'loss_all_td' in locals() else None
+ax_loss.plot(range(1, n_learning_steps+1), loss_all_tda[:n_learning_steps], '-.', marker='.', color="red") if 'loss_all_tda' in locals() else None
+ax_loss.plot(range(1, n_learning_steps+1), loss_all_fv[:n_learning_steps], marker='.', color="orangered") if 'loss_all_fv' in locals() else None
 ax_loss.set_xlabel("Learning step")
 ax_loss.set_ylabel("Loss")
 ax_loss.axhline(0, color="gray")
 ax_loss.xaxis.set_major_locator(MaxNLocator(integer=True))
 ax_loss.set_title("Evolution of the LOSS with the learning step by learning method")
-ax_loss.legend(["TD online", "TD OFFLINE", "FV OFFLINE"])
-ax_R.plot(range(1, n_learning_steps+1), R_all_online[:n_learning_steps] / max_avg_reward, '-.', marker='.', color="forestgreen")
-ax_R.plot(range(1, n_learning_steps+1), R_all_td[:n_learning_steps] / max_avg_reward, marker='.', color="green")
-ax_R.plot(range(1, n_learning_steps+1), R_all_fv[:n_learning_steps] / max_avg_reward, marker='.', color="greenyellow")
+ax_loss.legend(["TD ALL online", f"TD {policy_learning_mode}", f"TD Adaptive {policy_learning_mode}", f"FV {policy_learning_mode}"])
+ax_R.plot(range(1, n_learning_steps+1), R_all_online[:n_learning_steps] / max_avg_reward, '-.', marker='.', color="forestgreen") if 'R_all_online' in locals() else None
+ax_R.plot(range(1, n_learning_steps+1), R_all_td[:n_learning_steps] / max_avg_reward, marker='.', color="green") if 'R_all_td' in locals() else None
+ax_R.plot(range(1, n_learning_steps+1), R_all_tda[:n_learning_steps] / max_avg_reward, '-.', marker='.', color="green") if 'R_all_tda' in locals() else None
+ax_R.plot(range(1, n_learning_steps+1), R_all_fv[:n_learning_steps] / max_avg_reward, marker='.', color="greenyellow") if 'R_all_fv' in locals() else None
 ax_R.set_xlabel("Learning step")
 ax_R.set_ylabel(f"Average reward (normalized by the MAX average reward = {max_avg_reward})")
 ax_R.axhline(1, color="gray")
 ax_R.axhline(0, color="gray")
 ax_R.set_title("Evolution of the NORMALIZED Average Reward with the learning step by learning method")
-ax_R.legend(["TD online", "TD OFFLINE", "FV OFFLINE"])
+ax_R.legend(["TD ALL online", f"TD {policy_learning_mode}", f"TD Adaptive {policy_learning_mode}", f"FV {policy_learning_mode}"])
 plt.suptitle("ALL LEARNING METHODS")
 
 
@@ -167,7 +193,7 @@ for i in range(axes.shape[0]):
         img = axes[i,j].imshow(probs_actions_toplot, cmap=colormap, vmin=0, vmax=1)
 plt.colorbar(img, ax=axes)  # This adds a colorbar to the right of the FIGURE. However, the mapping from colors to values is taken from the last generated image! (which is ok because all images have the same range of values.
                             # Otherwise see answer by user10121139 in https://stackoverflow.com/questions/13784201/how-to-have-one-colorbar-for-all-subplots
-plt.suptitle(f"{method.upper()}\nPolicy at each state")
+plt.suptitle(f"{learning_method.upper()}\nPolicy at each state")
 
 # Distribution of state counts at last learning step run
 state_counts = learner.getStateCounts()

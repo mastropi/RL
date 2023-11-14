@@ -1010,7 +1010,7 @@ class LeaActorCriticNN(GenericLearner):
                 ## if lr is too large (i.e. lr = 1.0, it works with lr = 0.1)!!
                 ## If we use lr=0.1, momentum=0.9, we get similar results to the Adam optimizer.
 
-    def learn(self, nepisodes, max_time_steps=+np.Inf, prob_include_in_train=0.5):
+    def learn(self, nepisodes, max_time_steps=+np.Inf, prob_include_in_train=0.5, action_values=None):
         """
         Perform a one step learning of the policy parameter
 
@@ -1039,6 +1039,12 @@ class LeaActorCriticNN(GenericLearner):
             This can be used to increase the independence among the observations that are included in
             the loss calculation, which is what a neural network training process normally expects.
             default: 0.50
+
+        action_Values: (opt) array-like
+            Action values previously estimated for all states and actions in the environment.
+            These are used as a critic and are used to compute the advantage function with the hope of
+            smoothing the learning process (lower variance) because these values do NOT change during
+            the learning of the policy performed here.
         """
         self.t_learn += 1
         seed = self.seed + self.t_learn - 1
@@ -1065,6 +1071,7 @@ class LeaActorCriticNN(GenericLearner):
         for episode in range(1, nepisodes+1):
             self.env.reset()
             done_episode = False
+            average_reward_current_episode = 0.0
             t = -1
 
             if False and self.debug:
@@ -1096,6 +1103,7 @@ class LeaActorCriticNN(GenericLearner):
 
                 # Step
                 next_state, reward, done_episode, info = self.env.step(action)
+                average_reward_current_episode += reward
 
                 if not done_episode and t >= max_time_steps - 1:    # `-1` because t_episode starts at 0 and max_time_steps counts the number of steps
                     nepisodes_max_steps_reached += 1
@@ -1103,14 +1111,25 @@ class LeaActorCriticNN(GenericLearner):
                     if self.debug:
                         print(f"[DEBUG] Episode {episode}: MAX TIME STEP = {max_time_steps} REACHED!")
 
-                # Learn: i.e. update the value functions stored in the learner with the new observation
-                self.learner_value_functions.learn(t, state, action, next_state, reward, done_episode, info)
+                if action_values is None:
+                    # The user did not provide any critic, we need to learn it now
+                    # => Learn: i.e. update the value functions stored in the learner with the new observation
+                    self.learner_value_functions.learn(t, state, action, next_state, reward, done_episode, info)
+                    action_value = self.learner_value_functions.getQ().getValue(state, action)
+                else:
+                    # The user provided a critic
+                    # => Use it to compute the advantage function (with the hope that the updates of theta are less wiggly because these estimates do not change any more --as the policy is learned)
+                    # TODO: (2023/11/12) Use Q, the object of type ActionValueFunctionApprox defined in value_functions.py to retrieve the action value (so that we don't need to know how the state and action are stored in the X feature matrix of ActionValueFunctionApprox
+                    action_value = action_values[state * self.env.getActionSpace().n + action]
 
                 # Option 1: (better) The state value is computed as the policy-weighted average of the Q-values
                 # so that the advantage function is not biased because of an incorrect estimation of V(s)
                 state_value = 0.0
                 for a in range(self.env.getActionSpace().n):
-                    state_value += self.learner_value_functions.getQ().getValue(state, a)
+                    if action_values is None:
+                        state_value += self.learner_value_functions.getQ().getValue(state, a)
+                    else:
+                        state_value += action_values[state * self.env.getActionSpace().n + a]
                 state_value /= self.env.getActionSpace().n
 
                 # Option 2: (worse) The state value is directly the estimate of V(s)
@@ -1119,17 +1138,18 @@ class LeaActorCriticNN(GenericLearner):
                 #state_value = self.learner_value_functions.getV().getValue(state)
 
                 # Update loss
-                advantage = self.learner_value_functions.getQ().getValue(state, action) - state_value
+                advantage = action_value - state_value
                 logprob = action_distribution.log_prob(torch.tensor(action))
                 if np.random.uniform() <= prob_include_in_train:
                     loss += -advantage * logprob
+
             episode_length = t + 1  # `+1` because t goes from 0 to (T-1), where T is the episode's length
+            average_reward_current_episode /= episode_length
             if False and self.debug:
                 print(f"{state}]")
 
             # Update the average reward observed over all episodes run
             self.average_episode_length += (episode_length - self.average_episode_length) / episode
-            average_reward_current_episode = self.learner_value_functions.getAverageRewardByEpisode()[-1]
             self.average_reward_over_episodes += (average_reward_current_episode - self.average_reward_over_episodes) / episode
             if episode >= 2:
                 variance_average_reward = (episode - 2) / (episode - 1) * variance_average_reward + (average_reward_current_episode - self.average_reward_over_episodes)**2 / episode

@@ -56,6 +56,7 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
                         nn_input: InputLayer=InputLayer.ONEHOT, nn_hidden_layer_sizes: list=[8],
                         # Characteristics of the Fleming-Viot implementation
                         absorption_set: Union[list, set]=None,
+                        learning_criterion=LearningCriterion.DISCOUNTED,
                         seed=1717, debug=False):
         env_shape = shape
         cls.debug = debug
@@ -160,7 +161,6 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
         cls.start_state = 8
 
         # TD(lambda) learner
-        learning_criterion = LearningCriterion.DISCOUNTED #LearningCriterion.AVERAGE
         gamma = 0.9
         learner_tdlambda = td.LeaTDLambda(cls.env2d, criterion=learning_criterion, alpha=1.0,
                                           gamma=gamma, lmbda=0.0,
@@ -171,6 +171,18 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
                                           debug=cls.debug)
         cls.agent_nn_td = agents.GenericAgent(cls.policy_nn, learner_tdlambda)
         cls.sim_td = DiscreteSimulator(cls.env2d, cls.agent_nn_td, debug=False)
+
+        # Adaptive TD(lambda) learner
+        gamma = 0.9
+        learner_tdlambda_adap = td.LeaTDLambdaAdaptive(cls.env2d, criterion=learning_criterion, alpha=1.0,
+                                          gamma=gamma,
+                                          adjust_alpha=True,
+                                          adjust_alpha_by_episode=False,
+                                          alpha_min=0.0,
+                                          store_history_over_all_episodes=True, # Set it to True when we want to store the average reward over all episodes altogether
+                                          debug=cls.debug)
+        cls.agent_nn_tda = agents.GenericAgent(cls.policy_nn, learner_tdlambda_adap)
+        cls.sim_tda = DiscreteSimulator(cls.env2d, cls.agent_nn_tda, debug=False)
 
         # Fleming-Viot learner
         N = 100
