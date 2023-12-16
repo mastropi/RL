@@ -966,6 +966,25 @@ class LeaActorCriticNN(GenericLearner):
         Learning rate for the policy parameter learner which is automatically adapted by the optimizer used.
         default: 0.1
 
+    reset_value_functions: (opt) bool
+        Whether to reset the value functions at every policy learning step.
+        It may be useful NOT to reset the value functions between learning steps because the current step
+        will likely have a similar parameter value to the previous step, therefore the value function estimates
+        from the previous step may be a good estimate for the value functions of the current step, and this
+        would estimation time and could also prevent the policy from approaching a non-optimal policy
+        (already observed in a very small labyrinth case where many optimal paths are possible).
+        default: True
+
+    allow_deterministic_policy: (opt) bool
+        Whether to allow deterministic policies to be estimated.
+        Note that deterministic policies may prevent exploration of the environment thus biasing the
+        estimated policy towards a non-optimal policy.
+        (already observed in a very small labyrinth case where many optimal paths are possible).
+        When False, the epsilon value that is used to be away from deterministic policies is 0.05,
+        meaning that if a policy were to become deterministic, the probability of the deterministic
+        action is set to 1 - 0.05.
+        default: False
+
     seed: (opt) int
         Seed to be used to generate the trajectories under the current policy to perform one-step learning
         of the policy parameter.
@@ -975,16 +994,19 @@ class LeaActorCriticNN(GenericLearner):
         the same sequence of random numbers every time trajectories are simulated.
         default: None
     """
-    def __init__(self, env: EnvironmentDiscrete, policy, learner_value_functions, optimizer_learning_rate=0.1, seed=None, debug=False):
+    def __init__(self, env: EnvironmentDiscrete, policy, learner_value_functions, allow_deterministic_policy=False, reset_value_functions=True, optimizer_learning_rate=0.1, seed=None, debug=False):
         # SEE ALSO ALL THE OTHER LEARNING PARAMETERS DEFINED IN LeaPolicyGradient (e.g. learning rate alpha, etc.)
         super().__init__(env)
         self.policy = policy
+        self.allow_deterministic_policy = allow_deterministic_policy
+        self.epsilon_away_from_deterministic = 0.05     # epsilon used to adjust deterministic policies away from probability 1
         self.optimizer_learning_rate = optimizer_learning_rate
         self.learner_value_functions = learner_value_functions
         self.seed = seed
         self.debug = debug
 
-        self.reset(reset_value_functions=True, reset_policy=True)
+        self.reset_value_functions_at_every_learning_step = reset_value_functions
+        self.reset(reset_value_functions=reset_value_functions, reset_policy=True)
 
     def reset(self, reset_value_functions=True, reset_policy=False):
         # Performance measures: the average reward and length of episodes observed over the different episode run on the same policy
@@ -1010,7 +1032,7 @@ class LeaActorCriticNN(GenericLearner):
                 ## if lr is too large (i.e. lr = 1.0, it works with lr = 0.1)!!
                 ## If we use lr=0.1, momentum=0.9, we get similar results to the Adam optimizer.
 
-    def learn(self, nepisodes, max_time_steps=+np.Inf, prob_include_in_train=0.5, action_values=None):
+    def learn(self, nepisodes, max_time_steps_per_episode=+np.Inf, prob_include_in_train=0.5, action_values=None):
         """
         Perform a one step learning of the policy parameter
 
@@ -1030,7 +1052,7 @@ class LeaActorCriticNN(GenericLearner):
             This is the number of episodes that are run to learn the value functions under the current
             policy parameter.
 
-        max_time_steps: (opt) int
+        max_time_steps_per_episode: (opt) int
             Maximum number of time steps to perform within an episode until it is considered `done`.
             default: +np.Inf
 
@@ -1062,7 +1084,7 @@ class LeaActorCriticNN(GenericLearner):
             print(probs_actions)
 
         # Reset the information that has to do with the value functions learning and with attributes stored in the object about the performance of the policy
-        self.reset(reset_value_functions=True, reset_policy=False)
+        self.reset(reset_value_functions=self.reset_value_functions_at_every_learning_step, reset_policy=False)
 
         # Loss function to minimize when learning the optimum policy parameter
         loss = 0.0
@@ -1087,15 +1109,7 @@ class LeaActorCriticNN(GenericLearner):
 
                 # Choose an action and compute the log-probability of that action given the current state
                 # The log-probability is used in the computation of the loss function that is minimized when learning the optimum policy parameters
-                if self.policy.nn_model.getNumInputs() == 1:
-                    action_probs = F.softmax(self.policy.nn_model([state]), dim=0)
-                elif self.policy.nn_model.getNumInputs() == self.env.getNumStates():
-                    input = np.zeros(self.env.getNumStates(), dtype=int)
-                    input[state] = 1
-                    action_probs = F.softmax(self.policy.nn_model(input), dim=0)
-                else:
-                    raise ValueError(f"The number of inputs in the neural network ({self.policy.nn_model.getNumInputs()}) cannot be handled by the policy learner. It must be either 1 or as many as the number of states in the environment.")
-                action_distribution = Categorical(action_probs)
+                action_distribution = self.compute_action_distribution(state, allow_deterministic=self.allow_deterministic_policy, epsilon_away_from_deterministic=self.epsilon_away_from_deterministic)
                 action = action_distribution.sample().item()
                     ## NOTE: We cannot use self.policy.choose_action(state) to select an action because we need to know the action distribution
                     ## in order to compute the log-probability of the selected action that is needed for the loss function
@@ -1105,11 +1119,11 @@ class LeaActorCriticNN(GenericLearner):
                 next_state, reward, done_episode, info = self.env.step(action)
                 average_reward_current_episode += reward
 
-                if not done_episode and t >= max_time_steps - 1:    # `-1` because t_episode starts at 0 and max_time_steps counts the number of steps
+                if not done_episode and t >= max_time_steps_per_episode - 1:    # `-1` because t_episode starts at 0 and max_time_steps_per_episode counts the number of steps
                     nepisodes_max_steps_reached += 1
                     done_episode = True
                     if self.debug:
-                        print(f"[DEBUG] Episode {episode}: MAX TIME STEP = {max_time_steps} REACHED!")
+                        print(f"[policy, DEBUG] Episode {episode}: MAX TIME STEPS PER EPISODE = {max_time_steps_per_episode} REACHED!")
 
                 if action_values is None:
                     # The user did not provide any critic, we need to learn it now
@@ -1154,14 +1168,14 @@ class LeaActorCriticNN(GenericLearner):
             if episode >= 2:
                 variance_average_reward = (episode - 2) / (episode - 1) * variance_average_reward + (average_reward_current_episode - self.average_reward_over_episodes)**2 / episode
             if (episode - 1) % max(1, (nepisodes // 10)) == 0:      # max(1, ...) to avoid "modulo 0" if nepisodes < 10
-                print("[{:.0f}%]".format(episode/nepisodes*100) + f" Episode = {episode} of {nepisodes}: " +
+                print("[policy, {:.0f}%]".format(episode/nepisodes*100) + f" Episode = {episode} of {nepisodes}: " +
                       f"Average reward over episodes: {self.average_reward_over_episodes}, " +
                       "Average episode length: {:.1f}".format(self.average_episode_length))
 
         self.se_average_reward_over_episodes = np.sqrt(variance_average_reward / max(1, (episode - 1)))
-        print("---> FINAL AVERAGE REWARD AT LEARNING STEP {:d}: {:.3f} (+/- {:.3f}, {:.1f}%) on episodes of {:.1f} steps on average (% episodes max time reached = {:.1f}%)\n" \
+        print("---> FINAL AVERAGE REWARD AT LEARNING STEP {:d}: {:.3f} (+/- {:.3f}, {:.1f}%) on episodes of {:.1f} steps on average (max number of time steps was reached at {:.1f}% of episodes) --> loss = {}\n" \
               .format(self.t_learn, self.average_reward_over_episodes, self.se_average_reward_over_episodes, self.se_average_reward_over_episodes / self.average_reward_over_episodes * 100,
-                      self.average_episode_length, nepisodes_max_steps_reached / nepisodes * 100))
+                      self.average_episode_length, nepisodes_max_steps_reached / nepisodes * 100, loss))
 
         # Learn
         self.optimizer.zero_grad()      # We can easily look at the neural network parameters by printing self.optimizer.param_groups
@@ -1171,16 +1185,17 @@ class LeaActorCriticNN(GenericLearner):
 
         return loss.float()
 
-    def learn_from_estimated_value_functions(self, state_values, action_values, state_counts):
+    def learn_offline_from_estimated_value_functions(self, state_values, action_values, state_counts):
         """
-        Perform a one step learning of the policy parameter using the FV simulator to learn the value functions that contribute to the loss
-
-        This one step learning is based on using the current policy to learn the state and action value functions
-        that are used as a critic in the loss function that feeds the neural network defining the theta parameter of the policy.
+        Performs a one step learning of the policy parameter OFFLINE, i.e. by sweeping all possible
+        states and actions and using the given (state and) action value functions to compute the advantage function
+        (critic) that multiplies the log-policy contributing to the loss that is minimized by the policy learner.
 
         Arguments:
         state_values, action_values: np.ndarray
-            Estimated state and action value functions that is used here to compute the advantage function
+            Estimated state and action value functions that is used here to compute the advantage function.
+            The state value function may not be used if it is calculated as the average of the action value function
+            over all possible actions.
 
         state_counts: np.ndarray
             State visit frequency observed during the estimation of the given value functions.
@@ -1242,6 +1257,34 @@ class LeaActorCriticNN(GenericLearner):
             print(f"Policy:\n{proba_policy}")
 
         return loss.float()
+
+    def compute_action_distribution(self, state, allow_deterministic=False, epsilon_away_from_deterministic=0.05):
+        if self.policy.nn_model.getNumInputs() == 1:
+            action_probs = F.softmax(self.policy.nn_model([state]), dim=0)
+        elif self.policy.nn_model.getNumInputs() == self.env.getNumStates():
+            input = np.zeros(self.env.getNumStates(), dtype=int)
+            input[state] = 1
+            action_probs = F.softmax(self.policy.nn_model(input), dim=0)
+        else:
+            raise ValueError(f"The number of inputs in the neural network ({self.policy.nn_model.getNumInputs()}) cannot be handled by the policy learner. It must be either 1 or as many as the number of states in the environment.")
+
+        # Check if deterministic policy, if so, make it slightly non-deterministic (to avoid getting stuck at deterministic non-optimal policies)
+        if not allow_deterministic:
+            list_action_probs = action_probs.tolist()
+            if np.abs( np.max(list_action_probs) - 1.0 ) < 1E-9:
+                print(f"**** POLICY IS DETERMINISTIC for state {state}! An epsilon value of {epsilon_away_from_deterministic} is applied to make it random.")
+                n_actions = len(action_probs)
+                all_actions = list(range(n_actions))
+                a_max = np.argmax(list_action_probs)
+                list_action_probs[a_max] = max(0.0, list_action_probs[a_max] - epsilon_away_from_deterministic)
+                all_actions_but_amax = all_actions.copy()
+                all_actions_but_amax.remove(a_max)
+                for a in all_actions_but_amax:
+                    list_action_probs[a] = min(list_action_probs[a] + epsilon_away_from_deterministic / (n_actions - 1), 1.0)
+                action_probs = torch.tensor(list_action_probs)
+        action_distribution = Categorical(action_probs)
+
+        return action_distribution
 
     def deprecated_loss(self, Vs, Qs, logprobs) -> float:
         """

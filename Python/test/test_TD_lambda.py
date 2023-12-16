@@ -181,7 +181,7 @@ class Test_EstStateValueV_MetTDLambda_EnvGridworld1D(unittest.TestCase, test_uti
         if self.plot:
             self.plot_results(params, self.nepisodes,
                               observed, self.env.getV(), RMSE_by_episode, learning_info['alpha_mean'],
-                              y2lim=(0, 1.0),
+                              ylim=(0, 1.0),
                               max_rmse=self.max_rmse, color_rmse=self.color_rmse)
 
         assert np.allclose(observed, expected, atol=1E-6)
@@ -212,6 +212,11 @@ class Test_EstStateValueV_MetTDLambda_EnvGridworld1D(unittest.TestCase, test_uti
                                                             compute_rmse=True, state_observe=19,
                                                             verbose=True, verbose_period=100,
                                                             plot=False, pause=0.001)
+        # True state value function defined in the environment
+        V_true = np.arange(-(self.env.getNumStates() - 1), self.env.getNumStates() + 1, 2) / (self.env.getNumStates() - 1)
+        V_true[0] = V_true[-1] = 0.0    # The two terminal states of the environment have zero value (by definition)
+        print(f"True state value function V(s): {V_true}")
+        assert np.allclose(self.env.getV(), V_true, 1E-9)
 
         # Expected RMSE with the following settings:
         # 19-size gridworld
@@ -292,7 +297,7 @@ class Test_EstStateValueV_MetTDLambda_EnvGridworld1D(unittest.TestCase, test_uti
         if self.plot:
             (ax, ax2) = self.plot_results(params, self.nepisodes,
                               observed, self.env.getV(), RMSE_by_episode, learning_info['alpha_mean'],
-                              y2label="(Average) alpha & lambda", y2lim=(0, 1.0),
+                              ylabel="(Average) alpha & lambda", ylim=(0, 1.0),
                               max_rmse=self.max_rmse, color_rmse=self.color_rmse)
             ax2.plot(np.arange(self.nepisodes)+1, agent_rw_tdlambda_adaptive.getLearner().lambda_mean_by_episode, color="orange")
 
@@ -698,8 +703,8 @@ class Test_TD_Lambda_MountainCar(unittest.TestCase, test_utils.EpisodeSimulation
     def __init__(self, *args, **kwargs):
         self.seed = kwargs.pop('seed', None)
         self.nepisodes = kwargs.pop('nepisodes', 10)
-        self.max_time_steps = kwargs.pop('max_time_steps', 500)  # Maximum number of steps to run per episode
-        self.normalizer = kwargs.pop('normalizer', 1)            # Normalize for the plots: Set it to max_time_steps when the rewards are NOT sparse (i.e. are -1 every where except at terminal states), o.w. set it to 1 (when rewards are sparse, i.e. they occur at terminal states)
+        self.max_time_steps_per_episode = kwargs.pop('max_time_steps_per_episode', 500)  # Maximum number of steps to run per episode
+        self.normalizer = kwargs.pop('normalizer', 1)            # Normalize for the plots: Set it to max_time_steps_per_episode when the rewards are NOT sparse (i.e. are -1 every where except at terminal states), o.w. set it to 1 (when rewards are sparse, i.e. they occur at terminal states)
         self.start_state = kwargs.pop('start_state', None)       # Position and velocity
         self.plot = kwargs.pop('plot', False)
         self.colormap = cm.get_cmap("rainbow")  # useful colormaps are "jet", "rainbow", seismic"
@@ -743,7 +748,7 @@ class Test_TD_Lambda_MountainCar(unittest.TestCase, test_utils.EpisodeSimulation
         assert len(x) == values_2d_toplot.shape[0]
         assert len(v) == values_2d_toplot.shape[1]
         title_params = "(lambda={:.2f}, alpha={:.1f}, adj={}, episodes={}, max_time={}, density=(x:{}, v:{}) points)" \
-            .format(params['lambda'], params['alpha'], params['adjust_alpha'], self.nepisodes, self.max_time_steps,
+            .format(params['lambda'], params['alpha'], params['adjust_alpha'], self.nepisodes, self.max_time_steps_per_episode,
                     self.env.nx, self.env.nv)
         plt.figure()
         plt.errorbar(x, np.nanmean(values_2d_toplot / self.normalizer, axis=dim_v),
@@ -886,7 +891,7 @@ class Test_TD_Lambda_MountainCar(unittest.TestCase, test_utils.EpisodeSimulation
         sim = DiscreteSimulator(self.env, agent_rw_tdlambda, debug=False)
 
         time_start = timer()
-        _, _, _, _, _, learning_info = sim.run(nepisodes=self.nepisodes, max_time_steps=self.max_time_steps,
+        _, _, _, _, _, learning_info = sim.run(nepisodes=self.nepisodes, max_time_steps_per_episode=self.max_time_steps_per_episode,
                                         start=idx_start_state, seed=self.seed,
                                         compute_rmse=False, state_observe=None,
                                         verbose=True, verbose_period=max(1, int(self.nepisodes/10)),
@@ -967,7 +972,7 @@ if __name__ == "__main__":
         alpha_update_type = AlphaUpdateType.EVERY_STATE_VISIT
         nepisodes_benchmark = 30000
         max_time_steps_benchmark = 500
-        normalizer = 1 #max_time_steps_benchmark    # Normalize by max_time_steps when rewards are NOT sparse, o.w. use 1
+        normalizer = 1 #max_time_steps_benchmark    # Normalize by max_time_steps_benchmark when rewards are NOT sparse, o.w. use 1
             ## nepisodes=30000, max_time=500 => 2+ hours with MC (TD(1))
         # Case to run
         case = 'benchmark'
@@ -987,7 +992,7 @@ if __name__ == "__main__":
             # Execution to get the benchmark, i.e. the estimated state value function V that will be considered as the true value function
             adaptive = False
             test_obj.nepisodes = nepisodes_benchmark #10000
-            test_obj.max_time_steps = max_time_steps_benchmark
+            test_obj.max_time_steps_per_episode = max_time_steps_benchmark
             params = dict({'alpha': 1.0,
                            'gamma': gamma,
                            'lambda': 1.0,
@@ -1001,7 +1006,7 @@ if __name__ == "__main__":
         elif case == 'td':
             adaptive = False
             test_obj.nepisodes = 200 #1000
-            test_obj.max_time_steps = max_time_steps_benchmark
+            test_obj.max_time_steps_per_episode = max_time_steps_benchmark
             params = dict({'alpha': 1.0,
                            'gamma': gamma,
                            'lambda': 0.9,
@@ -1015,7 +1020,7 @@ if __name__ == "__main__":
         elif case == 'atd':
             adaptive = True
             test_obj.nepisodes = 200
-            test_obj.max_time_steps = max_time_steps_benchmark
+            test_obj.max_time_steps_per_episode = max_time_steps_benchmark
             params = dict({'alpha': 1.0,
                            'gamma': gamma,
                            'lambda': 0.0,
@@ -1029,7 +1034,7 @@ if __name__ == "__main__":
         elif case == 'hatd':
             adaptive = True
             test_obj.nepisodes = 200
-            test_obj.max_time_steps = max_time_steps_benchmark
+            test_obj.max_time_steps_per_episode = max_time_steps_benchmark
             params = dict({'alpha': 1.0,
                            'gamma': gamma,
                            'lambda': 0.0,
@@ -1049,13 +1054,13 @@ if __name__ == "__main__":
             if save:
                 filename = resultsdir + "/mountaincar_BENCHMARK_gamma={:.2f}_lambda={}_alpha={}_adj={}_episodes={},maxt={},nx={},nv={}.pickle" \
                     .format(params['gamma'], params['lambda'], params['alpha'], params['adjust_alpha'],
-                            test_obj.nepisodes, test_obj.max_time_steps, test_obj.env.nx, test_obj.env.nv)
+                            test_obj.nepisodes, test_obj.max_time_steps_per_episode, test_obj.env.nx, test_obj.env.nv)
                 file = open(filename, mode="wb")  # "b" means binary mode (needed for pickle.dump())
                 pickle.dump(dict({'V': state_values, 'counts': state_counts,
                                   'env': test_obj.env, 'policy': test_obj.policy_rw,
                                   'simulator': sim_obj, 'learning_info': learning_info,
                                   'params_test': {'nepisodes': test_obj.nepisodes,
-                                                  'max_time_steps': test_obj.max_time_steps},
+                                                  'max_time_steps': test_obj.max_time_steps_per_episode},
                                   'params': params}), file)
                 ## NOTE: The simulator object is quite large... ~ 1 MB. Otherwise, the output file only occupies ~ 20 kB
                 ## ALSO NOTE: It is not possible to save the `test_obj` per se... as I get the error:
@@ -1081,7 +1086,7 @@ if __name__ == "__main__":
                 # If the definition of the saved environment (in dict_benchmark['env']) is the same as the current definition of the
                 # MountainCarDiscrete environment, then we can just use the saved environment as environment on which test are run.
                 env_mountain = mountaincars.MountainCarDiscrete(dict_benchmark['env'].nv)
-                max_time_steps = test_obj.max_time_steps
+                max_time_steps_per_episode = test_obj.max_time_steps_per_episode
                 state_counts_benchmark = dict_benchmark['counts']
 
                 # Compute the error
@@ -1136,7 +1141,7 @@ if __name__ == "__main__":
         #-- Plot convergence analysis
         # Parameters used below
         nepisodes = test_obj.nepisodes
-        max_time_steps = test_obj.max_time_steps
+        max_time_steps_per_episode = test_obj.max_time_steps_per_episode
         normalizer = test_obj.normalizer
         env = test_obj.env
         gamma = params['gamma']
@@ -1146,7 +1151,7 @@ if __name__ == "__main__":
         adaptive_type = params['adaptive_type']
         # If plotting the results saved in the benchmark read above
         #nepisodes = dict_benchmark['params_test']['nepisodes']
-        #max_time_steps = dict_benchmark['params_test']['max_time_steps']
+        #max_time_steps_per_episode = dict_benchmark['params_test']['max_time_steps']
         #env = dict_benchmark['env']
         #gamma = dict_benchmark['params']['gamma']
         #alpha = dict_benchmark['params']['alpha']
@@ -1227,7 +1232,7 @@ if __name__ == "__main__":
         if save:
             figfile = resultsdir + "/mountaincar_BENCHMARK_CV_gamma={:.2f}_lambda={}_alpha={}_adj={}_episodes={},maxt={},nx={},nv={}.png" \
                         .format(params['gamma'], params['lambda'], params['alpha'], params['adjust_alpha'],
-                                test_obj.nepisodes, test_obj.max_time_steps, test_obj.env.nx, test_obj.env.nv)
+                                test_obj.nepisodes, test_obj.max_time_steps_per_episode, test_obj.env.nx, test_obj.env.nv)
             plt.savefig(figfile)
             print("Plot saved to:\n{}".format(os.path.abspath(figfile)))
 

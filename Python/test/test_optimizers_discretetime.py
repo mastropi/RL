@@ -25,7 +25,7 @@ from torch import nn
 
 import Python.lib.agents as agents
 
-from Python.lib.agents.learners import LearningCriterion
+from Python.lib.agents.learners import LearningCriterion, ResetMethod
 from Python.lib.agents.learners.episodic.discrete import fv, td
 
 from Python.lib.agents.policies.parameterized import PolNN
@@ -54,9 +54,13 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
     def setUpClass(cls, shape=(3, 4), obstacles_set: Union[list, set]=None, start_state: int=None,
                         # Characteristics of the neural network for the Actor Critic policy learner
                         nn_input: InputLayer=InputLayer.ONEHOT, nn_hidden_layer_sizes: list=[8],
-                        # Characteristics of the Fleming-Viot implementation
-                        absorption_set: Union[list, set]=None,
+                        # Characteristics of all learners
                         learning_criterion=LearningCriterion.DISCOUNTED,
+                        alpha=1.0, gamma=1.0, lmbda=0.0,      # Lambda parameter in non-adaptive TD(lambda) learners
+                        # Characteristics of the Fleming-Viot implementation
+                        N=100, T=100,   # N is the number of particles, T is the max number of time steps allowed over ALL episodes in the single Markov chain simulation that estimates E(T_A)
+                        absorption_set: Union[list, set]=None,
+                        reset_method_value_functions=ResetMethod.ALLZEROS,
                         seed=1717, debug=False):
         env_shape = shape
         cls.debug = debug
@@ -66,6 +70,7 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
 
         # Start state at the lower-left cell (if not given)
         if start_state is None:
+            # We set the start state to be at the bottom-left of the environment
             start_state = np.ravel_multi_index((env_shape[0]-1, 0), env_shape)
         else:
             if not 0 <= start_state < cls.nS:
@@ -88,10 +93,9 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
                 if not 0 <= state < cls.nS:
                     raise ValueError(f"All states in the obstacles set must be between 0 and {cls.nS-1}: {state}")
 
-        # Check the absorption set
-        # TODO: (2023/09/20) Choose a multi-state set A so that we can try the FV estimation where there is no single state on which the single Markov chain simulation should start
+        # Absorption set for FV
         if absorption_set is None:
-            # We choose the first column of the 2D-grid as the set A of uninteresting states
+            # We choose the first column, i.e. the column above the labyrinth's start state, of the 2D-grid as the set A of uninteresting states
             absorption_set = set()
             for i in range(env_shape[0]):
                 state = np.ravel_multi_index((i, 0), env_shape)
@@ -101,15 +105,22 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
                 if not 0 <= state < cls.nS:
                     raise ValueError(f"All states in the absorption set must be between 0 and {cls.nS-1}: {state}")
 
-        # Define the activation set for FV (it must touch the absorption set)
-        # TODO: (2023/10/16) Adapt this to ANY absorption set that is defined by the user (not easy...)
-        # *** WARNING *** FOR NOW this only works when the absorption set is the first column of the grid
-        # set({4, 9}) # set({1, 5, 9})  # For the 3x4 grid
+        reward_terminal = +1
+        reward_obstacles = 0
+        dict_rewards = dict([(s, reward_terminal if s in terminal_states else reward_obstacles) for s in set.union(set(terminal_states), obstacles_set)])
+        cls.env2d = gridworlds.EnvGridworld2D_WithObstacles(shape=env_shape, terminal_states=terminal_states,
+                                                            rewards_dict=dict_rewards, obstacles_set=obstacles_set,
+                                                            initial_state_distribution=isd)
+        print("Gridworld environment:")
+        cls.env2d._render()
+
+        # Activation set for FV
+        # (defined from the absorption set as all those states adjacent to every state in the absorption set that are not part of the absorption set not an obstacle)
         activation_set = set()
-        for i in range(env_shape[0]):
-            state = np.ravel_multi_index((i, 1), env_shape)
-            if state not in obstacles_set:
-                activation_set.add(state)
+        for s in absorption_set:
+            for sadj, dir in cls.env2d.get_adjacent_states(s):
+                if sadj is not None and sadj not in set.union(absorption_set, obstacles_set):
+                    activation_set.add(sadj)
 
         print("Environment characteristics (2D-labyrinth): (row, col)")
         print(f"Start state: {np.unravel_index(start_state, env_shape)}")
@@ -120,10 +131,6 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
         print(f"Absorption set:  {[np.unravel_index(s, env_shape) for s in sorted(absorption_set)]}")
         print(f"Activation set:  {[np.unravel_index(s, env_shape) for s in sorted(activation_set)]}")
 
-        cls.env2d = gridworlds.EnvGridworld2D_WithObstacles(shape=env_shape, terminal_states=terminal_states,
-                                                            rewards_dict=dict({3: +1}), obstacles_set=obstacles_set,
-                                                            initial_state_distribution=isd)
-
         #-- Cycle characteristics
         # Set of absorbing states, used to define a cycle as re-entrance into the set
         # which is used to estimate the average reward using renewal theory
@@ -133,20 +140,19 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
         cls.B = activation_set
 
         #-- Policy characteristics
-        # Random walk policy
+        # Policy model
         if nn_input == InputLayer.SINGLE:
             cls.nn_model = nn_backprop(1, nn_hidden_layer_sizes, cls.env2d.getNumActions(), dict_activation_functions=dict({'hidden': [nn.ReLU]*len(nn_hidden_layer_sizes)}))
         else:
             cls.nn_model = nn_backprop(cls.env2d.getNumStates(), nn_hidden_layer_sizes, cls.env2d.getNumActions(), dict_activation_functions=dict({'hidden': [nn.ReLU] * len(nn_hidden_layer_sizes)}))
         cls.policy_nn = PolNN(cls.env2d, cls.nn_model)
+        print(f"Neural network to model the policy:\n{cls.nn_model}")
+
         # Initialize the policy to a random walk
         cls.policy_nn.init_random_policy()
         print(f"Network parameters initialized as follows:\n{list(cls.policy_nn.getThetaParameter())}")
         print("Initial policy for all states (states x actions):")
-        policy = np.nan * np.ones((cls.env2d.getNumStates(), cls.env2d.getNumActions()))
-        for s in cls.env2d.getAllStates():
-            for a in range(cls.env2d.getNumActions()):
-                policy[s][a] = cls.policy_nn.getPolicyForAction(a, s)
+        policy = cls.policy_nn.get_policy_values()
         print(policy)
 
         #-- Plotting parameters
@@ -158,47 +164,75 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
         # at least when the MC learner is ready... which currently is not because both the state value and the average reward are based on episodic learning,
         # NOT on the average reward criterion.
         cls.nepisodes = 200
-        cls.start_state = 8
+
+        #-- Learning parameters
+        cls.gamma = gamma;
+        cls.alpha = alpha
+        cls.alpha_min = 0.0
+        cls.reset_method = reset_method_value_functions
+        cls.reset_params = dict({'min': -1, 'max': +1})
 
         # TD(lambda) learner
-        gamma = 0.9
-        learner_tdlambda = td.LeaTDLambda(cls.env2d, criterion=learning_criterion, alpha=1.0,
-                                          gamma=gamma, lmbda=0.0,
+        learner_tdlambda = td.LeaTDLambda(cls.env2d, criterion=learning_criterion,
+                                          gamma=gamma,
+                                          lmbda=lmbda,
+                                          alpha=cls.alpha,
                                           adjust_alpha=True,
                                           adjust_alpha_by_episode=False,
-                                          alpha_min=0.0,
-                                          store_history_over_all_episodes=True, # Set it to True when we want to store the average reward over all episodes altogether
+                                          alpha_min=cls.alpha_min,
+                                          store_history_over_all_episodes=(learning_criterion == LearningCriterion.AVERAGE),
+                                            ## We set the trajectory history storage to True when we are learning using the average reward criterion
+                                            ## because in that case the average reward comes from the average reward observed over all episodes altogether.
+                                            ## NOTE HOWEVER that we do NOT need to set this value because the parameter is set to True
+                                            ## by the constructor of the TD learner when the learning criterion is the average reward
+                                          reset_method=cls.reset_method, reset_params=cls.reset_params, reset_seed=cls.seed,
                                           debug=cls.debug)
         cls.agent_nn_td = agents.GenericAgent(cls.policy_nn, learner_tdlambda)
         cls.sim_td = DiscreteSimulator(cls.env2d, cls.agent_nn_td, debug=False)
 
         # Adaptive TD(lambda) learner
-        gamma = 0.9
-        learner_tdlambda_adap = td.LeaTDLambdaAdaptive(cls.env2d, criterion=learning_criterion, alpha=1.0,
+        learner_tdlambda_adap = td.LeaTDLambdaAdaptive(cls.env2d, criterion=learning_criterion,
                                           gamma=gamma,
+                                          alpha=cls.alpha,
                                           adjust_alpha=True,
                                           adjust_alpha_by_episode=False,
-                                          alpha_min=0.0,
-                                          store_history_over_all_episodes=True, # Set it to True when we want to store the average reward over all episodes altogether
+                                          alpha_min=cls.alpha_min,
+                                          store_history_over_all_episodes=(learning_criterion == LearningCriterion.AVERAGE),
+                                            ## We set the trajectory history storage to True when we are learning using the average reward criterion
+                                            ## because in that case the average reward comes from the average reward observed over all episodes altogether.
+                                            ## NOTE HOWEVER that we do NOT need to set this value because the parameter is set to True
+                                            ## by the constructor of the TD learner when the learning criterion is the average reward
+                                          reset_method=cls.reset_method, reset_params=cls.reset_params, reset_seed=cls.seed,
                                           debug=cls.debug)
         cls.agent_nn_tda = agents.GenericAgent(cls.policy_nn, learner_tdlambda_adap)
         cls.sim_tda = DiscreteSimulator(cls.env2d, cls.agent_nn_tda, debug=False)
 
         # Fleming-Viot learner
-        N = 100
-        T = 1000
         absorption_set = cls.A
         activation_set = cls.B
         learner_fv = fv.LeaFV(  cls.env2d,
-                                N, T, absorption_set, activation_set, probas_stationary_start_state=None,
-                                alpha=1.0,
-                                lmbda=0.0,
+                                N, T, absorption_set, activation_set,
+                                probas_stationary_start_state_absorption=None,
+                                probas_stationary_start_state_activation=None,
+                                criterion=learning_criterion,
+                                alpha=cls.alpha,
+                                gamma=gamma,
+                                lmbda=lmbda,
                                 adjust_alpha=True,
                                 adjust_alpha_by_episode=False,
-                                alpha_min=0.0,
+                                alpha_min=cls.alpha_min,
+                                reset_method=cls.reset_method, reset_params=cls.reset_params, reset_seed=cls.seed,
                                 debug=False)
+        #actor_critic = LeaActorCriticNN(cls.env2d, cls.policy_nn, learner_fv, optimizer_learning_rate=0.1, seed=cls.seed, debug=True)
+        #cls.agent_nn_fv = agents.GenericAgent(cls.policy_nn, dict({'value': learner_fv, 'policy': actor_critic}))
         cls.agent_nn_fv = agents.GenericAgent(cls.policy_nn, learner_fv)
         cls.sim_fv = DiscreteSimulator(cls.env2d, cls.agent_nn_fv, debug=False)
+
+    def getAbsorptionSet(self):
+        return self.A
+
+    def getActivationSet(self):
+        return self.B
 
     @classmethod
     def runSimulation(cls, agent, dict_params_simul, dict_params_learn, dict_params_info):

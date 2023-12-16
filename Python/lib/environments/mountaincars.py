@@ -189,10 +189,6 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
                             # IMPORTANT: It must have THIS name, i.e. the name used in the super class MountainCarEnv
                             # which reads the current state of the environment from this attribute.
 
-        #-- True value functions (for algorithm evaluation purposes)
-        #-- Note that terminal states have value = 0
-        self.V = None
-
     # NOTE: (2022/05/05) In the current version gym-0.12.1 that I have installed, the MountainCarEnv environment does not accept
     # a seed when resetting the environment. I should update the gym installation, as the newer version does accept a seed
     # (as seen in the GitHub repository of the MountainCarEnv environment)
@@ -491,9 +487,6 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
         "Returns the color to use in plots about the velocity"
         return "blue"
 
-    def getV(self):
-        return self.V
-
     def getState(self):
         """
         Returns the state index associated to the current environment observation
@@ -530,7 +523,3 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
         # Set the state in the Environment Discrete environment
         super().setState(idx_state)
         self.state = self.get_state_from_index(idx_state)
-
-    def setV(self, state_values: np.ndarray(1)):
-        "Sets the state value function for a particular policy (not shown explicitly)"
-        self.V = state_values

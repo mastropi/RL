@@ -55,7 +55,7 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
         #--- 2023/10/04 ---
         # State and action space (possibly used sometimes as I migrate to defining states and actions as integers to defining them as gym.spaces.Discrete
         # which ***are still integers*** but encapsulated as part of the gym.spaces.Discrete class.
-        # Particularly useful are methods contains(x) to check whether element x is in the space and sample() that retrieves a random sample
+        # Particularly useful are methods contains(x) to check whether element x is in the space (e.g. `state_space.contains(3)`) and sample() that retrieves a random sample
         # according to the internal random number generator whose seed can be set with seed() (e.g. `action_space.seed(1313)`).
         # Note that in order to *iterate* on all possible states or actions, we CANNOT do `for s in state_space` as it says that state_space is not iterable!!!
         # We need to do instead: `for s in range(state_space.n)`... I can't believe it.
@@ -68,6 +68,20 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
         self.terminal_states = terminal_states
         self.non_terminal_states = set(self.all_states).difference( set( self.terminal_states ) )
         self.terminal_rewards = terminal_rewards
+
+        # Define the true value functions as all zeros when they are not defined already by the actual environment (inheriting from this class)
+        # The goal is to be able to do analysis of the *estimated* value functions even when the true state value functions are unknonwn
+        # because some of these analyses require that the true value function be defined (e.g. when computing the RMSE value of the estimated value function)
+        # Ex: It is possible to request the Simulator._run_single() method to analyze how the value of a particular state (state_observe)
+        # evolves during the learning process, but this requires that the attributes self.V be defined in the environment object.
+        attributes_in_object = dir(self)
+        if "V" not in attributes_in_object:
+            self.V = np.array([0.0]*self.getNumStates())
+        if "Q" not in attributes_in_object:
+            self.Q = np.array([0.0]*self.getNumStates()*self.getNumActions())
+
+    def isTerminalState(self, state):
+        return set([state]).issubset( set(self.terminal_states) )
 
     #--- Getters
     def getDimension(self):
@@ -122,8 +136,13 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
         "Returns the list of non terminal states"
         return list(self.non_terminal_states)
 
-    def isTerminalState(self, state):
-        return set([state]).issubset( set(self.terminal_states) )
+    def getV(self):
+        "Returns the true state value function stored in the object"
+        return self.V
+
+    def getQ(self):
+        "Returns the true action value function in the object"
+        return self.Q
 
     #--- Setters
     def setInitialStateDistribution(self, isd):
@@ -132,4 +151,6 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
     def setState(self, s):
         self.s = s
 
-
+    def setV(self, state_values: np.ndarray(1)):
+        "Sets the true state value function for a particular policy (not shown explicitly)"
+        self.V = state_values

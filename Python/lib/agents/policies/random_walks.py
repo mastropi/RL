@@ -3,9 +3,9 @@
 Created on Mon Mar  30 19:40:52 2020
 
 @author: Daniel Mastropietro
-@description: Random walk policies constructed on environments defined in the environments package.
+@description: Random walk policies constructed on environments defined in the environments module.
 Each policy should have the following methods:
-    - choose_action() --> it returns an index on the action space with the action to take by the agent
+- choose_action(state) --> it returns an index on the action space with the action to take by the agent at a given state.
 """
 
 
@@ -21,9 +21,9 @@ class PolRandomWalkDiscrete():
     Random walk policy for a discrete environment defined with the DiscreteEnv class
     of openAI's gym module.
 
-    Args:
-        env(gym.envs.toy_text.discrete.DiscreteEnv) the environment where the random walk takes
-        place.
+    Arguments:
+    env: EnvironmentDiscrete
+        The environment where the random walk takes place.
     """
 
     def __init__(self, env: EnvironmentDiscrete):

@@ -246,10 +246,12 @@ class EpisodeSimulation:
 
     def plot_results(self, params, nepisodes,
                      V_estimate, V_true, RMSE_by_episode, alphas_by_episode,
-                     y2label="(Average) alpha", y2lim=None,
+                     ylabel="(Average) alpha", ylim=None,
                      max_rmse=0.8, color_rmse="black"):
         """
-        Plots the estimated and true state value function.
+        Plots the estimated and true state value function in one plot,
+        the (average) learning rate alpha by episode in another plot where the RMSE by episode
+        is plotted on a secondary axis, if given (not None).
         
         Arguments:
         params: dict
@@ -272,15 +274,19 @@ class EpisodeSimulation:
             Root Mean Squared Error of the estimated state value function by episode, including the very start of the
             learning process, where the RMSE is computed on the initial guess of the value function.
             Its length should be equal to the number of episodes run + 1.
+            If None, the RMSE is not plotted.
 
         alphas_by_episode: list or numpy.array
             Average learning rate by episode.
             Its length should be equal to the number of episodes run.
         """
+        if len(V_true) != len(V_estimate):
+            raise ValueError(f"The length of the true values array ({len(V_true)}) and of the estimated values array ({len(V_estimate)}) are different")
+
         title = "alpha={:.2f}, gamma={:.2f}, lambda={:.2f}, {} episodes" \
                      .format(params['alpha'], params['gamma'], params['lambda'], nepisodes)
 
-        all_states = np.arange(self.nS + 2)
+        all_states = np.arange(len(V_true))
         all_episodes = np.arange(nepisodes + 1)    # This is 0, 1, ..., nepisodes
                                                    # i.e. it has length nepisodes + 1 so that the very first
                                                    # RMSE (for the initial guess of the value function)
@@ -294,23 +300,26 @@ class EpisodeSimulation:
         plt.title(title)
 
         plt.figure()
-        plt.plot(all_episodes, RMSE_by_episode, color=color_rmse)
+        plt.plot(all_episodes[:-1], alphas_by_episode, "k:")
         #plt.xticks(np.arange(nepisodes)+1)
         ax = plt.gca()
-        #ax.set_ylim((0, np.max(RMSE_by_episode)))
-        ax.set_ylim((0, max_rmse))
         ax.set_xlabel("Episode")
-        ax.set_ylabel("RMSE")
+        ax.set_ylabel(ylabel)
+        if ylim is not None:
+            ax.set_ylim(ylim)
+        ax.axhline(y=params['alpha_min'], color="gray")
         ax.set_title(title)
 
-        ax2 = ax.twinx()
-        ax2.plot(all_episodes[:-1], alphas_by_episode, "k:")
-        ax2.set_ylabel(y2label)
-        if y2lim is not None:
-            ax2.set_ylim(y2lim)
-        ax2.axhline(y=params['alpha_min'], color="gray")
+        if RMSE_by_episode is not None:
+            ax2 = ax.twinx()
+            ax2.plot(all_episodes, RMSE_by_episode, color=color_rmse)
+            #ax2.set_ylim((0, np.max(RMSE_by_episode)))
+            ax2.set_ylim((0, max_rmse))
+            ax2.set_ylabel("RMSE")
 
-        # Go back to the primary axis
-        plt.sca(ax)
+            # Go back to the primary axis
+            plt.sca(ax)
+        else:
+            ax2 = None
 
         return (ax, ax2)

@@ -839,7 +839,9 @@ class Test_EstDifferentialStateValueV_EnvGridworldsWithObstacles(unittest.TestCa
         absorption_set = cls.A
         activation_set = cls.B
         learner_fv = fv.LeaFV(  cls.env2d,
-                                N, T, absorption_set, activation_set, probas_stationary_start_state=None,
+                                N, T, absorption_set, activation_set,
+                                probas_stationary_start_state_absorption=None,
+                                probas_stationary_start_state_activation=None,
                                 alpha=1.0,
                                 lmbda=0.0,
                                 adjust_alpha=True,
@@ -1076,8 +1078,8 @@ class Test_EstValueFunctionV_MetMCLambda_EnvMountainCar(unittest.TestCase, test_
     def __init__(self, *args, **kwargs):
         self.seed = kwargs.pop('seed', 1717)
         self.nepisodes = kwargs.pop('nepisodes', 30)  # 20000) #100000) #30000) #200) #2000)
-        self.max_time_steps = kwargs.pop('max_time_steps', 500)  # Maximum number of steps to run per episode
-        self.normalizer = kwargs.pop('normalizer', 1)  # Normalize for the plots: Set it to max_time_steps when the rewards are NOT sparse (i.e. are -1 every where except at terminal states), o.w. set it to 1 (when rewards are sparse, i.e. they occur at terminal states)
+        self.max_time_steps_per_episode = kwargs.pop('max_time_steps_per_episode', 500)  # Maximum number of steps to run per episode
+        self.normalizer = kwargs.pop('normalizer', 1)  # Normalize for the plots: Set it to max_time_steps_per_episode when the rewards are NOT sparse (i.e. are -1 every where except at terminal states), o.w. set it to 1 (when rewards are sparse, i.e. they occur at terminal states)
         self.start_state = kwargs.pop('start_state', None)  # (0.4, 0.07)) #None) #(0.4, 0.07))       # Position and velocity
         self.plot = kwargs.pop('plot', True)
         super().__init__(*args, **kwargs)
@@ -1146,7 +1148,7 @@ class Test_EstValueFunctionV_MetMCLambda_EnvMountainCar(unittest.TestCase, test_
         sim = DiscreteSimulator(self.env, agent_rw_mc, debug=False)
 
         time_start = timer()
-        _, _, _, _, _, learning_info = sim.run(nepisodes=self.nepisodes, max_time_steps=self.max_time_steps,
+        _, _, _, _, _, learning_info = sim.run(nepisodes=self.nepisodes, max_time_steps_per_episode=self.max_time_steps_per_episode,
                                             start=idx_start_state, seed=self.seed,
                                             compute_rmse=False, state_observe=None,
                                             verbose=True, verbose_period=max(1, int(self.nepisodes / 10)),
@@ -1205,10 +1207,8 @@ class Test_EstValueFunctionV_MetMCLambda_EnvMountainCar(unittest.TestCase, test_
                 "% states used for summary statistics (num states = {}) (average is computed on states with visit count > 0)".format(
                     self.env.getNumStates()))
 
-            fig.suptitle(
-                "Convergence of the estimated value function V (gamma={:.2f}, lambda={:.2f}, alpha={:.2f}, {}, max #steps = {})" \
-                .format(params['gamma'], params['lambda'], params['alpha'], params['alpha_update_type'].name,
-                        self.max_time_steps))
+            fig.suptitle("Convergence of the estimated value function V (gamma={:.2f}, lambda={:.2f}, alpha={:.2f}, {}, max #steps = {})" \
+                        .format(params['gamma'], params['lambda'], params['alpha'], params['alpha_update_type'].name, self.max_time_steps_per_episode))
 
             fig = plt.figure(figsize=(20, 10))
             ax, ax2 = fig.subplots(1, 2)
@@ -1294,7 +1294,7 @@ class Test_EstValueFunctionV_MetMCLambda_EnvMountainCar(unittest.TestCase, test_
 
         # MC execution
         time_start = timer()
-        _, _, _, _, _, learning_info = sim_mc.run(nepisodes=self.nepisodes, max_time_steps=self.max_time_steps,
+        _, _, _, _, _, learning_info = sim_mc.run(nepisodes=self.nepisodes, max_time_steps_per_episode=self.max_time_steps_per_episode,
                                                start=idx_start_state, seed=self.seed,
                                                compute_rmse=False, state_observe=None,
                                                verbose=True, verbose_period=max(1, int(self.nepisodes / 10)),
@@ -1307,7 +1307,7 @@ class Test_EstValueFunctionV_MetMCLambda_EnvMountainCar(unittest.TestCase, test_
         # Lambda-Return
         time_start = timer()
         _, _, _, _, _, learning_info = sim_lambda_return.run(nepisodes=self.nepisodes,
-                                                          max_time_steps=self.max_time_steps,
+                                                          max_time_steps_per_episode=self.max_time_steps_per_episode,
                                                           start=idx_start_state, seed=self.seed,
                                                           compute_rmse=False, state_observe=None,
                                                           verbose=True,

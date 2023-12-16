@@ -525,6 +525,15 @@ class PolNN():
 
         return action
 
+    def get_policy_values(self):
+        "Returns the policy values in a 2D array indexed by each state and each action of the environment"
+        policy = np.nan * np.ones((self.env.getNumStates(), self.env.getNumActions()))
+        for s in self.env.getAllStates():
+            for a in range(self.env.getNumActions()):
+                policy[s][a] = self.getPolicyForAction(a, s)
+
+        return policy
+
     def getPolicyForAction(self, action, state):
         """
         Returns the value of the policy for the given action when the environment is at the given state

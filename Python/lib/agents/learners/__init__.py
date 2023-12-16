@@ -347,8 +347,10 @@ class GenericLearner:
         # e.g. [3, 1, 5] becomes '[3, 1, 5]'
         state_action_str = str( (state, action) )
         if state_action_str in self.dict_state_action_counts.keys():
+            # Update the value of the dictionary key representing the state-action that is visited now
             self.dict_state_action_counts[state_action_str] += 1
         else:
+            # Add the state-action as a new dictionary key since it is the first time it is visited
             self.dict_state_action_counts[state_action_str] = 1
 
     def update_average_reward(self):
@@ -368,6 +370,10 @@ class GenericLearner:
 
     def getInitialLearningRate(self):
         return self.alpha
+
+    def getLearningCriterion(self):
+        "Returns the learning criterion, i.e. one of the possible values of LearningCriterion enum (e.g. AVERAGE, DISCOUNTED)"
+        return self.criterion
 
     def getLearningEpoch(self):
         "Returns the number of epochs at which learning took place according to the learning epoch attribute"
@@ -392,6 +398,10 @@ class GenericLearner:
 
     def getAverageReward(self):
         return self.average_reward
+
+    def setInitialLearningRate(self, alpha):
+        "Sets the initial learning rate"
+        self.alpha = alpha
 
     def setAverageReward(self, average_reward):
         self.average_reward = average_reward

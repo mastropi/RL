@@ -169,8 +169,7 @@ def update_phi(env, N: int, t: float, dict_phi: dict, state_prev, state_cur):
         phi_new = empirical_mean_update(phi_cur, x, state_or_buffer_size_prev, state_or_buffer_size_cur, N)
         # if phi_new > 0:
         #    print("prev state: {} -> state: {}: New Phi: {}".format(state_or_buffer_size_prev, state_or_buffer_size_cur, phi_new))
-        if not np.isclose(phi_new, phi_cur, atol=0.5 / N,
-                          rtol=0):  # Note that the absolute tolerance is smaller for larger N values.
+        if not np.isclose(phi_new, phi_cur, atol=0.5 / N, rtol=0):  # Note that the absolute tolerance is smaller for larger N values.
             # Also, recall that the isclose() checks if |a - b| <= with atol + rtol*|b|,
             # and since we are interested in analyzing the absolute difference (not the relative difference)
             # between phi_new and phi_cur, we set rtol = 0.
@@ -263,10 +262,20 @@ def estimate_stationary_probabilities(dict_phi, df_proba_surv, expected_absorpti
         at intervals of size 1/uniform_jump_rate. Typically (for simplicity) this uniform jump rate is equal to the
         number of particles in the Fleming-Viot system, N, which allows us to change the discrete-time Markov chain at
         integer steps by changing ONE particle at a time, which in turn represents the uniformization of the original
-        continuous-time Fleming-Viot process where the jump rate of the underlying Markov process (governing the dynamics
-        of each particle) is considered to be equal to 1 (this is the jump rate of jumping to ANY other state of the Markov process),
-        which makes the jump rate of the Fleming-Viot process to be equal to N (i.e. N expected events per unit time,
-        equivalent to one event for a time interval equal to 1/N).
+        continuous-time Fleming-Viot process for which the jump rate of the underlying continuous-time Markov process
+        (governing the dynamics of each particle) is considered to be equal to 1 (i.e. one event per unit time
+        --which is a DISCRETE time 0, 1, 2, ...). This is the jump rate to go from one state to ONE particular
+        other state where the Markov chain can go (in the case of the labyrinth with 4 actions per state,
+        it is the jump rate to go from any state to any of the other 4 adjacent states). Therefore,
+        the underlying continuous-time Markov process can be uniformized by sampling at 1/(#adjacent-states * jump-rate-to-each-state),
+        i.e. by using a uniformization jump rate equal to (#adjacent-states * jump-rate-to-each-state).
+        Thus, in the same labyrinth example, the uniformization jump rate would be equal 4*1 = 4, which
+        is the jump rate of jumping to ANY other reachable state of the Markov process or, in other words
+        the expected number of jumps of the Markov process in one unit time),
+        This makes the jump rate of the Fleming-Viot process be equal to N * (uniformization-rate)
+        (i.e. N*(uniformization-rate) expected events per unit time, equivalent to one event for a time interval
+        of length 1/(N*(uniformization-rate)). In the same labyrinth case, the jump rate of discrete-time
+        Fleming-Viot process would be 4*N.
         default: 1
 
     Return: tuple of dict
@@ -358,7 +367,7 @@ def estimate_proba_stationary(df_phi_proba_surv, expected_absorption_time, inter
         This is useful when Fleming-Viot is used in the context of discrete-time Markov chains, which are considered
         as the result of sampling an underlying continuous-time Markov chain (on which Fleming-Viot is actually applied,
         since Fleming-Viot is defined for continuous-time processes) at such interval sizes.
-        In such cases, interval_size should be set to 1/N, where N is the number of particles in the Fleming-Viot system.
+        See the documentation for estimate_stationary_probabilities() on how this interval size should be set for Fleming-Viot.
         default: 1
 
     Return: tuple

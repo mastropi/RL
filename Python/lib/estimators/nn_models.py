@@ -58,9 +58,9 @@ class nn_backprop(nn.Module):
         #nn.init.zeros_(self.hidden_layers[0].bias)
 
         # Additional hidden layers (if any)
-        for h in range(len(hidden_sizes[1:])):
+        for h in range(1, len(hidden_sizes)):
             #self.hidden_layers[h] = nn.Linear(hidden_sizes[h-1], hidden_sizes[h], dtype=torch.float)
-            self.hidden_layers.append( nn.Linear(hidden_sizes[h - 1], hidden_sizes[h], dtype=torch.float) )
+            self.hidden_layers.append( nn.Linear(hidden_sizes[h-1], hidden_sizes[h], dtype=torch.float) )
 
         # Output layer
         self.output_layer = nn.Linear(hidden_sizes[-1], output_size, dtype=torch.float)

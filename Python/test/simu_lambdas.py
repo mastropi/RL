@@ -76,7 +76,7 @@ def run_td_adap(learner_td_adap, lambda_min, lambda_max, alphas, start=None, see
                 MAPE_by_episode_mean, MAPE_by_episode_se, n_by_episode, \
                 learning_info = sim.simulate(nexperiments=nexperiments,
                                              nepisodes=nepisodes,
-                                             max_time_steps=max_time_steps,
+                                             max_time_steps_per_episode=max_time_steps_per_episode,
                                              start=start,
                                              weights_rmse=weights_rmse,
                                              verbose=verbose,
@@ -171,7 +171,7 @@ def plot_results_adap(fig, legend_label, td_adap_name, results, lambda_max,
 resultsdir = resultsdir_grid
 nstates = 19 # Number of states excluding terminal states
 env_grid1d = gridworlds.EnvGridworld1D(length=nstates+2)
-max_time_steps = None
+max_time_steps_per_episode = None
 start_state = int((nstates + 1) / 2)
 weights_rmse = False
 env_desc = str(nstates) + r"-state 1D gridworld environment"
@@ -197,7 +197,7 @@ print("True value function read from '{}'".format(filename))
 # If the definition of the saved environment (in dict_benchmark['env']) is the same as the current definition of the
 # MountainCarDiscrete environment, then we can just use the saved environment as environment on which test are run.
 env_mountain = mountaincars.MountainCarDiscrete(dict_benchmark['env'].nv)
-max_time_steps = dict_benchmark['params_test']['max_time_steps']    # Use this when the test_obj is saved as part of the pickle file read above
+max_time_steps_per_episode = dict_benchmark['params_test']['max_time_steps']    # Use this when the test_obj is saved as part of the pickle file read above
 start_state = None  # Initial state chosen at random at the start of each episode
 nstates = np.prod(env_mountain.shape)
 # Use the state counts when estimating the true value function as weights to compute the RMSE and MAPE as they give
@@ -210,7 +210,7 @@ env_mountain.setV( env_mountain.reshape_from_2d_to_1d(dict_benchmark['V']) )
 # Check
 env_mountain.getV()[:10]
 plt.figure()
-plt.imshow(env_mountain.reshape_from_1d_to_2d(env_mountain.getV()) / max_time_steps)
+plt.imshow(env_mountain.reshape_from_1d_to_2d(env_mountain.getV()) / max_time_steps_per_episode)
 plt.colorbar()
 plt.title("gamma = {:.2f}".format(gamma_benchmark))
 #plt.show()
@@ -411,7 +411,7 @@ if run_td and False:
                 MAPE_by_episode_mean, MAPE_by_episode_se, n_by_episode, \
                 learning_info = sim.simulate(nexperiments=nexperiments,
                                              nepisodes=nepisodes,
-                                             max_time_steps=max_time_steps,
+                                             max_time_steps_per_episode=max_time_steps_per_episode,
                                              start=start_state,
                                              weights_rmse=weights_rmse,
                                              verbose=verbose,
@@ -487,7 +487,7 @@ if run_mc:
         MAPE_by_episode_mean, MAPE_by_episode_se, n_by_episode, \
         learning_info = sim.simulate(nexperiments=nexperiments,
                                      nepisodes=nepisodes,
-                                     max_time_steps=max_time_steps,
+                                     max_time_steps_per_episode=max_time_steps_per_episode,
                                      start=start_state,
                                      weights_rmse=weights_rmse,
                                      verbose=verbose,
@@ -577,7 +577,7 @@ if run_td:
                 MAPE_by_episode_mean, MAPE_by_episode_se, n_by_episode, \
                 learning_info = sim.simulate(nexperiments=nexperiments,
                                              nepisodes=nepisodes,
-                                             max_time_steps=max_time_steps,
+                                             max_time_steps_per_episode=max_time_steps_per_episode,
                                              start=start_state,
                                              weights_rmse=weights_rmse,
                                              verbose=verbose,

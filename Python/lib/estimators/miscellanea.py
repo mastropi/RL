@@ -87,7 +87,7 @@ class EstValueFunctionOfflineDeterministicNextState:
                     # (See chapter 9 in Sutton but I don't think it talks about this... it only talks about how to update
                     # the weights at each iteration, using Stochastic Gradient Descent (SGD).
                     # However, it does talk about the fixed point of this SGD algorithm, which is w = A^-1 * b
-                    # where A and b are given in that chapter (pag. 206).
+                    # where A and b are given in that chapter (pag. 206).)
 
                     # NOTE 2: At first we should perhaps update V(s) synchronosly, i.e. keep the same V(s) on the RHS
                     # until ALL states are updated.
@@ -100,7 +100,9 @@ class EstValueFunctionOfflineDeterministicNextState:
                         #      .format(s, self.env.get_state_from_index(s), a, ns, self.env.get_state_from_index(ns), reward, done))
                         # WARNING: Only valid for MountainCarDiscrete environment
 
-                    # The new V(s) value is the average over all possible actions (since we are considering a random walk)
+                    # The new V(s) value is the PLAIN AVERAGE over all possible actions (since we are considering a random walk)
+                    # If the policy were not random, we should multiply the V_observed value by the probability of taken action "a" given the current state s.
+                    # This would require that this method receives e.g. a dictionary with each state as key and all the probabilities Pi(a|s) as values.
                     if synchronous:
                         # Use the state value computed at the PREVIOUS iteration as currently known value of the next state, V(ns)
                         V_observed = reward + self.gamma * values_prev[ns]

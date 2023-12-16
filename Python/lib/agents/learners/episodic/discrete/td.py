@@ -42,22 +42,34 @@ class LeaTDLambda(Learner):
         the trajectory observed in an episode.
         This is useful if we need to compute something using the whole trajectory history or whether
         we want to know what the trajectories were on all episodes.
+        This value is set to True if the learning criterion is the average reward because we need to
+        access the average reward value estimated over ALL the episodes run as the average reward
+        criterion is used on continuing learning tasks.
         default: False
     """
 
     def __init__(self, env, criterion=LearningCriterion.DISCOUNTED, alpha=0.1, gamma=1.0, lmbda=0.8,
                  adjust_alpha=False, alpha_update_type=AlphaUpdateType.EVERY_STATE_VISIT,
-                 adjust_alpha_by_episode=False, alpha_min=0.,
+                 adjust_alpha_by_episode=False, alpha_min=0., func_adjust_alpha=None,
                  reset_method=ResetMethod.ALLZEROS, reset_params=None, reset_seed=None,
                  store_history_over_all_episodes=False,
                  debug=False):
-        super().__init__(env, criterion=criterion, alpha=alpha, adjust_alpha=adjust_alpha, alpha_update_type=alpha_update_type, adjust_alpha_by_episode=adjust_alpha_by_episode, alpha_min=alpha_min,
-                         reset_method=reset_method, reset_params=reset_params, reset_seed=reset_seed, store_history_over_all_episodes=store_history_over_all_episodes)
+        super().__init__(env, criterion=criterion, alpha=alpha, adjust_alpha=adjust_alpha, alpha_update_type=alpha_update_type,
+                         adjust_alpha_by_episode=adjust_alpha_by_episode, alpha_min=alpha_min, func_adjust_alpha=func_adjust_alpha,
+                         reset_method=reset_method, reset_params=reset_params, reset_seed=reset_seed,
+                         store_history_over_all_episodes=True if criterion == LearningCriterion.AVERAGE else store_history_over_all_episodes)
         self.debug = debug
 
         # Attributes that MUST be present for all TD methods
-        self.V = StateValueFunctionApprox(self.env.getNumStates(), self.env.getTerminalStates())
-        self.Q = ActionValueFunctionApprox(self.env.getNumStates(), self.env.getNumActions(), self.env.getTerminalStates())
+        if criterion == LearningCriterion.AVERAGE:
+            # Under the average reward criterion, there are NO terminal states
+            # This is important because under the average reward criterion, the value of the terminal state should NOT be set to 0 by the learner.
+            # as it has its own value too!
+            self.V = StateValueFunctionApprox(self.env.getNumStates(), {})
+            self.Q = ActionValueFunctionApprox(self.env.getNumStates(), self.env.getNumActions(), {})
+        else:
+            self.V = StateValueFunctionApprox(self.env.getNumStates(), self.env.getTerminalStates())
+            self.Q = ActionValueFunctionApprox(self.env.getNumStates(), self.env.getNumActions(), self.env.getTerminalStates())
         self.gamma = gamma
         
         # Attributes specific to the current TD method
@@ -95,13 +107,19 @@ class LeaTDLambda(Learner):
         self.lmbda = lmbda if lmbda is not None else self.lmbda
 
     def learn(self, t, state, action, next_state, reward, done, info):
-        self._update_trajectory(t, state, action, reward)  # This method belongs to the Learner super class defined in learners.episodic.discrete
+        if info.get('update_trajectory', True):
+            # We may not want to update the trajectory when learning the value function
+            # (e.g. when learning an episodic task using the average reward criterion, where the episodic task is represented
+            # as a continuing task: in that case, the value functions of the terminal state should be learned but its
+            # state NOT recorded when learning the value functions as it is recorded as the end of the episode below
+            # inside the `done` block --see also discrete.Simulator._run_single() and search for 'LearningCriterion.AVERAGE')
+            self._update_trajectory(t, state, action, reward)  # This method belongs to the Learner super class defined in learners.episodic.discrete
 
         # Compute the delta values used for the update of each value function
         # NOTE: We compute the delta separately, and NOT inside the functions that update the value functions,
         # because the delta information is needed by the adaptive TD(lambda) learner and implementing a specific
         # function that computes the delta values increases DRY implementation.
-        delta_V, delta_Q = self._compute_deltas(state, action, next_state, reward)
+        delta_V, delta_Q = self._compute_deltas(state, action, next_state, reward, info)
 
         #print("episode {}, state {}: count = {}, alpha = {}".format(self.episode, state, self._state_counts_over_all_episodes[state], self._alphas[state]))
         self._updateZ(state, action, self.lmbda)
@@ -137,7 +155,7 @@ class LeaTDLambda(Learner):
                     if not self.env.isTerminalState(state):
                         self._update_alphas(state)
 
-    def _compute_deltas(self, state, action, next_state, reward):
+    def _compute_deltas(self, state, action, next_state, reward, info):
         """
         Computes the delta values to be used for the state value and action value functions update
 
@@ -159,8 +177,16 @@ class LeaTDLambda(Learner):
         # Check whether we are learning the differential value function (average reward criterion) and adjust delta accordingly
         # Ref: Sutton, pag. 250
         if self.criterion == LearningCriterion.AVERAGE:
-            delta_V -= self._average_reward_in_episode
-            delta_Q -= self._average_reward_in_episode
+            if info.get('average_reward') is not None:
+                average_reward_correction = info.get('average_reward')
+            else:
+                # The average reward that is used for the correction of the value functions to obtain the differential value functions
+                # should be the average reward observed over ALL episodes.
+                # This information should be stored by the learner because the constructor parameter store_history_over_all_episodes
+                # is set to True when the learning criterion passed to the constructor is the average reward.
+                average_reward_correction = self.getAverageReward()
+            delta_V -= average_reward_correction
+            delta_Q -= average_reward_correction
 
         return delta_V, delta_Q
 
@@ -268,13 +294,15 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
     
     def __init__(self, env, criterion=LearningCriterion.DISCOUNTED, alpha=0.1, gamma=1.0, lmbda=0.8,
                  adjust_alpha=False, alpha_update_type=AlphaUpdateType.EVERY_STATE_VISIT,
-                 adjust_alpha_by_episode=True, alpha_min=0.,
+                 adjust_alpha_by_episode=True, alpha_min=0., func_adjust_alpha=None,
                  lambda_min=0., lambda_max=0.99, adaptive_type=AdaptiveLambdaType.ATD,
                  reset_method=ResetMethod.ALLZEROS, reset_params=None, reset_seed=None,
                  store_history_over_all_episodes=False,
                  burnin=False, plotwhat="boxplots", fontsize=15, debug=False):
-        super().__init__(env, criterion=criterion, alpha=alpha, gamma=gamma, lmbda=lmbda, adjust_alpha=adjust_alpha, alpha_update_type=alpha_update_type, adjust_alpha_by_episode=adjust_alpha_by_episode, alpha_min=alpha_min,
-                         reset_method=reset_method, reset_params=reset_params, reset_seed=reset_seed, store_history_over_all_episodes=store_history_over_all_episodes,
+        super().__init__(env, criterion=criterion, alpha=alpha, gamma=gamma, lmbda=lmbda, adjust_alpha=adjust_alpha, alpha_update_type=alpha_update_type,
+                         adjust_alpha_by_episode=adjust_alpha_by_episode, alpha_min=alpha_min, func_adjust_alpha=func_adjust_alpha,
+                         reset_method=reset_method, reset_params=reset_params, reset_seed=reset_seed,
+                         store_history_over_all_episodes=True if criterion == LearningCriterion.AVERAGE else store_history_over_all_episodes,
                          debug=debug)
         
         # List that keeps the history of ALL lambdas used at EVERY TIME STEP
@@ -353,12 +381,15 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
         self.burnin = burnin if burnin is not None else self.burnin
 
     def learn(self, t, state, action, next_state, reward, done, info):
-        self._update_trajectory(t, state, action, reward)  # This method belongs to the Learner super class defined in learners.episodic.discrete
+        if info.get('update_trajectory', True):
+            # We may not want to update the trajectory when learning the value function
+            # See the comment in the learn() method of the super class (normally LeaTDLambda) for an use case.
+            self._update_trajectory(t, state, action, reward)  # This method belongs to the Learner super class defined in learners.episodic.discrete
 
         # See comment in the constructor of the meaning of this attribute, which is exclusively used in the adaptive lambda learner
         self.state_counts_noreset[state] += 1
 
-        delta_V, delta_Q = self._compute_deltas(state, action, next_state, reward)
+        delta_V, delta_Q = self._compute_deltas(state, action, next_state, reward, info)
 
         # Decide whether we do adaptive or non-adaptive lambda at this point
         # (depending on whether there is bootstrap information available or not)
@@ -637,7 +668,7 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
 
         #plt.figure()
         #ax1 = plt.gca()
-        # Note: the violinpot() function does NOT accept an empty list for plotting nor NaN values
+        # Note: the violinplot() function does NOT accept an empty list for plotting nor NaN values
         # (when at least a NaN value is present, nothing is shown for the corresponding group!)   
         #plotting.violinplot(ax1, [lambdas_by_state[s] for s in states2plot], positions=states2plot,
                             #color_body="orange", color_lines="orange", color_means="red")

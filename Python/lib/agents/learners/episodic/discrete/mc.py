@@ -61,8 +61,15 @@ class LeaMCLambda(Learner):
         self.debug = debug
 
         # Attributes that MUST be presented for all MC methods
-        self.V = StateValueFunctionApprox(self.env.getNumStates(), self.env.getTerminalStates())
-        self.Q = ActionValueFunctionApprox(self.env.getNumStates(), self.env.getNumActions(), self.env.getTerminalStates())
+        if criterion == LearningCriterion.AVERAGE:
+            # Under the average reward criterion, there are NO terminal states
+            # This is important because under the average reward criterion, the value of the terminal state should NOT be set to 0 by the learner,
+            # as it has its own value too!
+            self.V = StateValueFunctionApprox(self.env.getNumStates(), {})
+            self.Q = ActionValueFunctionApprox(self.env.getNumStates(), self.env.getNumActions(), {})
+        else:
+            self.V = StateValueFunctionApprox(self.env.getNumStates(), self.env.getTerminalStates())
+            self.Q = ActionValueFunctionApprox(self.env.getNumStates(), self.env.getNumActions(), self.env.getTerminalStates())
         self.gamma = gamma
         
         #-- Attributes specific to the current MC method
@@ -220,7 +227,7 @@ class LeaMCLambda(Learner):
         # in which case the state value is an estimate of the return that would be observed should the trajectory
         # continue until a terminal state is reached.
         # A non-terminal state as end state happens only when the episode is terminated early because the maximum
-        # number of steps has been reached (this is set by e.g. parameter max_time_steps in Simulation.run() in order
+        # number of steps has been reached (this is set by e.g. parameter max_time_steps_per_episode in Simulator.run() in order
         # to avoid that a simulation runs forever without reaching a terminal state which might be very rare
         # --as in the Mountain Car example when the next action is chosen uniformly at random)
         # Note that we don't affect the initial G with gamma, because gamma comes into play in the recursive formula
@@ -235,7 +242,7 @@ class LeaMCLambda(Learner):
         # need to have a data structure that stores the already visited states in the episode;
         # we trade data structure creation and maintenance with easier algorithmic implementation of
         # first visit that does NOT require a special data structure storage.
-        for tt in np.arange(T,0,-1) - 1:     # This is T-1, T-2, ..., 0
+        for tt in np.arange(T, 0, -1) - 1:     # This is T-1, T-2, ..., 0
             state = self._states[tt]
             action = self._actions[tt]
             G = self.gamma*G + self._rewards[tt+1]      # This is the reward of going from state `state` observed at time tt to the state observed at the next time tt+1
@@ -497,6 +504,7 @@ class LeaMCLambdaAdaptive(LeaMCLambda):
             self.learn(T)
 
     def _computeStateRewards(self, terminal_state):
+        "Computes the gamma discounted reward for each state visited during a trajectory (stored in the self._states attribute)"
         # Length of the episode
         T = len(self._states)
         
@@ -524,8 +532,9 @@ class LeaMCLambdaAdaptive(LeaMCLambda):
             # the state visited *previously* (i.e. at time t-1) in the episode) 
             next_state = state
 
-    def _updateStateRewards(self, state, reward):
+    def _updateStateRewards(self, state, discounted_reward):
+        "Updates the gamma discounted average reward currently stored in the object for the given state using the given newly observed discounted reward value"
         # Regular average update
-        self.state_rewards[state] = ( self.state_counts[state] * self.state_rewards[state] + reward ) \
+        self.state_rewards[state] = ( self.state_counts[state] * self.state_rewards[state] + discounted_reward ) \
                                     / (self.state_counts[state] + 1)   
         self.state_counts[state] += 1
