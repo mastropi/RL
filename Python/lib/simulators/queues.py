@@ -1354,7 +1354,7 @@ class SimulatorQueue(Simulator):
         # Learn
         if self.dict_params_learning['mode'] == LearningMode.REINFORCE_RETURN:
             agent.getLearnerV().learn(t)  # UNCOMMENTED ON SAT, 27-NOV-2021
-            theta_prev, theta, coverage, V, gradV, G = agent.getLearnerP().learn_update_theta_at_end_of_episode(t)
+            theta_prev, theta, coverage, V, gradV, G = agent.getLearnerP().learn_update_theta_at_episode_end(t)
             #theta_prev, theta, coverage, V, gradV, G = agent.getLearnerP().learn_update_theta_at_each_time_step(t)
         else:
             # When learning via the theoretical grad(V) expression, we don't need to estimate the average reward!

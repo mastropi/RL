@@ -170,7 +170,7 @@ for rep in range(R):
         sim.run(nepisodes=nepisodes,
                 max_time_steps=max_time_steps_benchmark,
                 max_time_steps_per_episode=max_time_steps_per_episode,
-                start=start_state, seed=seed_this,
+                start_state_first_episode=start_state, seed=seed_this,
                 compute_rmse=True, state_observe=env1d.getNumStates()-2,  # This is the state just before the terminal state
                 verbose=True, verbose_period=10,
                 plot=plot, pause=0.1)

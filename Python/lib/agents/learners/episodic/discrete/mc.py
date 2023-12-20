@@ -51,13 +51,15 @@ class LeaMCLambda(Learner):
 
     def __init__(self, env, criterion=LearningCriterion.DISCOUNTED, alpha=0.1, gamma=1.0, lmbda=0.8,
                  adjust_alpha=False, alpha_update_type=AlphaUpdateType.FIRST_STATE_VISIT,
-                 adjust_alpha_by_episode=False, alpha_min=0.,
+                 adjust_alpha_by_episode=False, alpha_min=0., func_adjust_alpha=None,
                  reset_method=ResetMethod.ALLZEROS, reset_params=None, reset_seed=None,
                  store_history_over_all_episodes=False,
                  learner_type=LearnerType.MC,
                  debug=False):
-        super().__init__(env, criterion=criterion, alpha=alpha, adjust_alpha=adjust_alpha, alpha_update_type=alpha_update_type, adjust_alpha_by_episode=adjust_alpha_by_episode, alpha_min=alpha_min,
-                         reset_method=reset_method, reset_params=reset_params, reset_seed=reset_seed, store_history_over_all_episodes=store_history_over_all_episodes)
+        super().__init__(env, criterion=criterion, alpha=alpha, adjust_alpha=adjust_alpha, alpha_update_type=alpha_update_type,
+                         adjust_alpha_by_episode=adjust_alpha_by_episode, alpha_min=alpha_min, func_adjust_alpha=func_adjust_alpha,
+                         reset_method=reset_method, reset_params=reset_params, reset_seed=reset_seed,
+                         store_history_over_all_episodes=True if criterion == LearningCriterion.AVERAGE else store_history_over_all_episodes)
         self.debug = debug
 
         # Attributes that MUST be presented for all MC methods
@@ -136,7 +138,7 @@ class LeaMCLambda(Learner):
             T = t + 1
 
             # Store the trajectory
-            self.store_trajectory_at_end_of_episode(T, next_state, debug=self.debug)
+            self.store_trajectory_at_episode_end(T, next_state, debug=self.debug)
             self._update_state_counts(t+1, next_state)
 
             assert len(self._states) == T and len(self._rewards) == T + 1, \
@@ -193,22 +195,31 @@ class LeaMCLambda(Learner):
     #----------------------------- Traditional Monte Carlo ---------------------------------------#
     def learn_mc(self, t, state, action, next_state, reward, done, info):
         "Learn the prediction problem (estimate the state value function) using explicitly MC"
-        # Update the trajectory of the current episode only
-        self._update_trajectory(t, state, action, reward)
+        if info.get('update_trajectory', True):
+            # We may not want to update the trajectory when learning the value function
+            # (e.g. when learning an episodic task using the average reward criterion, where the episodic task is represented
+            # as a continuing task: in that case, the value functions of the terminal state should be learned but its
+            # state NOT recorded when learning the value functions as it is recorded as the end of the episode below
+            # inside the `done` block --see also discrete.Simulator._run_single() and search for 'LearningCriterion.AVERAGE')
+            self._update_trajectory(t, state, action, reward)
 
         if done:
             # This means t+1 is the terminal time T
             # (recall we WERE in time t and we STEPPED INTO time t+1, so T = t+1)
             T = t + 1
 
-            # Store the trajectory
-            self.store_trajectory_at_end_of_episode(T, next_state, debug=self.debug)
-            self._update_state_counts(t+1, next_state)
-
             # Learn the value functions!
-            self.learn_mc_at_episode_end(T)
+            self.learn_mc_at_episode_end(T, next_state)
 
-    def learn_mc_at_episode_end(self, T):
+            # Store the trajectory and update the state count of the end state
+            # IMPORTANT: we need to store the trajectory AFTER learning because
+            # this method also computes and stores the average learning rate alpha (over all states) by episode,
+            # and the alphas (at each state) used during the episode are computed, in the MC learning approach,
+            # by the learning method called above(), while traversing all the states visited in the trajectory.
+            self.store_trajectory_at_episode_end(T, next_state, debug=self.debug)
+            self._update_state_counts(T, next_state)
+
+    def learn_mc_at_episode_end(self, T, state_end):
         """
         Updates the value function based on a new observed EPISODE using first-visit Monte Carlo.
         That is, this function is expected to be called when the episode ends.
@@ -220,7 +231,16 @@ class LeaMCLambda(Learner):
         Arguments:
         T: int
             Length of the episode, i.e. the time step at which the episode ends.
+
+        state_end: int
+            Trajectory's end state, whose value is retrieved as an initial value for the return G.
+            This is needed for the cases where the episode ends NOT because the agent reached a terminal
+            state but because the maximum simulation time has been reached (e.g. in continuing learning tasks
+            or in episodic tasks where the agent takes a long time to reach a terminal state --because of a bad policy).
         """
+        # Update the average reward (over all episodes, if required, typically when learning under the AVERAGE reward criterion)
+        self.update_average_reward(T, state_end)
+
         #-- Compute the observed return for each state in the trajectory for EVERY visit to it
         # Initialize the observed return to the value of the end state
         # This is ONLY relevant when the end state is NOT a terminal state (which by definition has value 0)
@@ -232,11 +252,11 @@ class LeaMCLambda(Learner):
         # --as in the Mountain Car example when the next action is chosen uniformly at random)
         # Note that we don't affect the initial G with gamma, because gamma comes into play in the recursive formula
         # used below to compute the final G)
-        G = self.V.getValue(self._states[-1])
+        G = self.V.getValue(state_end)
 
         # Keep track of the number of updates to the value function at each state
         # so that we can assert that there is at most one update for the first-visit MC algorithm
-        nupdates = np.zeros(self.env.getNumStates())
+        n_updates = np.zeros(self.env.getNumStates())
 
         # NOTE: we start at the LATEST state (as opposed to the first) so that we don't
         # need to have a data structure that stores the already visited states in the episode;
@@ -249,21 +269,21 @@ class LeaMCLambda(Learner):
             if self.criterion == LearningCriterion.AVERAGE:
                 # Compute the differential return
                 # Ref: Sutton (2018), pag. 250
-                G -= self._average_reward_in_episode
+                G -= self.getAverageReward()
             # First-visit MC: We only update the value function estimation at the first visit of the state
             if self._states_first_visit_time[state] == tt:
                 delta = G - self.V.getValue(state)
                 if self.criterion == LearningCriterion.AVERAGE:
                     # Compute the differential delta which should be used to update the differential value function
                     # Ref: Sutton (2018), pag. 250
-                    delta -= self._average_reward_in_episode
+                    delta -= self.getAverageReward()
                 self._updateV(state, delta)
                 self._updateQ(state, action, delta)
                 # Update the learning rate alpha for the next iteration
                 self._update_alphas(state)
-                nupdates[state] += 1
+                n_updates[state] += 1
 
-        assert all(nupdates <= 1), "Each state has been updated at most once"
+        assert all(n_updates <= 1), "Each state has been updated at most once"
     #----------------------------- Traditional Monte Carlo -----------------------------------------#
 
 
@@ -280,8 +300,13 @@ class LeaMCLambda(Learner):
         This means that every time this function is called before the end of the episode, the value function remains
         constant.
         """
-        # Update the trajectory of the current episode only
-        self._update_trajectory(t, state, action, reward)
+        if info.get('update_trajectory', True):
+            # We may not want to update the trajectory when learning the value function
+            # (e.g. when learning an episodic task using the average reward criterion, where the episodic task is represented
+            # as a continuing task: in that case, the value functions of the terminal state should be learned but its
+            # state NOT recorded when learning the value functions as it is recorded as the end of the episode below
+            # inside the `done` block --see also discrete.Simulator._run_single() and search for 'LearningCriterion.AVERAGE')
+            self._update_trajectory(t, state, action, reward)
         self._updateG(t, state, next_state, reward, done)
 
         if done:
@@ -289,12 +314,16 @@ class LeaMCLambda(Learner):
             # (recall we WERE in time t and we STEPPED INTO time t+1, so T = t+1)
             T = t + 1
 
-            # Store the trajectory
-            self.store_trajectory_at_end_of_episode(T, next_state, debug=self.debug)
-            self._update_state_counts(t+1, next_state)            
-
             # Learn the value functions!
-            self.learn_lambda_return_at_episode_end(T)
+            self.learn_lambda_return_at_episode_end(T, next_state)
+
+            # Store the trajectory and update the state count of the end state
+            # IMPORTANT: we need to store the trajectory AFTER learning because
+            # this method also computes and stores the average learning rate alpha (over all states) by episode,
+            # and the alphas (at each state) used during the episode are computed, in the MC learning approach,
+            # by the learning method called above(), while traversing all the states visited in the trajectory.
+            self.store_trajectory_at_episode_end(T, next_state, debug=self.debug)
+            self._update_state_counts(T, next_state)
 
     def _updateG(self, t, state, next_state, reward, done):
         times_reversed = np.arange(t, -1, -1)  # This is t, t-1, ..., 0
@@ -379,7 +408,7 @@ class LeaMCLambda(Learner):
                 print(np.c_[np.arange(t+1), self._rewards[1:], self._values_next_state[1:], self._Glambda_list, check, diff])
                 np.set_printoptions(precision=DEFAULT_NUMPY_PRECISION, suppress=DEFAULT_NUMPY_SUPPRESS)
 
-    def learn_lambda_return_at_episode_end(self, T):
+    def learn_lambda_return_at_episode_end(self, T, state_end):
         """
         Updates the value function based on a new observed EPISODE using first-visit Monte Carlo on any value of lambda.
         That is, this function is expected to be called when the episode ends.
@@ -393,8 +422,14 @@ class LeaMCLambda(Learner):
         Arguments:
         T: int
             Length of the episode, i.e. the time step at which the episode ends.
+
+        state_end: int
+            Trajectory's end state.
         """
-        # Store the list of G(t,lambda) values into an array 
+        # Update the average reward (over all episodes, if required, typically when learning under the AVERAGE reward criterion)
+        self.update_average_reward(T, state_end)
+
+        # Store the list of G(t,lambda) values into an array
         Glambda = np.array(self._Glambda_list)
 
         # Update the weights recursively from time 0 to T-1
@@ -429,12 +464,12 @@ class LeaMCLambda(Learner):
     def _updateV(self, state, delta):
         "Updates the state value function V(s) for the given state using the given delta on the gradient computed assuming a linear approximation function"
         gradient_V = self.V.X[:, state] # row vector
-        self.V.setWeights( self.V.getWeights() + self._alphas * delta * gradient_V )
+        self.V.setWeights( self.V.getWeights() + self._alphas * delta * gradient_V )    # The alpha value used in learning each state (given in self._alphas) depends on the state being learned
 
     def _updateQ(self, state, action, delta):
         "Updates the action value function Q(s,a) for the given state and action using the given delta on the gradient computed assuming a linear approximation function"
         gradient_Q = self.Q.X[:, self.Q.getLinearIndex(state, action)]  # row vector
-        _alphas = np.repeat(self._alphas, self.env.getNumActions()) # We use the same alpha on all the actions associated to each state
+        _alphas = np.repeat(self._alphas, self.env.getNumActions()) # We use the same alpha on all the actions associated to each state, but the alpha depends on the state
         self.Q.setWeights( self.Q.getWeights() + _alphas * delta * gradient_Q )
     #------------------- Auxiliary function: value function udpate -------------------------------#
 
@@ -450,11 +485,12 @@ class LeaMCLambdaAdaptive(LeaMCLambda):
     
     def __init__(self, env, criterion=LearningCriterion.DISCOUNTED, alpha=0.1, gamma=1.0, lmbda=0.8,
                  adjust_alpha=False, alpha_update_type=AlphaUpdateType.FIRST_STATE_VISIT,
-                 adjust_alpha_by_episode=True, alpha_min=0.,
+                 adjust_alpha_by_episode=True, alpha_min=0., func_adjust_alpha=None,
                  reset_method=ResetMethod.ALLZEROS, reset_params=None, reset_seed=None,
                  store_history_over_all_episodes=False,
                  debug=False):
-        super().__init__(env, criterion=criterion, alpha=alpha, gamma=gamma, lmbda=lmbda, adjust_alpha=adjust_alpha, alpha_update_type=alpha_update_type, adjust_alpha_by_episode=adjust_alpha_by_episode, alpha_min=alpha_min,
+        super().__init__(env, criterion=criterion, alpha=alpha, gamma=gamma, lmbda=lmbda, adjust_alpha=adjust_alpha, alpha_update_type=alpha_update_type,
+                         adjust_alpha_by_episode=adjust_alpha_by_episode, alpha_min=alpha_min, func_adjust_alpha=func_adjust_alpha,
                          reset_method=reset_method, reset_params=reset_params, reset_seed=reset_seed, store_history_over_all_episodes=store_history_over_all_episodes,
                          debug=debug)
 
@@ -475,8 +511,8 @@ class LeaMCLambdaAdaptive(LeaMCLambda):
             T = t + 1
 
             # Store the trajectory
-            self.store_trajectory_at_end_of_episode(T, next_state, debug=self.debug)
-            self._update_state_counts(t+1, next_state)            
+            self.store_trajectory_at_episode_end(T, next_state, debug=self.debug)
+            self._update_state_counts(T, next_state)
             
             # Compute the gamma-discounted _rewards for each state visited in the episode
             state_rewards_prev = self.state_rewards.copy()

@@ -43,7 +43,7 @@ def reactivate_particle(envs: list, idx_particle: int, K: int, absorption_number
     # Select a reactivation particle out of the other N-1 particles
     N = len(envs)
     assert N > 1, "There is more than one particle in the system (N={})".format(N)
-    idx_reactivate = choose_particle(envs, idx_particle, N, K, ReactivateMethod.RANDOM)  # , ReactivateMethod.VALUE_FUNCTION) #, ReactivateMethod.RANDOM)
+    idx_reactivate = choose_particle(envs, idx_particle, N, K, ReactivateMethod.RANDOM)  #, ReactivateMethod.ROBINS, absorption_number) #, ReactivateMethod.VALUE_FUNCTION) #, ReactivateMethod.RANDOM)
     # idx_reactivate = choose_particle(envs, idx_particle, N, K, ReactivateMethod.ROBINS, absorption_number=absorption_number) #, ReactivateMethod.VALUE_FUNCTION) #, ReactivateMethod.RANDOM)
 
     # Update the state of the reactivated particle to the reactivation state
@@ -89,7 +89,7 @@ def choose_particle(envs: list, idx_particle: int, N: int, K: int, method: React
         assert len(values) == N - 1
         prob_values = [v / np.sum(values) for v in values]
         # print(np.c_[range(N-1), [envs[idx].getBufferSize() for idx in range(N-1)], [envs[idx].getBufferSize() / K for idx in range(N-1)], prob_values])
-        idx_reactivate = np.random.choice(N - 1, p=prob_values)
+        idx_reactivate = np.random.choice(N-1, p=prob_values)
     elif method == ReactivateMethod.ROBINS:
         # Deterministic choice of the particle
         assert absorption_number is not None
@@ -97,11 +97,12 @@ def choose_particle(envs: list, idx_particle: int, N: int, K: int, method: React
         idx_reactivate = absorption_number
     else:
         # Random selection of active particles by default
-        idx_reactivate = np.random.randint(0, N - 1)  # The upper value is NOT included in the possible set of integers
+        idx_reactivate = np.random.randint(0, N-1)  # The upper value is NOT included in the possible set of integers
 
+    # Make the chosen particle index satisfy the condition that is a number between 0 and N-1, excluding `idx_particle`
+    # Recall that above, the reactivate index is chosen between 0 and N-2, hence, if the chosen index is >= idx_particle
+    # we should increase the index by 1 so that it satisfies the condition just mentioned.
     if idx_reactivate >= idx_particle:
-        # The chosen particle is beyond the particle to reactivate
-        # => increase the index of the particle by 1 so that we choose the correct particle
         idx_reactivate += 1
     assert 0 <= idx_reactivate < N, "The reactivation particle ID ({}) is between 0 and N (={}) for particle with ID = {}" \
         .format(idx_reactivate, N, idx_particle)

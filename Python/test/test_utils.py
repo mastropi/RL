@@ -13,7 +13,7 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 
 def array2str(x, sep=", ", fmt=":.6f"):
-    "Converts an array (possibly numeric) to string separated by `sep`"
+    "Converts an array (possibly numeric) to string separated by `sep` using the given string format"
     return "[" + sep.join( map(lambda s: ("{" + fmt + "}").format(s), x) ) + "]"
 
 def plot_rmse_by_episode(rmse_mean_values, rmse_se_values=None, min_rmse=None, max_rmse=None, kpi_name="RMSE",

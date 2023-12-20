@@ -33,9 +33,8 @@ import numpy as np
 from Python.lib.environments import EnvironmentDiscrete
 from Python.lib.agents.learners import GenericLearner, LearningCriterion, ResetMethod
 
-MIN_COUNT = 1  # Minimum state count to start shrinking alpha
 MIN_EPISODE = 1  # Minimum episode count to start shrinking alpha
-MAX_EPISODE_FOR_ALPHA_MIN = None  # Maximum episode on which the minimum alpha value above is applied
+MAX_EPISODE_FOR_ALPHA_MIN = None  # Maximum episode on which the minimum alpha value is applied, before continuing to decrease alpha again further (from the alpha value observed at the MAX_EPISODE_FOR_ALPHA_MIN episode)
 
 
 @unique  # Unique enumeration values (i.e. on the RHS of the equal sign)
@@ -60,7 +59,7 @@ class Learner(GenericLearner):
                  adjust_alpha=False, alpha_update_type=AlphaUpdateType.FIRST_STATE_VISIT, adjust_alpha_by_episode=False,
                  func_adjust_alpha=None,
                  alpha_min=0.,
-                 min_count_to_update_alpha=0, min_time_to_update_alpha=0,
+                 min_count_to_update_alpha=1, min_time_to_update_alpha=0,
                  reset_method=ResetMethod.ALLZEROS, reset_params=None, reset_seed=None,
                  store_history_over_all_episodes=False):
         """
@@ -103,7 +102,7 @@ class Learner(GenericLearner):
             default: False
 
         min_count_to_update_alpha: (opt) int
-            Minimum count of a state-action pair at which alpha starts to be updated by the update_learning_rate_by_state_action_count(s,a) method.
+            Minimum count of a state or state-action pair at which alpha starts to be adjusted (decreased).
 
         min_time_to_update_alpha: (opt) int
             Minimum learning time step at which alpha starts to be updated by the update_learning_rate_by_learning_epoch() method.
@@ -148,7 +147,9 @@ class Learner(GenericLearner):
 
         # Current learning rate across states
         self._alphas = self.alpha * np.ones(self.env.getNumStates())
-        # Learning rate at episode = MAX_EPISODE_FOR_ALPHA_MIN so that we can continue applying a non-bounded alpha
+        # Learning rate at episode = MAX_EPISODE_FOR_ALPHA_MIN (for each state) so that
+        # we can continue decreasing alpha further --from this self._alphas_at_max_episode value (for each state)--
+        # with no lower bound --even if alpha_min has been specified-- past the MAX_EPISODE_FOR_ALPHA_MIN episode.
         self._alphas_at_max_episode = None
         # (Average) alpha used at each episode
         # Note: Using the average is only relevant when the adjustment is by state occupation count,
@@ -164,8 +165,8 @@ class Learner(GenericLearner):
         self.times_at_episode_end = []
 
         # State counts over ALL episodes run after reset, and state counts of just their first visits
-        self._state_counts_over_all_episodes = np.zeros(self.env.getNumStates())
-        self._state_counts_first_visit_over_all_episodes = np.zeros(self.env.getNumStates())
+        self._state_counts_over_all_episodes = np.zeros(self.env.getNumStates(), dtype=int)
+        self._state_counts_first_visit_over_all_episodes = np.zeros(self.env.getNumStates(), dtype=int)
 
         # Instructions for resetting the value function
         self.reset_method = reset_method
@@ -248,12 +249,18 @@ class Learner(GenericLearner):
         # and R(t=0) (= 0 ALWAYS because it is defined here as such), R(t=1), ..., R(t=4),
         # which also means that, given t, S(t+1) is the state where the system goes after which the agent
         # receives the reward R(t+1).
-        # Note that it is expected that the length of the list of states and the length of the list of rewards
+        # This also means that the sequence of state, action, reward as in
+        # S(0), A(0), R(1), S(1), A(1), R(2), ...
+        # can be retrieved by referring to the CORRESPONDING indices in the above lists, i.e. as
+        # self._states[0], self._actions[0], self._rewards[1], self._states[1], self._actions[1], self._rewards[2], ...
+        #
+        # Note in addition that it is expected that the length of the list of states and the length of the list of rewards
         # be EQUAL *only* at the end of the episode as, while the episode is ongoing, the list of states
         # would have one element less than the list of rewards (because the list of rewards is initialized
         # as `[0]` here, while the list of states is initialized as `[]` (empty).
         # The particular learner being used is responsible of making sure that the list of states has the
-        # same number of elements as the list of rewards ONCE THE EPISODE HAS ENDED.
+        # same number of elements as the list of rewards ONCE THE EPISODE HAS ENDED, by calling e.g. the
+        # store_trajectory_at_episode_end() method defined in this class.
         self._rewards = [0]
 
         # List of alphas used during the episode (which may vary from state to state and from the time visited)
@@ -304,7 +311,7 @@ class Learner(GenericLearner):
 
     def _update_state_counts(self, t, state):
         "Updates the count that keeps track of the state's first visit within the CURRENT episode"
-        # print("t: {}, visit to state: {}".format(t, state))
+        #print("t: {}, visit to state: {}".format(t, state))
         if np.isnan(self._states_first_visit_time[state]):
             self._state_counts_first_visit_over_all_episodes[state] += 1
             # print("\tFIRST VISIT!")
@@ -323,9 +330,6 @@ class Learner(GenericLearner):
         self._average_reward_in_episode += (self._rewards[-1] - self._average_reward_in_episode) / max(1, n_rewards_observed_so_far)    # `max(1, ...) to avoid division by 0 if we are storing the very first reward
 
     def _update_alphas(self, state):
-        # TODO: (2023/09/06) The following assertion was commented out when I was implementing the FV estimator on discrete environments (e.g. labyrinth) because the system can be in a terminal state when updating alpha (e.g. the labyrinth's exit)... I don't think updating alpha in a terminal state is wrong... is it?
-        #assert not self.env.isTerminalState(state), \
-        #    "The state on which alpha is computed must NOT be a terminal state ({})".format(state)
         # with np.printoptions(precision=4):
         #    print("Before updating alpha: episode {}, state {}: state_count={:.0f}, alpha>={}: alpha={}\n{}" \
         #          .format(self.episode, state, self._state_counts_over_all_episodes[state], self.alpha_min, self._alphas[state], np.array(self._alphas)))
@@ -336,39 +340,103 @@ class Learner(GenericLearner):
         if self.adjust_alpha:
             if self.adjust_alpha_by_episode:
                 # Update using the episode number (equal for all states)
-                self._alphas[state] = np.max([self.alpha_min, self.alpha / np.max([1, self.episode - MIN_EPISODE + 2])])
-                ## +2 => when episode = MIN_EPISODE, time_divisor is > 1,
-                ## o.w. alpha would not be changed for the next update iteration
+                _time_divisor = self.func_adjust_alpha(max(1, self.episode - MIN_EPISODE + 2))
+                self._alphas[state] = max(self.alpha_min, self.alpha / _time_divisor)
+                    ## +2 => see the note below on the ELSE block for why we use +2 and not +1.
             else:
                 if self.alpha_update_type == AlphaUpdateType.FIRST_STATE_VISIT:
                     state_count = self._state_counts_first_visit_over_all_episodes[state]
                 else:
                     state_count = self._state_counts_over_all_episodes[state]
-                time_divisor = np.max([1, state_count - MIN_COUNT + 2])
-                ## +2 => when state_count = MIN_COUNT, time_divisor is > 1,
-                ## o.w. alpha would not be changed for the next update iteration
+                _time_divisor = self.func_adjust_alpha(max(1, state_count - self.min_count_to_update_alpha + 2))
+                    ## +2 => when state_count = min_count_to_update_alpha, the time divisor is > 1; if we used +1, the time divisor would be equal to 1
+                    ## and this would imply that alpha would NOT be reduced, even if the state count had reached
+                    ## the specified min count to adjust (reduce) alpha.
                 # print("\t\tepisode: {}, state: {}, updating alpha... time divisor = {}".format(self.episode, state, time_divisor))
                 # Update using the state occupation state_count over all past episodes
                 if MAX_EPISODE_FOR_ALPHA_MIN is None or self.episode <= MAX_EPISODE_FOR_ALPHA_MIN:
-                    # This means we should apply the alpha_min value indefinitely or
-                    # up to the max episode specified by MAX_EPISODE_FOR_ALPHA_MIN
-                    self._alphas[state] = np.max([self.alpha_min, self.alpha / time_divisor])
+                    # This means we should apply the alpha_min value as learning rate
+                    # whenever its value is larger than the alpha value obtained by decreasing alpha
+                    # by episode or by state count, at least until the episode number reaches the  MAX_EPISODE_FOR_ALPHA_MIN value,
+                    # at which stage, alpha continues to decrease using the decreasing rule, starting off from the
+                    # alpha value observed (for each state) at the MAX_EPISODE_FOR_ALPHA_MIN episode
+                    # (which can be either alpha_min or larger than alpha_min).
+                    self._alphas[state] = max(self.alpha_min, self.alpha / _time_divisor)
                     if MAX_EPISODE_FOR_ALPHA_MIN is not None and self.episode == MAX_EPISODE_FOR_ALPHA_MIN:
                         # Store the last alpha value observed for each state
-                        # so that we can use it as starting point from now on.
+                        # so that we can use it as starting point from now on when decreasing alpha further.
                         self._alphas_at_max_episode = self._alphas.copy()
                         # print("episode {}, state {}: alphas at max episode: {}".format(self.episode, state, self._alphas_at_max_episode))
                 else:
                     # Start decreasing from the alpha value left at episode = MAX_EPISODE_FOR_ALPHA_MIN
                     # without any lower bound for alpha
-                    self._alphas[state] = self._alphas_at_max_episode[state] / time_divisor
+                    self._alphas[state] = self._alphas_at_max_episode[state] / _time_divisor
                     # print("episode {}, state {}: alphas: {}".format(self.episode, state, self._alphas))
 
-    def store_trajectory_at_end_of_episode(self, T, state, debug=False):
+    def update_average_reward(self, T, state_end):
+        """
+        Updates the average reward over all episodes when storing the history over all episodes
+
+        This is used when estimating the average reward of a continuing learning task.
+        """
+        if self.store_history_over_all_episodes:
+            # Update the average reward over all episodes because we are storing the history over all episodes,
+            # therefore we might be interested in the average reward over all episodes.
+            # Note that the update formula is the generalization of the usual update formula with just one new value
+            # with the difference that here the update comes from T newly observed rewards (as opposed to 1),
+            # i.e. what we need to sum to the current average reward is \sum{t=1}{T} R(t)
+            # (and we note that the average reward over E episodes is defined as: \sum{e=1}{E} \sum{t=1}{T} R_e(t) / \sum{e=1}{E} T_e
+            # where T_e is the length of episode e).
+            # Deducing the update formula is a little bit trickier than in the one-new-reward-observation case but it is perfectly doable --I just did it!
+            # Therefore the update formula becomes:
+            #   average <- average + (new_average_value - average) * T / (sample_size_for(average) + T)
+            # Note also that, in the tests run in test_estimators_discretetime.py we observe that the average reward
+            # computed like this is very close to the average reward computed from cycles.
+            #
+            # Note finally that the attribute updated by this call to setAverageReward() is an attribute of the super class
+            # (which is a generic learner, i.e. not only for learners on episodic tasks)
+
+            # (2023/12/18) Update the OVERALL average reward (i.e. over ALL episodes) ITERATIVELY, i.e. using the latest observed average reward (in the latest episode)
+            # IMPORTANT: This computation adjusts an episodic average to a continuing average, which has ONE MORE STEP in the trajectory, namely the start state, which is NOT counted in the episodic average
+            # (because the rewards happen when the environment CHANGES from one state to the next, meaning that the first average seen by the episodic learning agent is the reward observed when going from the
+            # start state to the next state (meaning that no reward is counted when going to the start state, because this "going to the start state" NEVER happens in an episodic task,
+            # it only happens in a continuing learning task (whose average reward we are interested here in computing)
+            # IMPORTANT 2: This adjustment of the episodic average to the continuing average assumes that going to the start state does NOT give any reward!!
+            # (this is usually the case, but it is not really generic)
+            # TODO: (2023/12/18) Fix the above adjustment of the episodic average reward to a continuing average reward to the cases where a non-zero reward is perceived when transitioning to *a* start state
+            # NOTE that this may NOT be needed if we generalize the learning of value functions to the MC and TD(lambda) learners using the proposed method described in today's entry at Tasks-Projects.xlsx, where we would have only ONE episode on which the episodic average reward is computed.
+            updated_average = self.getAverageReward() + (self._average_reward_in_episode * T / (T+1) - self.getAverageReward()) * (T + 1) \
+                                                        / (np.sum(self.times_at_episode_end) + T + len(self.times_at_episode_end) + 1)
+            # (2023/12/18) The following is a check that the updated average is equal to the regular average computed on all the rewards seen so far over ALL episodes
+            # (Note: at some point, the print() below gives an error that something is an int and not a list, but I haven't figured out what the problem is, so I commented out, because this step is not crucial for the functioning of the process)
+            #all_rewards_so_far = self.rewards + self._rewards
+            #print(f"\nT={T}, state={state_end}\nEpisode average = {self._average_reward_in_episode}\nPrevious average = {self.getAverageReward()}\nEpisode length + 1 = {T+1}\nUpdated average = {updated_average} vs.\nComputed average = {np.mean(all_rewards_so_far)}")
+            self.setAverageReward(updated_average)
+
+            # Check that the updated average reward is correctly calculated (by comparing to the regular average over all the rewards observed over ALL episodes)
+            # NOTE: This assumes that the store_trajectory_at_episode_end() method has not been called yet
+            # (because we assume that the self.rewards attribute has not been updated with the newly observed self._rewards in the latest episode
+            all_rewards_so_far = self.rewards + [self._rewards]     # IMPORTANT: The concatenation of the rewards should be done in the same way it is done in store_trajectory_at_episode_end() when updating self.rewards
+            assert np.isclose(updated_average, np.mean(np.concatenate(all_rewards_so_far)))
+            # Regular average (over the whole history of stored rewards, as opposed to doing an iterated update)
+            # (2023/12/18) This assumes that the self.rewards list has been updated BEFORE calling this method, which currently is NOT the case,
+            # because e.g. the MC learner learn_mc() learns (i.e. calls this method) BEFORE storing the trajectory (by calling store_trajectory_at_episode_end(),
+            # which is the method responsible for storing the newly observed rewards at the latest episode in GenericLearner's attribute `self.rewards`.
+            #self.setAverageReward(np.mean(np.concatenate(self.rewards)))
+
+    def store_trajectory_at_episode_end(self, T, state_end, debug=False):
         """
         Stores the trajectory (in the super class attributes) observed during the current episode assuming the episode has finished.
         The trajectory is either REPLACED or ADDED to any previously existing trajectory already stored in the attributes of the super class
         (typically super.states, super.actions, super.rewards), depending on attribute store_history_over_all_episodes.
+
+        The method also computes and stores the following averages:
+        - observed average reward by episode
+        - average alpha (over all states) used by episode
+        Note that the average alpha by episode requires that the alphas (over all states) used in the episode
+        should have already been stored in the object's attribute (typically self._alphas_used_by_episode)
+        prior to calling this method. Otherwise, the average alpha stored in the object's attribute
+        (typically self.alpha_mean_by_episode) will have all NaN values.
 
         Notes:
         1) This method should be called by the learner inheriting from this class at the end of the episode
@@ -383,22 +451,22 @@ class Learner(GenericLearner):
 
         3) In addition, action self.actions[t] contains action A(t), i.e. the action taken AFTER visiting state S(t).
         The last action of the episode, i.e. A(T), is set to np.nan when this method is called,
-        because when the episode ends, no action is taken at the final state where the system ends up.
+        because when the episode ends, no action is taken at the state where the system ends up.
 
         Arguments:
         T: int
             Time at which the episode ends.
 
-        state: int
-            Final state of the trajectory that is added to the trajectory information.
+        state_end: int
+            Trajectory's end state that is added to the trajectory information.
 
         debug: (opt) bool
-            Whether to show the terminal state and the time at which the episode ends, in addition to
-            the distribution of the latest alpha value by environment state.
+            Whether to show the end state and the time at which the episode ends, in addition to
+            the distribution of the latest alpha value by state.
             default: False
         """
         if debug:
-            print("Episode {}: Terminal state = {} at time step {}".format(self.episode, state, T))
+            print("Episode {}: End state = {} at time step {}".format(self.episode, state_end, T))
             self.plot_alphas(T)
 
         # Store information that we store for each episode
@@ -406,8 +474,8 @@ class Learner(GenericLearner):
         self.average_reward_by_episode += [self._average_reward_in_episode]
         self.times_at_episode_end += [T]
 
-        # Add the terminal state to the trajectory
-        self._states += [state]
+        # Add the end state to the trajectory
+        self._states += [state_end]
         self._actions += [np.nan]
 
         # Assign the new trajectory observed in the current episode
@@ -415,21 +483,6 @@ class Learner(GenericLearner):
             self.states += [self._states.copy()]
             self.actions += [self._actions.copy()]
             self.rewards += [self._rewards.copy()]
-            # Update the average reward over all episodes because we are storing the history over all episodes,
-            # therefore we might be interested in the average reward over all episodes.
-            # Note that the update formula is the generalization of the usual update formula with just one new value
-            # with the difference that here the update comes from T newly observed rewards (as opposed to 1),
-            # i.e. what we need to sum to the current average reward is \sum{t=1}{T} R(t)
-            # (and we note that the average reward over E episodes is defined as: \sum{e=1}{E} \sum{t=1}{T} R_e(t) / \sum{e=1}{E} T_e
-            # where T_e is the length of episode e).
-            # Deducing the update formula is a little bit trickier than in the one-new-reward-observation case but it is perfectly doable --I just did it!
-            # Therefore the update formula becomes:
-            #   average <- average + (new_average_value - average) * T / (sample_size_for(average) + T)
-            # Note also that, in the tests run in test_estimators_discretetime.py we observe that the average reward
-            # computed like this is very close to the average reward computed from cycles.
-            # Note finally that the attribute updated by this call to setAverageReward() is an attribute of the super class
-            # (which is a generic learner, i.e. not only for learners on episodic tasks)
-            self.setAverageReward(self.getAverageReward() + (self._average_reward_in_episode - self.getAverageReward()) * self.times_at_episode_end[-1] / np.sum(self.times_at_episode_end))
         else:
             self.states = self._states.copy()
             self.actions = self._actions.copy()
@@ -465,8 +518,12 @@ class Learner(GenericLearner):
 
     def getV(self):
         "Returns the object containing the state value function estimation"
+        # This method is not implemented because the subclass implementing the actual learner may define the state value function differently (e.g. using different attribute names)
+        # Also, this method is required because it is called by the reset_value_functions() method defined in this class.
         raise NotImplementedError
 
     def getQ(self):
         "Returns the object containing action value function estimation"
+        # This method is not implemented because the subclass implementing the actual learner may define the action value function differently (e.g. using different attribute names)
+        # Also, this method is required because it is called by the reset_value_functions() method defined in this class.
         raise NotImplementedError

@@ -201,7 +201,7 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
             self.setState(idx_state)
         else:
             # Set an initial random state using the MountainCarEnv procedure
-            self.seed(seed)         # This method is defined in gym.Env
+            self.seed(seed)         # This method is defined in MountainCarEnv included in gym/envs/classic_control
             self.state = super().reset() # reset() through the MountainCarEnv environment (since this is the first super class appearing in the list of super classes in the definition of this class)
             super().setState(self.get_index_from_state(self.state))   # Set the state (index) in the discrete.DiscreteEnv environment, so that self.s and self.state are consistent
 

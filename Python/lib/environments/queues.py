@@ -412,6 +412,12 @@ class GenericEnvQueueWithJobClasses(gym.Env):
 
         with no further explanations!
         Python-3.6.4 (22-Oct-2021)
+
+        UPDATE-2023/12/18: Well, if we go to the source of class gym.Env, we see that the seed() method
+        defined therein yields precisely that warning! And this happens probably whenever the class inheriting
+        from gym.Env --which is responsible for actually setting the seed of the environment-- did NOT define
+        such seed() method to set the seed! So, instead of raising a NotImplementedError exception,
+        they decided to issue a warning, so that the process doesn't stop when such situation happens.
         """
         if seed is not None:
             self.seed = seed
@@ -420,7 +426,7 @@ class GenericEnvQueueWithJobClasses(gym.Env):
     def np_random(self):
         """
         Returns a number between 0 and 1 using the np.random.random() function.
-        In order to set a seed for this random number generation, use the seed() method beforehand.
+        In order to set a seed for this random number generation, use the set_seed() method defined in this class.
         """
         return np.random.random()
 

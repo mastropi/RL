@@ -133,16 +133,28 @@ class GenericLearner:
                                 # The time is associated to the state, action and reward stored in the respective attributes.
         self.states = []        # Stores S(t), the state at each time t stored in `times`
         self.actions = []       # Stores A(t), the action taken at state S(t)
-        self.rewards = [0]      # Stores R(t+1) = R(S(t), A(t)), the reward received after taking action A(t) on state S(t)
-                                # Note that we initialize the rewards array with ONE element set to 0, so that we can refer to the
-                                # sequence S(0), A(0), R(1), S(1), A(1), R(2), ... by referring to the CORRESPONDING indices
-                                # in the self.states, self.actions, self.rewards lists, respectively.
-                                # NOTE: In episodic tasks, it is expected that at the end of each episode, the lengths of these lists
-                                # be the same; this situation would be obtained by adding, once the episode has ended,
-                                # the terminal state to the end of the list self.states, and adding np.nan to the end of self.actions
-                                # (which indicates that no action is taken after the terminal state is reached).
-                                # Having all of these three lists of equal length should help the implementation
-                                # of certain computations, such as returns at different time steps, G(t).
+        self.rewards = []       # Stores R(t+1) = R(S(t), A(t)), the reward received after taking action A(t) on state S(t)
+                                # Note that we initialize the rewards list as EMPTY, exactly as we do with the states and actions lists,
+                                # because we leave the responsibility to the ACTUAL learner to fill in the first reward as 0
+                                # (if needed) if the learner wishes to reference to the state-action-reward sequence
+                                # by using the indices associated to the usual sequence used to represent it, namely:
+                                # S(0), A(0), R(1), S(1), A(1), R(2), etc.
+                                # However, this notation is NOT really necessary, the learner may well refer to this sequence as:
+                                # S(0), A(0), R(0), S(1), A(1), R(1), etc.
+                                # i.e. using the same indices in S, A and R to refer to each state-action-reward sequence.
+                                # In fact, the main reason we initialize rewards as empty is the currently implemented
+                                # management of the rewards over ALL episodes in episodic learning tasks, which is done
+                                # typically (and mainly) in the store_trajectory_at_episode_end() method in the Learner class,
+                                # where self.rewards is updated by concatenating self._rewards, i.e. the list of rewards observed
+                                # during the latest episode. In fact, if we initialize self.rewards here as [0], such concatenation
+                                # will create problems along the line, because e.g. the first concatenation will result in a weird
+                                # list as e.g. [0, [0, 0, 0, 1]], which would yield the error message "cannot concatenate zero-length arrays"
+                                # or similar message when calling np.concatenate(self.reward) when e.g. computing the average reward
+                                # over all rewards stored in the self.reward list.
+                                # For more information, see also the comment written above the initialization of the self._rewards list
+                                # containing the episodic rewards in the Learner class.
+                                # Taking a look at the Learner.store_trajectory_at_episode_end() method may also be helpful
+                                # to better understand the issues just described.
 
         # Count of visited states and visited state-actions
         # Depending on the type of learner (e.g. learner of V or learner of Q) one ore the other will be updated.
@@ -290,7 +302,7 @@ class GenericLearner:
 
     def update_learning_rate_by_learning_epoch(self):
         """
-        Updates the learning rate at the current learning time by the number of times learning took place already,
+        Updates the learning rate at the current learning epoch by the number of times learning took place already,
         independently of the visit count of each state and action.
 
         The update is done ONLY when the attribute self.adjust_alpha is True.

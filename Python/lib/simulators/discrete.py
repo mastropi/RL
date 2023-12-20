@@ -61,7 +61,9 @@ class Simulator:
         default: 1
 
     seed: (opt) int
-        Seed to use in the simulations as base seed (then the seed for each simulation is changed from this base seed).
+        Seed to use as base seed for a set of experiments run when the user calls the simulate() method.
+        The seed for each experiment is appropriately changed from this base seed in order to have
+        different results for each experiment.
         default: None, in which case a random seed is generated.
 
     log: (opt) bool
@@ -137,21 +139,10 @@ class Simulator:
         self.agent = agent
         self.seed = seed
 
-        # _isd_orig may store a copy of the Initial State Distribution of the environment in case we need to change it
-        # at some point, so that we can restore it a some later point, e.g. when a simulation finishes.
-        self._isd_orig = None
         self.reset()
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        # Restore the initial state distribution array in case it has been possibly changed
-        # (e.g. when we want to define a specific initial state)
-        if self._isd_orig is not None:
-            self.env.setInitialStateDistribution(self._isd_orig)
 
     def reset(self, reset_episode=True, reset_value_functions=True):
         "Resets the simulator"
-        self._isd_orig = None
-
         # Reset the learner to the first episode state
         self.agent.getLearner().reset(reset_episode=reset_episode, reset_value_functions=reset_value_functions)
 
@@ -305,22 +296,24 @@ class Simulator:
         dict_params_simul = parse_simulation_parameters(dict_params_simul, envs[0])
 
         # Set the simulation seed
-        # Note that, although the seed is set by the environment (via its set_seed() method which is called by run_simulation_mc() below)
-        # we also need to set the seed here because, before calling run_simulation_mc(), we choose below the initial state
-        # on which the simulation starts randomly, among all possible states in the absorption set.
+        # Note: Even though the seed is set by the _run_single() method below (which receives a `seed` parameter)
+        # we need to set the seed here for a reproducible selection of the start state of the simulation,
+        # whenever the start state distribution on the absorption set is given by the user.
         np.random.seed(dict_params_simul['seed'])
         # -- Parse input parameters
 
         # -- Step 1: Simulate a single Markov chain to estimate the expected cycle time of return to A, E(T_A)
+        # Define the start state, ONLY used at the very first episode
+        # (all subsequent episodes are started using the initial state distribution (isd) stored in the environment object)
         start_state = None
         if probas_stationary_start_state_absorption is not None:
             start_state = choose_state_from_set(dict_params_simul['absorption_set'], probas_stationary_start_state_absorption)
-        print(f"SINGLE simulation for the estimation of the expected reabsorption time E(T_A) starts...")
+        print(f"SINGLE simulation for the estimation of the expected reabsorption time E(T_A) starts at state s={start_state}...")
         state_values, action_values, state_counts_et, _, _, learning_info = \
             self._run_single(dict_params_simul['nepisodes'],
                             max_time_steps=dict_params_simul['T'],      # Max simulation time over ALL episodes
                             max_time_steps_per_episode=dict_params_simul.get('max_time_steps_per_episode_single', np.Inf), #dict_params_simul['T'] / dict_params_simul['nepisodes'],  # Max simulation time per episode
-                            start=start_state,
+                            start_state_first_episode=start_state,
                             reset_value_functions=reset_value_functions,
                             seed=dict_params_simul['seed'],
                             set_cycle=set.union(dict_params_simul['absorption_set'], self.env.getTerminalStates()), #dict_params_simul['absorption_set'],
@@ -355,12 +348,12 @@ class Simulator:
         if is_estimation_of_denominator_unreliable():
             # FV is not run because the simulation that is used to estimate E(T_A) would not generate a reliable estimation
             # (most likely it would UNDERESTIMATE E(T_A) making the probabilities be OVERESTIMATED)
-            print(
-                "Fleming-Viot process is NOT run because the estimation of the expected absorption time E(T_A) cannot be reliably performed"
+            print("Fleming-Viot process is NOT run because the estimation of the expected absorption time E(T_A) cannot be reliably performed"
                 " because of an insufficient number of observed cycles after the burn-in period of {} time steps: {} < {}" \
                 "\nThe estimated stationary probabilities and estimated expected reward will be set to NaN." \
                 .format(dict_params_simul['burnin_time_steps'], n_cycles_absorption_used,
                         dict_params_simul['min_num_cycles_for_expectations']))
+            state_counts_all = state_counts_et
             expected_reward = np.nan
             probas_stationary = dict()
             expected_absorption_time = np.nan
@@ -392,6 +385,7 @@ class Simulator:
                                         dist_proba_for_start_state=probas_stationary_start_state_activation,
                                         expected_absorption_time=expected_absorption_time,
                                         estimated_average_reward=average_reward_from_single_simulation,
+                                        seed=dict_params_simul['seed'] + 131713,    # Choose a different seed from the one used by the single Markov chain simulation (note that this seed is the base seed used for the seeds assigned to the different FV particles)
                                         verbose=dict_params_info.get('verbose', False),
                                         verbose_period=1,   # We choose a verbose period of 1 because the learning time t_learn passed as parameter above refers to the policy learning time
                                                             # and we want to show information about the end of the FV simulation for every policy learning step.
@@ -399,7 +393,7 @@ class Simulator:
             n_events_fv = t
             state_counts_all = state_counts_et + state_counts_fv
             #print(f"Shape of proba surv and phi: {df_proba_surv.shape}")
-            print("Expected reabsorption time E(T_A): {:.1f}".format(expected_absorption_time))
+            print("Expected reabsorption time E(T_A): {:.3f} ({} cycles)".format(expected_absorption_time, learning_info['num_cycles']))
             print(f"proba_surv P(T>t):\n{df_proba_surv}")
             average_phi_values = dict([(x, np.mean(phi[x]['Phi'])) for x in phi.keys()])
             print(f"Average Phi value per state of interest:\n{average_phi_values}")
@@ -436,7 +430,7 @@ class Simulator:
                             dist_proba_for_start_state: dict=None,
                             expected_absorption_time=None, expected_exit_time=None,
                             estimated_average_reward=None,
-                            verbose=False, verbose_period=1, plot=False):
+                            seed=None, verbose=False, verbose_period=1, plot=False):
         """
         Runs the Fleming-Viot simulation of the particle system and estimates the different pieces of information that
         are part of the Fleming-Viot estimator of the average reward:
@@ -494,7 +488,16 @@ class Simulator:
         estimated_average_reward: (opt) None
             An existing estimation of the average reward that is used as correction of the value functions
             being learned by this FV simulation process.
-            default: None, in which case the average reward is estimated by the FV simulation itself
+            default: None, in which case the average reward observed by the FV particles excursion is used
+            as correction term. Note that this is an INFLATED estimation of the true average reward, observed
+            by the original underlying Markov chain (from which the FV particle system is created), hence
+            it might not be very sensible to use it. Instead, a prior estimation of the average reward is preferred,
+            for instance from the single Markov chain simulation that is used to estimate the expected
+            reabsorption time, E(T_A).
+
+        seed: (opt) int
+            Seed to use in the simulations as base seed (then the seed for each simulation is changed from this base seed).
+            default: None, in which case a random seed is generated.
 
         verbose: (opt) bool
             Whether to be verbose in the simulation process.
@@ -539,7 +542,7 @@ class Simulator:
             while not done_reactivate:
                 idx_reactivate = reactivate_particle(envs, idx_particle, 0, absorption_number=absorption_number)
                     ## (2023/01/05) the third parameter is dummy when we do NOT use method = ReactivateMethod.VALUE_FUNCTION to reactivate the particle inside function reactivate_particle().
-                # TODO: (2023/11/15) Check whether the particle to which the absorbed particle has been selected for reactivation COULD really be in the absorption set...
+                # TODO: (2023/11/15) Check whether there is any possibility that the particle to which the absorbed particle has been reactivated COULD really be in the absorption set...
                 # Note that, at the initial devise of the FV simulation/estimation method, we have considered that the set of FV particles changes with time...
                 # But this dynamic set of FV particles might no longer be the case, at the time of this writing (2023/11/15).
                 if envs[idx_particle].getState() not in absorption_set:
@@ -576,6 +579,11 @@ class Simulator:
         # Set the start state of each environment/particle to an activation state, as this is a requirement
         # for the empirical distribution Phi(t).
         for i, env in enumerate(envs):
+            # Environment seed
+            seed_i = seed + i if seed is not None else None
+            env.setSeed(seed_i)
+
+            # Choose start state from the activation set
             start_state = choose_state_from_set(activation_set, dist_proba_for_start_state)
             env.setState(start_state)
 
@@ -617,6 +625,7 @@ class Simulator:
 
             # Get the current state of the selected particle because that's the particle whose state is going to (possibly) change
             state = envs[idx_particle].getState()
+            #print(f"particle {idx_particle} (s={state})", end=", ")
 
             # Check if the particle that was picked for update is CURRENTLY at a terminal state,
             # in which case we "restart" the process to an environment's initial state (according to its initial state distribution).
@@ -626,13 +635,11 @@ class Simulator:
             # If the selected state is part of the absorption set, the time to absorption contributes to the estimation of the survival probability P(T>t)
             # --as long as the particle has never been absorbed before-- and the particle is reactivated right-away.
             if state in self.env.getTerminalStates():
-                # Note: The following reset of the environment is normally carried out by the gym module,
+                # Note: The following reset of the environment is typically carried out by the gym module,
                 # e.g. by the toy_text.discrete.DiscreteEnv environment's reset() method where the initial state
                 # is chosen based on the isd attribute of the object, i.e. of the Initial State Distribution defining the initial state.
-                # Note also that the seed for the reset is assumed to have been set by the _run_single() method when running the single Markov chain
-                # simulation that is used to estimate E(T_A), as such seed is NOT set by the current method.
-                envs[idx_particle].reset()
-                next_state = envs[idx_particle].getState()
+                # Note also that the seed for the reset has been set separately for each particle before starting the FV simulation.
+                next_state = envs[idx_particle].reset()
                 if DEBUG_TRAJECTORIES:
                     print("___ Particle {} in terminal state {} REINITIALIZED to environment's start state following its initial state distribution: next_state={}" \
                           .format(state, idx_particle, next_state))
@@ -669,7 +676,7 @@ class Simulator:
                 # This makes total sense because reactivation sets the next state of the particle to a state
                 # that is normally not reachable by the underlying Markov chain on which the FV process is built.
                 # 2) We pass `done` to learn() and NOT `done_episode` because we want to update the average reward
-                # over all episodes (set by Learner.store_trajectory_at_end_of_episode() and retrieved by GenericLearner.getAverageReward())
+                # over all episodes (set by Learner.store_trajectory_at_episode_end() and retrieved by GenericLearner.getAverageReward())
                 # only when the FV SIMULATION IS OVER, not at the end of each episode. Otherwise, the estimated average
                 # reward will fluctuate a lot (i.e. as the average reward observed by episode fluctuates) and this is NOT what we want,
                 # we want a stable estimate of the average reward over all episodes.
@@ -763,7 +770,7 @@ class Simulator:
 
         return t, learner.getV().getValues(), learner.getQ().getValues(), learner._state_counts, dict_phi, df_proba_surv, expected_absorption_time, max_survival_time
 
-    def _run_single(self, nepisodes, max_time_steps=+np.Inf, max_time_steps_per_episode=+np.Inf, start=None, reset_value_functions=True,
+    def _run_single(self, nepisodes, max_time_steps=+np.Inf, max_time_steps_per_episode=+np.Inf, start_state_first_episode=None, reset_value_functions=True,
                     seed=None, compute_rmse=False, weights_rmse=None,
                     state_observe=None, set_cycle=None,
                     verbose=False, verbose_period=1, verbose_convergence=False,
@@ -788,16 +795,15 @@ class Simulator:
             Maximum number of steps to run each episode for.
             default: np.Inf
 
-        start: (opt) None or int
-            Index in the set of states defined by the environment corresponding to the starting state.
+        start_state_first_episode: (opt) int
+            Index in the set of states defined by the environment corresponding to the state to start
+            the very first episode.
+            All subsequent episodes are started according to the initial state distribution (isd)
+            stored in the environment object.
             default: None
 
-        seed: (opt) None or float
+        seed: (opt) int
             Seed to use for the random number generator for the simulation.
-            If None, the seed is NOT set.
-            If 0, the seed stored in the object is used. I don't know when this value would be useful, but certainly
-            NOT when running different experiments on the same environment and parameter setup, because in that case
-            all experiments would start with the same seed!
             default: None
 
         compute_rmse: (opt) bool
@@ -893,22 +899,6 @@ class Simulator:
         self.reset(reset_value_functions=reset_value_functions)
 
         #--- Parse input parameters
-        # TODO: (2023/10/21) Now that the classes defining gridworld environments in environments/gridworlds.py accept the initial state distribution as parameter, consider passing that information when defining the environment so that we don't need to do this setup here which is a little cumbersome...
-        # Define initial state
-        nS = self.env.getNumStates()
-        if start is not None:
-            if not (is_integer(start) and 0 <= start and start < nS):
-                warnings.warn("The `start` parameter ({}, type={}) must be an integer number between 0 and {}.\n" \
-                              "A start state will be selected based on the initial state distribution of the environment." \
-                              .format(start, type(start), nS-1))
-            else:
-                # Change the initial state distribution of the environment so that
-                # the environment resets to start at the given 'start' state.
-                self._isd_orig = self.env.getInitialStateDistribution()
-                isd = np.zeros(nS)
-                isd[start] = 1.0
-                self.env.setInitialStateDistribution(isd)
-
         # Set the weights to be used to compute the RMSE and MAPE based on the weights_rmse value
         # Only when weights_rmse = True are the weights NOT set definitely here, as they are set at every episode
         # as the state count at the end of the episode.
@@ -942,11 +932,11 @@ class Simulator:
                 warnings.warn("The `state_observe` parameter is not None, but `compute_rmse = False`.\n" \
                               "A state can only be observed when `compute_rmse = True`. The state to observe will be ignored.")
                 state_observe = None
-            elif not (is_integer(state_observe) and 0 <= state_observe and state_observe < nS):
+            elif not (is_integer(state_observe) and 0 <= state_observe and state_observe < self.env.getNumStates()):
                 warnings.warn("The `state_observe` parameter ({}, type={}) must be an integer number between 0 and {}.\n" \
                               "The state whose index falls in the middle of the state space will be observed." \
-                              .format(state_observe, type(state_observe), nS-1))
-                state_observe = int(nS/2)
+                              .format(state_observe, type(state_observe), self.env.getNumStates()-1))
+                state_observe = self.env.getNumStates() // 2
 
         # Setup the information needed when cycles are used to estimate the stationary distribution of states using renewal theory
         if set_cycle is not None:
@@ -962,11 +952,17 @@ class Simulator:
 
         # Plotting setup
         if plot:
-            fig_V = plt.figure()
+            # Setup the figures that will be updated at every verbose_period
             colors = cm.get_cmap(colormap, lut=nepisodes)
+            # 1D plot (even for 2D environments)
+            fig_V = plt.figure()
             # Plot the true state value function (to have it as a reference already
             plt.plot(self.env.getAllStates(), self.env.getV(), '.-', color="blue")
+            if self.env.getDimension() == 2:
+                # 2D plot
+                fig_V2 = plt.figure()
             if state_observe is not None:
+                # Plot with the evolution of the V estimate and its error
                 fig_RMSE_state = plt.figure()
 
         # Define the policy and the learner
@@ -974,12 +970,13 @@ class Simulator:
         learner = self.agent.getLearner()
 
         # Environment seed
+        # We only set the seed when it is not None because when this method is called by the simulate() method,
+        # seed is set to None in order to avoid having each experiment (i.e. each replication) produce the same results
+        # (which would certainly invalidate the replications!). In that case, the environment's seed is set *before*
+        # calling this method run() and we don't want to revert that seed setting, o.w. the experiments repeatability
+        # would be broken.
         if seed is not None:
-            if seed != 0:
-                self.env.seed(seed)
-            else:
-                # Set the seed to the one stored in the object, which was set when the object was constructed
-                self.env.seed(self.seed)
+            self.env.setSeed(seed)
 
         # Store initial values used in the analysis of all the episodes run
         V_state_observe, RMSE, MAPE, ntimes_rmse_inside_ci95 = self.initialize_run_with_learner_status(nepisodes, learner, compute_rmse, weights, state_observe)
@@ -1035,10 +1032,13 @@ class Simulator:
         while not done:
             episode += 1
             # Reset the environment
-            # (this reset is normally carried out by the gym module, e.g. by the toy_text.discrete.DiscreteEnv environment's reset() method
+            # (this reset is typically carried out by the gym module, e.g. by the toy_text.discrete.DiscreteEnv environment's reset() method
             # where the initial state is chosen based on the isd attribute of the object, i.e. of the Initial State Distribution defining the initial state,
-            # which was modified above when parameter `start` is not None)
+            # which is assumed to have been defined appropriately in order to have the start state the user wishes to use)
             self.env.reset()
+            # Optional start state JUST for the very first episode
+            if start_state_first_episode is not None and episode == 0:
+                self.env.setState(start_state_first_episode)
             done_episode = False
             if verbose and (np.mod(episode, verbose_period) == 0 or episode == nepisodes - 1):
                 print("@{}".format(get_current_datetime_as_string()))
@@ -1058,9 +1058,10 @@ class Simulator:
                 # Current state and action on that state leading to the next state
                 state = self.env.getState()
 
-                #-- At the beginning of each episode > 0, update the values of the TERMINAL STATE (when the average reward criterion is used)
-                # For the average reward criterion, we need to update the value of the state on which the previous episode ended
-                # because its value is not necessarily 0! (as we are in a continuing learning task, and the environment state goes to a start state and the Markov process continues)
+                # For the AVERAGE reward criterion, if this is the first time step of a new episode (t_episode = 0)
+                # we need to update the value of the state on which the previous episode ended (as long as episode > 0)
+                # because its value is not necessarily 0!
+                # (as we are in a continuing learning task, and the environment state goes to a start state and the Markov process continues)
                 if t_episode == 0 and episode > 0 and learner.getLearningCriterion() == LearningCriterion.AVERAGE:
                     # We update just one action for Q and then copy its value to the other Q values
                     # In fact, all Q-values for the terminal state are the same because all the actions lead to a start state --defined by env.reset())
@@ -1228,9 +1229,21 @@ class Simulator:
 
             if plot and np.mod(episode, verbose_period) == 0:
                 # Plot the estimated value function at the end of the episode
+                # in both 1D layout and 2D layout, if the environment is 2D.
+                #print("episode: {} (T={}), color: {}".format(episode, t_episode, colors(episode/nepisodes)))
+                plt.figure(fig_V.number)
+                plt.plot(self.env.getAllStates(), learner.getV().getValues(), linewidth=0.5,
+                         color=colors(min(episode, nepisodes - 1) / nepisodes))
+                plt.title("State values evolution (blue: initial, red: final)\nEpisode {} of {}".format(episode + 1,
+                                                                                                        nepisodes))
+                if pause > 0:
+                    plt.pause(pause)
+                plt.draw()
+                #fig_V.canvas.draw()    # This should be equivalent to plt.draw()
                 if self.env.getDimension() == 2:
-                    plt.figure(fig_V.number)
-                    (ax_V, ax_C) = fig_V.subplots(1, 2)
+                    # Update the 2D plots
+                    plt.figure(fig_V2.number)
+                    (ax_V, ax_C) = fig_V2.subplots(1, 2)
                     shape = self.env.getShape()
                     terminal_rewards = self.env.getTerminalRewards()
 
@@ -1246,19 +1259,10 @@ class Simulator:
                     colornorm = plt.Normalize(vmin=0, vmax=np.max(arr_state_counts))
                     ax_C.imshow(arr_state_counts, cmap=colors_count, norm=colornorm)
 
-                    fig_V.suptitle("State values (left) and state counts (right)\nEpisode {} of {}".format(episode, nepisodes))
+                    fig_V2.suptitle("State values (left) and state counts (right)\nEpisode {} of {}".format(episode, nepisodes))
                     if pause > 0:
                         plt.pause(pause)
                     plt.draw()
-                else:
-                    #print("episode: {} (T={}), color: {}".format(episode, t_episode, colors(episode/nepisodes)))
-                    plt.figure(fig_V.number)
-                    plt.plot(self.env.getAllStates(), learner.getV().getValues(), linewidth=0.5, color=colors(min(episode, nepisodes-1) / nepisodes))
-                    plt.title("State values evolution (blue: initial, red: final)\nEpisode {} of {}".format(episode+1, nepisodes))
-                    if pause > 0:
-                        plt.pause(pause)
-                    plt.draw()
-                    #fig.canvas.draw()
 
                 if state_observe is not None:
                     plt.figure(fig_RMSE_state.number)
@@ -1374,15 +1378,13 @@ class Simulator:
             print("Percentage of episodes reaching max step = {:.1f}%".format(nepisodes_max_steps_reached / nepisodes*100))
             print("Last episode run = {} of {}".format(episode+1, nepisodes))
 
-        self.finalize_run()
-
         return  learner.getV().getValues(), learner.getQ().getValues(), learner.getStateCounts(), RMSE, MAPE, \
                 {   't': t,   # Simulation time, i.e. number of discrete steps taken during the whole simulation
                     # Value of alpha for each state at the end of the LAST episode run
                     'alphas_at_last_episode': learner._alphas,
                     # All what follows is information by episode (I don't explicitly mention it in the key name because it may make the key name too long...)
                     # (Average) alpha by episode (averaged over visited states in the episode)
-                    'alpha_mean': learner.alpha_mean_by_episode,
+                    'alpha_mean': learner.getAverageAlphaByEpisode(),   # Average alpha (over all states) by episode
                     'lambda_mean': learner.lambda_mean_by_episode if isinstance(learner, LeaTDLambdaAdaptive) else None,
                     'V_abs_mean': V_abs_mean,
                     'V_abs_mean_weighted': V_abs_mean_weighted,
@@ -1463,45 +1465,14 @@ class Simulator:
 
         return V, RMSE, MAPE, ntimes_rmse_inside_ci95
 
-    def finalize_run(self):
-        # Restore the initial state distribution of the environment (for the next simulation)
-        # Note that the restore step done in the __exit__() method may NOT be enough, because the Simulator object
-        # may still exist once the simulation is over.
-        if self._isd_orig is not None:
-            self.env.setInitialStateDistribution(self._isd_orig)
-            self._isd_orig = None
-
-        # TOMOVE: (DM-2022/04/28) This change of the estimated and true value functions should NOT be done
-        # because of the following:
-        # - The value of terminal states is equal to 0 BY DEFINITION (see Sutton 2018, I guess)
-        # - If we change the true value of terminal states here, i.e. at the end of an experiment,
-        # these values are kept for any subsequent experiment we run, thus making the value of the RMSE
-        # computed on those experiments to be WRONG! (This is what made me spend about ONE OR MORE DEBUGGING DAYS
-        # to figure out why the plots of the average RMSE by episode on TD(lambda) experiments run by simu_lambda.py
-        # converged to a very large value (~0.5, when normally the value should converge to 0.1), except for the
-        # very first experiment!
-        # Actually, this change is mostly for an aesthetic reason when plotting the true and estimated value functions,
-        # especially in 2D gridworlds (as opposed to 1D).
-        # MY CONCLUSION is that this type of setup should be done by the PLOTTING FUNCTION itself.
-        #
-        # NOTE ALSO that we should NOT counteract this bad aesthetic plotting effect by setting the estimated value
-        # of terminal states at the end of each episode to the reward received when transitioning to the terminal state,
-        # for reasons explained when computing the true value function in the Gridworld1D environment (essentially
-        # because the TD error observed when reaching the terminal state would count the observed reward as DOUBLE,
-        # one time from R(T) and one time from the terminal state value which we set equal to R(T) as well!)
-        #
-        ## Set the value of terminal states to their reward, both the True values and estimated values
-        ## (just to make plots of the state value function more understandable, specially in environments > 1D)
-        #for s, r in self.env.getTerminalRewardsDict():
-        #    self.agent.getLearner().getV()._setWeight(s, r)
-        #    if self.env.getV() is not None:
-        #        self.env.getV()[s] = r
-
-    def simulate(self, nexperiments, nepisodes, max_time_steps_per_episode=None, start=None, compute_rmse=True, weights_rmse=None,
+    def simulate(self, nexperiments, nepisodes, max_time_steps_per_episode=None, compute_rmse=True, weights_rmse=None,
                  verbose=False, verbose_period=1, verbose_convergence=False, plot=False):
         """
         Simulates the agent interacting with the environment for a number of experiments and number
         of episodes per experiment.
+
+        The seed of the simulation is set at the beginning of all experiments as the seed stored
+        in the object (typically attribute `seed`).
 
         Parameters:
         nexperiments: int
@@ -1513,11 +1484,6 @@ class Simulator:
         max_time_steps_per_episode: (opt) int
             Maximum number of steps to run each episode for.
             default: np.Inf
-
-        start: (opt) int
-            Index of the state each experiment should start at.
-            When None, the starting state is picked randomly following the initial state distribution
-            of the environment.
 
         compute_rmse: (opt) bool
             Whether to compute the RMSE of the estimated value function over all states.
@@ -1655,15 +1621,16 @@ class Simulator:
         # environment defined in the gym.envs.toy_text.discrete, which defines its own random number generator
         # (np_random) which is used when calling its reset() and step() methods.
         np.random.seed(self.seed)
-        [seed] = self.env.seed(self.seed)
+        [seed] = self.env.setSeed(self.seed)
         for exp in np.arange(nexperiments):
             if verbose:
                 print("Running experiment {} of {} (#episodes = {})..." \
                       .format(exp+1, nexperiments, nepisodes), end=" ")
             V, Q, n_visits_i, RMSE_by_episode_i, MAPE_by_episode_i, learning_info = \
                     self.run(nepisodes=nepisodes, max_time_steps_per_episode=max_time_steps_per_episode,
-                             start=start, seed=None,  # We pass seed=None so that the seed is NOT set by this experiment
-                             # Otherwise ALL experiments would have the same outcome!
+                             seed=None, # We pass seed=None so that the seed is NOT set for the experiment,
+                                        # but it is set indirectly by the seed defined above, before the FOR loop.
+                                        # Otherwise ALL experiments would have the same outcome!
                              compute_rmse=compute_rmse, weights_rmse=weights_rmse,
                              plot=plot,
                              verbose=verbose, verbose_period=verbose_period, verbose_convergence=verbose_convergence)

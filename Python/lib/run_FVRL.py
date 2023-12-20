@@ -754,7 +754,7 @@ if __name__ == "__main__":
         plot_trajectories = False
         symbol = 'r-'
     fixed_window = False
-    alpha_start = 1.0  # / t_sim  # Use `/ t_sim` when using update of theta at each simulation step (i.e. LeaPolicyGradient.learn_update_theta_at_each_time_step() is called instead of LeaPolicyGradient.learn_update_theta_at_end_of_episode())
+    alpha_start = 1.0  # / t_sim  # Use `/ t_sim` when using update of theta at each simulation step (i.e. LeaPolicyGradient.learn_update_theta_at_each_time_step() is called instead of LeaPolicyGradient.learn_update_theta_at_episode_end())
     adjust_alpha = True  # True
     func_adjust_alpha = np.float # np.sqrt
     min_time_to_update_alpha = 0  # int(t_learn / 3)

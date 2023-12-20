@@ -14,7 +14,7 @@ Note that the action space is defined ALWAYS as an integer action space because 
 `action_space` attribute of their DiscreteEnv environment in envs/toy_text/discrete.py, i.e. by instantiating action_space
 as a Discrete object of type int (the default type). If we wanted to instantiate the `action_space` of the gridworld environments
 defined here as an action space of type e.g. Direciont2D (defined below), we would need to re-write the constructor
-of DiscreteEnv (i.e. override it via a subclass) and change the instatiation of the `action_space` attribute...
+of DiscreteEnv (i.e. override it via a subclass) and change the instantiation of the `action_space` attribute...
 and I find this too much of a hassle for gaining almost nothing (and probably for losing performance, as indexing
 a dictionary with an Enum is probably slower than indexing it with an integer).
 """
@@ -87,7 +87,7 @@ class EnvGridworld1D(EnvironmentDiscrete):
 
         #-- True value functions (for algorithm evaluation purposes)
         #-- Note that terminal states have value = 0
-        # Value functions for the random walk policy
+        # Value functions for the RANDOM walk policy ONLY!
         self.V = -1.0 + 2/(nS-1) * np.arange(nS)    # Note that this is the same as np.arange(-(nS-1), nS+1, 2) / (nS-1)
                                                     # (note that stop=nS+1, because the end value is NOT included!)
         self.V[0] = self.V[nS-1] = 0.0              # The value of terminal states is defined as 0.0.
@@ -113,7 +113,8 @@ class EnvGridworld1D(EnvironmentDiscrete):
         while not it.finished:
             s = it.iterindex
 
-            # P[s][a] = (prob, next_state, reward, is_terminal)
+            # P[s] is a dictionary indexed by the action "a" and its value a list of tuples for each possible next state that can be reached from state 's' taking action 'a':
+            # P[s][a] = [(prob_1, next_state_1, reward_1, is_terminal_1), (prob_2, next_state_2, reward_2, is_terminal_2), ...]
             # Given that we are state 's' and take action 'a':
             # prob: probability of going to state 'next_state'
             # next_state: a possible next_state when taking action 'a'
@@ -159,24 +160,22 @@ class EnvGridworld1D(EnvironmentDiscrete):
                                              terminal_states=set([i for i, s in enumerate(range(nS)) if is_terminal(s)]),
                                              terminal_rewards=dict([(s, reward(s)) for s in terminal_states]))
 
-    def getV(self):
-        "Returns the true state value function for a particular policy (not explicitly informed)"
-        return self.V
-    
-    def getQ(self):
-        "Returns the true state-action value function for a particular policy (not explicitly informed)"
-        return self.Q
-
 
 class EnvGridworld1D_OneTerminalState(EnvironmentDiscrete):
     """
-    1D Grid World environment with one terminal state (right one) and one transient state (left one).
+    1D Grid World environment with one terminal state (right one) and one transient state at state 0
+    (the leftmost state) for which the probability of going right is 1.
     The goal is to analyze the conjecture that lambda should start near 1 and decrease towards 0 as more reliable
     estimates of the value function are obtained, in particular to see if this happens in our adaptive TD(lambda)
     algorithm.
 
     This example is mentioned in Bertsekas, pag. 200-201 and, similar to this also in Sutton,
-    chapter 7 when analyzing the advantages of TD(0) (more model-based) over Monte Carlo (more experience-based).
+    chapter 7 when analyzing the advantages of TD(0) (more model-based) over Monte Carlo (more experience-based)
+    through a two non-terminal states A and B and two terminal states reachable in one step from B.
+
+    The default reward landscape is +1 for all states except at the terminal state.
+
+    The initial state of the environment is the transient state.
 
     For example, a 10-long grid looks as follows:
     t  o  o  o  o  x  o  o  o  T
@@ -186,11 +185,28 @@ class EnvGridworld1D_OneTerminalState(EnvironmentDiscrete):
     length: (opt) int
         Number of states in the gridworld.
         default: 21
+
+    terminal_states: (opt) set or list or array-like
+        State indices considered as terminal states.
+        default: set([`length` - 1])
+
+    rewards_dict: dict
+        Reward values for a subset of states in the grid. The state index is used as dictionary key.
+        default: {`length`: 0.0}
+
+    reward_default: float
+        Default value for the state reward.
+        This value is used as reward delivered by a state when the state does not appear in `rewards_dict`.
+        default: +1.0
     """
 
-    def __init__(self, length=21):
+    def __init__(self, length=21, terminal_states=None, rewards_dict=None, reward_default=1.0):
         if length < 3:
             raise ValueError('the length of the grid must be at least 3')
+        if terminal_states is not None and len(terminal_states) == 0:
+            raise ValueError("There must be at least one terminal state")
+        if rewards_dict is not None and not isinstance(rewards_dict, dict):
+            raise ValueError("The rewards information must be a dictionary indexed by the 1D state number")
 
         nS = length
         nA = 2
@@ -199,13 +215,8 @@ class EnvGridworld1D_OneTerminalState(EnvironmentDiscrete):
         MAX_S = nS - 1
 
         # Terminal states and reward obtained when reaching each possible state
-        terminal_states = set([nS - 1])
-        rewards_dict = dict({nS - 1: 0.0})
-
-        # -- True value functions (for algorithm evaluation purposes)
-        # -- Note that terminal states have value = 0
-        self.V = None
-        self.Q = None
+        terminal_states = set([nS - 1]) if terminal_states is None else set(terminal_states)
+        rewards_dict = dict({nS - 1: 0.0}) if rewards_dict is None else rewards_dict
 
         # Define the possible actions based on the geometry
         P = {}
@@ -215,12 +226,13 @@ class EnvGridworld1D_OneTerminalState(EnvironmentDiscrete):
         # Function that checks whether we arrived at a terminal state
         num_nonterminal_states = nS - len(terminal_states)
         is_terminal = lambda s: s in terminal_states
-        reward = lambda s: rewards_dict[s] if s in rewards_dict.keys() else +1.0
+        reward = lambda s: rewards_dict[s] if s in rewards_dict.keys() else reward_default
 
         while not it.finished:
             s = it.iterindex
 
-            # P[s][a] = (prob, next_state, reward, is_terminal)
+            # P[s] is a dictionary indexed by the action "a" and its value a list of tuples for each possible next state that can be reached from state 's' taking action 'a':
+            # P[s][a] = [(prob_1, next_state_1, reward_1, is_terminal_1), (prob_2, next_state_2, reward_2, is_terminal_2), ...]
             # Given that we are state 's' and take action 'a':
             # prob: probability of going to state 'next_state'
             # next_state: a possible next_state when taking action 'a'
@@ -260,18 +272,9 @@ class EnvGridworld1D_OneTerminalState(EnvironmentDiscrete):
         # print(P)
 
         super(EnvGridworld1D_OneTerminalState, self).__init__(nS, nA, P, isd,
-                                                             dim=1,
-                                                             terminal_states=set(
-                                                                 [i for i, s in enumerate(range(nS)) if is_terminal(s)]),
+                                                              dim=1,
+                                                              terminal_states=set([i for i, s in enumerate(range(nS)) if is_terminal(s)]),
                                                               terminal_rewards=dict([(s, reward(s)) for s in terminal_states]))
-
-    def getV(self):
-        "Returns the true state value function for a particular policy (not explicitly informed)"
-        return self.V
-
-    def getQ(self):
-        "Returns the true state-action value function for a particular policy (not explicitly informed)"
-        return self.Q
 
 
 class EnvGridworld2D(EnvironmentDiscrete):
@@ -374,10 +377,10 @@ class EnvGridworld2D(EnvironmentDiscrete):
         is_terminal = lambda s: s in terminal_states
         reward = lambda s: rewards_dict[s] if s in rewards_dict.keys() else 0.0
 
-        # Initialize the initial state distribution matrix to 0
-        # This matrix will be updated as we go along constructing the environment below
-        # and will be set to a uniform distribution on the NON-terminal states.
         if initial_state_distribution is None:
+            # Initialize the initial state distribution matrix to 0
+            # This matrix will be updated as we go along constructing the environment below
+            # and will be set to a uniform distribution on the NON-terminal states.
             isd = np.zeros(nS)
         else:
             isd = initial_state_distribution
@@ -473,14 +476,6 @@ class EnvGridworld2D(EnvironmentDiscrete):
     def getShape(self):
         return self.shape
 
-    def getV(self):
-        "Returns the true state value function"
-        return None
-    
-    def getQ(self):
-        "Returns the true state-action value function"
-        return None
-
 
 class EnvGridworld2D_WithObstacles(EnvGridworld2D):
     """
@@ -522,19 +517,20 @@ class EnvGridworld2D_WithObstacles(EnvGridworld2D):
                 self.isd[s] = 0.0
         assert np.isclose(np.sum(self.isd), 1.0), "The initial state probabilities sum up to 1 ({})".format(np.sum(self.isd))
 
-        # Treat the obstacles by setting the transition probability of the adjacent cells when moving towards the obstacle
+        # Treat the obstacles as such by setting the transition probability of the adjacent cells when moving towards the obstacle to 0
         self.obstacles_set = obstacles_set
         for s_obstacle in self.obstacles_set:
             # Get the 4 states that are adjacent to the obstacle set, in each of the geographical directions (N, S, E, W)
-            # so that we can set their transition probabilities to 0 when taking the action that intends to go to the obstacle cell.
+            # so that we can set their transition probabilities to 0 and the reward of the obstacle cell
+            # when taking the action that intends to go to the obstacle cell.
             set_adjacent_states = self.get_adjacent_states(s_obstacle)
             for ss, d in set_adjacent_states:
                 if ss is not None:
-                    minusd = self.get_opposite_direction(d)
-                    # We state that the probability of staying in state ss when the agent wants to move in the opposite direction to where ss is w.r.t. s_obstacle (d) is 1,
-                    # i.e. the agent cannot move from ss in the opposite direction to `d`.
+                    opposite_d = self.get_opposite_direction(d)
+                    # We state that the probability of staying in state ss when the agent wants to move in the opposite direction
+                    # to where ss is w.r.t. s_obstacle (d) is 1, i.e. the agent cannot move from ss in the opposite direction to `d`.
                     # Ex: d = UP => the agent cannot come from the state ss that is above s_obstacle when going DOWN (`minusd`)
-                    self.P[ss][minusd.value] = [(1, ss, rewards_dict.get(ss, 0.0), self.isTerminalState(ss))]
+                    self.P[ss][opposite_d.value] = [(1, ss, rewards_dict.get(ss, 0.0), self.isTerminalState(ss))]
 
     def state_adjacent(self, state: int, direction: Direction2D):
         "Computes the 1D state that is adjacent to the given 1D `state` towards `direction`"
@@ -592,10 +588,10 @@ class EnvGridworld2D_WithObstacles(EnvGridworld2D):
                 set_adjacent_states = self.get_adjacent_states(s)
                 for ss, d in set_adjacent_states:
                     if ss is not None:
-                        minusd = self.get_opposite_direction(d)
-                        assert self.P[ss][minusd.value][0][0] == 1 and self.P[ss][minusd.value][0][1] == ss, \
+                        opposite_d = self.get_opposite_direction(d)
+                        assert self.P[ss][opposite_d.value][0][0] == 1 and self.P[ss][opposite_d.value][0][1] == ss, \
                             "The transition probability going {} to obstacle state s={} from the adjacent state {} ss={} is 0: P[{}][{}] = {}, P(ss->s) = {}" \
-                            .format(minusd.name, s, d.name, ss, ss, minusd.name, self.P[ss][minusd.value][0], 1 - self.P[ss][minusd.value][0][0])
+                            .format(opposite_d.name, s, d.name, ss, ss, opposite_d.name, self.P[ss][opposite_d.value][0], 1 - self.P[ss][opposite_d.value][0][0])
                 output = " ({:2d}) P ".format(s)
             else:
                 output = " ({:2d}) o ".format(s)
@@ -647,5 +643,5 @@ class EnvGridworld2D_WithObstacles(EnvGridworld2D):
         Ex: when there are 4 directions: UP (0), DOWN (2), RIGHT (1), LEFT (3), it is computed as (d + 2) mod 4 so that
         the opposite of UP is DOWN and the opposite of RIGHT is LEFT, and viceversa.
         """
-        minusd = (d.value + len(Direction2D) // 2) % len(Direction2D)
-        return Direction2D(minusd)
+        opposite_d = (d.value + len(Direction2D) // 2) % len(Direction2D)
+        return Direction2D(opposite_d)

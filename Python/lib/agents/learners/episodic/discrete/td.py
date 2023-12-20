@@ -143,11 +143,14 @@ class LeaTDLambda(Learner):
             # Terminal time (recall that we were at time t and stepped into time t+1 when reaching the terminal state)
             T = t + 1
 
+            # Update the average reward over ALL episodes (needed for the AVERAGE reward criterion used in continuing learning tasks)
+            self.update_average_reward(T, next_state)
+
             if self.debug: #and self.episode > 45: # Use the condition on `episode` in order to plot just the last episodes
                 self._plotZ()
                 self._plotAlphasEffective()
-            self.store_trajectory_at_end_of_episode(T, next_state, debug=self.debug)
-            self._update_state_counts(t+1, next_state)
+            self.store_trajectory_at_episode_end(T, next_state, debug=self.debug)
+            self._update_state_counts(T, next_state)
 
             # Update alpha for the next iteration for "by episode" updates
             if self.adjust_alpha_by_episode:
@@ -456,11 +459,14 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
             # Terminal time (recall that we were at time t and stepped into time t+1 when reaching the terminal state)
             T = t + 1
 
+            # Update the average reward over ALL episodes (needed for the AVERAGE reward criterion which activates a continuing learning task)
+            self.update_average_reward(T, next_state)
+
             if self.debug: # and self.episode > 45:
                 self._plotZ()
                 self._plotAlphasEffective()
-            self.store_trajectory_at_end_of_episode(T, next_state, debug=self.debug)
-            self._update_state_counts(t+1, next_state)
+            self.store_trajectory_at_episode_end(T, next_state, debug=self.debug)
+            self._update_state_counts(T, next_state)
             self._store_lambdas_in_episode()
 
             # Update alpha for the next episode for "by episode" updates

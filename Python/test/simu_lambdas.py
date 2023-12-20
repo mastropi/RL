@@ -36,7 +36,7 @@ resultsdir_mountain = os.path.abspath("./RL-001-MemoryManagement/results/Mountai
 
 
 #--------------------------- Auxiliary functions ------------------------------
-def run_td_adap(learner_td_adap, lambda_min, lambda_max, alphas, start=None, seed=None, debug=False):
+def run_td_adap(learner_td_adap, lambda_min, lambda_max, alphas, seed=None, debug=False):
     "NOTE: This function uses global variables with the experiment setup"
     alpha_mean_by_episode_mean_by_alpha = []
     lambda_mean_by_episode_mean_by_alpha = []
@@ -77,7 +77,6 @@ def run_td_adap(learner_td_adap, lambda_min, lambda_max, alphas, start=None, see
                 learning_info = sim.simulate(nexperiments=nexperiments,
                                              nepisodes=nepisodes,
                                              max_time_steps_per_episode=max_time_steps_per_episode,
-                                             start=start,
                                              weights_rmse=weights_rmse,
                                              verbose=verbose,
                                              verbose_period=verbose_period,
@@ -170,9 +169,10 @@ def plot_results_adap(fig, legend_label, td_adap_name, results, lambda_max,
 #-- 1D gridworld
 resultsdir = resultsdir_grid
 nstates = 19 # Number of states excluding terminal states
-env_grid1d = gridworlds.EnvGridworld1D(length=nstates+2)
-max_time_steps_per_episode = None
 start_state = int((nstates + 1) / 2)
+isd = np.array([1 if s == start_state else 0 for s in range(nstates+2)])
+env_grid1d = gridworlds.EnvGridworld1D(length=nstates+2, initial_state_distribution=isd)
+max_time_steps_per_episode = None
 weights_rmse = False
 env_desc = str(nstates) + r"-state 1D gridworld environment"
 
@@ -196,9 +196,8 @@ print("True value function read from '{}'".format(filename))
 # w.r.t. to the MountainCarDiscrete environment saved in the pickle file, e.g. there are new methods defined such as setV().
 # If the definition of the saved environment (in dict_benchmark['env']) is the same as the current definition of the
 # MountainCarDiscrete environment, then we can just use the saved environment as environment on which test are run.
-env_mountain = mountaincars.MountainCarDiscrete(dict_benchmark['env'].nv)
+env_mountain = mountaincars.MountainCarDiscrete(dict_benchmark['env'].nv)       # Note: the initial state is chosen at random at the start of each episode
 max_time_steps_per_episode = dict_benchmark['params_test']['max_time_steps']    # Use this when the test_obj is saved as part of the pickle file read above
-start_state = None  # Initial state chosen at random at the start of each episode
 nstates = np.prod(env_mountain.shape)
 # Use the state counts when estimating the true value function as weights to compute the RMSE and MAPE as they give
 # information about how reliable is the estimation of the state value for those states.
@@ -412,7 +411,6 @@ if run_td and False:
                 learning_info = sim.simulate(nexperiments=nexperiments,
                                              nepisodes=nepisodes,
                                              max_time_steps_per_episode=max_time_steps_per_episode,
-                                             start=start_state,
                                              weights_rmse=weights_rmse,
                                              verbose=verbose,
                                              verbose_period=verbose_period,
@@ -488,7 +486,6 @@ if run_mc:
         learning_info = sim.simulate(nexperiments=nexperiments,
                                      nepisodes=nepisodes,
                                      max_time_steps_per_episode=max_time_steps_per_episode,
-                                     start=start_state,
                                      weights_rmse=weights_rmse,
                                      verbose=verbose,
                                      verbose_period=verbose_period,
@@ -578,7 +575,6 @@ if run_td:
                 learning_info = sim.simulate(nexperiments=nexperiments,
                                              nepisodes=nepisodes,
                                              max_time_steps_per_episode=max_time_steps_per_episode,
-                                             start=start_state,
                                              weights_rmse=weights_rmse,
                                              verbose=verbose,
                                              verbose_period=verbose_period,
@@ -627,7 +623,7 @@ if run_td:
 if run_atd:
     time_start = timer()
 
-    results_atd = run_td_adap(learner_atd, lambda_min, lambda_max_atd, alphas_atd, start=start_state, seed=seed, debug=debug)
+    results_atd = run_td_adap(learner_atd, lambda_min, lambda_max_atd, alphas_atd, seed=seed, debug=debug)
 
     time_end = timer()
     exec_time = time_end - time_start
@@ -642,7 +638,7 @@ if run_atd:
 if run_hatd:
     time_start = timer()
 
-    results_hatd = run_td_adap(learner_hatd, lambda_min, lambda_max_hatd, alphas_hatd, start=start_state, seed=seed, debug=debug)
+    results_hatd = run_td_adap(learner_hatd, lambda_min, lambda_max_hatd, alphas_hatd, seed=seed, debug=debug)
 
     time_end = timer()
     exec_time = time_end - time_start

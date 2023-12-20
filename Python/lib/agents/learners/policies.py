@@ -268,7 +268,7 @@ class LeaPolicyGradient(GenericLearner):
 
         return G
 
-    def learn_update_theta_at_end_of_episode(self, T):
+    def learn_update_theta_at_episode_end(self, T):
         """
         Learns the policy by updating the theta parameter at the end of the episode using the average gradient
         observed throughout the episode, i.e. as the average of G(t) * grad( log(Pol(A(t)|S(t),theta) ) over all t.
@@ -320,10 +320,10 @@ class LeaPolicyGradient(GenericLearner):
         actions = [a for a in self.learnerV.getActions() if a is not None]
         rewards = [s for s, a in zip(self.learnerV.getRewards(), self.learnerV.getActions()) if a is not None]
         print("\n--- POLICY LEARNING ---")
-        print("[LeaPolicyGradient.learn_update_theta_at_end_of_episode] theta = {}".format(self.getThetaParameter()))
-        print("[LeaPolicyGradient.learn_update_theta_at_end_of_episode] Average reward (from V learner) = {}".format(self.learnerV.getAverageReward()))
-        print("[LeaPolicyGradient.learn_update_theta_at_end_of_episode] Average reward under policy (baseline for G(t)) rho = {}".format(self.getAverageRewardUnderPolicy()))
-        print("[LeaPolicyGradient.learn_update_theta_at_end_of_episode] TRAJECTORY (t, state, action, reward, reward - rho, delta = G, gradient(log(Pol)))")
+        print("[LeaPolicyGradient.learn_update_theta_at_episode_end] theta = {}".format(self.getThetaParameter()))
+        print("[LeaPolicyGradient.learn_update_theta_at_episode_end] Average reward (from V learner) = {}".format(self.learnerV.getAverageReward()))
+        print("[LeaPolicyGradient.learn_update_theta_at_episode_end] Average reward under policy (baseline for G(t)) rho = {}".format(self.getAverageRewardUnderPolicy()))
+        print("[LeaPolicyGradient.learn_update_theta_at_episode_end] TRAJECTORY (t, state, action, reward, reward - rho, delta = G, gradient(log(Pol)))")
         df_trajectory = pd.DataFrame( np.c_[range(T+1), [self.env.getBufferSizeFromState(s) for s in states], actions,
                                             rewards, [r - self.getAverageRewardUnderPolicy() for r in rewards], deltas,
                                             [self.getGradientLog(a, s) for a, s in zip(actions, states)],
@@ -362,11 +362,11 @@ class LeaPolicyGradient(GenericLearner):
                 gradLogPol = self.getGradientLog(action, state)
                 if gradLogPol != 0.0:
                     # Update the estimated gradient
-                    print("[LeaPolicyGradient.learn_update_theta_at_end_of_episode] Learning at simulation time t={}, state={}, action={}, reward={}...".format(t, state, action, reward))
-                    print("\t[LeaPolicyGradient.learn_update_theta_at_end_of_episode] t={}: Delta(t) = corrected G(t) = {:.3f}".format(t, delta))
-                    print("\t[LeaPolicyGradient.learn_update_theta_at_end_of_episode] t={}: Log policy gradient for Pol(A(t)={}/S(t)={} ) = {}" \
+                    print("[LeaPolicyGradient.learn_update_theta_at_episode_end] Learning at simulation time t={}, state={}, action={}, reward={}...".format(t, state, action, reward))
+                    print("\t[LeaPolicyGradient.learn_update_theta_at_episode_end] t={}: Delta(t) = corrected G(t) = {:.3f}".format(t, delta))
+                    print("\t[LeaPolicyGradient.learn_update_theta_at_episode_end] t={}: Log policy gradient for Pol(A(t)={}/S(t)={} ) = {}" \
                           .format(t, action, state, gradLogPol))
-                    print("\t[LeaPolicyGradient.learn_update_theta_at_end_of_episode] #actions taken by the agent so far = {}".format(nactions))
+                    print("\t[LeaPolicyGradient.learn_update_theta_at_episode_end] #actions taken by the agent so far = {}".format(nactions))
                     gradV += delta * gradLogPol
                     #gradV += (reward - self.getAverageRewardUnderPolicy()) * gradLogPol    # This computation of the gradient is NOT useful for the learning process
 
@@ -379,8 +379,8 @@ class LeaPolicyGradient(GenericLearner):
         bound_delta_theta_upper = +np.Inf if not self.clipping else self.clipping_value  #+1.131
         bound_delta_theta_lower = -np.Inf if not self.clipping else -self.clipping_value  #-1.131 #-5.312314 #-1.0
         delta_theta = np.max([ bound_delta_theta_lower, np.min([self.getLearningRate() * gradV, bound_delta_theta_upper]) ])
-        print("[LeaPolicyGradient.learn_update_theta_at_end_of_episode] Estimated grad(V(theta)) = {}".format(gradV))
-        print("[LeaPolicyGradient.learn_update_theta_at_end_of_episode] Delta(theta) = alpha * grad(V) = {}".format(delta_theta))
+        print("[LeaPolicyGradient.learn_update_theta_at_episode_end] Estimated grad(V(theta)) = {}".format(gradV))
+        print("[LeaPolicyGradient.learn_update_theta_at_episode_end] Delta(theta) = alpha * grad(V) = {}".format(delta_theta))
 
         theta_lower = THETA_MIN
         theta = np.max([theta_lower, theta + delta_theta])
@@ -397,7 +397,7 @@ class LeaPolicyGradient(GenericLearner):
         This is the way learning happens in the Trunk Reservation paper by Massaro et al. (2019).
         This learning is supposed to give the same results as when the theta parameter is updated only at the end of
         the episode, using the average gradient observed throughout the time steps of the Markov chain, as done by
-        learn_update_theta_at_end_of_episode(). However, the update of theta done here at every time step could be
+        learn_update_theta_at_episode_end(). However, the update of theta done here at every time step could be
         bounded at each time step (e.g. when self.clipping = True), therefore results may not be exactly the same.
 
         When the fixed_window attribute is True, a fixed window is used to compute G(t) for each t.

@@ -49,7 +49,6 @@ class Test_EstStateValueV_MetTDLambda_EnvGridworld1D(unittest.TestCase, test_uti
         super().__init__(*args, **kwargs)
         self.seed = 1717
         self.nepisodes = 20
-        self.start_state = 10
         self.plot = True
 
     @classmethod
@@ -60,8 +59,10 @@ class Test_EstStateValueV_MetTDLambda_EnvGridworld1D(unittest.TestCase, test_uti
         cls.color_rmse = "red"
 
         # Environment: 1D gridworld
-        cls.nS = 19         # Number of non-terminal states in the 1D gridworld
-        cls.env = gridworlds.EnvGridworld1D(length=cls.nS+2)  # nS states plus the two terminal states
+        cls.nS = 21
+        cls.start_state = 10
+        cls.isd = np.array([1 if s == cls.start_state else 0 for s in range(cls.nS)])
+        cls.env = gridworlds.EnvGridworld1D(length=cls.nS, initial_state_distribution=cls.isd)
 
         # Random walk policy on the above environment
         print("Check subclass")
@@ -135,7 +136,7 @@ class Test_EstStateValueV_MetTDLambda_EnvGridworld1D(unittest.TestCase, test_uti
 
         # Simulation
         sim = DiscreteSimulator(self.env, agent_rw_tdlambda, debug=False)
-        _, _, _, RMSE_by_episode, MAPE_by_episode, learning_info = sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
+        _, _, _, RMSE_by_episode, MAPE_by_episode, learning_info = sim.run(nepisodes=self.nepisodes, seed=self.seed,
                                                                      compute_rmse=True, state_observe=15,
                                                                      verbose=True, verbose_period=100,
                                                                      plot=False, pause=0.1)
@@ -160,7 +161,7 @@ class Test_EstStateValueV_MetTDLambda_EnvGridworld1D(unittest.TestCase, test_uti
 
         # Simulation
         sim = DiscreteSimulator(self.env, agent_rw_tdlambda, debug=False)
-        _, _, _, RMSE_by_episode, MAPE_by_episode, learning_info = sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
+        _, _, _, RMSE_by_episode, MAPE_by_episode, learning_info = sim.run(nepisodes=self.nepisodes, seed=self.seed,
                                                                      compute_rmse=True, state_observe=19,
                                                                      verbose=True, verbose_period=100,
                                                                      plot=False, pause=0.001)
@@ -208,7 +209,7 @@ class Test_EstStateValueV_MetTDLambda_EnvGridworld1D(unittest.TestCase, test_uti
         sim = DiscreteSimulator(self.env, agent_rw_tdlambda, debug=False)
 
         # First run
-        _, _, _, RMSE_by_episode, MAPE_by_episode, _ = sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
+        _, _, _, RMSE_by_episode, MAPE_by_episode, _ = sim.run(nepisodes=self.nepisodes, seed=self.seed,
                                                             compute_rmse=True, state_observe=19,
                                                             verbose=True, verbose_period=100,
                                                             plot=False, pause=0.001)
@@ -219,7 +220,7 @@ class Test_EstStateValueV_MetTDLambda_EnvGridworld1D(unittest.TestCase, test_uti
         assert np.allclose(self.env.getV(), V_true, 1E-9)
 
         # Expected RMSE with the following settings:
-        # 19-size gridworld
+        # 21-size gridworld
         # alpha = 0.3, gamma = 1.0, lambda = 0.7
         # adjust_alpha = False, adjust_alpha_by_episode = False
         # seed = 1717, nepisodes=20, start_state = 10
@@ -230,7 +231,7 @@ class Test_EstStateValueV_MetTDLambda_EnvGridworld1D(unittest.TestCase, test_uti
         assert np.allclose(rmse_observed, rmse_expected, atol=1E-6)
 
         # Second run
-        _, _, _, RMSE_by_episode, MAPE_by_episode, _ = sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
+        _, _, _, RMSE_by_episode, MAPE_by_episode, _ = sim.run(nepisodes=self.nepisodes, seed=self.seed,
                                                             compute_rmse=True, state_observe=19,
                                                             verbose=True, verbose_period=100,
                                                             plot=False, pause=0.001)
@@ -260,13 +261,13 @@ class Test_EstStateValueV_MetTDLambda_EnvGridworld1D(unittest.TestCase, test_uti
 
         # Simulation        
         sim = DiscreteSimulator(self.env, agent_rw_tdlambda_adaptive, debug=False)
-        _, _, _, RMSE_by_episode, MAPE_by_episode, learning_info = sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
+        _, _, _, RMSE_by_episode, MAPE_by_episode, learning_info = sim.run(nepisodes=self.nepisodes, seed=self.seed,
                                                                      compute_rmse=True,
                                                                      verbose=True, verbose_period=100,
                                                                      plot=False, pause=0.001)
 
         # Expected values with: (we use the same parameters as with the above test case in dataprovider using lambda = 0.7)
-        # 19-size gridworld
+        # 21-size gridworld
         # alpha = 2.0, gamma = 1.0, lambda_min = 0.0, lambda_max = 1.0
         # alpha_update_type = AlphaUpdateType.EVERY_STATE_VISIT
         # adjust_alpha = True, adjust_alpha_by_episode = False
@@ -312,7 +313,6 @@ class Test_EstStateValueV_MetTDLambda_EnvGridworld1DOneTerminal(unittest.TestCas
     def __init__(self, *args, **kwargs):
         self.seed = kwargs.pop('seed', 1717)
         self.nepisodes = kwargs.pop('nepisodes', 20)
-        self.start_state = kwargs.pop('start_state', 0)
         self.plot = kwargs.pop('plot', False)
         super().__init__(*args, **kwargs)
 
@@ -324,8 +324,8 @@ class Test_EstStateValueV_MetTDLambda_EnvGridworld1DOneTerminal(unittest.TestCas
         cls.color_rmse = "red"
 
         # Environment: 1D gridworld
-        cls.nS = 19  # Number of non-terminal states in the 1D gridworld
-        cls.env = gridworlds.EnvGridworld1D_OneTerminalState(length=cls.nS + 1)  # nS states plus one terminal state
+        cls.nS = 20
+        cls.env = gridworlds.EnvGridworld1D_OneTerminalState(length=cls.nS)  # nS states plus one terminal state
 
         # Random walk policy on the above environment
         cls.policy_rw = random_walks.PolRandomWalkDiscrete(cls.env)
@@ -352,7 +352,7 @@ class Test_EstStateValueV_MetTDLambda_EnvGridworld1DOneTerminal(unittest.TestCas
 
         # Simulation
         sim = DiscreteSimulator(self.env, agent_rw_tdlambda_adaptive, debug=False)
-        _, _, _, _, _, learning_info = sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
+        _, _, _, _, _, learning_info = sim.run(nepisodes=self.nepisodes, seed=self.seed,
                                                                      compute_rmse=False,
                                                                      verbose=True, verbose_period=100,
                                                                      plot=False, pause=0.001)
@@ -369,7 +369,6 @@ class Test_EstStateValueV_MetTDLambda_EnvGridworld2D(unittest.TestCase, test_uti
         super().__init__(*args, **kwargs)
         self.seed = 1717
         self.nepisodes = 300
-        self.start_state = None
         self.colormap = cm.get_cmap("rainbow")  # useful colormaps are "jet", "rainbow", seismic"
         self.pause = 0.001
         self.plot = False
@@ -442,7 +441,7 @@ class Test_EstStateValueV_MetTDLambda_EnvGridworld2D(unittest.TestCase, test_uti
 
         # Simulation
         sim = DiscreteSimulator(self.env, agent_rw_tdlambda, debug=False)
-        _, _, _, _, _, learning_info = sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
+        _, _, _, _, _, learning_info = sim.run(nepisodes=self.nepisodes, seed=self.seed,
                                          compute_rmse=False, state_observe=0,
                                          verbose=True, verbose_period=max(1, int(self.nepisodes/10)),
                                          plot=self.plot, colormap=self.colormap, pause=self.pause)
@@ -452,7 +451,7 @@ class Test_EstStateValueV_MetTDLambda_EnvGridworld2D(unittest.TestCase, test_uti
         # alpha = 1.0, gamma = 1.0, lambda = 0.7, alpha_min = 0.0
         # alpha_update_type = AlphaUpdateType.FIRST_STATE_VISIT
         # adjust_alpha = True, adjust_alpha_by_episode = False
-        # seed = 1717, nepisodes = 300, start_state = None
+        # seed = 1717, nepisodes = 300, no particular start state
         expected_values = np.array([  0.        , -0.54833162, -0.28786602, -0.09861481, -0.00267096,
                                      -0.54412628, -0.38643206, -0.20172248, -0.01273661,  0.10080109,
                                      -0.29436269, -0.17989673, -0.03486362,  0.14812270,  0.26957068,
@@ -506,7 +505,7 @@ class Test_EstStateValueV_MetTDLambda_EnvGridworld2D(unittest.TestCase, test_uti
 
         # Simulation
         sim = DiscreteSimulator(self.env_logn_rewards, agent_rw_tdlambda, debug=False)
-        _, _, _, _, _, learning_info = sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
+        _, _, _, _, _, learning_info = sim.run(nepisodes=self.nepisodes, seed=self.seed,
                                          compute_rmse=False, state_observe=0,
                                          verbose=True, verbose_period=max(1, int(self.nepisodes/10)),
                                          plot=self.plot, colormap=self.colormap, pause=self.pause)
@@ -516,7 +515,7 @@ class Test_EstStateValueV_MetTDLambda_EnvGridworld2D(unittest.TestCase, test_uti
         # alpha = 1.0, gamma = 1.0, lambda = 0.7, alpha_min = 0.0
         # alpha_update_type = AlphaUpdateType.FIRST_STATE_VISIT
         # adjust_alpha = True, adjust_alpha_by_episode = False
-        # seed = 1717, nepisodes = 300, start_state = None
+        # seed = 1717, nepisodes = 300, no particular start state
         expected_values = np.array([ -0.77182828,  0.        , -0.27604594,  0.52689398,  0.52734742,
                                      -0.52284430, -0.39985642,  0.13538644,  0.        ,  0.5737801 ,
                                      -0.36497345, -0.26899774, -0.04048382,  0.25487455,  0.17131144,
@@ -578,7 +577,7 @@ class Test_EstStateValueV_MetTDLambda_EnvGridworld2D(unittest.TestCase, test_uti
 
         # Simulation        
         sim = DiscreteSimulator(self.env, agent_rw_tdlambda_adaptive, debug=False)
-        _, _, _, _, _, learning_info = sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
+        _, _, _, _, _, learning_info = sim.run(nepisodes=self.nepisodes, seed=self.seed,
                                          compute_rmse=False,
                                          verbose=True, verbose_period=max(1, int(self.nepisodes/10)),
                                          plot=self.plot, colormap=self.colormap, pause=self.pause)
@@ -588,7 +587,7 @@ class Test_EstStateValueV_MetTDLambda_EnvGridworld2D(unittest.TestCase, test_uti
         # alpha = 1.0, gamma = 1.0, alpha_min = 0.0, lambda_min = 0.0, lambda_max = 1.0
         # alpha_update_type = AlphaUpdateType.FIRST_STATE_VISIT
         # adjust_alpha = True, adjust_alpha_by_episode = False
-        # seed = 1717, nepisodes = 300, start_state = None
+        # seed = 1717, nepisodes = 300, no particular start state
         # lambda as the Boltzmann function of delta(t) / average( abs(V(t)) )
         expected_values = np.array([ 0.         , -0.59109302, -0.32699058, -0.12929933, -0.00239441,
                                      -0.57451245, -0.42242940, -0.22250979, -0.01439459,  0.11135646,
@@ -648,17 +647,17 @@ class Test_EstStateValueV_MetTDLambda_EnvGridworld2D(unittest.TestCase, test_uti
 
         # Simulation        
         sim = DiscreteSimulator(self.env_logn_rewards, agent_rw_tdlambda_adaptive, debug=False)
-        _, _, _, _, _, learning_info = sim.run(nepisodes=self.nepisodes, start=self.start_state, seed=self.seed,
-                                         compute_rmse=False,
-                                         verbose=True, verbose_period=max(1, int(self.nepisodes/10)),
-                                         plot=self.plot, colormap=self.colormap, pause=self.pause)
+        _, _, _, _, _, learning_info = sim.run( nepisodes=self.nepisodes, seed=self.seed,
+                                                compute_rmse=False,
+                                                verbose=True, verbose_period=max(1, int(self.nepisodes/10)),
+                                                plot=self.plot, colormap=self.colormap, pause=self.pause)
 
         # Expected 2D state value function given as 1D array with:
         # 2D grid = 5 x 5
         # alpha = 1.0, gamma = 1.0, alpha_min = 0.0, lambda_min = 0.0, lambda_max = 1.0
         # alpha_update_type = AlphaUpdateType.FIRST_STATE_VISIT
         # adjust_alpha = True, adjust_alpha_by_episode = False
-        # seed = 1717, nepisodes = 300, start_state = None
+        # seed = 1717, nepisodes = 300, no particular start state
         # lambda as the Boltzmann function of delta(t) / average( abs(V(t)) )
         expected_values = np.array([ -0.75751082,  0.        , -0.22101245,  0.62302307,  0.54209392,
                                      -0.46960693, -0.35882616,  0.18873879,  0.        ,  0.55887958,
@@ -705,7 +704,6 @@ class Test_TD_Lambda_MountainCar(unittest.TestCase, test_utils.EpisodeSimulation
         self.nepisodes = kwargs.pop('nepisodes', 10)
         self.max_time_steps_per_episode = kwargs.pop('max_time_steps_per_episode', 500)  # Maximum number of steps to run per episode
         self.normalizer = kwargs.pop('normalizer', 1)            # Normalize for the plots: Set it to max_time_steps_per_episode when the rewards are NOT sparse (i.e. are -1 every where except at terminal states), o.w. set it to 1 (when rewards are sparse, i.e. they occur at terminal states)
-        self.start_state = kwargs.pop('start_state', None)       # Position and velocity
         self.plot = kwargs.pop('plot', False)
         self.colormap = cm.get_cmap("rainbow")  # useful colormaps are "jet", "rainbow", seismic"
         super().__init__(*args, **kwargs)
@@ -872,31 +870,26 @@ class Test_TD_Lambda_MountainCar(unittest.TestCase, test_utils.EpisodeSimulation
 
         #-- Simulation
         # Choose the initial state
-        if self.start_state is not None:
-            # A specific initial state
-            idx_start_state = self.env.get_index_from_state(self.start_state)
-        else:
-            # Define a uniform Initial State Distribution in the environment so that the initial state is chosen randomly
-            # in MountainCar.reset(). The Initial State Distribution (ISD) is an attribute of toy_text.discrete environment.
+        # Define a uniform Initial State Distribution in the environment so that the initial state is chosen randomly
+        # in MountainCar.reset(). The Initial State Distribution (ISD) is an attribute of toy_text.discrete environment.
 
-            # First find all the terminal states which should be excluded from the possible initial states!
-            idx_states_non_terminal = self.env.get_indices_for_non_terminal_states()
-            self.env.isd = np.array([1.0 / len(idx_states_non_terminal) if idx in idx_states_non_terminal else 0.0
-                                     for idx in range(self.env.getNumStates())])
-            #print("ISD:", self.env.isd)
-            print("Steps: dx = {:.3f}, dv = {:.3f}".format(self.env.dx, self.env.dv))
-            print("Positions: {}".format(self.env.get_positions()))
-            print("Velocities: {}".format(self.env.get_velocities()))
-            idx_start_state = None
+        # First find all the terminal states which should be excluded from the possible initial states!
+        idx_states_non_terminal = self.env.get_indices_for_non_terminal_states()
+        self.env.isd = np.array([1.0 / len(idx_states_non_terminal) if idx in idx_states_non_terminal else 0.0
+                                 for idx in range(self.env.getNumStates())])
+        #print("ISD:", self.env.isd)
+        print("Steps: dx = {:.3f}, dv = {:.3f}".format(self.env.dx, self.env.dv))
+        print("Positions: {}".format(self.env.get_positions()))
+        print("Velocities: {}".format(self.env.get_velocities()))
         sim = DiscreteSimulator(self.env, agent_rw_tdlambda, debug=False)
 
         time_start = timer()
-        _, _, _, _, _, learning_info = sim.run(nepisodes=self.nepisodes, max_time_steps_per_episode=self.max_time_steps_per_episode,
-                                        start=idx_start_state, seed=self.seed,
-                                        compute_rmse=False, state_observe=None,
-                                        verbose=True, verbose_period=max(1, int(self.nepisodes/10)),
-                                        verbose_convergence=verbose_convergence,
-                                        plot=False, pause=0.001)
+        _, _, _, _, _, learning_info = sim.run( nepisodes=self.nepisodes, max_time_steps_per_episode=self.max_time_steps_per_episode,
+                                                seed=self.seed,
+                                                compute_rmse=False, state_observe=None,
+                                                verbose=True, verbose_period=max(1, int(self.nepisodes/10)),
+                                                verbose_convergence=verbose_convergence,
+                                                plot=False, pause=0.001)
         time_end = timer()
         exec_time = time_end - time_start
         print("Execution time: {:.1f} sec, {:.1f} min".format(exec_time, exec_time / 60))
@@ -949,11 +942,11 @@ if __name__ == "__main__":
         runner.run(suite_mountain)
     elif test_env_name == "GW1D_OneTerminalState":
         # Prepare environment
-        nstates = 19
+        nstates = 20
         nepisodes = 500
         plot = True
-        test_obj = Test_EstStateValueV_MetTDLambda_EnvGridworld1DOneTerminal(seed=1717, nepisodes=nepisodes, start_state=0, plot=plot)
-        test_obj.env = gridworlds.EnvGridworld1D_OneTerminalState(nstates+1)    # +1 terminal state
+        test_obj = Test_EstStateValueV_MetTDLambda_EnvGridworld1DOneTerminal(seed=1717, nepisodes=nepisodes, plot=plot)
+        test_obj.env = gridworlds.EnvGridworld1D_OneTerminalState(nstates)
         test_obj.policy_rw = random_walks.PolRandomWalkDiscrete(test_obj.env)
 
         learning_info = test_obj.run_random_walk_adaptive_onecase()
@@ -981,7 +974,7 @@ if __name__ == "__main__":
         case = 'hatd'
 
         # Prepare environment
-        test_obj = Test_TD_Lambda_MountainCar(seed=1717, start_state=None, normalizer=normalizer, plot=plot)
+        test_obj = Test_TD_Lambda_MountainCar(seed=1717, normalizer=normalizer, plot=plot)
         #nx = 20
         nv = 10
         test_obj.env = mountaincars.MountainCarDiscrete(nv)

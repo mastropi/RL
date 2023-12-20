@@ -148,6 +148,24 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
     def setInitialStateDistribution(self, isd):
         self.isd = isd
 
+    def setSeed(self, seed=None):
+        """
+        Sets the seed of the environment which defines the seed and the np_random() generator of random numbers
+        of the DiscreteEnv class defined in gym/envs/toy_text/discrete.py.
+
+        The random number generator np_random() is used by the reset() and the step() methods of the DiscreteEnv class.
+
+        seed: (opt) int
+            Seed value to set.
+            When None, a new np_random() generator is defined with a random seed
+            (see the seed() method defined in the DiscreteEnv class defined in gym/envs/toy_text/discrete.py).
+            default: None
+
+        Return: int
+        The seed value set.
+        """
+        return self.seed(seed)
+
     def setState(self, s):
         self.s = s
 
