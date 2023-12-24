@@ -31,21 +31,27 @@ class SurvivalProbabilityEstimation(Enum):
     FROM_M_CYCLES = 2
 
 
-def initialize_phi(envs, agent, t: float = 0.0, states_of_interest: set=set()):
+def initialize_phi(env, envs: list=None, agent=None, t: float = 0.0, states_of_interest: set=set()):
     """
     Initializes the conditional probability Phi(t, x) of each state or buffer size x of interest,
     i.e. those x values where blocking can occur.
     These states or buffer sizes are the keys of the dictionary that is initialized and returned by this function.
 
     Arguments:
-    envs: list
+    env: Environment
+        Environment which an FV particle is made of, i.e. all particles are instances of this environment.
+
+    envs: (opt) list of environments
         List of environments used to run the FV process.
         Valid environments are of type Python.lib.environments.queues.GenericEnvQueueWithJobClasses for queue environments
         or Python.lib.environments.EnvironmentDiscrete for discrete-time/state/action environments with optional terminal states.
+        default: None
 
-    agent: Agent
+    agent: (opt) Agent
         The Accept/Reject agent interacting with the environment.
-        It should be an agent accepted by the get_blocking_states_or_buffer_sizes() function.
+        Only used when the environment is a queuing environment, in which case it should be an agent
+        accepted by the get_blocking_states_or_buffer_sizes() function defined in among the queue simulator functions.
+        default: None
 
     t: (opt) float
         Time associated to the first measurement of Phi.
@@ -65,21 +71,19 @@ def initialize_phi(envs, agent, t: float = 0.0, states_of_interest: set=set()):
         first time of measurement of Phi and the empirical distribution of the particles at the respective state x
         (indexing the dictionary).
     """
-    assert envs is not None and isinstance(envs, list) and len(envs) > 0, "The list parameter `envs` is not empty"
-
     if len(states_of_interest) > 0:
         states_or_buffer_sizes_of_interest = states_of_interest
-    elif isinstance(envs[0], GenericEnvQueueWithJobClasses):
+    elif isinstance(env, GenericEnvQueueWithJobClasses):
         # TODO: (2023/09/06) Try to remove the circular import that this import implies (because simulators.queues imports functions or constants from this file (e.g. BURNIN_TIME_STEPS)
         from Python.lib.simulators.queues import get_blocking_states_or_buffer_sizes
         # TODO: (2023/03/12) When using the linear step policy, limit the states of interests to those where the derivative is not zero, as we don't need to estimate the probability of the other blocking states (e.g. K-1 is of interest but K is NOT)
-        states_or_buffer_sizes_of_interest = get_blocking_states_or_buffer_sizes(envs[0], agent)
-    elif isinstance(envs[0], EnvironmentDiscrete):
+        states_or_buffer_sizes_of_interest = get_blocking_states_or_buffer_sizes(env, agent)
+    elif isinstance(env, EnvironmentDiscrete):
         # For discrete-time/state/action environments, for now (2023/09/04) we consider that the states of interest are the TERMINAL states
         # Note that this will give an empty set of states if the environment doesn't have any terminal states!
-        states_or_buffer_sizes_of_interest = envs[0].getTerminalStates()
+        states_or_buffer_sizes_of_interest = env.getTerminalStates()
     else:
-        raise ValueError("The environment type is not valid: {}".format(type(envs[0])) +
+        raise ValueError("The environment type is not valid: {}".format(type(env)) +
                          "\nValid environments are: GenericEnvQueueWithJobClasses, EnvironmentDiscrete")
 
     if len(states_or_buffer_sizes_of_interest) == 0:
@@ -88,7 +92,11 @@ def initialize_phi(envs, agent, t: float = 0.0, states_of_interest: set=set()):
 
     dict_phi = dict()
     for x in states_or_buffer_sizes_of_interest:
-        dict_phi[x] = pd.DataFrame([[t, empirical_mean(envs, x)]], columns=['t', 'Phi'])
+        if envs is not None:
+            assert isinstance(envs, list) and len(envs) > 0, "The list parameter `envs` is not empty"
+            dict_phi[x] = pd.DataFrame([[t, empirical_mean(envs, x)]], columns=['t', 'Phi'])
+        else:
+            dict_phi[x] = pd.DataFrame([[t, 0.0]], columns=['t', 'Phi'])
 
     return dict_phi
 

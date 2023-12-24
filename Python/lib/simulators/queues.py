@@ -4014,7 +4014,7 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
 
     # Phi(t, x): Empirical probability of the states or buffer sizes of interest (x)
     # at each time t when a variation in Phi(t, x) is observed.
-    dict_phi = initialize_phi(envs, agent, t=event_times[0])
+    dict_phi = initialize_phi(envs[0], envs=envs, agent=agent, t=event_times[0])
 
     # Time step in the queue trajectory (the first time step is t = 0)
     done = False
