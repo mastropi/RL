@@ -21,7 +21,7 @@ from enum import Enum, unique
 import numpy as np
 import pandas as pd
 
-from Python.lib.agents.learners import LearningCriterion, ResetMethod
+from Python.lib.agents.learners import LearningCriterion, LearningTask, ResetMethod
 from Python.lib.agents.learners.episodic.discrete import Learner, AlphaUpdateType
 from Python.lib.agents.learners.value_functions import ActionValueFunctionApprox, StateValueFunctionApprox
 
@@ -49,24 +49,23 @@ class LeaMCLambda(Learner):
         The discrete-(state, action) environment where the learning takes place.
     """
 
-    def __init__(self, env, criterion=LearningCriterion.DISCOUNTED, alpha=0.1, gamma=1.0, lmbda=0.8,
+    def __init__(self, env, criterion=LearningCriterion.DISCOUNTED, task=LearningTask.EPISODIC, alpha=0.1, gamma=1.0, lmbda=0.8,
                  adjust_alpha=False, alpha_update_type=AlphaUpdateType.FIRST_STATE_VISIT,
                  adjust_alpha_by_episode=False, alpha_min=0., func_adjust_alpha=None,
                  reset_method=ResetMethod.ALLZEROS, reset_params=None, reset_seed=None,
                  store_history_over_all_episodes=False,
                  learner_type=LearnerType.MC,
                  debug=False):
-        super().__init__(env, criterion=criterion, alpha=alpha, adjust_alpha=adjust_alpha, alpha_update_type=alpha_update_type,
+        super().__init__(env, criterion=criterion, task=task, alpha=alpha, adjust_alpha=adjust_alpha, alpha_update_type=alpha_update_type,
                          adjust_alpha_by_episode=adjust_alpha_by_episode, alpha_min=alpha_min, func_adjust_alpha=func_adjust_alpha,
                          reset_method=reset_method, reset_params=reset_params, reset_seed=reset_seed,
-                         store_history_over_all_episodes=True if criterion == LearningCriterion.AVERAGE else store_history_over_all_episodes)
+                         store_history_over_all_episodes=True if task == LearningTask.CONTINUING else store_history_over_all_episodes)
         self.debug = debug
 
         # Attributes that MUST be presented for all MC methods
-        if criterion == LearningCriterion.AVERAGE:
-            # Under the average reward criterion, there are NO terminal states
-            # This is important because under the average reward criterion, the value of the terminal state should NOT be set to 0 by the learner,
-            # as it has its own value too!
+        if task == LearningTask.CONTINUING:
+            # For continuing learning tasks, there are NO terminal states, i.e. their value should NOT be set to 0 by the learner,
+            # as they have their own value too!
             self.V = StateValueFunctionApprox(self.env.getNumStates(), {})
             self.Q = ActionValueFunctionApprox(self.env.getNumStates(), self.env.getNumActions(), {})
         else:
@@ -197,10 +196,11 @@ class LeaMCLambda(Learner):
         "Learn the prediction problem (estimate the state value function) using explicitly MC"
         if info.get('update_trajectory', True):
             # We may not want to update the trajectory when learning the value function
-            # (e.g. when learning an episodic task using the average reward criterion, where the episodic task is represented
-            # as a continuing task: in that case, the value functions of the terminal state should be learned but its
-            # state NOT recorded when learning the value functions as it is recorded as the end of the episode below
-            # inside the `done` block --see also discrete.Simulator._run_single() and search for 'LearningCriterion.AVERAGE')
+            # (e.g. when using episodes under a continuing learning task context: in that case, the value functions
+            # of the terminal state are normally learned at the start of the next episode (before updating the state)
+            # and thus the state of the environment and action taken should NOT be recorded because they had already
+            # been recorded at the previous step, when the episode ended (by the `done` block below)
+            # --see also discrete.Simulator._run_single() and search for 'LearningTask.CONTINUING')
             self._update_trajectory(t, state, action, reward)
 
         if done:
@@ -258,6 +258,14 @@ class LeaMCLambda(Learner):
         # so that we can assert that there is at most one update for the first-visit MC algorithm
         n_updates = np.zeros(self.env.getNumStates())
 
+        # Keep track of the accumulated discount which is 1 for the previous to last state,
+        # gamma for the previous to previous-to-last,
+        # gamma^2 for the previous to previous to previous-to-last, and so forth.
+        # This means that the accumulated discount for a time step that is s time steps before the end of the episode
+        # is (1 + gamma + gamma^2 + ... + gamma^(s-1))
+        # This is used as division of the return for the episodic learning task under the average reward criterion
+        discount = 0.0  # We initialize at 0 because we want the discount for the previous to last state S(T-1) to be 1.0 (see update of `discount` in the FOR loop below)
+
         # NOTE: we start at the LATEST state (as opposed to the first) so that we don't
         # need to have a data structure that stores the already visited states in the episode;
         # we trade data structure creation and maintenance with easier algorithmic implementation of
@@ -265,15 +273,21 @@ class LeaMCLambda(Learner):
         for tt in np.arange(T, 0, -1) - 1:     # This is T-1, T-2, ..., 0
             state = self._states[tt]
             action = self._actions[tt]
-            G = self.gamma*G + self._rewards[tt+1]      # This is the reward of going from state `state` observed at time tt to the state observed at the next time tt+1
+            discount = 1 + self.gamma*discount      # The `1 +` corresponds to the discount associated to the reward observed at the currently processed time, when going from tt to tt+1.
+            G = self._rewards[tt+1] + self.gamma*G  # The reward used in this sum is the reward of going from state `state` observed at time tt to the state observed at the next time tt+1
             if self.criterion == LearningCriterion.AVERAGE:
-                # Compute the differential return
-                # Ref: Sutton (2018), pag. 250
-                G -= self.getAverageReward()
+                if self.task == LearningTask.CONTINUING:
+                    # Compute the differential return which is the one used for continuing learning tasks under the average reward criterion
+                    # Ref: Sutton (2018), pag. 250
+                    G -= self.getAverageReward()
+                else:
+                    # The return is defined as the discount-adjusted return (where "adjustment" in this case means "division")
+                    # When the discount factor gamma = 1, this becomes the average reward observed from the current time tt to the end of the episode T.
+                    G /= discount
             # First-visit MC: We only update the value function estimation at the first visit of the state
             if self._states_first_visit_time[state] == tt:
                 delta = G - self.V.getValue(state)
-                if self.criterion == LearningCriterion.AVERAGE:
+                if self.criterion == LearningCriterion.AVERAGE and self.task == LearningTask.CONTINUING:
                     # Compute the differential delta which should be used to update the differential value function
                     # Ref: Sutton (2018), pag. 250
                     delta -= self.getAverageReward()
@@ -302,10 +316,11 @@ class LeaMCLambda(Learner):
         """
         if info.get('update_trajectory', True):
             # We may not want to update the trajectory when learning the value function
-            # (e.g. when learning an episodic task using the average reward criterion, where the episodic task is represented
-            # as a continuing task: in that case, the value functions of the terminal state should be learned but its
-            # state NOT recorded when learning the value functions as it is recorded as the end of the episode below
-            # inside the `done` block --see also discrete.Simulator._run_single() and search for 'LearningCriterion.AVERAGE')
+            # (e.g. when using episodes under a continuing learning task context: in that case, the value functions
+            # of the terminal state are normally learned at the start of the next episode (before updating the state)
+            # and thus the state of the environment and action taken should NOT be recorded because they had already
+            # been recorded at the previous step, when the episode ended (by the `done` block below)
+            # --see also discrete.Simulator._run_single() and search for 'LearningTask.CONTINUING')
             self._update_trajectory(t, state, action, reward)
         self._updateG(t, state, next_state, reward, done)
 
@@ -483,13 +498,13 @@ class LeaMCLambda(Learner):
 
 class LeaMCLambdaAdaptive(LeaMCLambda):
     
-    def __init__(self, env, criterion=LearningCriterion.DISCOUNTED, alpha=0.1, gamma=1.0, lmbda=0.8,
+    def __init__(self, env, criterion=LearningCriterion.DISCOUNTED, task=LearningTask.EPISODIC, alpha=0.1, gamma=1.0, lmbda=0.8,
                  adjust_alpha=False, alpha_update_type=AlphaUpdateType.FIRST_STATE_VISIT,
                  adjust_alpha_by_episode=True, alpha_min=0., func_adjust_alpha=None,
                  reset_method=ResetMethod.ALLZEROS, reset_params=None, reset_seed=None,
                  store_history_over_all_episodes=False,
                  debug=False):
-        super().__init__(env, criterion=criterion, alpha=alpha, gamma=gamma, lmbda=lmbda, adjust_alpha=adjust_alpha, alpha_update_type=alpha_update_type,
+        super().__init__(env, criterion=criterion, task=task, alpha=alpha, gamma=gamma, lmbda=lmbda, adjust_alpha=adjust_alpha, alpha_update_type=alpha_update_type,
                          adjust_alpha_by_episode=adjust_alpha_by_episode, alpha_min=alpha_min, func_adjust_alpha=func_adjust_alpha,
                          reset_method=reset_method, reset_params=reset_params, reset_seed=reset_seed, store_history_over_all_episodes=store_history_over_all_episodes,
                          debug=debug)

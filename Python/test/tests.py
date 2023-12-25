@@ -19,7 +19,7 @@ import matplotlib.pyplot as plt
 from Python.lib.agents.policies import probabilistic
 from Python.lib.environments.gridworlds import EnvGridworld1D_OneTerminalState
 import Python.lib.agents as agents
-from Python.lib.agents.learners import LearningCriterion
+from Python.lib.agents.learners import LearningCriterion, LearningTask
 from Python.lib.agents.learners.episodic.discrete import td, fv
 from Python.lib.simulators.discrete import Simulator as DiscreteSimulator
 import Python.lib.utils.plotting as plotting
@@ -156,7 +156,9 @@ for rep in range(R):
                    'lambda': lmbda,
                    'alpha_min': alpha_min,
                    })
-    learner_td = td.LeaTDLambda(env1d, criterion=learning_criterion,
+    learner_td = td.LeaTDLambda(env1d,
+                                criterion=learning_criterion,
+                                task=LearningTask.CONTINUING if learning_criterion == LearningCriterion.AVERAGE else LearningTask.EPISODIC,
                                 alpha=params['alpha'], gamma=params['gamma'], lmbda=params['lambda'],
                                 adjust_alpha=True, adjust_alpha_by_episode=False,
                                 alpha_min=params['alpha_min'],
@@ -326,7 +328,9 @@ size_vertical = 3; size_horizontal = 4
 #size_vertical = 10; size_horizontal = 30
 env_shape = (size_vertical, size_horizontal) #(3, 4)
 
-start_state_in_absorption_set = False   #False #True
+# (2023/12/25) It's IMPORTANT that the start state be part of the absorption set if we want the value functions estimated by FV
+# converge to a constant, as opposed to diverging negatively. Need to investigate why this happens.
+start_state_in_absorption_set = True   #False #True
 
 if False and env_shape == (3, 4):
     obstacles_set = {} #{2, 5, 11} #{} #{5} #{2,5,11}

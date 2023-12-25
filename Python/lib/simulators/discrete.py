@@ -16,7 +16,7 @@ import numpy as np
 import random       # For a random sample from a set
 from matplotlib import pyplot as plt, cm
 
-from Python.lib.agents.learners import LearningCriterion
+from Python.lib.agents.learners import LearningTask
 from Python.lib.agents.learners.episodic.discrete.fv import LeaFV
 from Python.lib.agents.learners.episodic.discrete.td import LeaTDLambdaAdaptive
 from Python.lib.environments.mountaincars import MountainCarDiscrete
@@ -585,6 +585,11 @@ class Simulator:
 
             # Choose start state from the activation set
             start_state = choose_state_from_set(activation_set, dist_proba_for_start_state)
+            if learner.getLearningTask() == LearningTask.CONTINUING:
+                assert start_state not in env.getTerminalStates(), \
+                    f"The start state of an FV particle ({start_state}) cannot be a terminal state of the environment (terminal states = {env.getTerminalStates()}) for the CONTINUING learning task context." \
+                    f"\nThe reason is that, before getting to a terminal state, there must be at least ONE transition of the particle" \
+                    f" --because we need the `info` dictionary to be defined when processing a terminal state."
             env.setState(start_state)
 
         # Event times: the first event time is 0
@@ -644,23 +649,15 @@ class Simulator:
                     print("___ Particle {} in terminal state {} REINITIALIZED to environment's start state following its initial state distribution: next_state={}" \
                           .format(state, idx_particle, next_state))
 
-                # Learn the value functions for the terminal state when we are using the average reward criterion for learning
-                # because in that case we have a continuing learning task.
-                if learner.getLearningCriterion() == LearningCriterion.AVERAGE:
-                    if estimated_average_reward is not None:
-                        # Store the estimated average reward passed by the user in the `info` dictionary so that it can be used
-                        # by the call to the learn() method below as correction value when learning the value functions under the average reward criterion
-                        info = dict({'average_reward': estimated_average_reward})
-                    # We update just one action for Q and then copy its value to the other Q values
-                    # In fact, all Q-values for the terminal state are the same because all the actions lead to a start state --defined by env.reset())
-                    action_anchor = 0
-                    learner.learn(t, state, action_anchor, next_state, 0.0, False, info)
-                    for _action in range(self.env.getNumActions()):
-                        # TODO: (2023/11/23) Generalize this to any function approximation as the following call to _setWeight() assumes that we are in the tabular case!!
-                        learner.getQ()._setWeight(state, _action, learner.getQ().getValue(state, action_anchor))
-                    # Check that all Q values are the same for the terminal state
-                    for _action in range(self.env.getNumActions()):
-                        assert np.isclose(learner.getQ().getValue(state, _action), learner.getQ().getValue(state, action_anchor)), f"All Q-values are the same for the terminal state {s}:\n{learner.getQ().getValues()}"
+                # Learn the value functions for the terminal state for the continuing learning task case,
+                # because in that case the value of terminal states is NOT defined as 0.
+                if learner.getLearningTask() == LearningTask.CONTINUING:
+                    self.learn_terminal_state_values(t, state, next_state, info)
+                        ## Note: the `info` dictionary is guaranteed to be defined thanks to the assertion
+                        ## at the initialization of the FV particles that asserts they cannot be at a terminal state.
+                        ## Thanks to this condition, when a particle is at a terminal state, it means that it MUST have
+                        ## transitioned from a non-terminal state, and this implies that the `info` dictionary has been
+                        ## defined as the output of such transition.
             else:
                 # Step on the selected particle
                 action = policy.choose_action(state)
@@ -1058,20 +1055,16 @@ class Simulator:
                 # Current state and action on that state leading to the next state
                 state = self.env.getState()
 
-                # For the AVERAGE reward criterion, if this is the first time step of a new episode (t_episode = 0)
+                # For the CONTINUING learning task context, if this is the first time step of a new episode (t_episode = 0)
                 # we need to update the value of the state on which the previous episode ended (as long as episode > 0)
                 # because its value is not necessarily 0!
-                # (as we are in a continuing learning task, and the environment state goes to a start state and the Markov process continues)
-                if t_episode == 0 and episode > 0 and learner.getLearningCriterion() == LearningCriterion.AVERAGE:
-                    # We update just one action for Q and then copy its value to the other Q values
-                    # In fact, all Q-values for the terminal state are the same because all the actions lead to a start state --defined by env.reset())
-                    action_anchor = 0
-                    info['update_trajectory'] = False   # We do not update the trajectory because the trajectory was already updated at the end of the previous episode
-                    learner.learn(t_episode, terminal_state_previous_episode, action_anchor, state, 0.0, False, info)
-                    info.pop('update_trajectory')
-                    for _action in range(self.env.getNumActions()):
-                        # TODO: (2023/11/23) Generalize this to any function approximation as the following call to _setWeight() assumes that we are in the tabular case!!
-                        learner.getQ()._setWeight(terminal_state_previous_episode, _action, learner.getQ().getValue(terminal_state_previous_episode, action_anchor))
+                # (as, in the continuing learning task, the environment state goes to a start state when the episode "terminates"
+                # and the Markov process continues)
+                if t_episode == 0 and episode > 0 and learner.getLearningTask() == LearningTask.CONTINUING:
+                    self.learn_terminal_state_values(t_episode, terminal_state_previous_episode, state, info)
+                        ## Note: the `info` dictionary is guaranteed to be defined because we call this method
+                        ## only after one episode has been run. Therefore the `info` dictionary has been
+                        ## defined as the output of the transition leading to the end of the previous episode.
                 #-- Update the values of the terminal state (when the average reward criterion is used)
 
                 action = policy.choose_action(state)
@@ -1464,6 +1457,37 @@ class Simulator:
         ntimes_rmse_inside_ci95 = 0
 
         return V, RMSE, MAPE, ntimes_rmse_inside_ci95
+
+    def learn_terminal_state_values(self, t, terminal_state, next_state, info):
+        """
+        Learns the state and action values for the terminal state in the continuing learning task context
+
+        The action values are set to the same value for all actions, because all actions lead to an environment's start state,
+        which is the state chosen after the agent reaches a terminal state, in order to continue with its learning task.
+        """
+        learner = self.agent.getLearner()
+
+        # We update just one action for Q and then copy its value to the other Q values
+        # In fact, all Q-values for the terminal state are the same because all the actions lead to a start state --defined by env.reset())
+        action_anchor = 0
+
+        # Learn
+        if t == 0:
+            # We are learning the values of the terminal state at the start of an episode
+            # => Do not update the trajectory because the trajectory was already updated at the end of the previous episode
+            info['update_trajectory'] = False
+        learner.learn(t, terminal_state, action_anchor, next_state, 0.0, False, info)
+        if t == 0:
+            info.pop('update_trajectory')
+
+        # Copy the Q-value just learned for the anchor action to the Q-value of the other possible actions
+        for _action in range(self.env.getNumActions()):
+            # TODO: (2023/11/23) Generalize this update of the Q-value to ANY function approximation as the following call to _setWeight() assumes that we are in the tabular case!!
+            learner.getQ()._setWeight(terminal_state, _action, learner.getQ().getValue(terminal_state, action_anchor))
+        # Check that all Q values are the same for the terminal state
+        for _action in range(self.env.getNumActions()):
+            assert np.isclose(learner.getQ().getValue(terminal_state, _action), learner.getQ().getValue(terminal_state, action_anchor)), \
+                f"All Q-values are the same for the terminal state {terminal_state}:\n{learner.getQ().getValues()}"
 
     def simulate(self, nexperiments, nepisodes, max_time_steps_per_episode=None, compute_rmse=True, weights_rmse=None,
                  verbose=False, verbose_period=1, verbose_convergence=False, plot=False):

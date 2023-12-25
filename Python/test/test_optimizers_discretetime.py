@@ -25,7 +25,7 @@ from torch import nn
 
 import Python.lib.agents as agents
 
-from Python.lib.agents.learners import LearningCriterion, ResetMethod
+from Python.lib.agents.learners import LearningCriterion, LearningTask, ResetMethod
 from Python.lib.agents.learners.episodic.discrete import fv, td
 
 from Python.lib.agents.policies.parameterized import PolNN
@@ -173,7 +173,9 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
         cls.reset_params = dict({'min': -1, 'max': +1})
 
         # TD(lambda) learner
-        learner_tdlambda = td.LeaTDLambda(cls.env2d, criterion=learning_criterion,
+        learner_tdlambda = td.LeaTDLambda(cls.env2d,
+                                          criterion=learning_criterion,
+                                          task=LearningTask.CONTINUING if learning_criterion == LearningCriterion.AVERAGE else LearningTask.EPISODIC,
                                           gamma=gamma,
                                           lmbda=lmbda,
                                           alpha=cls.alpha,
@@ -191,19 +193,21 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
         cls.sim_td = DiscreteSimulator(cls.env2d, cls.agent_nn_td, debug=False)
 
         # Adaptive TD(lambda) learner
-        learner_tdlambda_adap = td.LeaTDLambdaAdaptive(cls.env2d, criterion=learning_criterion,
-                                          gamma=gamma,
-                                          alpha=cls.alpha,
-                                          adjust_alpha=True,
-                                          adjust_alpha_by_episode=False,
-                                          alpha_min=cls.alpha_min,
-                                          store_history_over_all_episodes=(learning_criterion == LearningCriterion.AVERAGE),
-                                            ## We set the trajectory history storage to True when we are learning using the average reward criterion
-                                            ## because in that case the average reward comes from the average reward observed over all episodes altogether.
-                                            ## NOTE HOWEVER that we do NOT need to set this value because the parameter is set to True
-                                            ## by the constructor of the TD learner when the learning criterion is the average reward
-                                          reset_method=cls.reset_method, reset_params=cls.reset_params, reset_seed=cls.seed,
-                                          debug=cls.debug)
+        learner_tdlambda_adap = td.LeaTDLambdaAdaptive( cls.env2d,
+                                                        criterion=learning_criterion,
+                                                        task=LearningTask.CONTINUING if learning_criterion == LearningCriterion.AVERAGE else LearningTask.EPISODIC,
+                                                        gamma=gamma,
+                                                        alpha=cls.alpha,
+                                                        adjust_alpha=True,
+                                                        adjust_alpha_by_episode=False,
+                                                        alpha_min=cls.alpha_min,
+                                                        store_history_over_all_episodes=(learning_criterion == LearningCriterion.AVERAGE),
+                                                            ## We set the trajectory history storage to True when we are learning using the average reward criterion
+                                                            ## because in that case the average reward comes from the average reward observed over all episodes altogether.
+                                                            ## NOTE HOWEVER that we do NOT need to set this value because the parameter is set to True
+                                                            ## by the constructor of the TD learner when the learning criterion is the average reward
+                                                        reset_method=cls.reset_method, reset_params=cls.reset_params, reset_seed=cls.seed,
+                                                        debug=cls.debug)
         cls.agent_nn_tda = agents.GenericAgent(cls.policy_nn, learner_tdlambda_adap)
         cls.sim_tda = DiscreteSimulator(cls.env2d, cls.agent_nn_tda, debug=False)
 

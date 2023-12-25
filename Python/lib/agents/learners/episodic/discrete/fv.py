@@ -9,7 +9,7 @@ Created on Tue Sep 05 15:04:22 2023
 import numpy as np
 import pandas as pd
 
-from Python.lib.agents.learners import AlphaUpdateType, LearningCriterion, ResetMethod
+from Python.lib.agents.learners import AlphaUpdateType, LearningCriterion, LearningTask, ResetMethod
 from Python.lib.agents.learners.episodic.discrete.td import LeaTDLambda, LeaTDLambdaAdaptive
 from Python.lib.estimators.fv import initialize_phi, update_phi
 
@@ -82,7 +82,7 @@ class LeaFV(LeaTDLambda):
                  reset_method=ResetMethod.ALLZEROS, reset_params=None, reset_seed=None,
                  TIME_RESOLUTION=1E-9,
                  debug=False):
-        super().__init__(env, criterion=criterion, alpha=alpha,  gamma=gamma, lmbda=lmbda, adjust_alpha=adjust_alpha,
+        super().__init__(env, criterion=criterion, task=LearningTask.CONTINUING, alpha=alpha,  gamma=gamma, lmbda=lmbda, adjust_alpha=adjust_alpha,
                          alpha_update_type=alpha_update_type, adjust_alpha_by_episode=adjust_alpha_by_episode,
                          alpha_min=alpha_min,
                          store_history_over_all_episodes=True,

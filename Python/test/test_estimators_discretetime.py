@@ -21,7 +21,7 @@ from Python.lib.estimators import miscellanea as estimators_miscellanea
 
 import Python.lib.agents as agents
 from Python.lib.agents import GenericAgent
-from Python.lib.agents.learners import LearningCriterion, ResetMethod
+from Python.lib.agents.learners import LearningCriterion, LearningTask, ResetMethod
 from Python.lib.agents.learners.episodic.discrete import fv, mc, td, AlphaUpdateType
 from Python.lib.agents.policies import probabilistic, random_walks
 
@@ -707,6 +707,7 @@ class Test_EstDifferentialValueV_EnvGridworlds(unittest.TestCase, test_utils.Epi
 
         # The learning criterion and discount factor
         cls.learning_criterion = LearningCriterion.DISCOUNTED
+        cls.learning_task = LearningTask.EPISODIC
         cls.gamma = 0.9
 
         # True state differential value functions for the optimal policy
@@ -739,7 +740,9 @@ class Test_EstDifferentialValueV_EnvGridworlds(unittest.TestCase, test_utils.Epi
                        'lambda': 0.7,
                        'alpha_min': 0.0,
                        })
-        learner_td = td.LeaTDLambda(self.env1d, criterion=self.learning_criterion,
+        learner_td = td.LeaTDLambda(self.env1d,
+                                    criterion=self.learning_criterion,
+                                    task=self.learning_task,
                                     alpha=params['alpha'], gamma=params['gamma'], lmbda=params['lambda'],
                                     alpha_update_type=AlphaUpdateType.EVERY_STATE_VISIT,
                                     adjust_alpha=True, adjust_alpha_by_episode=False,
@@ -1027,7 +1030,10 @@ class Test_EstDifferentialStateValueV_EnvGridworldsWithObstacles(unittest.TestCa
         cls.nepisodes = 100
 
         # Monte-Carlo learner
-        learner_mclambda = mc.LeaMCLambda(cls.env2d, criterion=LearningCriterion.AVERAGE, alpha=1.0,
+        learner_mclambda = mc.LeaMCLambda(cls.env2d,
+                                          criterion=LearningCriterion.AVERAGE,
+                                          task=LearningTask.CONTINUING,
+                                          alpha=1.0,
                                           gamma=1.0,
                                           adjust_alpha=True,
                                           adjust_alpha_by_episode=False,
@@ -1039,7 +1045,10 @@ class Test_EstDifferentialStateValueV_EnvGridworldsWithObstacles(unittest.TestCa
         cls.sim_mc = DiscreteSimulator(cls.env2d, cls.agent_rw_mc, debug=False)
 
         # TD(lambda) learner
-        learner_tdlambda = td.LeaTDLambda(cls.env2d, criterion=LearningCriterion.AVERAGE, alpha=1.0,
+        learner_tdlambda = td.LeaTDLambda(cls.env2d,
+                                          criterion=LearningCriterion.AVERAGE,
+                                          task=LearningTask.CONTINUING,
+                                          alpha=1.0,
                                           gamma=1.0, lmbda=0.0,
                                           adjust_alpha=True,
                                           func_adjust_alpha=np.sqrt,

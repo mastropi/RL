@@ -31,7 +31,7 @@ from enum import Enum, unique
 import numpy as np
 
 from Python.lib.environments import EnvironmentDiscrete
-from Python.lib.agents.learners import GenericLearner, LearningCriterion, ResetMethod
+from Python.lib.agents.learners import GenericLearner, LearningCriterion, LearningTask, ResetMethod
 
 MIN_EPISODE = 1  # Minimum episode count to start shrinking alpha
 MAX_EPISODE_FOR_ALPHA_MIN = None  # Maximum episode on which the minimum alpha value is applied, before continuing to decrease alpha again further (from the alpha value observed at the MAX_EPISODE_FOR_ALPHA_MIN episode)
@@ -55,7 +55,10 @@ class Learner(GenericLearner):
     and once prior to the first simulation, making e.g. the episode method be equal to 2 at
     the first simulation as opposed to the correct value 1.
     """
-    def __init__(self, env, criterion: LearningCriterion=LearningCriterion.DISCOUNTED, alpha: float=1.0,
+    def __init__(self, env,
+                 criterion: LearningCriterion=LearningCriterion.DISCOUNTED,
+                 task: LearningTask=LearningTask.EPISODIC,
+                 alpha: float=1.0,
                  adjust_alpha=False, alpha_update_type=AlphaUpdateType.FIRST_STATE_VISIT, adjust_alpha_by_episode=False,
                  func_adjust_alpha=None,
                  alpha_min=0.,
@@ -71,6 +74,10 @@ class Learner(GenericLearner):
         criterion: (opt) LearningCriterion
             See documentation of the super class.
             default: LearningCriterion.DISCOUNTED
+
+        task: (opt) LearningTask
+            See documentation of the super class.
+            default: LearningTask.EPISODIC
 
         alpha: (opt) positive float
             See documentation of the super class.
@@ -137,7 +144,7 @@ class Learner(GenericLearner):
         #        if not isinstance(alpha_update_type, AlphaUpdateType):
         #            raise TypeError("The alpha_update_type of learner must be of type {} from the {} module ({})" \
         #                            .format(AlphaUpdateType.__name__, AlphaUpdateType.__module__, alpha_update_type.__class__))
-        super().__init__(env, criterion=criterion, alpha=alpha, adjust_alpha=adjust_alpha, func_adjust_alpha=func_adjust_alpha, alpha_min=alpha_min,
+        super().__init__(env, criterion=criterion, task=task, alpha=alpha, adjust_alpha=adjust_alpha, func_adjust_alpha=func_adjust_alpha, alpha_min=alpha_min,
                          min_count_to_update_alpha=min_count_to_update_alpha, min_time_to_update_alpha=min_time_to_update_alpha)
         self.alpha_update_type = alpha_update_type
         self.adjust_alpha_by_episode = adjust_alpha_by_episode

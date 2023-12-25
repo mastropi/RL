@@ -12,7 +12,7 @@ from enum import Enum, unique
 import numpy as np
 from matplotlib import pyplot as plt, cm
 
-from Python.lib.agents.learners import LearningCriterion, ResetMethod
+from Python.lib.agents.learners import LearningCriterion, LearningTask, ResetMethod
 from Python.lib.agents.learners.episodic.discrete import Learner, AlphaUpdateType
 from Python.lib.agents.learners.value_functions import ActionValueFunctionApprox, StateValueFunctionApprox
 import Python.lib.utils.plotting as plotting
@@ -48,23 +48,35 @@ class LeaTDLambda(Learner):
         default: False
     """
 
-    def __init__(self, env, criterion=LearningCriterion.DISCOUNTED, alpha=0.1, gamma=1.0, lmbda=0.8,
+    def __init__(self, env, criterion=LearningCriterion.DISCOUNTED, task=LearningTask.EPISODIC, alpha=0.1, gamma=1.0, lmbda=0.8,
                  adjust_alpha=False, alpha_update_type=AlphaUpdateType.EVERY_STATE_VISIT,
                  adjust_alpha_by_episode=False, alpha_min=0., func_adjust_alpha=None,
                  reset_method=ResetMethod.ALLZEROS, reset_params=None, reset_seed=None,
                  store_history_over_all_episodes=False,
                  debug=False):
-        super().__init__(env, criterion=criterion, alpha=alpha, adjust_alpha=adjust_alpha, alpha_update_type=alpha_update_type,
+        super().__init__(env, criterion=criterion, task=task, alpha=alpha, adjust_alpha=adjust_alpha, alpha_update_type=alpha_update_type,
                          adjust_alpha_by_episode=adjust_alpha_by_episode, alpha_min=alpha_min, func_adjust_alpha=func_adjust_alpha,
                          reset_method=reset_method, reset_params=reset_params, reset_seed=reset_seed,
-                         store_history_over_all_episodes=True if criterion == LearningCriterion.AVERAGE else store_history_over_all_episodes)
+                         store_history_over_all_episodes=True if task == LearningTask.CONTINUING else store_history_over_all_episodes)
         self.debug = debug
 
+        # Ensure that the DISCOUNTED reward criterion has been passed for EPISODIC learning tasks
+        # The reason for this check is that it is NOT possible to use TD to learn the AVERAGE reward value functions
+        # (whose *state* value function is defined as V(x) = E[ sum(rewards until episode end) / T | X(0) = x ])
+        # because TD learning relies on the Bellman equation and we cannot write the Bellman equation in this average reward
+        # context because T is NOT known at the first transition step from t=0 to t=1,
+        # which is how we build the Bellman equation, i.e. by splitting the value function definition into the first
+        # reward observed when transition from t=0 to t=1 and the rest is re-branded as the value of the next state, V(X(1)).
+        if task == LearningTask.EPISODIC and criterion == LearningCriterion.AVERAGE:
+            # When the learning tasks are either EPISODIC or CONTINUING (which is the case at the moment of this writing (2023/12/25),
+            # raising a value error for the above condition is equivalent to the following (more intuitive) condition that must be satisfied:
+            # AVERAGE reward criterion => CONTINUING learning task
+            raise ValueError("The EPISODIC learning task in TD learning requires the DISCOUNTED reward criterion, however the AVERAGE reward criterion was specified)")
+
         # Attributes that MUST be present for all TD methods
-        if criterion == LearningCriterion.AVERAGE:
-            # Under the average reward criterion, there are NO terminal states
-            # This is important because under the average reward criterion, the value of the terminal state should NOT be set to 0 by the learner.
-            # as it has its own value too!
+        if task == LearningTask.CONTINUING:
+            # For continuing learning tasks, there are NO terminal states, i.e. their value should NOT be set to 0 by the learner,
+            # as they have their own value too!
             self.V = StateValueFunctionApprox(self.env.getNumStates(), {})
             self.Q = ActionValueFunctionApprox(self.env.getNumStates(), self.env.getNumActions(), {})
         else:
@@ -109,10 +121,11 @@ class LeaTDLambda(Learner):
     def learn(self, t, state, action, next_state, reward, done, info):
         if info.get('update_trajectory', True):
             # We may not want to update the trajectory when learning the value function
-            # (e.g. when learning an episodic task using the average reward criterion, where the episodic task is represented
-            # as a continuing task: in that case, the value functions of the terminal state should be learned but its
-            # state NOT recorded when learning the value functions as it is recorded as the end of the episode below
-            # inside the `done` block --see also discrete.Simulator._run_single() and search for 'LearningCriterion.AVERAGE')
+            # (e.g. when using episodes under a continuing learning task context: in that case, the value functions
+            # of the terminal state are normally learned at the start of the next episode (before updating the state)
+            # and thus the state of the environment and action taken should NOT be recorded because they had already
+            # been recorded at the previous step, when the episode ended (by the `done` block below)
+            # --see also discrete.Simulator._run_single() and search for 'LearningTask.CONTINUING')
             self._update_trajectory(t, state, action, reward)  # This method belongs to the Learner super class defined in learners.episodic.discrete
 
         # Compute the delta values used for the update of each value function
@@ -177,9 +190,11 @@ class LeaTDLambda(Learner):
         delta_V = reward + self.gamma * self.V.getValue(next_state) - self.V.getValue(state)
         delta_Q = reward + self.gamma * self._expected_next_Q(next_state) - self.Q.getValue(state, action)
 
-        # Check whether we are learning the differential value function (average reward criterion) and adjust delta accordingly
+        # Check whether we are learning the differential value function
+        # (average reward criterion for the continuing learning task context) and adjust delta accordingly
         # Ref: Sutton, pag. 250
         if self.criterion == LearningCriterion.AVERAGE:
+            # Recall that in the LeaTD constructor we have checked that AVERAGE reward criterion => CONTINUING learning task
             if info.get('average_reward') is not None:
                 average_reward_correction = info.get('average_reward')
             else:
@@ -295,17 +310,17 @@ class LeaTDLambda(Learner):
 
 class LeaTDLambdaAdaptive(LeaTDLambda):
     
-    def __init__(self, env, criterion=LearningCriterion.DISCOUNTED, alpha=0.1, gamma=1.0, lmbda=0.8,
+    def __init__(self, env, criterion=LearningCriterion.DISCOUNTED, task=LearningTask.EPISODIC, alpha=0.1, gamma=1.0, lmbda=0.8,
                  adjust_alpha=False, alpha_update_type=AlphaUpdateType.EVERY_STATE_VISIT,
                  adjust_alpha_by_episode=True, alpha_min=0., func_adjust_alpha=None,
                  lambda_min=0., lambda_max=0.99, adaptive_type=AdaptiveLambdaType.ATD,
                  reset_method=ResetMethod.ALLZEROS, reset_params=None, reset_seed=None,
                  store_history_over_all_episodes=False,
                  burnin=False, plotwhat="boxplots", fontsize=15, debug=False):
-        super().__init__(env, criterion=criterion, alpha=alpha, gamma=gamma, lmbda=lmbda, adjust_alpha=adjust_alpha, alpha_update_type=alpha_update_type,
+        super().__init__(env, criterion=criterion, task=task, alpha=alpha, gamma=gamma, lmbda=lmbda, adjust_alpha=adjust_alpha, alpha_update_type=alpha_update_type,
                          adjust_alpha_by_episode=adjust_alpha_by_episode, alpha_min=alpha_min, func_adjust_alpha=func_adjust_alpha,
                          reset_method=reset_method, reset_params=reset_params, reset_seed=reset_seed,
-                         store_history_over_all_episodes=True if criterion == LearningCriterion.AVERAGE else store_history_over_all_episodes,
+                         store_history_over_all_episodes=True if task == LearningTask.CONTINUING else store_history_over_all_episodes,
                          debug=debug)
         
         # List that keeps the history of ALL lambdas used at EVERY TIME STEP

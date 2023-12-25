@@ -43,13 +43,28 @@ class LearnerTypes(Enum):
 @unique
 class LearningCriterion(Enum):
     """
-    Whether the learning criterion is the discounted return (episodic tasks) or the average reward (continuous tasks)
+    Whether the learning criterion is the discounted return, the average reward, or the total reward
 
     When learning is by the average criterion, the value functions learned are the *bias* or *difference* values.
     Ref: Sutton (2018), pag. 250
+
+    Values are sorted by what is deemed "most to least common scenario".
     """
     DISCOUNTED = 1
     AVERAGE = 2
+    TOTAL = 3
+
+@unique
+class LearningTask(Enum):
+    """
+    Whether the learning task is episodic (i.e. learning happens in episodes of finite length T) or
+    continuing (i.e. learning happens continuously until a maximum number of steps is observed, or until
+    the estimation of the value functions has reached an accepted error).
+
+    Values are sorted by what is deemed "most to least common scenario".
+    """
+    EPISODIC = 1
+    CONTINUING = 2
 
 # Identity function: used to define the default transformation function of the counter (n) that adjusts alpha
 identity = lambda x: x
@@ -67,7 +82,10 @@ class GenericLearner:
     and once prior to the first simulation.
     """
 
-    def __init__(self, env, criterion=LearningCriterion.DISCOUNTED, alpha: float=1.0,
+    def __init__(self, env,
+                 criterion=LearningCriterion.DISCOUNTED,
+                 task=LearningTask.EPISODIC,
+                 alpha: float=1.0,
                  adjust_alpha=False,
                  func_adjust_alpha=None,
                  min_count_to_update_alpha=0, min_time_to_update_alpha=0,
@@ -83,6 +101,11 @@ class GenericLearner:
             The criterion used to learn the value functions, either DISCOUNTED (for episodic tasks with discount factor gamma < 1)
             or AVERAGE, for the average reward criterion (for continuing tasks, with discount factor gamma = 1).
             default: LearningCriterion.DISCOUNTED
+
+        task: (opt) LearningTask
+            Type of learning task as defined in the LearningTask enum class.
+            Typical alternatives are "episodic learning task" and "continuing learning task".
+            default: LearningTask.EPISODIC
 
         alpha: (opt) positive float
             Initial learning rate.
@@ -108,6 +131,7 @@ class GenericLearner:
         """
         self.env = env
         self.criterion = criterion
+        self.task = task
         self.alpha = alpha is None and 1.0 or alpha          # Initial and maximum learning rate
         self.adjust_alpha = adjust_alpha is None and False or adjust_alpha
 
@@ -386,6 +410,10 @@ class GenericLearner:
     def getLearningCriterion(self):
         "Returns the learning criterion, i.e. one of the possible values of LearningCriterion enum (e.g. AVERAGE, DISCOUNTED)"
         return self.criterion
+
+    def getLearningTask(self):
+        "Returns the learning task type, i.e. one of the possible values of LearningTask enum (e.g. CONTINUING, EPISODIC)"
+        return self.task
 
     def getLearningEpoch(self):
         "Returns the number of epochs at which learning took place according to the learning epoch attribute"
