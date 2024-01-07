@@ -188,11 +188,12 @@ class Learner(GenericLearner):
         Resets the variables that store information about the episode
 
         Parameters:
-        reset_episode: bool, optional
-            Whether to reset the episode to the first one.
+        reset_episode: (opt) bool
+            Whether to reset the episode to the first one, which includes resetting
+            all measures that are tracked by episode (e.g. alpha_mean_by_episode).
 
-        reset_value_functions: bool, optional
-            Whether to reset all the value functions to their initial estimates as well.
+        reset_value_functions: (opt) bool
+            Whether to reset all the value functions to their initial estimates (e.g. all zeros or a random value).
         """
         if reset_episode:
             self._reset_at_start_of_first_episode()

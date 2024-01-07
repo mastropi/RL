@@ -157,7 +157,7 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
         # Number of states and actions
         self.nS = self.nx * self.nv
         self.nA = self.action_space.n
-        self.all_states = list(range(self.nS))
+        self.all_states = list(np.arange(self.nS))
 
         # In case we need to have all possible (x, v) indices indexing the discrete position and velocity
         # We can go from 2D indices to 1D indices and viceversa using respectively the following functions

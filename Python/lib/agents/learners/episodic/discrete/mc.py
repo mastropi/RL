@@ -509,7 +509,7 @@ class LeaMCLambdaAdaptive(LeaMCLambda):
                          reset_method=reset_method, reset_params=reset_params, reset_seed=reset_seed, store_history_over_all_episodes=store_history_over_all_episodes,
                          debug=debug)
 
-        # Arrays that keep track of previous _rewards for each state
+        # Arrays that keep track of previous rewards for each state
         self.all_states = np.arange(self.env.getNumStates())
         self.state_rewards = np.zeros(self.env.getNumStates())
         self.state_counts = np.zeros(self.env.getNumStates())

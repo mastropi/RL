@@ -1136,24 +1136,24 @@ class Test_EstDifferentialStateValueV_EnvGridworldsWithObstacles(unittest.TestCa
         # as the particles reach a terminal state --in which case they are restarted inside A, e.g. at the START of the labyrinth).
         # The maximum number of particles in the system is N.
         cls.expected_fv_V = np.array(
-                            [ 0.041133,  0.192634, 0.438520, -0.043297,
-                             -0.025020,  0.000000, 0.258838, 0.404630,
-                             -0.030753, -0.025340, 0.077206, 0.141128])
+                            [ 0.092214,  0.234230, 0.471784, -0.043621,
+                              0.004099,  0.000000, 0.323143,  0.487401,
+                             -0.030753, -0.008305, 0.149249,  0.245818])
         # (2023/12/18) The expected action value function seems reasonable in terms of what action is better at each state to reach the terminal state at the upper-right cell of the labyrinth
-        cls.expected_fv_Q = np.array(                                                               # THESE MEANS SHOULD BE SIMILAR TO V(s) --> OK: fair enough
-                           [[4.252953240e-03,  7.77383110e-02, -2.34962512e-02,  4.80266647e-03],   # mean =  0.015
-                            [1.018938860e-01,  2.92346584e-01,  1.08446459e-01,  1.09342454e-02],   # mean =  0.128
-                            [2.942654850e-01,  5.48948489e-01,  1.74552316e-01,  1.35763862e-01],   # mean =  0.288
-                            [-4.32968161e-02, -4.32968161e-02, -4.32968161e-02, -4.32968161e-02],   # mean = -0.043
-                            [6.631574650e-04, -2.06023013e-02, -2.15267823e-02, -2.06500217e-02],   # mean = -0.016
-                            [0.000000000e+00,  0.00000000e+00,  0.00000000e+00,  0.00000000e+00],
-                            [3.893583590e-01,  3.61611293e-01,  1.52789889e-01,  2.90651483e-01],   # mean =  0.299
-                            [6.648148070e-01,  2.91672438e-01,  1.10824843e-01,  2.06506777e-01],   # mean =  0.318
-                            [-1.24205162e-02, -1.33566731e-02, -1.29637330e-02, -1.33208067e-02],   # mean = -0.013
-                            [-3.04350937e-02, -4.27835375e-03, -2.95514033e-02, -2.98109214e-02],   # mean = -0.024
-                            [1.587598240e-01,  6.15257810e-02,  5.38092918e-02,  9.51850222e-03],   # mean =  0.071
-                            [1.990794970e-01,  4.61921906e-02,  4.64391721e-02,  3.25838511e-02]])  # mean =  0.081
-        cls.expected_fv_average_reward = 0.022128
+        cls.expected_fv_Q = np.array(                                               # THESE MEANS SHOULD BE OF THE ORDER OF V(s) (however, the proper average to compute is the average weighted by the policy!) --> OK: fair enough
+                            [[ 0.06185371,  0.19179618, -0.00720363,  0.07130895],  # mean =  0.007
+                             [ 0.19586034,  0.38166976,  0.17723390,  0.06879540],  # mean =  0.206
+                             [ 0.42970693,  0.66943303,  0.24375542,  0.19180358],  # mean =  0.384
+                             [-0.04362085, -0.04362085, -0.04362085, -0.04362085],  # mean = -0.043
+                             [ 0.06097616, -0.01111019, -0.03101703, -0.01222373],  # mean =  0.016
+                             [         0.,          0.,          0.,          0.],
+                             [ 0.41073940,  0.43329672,  0.14058080,  0.31024694],  # mean =  0.324
+                             [0.821184490,  0.41928026,  0.19513462,  0.27629028],  # mean =  0.428
+                             [-0.01242052, -0.01335667, -0.01296373, -0.01332081],  # mean = -0.013
+                             [-0.04648120,  0.02379920, -0.03263805, -0.04153549],  # mean = -0.024
+                             [ 0.23983328,  0.10002997,  0.07757519, -0.03134359],  # mean =  0.097
+                             [ 0.36555816,  0.15019674,  0.14849494,  0.06301374]]) # mean =  0.182
+        cls.expected_fv_average_reward = 0.022148
         cls.expected_fv_cycle_time = 9.4327
         cls.expected_fv_n_cycles = 104
 

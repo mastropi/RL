@@ -1152,6 +1152,10 @@ class LeaActorCriticNN(GenericLearner):
                 #state_value = self.learner_value_functions.getV().getValue(state)
 
                 # Update loss
+                # IMPORTANT: Since the action_distribution() function computes the distribution of actions using
+                # probability distributions implemented by the torch package (e.g. F.sofmax()),
+                # `loss` becomes of type `tensor` which is the required type needed to be able to compute its derivative
+                # using loss.backward() below.
                 advantage = action_value - state_value
                 logprob = action_distribution.log_prob(torch.tensor(action))
                 if np.random.uniform() <= prob_include_in_train:

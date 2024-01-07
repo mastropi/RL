@@ -187,11 +187,11 @@ class GenericLearner:
 
         # Learning epoch and learning rate at that epoch
         self._t = 0              # Int: this value is expected to be updated by the user, whenever learning takes place
-        self._alpha = self.alpha # Float: current learning rate (at the learning time `self._t`)
+        self._alpha = self.alpha # Float: current learning rate (at the learning time `self._t`), REGARDLESS of the state and action the process has just visited.
 
         # Information about the historical learning rates
-        self.alpha_mean = []    # Average alpha
-        self.alphas = []        # List of alphas used during the learning process.
+        self.alpha_mean = []    # Average alpha. This is currently (2024/01/06) NOT used.
+        self.alphas = []        # List of alphas used during the learning process, i.e. one alpha value is stored for EVERY transition carried out by the process, REGARDLESS of the state and action the process has just visited.
 
     def reset(self, reset_learning_epoch=True, reset_alphas=True, reset_value_functions=True, reset_trajectory=True, reset_counts=True):
         """

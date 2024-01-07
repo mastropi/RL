@@ -13,8 +13,6 @@ in particular the file main/tools_nn.py where he defines a Q neural network.
 """
 
 
-
-
 import torch
 from torch import nn
 import torch.nn.functional as F

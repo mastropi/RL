@@ -139,13 +139,6 @@ class Simulator:
         self.agent = agent
         self.seed = seed
 
-        self.reset()
-
-    def reset(self, reset_episode=True, reset_value_functions=True):
-        "Resets the simulator"
-        # Reset the learner to the first episode state
-        self.agent.getLearner().reset(reset_episode=reset_episode, reset_value_functions=reset_value_functions)
-
     def close(self):
         if self.fh_log is not None:
             self.fh_log.close()
@@ -253,7 +246,7 @@ class Simulator:
             Dictionary containing information to display or parameters to deal with the information to display.
             Accepted keys are:
             - verbose: whether to be verbose during the simulation.
-            - verbose_period: the number of iterations (of what?) at which to be verbose.
+            - verbose_period: the number of simulation time steps at which to be verbose.
             - t_learn: the number of learning steps, when FV is used in the context of FVRL, i.e. to learn an optimum policy
             This is ONLY used for informational purposes, i.e. to show which stage of the policy learning we are at.
 
@@ -408,7 +401,7 @@ class Simulator:
             self.agent.getLearner().setAverageReward(expected_reward)
 
             if True or DEBUG_ESTIMATORS or show_messages(dict_params_info.get('verbose', False),
-                                                 dict_params_info.get('verbose_period', False),
+                                                 dict_params_info.get('verbose_period', 1),
                                                  dict_params_info.get('t_learn', 0)):
                 # import pandas as pd
                 # max_rows = pd.get_option('display.max_rows')
@@ -440,6 +433,9 @@ class Simulator:
         Otherwise, the input parameter value is returned.
         In addition, the differential value functions V(s) and Q(s,a) are also estimated, from possibly an initial estimation
         obtained from the simulation of a single Markov chain (run by e.g. self._run_single()).
+
+        Note that the learner is reset at the very beginning of this process, but without resetting the value functions
+        that may have already gone some learning experience, e.g. from an initial exploration of the environment.
 
         Arguments:
         t_learn: int
@@ -549,7 +545,7 @@ class Simulator:
                     done_reactivate = True
                     new_state = envs[idx_particle].getState()
                     if DEBUG_TRAJECTORIES:
-                        print("*** Particle {} ABSORBED at state={} and REACTIVATED to particle {} at state {}" \
+                        print("*** Particle #{} ABSORBED at state={} and REACTIVATED to particle {} at state {}" \
                               .format(idx_particle, state, idx_reactivate, new_state))
 
             return new_state
@@ -575,6 +571,10 @@ class Simulator:
             max_time_steps = N * 100   # N * "MAX # transitions allowed on average for each particle"
         policy = self.agent.getPolicy()  # Used to define the next action and next state
         learner = self.agent.getLearner()  # Used to learn (or keep learning) the value functions
+
+        # Reset the learner, but WITHOUT resetting the value functions as they were possibly learned a bit during an initial exploration of the environment
+        # What is most important of this reset is to reset the learning rates of all states and actions! (so that we start the FV-based learning with full intensity)
+        learner.reset(reset_episode=True, reset_value_functions=False)
 
         # Set the start state of each environment/particle to an activation state, as this is a requirement
         # for the empirical distribution Phi(t).
@@ -613,7 +613,7 @@ class Simulator:
 
         idx_particle = -1
         done = False
-        t = 0
+        t = -1
         while not done:
             t += 1
 
@@ -646,7 +646,7 @@ class Simulator:
                 # Note also that the seed for the reset has been set separately for each particle before starting the FV simulation.
                 next_state = envs[idx_particle].reset()
                 if DEBUG_TRAJECTORIES:
-                    print("___ Particle {} in terminal state {} REINITIALIZED to environment's start state following its initial state distribution: next_state={}" \
+                    print("___ Particle #{} in terminal state {} REINITIALIZED to environment's start state following its initial state distribution: next_state={}" \
                           .format(state, idx_particle, next_state))
 
                 # Learn the value functions for the terminal state for the continuing learning task case,
@@ -684,9 +684,17 @@ class Simulator:
                 # => Add the time to absorption to the set of times used to estimate the survival probability P(T>t) if it's the first absorption of the particle
                 # => Reactivate the particle to the position of any of the other particles
 
+                # Compute the absorption time as the time at which the particle is at *next_state*, and this time is therefore the NEXT time
+                # (recall that t is the current time, when the action is taken that moves the particle from `state` to `next_state`)
+                t_abs = t + 1
+
                 # Contribution to the survival probability
                 if not has_particle_been_absorbed_once[idx_particle]:
-                    survival_times += [t]  # Note that we store the ABSOLUTE time because at its first absorption, the particle started at 0, so this is correct.
+                    survival_times += [t_abs]
+                    ## NOTE: We store the ABSOLUTE absorption time as survival time (as opposed to the time elapsed since the latest visit to the start activation state)
+                    ## because the collected survival times are just those associated to the FIRST absorption of each particle,
+                    ## which implies that the absorbed particle has for sure started visiting the activation state at t=0
+                    ## (i.e. the survival time is the absorption time minus 0!)
                     ## IMPORTANT: By construction the survival times are ALREADY SORTED in the list, since we only add
                     ## the FIRST absorption time for each particle.
 
@@ -712,7 +720,7 @@ class Simulator:
             dict_phi = update_phi(envs[0], len(envs), t, dict_phi, state, next_state)
 
             if DEBUG_TRAJECTORIES:
-                print("P={}, t={}: state={}, action={} -> state={}, reward={}" \
+                print("[FV] Moved P={}, t={}: state={}, action={} -> next_state={}, reward={}" \
                       .format(idx_particle, t, state, action, next_state, reward),
                       end="\n")
 
@@ -885,16 +893,6 @@ class Simulator:
         # Auxiliary functions
         entered_set_cycle = lambda s, ns: s not in set_cycle and ns in set_cycle
 
-        # Reset the simulator (i.e. prepare it for a fresh new simulation with all learning memory erased)
-        # Note that a special treatment may be granted to the reset of the value functions because we may want to NOT reset them,
-        # for instance when we are learning a policy and we use this simulator to learn the value functions....
-        # In that case, we don't want to start off at 0.0 again but to start off at the estimated values obtained
-        # under the previous policy, which normally is very close to the new policy after one step of policy learning.
-        # (In some situations --e.g. labyrinth where the policy is learned using Actor-Critic or policy gradient learning--
-        # I observed (Nov-2023) that non-optimal policies are learned that minimize the loss function if we reset the
-        # value functions to 0 at every policy learning step, while the problem does NOT happen when the value functions are NOT reset.)
-        self.reset(reset_value_functions=reset_value_functions)
-
         #--- Parse input parameters
         # Set the weights to be used to compute the RMSE and MAPE based on the weights_rmse value
         # Only when weights_rmse = True are the weights NOT set definitely here, as they are set at every episode
@@ -961,10 +959,21 @@ class Simulator:
             if state_observe is not None:
                 # Plot with the evolution of the V estimate and its error
                 fig_RMSE_state = plt.figure()
+        #--- Parse input parameters
 
         # Define the policy and the learner
         policy = self.agent.getPolicy()
         learner = self.agent.getLearner()
+
+        # Reset the learner (i.e. prepare it for a fresh new learning experience with all learning memory erased and learning rates reset to their initial values)
+        # Note that a special treatment may be granted to the reset of the value functions because we may want NOT to reset them,
+        # for instance when we are learning a policy and we use this simulator to learn the value functions...
+        # In that case, we don't want to start off at 0.0 again but to start off at the estimated values obtained
+        # under the previous policy, which normally is very close to the new policy after one step of policy learning.
+        # (In some situations --e.g. labyrinth where the policy is learned using Actor-Critic or policy gradient learning--
+        # I observed (Nov-2023) that non-optimal policies are learned that minimize the loss function if we reset the
+        # value functions to 0 at every policy learning step, while the problem does NOT happen when the value functions are NOT reset.)
+        learner.reset(reset_episode=True, reset_value_functions=reset_value_functions)
 
         # Environment seed
         # We only set the seed when it is not None because when this method is called by the simulate() method,
