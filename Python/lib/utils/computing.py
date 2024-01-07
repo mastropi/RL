@@ -325,7 +325,7 @@ def generate_min_exponential_time(rates):
     return event_time, idx_event
 
 
-def compute_survival_probability(survival_times: list):
+def compute_survival_probability(survival_times: list, colnames=['t', 'P(T>t)']):
     """
     Computes the survival probability from a list of sorted survival times
 
@@ -333,10 +333,14 @@ def compute_survival_probability(survival_times: list):
     survival_times: list
         Sorted list containing the observed survival times on which the step survival probability is computed.
 
+    colnames: (opt) list
+        Column names to be used for the survival times and the survival probability, respectively.
+        default: ['t', 'P(T>t)']
+
     Return: pandas DataFrame
     Data frame containing the following two columns:
-    - 't': the input survival times (assumed sorted)
-    - 'P(T>t)': the survival probability for the corresponding t value.
+    - `colnames[0]`: the input survival times (assumed sorted)
+    - 'colnames[1]': the survival probability for the corresponding survival time value.
     """
     assert survival_times[0] == 0.0
     # Number of observed death events used to measure survival times
@@ -350,8 +354,8 @@ def compute_survival_probability(survival_times: list):
         proba_surv = [1.0]
 
     assert proba_surv[0] == 1.0
-    return pd.DataFrame.from_items([('t', survival_times),
-                                    ('P(T>t)', proba_surv)])
+    return pd.DataFrame.from_items([(colnames[0], survival_times),
+                                    (colnames[1], proba_surv)])
 
 
 def get_server_loads(job_rates, service_rates):

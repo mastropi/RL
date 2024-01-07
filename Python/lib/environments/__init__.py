@@ -18,6 +18,7 @@ See more details in gym/envs/toy_text/discrete.py.
 import warnings
 
 import numpy as np
+import pandas as pd
 
 from gym.envs.toy_text import discrete
 from gym import spaces
@@ -44,9 +45,12 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
         The number of elements in this dictionary does NOT need to coincide with the number of terminal states.
         If a terminal state is not found among the keys of the dictionary, its associated reward is returned as 0
         by the corresponding method.
+    - store_trajectory: (bool) whether to store the trajectory observed during a simulation in the object.
+    This is useful for instance when running a Fleming-Viot simulation where N particles evolve separately
+    and we want to keep track of the state and actions visited by each particle.
     """
 
-    def __init__(self, nS, nA, P, isd, dim=1, terminal_states=set(), terminal_rewards=dict()):
+    def __init__(self, nS, nA, P, isd, dim=1, terminal_states=set(), terminal_rewards=dict(), store_trajectory=True):
         super().__init__(nS, nA, P, isd)
 
         # Dimension of the environment (e.g. 1D (gridworld), 2D (gridworld), etc.)
@@ -63,11 +67,15 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
         self.action_space = spaces.Discrete(nA)
         #--- 2023/10/04 ---
 
-        # All states
-        self.all_states = list( range(self.getNumStates()) )
+        self.all_states = list( np.arange(self.getNumStates()) )
         self.terminal_states = terminal_states
         self.non_terminal_states = set(self.all_states).difference( set( self.terminal_states ) )
         self.terminal_rewards = terminal_rewards
+
+        self.store_trajectory = store_trajectory
+        if self.store_trajectory:
+            self.df_trajectory = None
+            self.reset_trajectory()
 
         # Define the true value functions as all zeros when they are not defined already by the actual environment (inheriting from this class)
         # The goal is to be able to do analysis of the *estimated* value functions even when the true state value functions are unknonwn
@@ -79,6 +87,24 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
             self.V = np.array([0.0]*self.getNumStates())
         if "Q" not in attributes_in_object:
             self.Q = np.array([0.0]*self.getNumStates()*self.getNumActions())
+
+    def reset_trajectory(self):
+        self.df_trajectory = pd.DataFrame(columns=['time', 'state', 'action', 'next_state', 'reward'])
+
+    def update_trajectory(self, t, state, action, next_state, reward):
+        """
+        Updates the trajectory information by adding a new row in the data frame containing the
+        times at which a state is visited, the action taken on the state, the state to which the process
+        transitions to after taking the action, and the reward received by such transition.
+
+        The new row is added to the end of the data frame using the number of rows already present in
+        the data frame as row index.
+        """
+        self.df_trajectory = pd.concat([self.df_trajectory,
+                                        pd.DataFrame([[t, state, action, next_state, reward]],
+                                                     index=[len(self.df_trajectory)],
+                                                     columns=self.df_trajectory.columns)],
+                                       axis=0)
 
     def isTerminalState(self, state):
         return set([state]).issubset( set(self.terminal_states) )
@@ -112,6 +138,7 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
         return self.nS
 
     def getAllStates(self):
+        "Returns the sorted list of all states in the environment"
         return self.all_states
 
     def getTerminalStates(self):
@@ -119,7 +146,7 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
         return list(self.terminal_states)
 
     def getTerminalRewards(self):
-        "Returns the terminal rewards (only their values, not the states where they occur, for this use getTerminalRewardsDict())"
+        "Returns the terminal rewards (only their values, not the states where they occur; for the latter, use getTerminalRewardsDict())"
         return self.getTerminalRewardsDict().values()
 
     def getTerminalRewardsDict(self):
@@ -135,6 +162,9 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
     def getNonTerminalStates(self):
         "Returns the list of non terminal states"
         return list(self.non_terminal_states)
+
+    def getTrajectory(self):
+        return self.df_trajectory
 
     def getV(self):
         "Returns the true state value function stored in the object"

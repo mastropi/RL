@@ -131,6 +131,14 @@ def update_phi(env, N: int, t: float, dict_phi: dict, env_state_prev, env_state_
 
     t: float
         Continuous-valued time at which the latest change of a particle's state happened.
+        This value must be larger than or equal to the last time value present in dict_phi for the state of interest
+        whose Phi value is potentially updated. In such case, the value of Phi previously stored in the dictionary
+        at the given t value is *replaced* with the updated Phi value. This is done to accommodate for the situation
+        where the state of interest x is also a terminal state (quite common in episodic learning tasks),
+        triggering a reset of the particle at an environment's start state the next time the particle is picked,
+        that happens to be part of the absorption set A, which therefore requires immediate reactivation.
+        Replacing the Phi value already stored allows the estimation process to take into account the transition
+        that really counts, namely from the terminal state x to the state after reactivation.
 
     dict_phi: dict
         Dictionary, indexed by the states of interest (derived from the environment's state),
@@ -179,6 +187,7 @@ def update_phi(env, N: int, t: float, dict_phi: dict, env_state_prev, env_state_
     # (in fact, these two are the only states whose Phi value can change now)
     for x in set(dict_phi.keys()).intersection({state_prev, state_cur}):
         assert dict_phi[x].shape[0] > 0, "The Phi data frame has been initialized for state = {}".format(x)
+        assert t >= dict_phi[x]['t'].iloc[-1], f"The new time to insert in Phi(t,x) (t={t}) must be larger than or equal to the largest time already stored in Phi(t,x) ({dict_phi[x].iloc[-1]['t']})"
         phi_cur = dict_phi[x]['Phi'].iloc[-1]
         phi_new = empirical_mean_update(phi_cur, x, state_prev, state_cur, N)
         # if phi_new > 0:
@@ -188,9 +197,16 @@ def update_phi(env, N: int, t: float, dict_phi: dict, env_state_prev, env_state_
             # and since we are interested in analyzing the absolute difference (not the relative difference)
             # between phi_new and phi_cur, we set rtol = 0.
             # Phi(t) changed at t by at least 1/N (that's why we use atol < 1/N
-            # => add a new entry to the data frame containing Phi(t, x)
+            # => add a new entry to the data frame containing Phi(t, x) (or replace the entry if t is equal to the latest t stored in Phi(t,x) --which may be the case for discrete-time Markov processes)
             # (o.w. it's no use to store it because we only store the times at which Phi changes)
-            dict_phi[x] = pd.concat([dict_phi[x], pd.DataFrame({'t': [t], 'Phi': [phi_new]})], axis=0)
+            if t == dict_phi[x]['t'].iloc[-1]:
+                dict_phi[x]['Phi'].iloc[-1] = phi_new
+                    ## WARNING: The update MUST be done using dict_phi[x]['Phi'].iloc[-1] NOT dict_phi[x].iloc[-1]['Phi'] because the latter does NOT update the value of Phi!!!
+                    ## (presumably because of the usual warning: "a value is trying to be set on a copy of a slice..." y la marincoche)
+            else:
+                dict_phi[x] = pd.concat([dict_phi[x],
+                                         pd.DataFrame([[t, phi_new]], index=[dict_phi[x].shape[0]], columns=['t', 'Phi'])],
+                                        axis=0)
 
     return dict_phi
 
@@ -325,8 +341,8 @@ def estimate_stationary_probabilities(dict_phi, df_proba_surv, expected_absorpti
     return probas_stationary, integrals
 
 
-# @measure_exec_time
-def merge_proba_survival_and_phi(df_proba_surv, df_phi):
+#@measure_exec_time
+def merge_proba_survival_and_phi(df_proba_surv, df_phi, t_origin=0.0):
     """
     Merges the survival probability and the empirical distribution of the particle system at a particular
     buffer size of interest, on a common set of time values into a data frame.
@@ -338,6 +354,12 @@ def merge_proba_survival_and_phi(df_proba_surv, df_phi):
     df_phi: pandas data frame
         Data frame containing the time 't' and the Phi(t) value 'Phi' for a buffer size of interest.
 
+    t_origin: (opt) float
+        Time that should be used as origin for the times t at which Phi(t) is measured.
+        This is useful to consider estimates of Phi(t) only at the times when we think that
+        stationarity of the Fleming-Viot process has been reached.
+        default: 0.0
+
     return: pandas data frame
     Data frame with the following columns:
     - 't': time at which a change in any of the input quantities happens
@@ -345,10 +367,22 @@ def merge_proba_survival_and_phi(df_proba_surv, df_phi):
     - 'Phi': empirical distribution at the buffer size of interest given the process started
     at the stationary activation distribution of states.
     """
+    if t_origin > 0:
+        _df_phi = df_phi.loc[df_phi['t'] >= t_origin, :]    # No need to call copy() on the filtered data frame because a copy is automatically created (tested this with a small data frame)
+        if _df_phi.shape[0] > 0:
+            # Shift the origin time possibly forward, to the closest time larger than or equal to the given t_origin,
+            # so that the first time value in Phi is 0, as this is a requirement by the merge_values_in_time() function called below.
+            t_origin = _df_phi['t'].iloc[0]
+        else:
+            # Revert to the original Phi data frame if no time value is larger than t_origin so that the merge continues without regard to the time origin value
+            _df_phi = df_phi
+            t_origin = 0.0
+    else:
+        _df_phi = df_phi
     # Merge the time values at which the survival probability is measured (i.e. where it changes)
     # with the time values at which the empirical distribution Phi is measured for each buffer size of interest.
     t, proba_surv_by_t, phi_by_t = merge_values_in_time(list(df_proba_surv['t']), list(df_proba_surv['P(T>t)']),
-                                                        list(df_phi['t']), list(df_phi['Phi']),
+                                                        list(_df_phi['t'] - t_origin), list(_df_phi['Phi']),
                                                         unique=False)
 
     # -- Merged data frame, where we add the dt, used in the computation of the integral
@@ -361,8 +395,8 @@ def merge_proba_survival_and_phi(df_proba_surv, df_phi):
     return df_merged
 
 
-# @measure_exec_time
-def estimate_proba_stationary(df_phi_proba_surv, expected_absorption_time, interval_size=1):
+#@measure_exec_time
+def estimate_proba_stationary(df_phi_proba_surv, expected_absorption_time, interval_size: float=1.0):
     """
     Computes the stationary probability for ONE particular state using Approximation 1 in Matt's draft for the Fleming-Viot estimation approach
 
@@ -404,8 +438,7 @@ def estimate_proba_stationary(df_phi_proba_surv, expected_absorption_time, inter
         print("Data for integral:\n{}".format(df_phi_proba_surv))
         pd.set_option('display.max_rows', max_rows)
 
-    df_phi_proba_surv_Phi_gt0 = df_phi_proba_surv.loc[df_phi_proba_surv['Phi'] > 0,]
-    integral = interval_size * np.sum(df_phi_proba_surv_Phi_gt0['P(T>t)'] * df_phi_proba_surv_Phi_gt0['Phi'] * df_phi_proba_surv_Phi_gt0['dt'])
+    integral = compute_fv_integral(df_phi_proba_surv, interval_size=interval_size)
 
     if DEBUG_ESTIMATORS:
         print("integral = {:.3f}, E(T) = {:.3f}".format(integral, expected_absorption_time))
@@ -421,6 +454,79 @@ def estimate_proba_stationary(df_phi_proba_surv, expected_absorption_time, inter
             print(stat)
 
     return proba_stationary, integral
+
+
+def compute_fv_integral(df_phi_proba_surv, reward: float=1.0, interval_size: float=1.0, discount_factor: float=1.0):
+    """
+    Computes the integral of the FV estimator of the stationary probability of a state of interest
+
+    The computation is done from piecewise approximations of the two functions involved in its computation,
+    the survival probability P(T>t) and the conditional occupation probability of the state of interest x
+    given the process has not been killed at time t, Phi(t,x).
+
+    The formula to compute the integral depends on whether the discount factor gamma is 1 or less than 1,
+    bearing in mind that gamma values < 1 only make sense in discrete-time Markov process contexts.
+    So, if gamma = 1.0:
+        integral = sum_{pieces-where-P(T>t)*Phi(t,x)-is-constant-until-reaching-t_max}{ P(T>t) * r(x) * Phi(t,x) }
+    if gamma < 1.0, the Markov process is assumed to be discrete-time and the formula is:
+        integral = sum_{t=1}^{t_max}{ gamma^(t-1) * P(T>t) * r(x) * Phi(t,x) }
+    where:
+    - t_max is the maximum survival time observed for the estimation of P(T>t),
+    - r(x) is the reward received when visiting state x.
+
+    All of  the above is prior to any adjustment requested by parameter `interval_size` which ends up
+    multiplying the summation if different from 1, in order to adjust for the discretization of the
+    underlying continuous-time Markov process for which the Fleming-Viot estimator is originally defined.
+    For more details, see the documentation of estimate_stationary_probabilities().
+
+    Arguments:
+    df_phi_proba_surv: pandas data frame
+        Data frame with the survival probability P(T>t) and the empirical distribution of
+        a state of interest x, Phi(t,x), on which the Fleming-Viot integral is computed.
+        It should contain columns 'dt', 'P(T>t)' and 'Phi', where 'dt' gives the size of each
+        time interval where the product P(T>t) * Phi(t,x) is constant.
+
+    reward: (opt) float
+        Reward received when visiting the state of interest on which the FV integral is computed
+        and that weights the contribution by Phi(t,x) to the integral.
+        default: 1.0
+
+    interval_size: (opt) positive float
+        Factor by which the Fleming-Viot integral should be adjusted (i.e. multiplied by) in order to take into account the interval
+        size at which the originally continuous-time Markov chain is sampled.
+        This is useful when Fleming-Viot is used in the context of discrete-time Markov chains, which are considered
+        as the result of sampling an underlying continuous-time Markov chain (on which Fleming-Viot is actually applied,
+        since Fleming-Viot is defined for continuous-time processes) at such interval sizes.
+        See the documentation of estimate_stationary_probabilities() on how this interval size should be set for Fleming-Viot.
+        default: 1.0
+
+    discount_factor: (opt) float in (0, 1]
+        The discount factor gamma to use as weight of each one-sized interval contributing to the integral
+        in the discrete time case, where the integral is actually a summation.
+        default: 1.0
+
+    Return: float
+    The integral value estimated from the area under the piecewise function (as described above) multiplied
+    by `interval_size` to obtain the final integral estimate.
+    """
+    # Filter on the records that actually contribute to the integral
+    # Note that:
+    # - The values of P(T>t) are always positive (by definition of survival probability)
+    # - The value of dt is 0 when several occurrences of the same t happen when observing the survival times of the process
+    # (e.g. when working on a discrete-time Markov process)
+    df_phi_proba_surv_Phi_gt0 = df_phi_proba_surv.loc[(df_phi_proba_surv['Phi'] > 0) & (df_phi_proba_surv['dt'] > 0),]
+    if discount_factor == 1.0:
+        integral = interval_size * np.sum(reward * df_phi_proba_surv_Phi_gt0['P(T>t)'] * df_phi_proba_surv_Phi_gt0['Phi'] * df_phi_proba_surv_Phi_gt0['dt'])
+    else:
+        # We need to consider each one-sized interval separately, even the function P(T>t)*Phi(t,x) is constant there
+        # because we need to apply a different discount for each of those intervals. Fortunately we can do without
+        # explicitly considering those one-sized interval by using the summation formula for a geometric sum,
+        # all of whose components are already stored in the input data frame!
+        integral = interval_size * 1 / (1 - discount_factor) * \
+                                    np.sum( discount_factor**df_phi_proba_surv_Phi_gt0['t'] * (1 - discount_factor**df_phi_proba_surv_Phi_gt0['dt']) *
+                                            reward * df_phi_proba_surv_Phi_gt0['P(T>t)'] * df_phi_proba_surv_Phi_gt0['Phi'] * df_phi_proba_surv_Phi_gt0['dt'])
+
+    return integral
 
 
 def estimate_expected_reward(env, probas_stationary: dict, reward=None):
@@ -459,3 +565,295 @@ def estimate_expected_reward(env, probas_stationary: dict, reward=None):
             expected_reward += (dict_terminal_rewards[s] if reward is None else reward) * probas_stationary[s]
 
     return expected_reward
+
+
+def estimate_survival_probability(model, t, state, action):
+    "Estimates the survival probability at time t, given the Markov process started at the given state and action, using the given model"
+    pass
+
+
+
+if __name__ == "__main__":
+    #import numpy as np
+    #import pandas as pd
+    #from matplotlib import pyplot as plt
+    from matplotlib import cm
+    import torch
+    from torch.functional import F
+
+    from Python.lib.utils import basic, computing
+    from Python.lib.estimators.nn_models import nn_backprop
+    from Python.lib.environments import gridworlds
+    from Python.lib.agents.policies import probabilistic
+
+    #--- Auxiliary functions
+    def compute_input_onehot(t, x, a, t_max, nS, nA):
+        """
+        Computes the input to the neural network whose input is the observed absorption time t, the one-hot encoded state x, and the one-hot encoded action a
+        based on the number of states nS and the number of actions nA.
+
+        The values of x are assumed to vary between 0 and nS - 1 and the values of `a` between 0 and nA - 1.
+
+        The value of t_max is used for scaling t to a similar scale to the one-hot encoding of x and a, i.e. to [0, 1].
+        """
+        assert 0 <= x < nS
+        assert 0 <= a < nA
+        input = np.zeros(1 + nS + nA)
+        input[0] = t / t_max        # Encode the absorption time
+        input[1 + x] = 1            # Encode the state
+        input[1 + (nS-1) + a + 1] = 1    # Encode the action
+
+        return input
+
+    def compute_input(t, x, a, t_max, nS, nA):
+        """
+        Computes the input to the neural network whose input is the observed absorption time t, the state x as a number,
+        and the one-hot encoded action a based on the number of actions nA.
+        """
+        assert 0 <= x < nS
+        assert 0 <= a < nA
+        input = np.zeros(1 + 1 + nA)
+        input[0] = t / t_max               # Encode the absorption time
+        input[1] = x / nS           # Encode the state
+        input[1 + a + 1] = 1    # Encode the action
+
+        return input
+
+    def compute_estimated_probabilities(proba_surv_model, nS, nA, t_surv_max):
+        dict_proba_surv_estimate = dict()
+        for _x in set(np.arange(nS)).difference(absorption_set):
+            dict_proba_surv_estimate[_x] = dict()
+            for _a in np.arange(nA):
+                _t_surv_values = np.linspace(0, t_surv_max_observed, 100)
+                dict_proba_surv_estimate[_x][_a] = pd.DataFrame(columns=['t', 'p'])
+                #print(f"\nComputing P(T>t) for x={_x}, a={_a}:")
+                for _t_surv in _t_surv_values:
+                    _input = compute_input_onehot(_t_surv, _x, _a, t_surv_max, nS, nA)
+                    #_input = compute_input(_t_surv, _x, _a, t_surv_max, nS, nA)
+                    _p_surv = float(torch.sigmoid(proba_surv_model(_input)))
+                    #print("t = {:.1f}, P(T>t) = {:.3f}".format(_t_surv, _p_surv))
+                    dict_proba_surv_estimate[_x][_a] = pd.concat([dict_proba_surv_estimate[_x][_a],
+                                                                 pd.DataFrame({'t': _t_surv,
+                                                                               'p': _p_surv},
+                                                                    index=[len(dict_proba_surv_estimate[_x][_a])])],
+                                                                 axis=0)
+        return dict_proba_surv_estimate
+
+    def plot_survival_curves(dict_proba_surv, dict_proba_surv_estimate, axes=None, n_estimates_so_far=0, title="Estimation of the survival probability P(t,x,a)"):
+        if axes is None:
+            axes = plt.figure().subplots(int(round(np.sqrt(len(active_set)))), int(round(np.sqrt(len(active_set)))))
+        colors_rainbow = cm.get_cmap("rainbow", nA)
+        # Color scheme for each action (assumed two actions)
+        colormaps = [cm.get_cmap("Blues"), cm.get_cmap("Reds")]
+        print(f"Interactive? {plt.isinteractive()}")
+        for idx, ax in enumerate(axes.reshape(-1)):
+            _x = idx + np.min(list(active_set))
+            if _x < nS:
+                print(f"Plotting P(T>t) for state x={_x} (sample sizes: {sample_size[_x]})")
+                for _a in np.arange(nA):
+                    if n_estimates_so_far == 0:
+                        color = colors_rainbow(_a)
+                    else:
+                        color = colormaps[_a](n_estimates_so_far)
+                    ax.plot(dict_proba_surv[_x][_a]['t'], dict_proba_surv[_x][_a]['p'], color=color, linewidth=0.5)
+                    ax.plot(dict_proba_surv_estimate[_x][_a]['t'], dict_proba_surv_estimate[_x][_a]['p'], '--', color=color)
+                ax.set_xlabel("Survival time")
+                ax.set_ylabel(f"P(T>t) (x={_x})")
+                ax.set_xlim((None, t_surv_max_observed))
+                ax.set_ylim((0, 1))
+                ax.legend([f"a = LEFT (n={sample_size[_x][0]})", "a = LEFT (model)", f"a = RIGHT (n={sample_size[_x][1]})", "a = RIGHT (model)"])
+        plt.draw()
+        plt.suptitle(title)
+    #--- Auxiliary functions
+
+    # Epsilon for the computation of the logit
+    EPSILON = 1E-12
+
+    # Number of states in the test environment
+    nS = 21
+
+    # Absorption set A
+    absorption_set = set({0, 1, 2, 3})
+    active_set = set(np.arange(nS)).difference(absorption_set.union({nS-1}))  # The terminal state should NOT be part of the active set of states
+
+    # Environment with a specific initial state distribution
+    isd = np.zeros(nS)
+    for x in active_set:
+        isd[x] = 1/len(active_set)
+    assert np.isclose(sum(isd), 1.0)
+    env = gridworlds.EnvGridworld1D(nS, initial_state_distribution=isd)
+    nA = env.getNumActions()
+    env.setSeed(1717)
+
+    # Policy of the agent moving in the environment
+    probas_actions = [0.8, 0.2] #[0.5, 0.5] #[0.8, 0.2]
+    policy = probabilistic.PolGenericDiscrete(env, dict(), policy_default=probas_actions)
+
+    # Model for the survival probability P(T>t) (strictly "greater than" --this has an impact on how the survival probability is estimated below)
+    nn_hidden_layer_sizes = [24]
+    proba_surv_model = nn_backprop(1 + nS + nA, nn_hidden_layer_sizes, 1,
+                                    dict_activation_functions=dict({'hidden': [torch.nn.ReLU] * len(nn_hidden_layer_sizes)}))
+    learning_rate = 0.03
+    optimizer = torch.optim.Adam(proba_surv_model.parameters(), lr=learning_rate, betas=(0.9, 0.999))
+
+    # Reset the dictionary that stores the absorption times for each state and action
+    dict_proba_surv = dict()
+    for _x in set(np.arange(nS)).difference(absorption_set):
+        dict_proba_surv[_x] = dict()
+        for _a in np.arange(nA):
+            dict_proba_surv[_x][_a] = pd.DataFrame(np.array([[0, 1.0]]), columns=['t', 'p'])
+    # Sample survival times for each state and action by simulation of the Markov process
+    T = 50000 if probas_actions == [0.5, 0.5] else 10000 #50000 #10000           # Simulation time
+    x = env.reset()
+    t_surv_max = 10*nS       # "Maximum" survival time used to scale the values of the absorption times to make it comparable to 1 and thus have similar scales in all inputs to the neural network
+    t_surv_max_observed = 0
+    logit_surv_t_max_observed = -np.Inf
+    #### IMPORTANT PARAMETER #####
+    # THIS PARAMETER IS IMPORTANT: I tried using min_sample_size = 1 and I got an estimate of the survival function that is increasing instead of decreasing!
+    min_sample_size = 50     # Minimum sample size for each state and action to consider their contribution from the last observed survival time on the loss function
+    #### IMPORTANT PARAMETER #####
+
+    #batch_size = 10     # Number of samples after which the parameters of the neural network are updated (parameter NEVER used)
+    trajectory = []
+    sample_size = np.zeros((nS, nA), dtype=int)
+    all_loss = []
+    all_n = []
+    n_model_updates = 0
+
+    plot_learning = False
+    if plot_learning:
+        fig = plt.figure()
+        axes = fig.subplots(int(round(np.sqrt(len(active_set)))), int(round(np.sqrt(len(active_set)))))
+        plt.ion()
+    for t in range(T):
+        assert x not in absorption_set, f"The state of the system (x={x}) must NOT be in the absorption_set ({absorption_set}) (t={t})"
+
+        # Iterate on the environment
+        a = policy.choose_action(x)
+
+        # Store in the trajectory the state x at which action `a` was taken, the action taken and the time t it was taken at
+        trajectory += [(t, x, a)]
+
+        # Step
+        x, reward, done, info = env.step(a)
+
+        # Update the survival probability model if an absorption is observed
+        if x in absorption_set:
+            # Store all the absorption times for ALL state and actions visited during the trajectory before the absoprtion
+            t_abs = t + 1   # Increase the time step to indicate the number of time steps it took to get to the absorption set (e.g. if takes one env.step() call to reach absorption, t = 0 before this update and we ant the absorption time to be 1)
+            print(f"\nABSORPTION! t={t_abs}, x={x}")
+            print(f"Trajectory = \n{trajectory}")
+
+            loss = 0.0
+            n_terms_in_loss = 0
+            for triple in trajectory:
+                tt, xx, aa = triple
+                sample_size[xx][aa] += 1
+                assert xx in dict_proba_surv.keys() and aa in dict_proba_surv[xx].keys()
+
+                #-- Contribute with the current sample of the absorption time to the model on P(T>t)
+                # 1) FIRST PIECE OF THE CONTRIBUTION TO THE LOSS: the updated estimation of the logit(P(T>t; xx, aa)) based on the new observed survival time
+                # => THIS GIVES THE TARGET VALUE y OF THE ERROR (contributing to the loss)
+                # Compute the observed survival time when the system starts at the currently analyzed state-action (xx,aa)
+                # (this is computed from the observed absorption time and the time at which the system was at (xx,aa))
+                t_surv = t_abs - tt
+                assert t_surv > 0
+                t_surv_max_observed = max(t_surv_max_observed, t_surv)
+
+                survival_times = list(dict_proba_surv[xx][aa]['t'])
+                idx_insert, found = basic.insort(survival_times, t_surv)
+                proba_surv_t = 1 - idx_insert / len(dict_proba_surv[xx][aa])
+                assert 0.0 <= proba_surv_t <= 1.0
+                    ## Notes:
+                    ## - idx_insert tells us the index of the smallest t among the survival times that are larger than the t_surv just inserted
+                    ## (this is so because the first element of the survival time lists is always 0)
+                    ## and this takes into account existing occurrences of t already present in the list, as when that happens
+                    ## the "new" t is inserted at the end of all the occurrences.
+                    ## - With this definition, the survival probability can never be 1
+                    ## because it is estimated from the "# samples > t" where t is an OBSERVED value
+                    ## => t is part of the sample and is not included in the event "# samples > t"
+                    ## => the denominator of the logit function below will never be 0 (but the numerator can, hence the "bound away from zero" constant)
+                    ## => this is why below, after updating the loss with this observation, we add a sample with t_surv = 0 to which we impose survival probability = 1,
+                    ##      i.e. so that we get a sample of the time (t=0) where P(T>t) = 1, which the model is thus able to estimate.
+                logit_surv_t = torch.tensor( [np.log( (proba_surv_t + EPSILON) / (1 - proba_surv_t + EPSILON) )] )
+                logit_surv_t_max_observed = max(logit_surv_t_max_observed, logit_surv_t)
+                #proba_surv_t = torch.tensor([proba_surv_t])    # To use when the output is directly the survival probability (usually not recommended, i.e. it is better to output the logit)
+
+                # Store the survival times and survival probabilities in the data frame
+                dict_proba_surv[xx][aa] = computing.compute_survival_probability(survival_times, colnames=['t', 'p'])
+
+                # 2) SECOND PIECE OF THE CONTRIBUTION TO THE LOSS: the current estimate of the logit(P(T>t; xx, aa)) given by the model
+                # => THIS GIVES THE PREDICTED VALUE \hat{y} OF THE ERROR (contributing to the loss)
+                input = compute_input_onehot(t_surv, xx, aa, t_surv_max, nS, nA)
+                #input = compute_input(t_surv, xx, aa, t_surv_max, nS, nA)
+                assert len(input) == proba_surv_model.getNumInputs()
+                #print(f"------------- Input = {input}")
+                logit_estimate = proba_surv_model(input)       # The output of the model is the estimate of the logit SIMPLY because we are feeding the *logit* as the network's target (when computing the loss below)
+
+                # 3) UPDATE THE LOSS AS LONG AS there have been enough samples of the survival time so far when the trajectory starts at (xx,aa)
+                if sample_size[xx][aa] >= min_sample_size:
+                    # Use a smooth version of the loss (in order to control for outliers)
+                    loss += F.smooth_l1_loss(logit_estimate, logit_surv_t) #F.mse_loss(logit_estimate, logit_surv_t)
+                    n_terms_in_loss += 1
+                    if True:
+                        print(f"--> Sample: (t={t_surv}, x={xx}, a={aa}) (n={sample_size[xx,aa]}) --> P_est = {float(torch.sigmoid(logit_estimate))}, P_obs = {float(torch.sigmoid(logit_surv_t))} --> loss = {loss/n_terms_in_loss} (n={n_terms_in_loss})")
+
+                    # Add a sample for the survival probability = 1 at t = 0 (so that the model learns that S(0) = 1)
+                    logit_surv_t = torch.tensor( [np.log( (1.0 + EPSILON) / (1 - 1.0 + EPSILON) )] )
+                    logit_surv_t_max_observed = max(logit_surv_t_max_observed, logit_surv_t)
+                    input = compute_input_onehot(0.0, xx, aa, t_surv_max, nS, nA)
+                    logit_estimate = proba_surv_model(input)       # The output of the model is the estimate of the logit because we are feeding the network the logit as target (when computing the loss)
+                    loss += F.smooth_l1_loss(logit_estimate, logit_surv_t) #F.mse_loss(logit_estimate, logit_surv_t)
+                    n_terms_in_loss += 1
+
+            # Compute the average loss
+            loss /= max(1, n_terms_in_loss)
+            all_loss += [float(loss)]
+            all_n += [n_terms_in_loss]
+            if n_terms_in_loss > 0:
+                # Train the neural network model on the n_terms_in_loss samples observed
+                optimizer.zero_grad()  # We can easily look at the neural network parameters by printing optimizer.param_groups
+                loss.backward()
+                optimizer.step()
+                n_model_updates += 1
+                print(f"# Model updates so far: {n_model_updates}")
+
+                if plot_learning:
+                    dict_proba_surv_estimate = compute_estimated_probabilities(proba_surv_model, nS, nA, t_surv_max)
+                    plot_survival_curves(dict_proba_surv, dict_proba_surv_estimate, axes=axes, n_estimates_so_far=n_model_updates)
+
+            # Reset the environment and the trajectory history
+            x = env.reset()
+            trajectory = []
+        elif x in env.getTerminalStates():
+            x = env.reset()
+            trajectory = []
+    if plot_learning:
+        plt.ioff()
+    print(f"Maximum observed logit value = {logit_surv_t_max_observed}")
+
+    plt.figure()
+    ax = plt.gca()
+    ax.plot(all_loss, '.-', color="red")
+    ax.set_xlabel("Learning step")
+    ax.set_ylabel("Loss (Smoothed L2 error)")
+    ax.set_ylim((0, None))
+    ax2 = ax.twinx()
+    ax2.plot(all_n, color="blue", linewidth=0.2)
+    ax2.set_ylabel("Batch size")
+    ax2.set_ylim((0, None))
+
+    # Compute the estimated survival probability for each state and action
+    dict_proba_surv_estimate = compute_estimated_probabilities(proba_surv_model, nS, nA, t_surv_max)
+
+    # Plot the survival probabilities
+    plot_survival_curves(dict_proba_surv, dict_proba_surv_estimate, title=f"Estimation of the survival probability P(t,x,a) for all states and actions in 1D gridworld (probas_actions = {probas_actions})")
+
+    # Plot of the loss value and the batch size
+    plt.figure()
+    colormap = cm.get_cmap("Blues", lut=len(all_n))
+    for idx in range(len(all_n)):
+        plt.plot(all_n[idx], float(all_loss[idx]), '.', markersize=5, color=colormap(idx))
+    plt.gca().set_xlabel("Batch size")
+    plt.gca().set_ylabel("Loss")
+    plt.gca().set_title("We see that the loss tends to be larger as the batch size decreases\n(specially towards the end of learning --more intense color)")

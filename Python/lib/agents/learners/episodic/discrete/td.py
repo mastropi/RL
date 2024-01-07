@@ -149,7 +149,7 @@ class LeaTDLambda(Learner):
 
         # Update alpha for the next iteration for "by state counts" update
         #print("Learn: state = {}, next_state = {}, done = {}".format(state, next_state, done))
-        if not self.adjust_alpha_by_episode:
+        if not self.adjust_alpha_by_episode and info.get('update_alphas', True):
             self._update_alphas(state)
 
         if done:
@@ -163,13 +163,17 @@ class LeaTDLambda(Learner):
                 self._plotZ()
                 self._plotAlphasEffective()
             self.store_trajectory_at_episode_end(T, next_state, debug=self.debug)
-            self._update_state_counts(T, next_state)
+            if info.get('update_trajectory', True):
+                # We only update the state count of the terminal state when we are updating the trajectory
+                # because the trajectory update also includes an update of the state count.
+                # So, if we the user requested not to update the trajectory (via the `info` dictionary)
+                # we should not update the state count of the terminal state here.
+                self._update_state_counts(T, next_state)
 
             # Update alpha for the next iteration for "by episode" updates
             if self.adjust_alpha_by_episode:
-                for state in range(self.env.getNumStates()):
-                    if not self.env.isTerminalState(state):
-                        self._update_alphas(state)
+                for s in range(self.env.getNumStates()):
+                    self._update_alphas(s)
 
     def _compute_deltas(self, state, action, next_state, reward, info):
         """
@@ -467,7 +471,7 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
         self._all_lambdas_sum2[state] += lambda_adaptive**2
 
         # Update alpha for the next iteration for "by state counts" update
-        if not self.adjust_alpha_by_episode:
+        if not self.adjust_alpha_by_episode and info.get('update_alphas', True):
             self._update_alphas(state)
 
         if done:
@@ -481,14 +485,18 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
                 self._plotZ()
                 self._plotAlphasEffective()
             self.store_trajectory_at_episode_end(T, next_state, debug=self.debug)
-            self._update_state_counts(T, next_state)
+            if info.get('update_trajectory', True):
+                # We only update the state count of the terminal state when we are updating the trajectory
+                # because the trajectory update also includes an update of the state count.
+                # So, if we the user requested not to update the trajectory (via the `info` dictionary)
+                # we should not update the state count of the terminal state here.
+                self._update_state_counts(T, next_state)
             self._store_lambdas_in_episode()
 
             # Update alpha for the next episode for "by episode" updates
             if self.adjust_alpha_by_episode:
                 for state in range(self.env.getNumStates()):
-                    if not self.env.isTerminalState(state):
-                        self._update_alphas(state)
+                    self._update_alphas(state)
 
         if self.debug:
             print("t: {}, delta = {:.3g} --> lambda = {:.3g}".format(t, delta, lambda_adaptive))

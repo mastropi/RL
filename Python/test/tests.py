@@ -33,15 +33,16 @@ print(f"Terminal states in {env1d.getNumStates()}-state gridworld: {env1d.getTer
 print(f"Terminal rewards: {env1d.getTerminalRewards()}")
 
 # Policy
-policy = probabilistic.PolGenericDiscrete(env1d, dict({0: [0.0, 1.0], env1d.getNumStates()-1: [0.0, 1.0]}), policy_default=[0.9, 0.1])
+policy = probabilistic.PolGenericDiscrete(env1d, dict({0: [0.0, 1.0], env1d.getNumStates()-1: [0.0, 1.0]}), policy_default=[0.9, 0.1]) #[0.5, 0.5]) #[0.9, 0.1])
 
 # Transition probability matrix under the given policy
 # It is based on the environment transition probabilities (given the action at each state) and the defined probabilistic policy
+# i.e. P[x,y] = sum_{a}{ p(x,y|a) * policy(a|x) }, where p(x,y|a) is the transition probability of going from x -> y when taking action a at state x.
 P = np.matrix(np.zeros((env1d.getNumStates(), env1d.getNumStates())))
 for s in range(env1d.getNumStates()):
     for a in range(env1d.getNumActions()):
         # In the environment, P[s][a] is a list of tuples of the form (prob, next_state, reward, is_terminal) (see the DiscreteEnv environment defined in envs/toy_text/discrete.py)
-        # and in each tuple, the transition probability to each possible next state for the given action 'a' is given in index 0 and the next state is given in index 1.
+        # and in each tuple, the transition probability to each possible next state for the GIVEN action 'a' is given at index 0 and the next state is given at index 1.
         for info_transition in env1d.P[s][a]:
             # Next state to be updated in the transition probability matrix
             ns = info_transition[1]
@@ -51,7 +52,7 @@ for s in range(env1d.getNumStates()):
 P_epi = P
 P_con = P.copy()
 # For the continuing learning task, update the transition probability of the terminal state, because when reached we want it to start again from state 0
-# so that the learning task is continuing
+# so that the learning task is continuing (recall that `-1` means "the last element of the array", i.e. the "last state").
 P_con[-1,0] = 1.0; P_con[-1,-1] = 0.0
 # Check that P is a valid transition probability matrix
 for s in range(env1d.getNumStates()):
@@ -87,37 +88,74 @@ assert np.allclose(prob_stationary, mu, 1E-4)
 # HOWEVER, if gamma = 1, using np.linalg.pinv() we can compute the pseudo-inverse, i.e. the Moore-Penrose generalized inverse,
 # which provides a matrix (I - P)^+ such as (I - P)^+ * b gives V in (I - P)*V = b where V has minimum norm among
 # all possible V solutions of the system of equation (I - P)*V = b.
+# Recall that `b` is the vector containing the EXPECTED one-step reward received by the agent under the given policy,
+# i.e. b[x] = sum_{y,a}{ p(x,a,y) * r(y) } = sum_{y,a}{ p(x,y|a) * policy(a|x) * r(y) } = sum_{y}{ P[x,y] * r(y) }
+# In our case, where the reward landscape is r(y) = 1.0 * Ind{y=4}, we have that b[x] = 0 for all x except x = 3,
+# at which b[x=3] = P[x=3,2]*0.0 + P[x=3,4]*1.0 = P[x=3,4]*r
+# Finally, in the continuing learning task case, the Bellman equation is: (I - P)*V = b - g*1,
+# where g is the average reward (i.e. the average reward observed over all states under statinoarity), and `1` is the vector of ones.
 r = env1d.getTerminalReward(env1d.getNumStates()-1)     # Reward received at the terminal state (assumed only one)
-V_true_disc = np.linalg.solve(np.eye(len(P_epi)) - 0.9*P_epi, np.array([0, 0, 0, P_epi[3, 4]*r, 0]))
-V_true_avg = np.linalg.solve(np.eye(len(P_con)) - 0.999999*P_con, np.array([0, 0, 0, P_con[3, 4]*r, 0]) - mu[-1]*r)
-## array([-0.01142543, -0.01088225, -0.00056179,  0.09775434, -0.01196862])
+gamma = 0.9
+gamma_almost1 = 0.999999
+# True value functions under the different learning tasks and learning criteria, namely:
+# V_true_epi_disc: learning task = EPISODIC; learning criterion = DISCOUNTED
+# V_true_epi_avg: UNDEFINED
+#   --> IN FACT, in this case the state value function V(s) is defined as the expected average reward observed in the episode,
+#       but this is a complicated quantity because its calculation implies dividing by the length of the episode, T, which is a random variable!
+#       We could perhaps talk about the TOTAL expected reward, i.e. V_true_epi_total = E[ sum-of-rewards-observed-in-episode-of-length-T ]
+#       but in our case where there is only one non-zero reward at the rightmost state, such learning criterion (TOTAL) is not sensible
+#       because for every non-terminal state x, the total observed rewards in ANY episode under ANY policy is ALWAYS 1, i.e. the reward received at termination!
+#       (this is confirmed by the calculation below that gives V_true_epi_tot)
+# V_true_con_avg: learning task = CONTINUING; learning criterion = AVERAGE
+# V_true_con_disc: learning task = CONTINUING; learning criterion = DISCOUNTED
+# WE SHOULD COMPARE THE LEARNED STATE VALUE FUNCTIONS WITH THE CORRESPONDING TRUE VALUE FUNCTIONS
+# depending on the Learning Task and on the Learning Criterion.
+V_true_epi_disc = np.linalg.solve(np.eye(len(P_epi)) - gamma*P_epi, np.array([0, 0, 0, P_epi[3, 4]*r, 0]))
+V_true_epi_tot = np.linalg.solve(np.eye(len(P_epi)) - gamma_almost1*P_epi, np.array([0, 0, 0, P_epi[3, 4]*r, 0]))   # This is not a sensible criterion for the episodic learning task for this reward's landscape (see reason in above comment)
+V_true_con_avg = np.linalg.solve(np.eye(len(P_con)) - gamma_almost1*P_con, np.array([0, 0, 0, P_con[3, 4]*r, 0]) - mu[-1]*r) # Note: mu[-1]*r is the average reward (i.e. the average observed reward over all states under stationarity, i.e. avg.reward = sum_{x} mu[x] * r[x])
+V_true_con_disc = np.linalg.solve(np.eye(len(P_con)) - gamma*P_con, np.array([0, 0, 0, P_con[3, 4]*r, 0]))
 # Generalized inverse (minimum norm solution)
-V_true_avg_minnorm = np.dot( np.linalg.pinv(np.eye(len(P_con)) - P_con), np.array([0, 0, 0, P_con[3, 4]*r, 0]) - mu[-1]*r )
-## matrix([[-0.02400868, -0.0234655 , -0.01314503,  0.08517109, -0.02455188]])
-
-# The difference between consecutive values of V should be the same in both solutions computed above
-assert np.allclose(np.diff(V_true_avg), np.diff(V_true_avg_minnorm))
-## OK!
+V_true_con_avg_minnorm = np.dot( np.linalg.pinv(np.eye(len(P_con)) - P_con), np.array([0, 0, 0, P_con[3, 4]*r, 0]) - mu[-1]*r )
+# Check the expected results
+if policy.policy == {0: [0.0, 1.0], 1: [0.5, 0.5], 2: [0.5, 0.5], 3: [0.5, 0.5], 4: [0.0, 1.0]} :
+    assert  gamma == 0.9 and \
+            np.allclose(V_true_epi_disc, np.array([0.33500299, 0.37222554, 0.49216488, 0.7214742 , 0.0]))
+    assert  gamma_almost1 == 0.999999 and \
+            np.allclose(V_true_epi_tot, np.array([1.0, 1.0, 1.0, 1.0, 0.0]), atol=1E-5)
+    assert  gamma_almost1 == 0.999999 and \
+            np.allclose(V_true_con_avg, np.array([-0.13494804, -0.07612458,  0.10034589,  0.39446375, -0.19377143]))
+    assert np.allclose(V_true_con_avg_minnorm, np.matrix(([[-0.15294118, -0.09411765,  0.08235294,  0.37647059, -0.21176471]])))
+    assert np.linalg.norm(V_true_con_avg_minnorm) <= np.linalg.norm(V_true_con_avg)
+    # The difference between consecutive values of V should be the same in both solutions computed above
+    assert np.allclose(np.diff(V_true_con_avg), np.diff(V_true_con_avg_minnorm))
+## ALL OK!
 
 avg_reward_true = np.sum([mu[s]*r for s, r in env1d.getTerminalRewardsDict().items()])
 print(f"True average reward for the cont. learning task: {avg_reward_true}")
 
 
 #-- Learn the average reward and the state value function
-learning_criterion = LearningCriterion.AVERAGE; gamma = 1.0
-#learning_criterion = LearningCriterion.DISCOUNTED; gamma = 0.9
+learning_task = LearningTask.CONTINUING
+#learning_criterion = LearningCriterion.AVERAGE; gamma = 1.0
+learning_criterion = LearningCriterion.DISCOUNTED
 
 # Store in the environment the true state value function of the learning task we want to analyze so that we can use it to compute the RMSE when estimating the value function
-if learning_criterion == LearningCriterion.AVERAGE:
-    env1d.setV(V_true_avg)
-    print(f"True differential state value function (AVERAGE): {env1d.getV()}")
-elif learning_criterion == LearningCriterion.DISCOUNTED:
-    env1d.setV(V_true_disc)
-    print(f"True state value function (DISCOUNTED): {env1d.getV()}")
+if learning_task == LearningTask.EPISODIC:
+    env1d.setV(V_true_epi_disc)
+    print(f"True state value function (EPISODIC / DISCOUNTED): {env1d.getV()}")
+else:
+    assert learning_task == LearningTask.CONTINUING
+    if learning_criterion == LearningCriterion.AVERAGE:
+        env1d.setV(V_true_con_avg)
+        print(f"True differential state value function (CONTINUING / AVERAGE): {env1d.getV()}")
+    elif learning_criterion == LearningCriterion.DISCOUNTED:
+        env1d.setV(V_true_con_disc)
+        print(f"True state value function (CONTINUING / DISCOUNTED): {env1d.getV()}")
 
 # Simulation parameters
 N = 200 #500 #200                                     # Number of particles in FV simulation
 T = 200 #500 #200                                     # Number of time steps for the estimation of E(T_A)
+burnin_time = 0 #4*N #None #5*N (for N=500)                   # Burn-in time for the estimation of Phi(t,x) in the DISCOUNTED case
 max_time_steps_fv_per_particle = 50         # Max average number of steps allowed for each particle in the FV simulation
 max_time_steps_fv_for_expectation = T
 max_time_steps_fv_for_all_particles = N * max_time_steps_fv_per_particle
@@ -126,10 +164,12 @@ max_time_steps_fv_for_all_particles = N * max_time_steps_fv_per_particle
 # The maximum time steps to be observed in the benchmark methods is set to the sum of:
 # - the max number of time steps allowed to estimate E(T_A)
 # - the max number of time steps allowed over all the FV particles
-max_time_steps_benchmark = max_time_steps_fv_for_expectation + max_time_steps_fv_for_all_particles
+M = 1   # Number of normal particles created during the FV simulation to explore using the underlying Markov process
+        # This value MUST coincide with n_normal_max variable defined in Simulator._run_simulation_fv_learnvaluefunctions()
+max_time_steps_benchmark = max_time_steps_fv_for_expectation + (1 + M) * max_time_steps_fv_for_all_particles
 
 # Parameters common for all learners
-R = 50              # Replications of the estimation process
+R = 1 #50              # Replications of the estimation process
 seed = 1717
 nepisodes = 100 #1000
 max_time_steps_per_episode = env1d.getNumStates()*10   #1000 #100
@@ -137,7 +177,7 @@ start_state = None  # The start state is defined by the Initial State Distributi
 plot = False
 
 alpha = 1.0
-#gamma = 1.0    # gamma is defined when defining the learning criterion above
+#gamma = 1.0    # gamma is defined when defining the learning criterion above or when computing the discounted state value for episodic learning tasks (normally `V_true_epi_disc`)
 lmbda = 0.0     # We should NOT use lambda > 0 because FV does NOT have the logic implemented to handle this case (currently the trajectories of all particles are mixed into the same trajectory stored in the self._states list.
 alpha_min = 0.0
 
@@ -158,7 +198,7 @@ for rep in range(R):
                    })
     learner_td = td.LeaTDLambda(env1d,
                                 criterion=learning_criterion,
-                                task=LearningTask.CONTINUING if learning_criterion == LearningCriterion.AVERAGE else LearningTask.EPISODIC,
+                                task=learning_task,
                                 alpha=params['alpha'], gamma=params['gamma'], lmbda=params['lambda'],
                                 adjust_alpha=True, adjust_alpha_by_episode=False,
                                 alpha_min=params['alpha_min'],
@@ -171,11 +211,12 @@ for rep in range(R):
     state_values_td, action_values_td, state_counts_td, RMSE_by_episode, MAPE_by_episode, learning_info = \
         sim.run(nepisodes=nepisodes,
                 max_time_steps=max_time_steps_benchmark,
-                max_time_steps_per_episode=max_time_steps_per_episode,
+                max_time_steps_per_episode=+np.Inf, #max_time_steps_per_episode, #+np.Inf
                 start_state_first_episode=start_state, seed=seed_this,
                 compute_rmse=True, state_observe=env1d.getNumStates()-2,  # This is the state just before the terminal state
                 verbose=True, verbose_period=10,
                 plot=plot, pause=0.1)
+    time_td = timer() - time_start
     avg_reward_td = learner_td.getAverageReward()
     if R > 1:
         estimates_td[rep] = avg_reward_td
@@ -184,7 +225,7 @@ for rep in range(R):
         print(f"Average reward estimated by TD(lambda): {avg_reward_td}")
         print(f"True average reward: {avg_reward_true}")
         print("Relative error: {:.1f}%".format((avg_reward_td / avg_reward_true - 1)*100))
-        print("TD(lambda) took {:.1f} minutes".format((timer() - time_start) / 60))
+        print("TD(lambda) took {:.1f} minutes".format(time_td / 60))
 
 
     #-- Learning the average reward using FV(lambda)
@@ -194,7 +235,7 @@ for rep in range(R):
     # Learner and agent definition
     params = dict({'N': N,  # NOTE: We should use N = 500 if we use N = 200, T = 200 above to compute the benchmark time steps because if here we use the N defined above, the number of time steps used by FV is much smaller than the number of time steps used by TD (e.g. 1500 vs. 5000) --> WHY??
                    'T': T,                           # Max simulation time over ALL episodes run when estimating E(T_A). This should be sufficiently large to obtain an initial non-zero average reward estimate (if possible)
-                   'absorption_set': set(np.arange(2)), #set({1}),
+                   'absorption_set': set(np.arange(2)), #set({1}),  # Note: The absorption set must include ALL states in A (see reasons in the comments in the LeaFV constructor)
                    'activation_set': set({2}),
                    'alpha': alpha,
                    'gamma': gamma,
@@ -208,6 +249,7 @@ for rep in range(R):
                           alpha=params['alpha'], gamma=params['gamma'], lmbda=params['lambda'],
                           adjust_alpha=True, adjust_alpha_by_episode=False,
                           alpha_min=params['alpha_min'],
+                          burnin_time=burnin_time,
                           debug=False)
     agent_fv = agents.GenericAgent(policy, learner_fv)
 
@@ -216,12 +258,13 @@ for rep in range(R):
     sim = DiscreteSimulator(env1d, agent_fv, debug=False)
     state_values_fv, action_values_fv, state_counts_fv, probas_stationary, expected_reward, expected_absorption_time, n_cycles_absorption_used, n_events_et, n_events_fv = \
         sim.run(nepisodes=nepisodes,
-                max_time_steps_per_episode=max_time_steps_per_episode,  #np.Inf
+                max_time_steps_per_episode=+np.Inf, #max_time_steps_per_episode,  #+np.Inf
                 max_time_steps_fv=max_time_steps_fv_for_all_particles,
                 min_num_cycles_for_expectations=0,
                 seed=seed_this,
-                verbose=True, verbose_period=10,
+                verbose=True, verbose_period=1,
                 plot=plot)
+    time_fv = timer() - time_start
     avg_reward_fv = learner_fv.getAverageReward()
     if R == 1:
         # Show the results of TD lambda so that we can compare it easily with FV shown below
@@ -229,7 +272,7 @@ for rep in range(R):
         print(f"Average reward estimated by TD(lambda): {avg_reward_td}")
         print(f"True average reward: {avg_reward_true}")
         print("Relative error: {:.1f}%".format((avg_reward_td / avg_reward_true - 1)*100))
-        print("TD(lambda) took {:.1f} minutes".format((timer() - time_start) / 60))
+        print("TD(lambda) took {:.1f} minutes".format(time_td / 60))
     else:
         estimates_fv[rep] = avg_reward_fv
         time_steps_fv[rep] = n_events_et + n_events_fv
@@ -237,7 +280,7 @@ for rep in range(R):
     print(f"Average reward estimated by FV(lambda): {avg_reward_fv}")
     print(f"True average reward: {avg_reward_true}")
     print("Relative error: {:.1f}%".format((avg_reward_fv / avg_reward_true - 1)*100))
-    print("FV(lambda) took {:.1f} minutes".format((timer() - time_start) / 60))
+    print("FV(lambda) took {:.1f} minutes".format(time_fv / 60))
 
 #-- Plot results
 # Replications
@@ -262,7 +305,7 @@ if R > 1:
     ax.set_ylabel("Average reward")
     plt.title(f"Distribution of average reward estimation on {R} replications: TD (red) vs. FV (green)")
 
-# Estimated value functions for the last replication
+# Estimated value functions for the LAST replication
 # Note that, under the average reward learning criterion, we plot the value function as the difference of the V(s) (either true or estimated)
 # w.r.t. V(0) (either true or estimated) because under the average reward criterion, the value function V(s) is NOT unique.
 # Ref: Gast paper at https://www.sigmetrics.org/mama/abstracts/Gast.pdf
@@ -273,21 +316,30 @@ if learning_criterion == LearningCriterion.AVERAGE:
     ref_value_true = env1d.getV()[0]
     ref_value_td = state_values_td[0]
     ref_value_fv = state_values_fv[0]
-plt.figure()
-ax = plt.gca()
+ax_V, ax_Vd = plt.figure().subplots(1,2)    # ax_Vd: for plotting the difference among state values (which is what really interest us for learning an optimal policy!)
 states = np.arange(1, env1d.getNumStates()+1)
-ax.plot(states, env1d.getV() - ref_value_true, color="blue")
-ax.plot(states, state_values_td - ref_value_td, color="red")
-ax.plot(states, state_values_fv - ref_value_fv, color="green")
-ax.set_xlabel("States")
-ax.set_ylabel("V(s)")
-ax.legend([f"True V(s)", f"V(s): TD(lambda={lmbda})", f"V(s): FV(lambda={lmbda})"], loc="upper left")
-ax2 = ax.twinx()
-ax2.bar(states, state_counts_td, color="red", alpha=0.3)
-ax2.bar(states, state_counts_fv, color="green", alpha=0.3)
-ax2.set_ylabel("State count")
-ax2.legend([f"Count(s): TD(lambda={lmbda})", f"Count(s): FV(lambda={lmbda})"], loc="upper right")
-plt.title(f"1D gridworld ({env1d.getNumStates()} states) with one terminal state (r=+1)\n{learning_criterion.name} reward criterion\nState values V(s) and visit frequency (count) for TD and FV")
+ax_V.plot(states, env1d.getV() - ref_value_true, color="blue")
+ax_V.plot(states, state_values_td - ref_value_td, color="red")
+ax_V.plot(states, state_values_fv - ref_value_fv, color="green")
+ax_V.axhline(0, color="gray")
+ax_V.set_xlabel("States")
+ax_V.set_ylabel("V(s)")
+ax_V.set_title("V(s)")
+ax_V.legend([f"True V(s)", f"V(s): TD(lambda={lmbda})", f"V(s): FV(lambda={lmbda})"], loc="upper left")
+ax2_V = ax_V.twinx()
+ax2_V.bar(states, state_counts_td, color="red", alpha=0.3)
+ax2_V.bar(states, state_counts_fv, color="green", alpha=0.3)
+ax2_V.set_ylabel("State count")
+ax2_V.legend([f"Count(s): TD(#events={learning_info['t']})", f"Count(s): FV(#events={n_events_et + n_events_fv})"], loc="upper right")
+ax_Vd.plot(states[:-1], np.diff(env1d.getV() - ref_value_true), color="blue")
+ax_Vd.plot(states[:-1], np.diff(state_values_td - ref_value_td), color="red")
+ax_Vd.plot(states[:-1], np.diff(state_values_fv - ref_value_fv), color="green")
+ax_Vd.axhline(0, color="gray")
+ax_Vd.set_xlabel("Left states")
+ax_Vd.set_ylabel("DIFF V(s)")
+ax_Vd.legend([f"True diff V(s)", f"Diff V(s): TD(lambda={lmbda})", f"Diff V(s): FV(lambda={lmbda})"])
+ax_Vd.set_title("V(s) difference among contiguous states")
+plt.suptitle(f"1D gridworld ({env1d.getNumStates()} states) with one terminal state (r=+1)\n{learning_criterion.name} reward criterion\nState values V(s) and visit frequency (count) for TD and FV")
 
 
 raise KeyboardInterrupt
@@ -315,15 +367,15 @@ policy_changed_from_previous_learning_step = lambda KL_distance, num_states: np.
 #--- Auxiliary functions
 
 # Learning criterion (it is used by the constructor of the test class below)
-#learning_criterion = LearningCriterion.DISCOUNTED; gamma = 0.9
-learning_criterion = LearningCriterion.AVERAGE; gamma = 1.0
+learning_criterion = LearningCriterion.DISCOUNTED; gamma = 0.9
+#learning_criterion = LearningCriterion.AVERAGE; gamma = 1.0
 
 seed = 1317
 test_ac = Test_EstPolicy_EnvGridworldsWithObstacles()
 size_vertical = 3; size_horizontal = 4
 #size_vertical = 6; size_horizontal = 8
 #size_vertical = 8; size_horizontal = 12
-#size_vertical = 9; size_horizontal = 13
+size_vertical = 9; size_horizontal = 13
 #size_vertical = 10; size_horizontal = 14
 #size_vertical = 10; size_horizontal = 30
 env_shape = (size_vertical, size_horizontal) #(3, 4)
@@ -426,7 +478,7 @@ print(f"A MAXIMUM of {max_time_steps_benchmark} steps will be allowed during the
 print("******")
 
 # Common learning parameters
-n_learning_steps = 50 #200 #50 #100 #30
+n_learning_steps = 200 #200 #50 #100 #30
 n_episodes_per_learning_step = 50   #100 #30   # This parameter is used as the number of episodes to run both for the value functions learning AND the policy learning, and both for the traditional and the FV methods method (for FV, this number of episodes is used to learn the expected reabsorption time E(T_A))
 max_time_steps_per_episode = test_ac.env2d.getNumStates()*10    # This parameter is just set as a SAFEGUARD against being blocked in an episode at some state of which the agent could be liberated by restarting to a new episode (when this max number of steps is reached)
 max_time_steps_per_policy_learning_episode = test_ac.env2d.getNumStates() #np.prod(env_shape) * 10 #max_time_steps_benchmark // n_episodes_per_learning_step   # Maximum number of steps per episode while LEARNING THE *POLICY* ONLINE (NOT used for the value functions (critic) learning)
@@ -679,35 +731,36 @@ plt.suptitle(f"{learning_method.upper()} - {learning_criterion.name} reward crit
 
 # Same plot for all states
 axes = plt.figure().subplots(test_ac.env2d.shape[0], test_ac.env2d.shape[1])
+first_learning_step = 0 #n_learning_steps * 3 // 4  #0
 y2max = int(round(np.max(state_counts_all)*1.1)) # For a common Y2-axis showing the state counts
 min_V, max_V = np.min(V_all), np.max(V_all)      # For a common Y-axis showing the value functions
 min_Q, max_Q = np.min(Q_all), np.max(Q_all)      # For a common Y-axis showing the value functions
-Q_all_baseline = Q_all[:n_learning_steps, :, :] - np.tile(V_all[:n_learning_steps, :].T, (test_ac.env2d.getNumActions(), 1, 1)).T
+Q_all_baseline = Q_all[first_learning_step:n_learning_steps, :, :] - np.tile(V_all[first_learning_step:n_learning_steps, :].T, (test_ac.env2d.getNumActions(), 1, 1)).T
 min_Q_baseline, max_Q_baseline = np.min(Q_all_baseline), np.max(Q_all_baseline)      # For a common Y-axis showing the value functions
 ymin, ymax = min(min_V, min_Q), max(max_V, max_Q)
 ymin_baseline, ymax_baseline = min(0, min_Q_baseline), max(0, max_Q_baseline)
 
 plot_baseline = False
 ylim = (ymin_baseline, ymax_baseline) if plot_baseline else (ymin, ymax)     # Use this for common Y-axis limits
-#ylim = (None, None)     # Use this for unequal Y-axis limits
+ylim = (None, None)     # Use this for unequal Y-axis limits
 marker = ''
 for i, ax in enumerate(axes.reshape(-1)):
     # Value functions on the left axis
     if plot_baseline:
         # Q values with baseline (so that we can better see the difference in value among the different actions)
-        ax.plot(range(1, n_learning_steps + 1), V_all[:n_learning_steps, i] - V_all[:n_learning_steps, i], marker=marker, color="black")  # We plot this so that the legend is fine
-        ax.plot(range(1, n_learning_steps + 1), Q_all_baseline[:n_learning_steps, i, :], marker=marker)
+        ax.plot(np.arange(1+first_learning_step, n_learning_steps + 1), V_all[first_learning_step:n_learning_steps, i] - V_all[first_learning_step:n_learning_steps, i], marker=marker, color="black")  # We plot this so that the legend is fine
+        ax.plot(np.arange(1+first_learning_step, n_learning_steps + 1), Q_all_baseline[first_learning_step:n_learning_steps, i, :], marker=marker)
     else:
-        ax.plot(range(1, n_learning_steps + 1), V_all[:n_learning_steps, i], marker=marker, color="black")
-        ax.plot(range(1, n_learning_steps + 1), Q_all[:n_learning_steps, i, :], marker=marker)
+        ax.plot(np.arange(1+first_learning_step, n_learning_steps + 1), V_all[first_learning_step:n_learning_steps, i], marker=marker, color="black")
+        ax.plot(np.arange(1+first_learning_step, n_learning_steps + 1), Q_all[first_learning_step:n_learning_steps, i, :], marker=marker)
     ax.xaxis.set_major_locator(MaxNLocator(integer=True))
     ax.set_ylim(ylim)
 
     # State counts on the right axis
     ax2 = ax.twinx()
-    ax2.plot(range(1, n_learning_steps+1), state_counts_all[:n_learning_steps, i], color="violet", linewidth=1)
+    ax2.plot(np.arange(1+first_learning_step, n_learning_steps+1), state_counts_all[first_learning_step:n_learning_steps, i], color="violet", linewidth=1)
     ax2.set_ylim((0, y2max))
-    y2ticks = [0, int(min(state_counts_all[:n_learning_steps, i])), int(max(state_counts_all[:n_learning_steps, i])), int(np.max(state_counts_all))]
+    y2ticks = [0, int(min(state_counts_all[first_learning_step:n_learning_steps, i])), int(max(state_counts_all[first_learning_step:n_learning_steps, i])), int(np.max(state_counts_all))]
     ax2.set_yticks(y2ticks)
     ax2.yaxis.set_ticklabels(y2ticks, fontsize=7)
 # Only show the x and y labels on the bottom-right plot (to avoid making the plot too cloggy)

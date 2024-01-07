@@ -172,119 +172,36 @@ if __name__ == '__main__':
 
         # These are the modules that are needed for the execution below which I comment out because they are included above
         # but leave here in order to know what is really needed for this execution.
-        #import copy
-        #import Python.lib.environments.gridworlds as gridworlds
-        #from Python.lib.estimators.fv import merge_proba_survival_and_phi, estimate_proba_stationary
+        import numpy as np
+        from Python.lib.environments import gridworlds
+        from Python.lib.agents.learners import LearningCriterion
+        from Python.lib.agents.policies import probabilistic
+        from Python.lib.agents import GenericAgent
+        from Python.lib.agents.learners.episodic.discrete.fv import LeaFV
+        from Python.lib.simulators.discrete import Simulator as DiscreteSimulator
 
-        env = gridworlds.EnvGridworld1D_OneTerminalState(length=5, rewards_dict={4: +1}, reward_default=0.0)
-        absorption_set = {1}
+        # Note: the EnvGridworld1D_OneTerminalState environment always starts at 0, so no need to define an initial state distribution (isd)
+        nS = 5
+        env = gridworlds.EnvGridworld1D_OneTerminalState(length=nS, rewards_dict={nS-1: +1}, reward_default=0.0)
+        absorption_set = set(range(2))              # ALL states in A should be part of the absorption set, because the set of active states in LeaFV is determined from the complement of the absorption set, and the active set is needed to define the dictionaries of the survival probability estimates.
         absorption_boundary = max(absorption_set)
         activation_set = {absorption_boundary + 1}
         active_set = set(np.arange(absorption_boundary + 1, env.getNumStates()))
-        learner_fv = LeaFV(env, N=5, T=10, absorption_set=absorption_set, activation_set=activation_set)
-        # Create the particles and mock where they are so that we can have a Phi estimate
-        envs = [copy.deepcopy(env) for _ in range(learner_fv.N)]
-        # Mock the observed absorption times
-        absorption_times = [3, 8, 13]
+        print(f"Absorption set: {absorption_set}")
+        print(f"Activation set: {activation_set}")
+        learner_fv = LeaFV(env, N=5, T=10, absorption_set=absorption_set, activation_set=activation_set, criterion=LearningCriterion.DISCOUNTED, gamma=0.9)
+        policy = probabilistic.PolGenericDiscrete(env, dict({0: [0.0, 1.0], env.getNumStates()-1: [0.0, 1.0]}), policy_default=[0.5, 0.5]) #[0.9, 0.1])
+        agent_fv = GenericAgent(policy, learner_fv)
 
-        t_max = 20      # Maximum time steps for which the evolution of the FV particles is mocked
-        seeds = [13, 17, 23, 1313, 1713, 1717]
-        for idx_seed, seed in enumerate(seeds):
-            print(f"\n******** Running test for seed = {seed} ({idx_seed+1} of {len(seeds)})")
-            np.random.seed(seed)
-            learner_fv.reset()
-
-            # Initialize the particle's position
-            for p in range(learner_fv.N):
-                envs[p].setState(np.random.choice(list(active_set)))
-            print(f"Initial state of particles: {[e.getState() for e in envs]}")
-
-            # Mock the evolution of the FV particles
-            t = 0
-            done = False
-            while not done:
-                # Mock the movement of the particles
-                for p in range(learner_fv.N):
-                    t += 1
-
-                    # For special test of the special coincidence where Phi is to be updated at the same time an absorption event happens
-                    if seed == 1717 and t == absorption_times[-2]:
-                        # To understand this updated of p, see comment below under the same IF condition
-                        p = p - 1
-                        print(f"t={t}: ENTRO p decreased to p={p}")
-
-                    state_prev = envs[p].getState()
-                    if t in absorption_times:
-                        # Since t is an absorption time, we set the state to be at the absorption set boundary
-                        state = absorption_boundary
-                    # For special test of the special coincidence where Phi is to be updated at the same time an absorption event happens
-                    elif seed == 1717 and t == absorption_times[-2] - 1:
-                        # Set the state to a state of interest (and change p to p-1 at the very end of the loop),
-                        # so that, at the next iteration, the same particle that is updated now will be updated
-                        # and this will allow us to test the case when Phi is updated at the same time of an absorption event.
-                        state = list(learner_fv.states_of_interest)[0]
-                        print(f"t={t}: ENTRO state forced to s={state}")
-                    else:
-                        state = np.random.choice(list(active_set))
-                    envs[p].setState(state)
-                    print(f"t={t} --> Particle p={p} moved from s={state_prev} --> {state}")
-                    if t in absorption_times:
-                        # Choose the new state of the absorbed particle as a random value among the active states (reactivation)
-                        if seed != 1717:
-                            state = np.random.choice(list(active_set))
-                            envs[p].setState(state)
-                            print(f"--> ABSORPTION! Particle p={p} reactivated to state s={state}")
-                        print("----------------------")
-                        print(f"Processing absorption time t_abs={t}...")
-                        learner_fv._update_absorption_times(t)
-                        learner_fv._update_phi_contribution(t)
-                        learner_fv._update_integral()
-                    learner_fv._update_phi(t, state_prev, state)
-                    print("After UPDATE:")
-                    print(f"Phi:\n{learner_fv.dict_phi}")
-                    print(f"Indices for Phi:\n{learner_fv.dict_last_indices_phi_prior_to_absorption_times}")
-                    print(f"CUMSUM Phi:\n{learner_fv.dict_phi_sum}")
-                    print(f"Integral:\n{learner_fv.dict_integral}")
-                    print()
-
-                    if t == t_max:
-                        done = True
-            print(f"\nDONE!\n=======\nPhi:\n{learner_fv.dict_phi}")
-
-            ## OK!
-            # NEXT: (2023/12/21) Assert the following output at the end (for seed = 13):
-            # ----------------------
-            # Processing absorption time t_abs=13...
-            # Phi:
-            # {4:    Phi   t
-            # 0  0.0   0
-            # 0  0.0   2
-            # 0  0.2   5
-            # 0  0.4   6
-            # 0  0.6   9
-            # 0  0.8  12}
-            # Indices for Phi:
-            # {4: [0, 1, 3, 5]}
-            # CUMSUM Phi:
-            # {4:    Phi   t
-            # 0  0.0   0
-            # 0  0.0   3
-            # 0  1.0   8
-            # 0  3.0  13}
-            # Integral:
-            # {4: 3.5}
-
-            # NEXT: (2023/12/21) Check that the integral gives the same as the integral computed after the fact, as opposed to iteratively as done above.
-            print("\n========\nCheck with computation of the integral after the fact...")
-            df_surv = pd.DataFrame({'t': [0] + absorption_times,
-                                    'P(T>t)': [ n /len(absorption_times) for n in range(len(absorption_times), -1, -1)]})
-
-            for x in learner_fv.states_of_interest:
-                df_proba_surv = merge_proba_survival_and_phi(df_surv, learner_fv.dict_phi[x])
-                proba, integral = estimate_proba_stationary(df_proba_surv, 1.0)
-                print(f"Components of the integral:\n{df_proba_surv}")
-                print(f"Integral computed after the fact: {integral}")
-
-                print(f"\nAsserting equality of integrals (iterative vs. after the fact) for seed = {seed} ({idx_seed+1} of {len(seeds)})")
-                assert np.isclose(integral, learner_fv.dict_integral[x]), "The iterative method and the after the fact method must give the same value for the FV integral"
-                print("OK!")
+        # Simulation
+        seed = 1717
+        nepisodes = 20
+        sim = DiscreteSimulator(env, agent_fv, debug=False)
+        state_values, action_values, state_counts, probas_stationary, expected_reward, expected_absorption_time, n_cycles_absorption_used, n_events_et, n_events_fv  = \
+            sim.run(nepisodes=nepisodes,
+                    max_time_steps_per_episode=np.Inf,
+                    max_time_steps_fv=100,
+                    min_num_cycles_for_expectations=0,
+                    seed=seed,
+                    verbose=True, verbose_period=1,
+                    plot=False)

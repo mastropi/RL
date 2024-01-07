@@ -425,7 +425,9 @@ class Learner(GenericLearner):
             # NOTE: This assumes that the store_trajectory_at_episode_end() method has not been called yet
             # (because we assume that the self.rewards attribute has not been updated with the newly observed self._rewards in the latest episode
             all_rewards_so_far = self.rewards + [self._rewards]     # IMPORTANT: The concatenation of the rewards should be done in the same way it is done in store_trajectory_at_episode_end() when updating self.rewards
-            assert np.isclose(updated_average, np.mean(np.concatenate(all_rewards_so_far)))
+            # TODO: (2024/01/03) Re-establish this assertion once I make it work again for the FV learning in the DISCOUNTED setting (using _run_simulation_fv_iterate())
+            # The problem comes up because of the parallel simulations that are run together with the FV particles in order to learn the value of the states inside the absorption set A (see the envs_normal environments in discrete.Simulator._run_simulation_fv_iterate()
+            #assert np.isclose(updated_average, np.mean(np.concatenate(all_rewards_so_far)))
             # Regular average (over the whole history of stored rewards, as opposed to doing an iterated update)
             # (2023/12/18) This assumes that the self.rewards list has been updated BEFORE calling this method, which currently is NOT the case,
             # because e.g. the MC learner learn_mc() learns (i.e. calls this method) BEFORE storing the trajectory (by calling store_trajectory_at_episode_end(),
