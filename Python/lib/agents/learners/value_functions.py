@@ -26,18 +26,14 @@ import numpy as np
 
 from Python.lib.agents.learners import ResetMethod
 
-# TODO: (2020/04/10) This class should cover ALL state value functions whose estimation is done via approximation (linear or non-linear)
-# (i.e. using a parameterized expression whose parameters are materialized as a vector of weights)
-# So the constructor should receive:
-# - the dimension of the weights
-# - the features x that are affected by the weights (possibly in a linear manner or perhaps in a nonlinear manner as well!)
-class StateValueFunctionApprox:
+
+class LinearValueFunctionApprox:
     """
-    Class that contains information about the estimation of a state value function, V(s)
+    Generic class for classes implementing linear value function approximations on concepts of interest (e.g. normally states and actions)
 
     Arguments:
     nS: int
-        Number of states on which the value function is defined.
+        Number of states on which the approximation function is defined.
 
     terminal_states: list
         List containing the indices of the terminal states, whose value should always be 0.
@@ -47,21 +43,14 @@ class StateValueFunctionApprox:
     def __init__(self, nS: int, terminal_states: list):
         self.nS = nS
         self.terminal_states = terminal_states
-        self.weights = np.zeros(nS)
-        # Here we implement the tabular value function, where the features x(s) of each state s
-        # are dummy or indicator variables, i.e. all equal to 0 except at the coordinate corresponding to state s.
-        # These dummy variables are stored for all states in the feature matrix X, where states and features
-        # are laid out so that the value of a state s is computed as w'x(s), i.e. the inner product between the
-        # vector of weights w and the vector of features for state s, x(s).
-        # Therefore the feature matrix X should have the dimension (#features) x (#states),
-        # meaning that features vary along the rows of X and states vary along the columns of X.
-        # In the dummy feature matrix case, where each feature is the indicator variable of a state
-        # the X matrix is a diagonal matrix.
-        self.X = np.eye(self.nS)
 
-    def reset(self, method=ResetMethod.ALLZEROS, params_random: dict=dict(), seed: int=None):
+        # Attributes to be implemented by the subclasses
+        self.weights = None
+        self.X = None
+
+    def reset(self, method=ResetMethod.ALLZEROS, params_random: dict=None, seed: int=None):
         """
-        Resets the weights using the specified reset method
+        Resets the weights of the linear function approximation using the specified reset method
 
         Arguments:
         method: ResetMethod
@@ -75,9 +64,9 @@ class StateValueFunctionApprox:
         params_random: (opt) dict
             Dictionary with the relevant parameters for the distribution to use for the pseudo-random generator
             when method is not ResetMethod.ALLZEROS.
-            For ResetMethod.RANDOM_UNIFORM: 'min', 'max'
-            For ResetMethod.RANDOM_NORMAL: 'loc', 'scale'
-            default: None, in which case the default values of the pseudo-random generation method are used.
+            For ResetMethod.RANDOM_UNIFORM: 'min', 'max', with default values 0.0 and 1.0
+            For ResetMethod.RANDOM_NORMAL: 'loc', 'scale', with default values 0.0 and 1.0
+            default: None, in which case the default values of the pseudo-random generation method specified above are used.
 
         seed: (opt) int
             Seed to use for the pseudo-random number generator.
@@ -96,31 +85,98 @@ class StateValueFunctionApprox:
             # from the pseudo-random generation affecting the value function initialization.
             np.random.seed(seed)
             if method == ResetMethod.RANDOM_UNIFORM:
-                min = params_random['min'] if 'min' in params_random.keys() else 0.0
-                max = params_random['max'] if 'max' in params_random.keys() else 1.0
+                min = params_random.get('min', 0.0) if params_random is not None else 0.0
+                max = params_random.get('max', 1.0) if params_random is not None else 1.0
                 self.weights[:] = np.random.uniform(min, max, size=len(self.weights))
             elif method == ResetMethod.RANDOM_NORMAL:
-                loc = params_random['loc'] if 'loc' in params_random.keys() else 0.0
-                scale = params_random['scale'] if 'scale' in params_random.keys() else 1.0
+                loc = params_random.get('loc', 0.0) if params_random is not None else 0.0
+                scale = params_random.get('scale', 1.0) if params_random is not None else 1.0
                 self.weights[:] = np.random.normal(loc, scale, size=len(self.weights))
             else:
                 self.weights[:] = np.random.rand(len(self.weights))
-
-            # Set the value of terminal states to 0 (this is the definition of the value of terminal states)
-            for s in self.terminal_states:
-                self.setValue(s, 0.0)
 
     #--- GETTERS
     def getWeights(self):
         return self.weights
 
+    def getValues(self):
+        "Returns the function values"
+        return np.dot(self.weights, self.X)
+
+    def _getValue(self, indcol: int):
+        "Returns the value of the concept (e.g. normally a state or a state-action) indexed by the given `indcol` (which indexes a column of the feature matrix X)"
+        # Inner product between the weights and all the features associated to the given
+        return np.dot(self.weights, self.X[:, indcol])
+
+    #--- SETTERS
+    def setWeights(self, weights: np.ndarray):
+        self.weights = weights
+
+    def _setValue(self, indcol: int, value: float):
+        """
+        Sets the value of the concept indexed by the given `indcol` (which indexes a column of the feature matrix X) to the given value
+
+        It returns True if the value could be set, o.w. it returns False. This happens when no feature in the feature matrix X for the given `indcol` column
+        is different from zero.
+        """
+        # Look for the first non-zero feature component for the given concept (referenced by `indcol`) (i.e. the first non-zero value of X[:, indcol])
+        # and use it to set its weight equal to value / X[feature, indcol], so that we get the given value when calling self.getValue(indcol),
+        # i.e. we get the given value when multiplying the weights with X[feature, indcol].
+        is_weight_set = False
+        for feature in range(self.X.shape[0]):
+            if self.X[feature, indcol] != 0.0:
+                self.weights[feature] = value / self.X[feature, indcol]
+                is_weight_set = True
+                break
+
+        return is_weight_set
+
+# TODO: (2020/04/10) This class should cover ALL state value functions whose estimation is done via approximation (linear or non-linear)
+# (i.e. using a parameterized expression whose parameters are materialized as a vector of weights)
+# So the constructor should receive:
+# - the dimension of the weights
+# - the features x that are affected by the weights (possibly in a linear manner or perhaps in a nonlinear manner as well!)
+class StateValueFunctionApprox(LinearValueFunctionApprox):
+    """
+    Class that contains information about the estimation of a state value function, V(s)
+
+    Arguments:
+    nS: int
+        Number of states on which the value function is defined.
+
+    terminal_states: list
+        List containing the indices of the terminal states, whose value should always be 0.
+        This is used by the reset() method which can reset the value function to different initial guesses
+        (e.g. random values), so that the value of terminal states is always reset to 0.
+    """
+    def __init__(self, nS: int, terminal_states: list):
+        super().__init__(nS, terminal_states)
+
+        self.weights = np.zeros(nS)
+        # Here we implement the tabular value function, where the features x(s) of each state s
+        # are dummy or indicator variables, i.e. all equal to 0 except at the coordinate corresponding to state s.
+        # These dummy variables are stored for all states in the feature matrix X, where states and features
+        # are laid out so that the value of a state s is computed as w'x(s), i.e. the inner product between the
+        # vector of weights w and the vector of features for state s, x(s).
+        # Therefore the feature matrix X should have the dimension (#features) x (#states),
+        # meaning that features vary along the rows of X and states vary along the columns of X.
+        # In the dummy feature matrix case, where each feature is the indicator variable of a state
+        # the X matrix is a diagonal matrix.
+        self.X = np.eye(self.nS)
+
+    def reset(self, method=ResetMethod.ALLZEROS, params_random: dict=None, seed: int=None):
+        "Resets the weights using the specified reset method. See the super class documentation for more details"
+        super().reset(method=method, params_random=params_random, seed=seed)
+
+        # Set the value of terminal states to 0 (this is the definition of the value of terminal states)
+        for s in self.terminal_states:
+            self.setValue(s, 0.0)
+
+    #--- GETTERS
     def getValue(self, state: int):
         if not self.isValidState(state):
             return None
-        return np.dot(self.weights, self.X[:,state])
-
-    def getValues(self):
-        return np.dot(self.weights, self.X)
+        return super()._getValue(state)
 
     #--- SETTERS
     def _setWeight(self, state: int, weight: float):
@@ -136,9 +192,6 @@ class StateValueFunctionApprox:
         if not self.isValidState(state):
             return -1
         self.weights[state] = weight
-
-    def setWeights(self, weights: np.ndarray):
-        self.weights = weights
 
     def setValue(self, state: int, value: float):
         """
@@ -169,15 +222,7 @@ class StateValueFunctionApprox:
             Value to set.
         """
         if self.isValidState(state):
-            # Look for the first non-zero feature component for the given state (i.e. the first non-zero value of X[:,state])
-            # and use it to set its weight equal to value / X[feature, state]
-            is_weight_set = False
-            for feature in range(self.X.shape[0]):
-                if self.X[feature, state] != 0.0:
-                    self.weights[feature] = value / self.X[feature, state]
-                    is_weight_set = True
-                    break
-
+            is_weight_set = super()._setValue(state, value)
             if not is_weight_set:
                 warnings.warn("No feature for state {} was found to be non-zero. The state value was NOT set to {}." \
                               .format(state, value))
@@ -190,16 +235,14 @@ class StateValueFunctionApprox:
         return True
 
 
-# TODO: (2023/10/12) Make this class inherit from a super class where the main methods that are common to all value function approximations (e.g. for V(s) and Q(s,a)) are defined
-# Example of such method that is common to all value function approximation classes: all methods related to weights, such as getWeights(), setWeights(), etc.
-class ActionValueFunctionApprox:
+class ActionValueFunctionApprox(LinearValueFunctionApprox):
     """
     Class that contains information about the estimation of an action value function, Q(s,a)
 
     The current implementation delivers only a TABULAR value function where the matrix of features X is
     a the identity matrix of size nS*nA x nS*nA.
     (In a general setting the number of columns in the X matrix represents the number of all possible state-actions
-    and the number of rows represents the number of features, which is normaly less than the number of all possible state-actions.)
+    and the number of rows represents the number of features, which is normally less than the number of all possible state-actions.)
 
     Likewise the vector of weights has size nS*nA (but normally it would have a smaller size) and each entry
     directly gives the action value for each state-action (s,a).
@@ -223,9 +266,9 @@ class ActionValueFunctionApprox:
         (e.g. random values), so that the value of terminal states is always reset to 0.
     """
     def __init__(self, nS: int, nA: int, terminal_states: list):
-        self.nS = nS
+        super().__init__(nS, terminal_states)
+
         self.nA = nA
-        self.terminal_states = terminal_states
         # For now we define full dimensional weights, i.e. as many as the number of all possible state-actions.
         # In general, the dimension of the weights would be smaller than the number of state-actions, but for now
         # we are implementing the tabular setting.
@@ -233,57 +276,14 @@ class ActionValueFunctionApprox:
         # Accordingly to the full dimensional weights, we define a full dimensional features matrix X
         self.X = np.eye(self.nS * self.nA)
 
-    def reset(self, method=ResetMethod.ALLZEROS, params_random: dict=dict(), seed: int=None):
-        """
-        Resets the action value function using the specified reset method
+    def reset(self, method=ResetMethod.ALLZEROS, params_random: dict=None, seed: int=None):
+        "Resets the action value function using the specified reset method. See the super class documentation for more details"
+        super().reset(method=method, params_random=params_random, seed=seed)
 
-        Arguments:
-        method: ResetMethod
-            Method to use to reset the action values.
-            Currently the following methods are implemented: ResetMethod.ALLZEROS, ResetMethod.RANDOM_UNIFORM,
-            ResetMethod.RANDOM_NORMAL.
-            `None` is equivalent to ResetMethod.ALLZEROS.
-            If none of these methods is given, the np.random.rand() method is used which generates a random number
-            in [0, 1).
-
-        params_random: (opt) dict
-            Dictionary with the relevant parameters for the distribution to use for the pseudo-random generator
-            when method is not ResetMethod.ALLZEROS.
-            For ResetMethod.RANDOM_UNIFORM: 'min', 'max'
-            For ResetMethod.RANDOM_NORMAL: 'loc', 'scale'
-            default: None, in which case the default values of the pseudo-random generation method are used.
-
-        seed: (opt) int
-            Seed to use for the pseudo-random number generator.
-            Note that, when seed != None, the set of random numbers generated by this method is always the same.
-            This useful so that the state values can be always reset to the same set of values at e.g. the beginning
-            of an experiment.
-        """
-        if method is None or method == ResetMethod.ALLZEROS:
-            self.weights[:] = 0.0
-        else:
-            # Random weights generation
-            # NOTE: We use np.random() as opposed to e.g. np_random() because the latter function
-            # (defined in gym.utils.seeding) is mostly called from within environments,
-            # e.g. in gym.envs.toy_text.discrete.seed(), and this class defines value functions approximations.
-            # In addition, we keep separately the pseudo-random number generation affecting the trajectories
-            # from the pseudo-random generation affecting the value function initialization.
-            np.random.seed(seed)
-            if method == ResetMethod.RANDOM_UNIFORM:
-                min = params_random['min'] if 'min' in params_random.keys() else 0.0
-                max = params_random['max'] if 'max' in params_random.keys() else 1.0
-                self.weights[:] = np.random.uniform(min, max, size=len(self.weights))
-            elif method == ResetMethod.RANDOM_NORMAL:
-                loc = params_random['loc'] if 'loc' in params_random.keys() else 0.0
-                scale = params_random['scale'] if 'scale' in params_random.keys() else 1.0
-                self.weights[:] = np.random.normal(loc, scale, size=len(self.weights))
-            else:
-                self.weights[:] = np.random.rand(len(self.weights))
-
-            # Set the value of terminal states to 0 (for all actions), as this is the definition of the value of terminal states
-            for s in self.terminal_states:
-                for a in range(self.nA):
-                    self.setValue(s, a, 0.0)
+        # Set the value of terminal states to 0 (for all actions), as this is the definition of the value of terminal states
+        for s in self.terminal_states:
+            for a in range(self.nA):
+                self.setValue(s, a, 0.0)
 
     #--- GETTERS
     def getLinearIndex(self, state, action):
@@ -293,18 +293,10 @@ class ActionValueFunctionApprox:
         """
         return state*self.nA + action
 
-    def getWeights(self):
-        return self.weights
-
     def getValue(self, state: int, action: int):
         if not self.isValidState(state) or not self.isValidAction(state, action):
             return None
-        # Inner product between the weights and the features corresponding to the given state-action
-        return np.dot(self.weights, self.X[:, self.getLinearIndex(state, action)])
-
-    def getValues(self):
-        "Returns the values of all possible state-actions"
-        return np.dot(self.weights, self.X)
+        return super()._getValue(self.getLinearIndex(state, action))
 
     #--- SETTERS
     def _setWeight(self, state: int, action: int, weight: float):
@@ -320,9 +312,6 @@ class ActionValueFunctionApprox:
         if not self.isValidState(state) or not self.isValidAction(state, action):
             return -1
         self.weights[self.getLinearIndex(state, action)] = weight
-
-    def setWeights(self, weights: np.ndarray):
-        self.weights = weights
 
     def setValue(self, state: int, action: int, value: float):
         """
@@ -349,15 +338,7 @@ class ActionValueFunctionApprox:
             Value to set.
         """
         if self.isValidState(state) and self.isValidAction(state, action):
-            # Look for the first non-zero feature component for the given state (i.e. the first non-zero value of X[:, (state, action)])
-            # and use it to set its weight equal to value / X[feature, (state, action)]
-            is_weight_set = False
-            for feature in range(self.X.shape[0]):
-                if self.X[feature, self.getLinearIndex(state, action)] != 0.0:
-                    self.weights[feature] = value / self.X[feature, self.getLinearIndex(state, action)]
-                    is_weight_set = True
-                    break
-
+            is_weight_set = super()._setValue(self.getLinearIndex(state, action), value)
             if not is_weight_set:
                 warnings.warn("No feature for state-action ({}, {}) was found to be non-zero. The state value was NOT set to {}." \
                               .format(state, action, value))

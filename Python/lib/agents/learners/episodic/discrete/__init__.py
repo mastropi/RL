@@ -59,7 +59,7 @@ class Learner(GenericLearner):
                  criterion: LearningCriterion=LearningCriterion.DISCOUNTED,
                  task: LearningTask=LearningTask.EPISODIC,
                  alpha: float=1.0,
-                 adjust_alpha=False, alpha_update_type=AlphaUpdateType.FIRST_STATE_VISIT, adjust_alpha_by_episode=False,
+                 adjust_alpha=False, alpha_update_type=AlphaUpdateType.EVERY_STATE_VISIT, adjust_alpha_by_episode=False,
                  func_adjust_alpha=None,
                  alpha_min=0.,
                  min_count_to_update_alpha=1, min_time_to_update_alpha=0,
@@ -205,7 +205,7 @@ class Learner(GenericLearner):
         # Reset the attributes that keep track of states and rewards received during learning at the new episode that will start
         self._reset_at_start_of_episode()
 
-        # Only reset the initial estimates of the value functions at the very first episode
+        # Only reset the initial estimates of the value functions at the very first episode (the episode counter starts at 1)
         # (since each episode should leverage what the agent learned so far!)
         if self.episode == 1 or reset_value_functions:
             # Reset all the learning information by calling the super class reset, which is generic, i.e. it does NOT assume episodic tasks
@@ -298,16 +298,18 @@ class Learner(GenericLearner):
         """
         try:
             self.getV().reset(method=self.reset_method, params_random=self.reset_params, seed=self.reset_seed)
-        except:
+        except Exception as e:
             warnings.warn(f"Resetting the value of the STATE value function failed. If this is needed, "
                           f"check whether the `getV()` is defined in the learner class '{self.__class__.__name__}', "
                           f"and if so, whether the reset() method is defined for the object containing the state value function.")
+            print(e)
         try:
-            self.getQ().reset(method=self.reset_method, params_random=self.reset_params, seed=self.reset_seed)
-        except:
+            self.getQ().reset(method=self.reset_method, params_random=self.reset_params, seed=self.reset_seed + 1 if self.reset_seed is not None else None)  # We sum +1 to the seed to avoid having the same initial values for V(s) and Q(s,a)
+        except Exception as e:
             warnings.warn(f"Resetting the value of the ACTION value function failed. If this is needed, "
                           f"check whether the `getQ()` is defined in the learner class '{self.__class__.__name__}', "
                           f"and if so, whether the reset() method is defined for the object containing the action value function.")
+            print(e)
 
     def _update_trajectory(self, t, state, action, reward):
         "Updates the trajectory of the CURRENT episode"

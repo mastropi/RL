@@ -72,8 +72,10 @@ jupyter==1.0.0
 jupyter-client==5.2.2
 jupyter-console==5.2.0
 jupyter-core==4.4.0
-jupyterlab==0.31.4
-jupyterlab-launcher==0.10.2
+# DM-2024/01/20-START: Commented out because of a security warning triggered by GitHub
+#jupyterlab==0.31.4
+#jupyterlab-launcher==0.10.2
+# DM-2024/01/20-END: Commented out because of a security warning triggered by GitHub
 kiwisolver==1.3.1
 lazy-object-proxy==1.3.1
 llvmlite==0.21.0
