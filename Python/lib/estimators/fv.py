@@ -132,11 +132,12 @@ def update_phi(env, N: int, t: float, dict_phi: dict, env_state_prev, env_state_
     t: float
         Continuous-valued time at which the latest change of a particle's state happened.
         This value must be larger than or equal to the last time value present in dict_phi for the state of interest
-        whose Phi value is potentially updated. In such case, the value of Phi previously stored in the dictionary
-        at the given t value is *replaced* with the updated Phi value. This is done to accommodate for the situation
-        where the state of interest x is also a terminal state (quite common in episodic learning tasks),
-        triggering a reset of the particle at an environment's start state the next time the particle is picked,
-        that happens to be part of the absorption set A, which therefore requires immediate reactivation.
+        whose Phi value is potentially updated. If t is equal to the last time present in dict_phi,
+        the value of Phi previously stored in the dictionary at the given t value is *replaced* with the updated Phi value.
+        This is done to accommodate for the situation where the state of interest x is also a terminal state
+        of the original process being modeled by the FV particle system (quite common in episodic learning tasks),
+        which triggers a reset of the particle at an environment's start state the next time the particle is picked for update.
+        If this start state happens to be part of the absorption set A, an immediate reactivation of the particle takes place.
         Replacing the Phi value already stored allows the estimation process to take into account the transition
         that really counts, namely from the terminal state x to the state after reactivation.
 
@@ -511,20 +512,25 @@ def compute_fv_integral(df_phi_proba_surv, reward: float=1.0, interval_size: flo
     """
     # Filter on the records that actually contribute to the integral
     # Note that:
-    # - The values of P(T>t) are always positive (by definition of survival probability)
+    # - The values of P(T>t) are always positive (by definition of survival probability), except at the maximum survival time measured, where P(T>t) = 0,
+    #   but here dt = 0 (which we filter below) because there is no next value to use for the computation of dt (which, recall, is computed as "next t" - "current t".
     # - The value of dt is 0 when several occurrences of the same t happen when observing the survival times of the process
-    # (e.g. when working on a discrete-time Markov process)
+    # (e.g. when working on a discrete-time Markov process), and at the last record inserted in the data frame (which contains the maximum survival time observed so far).
     df_phi_proba_surv_Phi_gt0 = df_phi_proba_surv.loc[(df_phi_proba_surv['Phi'] > 0) & (df_phi_proba_surv['dt'] > 0),]
     if discount_factor == 1.0:
         integral = interval_size * np.sum(reward * df_phi_proba_surv_Phi_gt0['P(T>t)'] * df_phi_proba_surv_Phi_gt0['Phi'] * df_phi_proba_surv_Phi_gt0['dt'])
     else:
-        # We need to consider each one-sized interval separately, even the function P(T>t)*Phi(t,x) is constant there
-        # because we need to apply a different discount for each of those intervals. Fortunately we can do without
-        # explicitly considering those one-sized interval by using the summation formula for a geometric sum,
-        # all of whose components are already stored in the input data frame!
+        # We need to consider each one-step-sized (i.e. dt = 1) interval separately, even if the function P(T>t)*Phi(t,x) is constant in there,
+        # because we need to apply a different discount for each of those intervals.
+        # Fortunately we do NOT need to explicitly iterate on all the one-step-sized intervals, because we can use the summation formula for a geometric sum
+        # on the discount factor, and the computation of this geometric sum is possible because all the necessary ingredients are available in the input data frame!
+        # The expression is:
+        #   Integral = interval_size * 1 / (1 - gamma) * sum_i { f(i) * gamma^(t(i) - 1) * (1 - gamma^(dt(i) + 1)) }
+        # where i indexes every interval where f(i) remains constant, t(i) is the LOWER end of such interval,
+        # and f(i) = P(T>t(i)) * Phi(t(i),x) and dt(i) is the length of such interval measured as t(i+1) - t(i).
         integral = interval_size * 1 / (1 - discount_factor) * \
-                                    np.sum( discount_factor**df_phi_proba_surv_Phi_gt0['t'] * (1 - discount_factor**df_phi_proba_surv_Phi_gt0['dt']) *
-                                            reward * df_phi_proba_surv_Phi_gt0['P(T>t)'] * df_phi_proba_surv_Phi_gt0['Phi'] * df_phi_proba_surv_Phi_gt0['dt'])
+                                    np.sum( discount_factor**(df_phi_proba_surv_Phi_gt0['t'] - 1) * (1 - discount_factor**(df_phi_proba_surv_Phi_gt0['dt'] + 1)) *
+                                            reward * df_phi_proba_surv_Phi_gt0['P(T>t)'] * df_phi_proba_surv_Phi_gt0['Phi'] )
 
     return integral
 

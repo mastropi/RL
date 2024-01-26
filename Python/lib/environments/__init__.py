@@ -50,7 +50,7 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
     and we want to keep track of the state and actions visited by each particle.
     """
 
-    def __init__(self, nS, nA, P, isd, dim=1, terminal_states=set(), terminal_rewards=dict(), store_trajectory=True):
+    def __init__(self, nS, nA, P, isd, dim=1, terminal_states=set(), terminal_rewards=dict(), store_trajectory=False):
         super().__init__(nS, nA, P, isd)
 
         # Dimension of the environment (e.g. 1D (gridworld), 2D (gridworld), etc.)
@@ -73,9 +73,8 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
         self.terminal_rewards = terminal_rewards
 
         self.store_trajectory = store_trajectory
-        if self.store_trajectory:
-            self.df_trajectory = None
-            self.reset_trajectory()
+        self.df_trajectory = None
+        self.reset_trajectory()
 
         # Define the true value functions as all zeros when they are not defined already by the actual environment (inheriting from this class)
         # The goal is to be able to do analysis of the *estimated* value functions even when the true state value functions are unknonwn
@@ -88,8 +87,33 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
         if "Q" not in attributes_in_object:
             self.Q = np.array([0.0]*self.getNumStates()*self.getNumActions())
 
-    def reset_trajectory(self):
-        self.df_trajectory = pd.DataFrame(columns=['time', 'state', 'action', 'next_state', 'reward'])
+    def reset_trajectory(self, reset_state=None):
+        """
+        Resets the trajectory of the environment to a data frame having just ONE record containing the current state of the environment
+
+        This is only done when the self.store_trajectory flag is True.
+
+        This first record has the following characteristics:
+        a) The 'time' column is set to 0 (and not e.g. -1, which could be another possibility).
+        This allows for:
+        - working with both discrete-time and continuous-time Markov chains
+        - making the time column represent the state TO WHICH the Markov chain transitions,
+        which is consistent with the convention normally used that considers the Markov chain trajectory
+        to be continuous from the right, see e.g. Pierre Bremaud's book in particular the graph of the jump process
+        presented in Chapter 13, "Continuous-time Markov chains".
+
+        b) The 'action' column is set to -1 because there is no particular action leading to the start state.
+        *** Recall that actions are assumed to be indices starting at 0. ***
+
+        c) The 'next_state' column is set to the start state, so it has the same value as the 'state' column.
+
+        d) The 'reward' column is set to the reward yielded by the environment when the agent visits the start state.
+        """
+        if self.store_trajectory:
+            if reset_state is None:
+                reset_state = self.getState()
+            self.df_trajectory = pd.DataFrame([[0, reset_state, -1, reset_state, self.getReward(reset_state)]],
+                                               columns=['time', 'state', 'action', 'next_state', 'reward'])
 
     def update_trajectory(self, t, state, action, next_state, reward):
         """
@@ -100,6 +124,7 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
         The new row is added to the end of the data frame using the number of rows already present in
         the data frame as row index.
         """
+        assert self.store_trajectory, "The `store_trajectory` flag must be True when updating the trajectory stored in the environment"
         self.df_trajectory = pd.concat([self.df_trajectory,
                                         pd.DataFrame([[t, state, action, next_state, reward]],
                                                      index=[len(self.df_trajectory)],
@@ -115,6 +140,9 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
 
     def getInitialStateDistribution(self):
         return np.copy(self.isd)
+
+    def getStoreTrajectoryFlag(self):
+        return self.store_trajectory
 
     def getState(self):
         return self.s
@@ -140,6 +168,17 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
     def getAllStates(self):
         "Returns the sorted list of all states in the environment"
         return self.all_states
+
+    def getAllValidStates(self):
+        "Returns the list of valid states (i.e. states where the system can be at). Unless this method is overridden, it returns all states"
+        return self.getAllStates()
+
+    def getReward(self, s):
+        "Returns the reward received when visiting the given state"
+        if s in self.terminal_rewards:
+            return self.terminal_rewards[s]
+        else:
+            return 0.0
 
     def getTerminalStates(self):
         "Returns the list of terminal states"
@@ -177,6 +216,10 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
     #--- Setters
     def setInitialStateDistribution(self, isd):
         self.isd = isd
+
+    def setStoreTrajectoryFlag(self, store_trajectory):
+        "Sets the store_trajectory flag to the given value"
+        self.store_trajectory = store_trajectory
 
     def setSeed(self, seed=None):
         """

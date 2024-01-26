@@ -325,7 +325,7 @@ def generate_min_exponential_time(rates):
     return event_time, idx_event
 
 
-def compute_survival_probability(survival_times: list, colnames=['t', 'P(T>t)']):
+def compute_survival_probability(survival_times: list, colnames: list=None, right_continuous=True):
     """
     Computes the survival probability from a list of sorted survival times
 
@@ -333,29 +333,52 @@ def compute_survival_probability(survival_times: list, colnames=['t', 'P(T>t)'])
     survival_times: list
         Sorted list containing the observed survival times on which the step survival probability is computed.
 
-    colnames: (opt) list
+    colnames: (opt) list or array-like of length 2
         Column names to be used for the survival times and the survival probability, respectively.
-        default: ['t', 'P(T>t)']
+        default: ['t', 'P(T>t)'] when right_continuous=True, ['t', 'P(T>=t)'] when right_continuous=False
+
+    right_continuous: (opt) bool
+        Whether the computed survival probability is right-continuous (True), i.e. it corresponds to the probability function P(T>t)
+        or left-continuous (False), i.e. it corresponds to the probability function P(T>=t).
+        default: True
 
     Return: pandas DataFrame
     Data frame containing the following two columns:
     - `colnames[0]`: the input survival times (assumed sorted)
-    - 'colnames[1]': the survival probability for the corresponding survival time value.
+    - 'colnames[1]': the survival probability for the corresponding survival time value, which corresponds to a piecewise constant estimation
+    of the survival probability. If right_continuous=True, the value is associated to the corresponding t value and to the time interval that is
+    to the RIGHT of it, making t the LOWER bound of such interval. If right_continuous=False, the value is associated to the corresponding t value
+    and to the time interval that is to the LEFT of it, making t the UPPER bound of such interval.
+
+    Note that the data frame has as many rows as the length of `survival_times` where the first row has time value t = 0.0.
+    When right_continuous=True, the first row has value 1.0 for P(T>t), which is the value of the survival probability function at t = 0.0,
+    as the function is right continuous.
+    When right_continuous=False, the first row has value 0.0 for P(T>=t) so that, if that row is used in the calculation of an integral / sum,
+    it does NOT contribute to it, as it should be the case, since the value t=0 corresponds to the right-end of the interval associated to the value
+    stored for P(T>=t). Note that we choose to have that record in the output data frame so that a call to utils.basic.merge_values_in_time() works fine
+    as this function requires the first value of each times list to merge to be always 0.
     """
+    if colnames is None:
+        colnames = ['t', 'P(T>t)'] if right_continuous else ['t', 'P(T>=t)']
+    elif not isinstance(colnames, (list, tuple, np.ndarray)) or len(colnames) != 2:
+        raise ValueError(f"Input parameter `colnames` must be either list, tuple or array and its length must be 2 ({colnames})")
+
     assert survival_times[0] == 0.0
     # Number of observed death events used to measure survival times
     N = len(survival_times) - 1
 
     if N > 0:
         proba_surv = [n / N for n in
-                      range(N, -1, -1)]  # This is N downto 0 (i.e. N+1 elements as there are in survival_times)
-        assert proba_surv[-1] == 0.0
+                      range(N, -1*right_continuous, -1)]  # This is N down-to 0 if right_continuous=True, o.w. it's N down-to 1
+        if right_continuous:
+            assert proba_surv[-1] == 0.0
     else:
-        proba_surv = [1.0]
+        proba_surv = [1.0] if right_continuous else [1.0]
 
     assert proba_surv[0] == 1.0
-    return pd.DataFrame.from_items([(colnames[0], survival_times),
-                                    (colnames[1], proba_surv)])
+
+    return pd.DataFrame.from_items([(colnames[0], survival_times),   # We remove the initial value already included in survival_times, t=0.0, if the survival probability is requested to be LEFT continuous.
+                                    (colnames[1], [0.0] + proba_surv if not right_continuous else proba_surv)])
 
 
 def get_server_loads(job_rates, service_rates):

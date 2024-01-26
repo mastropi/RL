@@ -547,7 +547,7 @@ def insort(alist, value, unique=False):
 
 def find_signed_max_value(x):
     """
-    Finds the maximum value based on all absolute values but includes the sign of the maximum found
+    Finds the maximum value in an array or list based on their absolute values and returns the maximum value found with its original sign
 
     Arguments
     x: array, list or tuple
@@ -572,9 +572,9 @@ def find_signed_max_value(x):
     else:
         x_max_neg = 0.0
 
-    max_signed_deltaV_rel = x_max_neg if np.abs(x_max_neg) > np.abs(x_max_pos) else x_max_pos  # e.g. -5)
+    max_signed_value = x_max_neg if np.abs(x_max_neg) > np.abs(x_max_pos) else x_max_pos  # e.g. -5)
 
-    return max_signed_deltaV_rel
+    return max_signed_value
 
 def find(alist, value):
     """

@@ -51,18 +51,18 @@ class LeaFV(LeaTDLambda):
         If `None`, the environment terminal states are defined as states of interest.
         default: None
 
-    probas_stationary_start_state_absorption: (opt) dict
+    probas_stationary_start_state_et: (opt) dict
         Dictionary containing the probability for the selection of the start state to be used to estimate
         the denominator of the FV estimator of expectations, namely the expected reabsorption cycle time, E(T_A).
-        When None, a random distribution is used to select the start state.
+        See further details in the documentation of the class responsible to simulate Fleming-Viot (e.g. discrete.Simulator).
         default: None
 
-    probas_stationary_start_state_activation=None,
+    probas_stationary_start_state_fv: (opt) dict
         Dictionary containing the probability for the selection of the start state to be used for
         the initialization of the N particles of the FV process, which are used to estimate the survival
         probability P(T>t) and the empirical distribution Phi(x,t) that estimates the occupation
         probability of each state x of interest conditional to the process not being absorbed.
-        When None, a random distribution is used to select the N start states.
+        See further details in the documentation of the class responsible to simulate Fleming-Viot (e.g. discrete.Simulator).
         default: None
 
     criterion: (opt) LearningCriterion
@@ -76,9 +76,8 @@ class LeaFV(LeaTDLambda):
         default: LearningCriterion.AVERAGE
 
     burnin_time: (opt) int or None
-        Burn-in time by which the survival probability is shifted when aligning its measurement times
-        with the measurement times of the estimate of the empirical mean Phi(t,x), which can be used
-        to compute the FV integral using the times in Phi(t,x) where Phi is assumed to have reached stationarity.
+        Burn-in time to wait until the empirical mean estimation of Phi(t,x) is considered to have reached
+        stationarity, and thus be independent of the initial state and action.
         When `None`, the burn-in time is set to twice the number of particles, 2*N, as the time the FV
         system needs to reach stationarity is proportional to the number of particles in the system.
         default: 0
@@ -95,18 +94,18 @@ class LeaFV(LeaTDLambda):
 
     def __init__(self, env, N: int, T: int, absorption_set: set, activation_set: set,
                  states_of_interest: set=None,
-                 probas_stationary_start_state_absorption: dict=None,
-                 probas_stationary_start_state_activation: dict=None,
+                 probas_stationary_start_state_et: dict=None,
+                 probas_stationary_start_state_fv: dict=None,
                  criterion=LearningCriterion.AVERAGE,
-                 alpha=0.1, gamma=1.0, lmbda=0.8,
+                 alpha=0.1, gamma=1.0, lmbda=0.0,
                  adjust_alpha=False, alpha_update_type=AlphaUpdateType.EVERY_STATE_VISIT,
-                 adjust_alpha_by_episode=False, alpha_min=0.,
+                 adjust_alpha_by_episode=False, alpha_min=0., func_adjust_alpha=None,
                  reset_method=ResetMethod.ALLZEROS, reset_params=None, reset_seed=None,
                  burnin_time=0, TIME_RESOLUTION=1E-9,
                  debug=False):
         super().__init__(env, criterion=criterion, task=LearningTask.CONTINUING, alpha=alpha,  gamma=gamma, lmbda=lmbda, adjust_alpha=adjust_alpha,
                          alpha_update_type=alpha_update_type, adjust_alpha_by_episode=adjust_alpha_by_episode,
-                         alpha_min=alpha_min,
+                         alpha_min=alpha_min, func_adjust_alpha=func_adjust_alpha,
                          store_history_over_all_episodes=True,  # We set this to True because FV is a CONTINUING learning task
                          reset_method=reset_method, reset_params=reset_params, reset_seed=reset_seed, debug=debug)
 
@@ -119,12 +118,14 @@ class LeaFV(LeaTDLambda):
             raise ValueError("Parameter `activation_set` must be a set ({}).".format(type(activation_set)))
         self.absorption_set = absorption_set
         self.activation_set = activation_set
+        # The complement of the absorption set A
+        self.active_set = set(self.env.getAllValidStates()).difference(self.absorption_set)
         self.states_of_interest = self.env.getTerminalStates() if states_of_interest is None else states_of_interest
         # Dictionary that stores the optional stationary probability of the start states of the single chain simulation
         # and of the N-particle Fleming-Viot process.
         # If None, uniformly random distributions are used.
-        self.probas_stationary_start_state_absorption = probas_stationary_start_state_absorption
-        self.probas_stationary_start_state_activation = probas_stationary_start_state_activation
+        self.probas_stationary_start_state_et = probas_stationary_start_state_et
+        self.probas_stationary_start_state_fv = probas_stationary_start_state_fv
 
         # Note: The average reward that is estimated by the FV learner is already stored in the GenericLearner class
         # which is the superclass of the Learner class which in turn is the superclass of the LeaTDLambda class
@@ -157,12 +158,19 @@ class LeaFV(LeaTDLambda):
         # that DEPEND on the state x and action a!)
         self.dict_phi = None
         self.dict_phi_sum = None
-        # Survival times for each state and for each state and action, i.e. measured from each time the state (or state and action) is visited
+        # Survival times and empirical mean estimates of Phi(t,x) for each start state and each start state-action, i.e. measured from each time the state (or state-action) is visited
         # during a trajectory just before an absorption (leading to a survival time) happens.
         self.dict_survival_times_for_state = None
         self.dict_survival_times_for_state_action = None
+        self.dict_phi_for_state = None
+        self.dict_phi_for_state_action = None
         # FV integral value for each state of interest x (updated every time a new absorption is observed)
         self.dict_integral = None
+
+        # Expected value of the discounted state value at absorption, which is part of the decomposition of the value functions in FV-estimated part and rest in e.g.
+        # Q(x,a) = Q_FV(x,a) + Q_after_absorption(x,a) = Q_FV(x,a) + E[ gamma^t_abs * V(X_abs) ]
+        self.expected_discounted_state_value_at_absorption = 0.0
+        self.n_expected_discounted_state_value_at_absorption = 0    # Sample size associated to the estimated expected discounted state value at absorption
 
         # Burn-in time that should be waited to consider that Phi(t,x) has achieved stationarity,
         # and thus independent of the starting state and action where the particles contributing to its estimation
@@ -170,8 +178,6 @@ class LeaFV(LeaTDLambda):
         # In fact, when computing the integral of P(T>t; s,a) * Phi(t,x) for each state of interest x,
         # we are assuming stationarity when writing Phi(t,x) instead of Phi(t,x; s,a), i.e. Phi(t,x) is assumed to NOT depend on
         # the "start" state-actions (s,a)!
-        # This value is subtracted from the t values in the entries of Phi(t,x) when aligning P(T>t; s,a) with Phi(t,x)
-        # (see estimators.fv.merge_proba_survival_and_phi() for more details).
         self.burnin_time = self.N*2 if burnin_time is None else burnin_time
 
         self.reset()
@@ -198,21 +204,32 @@ class LeaFV(LeaTDLambda):
         # Survival probability functions are defined for each state in the set of active states (i.e. all the states that are NOT in the absorption set A)
         self.dict_survival_times_for_state = dict()
         self.dict_survival_times_for_state_action = dict()
-        active_set = set(self.env.getAllStates()).difference(self.absorption_set)
-        for s in active_set:
-            # Survival functions for each state and for each state-action
+        self.dict_phi_for_state = dict()
+        self.dict_phi_for_state_action = dict()
+        for s in self.active_set:
+            # Survival functions and empirical mean estimate of Phi(t,x) as functions of each state and of each state-action
             self.dict_survival_times_for_state[s] = [0.0]
             self.dict_survival_times_for_state_action[s] = dict()
+            self.dict_phi_for_state[s] = dict()
+            self.dict_phi_for_state_action[s] = dict()
+            for x in self.states_of_interest:
+                self.dict_phi_for_state[s][x] = pd.DataFrame(columns=['t', 'Phi'])
             for a in range(self.env.getNumActions()):
                 self.dict_survival_times_for_state_action[s][a] = [0.0]
+                self.dict_phi_for_state_action[s][a] = dict()
+                for x in self.states_of_interest:
+                    self.dict_phi_for_state_action[s][a][x] = pd.DataFrame(columns=['t', 'Phi'])
 
-    def learn(self, t, state, action, next_state, reward, done, info, env=None, update_phi=False):
+    def learn(self, t, state, action, next_state, reward, done, info, envs=None, idx_particle=None, update_phi=False):
         """
         Learns the value functions using TD learning and updates the particle's trajectory in the environment representing the particle
 
         Arguments:
-        env: (opt) Environment
-            Environment (particle) whose trajectory history should be updated with the new transition.
+        envs: (opt) list of Environment
+            All the environments associated to the FV particles.
+
+        idx_particle: (opt) int
+            Index of `envs` representing the particle whose trajectory history should be updated with the new transition.
             This is the particle that has experienced this transition and it is needed to be able to find all the states and actions
             that have been visited by the particle at the absorption event, which are used to estimate the survival probability given
             each visited state and action.
@@ -229,12 +246,13 @@ class LeaFV(LeaTDLambda):
             # Learn the value function using the superclass learner
             super().learn(t, state, action, next_state, reward, done, info)
 
-        if env is not None:
-            assert env.store_trajectory, "The environment associated to the FV particle on which the value functions learning is carried out must have stored the observed trajectory"
+        if envs is not None:
+            assert envs[idx_particle].getStoreTrajectoryFlag(), "The environment associated to the FV particle on which the value functions learning is carried out must have stored the observed trajectory"
 
             if update_phi:
                 # Update the empirical distribution of both state and next_state when any of them is part of the set of states of interest.
-                # This should ONLY happen when the particle (env) transitioning is an FV particle, as opposed to e.g. a particle that can freely explore the whole environment.
+                # This should ONLY happen when the particle (env) transitioning is an FV particle, as opposed to e.g. a particle that can freely explore the whole environment
+                # (because in that case, Phi has no role to play).
                 # Note that `t` is the ABSOLUTE time, i.e. the time elapsed since the start of the FV simulation which is
                 # independent of any survival time, which on the contrary is relative to the start position (and action) of the particle
                 # that is eventually absorbed (i.e. the survival time is measured w.r.t. the time at which the particle was
@@ -246,14 +264,10 @@ class LeaFV(LeaTDLambda):
 
             # Store the trajectory in the particle (environment) that has evolved
             # (so that we are able to retrieve its history when learning the value functions by the FV estimator)
-            self._update_particle_trajectory(env, t, state, action, next_state, reward)
-            #print(f"[debug-learn] Trajectory of particle just moved UPDATED:\n{env.getTrajectory()}")
+            self._update_particle_trajectory(envs[idx_particle], t, state, action, next_state, reward)
+            #print(f"[debug-learn] Trajectory of particle {idx_particle} UPDATED:\n{envs[idx_particle].getTrajectory()}")
 
-    def _update_phi(self, t, state, next_state):
-        "Updates the empirical mean phi(t, x) for x in intersection({state, next_state}, states_of_interest)"
-        self.dict_phi = update_phi(self.env, self.N, t, self.dict_phi, state, next_state)
-
-    def learn_at_absorption(self, env, t, state_absorption, next_state):
+    def learn_at_absorption(self, envs, idx_particle, t, state_absorption, next_state):
         """
         Learns the value functions at the time of the particle's absorption for EVERY state and action
         the particle visited prior to absorption, using:
@@ -266,17 +280,24 @@ class LeaFV(LeaTDLambda):
         from the absorption state `state_absorption` to `next_state`.
 
         Arguments:
-        env: Environment (particle)
-            Environment associated to the absorbed particle.
+        envs: list of Environment (particle)
+            Environments associated to all the FV particles in the system.
+            These are used to:
+            (i) extract the trajectory of the absorbed particle before absorption.
+            (ii) update the empirical mean phi(t,x) as a function of every state and state-action visited by all particles
+            prior to the current absorption event.
+
+        idx_particle: int
+            Index of `envs` representing the absorbed particle.
             This is used to extract the states and actions visited by the particle prior to absorption
             alongside the times they were visited at.
 
         t: positive float
-            Current absolute time of the simulation, which is updated whenever ANY particle moves.
-            It is the time JUST BEFORE the absorption happens, i.e. before the Markov process moves
-            from state S(t) to the absorption state at t+1. Therefore the absorption time is actually t+1.
+            Simulation time elapsed since its start, which is updated whenever ANY particle moves.
+            It is the time at which the absorption happened, i.e. the time at which the Markov process moved to the absorbed state.
+            Hence t coincides with the absorption time.
             This value is used to update Phi(t,x) and to update the self.absorption_times list that keeps track of
-            all the SYSTEM absorption times (in this case it adds the value t+1 to the list).
+            all the SYSTEM absorption times.
             Note that it is NOT used to compute the survival time of the particle that has been absorbed,
             since the survival time is computed from the particle's trajectory stored SPECIFICALLY in the environment
             associated to the particle (whose row index has the actual clock of the particle's movement).
@@ -289,42 +310,64 @@ class LeaFV(LeaTDLambda):
             for the update of Phi(t,x) for each state of interest x.
         """
         #-- Update Phi based on the new reactivated position of the particle after the absorption
+        # This is important because Phi could have already experienced an update, which is the case when the absorption occurred from a state of interest x
+        # as this implies that the occupation frequency of x changed when the particle was absorbed.
         self._update_phi(t, state_absorption, next_state)
+
+        # Update the Phi(t,x) as a function of the start state, for all states in the active set
+        self._update_phi_function(envs)
+
+        # Update the list of observed absorption times
+        self.absorption_times += [t]
 
         #-- Learn the value function using the FV estimator
         # This means: update the value functions for all states and actions visited by the particle before absorption
 
-        # Compute the number of steps it took the particle to become absorbed
-        # Note that, in principle, we could use either this as absorption time of the particle OR the absolute time plus 1 (t + 1),
+        # Compute the number of steps it took the absorbed particle to become absorbed (t_particle_abs)
+        # Note that, in principle, we could use either this t_particle_abs as absorption time of the particle OR the FV system's time plus 1 `(t + 1)`,
         # (i.e. either the particle's clock OR the FV system's clock) to compute the survival time for each start state s.
         # Note that the scaling of the FV integral is different depending on which of the two approaches we use for the absorption time:
         # - when using the particle's clock, the scaling is 1 because we are considering each particle separately and its change rate is 1 change per unit time.
         # - when using the FV system's clock, the scaling is 1/N because the change rate of the system is N per unit time, which defines the uniformization
         # constant that discretizes the originally continuous-time FV process.
-        # Note that the particle's clock is given simply by the INDEX of the data frame storing the particle's trajectory.
-        df_trajectory = env.getTrajectory()
-        t_particle_abs = df_trajectory.shape[0]
+        # Note that the particle's clock is stored as the INDEX of the data frame storing the particle's trajectory.
+        df_trajectory_absorbed_particle = envs[idx_particle].getTrajectory()
+        # Absorption time in the particle's clock: it's the maximum index value of the data frame storing the particle's trajectory
+        t_particle_abs = df_trajectory_absorbed_particle.index[-1]
         assert t_particle_abs > 0, f"The absorption time of the particle is > 0 ({t_particle_abs})"
-        print(f"[debug-learn_at_absorption] Trajectory of the absorbed particle:\n{env.getTrajectory()}\n")
-        for row in df_trajectory.iterrows():
+        print(f"[debug-learn_at_absorption] Trajectory of the absorbed particle #{idx_particle} at system's clock time={t}, and internal clock time={t_particle_abs}:\n{df_trajectory_absorbed_particle}\n")
+        # TODO: (2024/01/17) IMPORTANT: Collect ALL survival times observed since visiting each of the UNIQUE states and state-actions in the absorbed particle's past trajectory
+        # Goal: update P(T>t; s) and P(T>t; s,a) only ONCE for each state and each state-action.
+        for row in df_trajectory_absorbed_particle.iterrows():
             # Internal time of the absorbed particle (it ALWAYS takes the values 0, 1, 2, ...)
             # (which is NOT the simulation time because the simulation time increases by 1 at the movement of ANY particle)
             t_particle = row[0]
             row_data = row[1]
 
-            # The absorption time is +1 the input time t given as parameter because this input time t is the time BEFORE the update of the state,
-            # i.e. the time at which the Markov process was at the state BEFORE being absorbed.
-            self.absorption_times += [t + 1]
+            # Skip the first record because the trajectory stores the initial state as if the first action would be to "place the particle at its initial state"
+            # This implies that such initial state record has action = -1, as there is no environment action to "place" a particle at a state.
+            # Thus, if we don't skip the first record, we would get an error about invalid action when processing the calculation of the FV integral below.
+            if t_particle == 0:
+               continue
+
             # Compute the survival time (i.e. until killing) using as origin the time when the particle visited the state and action
-            # currently retrieved from the particle's trajectory
-            t_surv = t_particle_abs - t_particle   # Use this if using the particle's clock to compute the survival time --> in this case the value of uniform_jump_rate in _compute_fv_deltas() should be 1
-            #t_surv = (t + 1) - row_data['time']     # Use this if using the system's clock to compute the survival time --> in this case the value of uniform_jump_rate in _compute_fv_deltas() should be self.N (the number of particles)
-            state = row_data['state']
-            action = row_data['action']
+            # currently retrieved from the particle's trajectory. Note that this visiting time is `t_particle - 1` and NOT `t_particle`
+            # because each index of the trajectory data frame (which is precisely t_particle) gives the time at which the particle visited `next_state`
+            # (NOT the time at which the particle visited `state`) => therefore, the time the particle visited `state` and took action `action` is `t_particle - 1`.
+            # If we don't do this, we would get t = 0 duplicated when estimating the survival time probability distribution P(T>t; state, action)
+            # from the currently analyzed trajectory, and that would yield the usual error I get when such repeated value happens in P(T>t), namely e.g.:
+            #   "AssertionError: The length of the first pair of merged lists is the same as that of the second pair of merged lists (3, 3, 2, 2)"
+            # triggered by the basic.merge_values_in_time() called when merging the survival probability function and Phi(t,x).
+            t_surv = t_particle_abs - (t_particle - 1)  # Use this if using the particle's clock to compute the survival time --> in this case the value of uniform_jump_rate in _compute_fv_deltas() should be 1
+            #t_surv = (t + 1) - row_data['time']        # Use this if using the system's clock to compute the survival time --> in this case the value of uniform_jump_rate in _compute_fv_deltas() should be self.N (the number of particles)
+            state = int(row_data['state'])
+            action = int(row_data['action'])
             assert state in self.dict_survival_times_for_state.keys(), f"All states visited by the particle prior to absorption need to be in the active set of states (s={state})"
+            assert action >= 0, f"The action must be >= 0: action={action}"
             delta_V, delta_Q, state_value_killed_process, action_value_killed_process = self._compute_fv_deltas(t_surv, state_absorption, state, action)
 
             # print("episode {}, state {}: count = {}, alpha = {}".format(self.episode, state, self._state_counts_over_all_episodes[state], self._alphas[state]))
+            self._updateZ(state, action, self.lmbda)
             self._updateV(delta_V)
             self._updateQ(delta_Q)
 
@@ -336,12 +379,216 @@ class LeaFV(LeaTDLambda):
                 self._update_alphas(state)
             # TODO: (2024/01/03) ALSO update the alphas by state-action (to be defined in the GenericLearner class first)
 
-        # Reset the trajectory of the particle for the next absorption event
-        env.reset_trajectory()
+            if delta_Q != 0.0 and state in self.env.getTerminalStates():
+                # TODO: (2024/01/17) Move this piece of code to a function as this is done already at two places at least
+                # Copy the Q value just learned to all the other actions in a terminal state, because no action is taken at the terminal state, so all Q values should have the same value for all the actions
+                for _action in range(self.env.getNumActions()):
+                    # TODO: (2023/11/23) Generalize this update of the Q-value to ANY function approximation as the following call to _setWeight() assumes that we are in the tabular case!!
+                    self.getQ()._setWeight(state, _action, self.getQ().getValue(state, action))
+                # Check that all Q values are the same for the terminal state
+                for _action in range(self.env.getNumActions()):
+                    assert np.isclose(self.getQ().getValue(state, _action), self.getQ().getValue(state, action)), \
+                        f"All Q-values are the same for the terminal state {state}:\n{self.getQ().getValues()}"
+
+        # Reset the trajectory of the absorbed particle for the next absorption event to the next state which is the reactivated state
+        envs[idx_particle].reset_trajectory(next_state)
+
+    def _update_phi(self, t, state, next_state):
+        "Updates the empirical mean phi(t, x) for x in intersection({state, next_state}, states_of_interest)"
+        self.dict_phi = update_phi(self.env, self.N, t, self.dict_phi, state, next_state)
+
+    def _update_phi_function(self, envs):
+        """
+        Updates the empirical mean phi(t, x) for all states x listed in the self.states_of_interest attribute for all the historical discrete times t
+        of which we have information at the time of estimation (e.g. at the absorption time of a particle).
+
+        The value of phi(t, x) is considered a function of every start state outside the absorption set A (when phi(t,x) is used to estimate the state value function)
+        or a function of every start state-action of states outside A (when phi(t,x) is used to estimate the action value function).
+
+        The update is done for all the states and actions that are visited by all the particles passed in the input list `envs`
+        whose values (of the states and actions to update) are taken from the particle trajectories stored in each environment present in the list.
+
+        In particular, the above sentence implies that we can run _update_phi_function() at the time we need to compute the phi(t,x; s,a) estimates,
+        normally at the time of a new absorption of a particle in the FV system.
+
+        Note that the times at which phi(t, x) is estimated for each state and for each state-action are CONSECUTIVE integers, because Phi is estimated
+        for EACH time step of a particle, which are integer-valued in a discrete-time setting.
+
+        Arguments:
+        envs: list of Environments
+            List containing the environments associated to the particles whose stored trajectories are used to compute the empirical mean phi(t, x).
+        """
+        #--------------------- Auxiliary functions ---------------------------
+        def update_phi_internal(dict_phi, t, x, empirical_mean, last_time_inserted_in_phi: float):
+            """
+            Updates Phi(t,x) using the empirical_mean as its estimate
+
+            IMPORTANT: For this function to work properly, it is required that the values of column 't' in the Phi(t,x) data frame
+            coincide with its row indices (as the value of Phi(t,x) is retrieved by using `.loc[t]` when updating an existing entry).
+            This requirement is assured via an assertion in this function that checks that every new record inserted has its index
+            equal to its 't' value.
+
+            Parameter last_time_inserted_in_phi contains the last time value that has been inserted for Phi(t,x)
+            which is used to know whether the estimate should be added to the Phi(t,x) data frame
+            or should replace an already existing record.
+
+            Arguments:
+            dict_phi: dict
+                Dictionary indexed by the states of interest of which `x` should be part, which is updated by this function.
+
+            t: int
+                Time step to which the empirical mean estimate corresponds.
+
+            x: int
+                State of interest whose Phi(t,x) is estimated with the empirical mean value.
+                It should be a key in the dict_phi dictionary.
+
+            empirical mean: non-negative float
+                Empirical mean to store in in the data frame referred by `dict_phi[x]`.
+
+            last_time_inserted_in_phi: float (although normally is int, as the integer value passed in `t` is compared with this value)
+                The largest time that was inserted in dict_phi[x] so far.
+                This is used to know whether the empirical mean value should be added to the end of the data frame referred by `dict_phi[x]`
+                or should replace an existing record in `dict_phi[x]`.
+
+            Return: float
+            The updated value for last_time_inserted_in_phi, after the update of Phi(t,x) (stored in the input argument dict_phi) took place.
+            """
+            if t <= last_time_inserted_in_phi:
+                # We are updating Phi(t,x) for a time already stored in dict_phi
+                dict_phi[x].loc[t] = [t, empirical_mean]
+            else:
+                # We are estimating Phi(t,x) at a new time not yet stored in dict_phi
+                dict_phi[x] = pd.concat([dict_phi[x],
+                                        pd.DataFrame([[t, empirical_mean]], columns=self.dict_phi_for_state[s][x].columns, index=[len(dict_phi[x])])],
+                                        axis=0)
+                assert dict_phi[x].index[-1] == t, f"The index of the last record just inserted in the data frame storing Phi(t,x) ({dict_phi[x].index[-1]}) must coincide with the value of 't' of the inserted record (t={t})"
+                last_time_inserted_in_phi = t
+
+            return last_time_inserted_in_phi
+        #--------------------- Auxiliary functions ---------------------------
+
+        actions = np.arange(self.env.getNumActions())
+
+        # Iterate on all states for which Phi(t,x) would be computed when the trajectory started at that state
+        # The start state of such trajectories are the states in the active set of states, i.e. the complement of the absorption set A.
+        last_tt_inserted_in_phi = dict()
+        last_tt_inserted_in_phi_actions = dict()
+        for s in self.active_set:
+            last_tt_inserted_in_phi[s] = dict()
+            last_tt_inserted_in_phi_actions[s] = dict()
+            for a in actions:
+                last_tt_inserted_in_phi_actions[s][a] = dict()
+            for x in self.states_of_interest:
+                last_tt_inserted_in_phi[s][x] = self.dict_phi_for_state[s][x]['t'].iloc[-1] if len(self.dict_phi_for_state[s][x]) > 0 else -1
+                for a in actions:
+                    last_tt_inserted_in_phi_actions[s][a][x] = self.dict_phi_for_state_action[s][a][x]['t'].iloc[-1] if len(self.dict_phi_for_state_action[s][a][x]) > 0 else -1
+            # List of indices in each particle's trajectory where the particle was positioned at state `s`, if any
+            # This is used to be able to measure the time since each particle visited state s, which would eventually update the value of phi(t,x) for each state of interest x
+            indices_trajectory_at_state_s = [np.array([], dtype=int)]*self.N
+            particles_that_visited_s = []
+            indices_trajectory_at_state_s_actions = [None]*len(actions)
+            particles_that_visited_s_actions = [None]*len(actions)
+            # Initialize each element of the above lists as an empty list or array with DIFFERENT memory address
+            # (which is NOT the case if we simply initialize the list as `[[]]*len(actions)`)
+            for a in actions:
+                indices_trajectory_at_state_s_actions[a] = [np.array([], dtype=int)] * self.N
+                particles_that_visited_s_actions[a] = []
+            for p in range(self.N):
+                df_trajectory = envs[p].getTrajectory()
+                # Find the indices in the particle's trajectory where the particle was at state s
+                # Because the state of a particle at each time step corresponds to the state where it moved AFTER the action was taken at the state given in column 'state'
+                # of df_trajectory, we use the 'next_state' column (NOT 'state') to retrieve the "current" state of the particle.
+                indices_trajectory_at_state_s[p] = np.where(df_trajectory['next_state'] == s)[0]  # Because of the output of np.where() we need to retrieve the 0-th element
+                particles_that_visited_s += [p] if len(indices_trajectory_at_state_s[p]) > 0 else []
+                for a in actions:
+                    # Note that we look for `s` in column 'state' (and NOT 'next_state' as done before)
+                    # because we are interested in finding the state where the particle was BEFORE taking the action.
+                    # Also recall that the very first record in the particle's trajectory has action = NaN (see EnvironmentDiscrete.reset_trajectory() method).
+                    indices_trajectory_at_state_s_actions[a][p] = np.where((df_trajectory['state'] == s) & (df_trajectory['action'] == a))[0]
+                    particles_that_visited_s_actions[a] += [p] if len(indices_trajectory_at_state_s_actions[a][p]) > 0 else []
+
+            # Iteration on the times tt at which Phi(tt,x) can be updated, which are assumed to be discrete
+            # The iteration will go on insofar as there are particles whose position at time tt after visiting state s are available
+            tt = -1
+            done_trajectories = False
+            while not done_trajectories:
+                tt += 1     # We assume a discrete time process!
+                n_particles_tt_after_state_s = 0  # Number of particles whose position can be measured at time tt after visiting state s
+                if tt == 0:
+                    # In this case, the empirical mean is either 0 or 1, i.e. it is simply whether the analyzed state s is among the states of interest
+                    # as we are looking at the proportion of particles starting at s that are in x at time 0, i.e. at the time where they are in s!
+                    for x in self.states_of_interest:
+                        empirical_mean = float( s == x )
+                        last_tt_inserted_in_phi[s][x] = update_phi_internal(self.dict_phi_for_state[s], tt, x, empirical_mean, last_tt_inserted_in_phi[s][x])
+                        # Initialize the Phi(t,x) for each possible start state-action to the empirical mean of being at x
+                        for a in actions:
+                            last_tt_inserted_in_phi_actions[s][a][x] = update_phi_internal(self.dict_phi_for_state_action[s][a], tt, x, empirical_mean, last_tt_inserted_in_phi_actions[s][a][x])
+                else:
+                    n_particles_tt_after_state_s_actions = [0]*len(actions)
+                    empirical_mean = 0.0
+                    empirical_mean_actions = [0.0]*len(actions)
+                    # Go over each particle that visited s in its history and check where they were at time tt of their RESPECTIVE clock
+                    for p in particles_that_visited_s:
+                        df_trajectory = envs[p].getTrajectory()
+
+                        # 1) Update the empirical mean for the given start state s
+                        for idx in indices_trajectory_at_state_s[p]:
+                            try:    # This `try` is for the retrieval of the `idx + tt` row from the trajectory which may not exist
+                                position_of_particle_at_time_tt_after_state_s = df_trajectory['next_state'].iloc[idx + tt]
+                                for x in self.states_of_interest:
+                                    empirical_mean += int(position_of_particle_at_time_tt_after_state_s == x)
+                                n_particles_tt_after_state_s += 1
+                            except IndexError:
+                                pass
+
+                        # 2) Update the empirical mean for each possible start action at the given start state s
+                        for a in actions:
+                            for idx in indices_trajectory_at_state_s_actions[a][p]:
+                                try:  # This `try` is for the retrieval of the `idx + tt` row from the trajectory which may not exist
+                                    # Note that we subtract `-1` to tt because the next state after taking action `a` at state `s` is in the SAME row of the df_trajectory
+                                    # data frame where state `s` and action `a` were found (with location index stored in `idx`).
+                                    position_of_particle_at_time_tt_after_state_s_action_a = df_trajectory['next_state'].iloc[idx + tt - 1]
+                                    for x in self.states_of_interest:
+                                        empirical_mean_actions[a] += int(position_of_particle_at_time_tt_after_state_s_action_a == x)
+                                    n_particles_tt_after_state_s_actions[a] += 1
+                                except IndexError:
+                                    pass
+                    if n_particles_tt_after_state_s == 0 and sum(n_particles_tt_after_state_s_actions) == 0:
+                        # No particles were found that provide information about their position at time tt after visiting state s
+                        # (this happens because either no particles visited state s or because the clock of all the particles that visited state s is still less than tt after having visited state s)
+                        done_trajectories = True
+                    else:
+                        # Compute Phi(tt,x) as the PROPORTION of particles that are at state x at time tt after visiting state s
+                        for x in self.states_of_interest:
+                            # 1) Update Phi for the given start state s
+                            # Note that Phi is updated ONLY if there is at least one sample for the estimate of such Phi
+                            if n_particles_tt_after_state_s > 0:  # We don't want to update Phi if there is no sample for the given start state s
+                                empirical_mean /= n_particles_tt_after_state_s
+                                last_tt_inserted_in_phi[s][x] = update_phi_internal(self.dict_phi_for_state[s], tt, x, empirical_mean, last_tt_inserted_in_phi[s][x])
+
+                                # When using an estimate of Phi(t,x) that does NOT depend on the start state-action for larger times
+                                if False and self.burnin_time is not None and tt > self.burnin_time:
+                                    # Replace the value just computed with an estimate of Phi(t,x) that does NOT depend on the start state, as we assume that stationarity has been reached
+                                    idx_last_time_in_phi_smaller_than_or_equal_to_tt = np.argmax(tt < self.dict_phi[x]['t']) - 1
+                                        ## We subtract -1 because if e.g. Phi['t'] = [0.0, 1.5, 2.3, 5.0] and if 2.3 <= tt < 5.0, the value of Phi at tt is the Phi(t=2.3), because Phi is a piecewise constant function
+                                        ## Note that this logic does NOT work when tt = 5.0 because the returned value is -1, but that situation should NEVER happen because the time in dict_phi
+                                        ## is always larger than the time in the particle trajectory being analyzed as the time in dict_phi is the SYSTEM's time.
+                                        ## Well... perhaps tt could be equal to the last time in dict_phi but that is VERY unlikely.
+                                    assert idx_last_time_in_phi_smaller_than_or_equal_to_tt >= 0
+                                    phi_value_at_tt = self.dict_phi[x]['Phi'].iloc[idx_last_time_in_phi_smaller_than_or_equal_to_tt]
+                                    self.dict_phi_for_state[s][x].loc[tt] = [tt, phi_value_at_tt]
+
+                            # 2) Update Phi for each possible start state at the given start state s
+                            # Note that Phi is updated ONLY if there is at least one sample for the estimate of such Phi
+                            for a in actions:
+                                if n_particles_tt_after_state_s_actions[a] > 0:  # We don't want to update Phi if there is no sample for the given start state-action
+                                    empirical_mean_actions[a] /= n_particles_tt_after_state_s_actions[a]
+                                    last_tt_inserted_in_phi_actions[s][a][x] = update_phi_internal(self.dict_phi_for_state_action[s][a], tt, x, empirical_mean_actions[a], last_tt_inserted_in_phi_actions[s][a][x])
 
     def _update_particle_trajectory(self, env, t, state, action, next_state, reward):
         # Update the trajectory stored in the environment
-        assert env.store_trajectory, "The trajectory must be stored in the environments representing the FV particles"
+        assert env.getStoreTrajectoryFlag(), "The trajectory must be stored in the environments representing the FV particles"
         env.update_trajectory(t, state, action, next_state, reward)
 
     def _compute_fv_deltas(self, t_surv, state_absorption, state, action):
@@ -377,9 +624,9 @@ class LeaFV(LeaTDLambda):
         #print(f"[debug-compute_fv_deltas] s={state}, a={action}:")
         #print(f"[debug-compute_fv_deltas] Processing survival time {t_surv}...")
         basic.insort(self.dict_survival_times_for_state[state], t_surv)
-        df_proba_surv_for_state = computing.compute_survival_probability(self.dict_survival_times_for_state[state])
+        df_proba_surv_for_state = computing.compute_survival_probability(self.dict_survival_times_for_state[state], colnames=['t', 'P(T>t)'], right_continuous=False)
         basic.insort(self.dict_survival_times_for_state_action[state][action], t_surv)
-        df_proba_surv_for_state_action = computing.compute_survival_probability(self.dict_survival_times_for_state_action[state][action])
+        df_proba_surv_for_state_action = computing.compute_survival_probability(self.dict_survival_times_for_state_action[state][action], colnames=['t', 'P(T>t)'], right_continuous=False)
 
         # Uniformization constant which is used in scaling the discrete-time FV integral
         uniform_jump_rate = 1 #1 #self.getStateCounts()[state] #self.N
@@ -389,50 +636,82 @@ class LeaFV(LeaTDLambda):
         action_value_killed_process = 0.0
         # Contributions to the state and action values for the killed process come from ALL states of interest, therefore we iterate on them
         for x in self.states_of_interest:
-            # Align (in time) the two functions to multiply in the integrand, P(T>t; state, action) and Phi(t, x),
+            # Align (in time) the two functions to multiply in the integrand, P(T>t; state, action) and Phi(t, x; state, action),
             # so that the same t is associated to each of the two function values being multiplied
             # (recall that x is the state of interest being considered at the current loop, while `state` and `action`
             # are the start state and action w.r.t. which all survival times giving rise to the estimate of P(T>t; state, action)
-            # have been measured.
-            # Note that this calculation of the integrand assumes that the value of Phi(t,x) does NOT depend on the start state-action
-            # associated to the survival function P(T>t; state, action). This assumption is reasonable because we assume that the
-            # killed process reaches quasi-stationarity quite fast. If this is deemed as a too strong assumption, we could
-            # wait for a burning period before considering contributions to this integral, but I don't think this is really
-            # necessary because the contribution from Phi(t,x) for small t is usually quite small (as the rare event is not yet too often observed).
+            # and to Phi(t, x; state, action) have been measured.
+
+            # IMPORTANT: In the calculation of the FV integral, we need to DISCARD the first record of the merged data frame because
+            # the FV summation formula (giving rise to the FV "integral") starts at t=1, NOT at t=0. That is, there is NO contribution from P(T>t) and Phi(t,x) at t=0.
+            # (In fact, t is a sample of the survival time random variable when the process starts at a given state-action where the state is OUTSIDE the absorption set A,
+            # therefore this survival time can never be 0.)
+            # Note also that, we are safe in discarding the first record of the merged data frame because the second record will ALWAYS start at 1, as all the time values
+            # stored in the 't' column of Phi(t,x) are consecutive integer values as asserted below.
+            # However, even if they were not consecutive integer values, it might well be the case that starting to sum from the second record would still work because
+            # we can safely ignore the contributions from t=1 until the time 't' recorded in the second record because they are ZERO if such 't' value is > 1.
+            # In fact, if 't' in the second record is > 1, it means that the starting `state` giving rise to the values of Phi(t, x; state, action) is NOT equal to x;
+            # if `state` were equal to x, then the second record in Phi(t,x) would have t=1 because Phi(t,x) would have been updated as soon as one of the particles
+            # --included in the sample of particles starting at x-- moves. *** This ACTUALLY ASSUMES that when the particle moves, it CHANGES state
+            # if this were NOT the case, we would need to assure that a new record in Phi(t,x) is added even if the particle that moved does not change state
+            # (which may well happen if, e.g., the particle tried to move against an obstacle which in the end prevented it from moving). ***
+            # In any case, as stated above, the current implementation of Phi(t, x; state, action) estimation guarantees that all times stored in 't' are CONSECUTIVE integers,
+            # and this is because the implementation does NOT check whether the value of Phi would change before computing it (as is the case with the calculation of Phi(t,x)
+            # that is not a function of the start state and action). Note that we do NOT do this check because the state-action dependent Phi can be updated at ANY time, even
+            # at a time whose Phi value has already been computed before, and this is the case because the t values on which Phi is updated are NOT always increasing, as is the
+            # case with the Phi(t,x) that is independent of the start state and action --because the measurement of such time DEPENDS on the start state and action.
 
             # Contribution to the state value
-            df_phi_proba_surv_for_state = merge_proba_survival_and_phi(df_proba_surv_for_state, self.dict_phi[x], t_origin=self.burnin_time)
-            state_value_killed_process += compute_fv_integral(df_phi_proba_surv_for_state, reward=self.env.getTerminalReward(x), interval_size=1/uniform_jump_rate, discount_factor=self.gamma)
+            assert all(np.diff(self.dict_phi_for_state[state][x]['t']) == 1), f"The times 't' stored in Phi(t,x={x}, s={state}) must be CONSECUTIVE integers:\n{self.dict_phi_for_state[state][x]}"
+            df_phi_proba_surv_for_state = merge_proba_survival_and_phi(df_proba_surv_for_state, self.dict_phi_for_state[state][x])
+            state_value_killed_process += compute_fv_integral(df_phi_proba_surv_for_state.iloc[1:], reward=self.env.getTerminalReward(x), interval_size=1/uniform_jump_rate, discount_factor=self.gamma)
 
             # Contribution to the action value
-            df_phi_proba_surv_for_state_action = merge_proba_survival_and_phi(df_proba_surv_for_state_action, self.dict_phi[x], t_origin=self.burnin_time)
-            action_value_killed_process += compute_fv_integral(df_phi_proba_surv_for_state_action, reward=self.env.getTerminalReward(x), interval_size=1/uniform_jump_rate, discount_factor=self.gamma)
+            assert all(np.diff(self.dict_phi_for_state_action[state][action][x]['t']) == 1), f"The times 't' stored in Phi(t,x={x}; s={state}, a={action}) must be CONSECUTIVE integers:\n{self.dict_phi_for_state_action[state][action][x]}"
+            df_phi_proba_surv_for_state_action = merge_proba_survival_and_phi(df_proba_surv_for_state_action, self.dict_phi_for_state_action[state][action][x])
+            action_value_killed_process += compute_fv_integral(df_phi_proba_surv_for_state_action.iloc[1:], reward=self.env.getTerminalReward(x), interval_size=1/uniform_jump_rate, discount_factor=self.gamma)
 
             ind_gt0 = (df_phi_proba_surv_for_state['P(T>t)'] > 0.0) & (df_phi_proba_surv_for_state['Phi'] > 0.0) & (df_phi_proba_surv_for_state['dt'] > 0.0)
             if np.sum(ind_gt0) > 0:
                 print(f"[debug-compute_fv_deltas] s={state}, a={action}:")
-                print(f"[debug-compute_fv_deltas] P(T>t; s):\n{df_proba_surv_for_state}")
-                print(f"[debug-compute_fv_deltas] Phi:\n{self.dict_phi[x]}")
+                # Showing the values of P(T>t) and Phi may be generate too long lines
+                #print(f"[debug-compute_fv_deltas] P(T>t; s):\n{df_proba_surv_for_state}")
+                #print(f"[debug-compute_fv_deltas] Phi:\n{self.dict_phi_for_state[state][x]}")
                 print(f"[debug-compute_fv_deltas] f(t,x={x}) = P(T>t; s) * Phi(t,x):\n{df_phi_proba_surv_for_state.loc[ind_gt0, :]}")
-                print("[debug-compute_fv_deltas] Integral(f(t,x={})) = {}".format(x, state_value_killed_process))
+                print( "[debug-compute_fv_deltas] Integral(f(t,x={})) = {}".format(x, state_value_killed_process))
                 print(f"[debug-compute_fv_deltas] alpha[s={state}] = {self._alphas[state]}")
                 print("")
+                if False and state == 3:
+                    # Make an interactive plot of the survival probability and Phi functions that is updated every time these functions are updated for ANY start state
+                    import matplotlib.pyplot as plt
+                    fig = plt.figure(99)
+                    print(f"Interactive: {plt.isinteractive()}")
+                    ax = fig.gca()
+                    ax.step(df_phi_proba_surv_for_state['t'], df_phi_proba_surv_for_state['P(T>t)'], color="blue", where='post')
+                    ax.step(df_phi_proba_surv_for_state['t'], df_phi_proba_surv_for_state['Phi'], color="red", where='post')
+                    ax.step(df_phi_proba_surv_for_state['t'], self.gamma**df_phi_proba_surv_for_state['t']*df_phi_proba_surv_for_state['P(T>t)']*df_phi_proba_surv_for_state['Phi'], color="green", where='post')
+                    ax.set_title(f"P(T>t; state) (blue) and Phi(t,x; state) (red), gamma*P*Phi (green) for start state = {state}, x = {x}\nAbsorption state: {state_absorption}, Survival time = {t_surv}")
+                    plt.draw()
+                    plt.pause(0.01) # Need this pause() call with a positive argument in order for the plot to be drawn with plt.draw()!!
 
         #-- Compute the delta values to be used for the state value and action value functions update
-        # The following discount has only an effect when self.gamma < 1.
-        # And note that it only makes sense for discrete-time Markov processes, as the exponent is `t_surv - 1`,
-        # (i.e. the `-1` correction tells us that t_surv needs to be discrete).
-        discount_factor = self.gamma**(t_surv - 1)
+        # The following discount has only an effect when self.gamma < 1
+        discount_factor = self.gamma**t_surv
         #print(f"[debug] Discount factor applied to the bootstrapping value of the absorption state s={state_absorption}: {discount_factor} (t_surv={t_surv})\n")
         value_at_absorption_state = discount_factor * self.V.getValue(state_absorption)
+        self.n_expected_discounted_state_value_at_absorption += 1
+        self.expected_discounted_state_value_at_absorption += (value_at_absorption_state - self.expected_discounted_state_value_at_absorption) / self.n_expected_discounted_state_value_at_absorption
+        #print("*** Updated expected discounted V(y): new value = {}, E = {} (n={})".format(value_at_absorption_state, self.expected_discounted_state_value_at_absorption, self.n_expected_discounted_state_value_at_absorption))
 
         # Initialize the delta's to compute to 0
         # The actual values are only computed when we receive a signal from the rare rewards outside A.
         delta_V = delta_Q = 0.0
         if state_value_killed_process != 0:
-            delta_V = state_value_killed_process  + value_at_absorption_state - self.V.getValue(state)
+            #print("*** --> Proportion of the value of the killed process: {:.3f}%".format(self.expected_discounted_state_value_at_absorption / state_value_killed_process * 100))
+            delta_V = state_value_killed_process  + self.expected_discounted_state_value_at_absorption - self.V.getValue(state)
+            #print("*** --> V = {:.3f}, delta(V) = {:.3f} ({:.3f}%)".format(self.V.getValue(state), delta_V, delta_V / min(1, self.V.getValue(state))*100))
         if action_value_killed_process != 0:
-            delta_Q = action_value_killed_process + value_at_absorption_state - self.Q.getValue(state, action)
+            delta_Q = action_value_killed_process + self.expected_discounted_state_value_at_absorption - self.Q.getValue(state, action)
 
         return delta_V, delta_Q, state_value_killed_process, action_value_killed_process
 
@@ -563,8 +842,8 @@ class LeaFV(LeaTDLambda):
     def getActivationSet(self):
         return self.activation_set
 
-    def getProbasStationaryStartStateAbsorption(self):
-        return self.probas_stationary_start_state_absorption
+    def getProbasStationaryStartStateET(self):
+        return self.probas_stationary_start_state_et
 
-    def getProbasStationaryStartStateActivation(self):
-        return self.probas_stationary_start_state_activation
+    def getProbasStationaryStartStateFV(self):
+        return self.probas_stationary_start_state_fv

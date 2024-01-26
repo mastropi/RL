@@ -164,10 +164,11 @@ class LeaTDLambda(Learner):
                 self._plotAlphasEffective()
             self.store_trajectory_at_episode_end(T, next_state, debug=self.debug)
             if info.get('update_trajectory', True):
-                # We only update the state count of the terminal state when we are updating the trajectory
-                # because the trajectory update also includes an update of the state count.
-                # So, if we the user requested not to update the trajectory (via the `info` dictionary)
-                # we should not update the state count of the terminal state here.
+                # We only update the state count of the terminal state (next_state) when we have updated the trajectory above
+                # with information about the `state` visited, because such trajectory update also updates the state count of `state`.
+                # Since here we are dealing with `next_state`, which at this point is the terminal state,
+                # we should only update the trajectory if we are in "trajectory storage" mode
+                # (and therefore in "update state counts" mode).
                 self._update_state_counts(T, next_state)
 
             # Update alpha for the next iteration for "by episode" updates
@@ -486,10 +487,11 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
                 self._plotAlphasEffective()
             self.store_trajectory_at_episode_end(T, next_state, debug=self.debug)
             if info.get('update_trajectory', True):
-                # We only update the state count of the terminal state when we are updating the trajectory
-                # because the trajectory update also includes an update of the state count.
-                # So, if we the user requested not to update the trajectory (via the `info` dictionary)
-                # we should not update the state count of the terminal state here.
+                # We only update the state count of the terminal state (next_state) when we have updated the trajectory above
+                # with information about the `state` visited, because such trajectory update also updates the state count of `state`.
+                # Since here we are dealing with `next_state`, which at this point is the terminal state,
+                # we should only update the trajectory if we are in "trajectory storage" mode
+                # (and therefore in "update state counts" mode).
                 self._update_state_counts(T, next_state)
             self._store_lambdas_in_episode()
 

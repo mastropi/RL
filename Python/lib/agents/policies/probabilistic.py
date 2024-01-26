@@ -81,6 +81,9 @@ class PolGenericDiscrete():
         action = self.env.np_random.choice(self.env.getNumActions(), p=self.getPolicyForState(state))
         return action
 
+    def isDeterministic(self):
+        return all([np.sum(1.0 in self.policy[s]) for s in self.policy])
+
     def getPolicyForState(self, state):
         return self.policy[state]
 

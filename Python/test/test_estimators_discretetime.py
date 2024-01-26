@@ -803,8 +803,8 @@ class Test_EstDifferentialValueV_EnvGridworlds(unittest.TestCase, test_utils.Epi
                        'alpha_min': 0.0,
                        })
         learner_fv = fv.LeaFV(  self.env1d, params['N'], params['T'], params['absorption_set'], params['activation_set'],
-                                probas_stationary_start_state_absorption=None,
-                                probas_stationary_start_state_activation=None,
+                                probas_stationary_start_state_et=None,
+                                probas_stationary_start_state_fv=None,
                                 criterion=self.learning_criterion,
                                 alpha=params['alpha'], gamma=params['gamma'], lmbda=params['lambda'],
                                 alpha_update_type=AlphaUpdateType.EVERY_STATE_VISIT,
@@ -1066,8 +1066,8 @@ class Test_EstDifferentialStateValueV_EnvGridworldsWithObstacles(unittest.TestCa
         activation_set = cls.B
         learner_fv = fv.LeaFV(  cls.env2d,
                                 N, T, absorption_set, activation_set,
-                                probas_stationary_start_state_absorption=None,
-                                probas_stationary_start_state_activation=None,
+                                probas_stationary_start_state_et=None,
+                                probas_stationary_start_state_fv=None,
                                 criterion=LearningCriterion.AVERAGE,
                                 alpha=1.0,
                                 lmbda=0.0,
@@ -1153,7 +1153,7 @@ class Test_EstDifferentialStateValueV_EnvGridworldsWithObstacles(unittest.TestCa
                              [-0.04648120,  0.02379920, -0.03263805, -0.04153549],  # mean = -0.024
                              [ 0.23983328,  0.10002997,  0.07757519, -0.03134359],  # mean =  0.097
                              [ 0.36555816,  0.15019674,  0.14849494,  0.06301374]]) # mean =  0.182
-        cls.expected_fv_average_reward = 0.022148
+        cls.expected_fv_average_reward = 0.022128
         cls.expected_fv_cycle_time = 9.4327
         cls.expected_fv_n_cycles = 104
 

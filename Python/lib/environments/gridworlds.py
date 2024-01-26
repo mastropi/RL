@@ -645,3 +645,7 @@ class EnvGridworld2D_WithObstacles(EnvGridworld2D):
         """
         opposite_d = (d.value + len(Direction2D) // 2) % len(Direction2D)
         return Direction2D(opposite_d)
+
+    def getAllValidStates(self):
+        "Returns the list of valid states (i.e. states that are not obstacles)"
+        return [s for s in self.getAllStates() if not self.isObstacleState(s)]

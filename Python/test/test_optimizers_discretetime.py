@@ -55,8 +55,10 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
                         # Characteristics of the neural network for the Actor Critic policy learner
                         nn_input: InputLayer=InputLayer.ONEHOT, nn_hidden_layer_sizes: list=[8],
                         # Characteristics of all learners
+                        learning_task=LearningTask.EPISODIC,
                         learning_criterion=LearningCriterion.DISCOUNTED,
                         alpha=1.0, gamma=1.0, lmbda=0.0,      # Lambda parameter in non-adaptive TD(lambda) learners
+                        alpha_min=0.0,
                         # Characteristics of the Fleming-Viot implementation
                         N=100, T=100,   # N is the number of particles, T is the max number of time steps allowed over ALL episodes in the single Markov chain simulation that estimates E(T_A)
                         absorption_set: Union[list, set]=None,
@@ -168,14 +170,14 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
         #-- Learning parameters
         cls.gamma = gamma;
         cls.alpha = alpha
-        cls.alpha_min = 0.0
+        cls.alpha_min = alpha_min
         cls.reset_method = reset_method_value_functions
         cls.reset_params = dict({'min': -1, 'max': +1})
 
         # TD(lambda) learner
         learner_tdlambda = td.LeaTDLambda(cls.env2d,
                                           criterion=learning_criterion,
-                                          task=LearningTask.CONTINUING if learning_criterion == LearningCriterion.AVERAGE else LearningTask.EPISODIC,
+                                          task=learning_task,
                                           gamma=gamma,
                                           lmbda=lmbda,
                                           alpha=cls.alpha,
@@ -195,7 +197,7 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
         # Adaptive TD(lambda) learner
         learner_tdlambda_adap = td.LeaTDLambdaAdaptive( cls.env2d,
                                                         criterion=learning_criterion,
-                                                        task=LearningTask.CONTINUING if learning_criterion == LearningCriterion.AVERAGE else LearningTask.EPISODIC,
+                                                        task=learning_task,
                                                         gamma=gamma,
                                                         alpha=cls.alpha,
                                                         adjust_alpha=True,
@@ -216,8 +218,8 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
         activation_set = cls.B
         learner_fv = fv.LeaFV(  cls.env2d,
                                 N, T, absorption_set, activation_set,
-                                probas_stationary_start_state_absorption=None,
-                                probas_stationary_start_state_activation=None,
+                                probas_stationary_start_state_et=None,
+                                probas_stationary_start_state_fv=None,
                                 criterion=learning_criterion,
                                 alpha=cls.alpha,
                                 gamma=gamma,
