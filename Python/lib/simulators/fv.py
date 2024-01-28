@@ -20,7 +20,7 @@ class ReactivateMethod(Enum):
     ROBINS = 3
 
 
-def reactivate_particle(envs: list, idx_particle: int, K: int, absorption_number=None):
+def reactivate_particle(envs: list, idx_particle: int, K: int, reactivation_number: int=None, all_idx_particles: list=None):
     """
     Reactivates a particle that has been absorbed
 
@@ -28,23 +28,56 @@ def reactivate_particle(envs: list, idx_particle: int, K: int, absorption_number
 
     Arguments:
     envs: list
-        List of queue environments used to run the FV process.
+        List of environments used to run the FV process. It is used to retrieve the state of the reactivation particle and to set the new state
+        of the absorbed particle `idx_particle`.
 
     idx_particle: int
-        The index of the particle to be reactivated.
+        The index of the particle to be reactivated. It must be a valid index in the `envs` list.
 
     K: int
-        Queue's capacity. Only used when method = ReactivateMethod.VALUE_FUNCTION is used in the call to
-        choose_particle() done by this function.
+        For queue environments, this is the queue's capacity. Only used when method = ReactivateMethod.VALUE_FUNCTION and only makes sense for queue environments.
+        It is used in the call to choose_particle() done by this function.
+
+    reactivation_number: (opt) int
+        Counter of the number of absorptions that took place until the current absorption being dealt with that is used to choose the reactivation particle.
+        When given, ReactivateMethod.ROBINS is used as reactivation method.
+        default: None
+
+    all_idx_particles: (opt) list
+        List containing the particle IDs among which the reactivation particle should be chosen.
+        default: None
 
     Return: int
-    The index of the particle to which it is reactivated.
+    The index of the particle chosen for reactivation. This value indexes the envs list.
     """
     # Select a reactivation particle out of the other N-1 particles
-    N = len(envs)
+    if all_idx_particles is None:
+        N = len(envs)
+    else:
+        assert len(all_idx_particles) <= len(envs)
+        N = len(all_idx_particles)
     assert N > 1, "There is more than one particle in the system (N={})".format(N)
-    idx_reactivate = choose_particle(envs, idx_particle, N, K, ReactivateMethod.RANDOM)  #, ReactivateMethod.ROBINS, absorption_number) #, ReactivateMethod.VALUE_FUNCTION) #, ReactivateMethod.RANDOM)
-    # idx_reactivate = choose_particle(envs, idx_particle, N, K, ReactivateMethod.ROBINS, absorption_number=absorption_number) #, ReactivateMethod.VALUE_FUNCTION) #, ReactivateMethod.RANDOM)
+
+    reactivate_method = ReactivateMethod.RANDOM
+    if reactivation_number is not None and reactivation_number >= 0:
+        reactivate_method = ReactivateMethod.ROBINS
+        # Make sure that the reactivation number is between 0 and N-2 because N may NOT include ALL particles in envs, it might be smaller when parameter all_idx_particles is not None
+        # If the condition is already true, the following line will NOT change its value.
+        reactivation_number = reactivation_number % (N - 1)
+    idx_reactivate_out_of_N = choose_particle(envs, idx_particle, N, K, reactivate_method, reactivation_number=reactivation_number) #ReactivateMethod.VALUE_FUNCTION)
+
+    if all_idx_particles is None:
+        # The number of elements in envs is N
+        # => The value of idx_reactivate_out_of_N can be readily used to index (through envs) the particle that was chosen for reactivation
+        idx_reactivate = idx_reactivate_out_of_N
+    else:
+        # The number of elements in envs is >= N
+        # => Compute the index in envs that represents the particle that was chosen for reactivation
+        # Ex: all_idx_particles = [1, 3, 4]
+        # whereas envs is made up of 6 particles, in this case N = len(all_idx_particles) = 3, and since idx_reactivate_out_of_N takes a value between
+        # 0 and N-1, in this case it takes either the value 0, 1 or 2.
+        # Therefore the index representing the particle that was chosen for reactivation is given by all_idx_particles[idx_reactivate_out_of_N]
+        idx_reactivate = all_idx_particles[idx_reactivate_out_of_N]
 
     # Update the state of the reactivated particle to the reactivation state
     envs[idx_particle].setState(envs[idx_reactivate].getState())
@@ -52,13 +85,13 @@ def reactivate_particle(envs: list, idx_particle: int, K: int, absorption_number
     return idx_reactivate
 
 
-def choose_particle(envs: list, idx_particle: int, N: int, K: int, method: ReactivateMethod, absorption_number=None):
+def choose_particle(envs: list, idx_particle: int, N: int, K: int, method: ReactivateMethod, reactivation_number: int=None):
     """
-    Chooses a particle among N-1 possible particles using the given method
+    Chooses a particle for reactivation of an absorbed particle among N-1 possible particles using the given reactivation method
 
     Arguments:
     envs: list
-        List of queue environments used to run the FV process. Only used when method = ReactivateMethod.VALUE_FUNCTION.
+        List of environments used to run the FV process. Only used when method = ReactivateMethod.VALUE_FUNCTION.
 
     idx_particle: int
         The index of the particle to be reactivated.
@@ -67,12 +100,18 @@ def choose_particle(envs: list, idx_particle: int, N: int, K: int, method: React
         Number of particles in the Fleming-Viot system.
 
     K: int
-        Queue's capacity. Only used when method = ReactivateMethod.VALUE_FUNCTION.
+        For queue environments, this is the queue's capacity. Only used when method = ReactivateMethod.VALUE_FUNCTION and only makes sense for queue environments.
 
     method: ReactivateMethod
-        Reactivation method to use which defines how the particle is chosen
-        (e.g. randomly or using a probability distribution that depends on the value function of the state
+        Reactivation method to use which defines how the reactivation particle is chosen
+        (e.g. randomly, in order, or using a probability distribution that depends on the value function of the state
         where each potential non-absorbed particle is located).
+
+    reactivation_number: (opt) int
+        Counter of the number of absorptions that took place until the current absorption being dealt with that is used to choose the reactivation particle
+        when the reactivation method is ReactivateMethod.ROBINS.
+        When given, it should be an integer between 0 and N-2, as the reactivation particle needs to be chosen among N-1 particles.
+        default: None
 
     Return: int
     The index of the chosen particle.
@@ -80,10 +119,10 @@ def choose_particle(envs: list, idx_particle: int, N: int, K: int, method: React
     if method == ReactivateMethod.VALUE_FUNCTION:
         # TODO: (2022/03/10) Inquiry the value function of each of the N-1 particles based on their state and use a probability distribution that is proportional to it.
         # To begin with, consider an increasing linear function of the buffer size, and on a next step estimate the value function
-        # appropriately based on the queue's dynamics.
+        # appropriately based on the environment's dynamics.
         # Note: the value function should be defined as part of the learner in self.learnerV attribute of the SimulatorQueue object.
 
-        # The value function is a linear function of the buffer size
+        # In queue environments, the value function is considered a linear function of the buffer size.
         # Note that the length of `values` is equal to the number of particles in the system minus 1, N-1
         values = [envs[idx].getBufferSize() / K for idx in list(range(idx_particle)) + list(range(idx_particle + 1, N))]
         assert len(values) == N - 1
@@ -92,9 +131,9 @@ def choose_particle(envs: list, idx_particle: int, N: int, K: int, method: React
         idx_reactivate = np.random.choice(N-1, p=prob_values)
     elif method == ReactivateMethod.ROBINS:
         # Deterministic choice of the particle
-        assert absorption_number is not None
-        assert 0 <= absorption_number < N - 1, "The absorption number is between 0 and N-2 = {} ({})".format(N - 2, absorption_number)
-        idx_reactivate = absorption_number
+        assert reactivation_number is not None
+        assert 0 <= reactivation_number < N - 1, "The reactivation number is between 0 and N-2 = {} ({})".format(N-2, reactivation_number)
+        idx_reactivate = reactivation_number
     else:
         # Random selection of active particles by default
         idx_reactivate = np.random.randint(0, N-1)  # The upper value is NOT included in the possible set of integers

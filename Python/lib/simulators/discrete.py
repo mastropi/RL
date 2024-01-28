@@ -549,8 +549,9 @@ class Simulator:
                 print(f"[reactivate_particle_internal] % particles at terminal states: {np.mean(flags_particle_at_terminal_state)*100}% ({np.sum(flags_particle_at_terminal_state)} out of {len(envs)})")
             new_state = None
             while not done_reactivate:
-                idx_reactivate = reactivate_particle(envs, idx_particle, 0, absorption_number=absorption_number)
+                idx_reactivate = reactivate_particle(envs, idx_particle, 0, reactivation_number=None)
                     ## (2023/01/05) the third parameter is dummy when we do NOT use method = ReactivateMethod.VALUE_FUNCTION to reactivate the particle inside function reactivate_particle().
+                    ## (2024/01/28) Use reactivation_number=reactivation_number to indicate that we want to use method = ReactivateMethod.ROBINS.
                 # TODO: (2023/11/15) Check whether there is any possibility that the particle to which the absorbed particle has been reactivated COULD really be in the absorption set...
                 # Note that, at the initial devise of the FV simulation/estimation method, we have considered that the set of FV particles changes with time...
                 # But this dynamic set of FV particles might no longer be the case, at the time of this writing (2023/11/15).
@@ -634,11 +635,10 @@ class Simulator:
         while not done:
             t += 1
 
-            # We count the absorption number, an integer between 0 and N-2 which is used to deterministically choose
+            # We define a reactivation number, an integer between 0 and N-2 which is used to deterministically choose
             # the reactivation particle (if reactivation is via ReactivateMethod.ROBINS), in order to save time by not having to generate a uniform random number.
-            # Note that the range from 0 to N-2 allows us to choose one of the N-1 particles to which the absorbed particle
-            # can be reactivated into.
-            absorption_number = t % (N - 1)
+            # Note that the range from 0 to N-2 allows us to choose one of the N-1 particles to which the absorbed particle can be reactivated into.
+            reactivation_number = t % (N - 1)
 
             event_times += [t]
 
@@ -818,8 +818,9 @@ class Simulator:
                 print(f"[reactivate_particle_internal] % particles at terminal states: {np.mean(flags_particle_at_terminal_state)*100}% ({np.sum(flags_particle_at_terminal_state)} out of {len(envs)})")
             new_state = None
             while not done_reactivate:
-                idx_reactivate = reactivate_particle(envs, idx_particle, 0, absorption_number=absorption_number)
+                idx_reactivate = reactivate_particle(envs, idx_particle, 0, reactivation_number=None)
                     ## (2023/01/05) the third parameter is dummy when we do NOT use method = ReactivateMethod.VALUE_FUNCTION to reactivate the particle inside function reactivate_particle().
+                    ## (2024/01/28) Use reactivation_number=reactivation_number to indicate that we want to use method = ReactivateMethod.ROBINS.
                 # TODO: (2023/11/15) Check whether there is any possibility that the particle to which the absorbed particle has been reactivated COULD really be in the absorption set...
                 # Note that, at the initial devise of the FV simulation/estimation method, we have considered that the set of FV particles changes with time...
                 # But this dynamic set of FV particles might no longer be the case, at the time of this writing (2023/11/15).
@@ -928,11 +929,10 @@ class Simulator:
                 print(f"# FV particles absorbed at least once: {sum(has_particle_been_absorbed_once)} of max N={N}")
                 print(f"# particles exploring absorption set A: {len(envs_normal)} of max M={n_normal_max}")
 
-            # We count the absorption number, an integer between 0 and N-2 which is used to deterministically choose
+            # We define a reactivation number, an integer between 0 and N-2 which is used to deterministically choose
             # the reactivation particle (if reactivation is via ReactivateMethod.ROBINS), in order to save time by not having to generate a uniform random number.
-            # Note that the range from 0 to N-2 allows us to choose one of the N-1 particles to which the absorbed particle
-            # can be reactivated into.
-            absorption_number = t % (N - 1)
+            # Note that the range from 0 to N-2 allows us to choose one of the N-1 particles to which the absorbed particle can be reactivated into.
+            reactivation_number = t % (N - 1)
 
             event_times += [t]
 
