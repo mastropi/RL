@@ -331,7 +331,8 @@ def compute_survival_probability(survival_times: list, colnames: list=None, righ
 
     Arguments:
     survival_times: list
-        Sorted list containing the observed survival times on which the step survival probability is computed.
+        List containing the observed survival times on which the step survival probability is computed.
+        The list is assumed SORTED by increasing times, but this is NOT checked because it takes time.
 
     colnames: (opt) list or array-like of length 2
         Column names to be used for the survival times and the survival probability, respectively.
@@ -363,7 +364,11 @@ def compute_survival_probability(survival_times: list, colnames: list=None, righ
     elif not isinstance(colnames, (list, tuple, np.ndarray)) or len(colnames) != 2:
         raise ValueError(f"Input parameter `colnames` must be either list, tuple or array and its length must be 2 ({colnames})")
 
-    assert survival_times[0] == 0.0
+    if not isinstance(survival_times, list):
+        raise ValueError("The `survival_times` parameter must be of type list")
+    if len(survival_times) == 0 or survival_times[0] != 0.0:
+        raise ValueError("The `survival_times` parameter must have at least one element and the first element must be 0.0")
+
     # Number of observed death events used to measure survival times
     N = len(survival_times) - 1
 
@@ -883,6 +888,8 @@ def func_prod_knapsack(rho, n):
 
 # Tests
 if __name__ == "__main__":
+    import pytest   # For pytest.raises() which allows to check if an exception is raised when calling a function
+
     #----------------- rmse() and mape() --------------------#
     print("\n--- Testing rmse() and mape():")
 
@@ -973,6 +980,54 @@ if __name__ == "__main__":
         t, idx = generate_min_exponential_time([0.2, np.nan, -0.7])
         assert idx == idx_expected
     #---------- generate_min_exponential_time() -------------#
+
+
+
+    #---------- compute_survival_probability() -------------#
+    print("\n--- Testing compute_survival_probability(survival_times, columns=None, right_continuous=True):")
+
+    # NOTE: The survival times must be sorted
+    # Survival probability estimate with distinct survival times
+    survival_times = [0.0, 1.3, 2.5, 5.0, 7.4]
+    # P(T>t): right-continuous function
+    proba_surv = compute_survival_probability(survival_times)
+    expected_proba_surv = pd.DataFrame(np.c_[survival_times, [1.00, 0.75, 0.50, 0.25, 0.00]], columns=['t', 'P(T>t)'])
+    assert all(proba_surv.columns == expected_proba_surv.columns)
+    assert np.allclose(proba_surv, expected_proba_surv)
+
+    # P(T>=t): left-continuous function
+    proba_surv_left = compute_survival_probability(survival_times, right_continuous=False)
+    expected_proba_surv_left = pd.DataFrame(np.c_[survival_times, [0.00] + expected_proba_surv['P(T>t)'][:-1].tolist()], columns=['t', 'P(T>=t)'])
+    assert all(proba_surv_left.columns == expected_proba_surv_left.columns)
+    assert np.allclose(proba_surv_left, expected_proba_surv_left)
+
+    # P(T>t) with repeated observed survival times (typically occurring in discrete-time processes)
+    # Note that each decrease of P(T>t) is still 1/N, even for the repeated time values.
+    # And this is ok, because we just need to take the value of P(T>t) associated to the last occurrence of the repeated time value in order to get the estimate of the survival
+    # probability function for that time value.
+    survival_times = [0, 1, 1, 1, 2, 2, 3, 3, 7]
+    proba_surv = compute_survival_probability(survival_times)
+    expected_proba_surv = pd.DataFrame(np.c_[survival_times, [1.00, 0.875, 0.750, 0.625, 0.500, 0.375, 0.250, 0.125, 0.00]], columns=['t', 'P(T>t)'])
+    assert np.allclose(proba_surv, expected_proba_surv)
+
+    # Survival times are given unsorted
+    # NOTE that NO error message is triggered (because checking for sorted values is computationally expensive)
+    survival_times = [0.0, 2.5, 1.3, 7.4, 5.0]
+    proba_surv = compute_survival_probability(survival_times)
+    expected_proba_surv_wrong = pd.DataFrame(np.c_[survival_times, [1.00, 0.75, 0.50, 0.25, 0.00]], columns=['t', 'P(T>t)'])
+    assert np.allclose(proba_surv, expected_proba_surv_wrong)
+
+    # Check ValueErrors that should be raised by invalid function calls
+    with pytest.raises(ValueError):
+        # survival_times parameter is not a list
+        compute_survival_probability(3)
+
+        # survival_times has zero length
+        compute_survival_probability([])
+
+        # First element of survival times list is not 0.0
+        compute_survival_probability([3.2, 5.0])
+    # ---------- compute_survival_probability() -------------#
 
 
     #------------------- comb(n,k) -------------------------#
@@ -1105,6 +1160,7 @@ if __name__ == "__main__":
     #------------ stationary_distribution_product_form --------------#
     import matplotlib.pyplot as plt
     print("\n--- Testing stationary_distribution_product_form(capacity, rhos, func_prod_birthdeath):")
+    print("IMPORTANT: This test does NOT test the correctness of the theoretic distribution, it is just useful for regression tests")
     R = 3
     C = 3
     n_expected = [
@@ -1156,10 +1212,10 @@ if __name__ == "__main__":
                     ]           
     n, dist = stationary_distribution_product_form(C, rhos_equal, func_prod_birthdeath)
     print("State space for R={}, C={}: {}".format(R, C, len(dist)))
-    print("Distribution for rhos={}:".format(rhos_equal))
+    print("Distribution for rhos={} computed by the tested function:".format(rhos_equal))
     [print("index={}: x={}, p={:.6f}".format(idx, x, p)) for idx, (x, p) in enumerate(zip(n, dist))]
     print("---------------")
-    print("Sum: p={:.6f}".format(sum(dist)))
+    print("Sum (should be 1): p={:.6f}".format(sum(dist)))
     assert abs(sum(dist) - 1.0) < 1E-6, "The sum of the distribution function is 1 ({.6f})".format(sum(dist))
     assert all([x == x_expected for x, x_expected in zip(n, n_expected)]), "The expected event space is verified"
     assert np.allclose(dist, dist_expected, atol=1E-6), "The expected distribution is verified"
@@ -1172,13 +1228,14 @@ if __name__ == "__main__":
     # from 0 ... length(dist)-1, so we can use it as the number of times to use the n array associated
     # to each index as starting point of the simulation
     sample_size = 1000
-    print("Generating {} samples with the given distribution".format(sample_size))
+    print("Generating {} samples with the given Multinomial distribution".format(sample_size))
     sample = np.random.multinomial(sample_size, dist, size=1)
     print("No. of times each array combination n appears in the sample:\n{}".format(sample[0]))
     plt.figure()
     plt.plot(dist, 'r.-')
     plt.plot(sample[0]/sample_size, 'b.')
-    plt.title("R={}, C={}, rhos={} (ALL EQUAL) (sample size = {})".format(R, C, rhos_equal, sample_size))
+    plt.legend(["Theoretic distribution", "Observed frequency of values sampled from the theoretic distribution"])
+    plt.title("Theoretical vs. Observed product-form stationary distribution for a multi-server queue system\nR={}, C={}, rhos={} (ALL EQUAL) (sample size = {})".format(R, C, rhos_equal, sample_size))
 
     print("Test #2: process intensities rhos are different (smaller than 1)")
     rhos_diff = [0.8, 0.7, 0.4]
@@ -1206,10 +1263,10 @@ if __name__ == "__main__":
                     ]
     n, dist = stationary_distribution_product_form(C, rhos_diff, func_prod_birthdeath)
     print("State space for R={}, C={}: {}".format(R, C, len(dist)))
-    print("Distribution for rhos={}:".format(rhos_diff))
+    print("Distribution for rhos={} computed by the tested function:".format(rhos_diff))
     [print("index={}: x={}, p={:.6f}".format(idx, x, p)) for idx, (x, p) in enumerate(zip(n, dist))]
     print("---------------")
-    print("Sum: p={:.6f}".format(sum(dist)))
+    print("Sum (should be 1): p={:.6f}".format(sum(dist)))
     assert abs(sum(dist) - 1.0) < 1E-6, "The sum of the distribution function is 1 ({.6f})".format(sum(dist))
     assert all([x == x_expected for x, x_expected in zip(n, n_expected)]), "The expected event space is verified"
     assert np.allclose(dist, dist_expected, atol=1E-6), "The expected distribution is verified"
@@ -1228,7 +1285,8 @@ if __name__ == "__main__":
     plt.figure()
     plt.plot(dist, 'r.-')
     plt.plot(sample[0]/sample_size, 'b.')
-    plt.title("R={}, C={}, rhos={} (ALL DIFFERENT) (sample size = {})".format(R, C, rhos_diff, sample_size))
+    plt.legend(["Theoretic distribution", "Observed frequency of values sampled from the theoretic distribution"])
+    plt.title("Theoretical vs. Observed product-form stationary distribution for a multi-server queue system\nR={}, C={}, rhos={} (ALL DIFFERENT) (sample size = {})".format(R, C, rhos_equal, sample_size))
     #------------ stationary_distribution_product_form --------------#
 
 
