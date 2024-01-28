@@ -137,10 +137,10 @@ class Test_Class_LeaFV_discretetime(unittest.TestCase):
 
             # Assert the value of the integral
             for x in learner_fv.states_of_interest:
-                df_proba_surv = merge_proba_survival_and_phi(df_surv, learner_fv.dict_phi[x])
-                proba, integral = estimate_proba_stationary(df_proba_surv, 1.0)
-                #print(f"Components of the integral:\n{df_proba_surv}")
-                #print(f"Integral computed after the fact: {integral}")
+                df_proba_surv_and_phi = merge_proba_survival_and_phi(df_surv, learner_fv.dict_phi[x])
+                proba, integral = estimate_proba_stationary(df_proba_surv_and_phi, 1.0)
+                print(f"Components of the integral:\n{df_proba_surv_and_phi}")
+                print(f"Integral computed after the fact: {integral}")
 
                 print(f"Observed integral[x={x}]: {learner_fv.dict_integral[x]}")
                 assert np.isclose(learner_fv.dict_integral[x], integral), "The iterative method and the after the fact method must give the same value for the FV integral"
