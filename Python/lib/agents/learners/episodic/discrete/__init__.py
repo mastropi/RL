@@ -519,6 +519,12 @@ class Learner(GenericLearner):
         else:
             return self._state_counts_over_all_episodes
 
+    def getAlphasByState(self):
+        return self._alphas
+
+    def getAlphaForState(self, state):
+        return self._alphas[state]
+
     def getAverageAlphaByEpisode(self):
         return self.alpha_mean_by_episode
 

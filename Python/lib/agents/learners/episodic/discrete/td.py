@@ -272,7 +272,7 @@ class LeaTDLambda(Learner):
         ax = plt.gca()
         ax.set_xlabel("time step")
         ax.set_ylabel("z")
-        start_state = self._states[0]
+        start_state = self._states[0] if len(self._states) > 0 else None
         ax.set_title("Eligibility trace by time step (Episode {} - start state = {})".format(self.episode, start_state))
 
     def _plotAlphasEffective(self):
@@ -288,14 +288,14 @@ class LeaTDLambda(Learner):
         ax.set_ylim([0,1])
         ax.set_xlabel("time step")
         ax.set_ylabel("alpha*z")
-        start_state = self._states[0]
+        start_state = self._states[0] if len(self._states) > 0 else None
         ax.set_title("Effective learning rate (alpha*z) by time step (Episode {} - start state = {})".format(self.episode, start_state))
 
     def _choose_states2plot(self):
         from Python.lib.environments.gridworlds import EnvGridworld1D
         from Python.lib.environments.mountaincars import MountainCarDiscrete
-        if isinstance(self.env, EnvGridworld1D):
-            states2plot = list(range(9,12))
+        if isinstance(self.env, EnvGridworld1D) and self.env.getNumStates() > 12:
+            states2plot = list(range(9, 12))
         elif isinstance(self.env, MountainCarDiscrete):
             # Assuming MountainCar environment
             states2plot = list(range(100, 104))

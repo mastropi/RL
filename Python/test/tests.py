@@ -475,7 +475,7 @@ ax2_V.plot(states, mu, color="violet", marker=".", markersize=20)
 ax2_V.bar(states, counts_td[rep] / sum(counts_td[rep]), color="red", alpha=0.3)
 ax2_V.bar(states, counts_fv[rep] / sum(counts_fv[rep]), color="green", alpha=0.3)
 ax2_V.set_ylabel("Relative state frequency")
-ax2_V.legend(["stationary probability", f"Rel. Freq.(s): TD(#events={learning_info['t']})", f"Rel. Freq.(s): FV(#events={n_events_et + n_events_fv})"], loc="upper right")
+ax2_V.legend(["stationary probability", f"Rel. Freq.(s): TD(#events={learning_info['nsteps']})", f"Rel. Freq.(s): FV(#events={n_events_et + n_events_fv})"], loc="upper right")
 ax_Vd.plot(states[:-1], np.diff(env1d.getV() - ref_value_true), color="blue")
 ax_Vd.plot(states[:-1], np.diff(estimates_V_td[rep] - ref_value_td), color="red")
 ax_Vd.plot(states[:-1], np.diff(estimates_V_fv[rep] - ref_value_fv), color="green")
@@ -765,7 +765,7 @@ else:
                                              state_observe=np.ravel_multi_index((1, env_shape[1]-1), env_shape), compute_rmse=True if t_learn in learning_episodes_observe else False, plot=False if t_learn in learning_episodes_observe else False,
                                              verbose=True, verbose_period=verbose_period)
             average_reward = simulator_value_functions.getAgent().getLearner().getAverageReward()
-            nsteps_all[t_learn - 1] = info['t'] + 1     # +1 because the t value when just one time step is run is 0 (see the run() method called above)
+            nsteps_all[t_learn - 1] = learning_info['nsteps']
             print(f"Learning step {t_learn}: Learning of value functions COMPLETED using {learning_method} method on {nsteps_all[t_learn-1]} time steps")
 
         state_counts_all[t_learn-1, :] = state_counts

@@ -156,7 +156,8 @@ class Simulator:
         else:
             return self._run_single(**kwargs)
 
-    def _run_fv(self, nepisodes=100, max_time_steps_per_episode=None, max_time_steps_fv=None, min_num_cycles_for_expectations=MIN_NUM_CYCLES_FOR_EXPECTATIONS, reset_value_functions=True, seed=None, verbose=True, verbose_period=100, plot=False):
+    def _run_fv(self, max_time_steps_fv=None, min_num_cycles_for_expectations=MIN_NUM_CYCLES_FOR_EXPECTATIONS,
+                reset_value_functions=True, seed=None, verbose=True, verbose_period=100, plot=False, colormap="seismic", pause=0.1):
         """
         Runs all the simulations that are needed to learn differential value functions using the Fleming-Viot approach.
 
@@ -167,23 +168,29 @@ class Simulator:
         to the numerator of the Fleming-Viot estimator of stationary state probabilities.
 
         Arguments:
-        nepisodes: (opt) int
-            Number of episodes for which the single Markov chain is run to estimate the expected reabsorption time E(T_A).
-            This value is also used to compute the maximum number of steps to run *per episode* from the maximum number of TOTAL
-            steps allowed over ALL episodes.
-            Note that this maximum number of steps per episode allows the agent to stop exploring when the episode
-            doesn't lead to states with reward and avoid consuming the total budget set by the maximum number of TOTAL
-            steps allowed over ALL episodes.
-            default: 100
-
-        max_time_steps_per_episode: (opt) int
-            Maximum number of steps per episode to be observed in the single Markov chain simulation
-            that is used to estimate the expected reabsorption time E(T_A).
-            default: None, in which case it is defined as 10 times the number of states in the environment
-
         max_time_steps_fv: (opt) int
             Maximum number of steps to be observed for ALL particles when running the FV simulation.
             default: None, in which case its default value is defined by method _run_simulation_fv()
+
+        min_num_cycles_for_expectations: (opt) int
+            Minimum number of reabsorption cycles that should be observed in order to estimate the expected reabsorption time, E(T_A).
+            If this minimum number of cycles is NOT observed, then the expected reabsorption time is NOT estimated and the FV simulation is NOT run
+            (as there is no use of running it, since we need an estimate of E(T_A) in order to produce an FV estimate of the average reward).
+            NOTE: (2024/02/13) Currently, the lack of an E(T_A) estimate ONLY affects the FV-estimation of the average reward,
+            as the DIFFERENTIAL value functions (which is the definition of value functions in the CONTINUING learning task setting,
+            which is the setting of the FV estimation of value functions) do NOT currently use the average reward estimated by FV for correction,
+            but the traditional average reward estimated from the single Markov chain exploration of the environment used to estimate E(T_A).
+            This is NOT the best approach to use (because the average reward could be WAY underestimated if it is rarely observed --as is the case
+            in applications of FV!), however in order to use the FV-estimated average reward in place of the traditionally estimated average reward,
+            we need to use the ITERATIVE update of the FV-estimated average reward (because value functions are estimated by a TD learner
+            and a TD learner of value functions needs an average reward that is either already available OR is updated at every learning step
+            to be used for correction of the return that thus gives the estimate of the value functions. This iterative update of the FV-estimated average
+            reward, although already implemented in LeaFV, is currently not in place by the FV learning implemented here (because the method
+            defined in LeaFV that ITERATIVELY computes the FV-estimated average reward is NOT currently called).
+            default: MIN_NUM_CYCLES_FOR_EXPECTATIONS
+
+        reset_value_functions: (opt) bool
+            Whether the estimated value functions should be reset at the start of the
 
         Return: tuple
         Tuple with the following elements:
@@ -196,10 +203,7 @@ class Simulator:
         - n_events_fv: number of events observed during the FV simulation that estimates Phi(t).
         """
         #--- Parse input parameters ---
-        max_time_steps_per_episode = self.env.getNumStates() if max_time_steps_per_episode is None else max_time_steps_per_episode
-        dict_params_simul = dict({  'nepisodes': nepisodes,                                         # Number of episodes on which FV learning will take place, but keep in mind that whenever a terminal state is reached, the process restarts from an environment's initial state (and a new episode is considered to start --see implementation of _run_single())
-                                    'max_time_steps_fv': max_time_steps_fv,                         # Maximum number of time steps allowed for the N particles (comprehensively) in the FV simulation used to estimate the QSD Phi(t,x)
-                                    'max_time_steps_per_episode_single': max_time_steps_per_episode,# Maximum number of time steps per episode in the single Markov chain simulation that estimates E(T_A)
+        dict_params_simul = dict({  'max_time_steps_fv': max_time_steps_fv,                         # Maximum number of time steps allowed for the N particles (comprehensively) in the FV simulation used to estimate the QSD Phi(t,x)
                                     'N': self.agent.getLearner().getNumParticles(),
                                     'T': self.agent.getLearner().getNumTimeStepsForExpectation(),   # Maximum number of time steps allowed in each episode of the single Markov chain that estimates the expected reabsorption time E(T_A)
                                     'absorption_set': self.agent.getLearner().getAbsorptionSet(),
@@ -208,11 +212,11 @@ class Simulator:
                                     'seed': seed})
         dict_params_info = dict({'verbose': verbose,
                                  'verbose_period': verbose_period,
-                                 't_learn': 0}) # This indexes the learning epoch of the optimal policy
+                                 't_learn': 0,
+                                 'plot': plot,
+                                 'colormap': colormap,
+                                 'pause': pause}) # This indexes the learning epoch of the optimal policy
         #--- Parse input parameters ---
-
-        if 'N' not in dict_params_simul.keys():
-            raise ValueError("The dictionary of simulation parameters must contain the key 'N' with the number of Fleming-Viot particles to use in the simulation")
 
         # Create the particles as copies of the main environment
         envs = [self.env if i == 0 else copy.deepcopy(self.env) for i in range(dict_params_simul['N'])]
@@ -262,7 +266,13 @@ class Simulator:
             default: None, in which case a uniform random distribution on the activation set is used
 
         reset_value_functions: (opt) bool
-            See documentation for `_run_single()`.
+            Whether value function estimates, possibly stored in the value functions learner, should be reset at the beginning of the learning process
+            (i.e. before launching the single Markov chain simulation used to estimate the expected reabsorption time, E(T_A)).
+            Note that it might be useful to NOT reset the value functions if the value function learner is used to e.g. generate critic values used in
+            an Actor-Critic policy learning context. In that case, we usually like to use the value function estimates obtained from the critic
+            (i.e. from this value function learner) run when learning the policy at the PREVIOUS policy learning step (so that we don't start
+            the learning of the value functions from scratch. This makes sense because the value functions associated to ONE policy learning step
+            (of the Actor-Critic algorithm) are expected to be similar to those associated to the previous policy learning step.
             default: True
 
         Return: tuple
@@ -301,35 +311,18 @@ class Simulator:
         start_state = None
         if probas_stationary_start_state_et is not None:
             start_state = choose_state_from_set(dict_params_simul['absorption_set'], probas_stationary_start_state_et)
-        print(f"SINGLE simulation for the estimation of the expected reabsorption time E(T_A) starts at state s={start_state}...")
+        print(f"SINGLE simulation for the estimation of the expected reabsorption time E(T_A) starts at state s={start_state} "
+              f"(when None, the simulation starts following the Initial State Distribution of the environment: {self.env.getInitialStateDistribution()}")
         state_values, action_values, state_counts_et, _, _, learning_info = \
-            self._run_single(dict_params_simul['nepisodes'],
+            self._run_single_continuing_task(
                             max_time_steps=dict_params_simul['T'],      # Max simulation time over ALL episodes
-                            max_time_steps_per_episode=dict_params_simul.get('max_time_steps_per_episode_single', np.Inf), #dict_params_simul['T'] / dict_params_simul['nepisodes'],  # Max simulation time per episode
                             start_state_first_episode=start_state,
                             reset_value_functions=reset_value_functions,
                             seed=dict_params_simul['seed'],
-                            set_cycle=set.union(dict_params_simul['absorption_set'], self.env.getTerminalStates()), #dict_params_simul['absorption_set'],
-                                ## (2023/11/15) NOTE that we define the terminal states as part of the set defining a cycle
-                                ## (in this case a reabsorption cycle) because in _run_single() the episode
-                                ## terminates when the process reaches a terminal state.
-                                ## The simulation then starts the next episode at one of the environment's start state according to its initial state distribution.
-                                ## In this call, the start state is fixed and has been defined above as a sample of the set of absorption states.
-                                ## STRICTLY SPEAKING, THIS LOGIC IS NOT REALLY CORRECT, because the Markov process underlying the FV process
-                                ## is a Markov process that has been redefined from the episodic Markov process (that terminates when reaching a terminal state)
-                                ## as a Markov process that restarts at an environment's start state when the original Markov process reaches a terminal state
-                                ## (so that the new Markov process runs indefinitely, and thus can be used to estimate the expectations
-                                ## that are estimated by the FV simulator/estimator).
-                                ## By doing the above logic, we are NOT following this new Markov process that has been defined
-                                ## for the FV estimation process... it only approximately follows that Markov process because
-                                ## every new episode is started at a fixed state that has been selected randomly (following probas_stationary_start_state_et)
-                                ## AS OPPOSED TO STARTING FROM AN ENVIRONMENT'S START STATE.
-                                ## This could be fixed (**for the case when the set of environment's start state is a subset of the absorption set**)
-                                ## if we start the simulation at an environment's start state (for which we need to redefine the
-                                ## value of parameter probas_stationary_start_state_et passed to the call to this method).
+                            set_cycle=dict_params_simul['absorption_set'],
                             verbose=dict_params_info.get('verbose', False),
                             verbose_period=dict_params_info.get('verbose_period', 1))
-        n_events_et = learning_info['t']
+        n_events_et = learning_info['nsteps']
         n_cycles_absorption_used = learning_info['num_cycles']
         time_last_absorption = learning_info['last_cycle_entrance_time']
         average_reward_from_single_simulation = self.agent.getLearner().getAverageReward()
@@ -364,7 +357,7 @@ class Simulator:
             # we do NOT need to estimate the average reward because it is cancelled out in the Advantage function Q(s,a) - V(s)
             # which is the term that weights the log-policy value contributing to the loss function that is minimized
             # to estimate the optimal theta parameters of the policy.
-            expected_absorption_time = learning_info['expected_cycle_time'] if learning_info['expected_cycle_time'] > 0.0 else learning_info['t']
+            expected_absorption_time = learning_info['expected_cycle_time'] if learning_info['expected_cycle_time'] > 0.0 else learning_info['nsteps']
             print(f"FV simulation on N={N} particles starts...")
             # TEMPORARY (2023/12/05) To test whether FV learns the optimal policy when the values of the states and actions taken in set A are NOT estimated at all
             #self.agent.getLearner().reset(reset_value_functions=True)
@@ -416,16 +409,17 @@ class Simulator:
             if True or DEBUG_ESTIMATORS or show_messages(dict_params_info.get('verbose', False),
                                                  dict_params_info.get('verbose_period', 1),
                                                  dict_params_info.get('t_learn', 0)):
-                # import pandas as pd
-                # max_rows = pd.get_option('display.max_rows')
-                # pd.set_option('display.max_rows', None)
-                # print("Phi(t):\n{}".format(phi))
-                # pd.set_option('display.max_rows', max_rows)
+                #max_rows = pd.get_option('display.max_rows')
+                #pd.set_option('display.max_rows', None)
+                #print("Phi(t):\n{}".format(phi))
+                #pd.set_option('display.max_rows', max_rows)
                 print("Integrals: {}".format(integrals))
                 print("Expected reabsorption time (on {} cycles): {}".format(learning_info['num_cycles'], expected_absorption_time))
                 print("Stationary probabilities: {}".format(probas_stationary))
                 print("Expected reward = {}".format(expected_reward))
                 print("Average reward stored in learner = {}".format(self.agent.getLearner().getAverageReward()))
+                assert np.isclose(expected_reward, self.agent.getLearner().getAverageReward()), \
+                    f"The average reward estimated by FV ({expected_reward}) must be equal to the average reward stored in the FV learner ({self.agent.getLearner().getAverageReward()})"
 
         return state_values, action_values, state_counts_all, probas_stationary, expected_reward, expected_absorption_time, n_cycles_absorption_used, \
                time_last_absorption, max_survival_time, n_events_et, n_events_fv
@@ -1149,11 +1143,41 @@ class Simulator:
 
         return n_steps_on_all_environments, learner.getV().getValues(), learner.getQ().getValues(), learner.getStateCounts(), learner.dict_phi, df_proba_surv, expected_absorption_time, max_survival_time
 
+    def _check_cycle_occurrence_and_update_cycle_variables(self, set_cycle, t, state, next_state, cycle_times, state_counts_in_complete_cycles, last_cycle_entrance_time, expected_cycle_time, num_cycles):
+        entered_set_cycle = lambda s, ns: s not in set_cycle and ns in set_cycle
+        if set_cycle is not None:
+            if entered_set_cycle(state, next_state):
+                # Notes on the cycle time calculation:
+                # 1) We sum +1 to t because the next_state happens at the NEXT time step, which is t+1
+                # and the next_state is the one that defines absorption, so we should measure the time at which the next_state occurs.
+                # (in fact, note that the very first t value is 0, therefore we should not consider the first entry
+                # time to be 0 if the system enters the cycle set at the very first step...)
+                # 2) The fact we use `t` to compute the cycle time --instead of `t_episode`-- indicates that we are considering the task to be a continuous task,
+                # as opposed to episodic task, because the value of `t` is NOT reset at the beginning of each episode,
+                # instead it keeps increasing with every new time step.
+                cycle_times += [t + 1 - last_cycle_entrance_time]
+                last_cycle_entrance_time = t + 1  # We mark the time the system entered the cycle set, so that we can compute the next cycle time
+                if len(cycle_times) > 1:
+                    # We disregard the first cycle time from the computation of the average
+                    # because the first entering event may not represent a cycle as the system may have not previously exited the set.
+                    num_cycles += 1
+                    expected_cycle_time += (cycle_times[-1] - expected_cycle_time) / num_cycles
+                    if DEBUG_TRAJECTORIES:
+                        print(f"Entered cycle set: (t, t_cycle, s, ns) = ({t}, {cycle_times[-1]}, {state}, {next_state})")
+
+            # Update the count of the state ONLY after the first "cycle time"
+            # so that we make sure that the counts are measured during a TRUE cycle
+            # (as the first one may be a degenerate (incomplete) cycle because the start state may not be in the cycle set)
+            if num_cycles > 0:
+                state_counts_in_complete_cycles[state] += 1
+
+        return cycle_times, state_counts_in_complete_cycles, last_cycle_entrance_time, expected_cycle_time, num_cycles
+
     def _run_single(self, nepisodes, max_time_steps=+np.Inf, max_time_steps_per_episode=+np.Inf, start_state_first_episode=None, reset_value_functions=True,
                     seed=None, compute_rmse=False, weights_rmse=None,
-                    state_observe=None, set_cycle=None,
+                    state_observe=None,
                     verbose=False, verbose_period=1, verbose_convergence=False,
-                    plot=False, colormap="seismic", pause=0):
+                    plot=False, colormap="seismic", pause=0.1):
         # TODO: (2020/04/11) Convert the plotting parameters to a dictionary named plot_options or similar.
         # The goal is to group OPTIONAL parameters by their function/concept.
         """
@@ -1181,6 +1205,10 @@ class Simulator:
             stored in the environment object.
             default: None
 
+        reset_value_functions: (opt) bool
+            Whether value function estimates, possibly stored in the value functions learner, should be reset at the beginning of the simulation.
+            default: True
+
         seed: (opt) int
             Seed to use for the random number generator for the simulation.
             default: None
@@ -1196,13 +1224,6 @@ class Simulator:
         state_observe: (opt) int
             A state index whose RMSE should be observed as the episode progresses.
             Only used when compute_rmse = True
-            default: None
-
-        set_cycle: (opt) set
-            Set of states whose entrance from the complement set defines a cycle.
-            Note that the set should include ALL the states, NOT only the boundary states through which the system can enter the set.
-            The reason is that the set is used to determine which states are tracked for their visit frequency for the computation
-            of their stationary probability using renewal theory.
             default: None
 
         verbose: (opt) bool
@@ -1233,8 +1254,9 @@ class Simulator:
             default: seismic, a colormap that ranges from blue to red, where the middle is white
 
         pause: (opt) float
-            Number of seconds to wait before updating the plot that shows the evalution
-            of the value function estimates.
+            Number of seconds to wait before updating the plot that shows the evolution of the value function estimates.
+            It should be positive if we want the plot to be updated every time the value function estimate is updated.
+            default: 0.1
 
         Returns: tuple
         Tuple containing the following elements:
@@ -1257,16 +1279,7 @@ class Simulator:
                 - 'deltaV_abs_median': array with length nepisodes+1 containing median|delta(V)| over all states at each episode.
                 - 'deltaV_rel_abs_mean': array with length nepisodes+1 containing mean|delta_rel(V)| over all states at each episode.
                 - 'deltaV_rel_abs_median': array with length nepisodes+1 containing median|delta_rel(V)| over all states at each episode.
-            - when parameter set_cycle is not None, two pieces of information that can be used to compute the stationary probability of states
-            using renewal theory:
-                - the number of cycles observed.
-                - the time at which the process completed the last cycle.
-                - the expected cycle time, i.e. the average cycle time where a cycle is defined by entering the cycle set after its latest exit.
-                - an array with the visit count of all states.
         """
-        # Auxiliary functions
-        entered_set_cycle = lambda s, ns: s not in set_cycle and ns in set_cycle
-
         #--- Parse input parameters
         # Set the weights to be used to compute the RMSE and MAPE based on the weights_rmse value
         # Only when weights_rmse = True are the weights NOT set definitely here, as they are set at every episode
@@ -1306,18 +1319,6 @@ class Simulator:
                               "The state whose index falls in the middle of the state space will be observed." \
                               .format(state_observe, type(state_observe), self.env.getNumStates()-1))
                 state_observe = self.env.getNumStates() // 2
-
-        # Setup the information needed when cycles are used to estimate the stationary distribution of states using renewal theory
-        if set_cycle is not None:
-            cycle_times = []  # Note that the first cycle time will include a time that may not be a cycle time because the cycle may have not initiated at the sytem's start state. So the first cycle time will be considered a delay time.
-            num_cycles = 0
-            last_cycle_entrance_time = 0       # We set the last cycle time (i.e. the moment when the system enters the cycle set) to 0 (even if it is unknown) so that we can easily compute the FIRST cycle time below as "t - last_cycle_entrance_time"
-            expected_cycle_time = 0.0  # We set the expected cycle time so that we can compute the expected cycle time recursively
-
-            # Array of state counts WITHIN cycles, i.e. the count is increased ONLY when the state is visited within a TRUE cycle
-            # (not during the first "cycle" which may be degenerate)
-            # This can be used to estimate the stationary probability of the states using renewal theory
-            arr_state_counts_within_cycles = np.zeros(self.env.getNumStates(), dtype=int)
 
         # Plotting setup
         if plot:
@@ -1489,32 +1490,6 @@ class Simulator:
                 if state_observe is not None:
                     # Store the value function of the state just estimated
                     V_state_observe += [learner.getV().getValue(state_observe)]
-
-                # Check if the system has entered the set of states defining a cycle
-                if set_cycle is not None:
-                    if entered_set_cycle(state, next_state):
-                        # Notes on the cycle time calculation:
-                        # 1) We sum +1 to t because the next_state happens at the NEXT time step, which is t+1
-                        # and the next_state is the one that defines absorption, so we should measure the time at which the next_state occurs.
-                        # (in fact, note that the very first t value is 0, therefore we should not consider the first entry
-                        # time to be 0 if the system enters the cycle set at the very first step...)
-                        # 2) The fact we use `t` to compute the cycle time --instead of `t_episode`-- indicates that we are considering the task to be a continuous task,
-                        # as opposed to episodic task, because the value of `t` is NOT reset at the beginning of each episode,
-                        # instead it keeps increasing with every new time step.
-                        cycle_times += [t + 1 - last_cycle_entrance_time]
-                        last_cycle_entrance_time = t + 1   # We mark the time the system entered the cycle set, so that we can compute the next cycle time
-                        if len(cycle_times) > 1:
-                            # We disregard the first cycle time from the computation of the average
-                            # because the first entering event may not represent a cycle as the system may have not previously exited the set.
-                            num_cycles += 1
-                            expected_cycle_time += (cycle_times[-1] - expected_cycle_time) / num_cycles
-                            if DEBUG_TRAJECTORIES:
-                                print(f"Entered cycle set: (t_episode, t, t_cycle, s, ns) = ({t_episode}, {t}, {cycle_times[-1]}, {state}, {next_state})")
-
-                    # Update the count of the state ONLY after the first "cycle time"
-                    # so that we make sure that the counts are measured during a TRUE cycle (as the first one may be a degenerate cycle)
-                    if num_cycles > 0:
-                        arr_state_counts_within_cycles[state] += 1
 
             #------- EPISODE FINISHED --------#
             # Store the value of the temrinal state (used in the next episode when the average reward criterion is used for learning)
@@ -1759,7 +1734,577 @@ class Simulator:
             print("Last episode run = {} of {}".format(episode+1, nepisodes))
 
         return  learner.getV().getValues(), learner.getQ().getValues(), learner.getStateCounts(), RMSE, MAPE, \
-                {   't': t,   # Simulation time, i.e. number of discrete steps taken during the whole simulation
+                {   'nsteps': t + 1,   # Number of discrete steps taken during the whole simulation (+1 because t = 0 indexes the first step)
+                    # Value of alpha for each state at the end of the LAST episode run
+                    'alphas_at_last_episode': learner._alphas,
+                    # All what follows is information by episode (I don't explicitly mention it in the key name because it may make the key name too long...)
+                    # (Average) alpha by episode (averaged over visited states in the episode)
+                    'alpha_mean': learner.getAverageAlphaByEpisode(),   # Average alpha (over all states) by episode
+                    'lambda_mean': learner.lambda_mean_by_episode if isinstance(learner, LeaTDLambdaAdaptive) else None,
+                    'V_abs_mean': V_abs_mean,
+                    'V_abs_mean_weighted': V_abs_mean_weighted,
+                    'V_abs_min': V_abs_min,       # min|V| on states with a non-zero relative change in order to evaluate the impact of |V| when dividing to compute the relative change
+                    'deltaV_max_signed': deltaV_max_signed,  # maximum change of V keeping the sign! Goal: understand whether the maximum change oscillates suggesting that it is converging fine
+                    'deltaV_rel_max_signed': deltaV_rel_max_signed,  # maximum relative change of V keeping the sign! Goal: understand whether the maximum change oscillates suggesting that it is converging fine
+                    'deltaV_abs_mean': deltaV_abs_mean,
+                    'deltaV_rel_abs_mean': deltaV_rel_abs_mean,
+                    'deltaV_rel_abs_mean_weighted': deltaV_rel_abs_mean_weighted,
+                    'deltaV_rel_abs_max': deltaV_rel_abs_max,
+                    'deltaV_rel_abs_max_weighted': deltaV_rel_abs_max_weighted,
+                    'V_abs_median': V_abs_median,
+                    'deltaV_abs_median': deltaV_abs_median,
+                    'deltaV_rel_abs_median': deltaV_rel_abs_median,
+                    'V_abs_n': V_abs_n,
+                    'prop_states_deltaV_relevant': prop_states_deltaV_relevant,
+                    'prop_episodes_max_steps_reached': nepisodes_max_steps_reached / nepisodes,
+                    'state_observe': state_observe,
+                    'V_state_observe': V_state_observe,
+                }
+
+    def _run_single_continuing_task(self, nepisodes=1, max_time_steps=1000, max_time_steps_per_episode=+np.Inf, start_state_first_episode=None, reset_value_functions=True,
+                    seed=None, compute_rmse=False, weights_rmse=None,
+                    state_observe=None, set_cycle=None,
+                    verbose=False, verbose_period=1, verbose_convergence=False,
+                    plot=False, colormap="seismic", pause=0.1):
+        """
+        Same as _run_single() but where there are no episodes.
+
+        At this point (Jan-2024), the method needs a LOT of refactoring, as this method was constructed keeping in mind that I didn't want to do too many changes
+        to the _run_single() method from which it was created.
+        For instance, we need to get rid of the WHILE loop on the episodes because the episodes never increase. So, at this point parameter nepisodes
+        is expected to always be 1, as specified in its default value.
+
+        set_cycle: (opt) set
+            Set of states whose entrance from the complement set defines a cycle.
+            Note that the set should include ALL the states, NOT only the boundary states through which the system can enter the set.
+            The reason is that the set is used to determine which states are tracked for their visit frequency for the computation
+            of their stationary probability using renewal theory.
+            default: None
+
+        Returns: tuple
+        Tuple containing the following elements:
+        - state value function estimate for each state at the end of the last episode (`nepisodes`).
+        - number of visits to each state at the end of the last episode.
+        - RMSE (when `compute_rmse` is not None), an array of length `nepisodes` containing the
+        Root Mean Square Error after each episode, of the estimated value function averaged
+        over all states. Otherwise, None.
+        - MAPE (when `compute_rmse` is not None): same as RMSE but with the Mean Absolute Percent Error information.
+        - a dictionary containing additional relevant information, as follows:
+            - 'alphas_at_episode_end': the value of the learning parameter `alpha` for each state
+            at the end of the last episode run.
+            - 'alphas_by_episode': (average) learning parameter `alpha` by episode
+            (averaged over visited states in each episode)
+            - a set of estimation statistics such as the average absolute value function or the relative
+            change of the value function between episodes. A sample of these summary statistics are:
+                - 'V_abs_mean': array with length nepisodes+1 containing mean|V| over all states at each episode.
+                - 'V_abs_median': array with length nepisodes+1 containing median|V| over all states at each episode.
+                - 'deltaV_abs_mean': array with length nepisodes+1 containing mean|delta(V)| over all states at each episode.
+                - 'deltaV_abs_median': array with length nepisodes+1 containing median|delta(V)| over all states at each episode.
+                - 'deltaV_rel_abs_mean': array with length nepisodes+1 containing mean|delta_rel(V)| over all states at each episode.
+                - 'deltaV_rel_abs_median': array with length nepisodes+1 containing median|delta_rel(V)| over all states at each episode.
+            - when parameter set_cycle is not None, two pieces of information that can be used to compute the stationary probability of states
+            using renewal theory:
+                - the number of cycles observed.
+                - the time at which the process completed the last cycle.
+                - the expected cycle time, i.e. the average cycle time where a cycle is defined by entering the cycle set after its latest exit.
+                - an array with the visit count of all states.
+        """
+        #--- Parse input parameters
+        # ---- UPDATE FOR CONTINUING TASK
+        if max_time_steps is None or max_time_steps <= 0 or max_time_steps == np.Inf:
+            raise ValueError(f"The maximum number of time steps to run must be given and must be a FINITE positive number: {max_time_steps}")
+        # ---- UPDATE FOR CONTINUING TASK
+
+        # Set the weights to be used to compute the RMSE and MAPE based on the weights_rmse value
+        # Only when weights_rmse = True are the weights NOT set definitely here, as they are set at every episode
+        # as the state count at the end of the episode.
+        # Note that in all other cases, we set weights_rmse = None so that the logic to define the weights at the end
+        # of each episode is much much simpler: we just check if weights_rmse is not None to know if we need to set
+        # the weights as the state counts in the episode
+        if weights_rmse is not None and not isinstance(weights_rmse, bool):
+            # The user provided an array with the weights to use when computing the RMSE and MAPE
+            assert isinstance(weights_rmse, np.ndarray), "weights_rmse is a numpy array ({})".format(type(weights_rmse))
+            assert len(weights_rmse) == self.env.getNumStates(), \
+                "The length of the weights_rmse array ({}) is the same as the number of states in the environment ({})" \
+                    .format(len(weights_rmse), self.env.getNumStates())
+            weights = weights_rmse
+            weights_rmse = None
+        elif weights_rmse is None or weights_rmse == False:
+            # The user does NOT want to use weights when computing the RMSE and MAPE
+            weights = None
+            weights_rmse = None
+        else:
+            # The user wants to use the state counts when computing the RMSE and MAPE
+            # => We set the weights to None so that the RMSE and MAPE computed at the very beginning
+            # (using the initial state value function before the simulation starts) do not use any weights
+            # as at that moment the state count is 0 for all states and using the state counts as weights
+            # would give RMSE = MAPE = 0.0 at the very beginning and we don't want that.
+            assert weights_rmse == True
+            weights = None
+
+        # Check the state to observe
+        if state_observe is not None:
+            if not compute_rmse:
+                warnings.warn("The `state_observe` parameter is not None, but `compute_rmse = False`.\n" \
+                              "A state can only be observed when `compute_rmse = True`. The state to observe will be ignored.")
+                state_observe = None
+            elif not (is_integer(state_observe) and 0 <= state_observe and state_observe < self.env.getNumStates()):
+                warnings.warn("The `state_observe` parameter ({}, type={}) must be an integer number between 0 and {}.\n" \
+                              "The state whose index falls in the middle of the state space will be observed." \
+                              .format(state_observe, type(state_observe), self.env.getNumStates()-1))
+                state_observe = self.env.getNumStates() // 2
+
+        # Setup the information needed when cycles are used to estimate the stationary distribution of states using renewal theory
+        cycle_times = []  # Note that the first cycle time will include a time that may not be a cycle time because the cycle may have not initiated at the sytem's start state. So the first cycle time will be considered a delay time.
+        num_cycles = 0
+        last_cycle_entrance_time = 0       # We set the last cycle time (i.e. the moment when the system enters the cycle set) to 0 (even if it is unknown) so that we can easily compute the FIRST cycle time below as "t - last_cycle_entrance_time"
+        expected_cycle_time = 0.0  # We set the expected cycle time so that we can compute the expected cycle time recursively
+        # Array of state counts in COMPLETE cycles, i.e. the count is increased ONLY when the state is visited in a complete cycle
+        # (not during the first "cycle" which may be degenerate --i.e. incomplete, as the start state for the first cycle may not be in the cycle set)
+        # This can be used to estimate the stationary probability of the states using renewal theory
+        state_counts_in_complete_cycles = np.zeros(self.env.getNumStates(), dtype=int)
+
+        # Plotting setup
+        if plot:
+            # Setup the figures that will be updated at every verbose_period
+            colors = cm.get_cmap(colormap, lut=max_time_steps)
+            # 1D plot (even for 2D environments)
+            fig_V = plt.figure(figsize=(10, 16))
+            # Plot the true state value function (to have it as a reference already
+            plt.plot(self.env.getAllStates(), self.env.getV(), '.-', color="blue")
+            if self.env.getDimension() == 2:
+                # 2D plot
+                fig_V2 = plt.figure()
+            if state_observe is not None:
+                # Plot with the evolution of the V estimate and its error
+                fig_RMSE_state = plt.figure()
+        #--- Parse input parameters
+
+        # Define the policy and the learner
+        policy = self.agent.getPolicy()
+        learner = self.agent.getLearner()
+
+        # Reset the learner (i.e. prepare it for a fresh new learning experience with all learning memory erased and learning rates reset to their initial values)
+        # Note that a special treatment may be granted to the reset of the value functions because we may want NOT to reset them,
+        # for instance when we are learning a policy and we use this simulator to learn the value functions...
+        # In that case, we don't want to start off at 0.0 again but to start off at the estimated values obtained
+        # under the previous policy, which normally is very close to the new policy after one step of policy learning.
+        # (In some situations --e.g. labyrinth where the policy is learned using Actor-Critic or policy gradient learning--
+        # I observed (Nov-2023) that non-optimal policies are learned that minimize the loss function if we reset the
+        # value functions to 0 at every policy learning step, while the problem does NOT happen when the value functions are NOT reset.)
+        learner.reset(reset_episode=True, reset_value_functions=reset_value_functions)
+
+        # Environment seed
+        # We only set the seed when it is not None because when this method is called by the simulate() method,
+        # seed is set to None in order to avoid having each experiment (i.e. each replication) produce the same results
+        # (which would certainly invalidate the replications!). In that case, the environment's seed is set *before*
+        # calling this method run() and we don't want to revert that seed setting, o.w. the experiments repeatability
+        # would be broken.
+        if seed is not None:
+            self.env.setSeed(seed)
+
+        # Store initial values used in the analysis of all the episodes run
+        V_state_observe, RMSE, MAPE, ntimes_rmse_inside_ci95 = self.initialize_run_with_learner_status(nepisodes, learner, compute_rmse, weights, state_observe)
+
+        # Initial state value function
+        V = learner.getV().getValues()
+        Q = learner.getQ().getValues()
+        if verbose:
+            print("Value functions at start of experiment:")
+            print("V = {}".format(V))
+            print("Q = {}".format(Q.reshape(self.env.getNumStates(), self.env.getNumActions())))
+
+        # Average state values and average change of V by episode for plotting purposes
+        V_abs_mean = np.nan*np.ones(nepisodes+1)            # mean|V|
+        V_abs_mean_weighted = np.nan*np.ones(nepisodes+1)   # mean|V| weighted by the state count
+        V_abs_min = np.nan*np.ones(nepisodes+1)             # To evaluate the smallest divisor when computing the relative change in V
+        deltaV_abs_mean = np.nan*np.ones(nepisodes+1)
+        deltaV_max_signed = np.nan*np.ones(nepisodes+1)     # Maximum change with sign! To evaluate if the maximum change is oscillating around 0 suggesting convergence
+        deltaV_rel_abs_mean = np.nan*np.ones(nepisodes+1)
+        deltaV_rel_abs_mean_weighted = np.nan*np.ones(nepisodes+1)
+        deltaV_rel_max_signed = np.nan*np.ones(nepisodes+1) # Maximum relative change with sign! To evaluate if the maximum change is oscillating around 0 suggesting convergence
+        deltaV_rel_abs_max = np.nan*np.ones(nepisodes+1)    # To know the largest relative change observed in an episode
+        deltaV_rel_abs_max_weighted = np.nan*np.ones(nepisodes+1)
+        V_abs_median = np.nan*np.ones(nepisodes+1)
+        deltaV_abs_median = np.nan*np.ones(nepisodes+1)
+        deltaV_rel_abs_median = np.nan*np.ones(nepisodes+1)
+        prop_states_deltaV_relevant = np.nan*np.ones(nepisodes+1)     # Proportion of states for which the change in V is relevant w.r.t. previous value (e.g. > 1%)
+
+        # Initialize a few that make sense to initialize
+        V_abs_n = np.zeros(nepisodes+1)
+        V_abs_mean[0] = np.mean(np.abs(V))
+        V_abs_median[0] = np.median(np.abs(V))
+        V_abs_n[0] = 0
+
+        # Iterate on the episodes to run
+        nepisodes_max_steps_reached = 0
+        max_time_steps_reached = False  # Flags whether the TOTAL number of steps reaches the maximum number of steps allowed over all episodes (so that we can break the FOR loop on episodes if that happens)
+        # Note: The terminal state at which the previous episode endes is used ONLY in the average reward learning criterion
+        # because we need to update the value of the terminal state every time it is visited,
+        # as the average reward criterion implies a continuous learning task (as opposed to an episodic learning task)
+        # and in continuous learning tasks "terminal" states (i.e. states that are terminal in the original environment
+        # whose value functions are learned with an episodic learning task) do NOT necessarily have value 0,
+        # their value needs to be estimated as well.
+        terminal_state_previous_episode = None
+        t = -1            # This time index is used when a cycle set has been given
+                          # so that we can estimate the stationary probability of states using renewal theory,
+                          # as in that case (of a given cycle set), we assume that learning occurs under the average reward criterion
+                          # (o.w., if we didn't use the average reward criterion to learn --but instead the discounted reward criterion,
+                          # cycles would not be well defined, as cycles assume a continuing task which is not suitable for the discounted reward criterion
+                          # --only episodic tasks are suitable for the discounted reward criterion).
+        episode = -1
+        done = False
+        while not done:
+            episode += 1
+            # Reset the environment
+            # (this reset is typically carried out by the gym module, e.g. by the toy_text.discrete.DiscreteEnv environment's reset() method
+            # where the initial state is chosen based on the isd attribute of the object, i.e. of the Initial State Distribution defining the initial state,
+            # which is assumed to have been defined appropriately in order to have the start state the user wishes to use)
+            self.env.reset()
+            # Optional start state JUST for the very first episode
+            # (In case we want to start at a specific state and then perform the subsequent resets as per the environment initial state distribution)
+            if start_state_first_episode is not None and episode == 0:
+                self.env.setState(start_state_first_episode)
+            if show_messages(verbose, verbose_period, episode) or episode == nepisodes - 1:  # Note that we ALWAYS show the message at the LAST episode
+                print("@{}".format(get_current_datetime_as_string()))
+                print("Episode {} of {} running...".format(episode+1, nepisodes), end=" ")
+                print("(agent starts at state: {}".format(self.env.getState()), end=" ")
+            if self.debug:
+                print("\n[DEBUG] Episode {} of {}:".format(episode+1, nepisodes))
+                print("\t[DEBUG] Starts at state {}".format(self.env.getState()))
+                print("\t[DEBUG] State value function at start of episode:\n\t{}".format(learner.getV().getValues()))
+
+            # Time step within the current episode (the first time step is t_episode = 0
+            t_episode = -1
+            done_episode = False
+            stop = False
+            while not stop:
+                t += 1
+                t_episode += 1
+
+                # Current state and action on that state leading to the next state
+                state = self.env.getState()
+                V_state_prev = learner.getV().getValue(state)  # Store the current V(s) value as PREV for informational plotting purposes
+
+                # ---- UPDATE FOR CONTINUING TASK
+                if done_episode:
+                    # The episode ended at the previous step
+                    # => Reset the episode-related information (needed most importantly for a correct calculation of the average reward)
+                    # => Reset the environment to a start state because the process honours a CONTINUING learning task (of the value functions)
+
+                    t_episode = -1      # Reset the episode counter. Note that we reset it to -1 and NOT 0 because the episode is considered to start when `state` is a START state and here state is a terminal state, whereas *`next_state`* is the start state. So t_episode = 0 should be set at the next iteration.
+                    # Reset the learner as a new episode will start
+                    # It is important to reset all the episode-related information, most importantly the history of rewards observed in the episode,
+                    # which is used to compute the average reward. If this reset is not done, most likely the average reward will be WAY underestimated
+                    # because the update of the average reward function ((normally) Learner._update_average_reward()) will think that the number of rewards
+                    # observed in the episode when updating the within-episode average reward is WAY larger than it really was.
+                    learner.reset(reset_episode=False, reset_value_functions=False)
+
+                    # Perform the action of going to an environment's start state
+                    action = 0
+                    next_state = self.env.reset()
+                    reward = self.env.getReward(next_state)
+                    done_episode = False
+                    # TEMPORARY: (2024/02/13) Two temporary settings are done here, until the proper implementation of a CONTINUING learning task is done, as follows:
+                    # 1) Non-update of trajectory: the trajectory should NOT be updated when learning from the transition "terminal state" -> "start state" because we do NOT want
+                    # to have this transition contribute to the estimation of the average reward (i.e. we do not want to have the reward observed when going from a terminal state
+                    # to a start state to be present in the list of episode rewards stored in self._rewards) because the Learner.update_average_reward() method that performs
+                    # this calculation assumes right now that the average reward estimated by the learner is the EPISODIC average reward, and thus adjusts for this when estimating
+                    # the CONTINUING average reward (by multiplying the average reward observed in the episode by T / (T+1), which assumes that the reward received when going
+                    # from a terminal state to a start state is r=0 --as is usually the case, although it does not really have to be the case... to be fixed in the near future).
+                    # IN THE NEAR FUTURE, this restriction of not updating the trajectory will be removed as we intend to adapt the Learner.update_average_reward() method
+                    # in order to:
+                    # - estimate the EPISODIC average reward when the learning task is EPISODIC.
+                    # - estimate the CONTINUING average reward when the learning task is CONTINUING.
+                    # This will also eliminate the assumption mentioned above that is currently done in Learner.update_average_reward() that the reward received when going from
+                    # a terminal state to a start state is 0.
+                    # 2) Non-update of state counts: the count of the terminal state should not be increased by 1 now because it was ALREADY increased at the end of the "episode"
+                    # when learning at the previous iteration, because the count of the final episode state is increased when done_episode = True in the call to learner.learn().
+                    info = {'update_trajectory': False,
+                            'update_counts': False}
+                # ---- UPDATE FOR CONTINUING TASK
+                else:
+                    action = policy.choose_action(state)
+                    next_state, reward, done_episode, info = self.env.step(action)
+
+                # Check early end of episode when max_time_steps_per_episode is given
+                # in which case we set done_episode=True.
+                # This is important because a set of final operations are done_episode when the episode ends,
+                # such as storing the learning rates alpha used in the episode
+                # (see the learner object for more details, in particular de learn() method called below
+                # that learns the state value function V)
+                if max_time_steps_per_episode is not None and t_episode >= max_time_steps_per_episode - 1:     # `-1` because t_episode in the first loop (i.e. the first step) is 0 and max_time_steps_per_episode counts the number of steps
+                    nepisodes_max_steps_reached += 1
+                    done_episode = True
+                    stop = True
+                    if self.debug:
+                        print("[DEBUG] (MAX TIME STEPS PER EPISODE = {} REACHED at episode{}!)".format(max_time_steps_per_episode, episode+1))
+
+                # Check end of simulation
+                if t >= max_time_steps - 1:     # `-1` because t_episode starts at 0 and max_time_steps counts the number of steps
+                    max_time_steps_reached = True
+                    done_episode = True
+                    stop = True
+                    if self.debug:
+                        print("[run_single_continuing_task, DEBUG] (TOTAL MAX TIME STEPS = {} REACHED at episode {}!)".format(max_time_steps, episode+1))
+
+                if self.debug:
+                    # We place this message BEFORE calling learner.learn() below because we want to show the state value BEFORE and after updating it (by learner.learn())
+                    print("t: {}, t in episode: {}, s={}, a={} -> ns={}, r={}: state_count={:.0f}, alpha={:.3f}, V({})={:.4f}, Q({},{})={:.4f} -> V({})=" \
+                          .format(t, t_episode, state, action, next_state, reward, learner.getStateCounts()[state], learner.getAlphaForState(state),
+                                  state, learner.V.getValue(state),
+                                  state, action, learner.Q.getValue(state, action),
+                                  state), end="")
+
+                # Learn: i.e. update the value functions (stored in the learner) for the *currently visited state and action* with the new observation
+                learner.learn(t_episode, state, action, next_state, reward, done_episode, info)
+                if state in self.env.getTerminalStates():
+                    # We need to copy the Q-values of the terminal state to the other actions because the action chosen to go to the start state is always the same (action 0)
+                    action_anchor = 0
+                    for _action in range(self.env.getNumActions()):
+                        learner.getQ()._setWeight(state, _action, learner.getQ().getValue(state, action_anchor))
+
+                if self.debug:
+                    print("{:.4f}, Q=({},{})={:.4f}".format(learner.V.getValue(state), state, action, learner.Q.getValue(state, action)))
+                if self.debug and done_episode:
+                    print("--> [DEBUG] Done [{} iterations of {} per episode of {} total] at state {} with reward {}" \
+                          .format(t_episode+1, max_time_steps_per_episode, max_time_steps, self.env.getState(), reward))
+
+                # Observation state
+                if state_observe is not None:
+                    # Store the value function of the state just estimated
+                    V_state_observe += [learner.getV().getValue(state_observe)]
+
+                # Check if the system has entered the set of states defining a cycle
+                cycle_times, state_counts_in_complete_cycles, last_cycle_entrance_time, expected_cycle_time, num_cycles = \
+                    self._check_cycle_occurrence_and_update_cycle_variables(set_cycle, t, state, next_state,
+                                                                            cycle_times, state_counts_in_complete_cycles, last_cycle_entrance_time, expected_cycle_time, num_cycles)
+
+                # ---- UPDATE FOR CONTINUING TASK
+                # Plotting step moved INSIDE the episode because there is only 1 episode!
+                if plot and show_messages(True, verbose_period, t):
+                    if self.env.getDimension() == 2:
+                        # Plot the state counts in a separate image
+                        fig_C = plt.figure()
+                        plt.figure(fig_C.number)
+
+                        state_counts_min = np.min(learner.getStateCounts())
+                        state_counts_mean = np.mean(learner.getStateCounts())
+                        state_counts_max = np.max(learner.getStateCounts())
+
+                        shape = self.env.getShape()
+                        arr_state_counts = learner.getStateCounts().reshape(shape)
+                        colors_count = cm.get_cmap("Blues")
+                        colornorm = plt.Normalize(vmin=0, vmax=np.max(arr_state_counts))
+                        plt.imshow(arr_state_counts, cmap=colors_count, norm=colornorm)
+                        # Font size factor
+                        fontsize = 14
+                        factor_fs = np.min((5 / shape[0], 5 / shape[1]))
+                        for x in range(shape[0]):
+                            for y in range(shape[1]):
+                                # Recall the x axis corresponds to the columns of the matrix shown in the image
+                                # and the y axis corresponds to the rows
+                                plt.text(y, x, "{:.0f}".format(arr_state_counts[x, y]),
+                                         fontsize=fontsize * factor_fs, horizontalalignment='center', verticalalignment='center')
+
+                        plt.title("State counts by state\n# visits: (min, mean, max) = ({:.0f}, {:.1f}, {:.0f})" \
+                                  .format(state_counts_min, state_counts_mean, state_counts_max))
+                    else:
+                        # Add the state counts to the plot of the state value function
+                        # plt.colorbar(cm.ScalarMappable(cmap=colormap))    # Does not work
+                        plt.figure(fig_V.number)
+                        plt.plot(self.env.getAllStates(), learner.getV().getValues(), linewidth=0.5, color=colors(t / max_time_steps))
+                        if False:
+                            ax = plt.gca()
+                            ax2 = ax.twinx()  # Create a secondary axis sharing the same x axis
+                            ax2.bar(self.env.getAllStates(), learner.getStateCounts(), color="blue", alpha=0.3)
+                            plt.sca(ax)  # Go back to the primary axis
+                        plt.title(f"V(s) evolution (blueish: initial, reddish: final)"
+                                  f"\nSystem's time t = {t} of max {max_time_steps}, from state = {state} --> next state = {next_state} (V(s) = {np.round(learner.getV().getValue(next_state), 3)})"
+                                  f"\nV(state={state}) = {np.round(V_state_prev, 3)} --> V(state={state}) = {np.round(learner.getV().getValue(state), 3)} (delta(V) = {np.round(learner.getV().getValue(state) - V_state_prev, 3)}, {np.round((learner.getV().getValue(state) - V_state_prev) / max(1, V_state_prev) * 100, 1)}%)"
+                                  f"\nCount[s] = {learner.getStateCounts()}, alpha[s] = {learner.getAlphasByState()}")
+                        plt.pause(pause)
+                        plt.draw()
+                # ---- UPDATE FOR CONTINUING TASK
+
+
+
+            #------- EPISODE FINISHED --------#
+            if show_messages(verbose, verbose_period, episode):
+                print(", agent ENDS at state: {} at discrete time t = {})".format(self.env.getState(), t_episode), end=" ")
+                print("")
+
+            # Change of V w.r.t. previous episode (to monitor convergence)
+            deltaV = (learner.getV().getValues() - V)
+            deltaV_rel = np.array([0.0  if dV == 0
+                                        else dV
+                                        for dV in deltaV]) / np.array([abs(v) if v != 0 else max(1, V_abs_mean[min(episode, nepisodes-1)]) for v in V])
+                ## Note that the denominator when computing deltaV_rel is mean|V| when V(s) = 0
+                ## This prevents division by 0 and still gives a sensible relative error value.
+                ## Note that V_abs_mean[episode] contains mean|V| for the PREVIOUS episode since
+                ## V_abs_mean is an array of length nepisodes+1 where the first value is the average
+                ## of the initial guess for the value function.
+
+            # Update historical information
+            arr_state_counts = learner.getStateCounts()
+            states_visited_so_far = [s for s in range(self.env.getNumStates()) if arr_state_counts[s] > 0]
+            states_visited_with_positive_deltaV_rel_abs = [s for s in states_visited_so_far if np.abs(deltaV_rel[s]) > 0]
+                ## The above is used to find the minimum |V| value that plays a role in the computation of deltaV_rel
+                ## so that we can evaluate how big this relative change could be, just because of a very small |V| value.
+            max_signed_deltaV = find_signed_max_value(deltaV[states_visited_so_far])
+            max_signed_deltaV_rel = find_signed_max_value(deltaV_rel[states_visited_so_far])
+            if verbose_convergence:
+                # Check the min(|V|) because it is often 0.0 even when the count for the state > 0
+                # This minimum = 0.0 should come from the terminal states which have value 0.
+                #if episode == 1:
+                #    print(np.c_[V, arr_state_counts])
+                #if np.min(np.abs(V[states_visited_so_far])) > 0.0:
+                #    print(np.c_[V, arr_state_counts])
+                #    import sys
+                #    sys.exit()
+                if isinstance(self.env, MountainCarDiscrete):
+                    # Get the 2D state from the 1D state (for better understanding of where the agent started exploring the environment in the episode)
+                    start_state = self.env.get_state_from_index(learner.states[0])
+                else:
+                    start_state = learner.states[0]
+                print("*** Episode {} (start = {}, #steps = {} of MAX={}), Convergence:".format(episode + 1, start_state, t_episode + 1, max_time_steps_per_episode), end=" ")
+                try:
+                    print("Convergence: min(|V|) with non-zero delta = {:.3g}, mean(V) PREV = {:.3g}, mean(V) NOW = {:.3g}" \
+                      .format(np.min(np.abs(V[states_visited_with_positive_deltaV_rel_abs])), np.mean(V[states_visited_so_far]), np.mean(learner.getV().getValues()[states_visited_so_far])) + \
+                                       ", mean(delta) = {:.3g}, mean(|delta_rel|) = {:.1f}%, max(|delta_rel|) = {:.1f}% +/-max(delta) = {:.3g} +/-max(delta_rel) = {:.1f}% (n={} of {})" \
+                      .format(np.mean(deltaV[states_visited_so_far]), np.mean(np.abs(deltaV_rel[states_visited_so_far]))*100,
+                              np.max(np.abs(deltaV_rel[states_visited_so_far]))*100, max_signed_deltaV, max_signed_deltaV_rel*100,
+                              len(states_visited_so_far), self.env.getNumStates()) + \
+                                       ", mean(alpha) @end = {:.3g}".format(np.mean([learner.getAlphaForState(s) for s in states_visited_so_far])) # Average alpha at the end of episode over ALL states visited so far
+                      )
+                except:
+                    print("WARNING - states_visited_with_positive_deltaV_rel_abs is empty.\n")
+                    #print("Count of states visited so far: {}, {}, {}" \
+                    #      .format(arr_state_counts, states_visited_so_far, states_visited_with_positive_deltaV_rel_abs))
+                    pass
+
+            V = learner.getV().getValues()
+            V_abs_mean[min(episode+1, nepisodes)] = np.mean(np.abs(V[states_visited_so_far]))
+            V_abs_mean_weighted[min(episode+1, nepisodes)] = np.sum(arr_state_counts * np.abs(V)) / np.sum(arr_state_counts)
+            if len(states_visited_with_positive_deltaV_rel_abs) > 0:
+                V_abs_min[min(episode+1, nepisodes)] = np.min(np.abs(V[states_visited_with_positive_deltaV_rel_abs]))
+            deltaV_abs_mean[min(episode+1, nepisodes)] = np.mean(np.abs(deltaV[states_visited_so_far]))
+            deltaV_max_signed[min(episode+1, nepisodes)] = max_signed_deltaV
+            deltaV_rel_abs_mean[min(episode+1, nepisodes)] = np.mean(np.abs(deltaV_rel[states_visited_so_far]))
+            deltaV_rel_abs_mean_weighted[min(episode+1, nepisodes)] = \
+                np.sum( arr_state_counts[states_visited_so_far] * np.abs(deltaV_rel[states_visited_so_far]) ) / np.sum(arr_state_counts[states_visited_so_far])
+            deltaV_rel_abs_max[min(episode+1, nepisodes)] = np.max(np.abs(deltaV_rel[states_visited_so_far]))
+            deltaV_rel_abs_max_weighted[min(episode+1, nepisodes)] = \
+                np.max( arr_state_counts[states_visited_so_far] * np.abs(deltaV_rel[states_visited_so_far]) / np.sum(arr_state_counts[states_visited_so_far]) )
+            deltaV_rel_max_signed[min(episode+1, nepisodes)] = max_signed_deltaV_rel
+            V_abs_median[min(episode+1, nepisodes)] = np.median(np.abs(V[states_visited_so_far]))
+            deltaV_abs_median[min(episode+1, nepisodes)] = np.median(np.abs(deltaV[states_visited_so_far]))
+            deltaV_rel_abs_median[min(episode+1, nepisodes)] = np.median(np.abs(deltaV_rel[states_visited_so_far]))
+            V_abs_n[min(episode+1, nepisodes)] = len(states_visited_so_far)
+            prop_states_deltaV_relevant[min(episode+1, nepisodes)] = np.sum( np.abs(deltaV_rel) > 0.01 ) / self.env.getNumStates()
+
+            if compute_rmse:
+                if self.env.getV() is not None:
+                    if weights_rmse is not None:
+                        weights = learner.getStateCounts()
+                    RMSE[min(episode+1, nepisodes)] = rmse(self.env.getV(), learner.getV().getValues(), weights=weights)
+                    MAPE[min(episode+1, nepisodes)] = mape(self.env.getV(), learner.getV().getValues(), weights=weights)
+
+            if plot and show_messages(True, verbose_period, episode):
+                # Plot the estimated value function at the end of the simulation
+                # in both 1D layout and 2D layout, if the environment is 2D.
+                plt.figure(fig_V.number)
+                plt.plot(self.env.getAllStates(), learner.getV().getValues(), linewidth=0.5, color=colors(t / max_time_steps))
+                plt.pause(pause)
+                plt.draw()
+                #fig_V.canvas.draw()    # This should be equivalent to plt.draw()
+                if self.env.getDimension() == 2:
+                    # Update the 2D plots
+                    plt.figure(fig_V2.number)
+                    (ax_V, ax_C) = fig_V2.subplots(1, 2)
+                    shape = self.env.getShape()
+                    terminal_rewards = self.env.getTerminalRewards()
+
+                    state_values = np.asarray(learner.getV().getValues()).reshape(shape)
+                    if len(terminal_rewards) > 0:
+                        colornorm = plt.Normalize(vmin=np.min(list(terminal_rewards)), vmax=np.max(list(terminal_rewards)))
+                    else:
+                        colornorm = None
+                    ax_V.imshow(state_values, cmap=colors) #, norm=colornorm) # (2023/11/23) If we use norm=colornorm we might see all blue colors... even if the V values vary from 0 to 1... why??
+
+                    arr_state_counts = learner.getStateCounts().reshape(shape)
+                    colors_count = cm.get_cmap("Blues")
+                    colornorm = plt.Normalize(vmin=0, vmax=np.max(arr_state_counts))
+                    ax_C.imshow(arr_state_counts, cmap=colors_count, norm=colornorm)
+
+                    fig_V2.suptitle("State values (left) and state counts (right)\nEpisode {} of {}".format(episode, nepisodes))
+                    plt.pause(pause)
+                    plt.draw()
+
+                if state_observe is not None:
+                    plt.figure(fig_RMSE_state.number)
+
+                    # Compute quantities to plot
+                    RMSE_state_observe = rmse(np.array(self.env.getV()[state_observe]), np.array(learner.getV().getValue(state_observe)), weights=weights)
+                    se95 = 2*np.sqrt( 0.5*(1-0.5) / (episode+1))
+                    # Only count falling inside the CI starting at episode 100 so that
+                    # the normal approximation of the SE is more correct.
+                    if episode + 1 >= 100:
+                        ntimes_rmse_inside_ci95 += (RMSE_state_observe <= se95)
+
+                    # Plot of the estimated value of the state at the end of the episode
+                    # NOTE: the plot is just ONE point, the state value at the end of the episode;
+                    # at each new episode, a new point with this information will be added to the plot.
+                    plt.plot(episode+1, learner.getV().getValue(state_observe), 'r*-', markersize=7)
+                    # Plot the average of the state value function over the values that it took along the episode while it was being learned.
+                    #plt.plot(episode, np.mean(np.array(V_state_observe)), 'r.-')
+                    # Plot of the estimation error and the decay of the "confidence bands" for the true value function
+                    plt.plot(episode+1, RMSE_state_observe, 'k.-', markersize=7)
+                    plt.plot(episode+1,  se95, color="gray", marker=".", markersize=5)
+                    plt.plot(episode+1, -se95, color="gray", marker=".", markersize=5)
+                    # Plot of learning rate
+                    #plt.plot(episode+1, learner.getAlphaForState(state_observe), 'g.-')
+
+                    # Finalize plot
+                    ax = plt.gca()
+                    ax.set_ylim((-1, 1))
+                    yticks = np.arange(-10,10)/10
+                    ax.set_yticks(yticks)
+                    ax.axhline(y=self.env.getV()[state_observe], color="red", linewidth=0.5)
+                    ax.axhline(y=0, color="gray")
+                    plt.title("State value (estimated and true) and |error| for state {} - episode {} of {}".format(state_observe, episode+1, nepisodes))
+                    legend = ['Estimated value', '|error|', 'true value', '2*SE = 2*sqrt(0.5*(1-0.5)/episode)']
+                    plt.legend(legend)
+                    if episode + 1 == nepisodes:
+                        # Show the true value function coverage as x-axis label
+                        ax.set_xlabel("% Episodes error is inside 95% Confidence Interval (+/- 2*SE) (for episode>=100): {:.1f}%" \
+                                      .format(ntimes_rmse_inside_ci95/(episode+1 - 100 + 1)*100))
+                    plt.legend(legend)
+                    plt.draw()
+
+            if plot and isinstance(learner, LeaTDLambdaAdaptive) and episode == nepisodes - 1:
+                learner.plot_info(episode, nepisodes)
+
+            # Use the following IF when we want to stop the simulation EITHER when the maximum time steps (over all episodes) is reached
+            # OR
+            # when the number of episodes has been run.
+            if max_time_steps_reached or episode == nepisodes - 1:
+                # The maximum number of steps over ALL episodes has been reached, so we need to stop the simulation
+                done = True
+
+        if verbose:
+            V = learner.getV().getValues()
+            Q = learner.getQ().getValues()
+            print(f"Estimated value functions at END of experiment (last episode run = {episode+1} of {nepisodes}):")
+            print("V = {}".format(V))
+            print("Q = {}".format(Q.reshape(self.env.getNumStates(), self.env.getNumActions())))
+
+        if verbose:
+            print("Percentage of episodes reaching max step = {:.1f}%".format(nepisodes_max_steps_reached / nepisodes*100))
+            print("Last episode run = {} of {}".format(episode+1, nepisodes))
+
+        return  learner.getV().getValues(), learner.getQ().getValues(), learner.getStateCounts(), RMSE, MAPE, \
+                {   'nsteps': t + 1,   # Number of discrete steps taken during the whole simulation (+1 because t = 0 indexes the first step)
                     # Value of alpha for each state at the end of the LAST episode run
                     'alphas_at_last_episode': learner._alphas,
                     # All what follows is information by episode (I don't explicitly mention it in the key name because it may make the key name too long...)

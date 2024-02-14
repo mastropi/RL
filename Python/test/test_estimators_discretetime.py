@@ -767,7 +767,7 @@ class Test_EstDifferentialValueV_EnvGridworlds(unittest.TestCase, test_utils.Epi
         observed = state_values # This should coincide with agent_td.getLearner().getV().getValues()
         print("\nObserved V(s): " + test_utils.array2str(observed))
         print("State count: " + test_utils.array2str(state_counts))
-        print(f"Number of time steps in simulation: {learning_info['t']}")
+        print(f"Number of time steps in simulation: {learning_info['nsteps']}")
         print(f"Observed RMSE: {RMSE_by_episode[-1]}")
         if plot:
             self.plot_results(params, nepisodes,
