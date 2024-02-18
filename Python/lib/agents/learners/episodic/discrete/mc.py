@@ -47,6 +47,18 @@ class LeaMCLambda(Learner):
     Arguments:
     env: EnvironmentDiscrete
         The discrete-(state, action) environment where the learning takes place.
+
+    criterion: (opt) LearningCriterion
+        The learning criterion in terms of how observed rewards are propagated to the return G(t).
+        (e.g. average reward criterion or discounted reward criterion).
+        default: LearningCriterion.DISCOUNTED
+
+    task: (opt) LearningTask
+        The type of learning task, whether it is based on episodes or it is based on a continuing Markov process that never ends
+        (or that it ends after a pre-specified number of observed steps).
+        IMPORTANT: It is not yet clear whether the class is already prepared to deal with the CONTINUING learning task, as it was originally
+        created to deal with the DISCOUNTED learning task.
+        default: LearningTask.EPISODIC
     """
 
     def __init__(self, env, criterion=LearningCriterion.DISCOUNTED, task=LearningTask.EPISODIC, alpha=0.1, gamma=1.0, lmbda=0.8,
@@ -131,7 +143,10 @@ class LeaMCLambda(Learner):
     # For more information, see the entry on 13-Apr-2022 in my Tasks-Projects.xlsx file.
     def deprecated_learn_slow(self, t, state, action, next_state, reward, done, info):
         # This learner updates the estimate of the value function V ONLY at the end of the episode
-        self._update_trajectory(t, state, action, reward)
+        if info.get('update_trajectory', True):
+            self._update_trajectory(t, state, action, reward)
+        if info.get('update_counts', True):
+            self._update_state_counts(t, state)
         if done:
             # Terminal time
             T = t + 1
@@ -202,6 +217,8 @@ class LeaMCLambda(Learner):
             # been recorded at the previous step, when the episode ended (by the `done` block below)
             # --see also discrete.Simulator._run_single() and search for 'LearningTask.CONTINUING')
             self._update_trajectory(t, state, action, reward)
+        if info.get('update_counts', True):
+            self._update_state_counts(t, state)
 
         if done:
             # This means t+1 is the terminal time T
@@ -212,12 +229,14 @@ class LeaMCLambda(Learner):
             self.learn_mc_at_episode_end(T, next_state)
 
             # Store the trajectory and update the state count of the end state
-            # IMPORTANT: we need to store the trajectory AFTER learning because
-            # this method also computes and stores the average learning rate alpha (over all states) by episode,
-            # and the alphas (at each state) used during the episode are computed, in the MC learning approach,
-            # by the learning method called above(), while traversing all the states visited in the trajectory.
+            # IMPORTANT: we need to store the trajectory AFTER the learning step performed above
+            # because the method called next computes and stores the average learning rate by episode
+            # (i.e. the average of the alpha's used at the different learning step of the value functions carried out by the learn method above,
+            # i.e. the alpha used at every call to self._updateV() and self._updateQ() performed --typically at the first visit of the state only, not at every visit--
+            # while traversing the states visited in the trajectory),
             self.store_trajectory_at_episode_end(T, next_state, debug=self.debug)
-            self._update_state_counts(T, next_state)
+            if info.get('update_counts', True):
+                self._update_state_counts(T, next_state)
 
     def learn_mc_at_episode_end(self, T, state_end):
         """
@@ -233,7 +252,7 @@ class LeaMCLambda(Learner):
             Length of the episode, i.e. the time step at which the episode ends.
 
         state_end: int
-            Trajectory's end state, whose value is retrieved as an initial value for the return G.
+            Index of the state at which the episode ends, whose value is retrieved as an initial value for the return G.
             This is needed for the cases where the episode ends NOT because the agent reached a terminal
             state but because the maximum simulation time has been reached (e.g. in continuing learning tasks
             or in episodic tasks where the agent takes a long time to reach a terminal state --because of a bad policy).
@@ -270,6 +289,7 @@ class LeaMCLambda(Learner):
         # need to have a data structure that stores the already visited states in the episode;
         # we trade data structure creation and maintenance with easier algorithmic implementation of
         # first visit that does NOT require a special data structure storage.
+        assert len(self._states) == len(self._actions) and len(self._rewards) == len(self._states) + 1
         for tt in np.arange(T, 0, -1) - 1:     # This is T-1, T-2, ..., 0
             state = self._states[tt]
             action = self._actions[tt]
@@ -322,6 +342,8 @@ class LeaMCLambda(Learner):
             # been recorded at the previous step, when the episode ended (by the `done` block below)
             # --see also discrete.Simulator._run_single() and search for 'LearningTask.CONTINUING')
             self._update_trajectory(t, state, action, reward)
+        if info.get('update_counts', True):
+            self._update_state_counts(t, state)
         self._updateG(t, state, next_state, reward, done)
 
         if done:
@@ -333,12 +355,14 @@ class LeaMCLambda(Learner):
             self.learn_lambda_return_at_episode_end(T, next_state)
 
             # Store the trajectory and update the state count of the end state
-            # IMPORTANT: we need to store the trajectory AFTER learning because
-            # this method also computes and stores the average learning rate alpha (over all states) by episode,
-            # and the alphas (at each state) used during the episode are computed, in the MC learning approach,
-            # by the learning method called above(), while traversing all the states visited in the trajectory.
+            # IMPORTANT: we need to store the trajectory AFTER the learning step performed above
+            # because the method called next computes and stores the average learning rate by episode
+            # (i.e. the average of the alpha's used at the different learning step of the value functions carried out by the learn method above,
+            # i.e. the alpha used at every call to self._updateV() and self._updateQ() performed --typically at the first visit of the state only, not at every visit--
+            # while traversing the states visited in the trajectory),
             self.store_trajectory_at_episode_end(T, next_state, debug=self.debug)
-            self._update_state_counts(T, next_state)
+            if info.get('update_counts', True):
+                self._update_state_counts(T, next_state)
 
     def _updateG(self, t, state, next_state, reward, done):
         times_reversed = np.arange(t, -1, -1)  # This is t, t-1, ..., 0
@@ -439,7 +463,7 @@ class LeaMCLambda(Learner):
             Length of the episode, i.e. the time step at which the episode ends.
 
         state_end: int
-            Trajectory's end state.
+            Index of the state at which the episode ends.
         """
         # Update the average reward (over all episodes, if required, typically when learning under the AVERAGE reward criterion)
         self.update_average_reward(T, state_end)
@@ -479,12 +503,12 @@ class LeaMCLambda(Learner):
     def _updateV(self, state, delta):
         "Updates the state value function V(s) for the given state using the given delta on the gradient computed assuming a linear approximation function"
         gradient_V = self.V.X[:, state] # row vector
-        self.V.setWeights( self.V.getWeights() + self._alphas * delta * gradient_V )    # The alpha value used in learning each state (given in self._alphas) depends on the state being learned
+        self.V.setWeights( self.V.getWeights() + self.getAlphasByState() * delta * gradient_V )    # The alpha value used in learning each state (given in self.getAlphasByState()) depends on the state being learned
 
     def _updateQ(self, state, action, delta):
         "Updates the action value function Q(s,a) for the given state and action using the given delta on the gradient computed assuming a linear approximation function"
         gradient_Q = self.Q.X[:, self.Q.getLinearIndex(state, action)]  # row vector
-        _alphas = np.repeat(self._alphas, self.env.getNumActions()) # We use the same alpha on all the actions associated to each state, but the alpha depends on the state
+        _alphas = np.repeat(self.getAlphasByState(), self.env.getNumActions()) # We use the same alpha on all the actions associated to each state, but the alpha depends on the state
         self.Q.setWeights( self.Q.getWeights() + _alphas * delta * gradient_Q )
     #------------------- Auxiliary function: value function udpate -------------------------------#
 
@@ -517,7 +541,10 @@ class LeaMCLambdaAdaptive(LeaMCLambda):
 
     def learn(self, t, state, action, next_state, reward, done, info):
         "Learn the prediction problem: estimate the state value function"
-        self._update_trajectory(t, state, action, reward)
+        if info.get('update_trajectory', True):
+            self._update_trajectory(t, state, action, reward)
+        if info.get('update_counts', True):
+            self._update_state_counts(t, state)
         self._updateG(t, state, next_state, reward, done)
 
         if done:
@@ -527,7 +554,8 @@ class LeaMCLambdaAdaptive(LeaMCLambda):
 
             # Store the trajectory
             self.store_trajectory_at_episode_end(T, next_state, debug=self.debug)
-            self._update_state_counts(T, next_state)
+            if info.get('update_counts', True):
+                self._update_state_counts(T, next_state)
             
             # Compute the gamma-discounted _rewards for each state visited in the episode
             state_rewards_prev = self.state_rewards.copy()
@@ -551,8 +579,13 @@ class LeaMCLambdaAdaptive(LeaMCLambda):
             print(LambdaAdapt)
             #input("Press Enter to continue...")
 
-            # TODO: (2023/10/21) Fix this call, because currently this learn() method is not found
-            self.learn(T)
+            # done-2024/01/29: (2023/10/21) Fix this call, because currently this learn() method is not found
+            # TODO: (2024/01/29) Check if the following piece of code is correct, or whether we should move it BEFORE the call to self.store_trajectory_at_episode_end() done above, as is the case with the non-adaptive MC learner
+            if self.learner_type == LearnerType.LAMBDA_RETURN:
+                self.learn_lambda_return_at_episode_end(T, next_state)
+            else:
+                self.learn_mc_at_episode_end(T, next_state)
+            self.store_learning_rate(self.getAlphasByState())
 
     def _computeStateRewards(self, terminal_state):
         "Computes the gamma discounted reward for each state visited during a trajectory (stored in the self._states attribute)"

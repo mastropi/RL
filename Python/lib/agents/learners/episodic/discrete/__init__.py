@@ -263,9 +263,11 @@ class Learner(GenericLearner):
         # self._states[0], self._actions[0], self._rewards[1], self._states[1], self._actions[1], self._rewards[2], ...
         #
         # Note in addition that it is expected that the length of the list of states and the length of the list of rewards
-        # be EQUAL *only* at the end of the episode as, while the episode is ongoing, the list of states
-        # would have one element less than the list of rewards (because the list of rewards is initialized
-        # as `[0]` here, while the list of states is initialized as `[]` (empty).
+        # be EQUAL *only* at the end of the episode (unless we are learning the value functions in a
+        # CONTINUING learning task setting, even if the learning environment has terminal states --i.e. where naturally
+        # an EPISODIC learning task is called for). In fact, while the episode is ongoing, the list of states
+        # has one element less than the list of rewards, because the list of rewards is initialized as `[0]` here
+        # while the list of states is initialized as `[]` (empty).
         # The particular learner being used is responsible of making sure that the list of states has the
         # same number of elements as the list of rewards ONCE THE EPISODE HAS ENDED, by calling e.g. the
         # store_trajectory_at_episode_end() method defined in this class.
@@ -316,7 +318,6 @@ class Learner(GenericLearner):
         self._states += [state]
         self._actions += [action]
         self._rewards += [reward]
-        self._update_state_counts(t, state)
         self._update_average_reward()
 
     def _update_state_counts(self, t, state):
@@ -324,9 +325,9 @@ class Learner(GenericLearner):
         #print("t: {}, visit to state: {}".format(t, state))
         if np.isnan(self._states_first_visit_time[state]):
             self._state_counts_first_visit_over_all_episodes[state] += 1
-            # print("\tFIRST VISIT!")
-            # print("\tcounts first visit after: {}".format(self._state_counts_first_visit_over_all_episodes[state]))
-            # print("\tall counts fv: {}".format(self._state_counts_first_visit_over_all_episodes))
+            #print("\tFIRST VISIT!")
+            #print("\tcounts first visit after: {}".format(self._state_counts_first_visit_over_all_episodes[state]))
+            #print("\tall counts fv: {}".format(self._state_counts_first_visit_over_all_episodes))
         self._states_first_visit_time[state] = np.nanmin([t, self._states_first_visit_time[state]])
 
         # Keep track of state every-visit counts
@@ -342,7 +343,7 @@ class Learner(GenericLearner):
     def _update_alphas(self, state):
         # with np.printoptions(precision=4):
         #    print("Before updating alpha: episode {}, state {}: state_count={:.0f}, alpha>={}: alpha={}\n{}" \
-        #          .format(self.episode, state, self._state_counts_over_all_episodes[state], self.alpha_min, self._alphas[state], np.array(self._alphas)))
+        #          .format(self.episode, state, self._state_counts_over_all_episodes[state], self.alpha_min, self.getAlphaForState(state), np.array(self._alphas)))
 
         # NOTE that we store the alpha value BEFORE its update, as this is the value that was used to learn prior to
         # updating alpha!
@@ -395,7 +396,7 @@ class Learner(GenericLearner):
             # Note that the update formula is the generalization of the usual update formula with just one new value
             # with the difference that here the update comes from T newly observed rewards (as opposed to 1),
             # i.e. what we need to sum to the current average reward is \sum{t=1}{T} R(t)
-            # (and we note that the average reward over E episodes is defined as: \sum{e=1}{E} \sum{t=1}{T} R_e(t) / \sum{e=1}{E} T_e
+            # (and we note that the average reward over E episodes is defined as: [ \sum{e=1}{E} \sum{t=1}{T} R_e(t) ] / \sum{e=1}{E} T_e
             # where T_e is the length of episode e).
             # Deducing the update formula is a little bit trickier than in the one-new-reward-observation case but it is perfectly doable --I just did it!
             # Therefore the update formula becomes:
@@ -407,16 +408,18 @@ class Learner(GenericLearner):
             # (which is a generic learner, i.e. not only for learners on episodic tasks)
 
             # (2023/12/18) Update the OVERALL average reward (i.e. over ALL episodes) ITERATIVELY, i.e. using the latest observed average reward (in the latest episode)
-            # IMPORTANT: This computation adjusts an episodic average to a continuing average, which has ONE MORE STEP in the trajectory, namely the start state, which is NOT counted in the episodic average
-            # (because the rewards happen when the environment CHANGES from one state to the next, meaning that the first average seen by the episodic learning agent is the reward observed when going from the
-            # start state to the next state (meaning that no reward is counted when going to the start state, because this "going to the start state" NEVER happens in an episodic task,
+            # Note that this happens ONLY when the length of the episode T is > 0 (see multiplier `int(T>0)` below), o.w. there is no episode contributing to the average reward!
+            # IMPORTANT 1: This computation adjusts an episodic average to a continuing average, which has ONE MORE STEP in the trajectory, namely the start state,
+            # which is NOT counted in the episodic average (because the rewards happen when the environment CHANGES from one state to the next,
+            # meaning that the first average seen by the episodic learning agent is the reward observed when going from the start state to the next state
+            # (meaning that no reward is counted when going to the start state, because this "going to the start state" NEVER happens in an episodic task,
             # it only happens in a continuing learning task (whose average reward we are interested here in computing)
             # IMPORTANT 2: This adjustment of the episodic average to the continuing average assumes that going to the start state does NOT give any reward!!
             # (this is usually the case, but it is not really generic)
-            # TODO: (2023/12/18) Fix the above adjustment of the episodic average reward to a continuing average reward to the cases where a non-zero reward is perceived when transitioning to *a* start state
+            # TODO: (2023/12/18) Fix the adjustment performed of the episodic average reward to a continuing average reward to the cases where a non-zero reward is perceived when transitioning to *a* start state (see "IMPORTANT 2" note written above)
             # NOTE that this may NOT be needed if we generalize the learning of value functions to the MC and TD(lambda) learners using the proposed method described in today's entry at Tasks-Projects.xlsx, where we would have only ONE episode on which the episodic average reward is computed.
-            updated_average = self.getAverageReward() + (self._average_reward_in_episode * T / (T+1) - self.getAverageReward()) * (T + 1) \
-                                                        / (np.sum(self.times_at_episode_end) + T + len(self.times_at_episode_end) + 1)
+            updated_average = self.getAverageReward() + int(T>0) * (self._average_reward_in_episode * T / (T+1) - self.getAverageReward()) * (T + 1) \
+                                                                    / (np.sum(self.times_at_episode_end) + T + len(self.times_at_episode_end) + 1)
             # (2023/12/18) The following is a check that the updated average is equal to the regular average computed on all the rewards seen so far over ALL episodes
             # (Note: at some point, the print() below gives an error that something is an int and not a list, but I haven't figured out what the problem is, so I commented out, because this step is not crucial for the functioning of the process)
             #all_rewards_so_far = self.rewards + self._rewards
@@ -436,7 +439,7 @@ class Learner(GenericLearner):
             # which is the method responsible for storing the newly observed rewards at the latest episode in GenericLearner's attribute `self.rewards`.
             #self.setAverageReward(np.mean(np.concatenate(self.rewards)))
 
-    def store_trajectory_at_episode_end(self, T, state_end, debug=False):
+    def store_trajectory_at_episode_end(self, T, state_end, action=np.nan, reward=0.0, debug=False):
         """
         Stores the trajectory (in the super class attributes) observed during the current episode assuming the episode has finished.
         The trajectory is either REPLACED or ADDED to any previously existing trajectory already stored in the attributes of the super class
@@ -488,7 +491,15 @@ class Learner(GenericLearner):
 
         # Add the end state to the trajectory
         self._states += [state_end]
-        self._actions += [np.nan]
+        self._actions += [action]
+        # TODO: (2024/02/08) Uncomment this when we are ready to compute the average reward associated to the learning task, either EPISODIC or CONTINUING: currently the computed average reward by self.update_average_reward() is ALWAYS the CONTINUING average reward, even if the learning task is EPISODIC!
+        # When we do this change, the method self.update_average_reward() will have to be changed by removing the ratio `T / (T+1)` which is now used to adjust the would be episodic average reward to the continuing average reward.
+        # Once we implement the episodic average reward calculation (when the learning task is EPISODIC) we would not need to do any adjustment, because the original formula of the iterative update of the average reward
+        # (described in the comment above the update formula in self.update_average_reward()) will already be the correct formula. And note that this will ALSO solve the problem mentioned in
+        # self.update_average_reward that using the ratio T/(T+1) assumes that the last reward observed in the continuing context (i.e. the reward of going from a terminal state to a start state) is 0
+        # (as that reward is going to be stored in self._rewards precisely by the line that will be uncommented right here!)
+        #if self.task == LearningTask.CONTINUING:
+        #    self._rewards += [reward]
 
         # Assign the new trajectory observed in the current episode
         if self.store_history_over_all_episodes:

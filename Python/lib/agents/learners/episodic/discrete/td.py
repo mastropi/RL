@@ -121,12 +121,15 @@ class LeaTDLambda(Learner):
     def learn(self, t, state, action, next_state, reward, done, info):
         if info.get('update_trajectory', True):
             # We may not want to update the trajectory when learning the value function
-            # (e.g. when using episodes under a continuing learning task context: in that case, the value functions
-            # of the terminal state are normally learned at the start of the next episode (before updating the state)
-            # and thus the state of the environment and action taken should NOT be recorded because they had already
-            # been recorded at the previous step, when the episode ended (by the `done` block below)
-            # --see also discrete.Simulator._run_single() and search for 'LearningTask.CONTINUING')
+            # This is the case when using episodes under a continuing learning task context: in that case, the value functions
+            # of the terminal state are normally learned at the start of the next episode (before updating the environment's state, which is a START state at that point,
+            # and which is passed to this method as the value of next_state)
+            # and thus the state of the environment and action taken should NOT be recorded because they have already
+            # been recorded at the previous step, when the episode ended (a learning materialized here by the `done` block below)
+            # --see also discrete.Simulator._run_single() and search for 'LearningTask.CONTINUING'
             self._update_trajectory(t, state, action, reward)  # This method belongs to the Learner super class defined in learners.episodic.discrete
+        if info.get('update_counts', True):
+            self._update_state_counts(t, state)
 
         # Compute the delta values used for the update of each value function
         # NOTE: We compute the delta separately, and NOT inside the functions that update the value functions,
@@ -153,28 +156,42 @@ class LeaTDLambda(Learner):
             self._update_alphas(state)
 
         if done:
-            # Terminal time (recall that we were at time t and stepped into time t+1 when reaching the terminal state)
-            T = t + 1
+            self.learn_at_episode_end(t+1, next_state)
 
-            # Update the average reward over ALL episodes (needed for the AVERAGE reward criterion used in continuing learning tasks)
-            self.update_average_reward(T, next_state)
+    def learn_at_episode_end(self, T, state_end, update_counts=True):
+        """
+        Performs the changes to the learner that must be done at the end of an episode, such as:
+        - update of the average reward
+        - trajectory storage
+        - update of state count (of the end state)
 
-            if self.debug: #and self.episode > 45: # Use the condition on `episode` in order to plot just the last episodes
-                self._plotZ()
-                self._plotAlphasEffective()
-            self.store_trajectory_at_episode_end(T, next_state, debug=self.debug)
-            if info.get('update_trajectory', True):
-                # We only update the state count of the terminal state (next_state) when we have updated the trajectory above
-                # with information about the `state` visited, because such trajectory update also updates the state count of `state`.
-                # Since here we are dealing with `next_state`, which at this point is the terminal state,
-                # we should only update the trajectory if we are in "trajectory storage" mode
-                # (and therefore in "update state counts" mode).
-                self._update_state_counts(T, next_state)
+        Arguments:
+        T: int
+            Length of the episode, i.e. the time step at which the episode ends.
 
-            # Update alpha for the next iteration for "by episode" updates
-            if self.adjust_alpha_by_episode:
-                for s in range(self.env.getNumStates()):
-                    self._update_alphas(s)
+        state_end: int
+            Index of the state at which the episode ends.
+
+        update_counts: (opt) bool
+            Whether the state visit count for the end state should be updated as well.
+            We might want to set this to False to avoid a too aggressive decrease of the learning rate alpha that in the end prevents learning,
+            especially when a state is visited but no reward innovation is observed, meaning that the learning step is sort of "useless" because
+            the delta(V) value to apply to the new V(s) is 0.
+        """
+        # Update the average reward over ALL episodes (needed for the AVERAGE reward criterion)
+        self.update_average_reward(T, state_end)
+
+        if self.debug: #and self.episode > 45: # Use the condition on `episode` in order to plot just the last episodes
+            self._plotZ()
+            self._plotAlphasEffective()
+        self.store_trajectory_at_episode_end(T, state_end, debug=self.debug)
+        if update_counts:
+            self._update_state_counts(T, state_end)
+
+        # Update alpha for the next iteration for "by episode" updates
+        if self.adjust_alpha_by_episode:
+            for s in range(self.env.getNumStates()):
+                self._update_alphas(s)
 
     def _compute_deltas(self, state, action, next_state, reward, info):
         """
@@ -200,13 +217,18 @@ class LeaTDLambda(Learner):
         # Ref: Sutton, pag. 250
         if self.criterion == LearningCriterion.AVERAGE:
             # Recall that in the LeaTD constructor we have checked that AVERAGE reward criterion => CONTINUING learning task
+            # (the converse however is not necessarily true, as a continuing learning task may still use a discount factor;
+            # if this is the case, no average reward correction is applied to the value functions, as the discount prevents the sum of rewards from diverging;
+            # note however that Sutton on pag. 251/252 defines a "discounted" state value function where still an average reward correction is present in its definition;
+            # however, in that case the discount factor gamma -> 1, and this is exclusively done to make the differential return be well defined for non-ergodic Markov chains)
             if info.get('average_reward') is not None:
                 average_reward_correction = info.get('average_reward')
             else:
-                # The average reward that is used for the correction of the value functions to obtain the differential value functions
-                # should be the average reward observed over ALL episodes.
-                # This information should be stored by the learner because the constructor parameter store_history_over_all_episodes
-                # is set to True when the learning criterion passed to the constructor is the average reward.
+                # Note: The average reward that is used for the correction of the value functions to obtain the differential value functions
+                # should be the average reward observed over ALL episodes because such average reward is associated to a CONTINUING learning task
+                # which sees no episodes... i.e. if the simulation is performed in episodes, it is merely an IMPLEMENTATION detail, NOT a LEARNING characteristic.
+                # This is why here we call the GenericLearner.getAverageReward() method which retrieves the average reward observed over the whole simulation,
+                # regardless of any implementation-related episodes.
                 average_reward_correction = self.getAverageReward()
             delta_V -= average_reward_correction
             delta_Q -= average_reward_correction
@@ -240,10 +262,9 @@ class LeaTDLambda(Learner):
             # to EACH state --which happens differently). However, this seems to give slightly faster convergence
             # than the theoretical alpha strategy just mentioned, at least in the gridworld environment!
             # If we wanted to use the strategy that should be applied in theory, we should simply
-            # replace `self._alphas[state]` with `self._alphas` in the below expression,
-            # as self._alphas is an array containing the alpha value to be used for each state.
-            #self.V.setWeights( self.V.getWeights() + self._alphas[state] * delta * self._z_V )
-            self.V.setWeights( self.V.getWeights() + self._alphas * delta * self._z_V )
+            # replace `self.getAlphaForState(state)` with `self.getAlphasByState()` in the below expression.
+            #self.V.setWeights( self.V.getWeights() + self.getAlphaForState(state) * delta * self._z_V )
+            self.V.setWeights( self.V.getWeights() + self.getAlphasByState() * delta * self._z_V )
 
     def _updateQ(self, delta):
         if delta != 0.0:
@@ -251,7 +272,7 @@ class LeaTDLambda(Learner):
             # Note that this repeat each value as we need it based on how state and actions are stored in the feature matrix used in self.Q,
             # namely grouped by state (e.g. if alphas = [2.5, 4.1, 3.0], the repeat by 2 generates [2.5, 2.5, 4.1, 4.1, 3.0, 3.0]
             # i.e. the same alpha for all actions associated to the same state (which is what we want, i.e. alphas on different actions grouped by state).
-            _alphas = np.repeat(self._alphas, self.env.getNumActions())
+            _alphas = np.repeat(self.getAlphasByState(), self.env.getNumActions())
             self.Q.setWeights( self.Q.getWeights() + _alphas * delta * self._z_Q )
 
     def _expected_next_Q(self, next_state):
@@ -408,6 +429,8 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
             # We may not want to update the trajectory when learning the value function
             # See the comment in the learn() method of the super class (normally LeaTDLambda) for an use case.
             self._update_trajectory(t, state, action, reward)  # This method belongs to the Learner super class defined in learners.episodic.discrete
+        if info.get('update_counts', True):
+            self._update_state_counts(t, state)
 
         # See comment in the constructor of the meaning of this attribute, which is exclusively used in the adaptive lambda learner
         self.state_counts_noreset[state] += 1
@@ -457,7 +480,7 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
 
         # The effective alphas are only computed for the learning of V, not of Q
         # (as this is only stored for information purposes --e.g. plots of the eligibility traces to check if things are working properly)
-        self._alphas_effective = np.r_[self._alphas_effective, (self._alphas * self._z_V).reshape(1, len(self._z_V))]
+        self._alphas_effective = np.r_[self._alphas_effective, (self.getAlphasByState() * self._z_V).reshape(1, len(self._z_V))]
             ## NOTE: We need to reshape the product alpha*z because _alphas_effective is a 2D array with as many rows as
             ## the number of episodes run so far and as many columns as the number of states. The length of alpha*z
             ## is the number of states which should be laid out across the columns when appending a new row to
@@ -476,29 +499,8 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
             self._update_alphas(state)
 
         if done:
-            # Terminal time (recall that we were at time t and stepped into time t+1 when reaching the terminal state)
-            T = t + 1
-
-            # Update the average reward over ALL episodes (needed for the AVERAGE reward criterion which activates a continuing learning task)
-            self.update_average_reward(T, next_state)
-
-            if self.debug: # and self.episode > 45:
-                self._plotZ()
-                self._plotAlphasEffective()
-            self.store_trajectory_at_episode_end(T, next_state, debug=self.debug)
-            if info.get('update_trajectory', True):
-                # We only update the state count of the terminal state (next_state) when we have updated the trajectory above
-                # with information about the `state` visited, because such trajectory update also updates the state count of `state`.
-                # Since here we are dealing with `next_state`, which at this point is the terminal state,
-                # we should only update the trajectory if we are in "trajectory storage" mode
-                # (and therefore in "update state counts" mode).
-                self._update_state_counts(T, next_state)
+            self.learn_at_episode_end(t+1, next_state)
             self._store_lambdas_in_episode()
-
-            # Update alpha for the next episode for "by episode" updates
-            if self.adjust_alpha_by_episode:
-                for state in range(self.env.getNumStates()):
-                    self._update_alphas(state)
 
         if self.debug:
             print("t: {}, delta = {:.3g} --> lambda = {:.3g}".format(t, delta, lambda_adaptive))

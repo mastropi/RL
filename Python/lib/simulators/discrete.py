@@ -3,7 +3,7 @@
 Created on Sun Jul 10 12:21:54 2022
 
 @author: Daniel Mastropietro
-@description: Definition of functions and classes used for the simulation of discrete-time MDPs.
+@description: Definition of functions and classes used for the simulation of discrete-time MDPs with discrete states and actions.
 """
 
 import os
@@ -15,6 +15,7 @@ from typing import Union
 import numpy as np
 import random       # For a random sample from a set
 from matplotlib import pyplot as plt, cm
+import gym
 
 from Python.lib.agents.learners import LearningCriterion, LearningTask
 from Python.lib.agents.learners.episodic.discrete.fv import LeaFV
@@ -31,11 +32,11 @@ from Python.lib.utils.computing import compute_survival_probability, mape, rmse
 
 class Simulator:
     """
-    Simulator class that runs a Reinforcement Learning simulation on a discrete environment
+    Simulator class that runs a Reinforcement Learning simulation on a discrete-time, discrete-state, discrete-action environment
 
     Arguments:
-    env: Environment
-        Environment that is assumed to have the following methods, getters and setters defined:
+    env: gym.Env
+        Environment with discrete states and actions that is assumed to have the following methods, getters and setters defined:
         - seed(): to set the random generator seed
         - reset(): to reset the environment's state
         - getNumStates()
@@ -44,9 +45,12 @@ class Simulator:
             (responsible for defining the initial state when running the simulation)
         - getState() --> returns the current state of the environment
         - getDimension()
-        - getAllState()
+        - getShape()
+        - getAllStates()
         - getTerminalStates()
+        - getTerminalRewards()
         - getInitialStateDistribution()
+        - getV() --> returns the true state value function (which can be None, if unknown)
         - setInitialStateDistribution()
 
     agent: Agent
@@ -90,9 +94,12 @@ class Simulator:
     """
 
     def __init__(self, env, agent, case=1, replication=1, seed=None, log=False, save=False, logsdir=None, resultsdir=None, debug=False):
-#        if not isinstance(env, EnvironmentDiscrete):
-#            raise TypeError("The environment must be of type {} from the {} module ({})" \
-#                            .format(EnvironmentDiscrete.__name__, EnvironmentDiscrete.__module__, env.__class__))
+        # TODO: (2024/02/13) Convert this class into a SimulatorDiscrete class that inherits from a generic Simulator class (to be defined in simulators/__init__.py) as this class is currently inherited by the SimulatorQueue class, which is NOT discrete-time simulator but continuous-time simulator
+
+        if not issubclass(env.__class__, gym.Env):
+            raise TypeError("The environment must inherit from the {} class in the {} module: {}" \
+                            .format(gym.Env.__name__, gym.__module__, env.__class__))
+
         # TODO: (2020/04/12) Fix the following check on the type of agent as it does not work...
         # even though the class of agent is Python.lib.agents.GenericAgent
 #        if not isinstance(agent, GenericAgent):
@@ -154,7 +161,11 @@ class Simulator:
         if isinstance(self.agent.getLearner(), LeaFV):
             return self._run_fv(**kwargs)
         else:
-            return self._run_single(**kwargs)
+            if self.agent.getLearner().getLearningTask() == LearningTask.CONTINUING:
+                kwargs['nepisodes'] = 1
+                return self._run_single_continuing_task(**kwargs)
+            else:
+                return self._run_single(**kwargs)
 
     def _run_fv(self, max_time_steps_fv=None, min_num_cycles_for_expectations=MIN_NUM_CYCLES_FOR_EXPECTATIONS,
                 reset_value_functions=True, seed=None, verbose=True, verbose_period=100, plot=False, colormap="seismic", pause=0.1):
@@ -1402,12 +1413,7 @@ class Simulator:
         # whose value functions are learned with an episodic learning task) do NOT necessarily have value 0,
         # their value needs to be estimated as well.
         terminal_state_previous_episode = None
-        t = -1            # This time index is used when a cycle set has been given
-                          # so that we can estimate the stationary probability of states using renewal theory,
-                          # as in that case (of a given cycle set), we assume that learning occurs under the average reward criterion
-                          # (o.w., if we didn't use the average reward criterion to learn --but instead the discounted reward criterion,
-                          # cycles would not be well defined, as cycles assume a continuing task which is not suitable for the discounted reward criterion
-                          # --only episodic tasks are suitable for the discounted reward criterion).
+        t = -1                  # Learning step counter
         episode = -1
         done = False
         while not done:
@@ -1421,8 +1427,7 @@ class Simulator:
             # (In case we want to start at a specific state and then perform the subsequent resets as per the environment initial state distribution)
             if start_state_first_episode is not None and episode == 0:
                 self.env.setState(start_state_first_episode)
-            done_episode = False
-            if verbose and (np.mod(episode, verbose_period) == 0 or episode == nepisodes - 1):
+            if show_messages(verbose, verbose_period, episode) or episode == nepisodes - 1:  # Note that we ALWAYS show the message at the LAST episode
                 print("@{}".format(get_current_datetime_as_string()))
                 print("Episode {} of {} running...".format(episode+1, nepisodes), end=" ")
                 print("(agent starts at state: {}".format(self.env.getState()), end=" ")
@@ -1431,26 +1436,59 @@ class Simulator:
                 print("\t[DEBUG] Starts at state {}".format(self.env.getState()))
                 print("\t[DEBUG] State value function at start of episode:\n\t{}".format(learner.getV().getValues()))
 
-            # Time step within the current episode (the first time step is t_episode = 0
-            t_episode = -1
+            # Reset variables at the start of a new episode
+            done_episode = False
+            t_episode = -1          # Time step within the current episode (the first time step will have t_episode = 0)
+
+            if episode > 0:
+                # Learn the value of the terminal state visited at the end of the previous episode in the CONTINUING learning task context
+                # IMPORTANT: This step must come BEFORE resetting the learner (done below) because the learner erases all history about the previous episode
+                # (e.g. observed states, actions and rewards) and these are needed, in particular the rewards, to correctly update the average reward,
+                # which should be an estimate of the CONTINUING average reward, NOT of the EPISODIC average reward, where the former is smaller than the latter,
+                # as there is one more step taken --per episode-- by the continuing learning task than by the episodic learning task
+                # (where the last step of going from a terminal state to a start state --taken by the continuing learning task-- is NOT taken by the episodic learning task).
+                if learner.getLearningTask() == LearningTask.CONTINUING:
+                    # Count the environment's reset as a new learning step (tracked by variable t) because that step implies learning the terminal state value
+                    # (so we are using the available learning budget)
+                    t += 1
+                    # Check whether we should stop the simulation right after the next learning step (carried out by self.learn_terminal_state_values())
+                    # We should check this because the counter of learning steps just increased by 1 and perhaps we reach the maximum number of learning steps after that!
+                    # Note that this would trigger the same situation as if parameter max_time_steps were 0:
+                    # in that case we would not even perform any learning step as the simulation would stop even before performing the first step!
+                    if max_time_steps is not None and t >= max_time_steps - 1:     # `-1` because t_episode starts at 0 and max_time_steps counts the number of steps
+                        max_time_steps_reached = True
+                        done_episode = True
+                        if self.debug:
+                            print("[run_single, DEBUG] (TOTAL MAX TIME STEPS = {} REACHED at episode {}!)".format(max_time_steps, episode+1))
+
+                    # For the CONTINUING learning task context, we need to update the value of the state on which the previous episode ended
+                    # (as long as it is not the first episode, which is the case at this point), because its value is not necessarily 0!
+                    # (it is 0 only in EPISODIC learning tasks, as in that case it is 0 by definition of terminal states).
+                    # In fact, in the continuing learning task, the environment state goes to a start state when the episode "terminates" and the Markov process continues.
+                    self.learn_terminal_state_values(t_episode, terminal_state_previous_episode, self.env.getState(), info, done_episode=done_episode)
+                        ## Notes:
+                        ## - it's important that t_episode = -1 here (as is the case because of the reset of t_episode to -1 above) so that there is NO update of the average reward
+                        ##  by Learner.update_average_reward() when done_episode=True (i.e. a situation that happens ONLY at the very end of the simulation when the simulation
+                        ##  ends at a start state), as at this point, no new episode has started yet. I.e. the episode starts when the first step from the start state is taken,
+                        ##  and this happens at t_episode = 0, in which case the length of the episode T would be T = 0 + 1 = 1 > 0 => the average reward can be updated by
+                        ##  Learner.update_average_reward().
+                        ## - the `info` dictionary is guaranteed to be defined because we call this method only after one episode has been run.
+                        ## Therefore the `info` dictionary has been defined as the output of the transition leading to the end of the previous episode.
+
+                # Reset the learner, WITHOUT resetting the value functions nor the episode counter because we want to continue learning from where we left.
+                # Essentially this resets the trajectory information stored in the learner.
+                # IMPORTANT: We only reset the learner for subsequent episodes (episode > 0) because the reset for episode 0 had already been done before entering the episode loop)
+                # This is important because it actually affects the results of learning processes when the learning rate alpha is adjusted by the episode count,
+                # as resetting the learner here again (for the first episode = 0) incorrectly increases the episode count which then affects the alpha adjustment!
+                # (e.g. makes alpha be adjusted to alpha/3 instead of alpha/2 after the first episode was completed).
+                learner.reset(reset_episode=False, reset_value_functions=False)
+
             while not done_episode:
                 t += 1
                 t_episode += 1
 
                 # Current state and action on that state leading to the next state
                 state = self.env.getState()
-
-                # For the CONTINUING learning task context, if this is the first time step of a new episode (t_episode = 0)
-                # we need to update the value of the state on which the previous episode ended (as long as episode > 0)
-                # because its value is not necessarily 0!
-                # (as, in the continuing learning task, the environment state goes to a start state when the episode "terminates"
-                # and the Markov process continues)
-                if t_episode == 0 and episode > 0 and learner.getLearningTask() == LearningTask.CONTINUING:
-                    self.learn_terminal_state_values(t_episode, terminal_state_previous_episode, state, info)
-                        ## Note: the `info` dictionary is guaranteed to be defined because we call this method
-                        ## only after one episode has been run. Therefore the `info` dictionary has been
-                        ## defined as the output of the transition leading to the end of the previous episode.
-
                 action = policy.choose_action(state)
                 next_state, reward, done_episode, info = self.env.step(action)
 
@@ -1460,7 +1498,7 @@ class Simulator:
                 # such as storing the learning rates alpha used in the episode
                 # (see the learner object for more details, in particular de learn() method called below
                 # that learns the state value function V)
-                if max_time_steps_per_episode is not None and t_episode >= max_time_steps_per_episode - 1:     # `-1` because t_episode starts at 0 and max_time_steps_per_episode counts the number of steps
+                if max_time_steps_per_episode is not None and t_episode >= max_time_steps_per_episode - 1:     # `-1` because t_episode in the first loop (i.e. the first step) is 0 and max_time_steps_per_episode counts the number of steps
                     nepisodes_max_steps_reached += 1
                     done_episode = True
                     if self.debug:
@@ -1474,14 +1512,18 @@ class Simulator:
                         print("[run_single, DEBUG] (TOTAL MAX TIME STEPS = {} REACHED at episode {}!)".format(max_time_steps, episode+1))
 
                 if self.debug:
-                    print("t in episode: {}, s={}, a={} -> ns={}, r={}: state_count={:.0f}, alpha={:.3f}, V({})={:.4f} -> V({})=" \
-                          .format(t_episode, state, action, next_state, reward, learner.getStateCounts()[state], learner._alphas[state], state, learner.V.getValue(state), state), end="")
+                    # We place this message BEFORE calling learner.learn() below because we want to show the state value BEFORE and after updating it (by learner.learn())
+                    print("t: {}, t in episode: {}, s={}, a={} -> ns={}, r={}: state_count={:.0f}, alpha={:.3f}, V({})={:.4f}, Q({},{})={:.4f} -> V({})=" \
+                          .format(t, t_episode, state, action, next_state, reward, learner.getStateCounts()[state], learner.getAlphaForState(state),
+                                  state, learner.V.getValue(state),
+                                  state, action, learner.Q.getValue(state, action),
+                                  state), end="")
 
                 # Learn: i.e. update the value functions (stored in the learner) for the *currently visited state and action* with the new observation
                 learner.learn(t_episode, state, action, next_state, reward, done_episode, info)
 
                 if self.debug:
-                    print("{:.4f}".format(learner.V.getValue(state)))
+                    print("{:.4f}, Q=({},{})={:.4f}".format(learner.V.getValue(state), state, action, learner.Q.getValue(state, action)))
                 if self.debug and done_episode:
                     print("--> [DEBUG] Done [{} iterations of {} per episode of {} total] at state {} with reward {}" \
                           .format(t_episode+1, max_time_steps_per_episode, max_time_steps, self.env.getState(), reward))
@@ -1495,8 +1537,8 @@ class Simulator:
             # Store the value of the temrinal state (used in the next episode when the average reward criterion is used for learning)
             terminal_state_previous_episode = next_state
 
-            if verbose and np.mod(episode, verbose_period) == 0:
-                print(", agent ENDS at state: {} at time step {})".format(self.env.getState(), t_episode), end=" ")
+            if show_messages(verbose, verbose_period, episode):
+                print(", agent ENDS at state: {} at discrete time t = {})".format(self.env.getState(), t_episode), end=" ")
                 print("")
 
             # Change of V w.r.t. previous episode (to monitor convergence)
@@ -1540,7 +1582,7 @@ class Simulator:
                       .format(np.mean(deltaV[states_visited_so_far]), np.mean(np.abs(deltaV_rel[states_visited_so_far]))*100,
                               np.max(np.abs(deltaV_rel[states_visited_so_far]))*100, max_signed_deltaV, max_signed_deltaV_rel*100,
                               len(states_visited_so_far), self.env.getNumStates()) + \
-                                       ", mean(alpha) @end = {:.3g}".format(np.mean(learner._alphas[states_visited_so_far])) # Average alpha at the end of episode over ALL states visited so far
+                                       ", mean(alpha) @end = {:.3g}".format(np.mean([learner.getAlphaForState(s) for s in states_visited_so_far])) # Average alpha at the end of episode over ALL states visited so far
                       )
                 except:
                     print("WARNING - states_visited_with_positive_deltaV_rel_abs is empty.\n")
@@ -1575,23 +1617,15 @@ class Simulator:
                     RMSE[min(episode+1, nepisodes)] = rmse(self.env.getV(), learner.getV().getValues(), weights=weights)
                     MAPE[min(episode+1, nepisodes)] = mape(self.env.getV(), learner.getV().getValues(), weights=weights)
 
-            # Update the count within cycles of the last state visited by the chain when done with the episode
-            # (normally this is a terminal state, unless the simulation was truncated before reaching a terminal state
-            # because the simulation time was already larger than the maximum simulation time allowed per episode)
-            if set_cycle is not None and num_cycles > 0:
-                arr_state_counts_within_cycles[next_state] += 1
-
-            if plot and np.mod(episode, verbose_period) == 0:
+            if plot and show_messages(True, verbose_period, episode):
                 # Plot the estimated value function at the end of the episode
                 # in both 1D layout and 2D layout, if the environment is 2D.
                 #print("episode: {} (T={}), color: {}".format(episode, t_episode, colors(episode/nepisodes)))
                 plt.figure(fig_V.number)
                 plt.plot(self.env.getAllStates(), learner.getV().getValues(), linewidth=0.5,
                          color=colors(min(episode, nepisodes - 1) / nepisodes))
-                plt.title("State values evolution (blue: initial, red: final)\nEpisode {} of {}".format(episode + 1,
-                                                                                                        nepisodes))
-                if pause > 0:
-                    plt.pause(pause)
+                plt.title("State values evolution (blue: initial, red: final)\nEpisode {} of {}".format(episode + 1, nepisodes))
+                plt.pause(pause)
                 plt.draw()
                 #fig_V.canvas.draw()    # This should be equivalent to plt.draw()
                 if self.env.getDimension() == 2:
@@ -1614,8 +1648,7 @@ class Simulator:
                     ax_C.imshow(arr_state_counts, cmap=colors_count, norm=colornorm)
 
                     fig_V2.suptitle("State values (left) and state counts (right)\nEpisode {} of {}".format(episode, nepisodes))
-                    if pause > 0:
-                        plt.pause(pause)
+                    plt.pause(pause)
                     plt.draw()
 
                 if state_observe is not None:
@@ -1640,7 +1673,7 @@ class Simulator:
                     plt.plot(episode+1,  se95, color="gray", marker=".", markersize=5)
                     plt.plot(episode+1, -se95, color="gray", marker=".", markersize=5)
                     # Plot of learning rate
-                    #plt.plot(episode+1, learner._alphas[state_observe], 'g.-')
+                    #plt.plot(episode+1, learner.getAlphaForState(state_observe), 'g.-')
 
                     # Finalize plot
                     ax = plt.gca()
@@ -1661,11 +1694,6 @@ class Simulator:
 
             if plot and isinstance(learner, LeaTDLambdaAdaptive) and episode == nepisodes - 1:
                 learner.plot_info(episode, nepisodes)
-
-            # Reset the learner for the next episode
-            # (WITHOUT resetting the value functions nor the episode counter because we want to continue learning from where we left.
-            # Essentially this resets the trajectory information stored in the learner)
-            learner.reset(reset_episode=False, reset_value_functions=False)
 
             # Use the following IF when we want to stop the simulation EITHER when the maximum time steps (over all episodes) is reached
             # OR
@@ -1692,7 +1720,7 @@ class Simulator:
 
         # Comment this out to NOT show the plot right away
         # in case the calling function adds a new plot to the graph generated here
-        if plot:
+        if plot and show_messages(True, verbose_period, t):
             if self.env.getDimension() == 2:
                 # Plot the state counts in a separate image
                 fig_C = plt.figure()
@@ -2332,7 +2360,7 @@ class Simulator:
                     'num_cycles': num_cycles if set_cycle is not None else None,
                     'last_cycle_entrance_time': last_cycle_entrance_time if set_cycle else None,
                     'expected_cycle_time': expected_cycle_time if set_cycle is not None else None,
-                    'state_counts_within_cycles': arr_state_counts_within_cycles if set_cycle is not None else None,
+                    'state_counts_in_complete_cycles': state_counts_in_complete_cycles if set_cycle is not None else None,
                 }
 
     def initialize_run_with_learner_status(self, nepisodes, learner, compute_rmse, weights, state_observe):
@@ -2390,7 +2418,7 @@ class Simulator:
 
         return V, RMSE, MAPE, ntimes_rmse_inside_ci95
 
-    def learn_terminal_state_values(self, t, terminal_state, next_state, info, envs=None, idx_particle=None, update_phi=False):
+    def learn_terminal_state_values(self, t, terminal_state, next_state, info, done_episode=False, envs=None, idx_particle=None, update_phi=False):
         """
         Learns the state and action values for the terminal state in the continuing learning task context
 
@@ -2398,6 +2426,22 @@ class Simulator:
         which is the state chosen after the agent reaches a terminal state, in order to continue with its learning task.
 
         Arguments:
+        next_state: int
+            Index of the state visited AFTER visiting the terminal_state. This is normally a start state, as this method is usually called
+            when the environment transitioned from a terminal state to an environment's start state.
+
+        done_episode: (opt) bool
+            Whether the next_state corresponds to the end of an episode.
+            This is used by the learn() method called by this process in order to determine whether the learning steps carried out by the learner
+            at the end of an episode should be carried out (typically, whether the `if done` block of the learner's learn() method is executed or not).
+            The default value is set to False because normally this method is called AFTER the fact, i.e. once the agent moved to a start state (next_state),
+            wherein this method is used to learn the values of the *previous* state (terminal_state). Under this circumstance `done_episode=True`
+            was passed to the learner's learn() method at THAT moment, i.e. when the environment transitioned to what is currently the *previous* state.
+            However, done_episode should be set to True when the current state of the environment (next_state), typically a start state, occurs when
+            the simulation ends, at which point the learner needs to perform all the actions that are performed when an episode ends
+            (e.g. store the trajectory's history in the permanent self.states, self.actions, etc. attributes and update the state count).
+            default: False
+
         envs: (opt) list of Environment
             In the FV simulation, all the environments associated to the particles in the system.
 
@@ -2418,17 +2462,23 @@ class Simulator:
         action_anchor = 0
 
         # Learn
-        if t == 0:
+        if t <= 0:
             # We are learning the values of the terminal state at the start of an episode
-            # => Do not update the trajectory because the trajectory was already updated at the end of the previous episode
+            # => Do not update the trajectory nor the state count because they were updated at the end of the previous episode.
+            # Note that, even if the simulation ends at the given `next_state` we set these flags to False because they concern the update of the trajectory and the counts
+            # of the TERMINAL state visited at the previous step, NOT of the `next_state` to which the system transitions (which may happen to be the end state when the simulation
+            # ends there). Note that the learner.learn() method takes care of updating the end state count when the episode is DONE, and this is informed by parameter done_episode.
             info['update_trajectory'] = False
+            info['update_counts'] = False
         if envs is None:
-            # We distinguish the call because only the LeaFV.learn() method accepts parameter `env=`
-            learner.learn(t, terminal_state, action_anchor, next_state, 0.0, False, info)
+            # We distinguish the call because only LeaFV.learn() method accepts more parameters than the other learners
+            learner.learn(t, terminal_state, action_anchor, next_state, 0.0, done_episode, info)
         else:
-            learner.learn(t, terminal_state, action_anchor, next_state, 0.0, False, info, envs=envs, idx_particle=idx_particle, update_phi=update_phi)
-        if t == 0:
+            assert isinstance(learner, LeaFV)
+            learner.learn(t, terminal_state, action_anchor, next_state, 0.0, done_episode, info, envs=envs, idx_particle=idx_particle, update_phi=update_phi)
+        if t <= 0:
             info.pop('update_trajectory')
+            info.pop('update_counts')
 
         # Copy the Q-value just learned for the anchor action to the Q-value of the other possible actions
         # TODO: (2024/01/17) Move this piece of code to a function as this is done already at two places at least
