@@ -15,6 +15,7 @@ Classes inheriting from this class should define the following methods:
 - reset_value_functions()
 """
 
+import copy
 from enum import Enum, unique
 
 import numpy as np
@@ -171,7 +172,7 @@ class GenericLearner:
                                 # typically (and mainly) in the store_trajectory_at_episode_end() method in the Learner class,
                                 # where self.rewards is updated by concatenating self._rewards, i.e. the list of rewards observed
                                 # during the latest episode. In fact, if we initialize self.rewards here as [0], such concatenation
-                                # will create problems along the line, because e.g. the first concatenation will result in a weird
+                                # will create problems down the line, because e.g. the first concatenation will result in a weird
                                 # list as e.g. [0, [0, 0, 0, 1]], which would yield the error message "cannot concatenate zero-length arrays"
                                 # or similar message when calling np.concatenate(self.reward) when e.g. computing the average reward
                                 # over all rewards stored in the self.reward list.
@@ -191,7 +192,10 @@ class GenericLearner:
 
         # Information about the historical learning rates
         self.alpha_mean = []    # Average alpha. This is currently (2024/01/06) NOT used.
-        self.alphas = []        # List of alphas used during the learning process, i.e. one alpha value is stored for EVERY transition carried out by the process, REGARDLESS of the state and action the process has just visited.
+        self.alphas = []        # List of alphas used during the learning process, which is updated by EXPLICITLY calling store_learning_rate()
+                                # In principle, this list can contain anything, either scalars or e.g. lists (which are useful when storing the alpha used by state))
+                                # When a scalar is stored, the scalar value would normally correspond to the alpha value used when learning at the moment when
+                                # the store_learning_rate() method was called, REGARDLESS of the state and action the process just visited.
 
     def reset(self, reset_learning_epoch=True, reset_alphas=True, reset_value_functions=True, reset_trajectory=True, reset_counts=True):
         """
@@ -266,9 +270,11 @@ class GenericLearner:
         # Method to be implemented by subclasses
         raise NotImplementedError
 
-    def store_learning_rate(self):
+    def store_learning_rate(self, alpha=None):
         """
-        Stores the current learning rate alpha that is supposedly used for learning when this method is called
+        Stores as part of the alpha history (self.alphas) the current learning rate alpha (self._alpha) that has been used for learning
+        when this method is called, UNLESS parameter `alpha` is given in which case that alpha value (which can be a complex object, such a list or array)
+        is stored.
 
         Note that the values of the self.alphas list may be indexed by many different things...
         For instance, if learning takes place at every visited state-action, then there will probably be an alpha
@@ -276,8 +282,19 @@ class GenericLearner:
         will probably be indexed by epoch number.
         It is however difficult to store the index together with the alpha, because the index structure may change
         from one situation to the other, as just described.
+
+        Arguments:
+        alpha: object or float
+            The alpha "value" to store which can be e.g. a list of alpha values (e.g. one alpha value per state or per state-action of the environment).
+            This latter case is useful if we want to keep track of how the alpha values changed by state or state-action as the learning process progressed.
+            default: None, in which case the (float) value of the self._alpha attribute is stored.
         """
-        self.alphas += [self._alpha]
+        if alpha is None:
+            self.alphas += [self._alpha]
+        else:
+            # Add a DEEP copy of alpha in case it is an object, o.w. all elements in self.alphas will end up to be the same!!
+            # Note that copy.deecopy(<scalar>) works fine
+            self.alphas += [copy.deepcopy(alpha)]
 
     def update_learning_epoch(self):
         """
@@ -310,14 +327,14 @@ class GenericLearner:
         #          .format(state, self.dict_state_action_count[str(state)], self.alpha_min, self.alphas[str(state)]))
         if self.adjust_alpha:
             state_action_count = self.getStateActionCount(state, action)
-            time_divisor = self.func_adjust_alpha( np.max([1, state_action_count - self.min_count_to_update_alpha]) )
+            time_divisor = self.func_adjust_alpha( max(1, state_action_count - self.min_count_to_update_alpha) )
                 ## Note: We don't sum anything to the difference count - min_count because we want to have the same
                 ## time_divisor value when min_count = 0, in which case the first update occurs when count = 2
                 ## (yielding time_divisor = 2), as when min_count > 0 (e.g. if min_count = 5, then we would have the
                 ## first update at count = 7, with time_divisor = 2 as well (= 7 - 5)).
             print("\tUpdating alpha... state={}, action={}: time divisor = {}".format(state, action, time_divisor))
             alpha_prev = self._alpha
-            self._alpha = np.max( [self.alpha_min, self.alpha / time_divisor] )
+            self._alpha = max(self.alpha_min, self.alpha / time_divisor)
             print("\t\tstate {}: alpha: {} -> {}".format(state, alpha_prev, self._alpha))
         else:
             self._alpha = self.alpha

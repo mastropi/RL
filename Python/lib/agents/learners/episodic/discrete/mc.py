@@ -226,6 +226,8 @@ class LeaMCLambda(Learner):
             T = t + 1
 
             # Learn the value functions!
+            # First store the alphas to be used in the value functions update
+            self.store_learning_rate(self.getAlphasByState())
             self.learn_mc_at_episode_end(T, next_state)
 
             # Store the trajectory and update the state count of the end state
@@ -352,6 +354,8 @@ class LeaMCLambda(Learner):
             T = t + 1
 
             # Learn the value functions!
+            # First store the alphas to be used in the value functions update
+            self.store_learning_rate(self.getAlphasByState())
             self.learn_lambda_return_at_episode_end(T, next_state)
 
             # Store the trajectory and update the state count of the end state
@@ -579,6 +583,8 @@ class LeaMCLambdaAdaptive(LeaMCLambda):
             print(LambdaAdapt)
             #input("Press Enter to continue...")
 
+            # Store the alphas to be used in the value functions update
+            self.store_learning_rate(self.getAlphasByState())
             # done-2024/01/29: (2023/10/21) Fix this call, because currently this learn() method is not found
             # TODO: (2024/01/29) Check if the following piece of code is correct, or whether we should move it BEFORE the call to self.store_trajectory_at_episode_end() done above, as is the case with the non-adaptive MC learner
             if self.learner_type == LearnerType.LAMBDA_RETURN:

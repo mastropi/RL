@@ -137,8 +137,12 @@ class LeaTDLambda(Learner):
         # function that computes the delta values increases DRY implementation.
         delta_V, delta_Q = self._compute_deltas(state, action, next_state, reward, info)
 
-        #print("episode {}, state {}: count = {}, alpha = {}".format(self.episode, state, self._state_counts_over_all_episodes[state], self._alphas[state]))
+        #print("episode {}, state {}: count = {}, alpha = {}".format(self.episode, state, self._state_counts_over_all_episodes[state], self.getAlphaForState(state)))
+        # Store the learning rates to be used in the value functions update
+        self.store_learning_rate(self.getAlphasByState())
+        # Update the eligibility trace
         self._updateZ(state, action, self.lmbda)
+        # Update the value functions
         self._updateV(delta_V)
         self._updateQ(delta_Q)
 
@@ -473,8 +477,11 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
                         "trajectory so far: {}" \
                         "--> V(s): {}".format(self.episode, t, delta, delta_relative, lambda_adaptive, self._states, self.V.getValues()))
 
+        # Store the learning rates to be used in the value functions update
+        self.store_learning_rate(self.getAlphasByState())
         # Update the eligibility trace
         self._updateZ(state, action, lambda_adaptive)
+        # Update the value functions
         self._updateV(delta_V)
         self._updateQ(delta_Q)
 
