@@ -178,9 +178,19 @@ else:
         print(f"True state value function (CONTINUING / DISCOUNTED): {env1d.getV()}")
 
 # Simulation parameters
-N = 50 #50 #500 #200 #20                                 # Number of particles in FV simulation
-T = 100 #200 #500                                     # Number of time steps for the estimation of E(T_A)
-max_time_steps_fv_per_particle = 50 #10 #50         # Max average number of steps allowed for each particle in the FV simulation
+N = 50 #50 #500 #200 #20                            # Number of particles in FV simulation
+T = 200 #200 #500                                   # Number of time steps of the single Markov chain simulation run as first step of the FV learning process
+                                                    # This initial simulation is done to:
+                                                    # - obtain an initial exploration of the environment that would help determine the absorption set A
+                                                    #   (e.g. based on state visit frequency going beyond a given threshold --not yet implemented though)
+                                                    # - under the AVERAGE reward criterion:
+                                                    #   estimate the expected reabsorption cycle time, E(T_A) needed to compute the FV estimator of the average reward.
+                                                    # - under the DISCOUNTED reward criterion:
+                                                    #   obtain an initial estimation of the value functions of the states in the absorption set A
+                                                    #   (which is needed by the FV simulation to bootstrap the state and action values for the states
+                                                    #   at the boundary of A).
+estimate_on_fixed_sample_size = True                # This is only used for the DISCOUNTED reward criterion
+max_time_steps_fv_per_particle = 50 #50 #10 #50         # Max average number of steps allowed for each particle in the FV simulation
 max_time_steps_fv_for_expectation = T
 max_time_steps_fv_for_all_particles = N * max_time_steps_fv_per_particle
 # Traditional method learning parameters
@@ -199,6 +209,7 @@ nepisodes = 100 #1000
 max_time_steps_per_episode = nS*10   #1000 #100
 start_state = None  # The start state is defined by the Initial State Distribution (isd) of the environment
 plot = False
+colormap = "rainbow"
 
 alpha = 1.0
 #gamma = 1.0    # gamma is defined when defining the learning criterion above or when computing the discounted state value for episodic learning tasks (normally `V_true_epi_disc`)
@@ -206,24 +217,80 @@ lmbda = 0.0     # We should NOT use lambda > 0 because FV does NOT have the logi
 alpha_min = 0.01 #0.01 #0.1 #0.0
 adjust_alpha = True
 
+suptitle =  f"1D gridworld ({nS} states) with one terminal state (r=+1), policy probabilities = {policy_probabilities}, # particles = {N}, # replications = {R}, lambda={lmbda}, alpha_min={alpha_min}, adjust_alpha={adjust_alpha}" + \
+            f"\n{learning_task.name} learning task, {learning_criterion.name} reward criterion"
+
 time_start_all = timer()
-if R > 1:
-    counts_td = np.nan * np.ones((R, nS), dtype=int)
-    counts_fv = np.nan * np.ones((R, nS), dtype=int)
-    time_steps_td = np.zeros(R, dtype=int)
-    time_steps_fv = np.zeros(R, dtype=int)
-    estimates_V_td = np.nan * np.ones((R, nS))
-    estimates_V_fv = np.nan * np.ones((R, nS))
-    estimates_Q_td = np.nan * np.ones((R, nS*env1d.getNumActions()))
-    estimates_Q_fv = np.nan * np.ones((R, nS*env1d.getNumActions()))
-    estimates_avg_td = np.nan * np.ones(R)
-    estimates_avg_fv = np.nan * np.ones(R)
+counts_td = np.nan * np.ones((R, nS), dtype=int)
+counts_fv = np.nan * np.ones((R, nS), dtype=int)
+time_steps_td = np.zeros(R, dtype=int)
+time_steps_fv = np.zeros(R, dtype=int)
+estimates_V_td = np.nan * np.ones((R, nS))
+estimates_V_fv = np.nan * np.ones((R, nS))
+estimates_Q_td = np.nan * np.ones((R, nS*env1d.getNumActions()))
+estimates_Q_fv = np.nan * np.ones((R, nS*env1d.getNumActions()))
+estimates_avg_td = np.nan * np.ones(R)
+estimates_avg_fv = np.nan * np.ones(R)
 for rep in range(R):
     print(f"\n******* Running replication {rep+1} of {R} (TD + FV)..." )
-    print(f"\nTD(lambda={lmbda})")
 
+
+    #-- Learning the average reward using FV(lambda)
+    # This simulation should come BEFORE TD(lambda) so that we know for how many steps to run TD, i.e. as many steps as transitions seen by FV
     seed_this = seed + rep*13
+
+    print(f"\nFV(lambda={lmbda})")
+    # Learner and agent definition
+    params = dict({'N': N,  # NOTE: We should use N = 500 if we use N = 200, T = 200 above to compute the benchmark time steps because if here we use the N defined above, the number of time steps used by FV is much smaller than the number of time steps used by TD (e.g. 1500 vs. 5000) --> WHY??
+                   'T': T,                           # Max simulation time over ALL episodes run when estimating E(T_A). This should be sufficiently large to obtain an initial non-zero average reward estimate (if possible)
+                   'absorption_set': set(np.arange(2)), #set({1}),  # Note: The absorption set must include ALL states in A (see reasons in the comments in the LeaFV constructor)
+                   'activation_set': set({2}),
+                   'alpha': alpha,
+                   'gamma': gamma,
+                   'lambda': lmbda,
+                   'alpha_min': alpha_min,
+                   })
+    learner_fv = fv.LeaFV(env1d, params['N'], params['T'], params['absorption_set'], params['activation_set'],
+                          probas_stationary_start_state_et=None,
+                          probas_stationary_start_state_fv=None,
+                          criterion=learning_criterion,
+                          alpha=params['alpha'], gamma=params['gamma'], lmbda=params['lambda'],
+                          adjust_alpha=adjust_alpha, adjust_alpha_by_episode=False, func_adjust_alpha=None, #np.sqrt,
+                          #reset_method=ResetMethod.RANDOM_UNIFORM, reset_params={'min': -1, 'max': +1}, reset_seed=1713,
+                          alpha_min=params['alpha_min'],
+                          estimate_on_fixed_sample_size=estimate_on_fixed_sample_size,
+                          debug=False)
+    agent_fv = agents.GenericAgent(policy, learner_fv)
+
+    # Simulation
+    time_start = timer()
+    sim = DiscreteSimulator(env1d, agent_fv, debug=False)
+    state_values_fv, action_values_fv, state_counts_fv, probas_stationary, expected_reward, expected_absorption_time, n_cycles_absorption_used, n_events_et, n_events_fv = \
+        sim.run(max_time_steps_fv=max_time_steps_fv_for_all_particles,
+                min_num_cycles_for_expectations=0,
+                seed=seed_this,
+                verbose=True, verbose_period=50,
+                plot=False, colormap=colormap, pause=0.1)  # Use plot=True to create plots that show how learning progresses; use pause=+np.Inf to "press ENTER to continue" between plots
+    time_fv = timer() - time_start
+    avg_reward_fv = learner_fv.getAverageReward()
+    if R > 1:
+        # Only show the results when R > 1 because when R = 1, the FV results are shown below, together with the TD results
+        print(f"\nNumber of time steps used by FV(lambda): {n_events_et + n_events_fv} (= {n_events_et} for E(T) + {n_events_fv} for FV)")
+        print(f"Average reward estimated by FV(lambda): {avg_reward_fv}")
+        print(f"True average reward: {avg_reward_true}")
+        print("Relative error: {:.1f}%".format((avg_reward_fv / avg_reward_true - 1)*100))
+        print("FV(lambda) took {:.1f} minutes".format(time_fv / 60))
+    counts_fv[rep] = state_counts_fv
+    time_steps_fv[rep] = n_events_et + n_events_fv
+    estimates_V_fv[rep] = state_values_fv
+    estimates_Q_fv[rep] = action_values_fv
+    estimates_avg_fv[rep] = avg_reward_fv
+
+
     #-- Learning the average reward using TD(lambda)
+    seed_this = seed_this + 1
+
+    print(f"\nTD(lambda={lmbda})")
     # Learner and agent definition
     params = dict({'alpha': alpha,
                    'gamma': gamma,
@@ -245,84 +312,68 @@ for rep in range(R):
     sim = DiscreteSimulator(env1d, agent_td, debug=False)
     state_values_td, action_values_td, state_counts_td, RMSE_by_episode, MAPE_by_episode, learning_info = \
         sim.run(nepisodes=nepisodes,
-                max_time_steps=max_time_steps_benchmark,
+                max_time_steps=time_steps_fv[rep], #max_time_steps_benchmark,
                 max_time_steps_per_episode=+np.Inf, #max_time_steps_per_episode, #+np.Inf
                 start_state_first_episode=start_state, seed=seed_this,
-                compute_rmse=True, state_observe=nS-2,  # This is the state just before the terminal state
-                verbose=True, verbose_period=10,
-                plot=plot, pause=0.1)
+                compute_rmse=True, state_observe=None, #nS-2,  # This is the state just before the terminal state
+                verbose=True, verbose_period=50,
+                plot=False, colormap=colormap, pause=0.1)    # Use plot=True to create plots that show how learning progresses; use pause=+np.Inf to "press ENTER to continue" between plots
     time_td = timer() - time_start
     avg_reward_td = learner_td.getAverageReward()
-    if R > 1:
-        counts_td[rep] = state_counts_td
-        time_steps_td[rep] = learning_info['t']
-        estimates_V_td[rep] = state_values_td
-        estimates_Q_td[rep] = action_values_td
-        estimates_avg_td[rep] = avg_reward_td
-        print(f"\nNumber of time steps used by TD(lambda): {learning_info['t']}")
-        print(f"Average reward estimated by TD(lambda): {avg_reward_td}")
-        print(f"True average reward: {avg_reward_true}")
-        print("Relative error: {:.1f}%".format((avg_reward_td / avg_reward_true - 1)*100))
-        print("TD(lambda) took {:.1f} minutes".format(time_td / 60))
-
-
-    #-- Learning the average reward using FV(lambda)
-    print(f"\nFV(lambda={lmbda})")
-
-    seed_this = seed_this + 1
-    # Learner and agent definition
-    params = dict({'N': N,  # NOTE: We should use N = 500 if we use N = 200, T = 200 above to compute the benchmark time steps because if here we use the N defined above, the number of time steps used by FV is much smaller than the number of time steps used by TD (e.g. 1500 vs. 5000) --> WHY??
-                   'T': T,                           # Max simulation time over ALL episodes run when estimating E(T_A). This should be sufficiently large to obtain an initial non-zero average reward estimate (if possible)
-                   'absorption_set': set(np.arange(2)), #set({1}),  # Note: The absorption set must include ALL states in A (see reasons in the comments in the LeaFV constructor)
-                   'activation_set': set({2}),
-                   'alpha': alpha,
-                   'gamma': gamma,
-                   'lambda': lmbda,
-                   'alpha_min': alpha_min,
-                   })
-    learner_fv = fv.LeaFV(env1d, params['N'], params['T'], params['absorption_set'], params['activation_set'],
-                          probas_stationary_start_state_et=None,
-                          probas_stationary_start_state_fv=None,
-                          criterion=learning_criterion,
-                          alpha=params['alpha'], gamma=params['gamma'], lmbda=params['lambda'],
-                          adjust_alpha=adjust_alpha, adjust_alpha_by_episode=False, func_adjust_alpha=None, #np.sqrt,
-                          #reset_method=ResetMethod.RANDOM_UNIFORM, reset_params={'min': -1, 'max': +1}, reset_seed=1713,
-                          alpha_min=params['alpha_min'],
-                          debug=False)
-    agent_fv = agents.GenericAgent(policy, learner_fv)
-
-    # Simulation
-    time_start = timer()
-    sim = DiscreteSimulator(env1d, agent_fv, debug=False)
-    state_values_fv, action_values_fv, state_counts_fv, probas_stationary, expected_reward, expected_absorption_time, n_cycles_absorption_used, n_events_et, n_events_fv = \
-        sim.run(nepisodes=nepisodes,
-                max_time_steps_per_episode=+np.Inf, #max_time_steps_per_episode,  #+np.Inf
-                max_time_steps_fv=max_time_steps_fv_for_all_particles,
-                min_num_cycles_for_expectations=0,
-                seed=seed_this,
-                verbose=True, verbose_period=1,
-                plot=plot)
-    time_fv = timer() - time_start
-    avg_reward_fv = learner_fv.getAverageReward()
     if R == 1:
-        # Show the results of TD lambda so that we can compare it easily with FV shown below
-        print(f"\nNumber of time steps used by TD(lambda): {learning_info['t']}")
-        print(f"Average reward estimated by TD(lambda): {avg_reward_td}")
+        # Show the results of FV lambda so that we can compare it easily with TD shown below
+        print(f"\nNumber of time steps used by FV(lambda): {n_events_et + n_events_fv} (= {n_events_et} for E(T) + {n_events_fv} for FV)")
+        print(f"Average reward estimated by FV(lambda): {avg_reward_fv}")
         print(f"True average reward: {avg_reward_true}")
-        print("Relative error: {:.1f}%".format((avg_reward_td / avg_reward_true - 1)*100))
-        print("TD(lambda) took {:.1f} minutes".format(time_td / 60))
-    else:
-        counts_fv[rep] = state_counts_fv
-        time_steps_fv[rep] = n_events_et + n_events_fv
-        estimates_V_fv[rep] = state_values_fv
-        estimates_Q_fv[rep] = action_values_fv
-        estimates_avg_fv[rep] = avg_reward_fv
-    print(f"\nNumber of time steps used by FV(lambda): {n_events_et + n_events_fv} (= {n_events_et} for E(T) + {n_events_fv} for FV)")
-    print(f"Average reward estimated by FV(lambda): {avg_reward_fv}")
+        print("Relative error: {:.1f}%".format((avg_reward_fv / avg_reward_true - 1)*100))
+        print("FV(lambda) took {:.1f} minutes".format(time_fv / 60))
+    print(f"\nNumber of time steps used by TD(lambda): {learning_info['nsteps']}")
+    print(f"Average reward estimated by TD(lambda): {avg_reward_td}")
     print(f"True average reward: {avg_reward_true}")
-    print("Relative error: {:.1f}%".format((avg_reward_fv / avg_reward_true - 1)*100))
-    print("FV(lambda) took {:.1f} minutes".format(time_fv / 60))
+    print("Relative error: {:.1f}%".format((avg_reward_td / avg_reward_true - 1)*100))
+    print("TD(lambda) took {:.1f} minutes".format(time_td / 60))
+    counts_td[rep] = state_counts_td
+    time_steps_td[rep] = learning_info['nsteps']
+    estimates_V_td[rep] = state_values_td
+    estimates_Q_td[rep] = action_values_td
+    estimates_avg_td[rep] = avg_reward_td
+
+    if learning_task == LearningTask.CONTINUING:
+        # Only for CONTINUING learning task is the number of learning steps performed by each method guaranteed to be the same
+        # because in EPISODIC learning task, TD learning uses the number of learning steps defined by each episode (which we cannot control)...
+        assert time_steps_td[rep] == time_steps_fv[rep], f"The number of learning steps used by FV ({time_steps_fv[rep]}) and by TD ({time_steps_td[rep]}) must be the same"
 print("\n\nAll replications took {:.1f} minutes\n\n".format((timer() - time_start_all) / 60))
+
+# Plot the learning rates by state for the last replication
+ax_td, ax_fv = plt.figure().subplots(1,2)
+ax_td.plot(learner_td.alphas); ax_td.legend(np.arange(nS), title="States"); ax_td.set_title("Alphas in TD learning by state"); ax_td.set_ylim((0, alpha))
+ax_fv.plot(learner_fv.alphas); ax_fv.legend(np.arange(nS), title="States"); ax_fv.set_title("Alphas in FV learning by state"); ax_fv.set_ylim((0, alpha))
+plt.suptitle(suptitle)
+
+if False:   # NEED TO FIX THE CORRECT STORAGE OF THE TRAJECTORY HISTORY IN THE FV LEARNER as explainedin the WARNING message below when retrieving the FV trajectory history
+    # Check the state and action distribution for the last replication
+    # TD
+    states_history_td = np.concatenate(learner_td.states)
+    print(f"Distribution of state visits (TD):\n{pd.Series(states_history_td).value_counts(sort=False)}")
+    actions_history_td = np.concatenate(learner_td.actions)
+    for s in range(nS):
+        ind_s = states_history_td == s
+        states_history_td[ind_s]
+        print(f"Distribution of actions taken for s={s} (TD): count = \n{np.sum(ind_s)}")
+        print(pd.Series(actions_history_td[ind_s]).value_counts() / np.sum(ind_s))
+    ## OK! For the [0.5, 0.5] case, 50% for all states except state 0 and 4
+    # FV
+    # WARNING: The trajectory history recovered here most likely includes ONLY the exploration by the "normal" particle (this is the case when running the FV simulation with _run_simulation_fv_learnvaluefunctions())
+    # The reason is that, in that case, the trajectories taken by the FV particles is stored in their respective environment.
+    states_history_fv = np.concatenate(learner_fv.states)
+    print(f"Distribution of state visits (FV):\n{pd.Series(states_history_fv).value_counts(sort=False)}")
+    actions_history_fv = np.concatenate(learner_fv.actions)
+    for s in range(nS):
+        ind_s = states_history_fv == s
+        states_history_fv[ind_s]
+        print(f"Distribution of actions for s={s} (TD): visit count = {np.sum(ind_s)}")
+        print(pd.Series(actions_history_fv[ind_s]).value_counts() / np.sum(ind_s))
+
 
 #-- Plot results
 # Replications
@@ -418,8 +469,7 @@ if R > 1:
     ax_diff.set_ylabel("DIFF V(s)")
     ax_diff.legend([f"True diff V(s)", f"MEDIAN Diff V(s): TD(lambda={lmbda})", f"MEDIAN Diff V(s): FV(lambda={lmbda})"])
     ax_diff.set_title("V(s) difference among contiguous states")
-    plt.suptitle(f"1D gridworld ({nS} states) with one terminal state (r=+1), policy probabilities = {policy_probabilities}, # particles = {N}, # replications = {R}, lambda={lmbda}, alpha_min={alpha_min}, adjust_alpha={adjust_alpha}"
-                 f"\n{learning_task.name} learning task, {learning_criterion.name} reward criterion\nDistribution of state values V(s) by state")
+    plt.suptitle(suptitle + "\nDistribution of state values V(s) by state")
 
     # Plot the average reward estimate for each replication
     plt.figure()
@@ -484,8 +534,7 @@ ax_Vd.set_xlabel("Left states")
 ax_Vd.set_ylabel("DIFF V(s)")
 ax_Vd.legend([f"True diff V(s)", f"Diff V(s): TD(lambda={lmbda})", f"Diff V(s): FV(lambda={lmbda})"])
 ax_Vd.set_title("V(s) difference among contiguous states")
-plt.suptitle(f"REPLICATION {rep+1} of {R}: 1D gridworld ({nS} states) with one terminal state (r=+1). Policy probabilities = {policy_probabilities}. # particles = {N}"
-             f"\n{learning_task.name} learning task, {learning_criterion.name} reward criterion\nState values V(s) and visit frequency (count) for TD and FV")
+plt.suptitle(f"REPLICATION {rep+1} of {R}: " + suptitle + "\nState values V(s) and visit frequency (count) for TD and FV")
 
 # To show the different replications one after the other
 # Goal: Check the Q values, if V is comprised in between them
@@ -501,18 +550,8 @@ for r in range(R):
     plt.plot(states, estimates_Q_fv[r].reshape(nS, env1d.getNumActions())[:, 1], color="orange", linestyle="dashed")
     plt.title(f"Replication {r+1} of {R}")
     plt.draw()
-    plt.pause(5)
+    plt.pause(1)
 ## OK: In most of the cases, the estimates are correct (in ~ 17 out of 20 replications)
-
-# Check the proportion of actions taken at each state
-states_history = np.concatenate(learner_td.states)
-actions_history = np.concatenate(learner_td.actions)
-for s in range(nS):
-    ind_s = states_history == s
-    states_history[ind_s]
-    print(f"Distribution of actions for s={s} (TD): visit count = {np.sum(ind_s)}")
-    print(pd.Series(actions_history[ind_s]).value_counts() / np.sum(ind_s))
-## OK! 50% for all states except state 0 and 4
 
 raise KeyboardInterrupt
 
@@ -533,6 +572,8 @@ from Python.test.test_optimizers_discretetime import InputLayer, Test_EstPolicy_
 from Python.lib.agents.learners import LearningCriterion, LearningTask
 from Python.lib.agents.learners.policies import LeaActorCriticNN
 
+from Python.lib.utils.basic import get_current_datetime_as_string, load_objects_from_pickle, save_objects_to_pickle
+
 #--- Auxiliary functions
 KL_THRESHOLD = 0.005
 policy_changed_from_previous_learning_step = lambda KL_distance, num_states: np.abs(KL_distance) / num_states > KL_THRESHOLD
@@ -549,13 +590,13 @@ size_vertical = 3; size_horizontal = 4
 #size_vertical = 6; size_horizontal = 8
 #size_vertical = 8; size_horizontal = 12
 #size_vertical = 9; size_horizontal = 13
-#size_vertical = 10; size_horizontal = 14
+size_vertical = 10; size_horizontal = 14
 #size_vertical = 10; size_horizontal = 30
 env_shape = (size_vertical, size_horizontal) #(3, 4)
 
 # (2023/12/25) It's IMPORTANT that the start state be part of the absorption set if we want the value functions estimated by FV
 # converge to a constant, as opposed to diverging negatively. Need to investigate why this happens.
-start_state_in_absorption_set = True   #False #True
+start_state_in_absorption_set = False   #False #True
 
 if False and env_shape == (3, 4):
     obstacles_set = {} #{2, 5, 11} #{} #{5} #{2,5,11}
@@ -606,10 +647,11 @@ test_ac.setUpClass(shape=env_shape, nn_input=InputLayer.ONEHOT, nn_hidden_layer_
                     alpha_min=0.1,
                     # Fleming-Viot parameters
                     # Small N and T are N=50, T=1000 for the 8x12 labyrinth with corridor
-                    N=50,   #50 #20 #100
+                    N=200, #50 #20 #100
                     T=100, #1000, #3000,  # np.prod(env_shape) * 10  #100 #1000
                     obstacles_set=obstacles_set, absorption_set=absorption_set,
                     reset_method_value_functions=ResetMethod.ALLZEROS,
+                    estimate_on_fixed_sample_size=True,
                     seed=seed, debug=False)
 test_ac.setUp()
 print(test_ac.policy_nn.nn_model)
@@ -634,10 +676,10 @@ learning_method = "all_online"
 learning_method = "values_td"; simulator_value_functions = test_ac.sim_td       # Normally TD(0), but could be TD(lambda)
 #learning_method = "values_tdl"; simulator_value_functions = test_ac.sim_td     # TD(lambda)
 #learning_method = "values_tda"; simulator_value_functions = test_ac.sim_tda    # Adaptive TD(lambda)
-#learning_method = "values_fv"; simulator_value_functions = test_ac.sim_fv
+learning_method = "values_fv"; simulator_value_functions = test_ac.sim_fv
 
 # FV learning parameters (which are used to define parameters of the other learners analyzed so that their comparison with FV is fair)
-max_time_steps_fv_per_particle = 50                            # Max average number of steps allowed for each particle in the FV simulation
+max_time_steps_fv_per_particle = 50 #100 #50                            # Max average number of steps allowed for each particle in the FV simulation
 max_time_steps_fv_for_expectation = test_ac.agent_nn_fv.getLearner().getNumTimeStepsForExpectation()                         # This is parameter T
 max_time_steps_fv_for_all_particles = test_ac.agent_nn_fv.getLearner().getNumParticles() * max_time_steps_fv_per_particle    # This is parameter N * max_time_steps_fv_per_particle which defines the maximum number of steps to run the FV system when learning the value functions that are used as critic of the loss function at each policy learning step
 
@@ -663,7 +705,12 @@ optimizer_learning_rate = 0.01 #0.01 #0.1
 reset_value_functions_at_every_learning_step = False #(learning_method == "values_fv")     # Reset the value functions when learning with FV, o.w. the learning can become too unstable due to the oversampling of the states with high value... (or something like that)
 verbose_period = n_episodes_per_learning_step // 10
 
+# Saving
+resultsdir = "./RL-003-Classic/results"
+save = True
+
 time_start = timer()
+datetime_start = get_current_datetime_as_string()
 
 # Initialize objects that will contain the results by learning step
 break_when_no_change = False    # Whether to stop the learning process when the average reward doesn't change from one step to the next
@@ -677,6 +724,11 @@ loss_all = np.nan * np.ones((n_learning_steps,))
 nsteps_all = np.nan * np.ones((n_learning_steps,))  # Number of value function time steps run per every policy learning step
 KL_all = np.nan * np.ones((n_learning_steps,))      # K-L divergence between two consecutive policies
 alpha_all = alpha_initial * np.ones((n_learning_steps,))   # Initial alpha used at each policy learning step
+if learning_method == "values_fv":
+    # Define the object where we will store the number of steps used by the FV learner of value functions at each policy learning step
+    # so that we use the same number for the TD learner of value functions when the TDAC policy learning process is run afterwards.
+    # I.e. this assumes that FVAC is run BEFORE TDAC!
+    max_time_steps_benchmark_all = np.nan * np.ones((n_learning_steps,))
 if learning_method == "all_online":
     # Online Actor-Critic policy learner with TD(lambda) as value functions learner and value functions learning happens at the same time as policy learning
     learner_ac = LeaActorCriticNN(test_ac.env2d, test_ac.agent_nn_td.getPolicy(), test_ac.agent_nn_td.getLearner(), reset_value_functions=reset_value_functions_at_every_learning_step, optimizer_learning_rate=optimizer_learning_rate, seed=test_ac.seed, debug=True)
@@ -747,23 +799,47 @@ else:
         # Learn the value functions using the FV simulator
         if learning_method == "values_fv":
             V, Q, state_counts, probas_stationary, expected_reward, expected_absorption_time, n_cycles_absorption_used, n_events_et, n_events_fv = \
-                simulator_value_functions.run(nepisodes=n_episodes_per_learning_step, max_time_steps_per_episode=max_time_steps_per_episode,
-                                              max_time_steps_fv=max_time_steps_fv_for_all_particles, min_num_cycles_for_expectations=0,
+                simulator_value_functions.run(max_time_steps_fv=max_time_steps_fv_for_all_particles, min_num_cycles_for_expectations=0,
                                                 ## Note: We set the minimum number of cycles for the estimation of E(T_A) to 0 because we do NOT need
                                                 ## the estimation of the average reward to learn the optimal policy, as it cancels out in the advantage function Q(s,a) - V(s)!!
-                                              reset_value_functions=reset_value_functions_at_this_step, seed=seed_this, verbose=True, verbose_period=verbose_period)
+                                              reset_value_functions=reset_value_functions_at_this_step, seed=seed_this, verbose=False, verbose_period=verbose_period)
             #average_reward = test_ac.agent_nn_fv.getLearner().getAverageReward()  # This average reward should not be used because it is inflated by the FV process that visits the states with rewards more often
             average_reward = expected_reward
             nsteps_all[t_learn-1] = n_events_et + n_events_fv
+            max_time_steps_benchmark_all[t_learn-1] = n_events_et + n_events_fv  # Number of steps to use when running TDAC at the respective learning step
             print(f"Learning step {t_learn}: Learning of value functions COMPLETED using {learning_method} method on {nsteps_all[t_learn-1]} time steps")
         else:
             # TD learners
             learning_episodes_observe = [7, 20, 30, 40]
-            V, Q, state_counts, _, _, info = \
-                simulator_value_functions.run(nepisodes=n_episodes_per_learning_step, max_time_steps=max_time_steps_benchmark, max_time_steps_per_episode=max_time_steps_per_episode, #max_time_steps_benchmark // n_episodes_per_learning_step,
-                                             reset_value_functions=reset_value_functions_at_this_step, seed=seed_this,
-                                             state_observe=np.ravel_multi_index((1, env_shape[1]-1), env_shape), compute_rmse=True if t_learn in learning_episodes_observe else False, plot=False if t_learn in learning_episodes_observe else False,
-                                             verbose=True, verbose_period=verbose_period)
+            if 'max_time_steps_benchmark_all' in locals() and max_time_steps_benchmark_all[t_learn-1] != np.nan:
+                # *** WARNING: Assumes discrete.Simulator.run() calls _run_single_continuing_task() to run the simulation ***
+                V, Q, state_counts, _, _, learning_info = \
+                    simulator_value_functions.run(max_time_steps=max_time_steps_benchmark_all[t_learn-1],
+                                                  reset_value_functions=reset_value_functions_at_this_step, seed=seed_this,
+                                                  state_observe=np.ravel_multi_index((1, env_shape[1] - 1), env_shape),
+                                                  compute_rmse=True if t_learn in learning_episodes_observe else False, plot=False if t_learn in learning_episodes_observe else False,
+                                                  verbose=True, verbose_period=verbose_period)
+            else:
+                # When max_time_steps_benchmark_all is not defined, it means that the number of steps to run the TD learner for is calculated above
+                # and may not be exactly equal to the number of steps the FV learner took at each policy learning step.
+                if False:
+                    # When calling discrete.Simulator._run_single() to run the simulation (see how the discrete.Simulator.run() method is defined, i.e. what internal method it calls)
+                    V, Q, state_counts, _, _, learning_info = \
+                        simulator_value_functions.run(nepisodes=n_episodes_per_learning_step,
+                                                      max_time_steps=max_time_steps_benchmark,
+                                                      max_time_steps_per_episode=max_time_steps_per_episode, #max_time_steps_benchmark // n_episodes_per_learning_step,
+                                                      reset_value_functions=reset_value_functions_at_this_step, seed=seed_this,
+                                                      state_observe=np.ravel_multi_index((1, env_shape[1]-1), env_shape), compute_rmse=True if t_learn in learning_episodes_observe else False, plot=False if t_learn in learning_episodes_observe else False,
+                                                      verbose=True, verbose_period=verbose_period)
+                else:
+                    # When calling discrete.Simulator._run_single_continuing_task() to run the simulation (see how the discrete.Simulator.run() method is defined, i.e. what internal method it calls)
+                    V, Q, state_counts, _, _, learning_info = \
+                        simulator_value_functions.run(max_time_steps=max_time_steps_benchmark,
+                                                      max_time_steps_per_episode=+np.Inf,
+                                                      reset_value_functions=reset_value_functions_at_this_step, seed=seed_this,
+                                                      state_observe=np.ravel_multi_index((1, env_shape[1] - 1), env_shape),
+                                                      compute_rmse=True if t_learn in learning_episodes_observe else False, plot=False if t_learn in learning_episodes_observe else False,
+                                                      verbose=True, verbose_period=verbose_period)
             average_reward = simulator_value_functions.getAgent().getLearner().getAverageReward()
             nsteps_all[t_learn - 1] = learning_info['nsteps']
             print(f"Learning step {t_learn}: Learning of value functions COMPLETED using {learning_method} method on {nsteps_all[t_learn-1]} time steps")
@@ -792,7 +868,8 @@ else:
             break
 
 time_end = timer()
-print("{} learning process took {:.1f} minutes".format(learning_method.upper(), (time_end - time_start) / 60))
+time_elapsed = time_end - time_start
+print("{} learning process took {:.1f} minutes ({:.1f} hours)".format(learning_method.upper(), time_elapsed / 60, time_elapsed / 3600))
 
 # Make a copy of the measures that we would like to compare (on the same plot)
 if learning_method in ["all_online", "values_tdl"]:
@@ -805,6 +882,7 @@ if learning_method in ["all_online", "values_tdl"]:
     nsteps_all_online = nsteps_all.copy()
     KL_all_online = KL_all.copy()
     alpha_all_online = alpha_all.copy()
+    time_elapsed_online = time_elapsed
 elif learning_method == "values_td":
     loss_all_td = loss_all.copy()
     R_all_td = R_all.copy()
@@ -815,6 +893,7 @@ elif learning_method == "values_td":
     nsteps_all_td = nsteps_all.copy()
     KL_all_td = KL_all.copy()
     alpha_all_td = alpha_all.copy()
+    time_elapsed_td = time_elapsed
 elif learning_method == "values_tda":
     loss_all_tda = loss_all.copy()
     R_all_tda = R_all.copy()
@@ -825,6 +904,7 @@ elif learning_method == "values_tda":
     nsteps_all_tda = nsteps_all.copy()
     KL_all_tda = KL_all.copy()
     alpha_all_tda = alpha_all.copy()
+    time_elapsed_tda = time_elapsed
 elif learning_method == "values_fv":
     loss_all_fv = loss_all.copy()
     R_all_fv = R_all.copy()
@@ -835,6 +915,7 @@ elif learning_method == "values_fv":
     nsteps_all_fv = nsteps_all.copy()
     KL_all_fv = KL_all.copy()
     alpha_all_fv = alpha_all.copy()
+    time_elapsed_fv = time_elapsed
 
 # Plot loss and average reward for the currently analyzed learner
 print("\nPlotting...")
@@ -983,7 +1064,27 @@ plt.colorbar(img, ax=axes)  # This adds a colorbar to the right of the FIGURE. H
                             # Otherwise see answer by user10121139 in https://stackoverflow.com/questions/13784201/how-to-have-one-colorbar-for-all-subplots
 plt.suptitle(f"{learning_method.upper()}\nPolicy at each state")
 
-print("{} learning process took {:.1f} minutes".format(learning_method.upper(), (time_end - time_start) / 60))
+print("{} learning process took {:.1f} minutes ({:.1f} hours)".format(learning_method.upper(), time_elapsed / 60, time_elapsed / 3600))
+
+
+############## SAVE
+if save:
+    _size = f"{env_shape[0]}x{env_shape[1]}"
+    _learning_method = str.replace(learning_method, "values_", "")
+    _filename = f"ActorCritic_labyrinth_{_size}_{datetime_start}_{_learning_method.upper()}.pkl"
+    objects_to_save = ["_".join(obj_name, _learning_method) for obj_name in ["loss_all", "R_all", "R_long_all", "V_all", "Q_all", "state_counts_all", "nsteps_all", "KL_all", "alpha_all", "time_elapsed"]]
+    save_objects_to_pickle(objects_to_save, os.path.join(resultsdir, _filename))
+############## SAVE
+
+
+############## LOAD
+_datetime = ""          # Use format yyymmdd_hhmmss
+_size = "10x14"
+_learning_method = "fv"
+_filename = f"ActorCritic_labyrinth_{_size}_{_datetime}_{_learning_method.upper()}.pkl"
+load_objects_from_pickle(os.path.join(resultsdir, _filename))
+############## LOAD
+
 
 #-- ALTOGETHER
 # Plot all average rewards together (to compare methods)

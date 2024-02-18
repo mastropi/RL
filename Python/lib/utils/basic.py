@@ -9,6 +9,7 @@ Created on Thu Jun 07 21:43:52 2020
 import bisect   # To insert elements in order in a list (bisect.insort(list, element)
 import copy
 import re
+import joblib
 import numpy as np
 import pandas as pd
 
@@ -49,6 +50,9 @@ def measure_exec_time(func):
                           cpu_time/3600,cpu_time/60, cpu_time, cpu_time*1000))
         return results
     return func_decorated
+
+def get_exception_message(e):
+    return getattr(e, "message", str(e))
 
 def get_current_datetime_as_string(format=None):
     """
@@ -168,6 +172,21 @@ def convert_str_to_list_of_type(str_value, sep="[, ]", type=float):
         return str_value_as_list[0]
     else:
         return str_value_as_list
+
+def save_objects_to_pickle(object_names, filename):
+    "Saves objects into a pickle file stored inside a dictionary whose names are taken from the object_names list and values taken from globals()[<name>]"
+    dict_objects_to_save = dict([(obj_name, globals()[obj_name]) for obj_name in object_names])
+    joblib.dump(dict_objects_to_save, filename)
+
+def load_objects_from_pickle(filename):
+    "Loads objects saved in a pickle file and stored inside a dictionary whose names are taken from the dictionary keys and values taken from their values"
+    try:
+        dict_objects = joblib.load(filename)
+    except IOError as e:
+        print(get_exception_message(e))
+    assert isinstance(dict_objects, dict), f"The object saved in the input pickle file must be a dictionary: {dict_objects}"
+    for obj_name, obj_value in dict_objects.iteritems():
+        globals()[obj_name] = obj_value
 
 def parse_dict_params(dict_params, dict_params_default):
     """

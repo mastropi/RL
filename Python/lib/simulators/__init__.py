@@ -438,7 +438,7 @@ def update_trajectory(agent, t_total, t_sim, state, action, reward):
         agent.getLearnerP().update_trajectory(t_total, state, action, reward)
 
 def show_messages(verbose, verbose_period, t_learn):
-    return verbose and np.mod(t_learn - 1, verbose_period) == 0
+    return verbose and np.mod(t_learn, verbose_period) == 0
 
 def analyze_event_times(rates: Union[list, tuple, np.ndarray], times, groups, group_name="group", plot=False):
     """

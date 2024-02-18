@@ -13,7 +13,7 @@ import warnings
 from typing import Union
 
 import numpy as np
-import random       # For a random sample from a set
+import pandas as pd
 from matplotlib import pyplot as plt, cm
 import gym
 
@@ -264,6 +264,10 @@ class Simulator:
             - verbose_period: the number of simulation time steps at which to be verbose.
             - t_learn: the number of learning steps, when FV is used in the context of FVRL, i.e. to learn an optimum policy
             This is ONLY used for informational purposes, i.e. to show which stage of the policy learning we are at.
+            - plot: whether to generate an interactive plot showing the evolution of the state value function estimate.
+            - colormap: name of the colormap to use for each new estimate of the state value function added to the plot (e.g. "seismic").
+            - pause: number of seconds to pause after updating the plot with the new estimate of the state value function. MUST be > 0 if we want the
+            plot to be updated!
 
         probas_stationary_start_state_et: (opt) dict
             Stationary distribution to use for the selection of the start state of the single Markov chain
@@ -388,7 +392,7 @@ class Simulator:
                 # See meeting minutes in entry dated 17-Jan-2024 for more details.
                 method_fv = self._run_simulation_fv_learnvaluefunctions
                 start_set = self.agent.getLearner().active_set.difference(self.env.getTerminalStates())
-            t, state_values, action_values, state_counts_fv, phi, df_proba_surv, expected_absorption_time, max_survival_time = \
+            n_events_fv, state_values, action_values, state_counts_fv, phi, df_proba_surv, expected_absorption_time, max_survival_time = \
                 method_fv(  dict_params_info.get('t_learn', 0), envs,
                             dict_params_simul['absorption_set'],
                             start_set,
@@ -399,8 +403,9 @@ class Simulator:
                             seed=dict_params_simul['seed'] + 131713,    # Choose a different seed from the one used by the single Markov chain simulation (note that this seed is the base seed used for the seeds assigned to the different FV particles)
                             verbose=dict_params_info.get('verbose', False),
                             verbose_period=dict_params_info.get('verbose_period', 1),
-                            plot=DEBUG_TRAJECTORIES)
-            n_events_fv = t
+                            plot=dict_params_info['plot'],
+                            colormap=dict_params_info['colormap'],
+                            pause=dict_params_info['pause'])
             state_counts_all = state_counts_et + state_counts_fv
             #print(f"Shape of proba surv and phi: {df_proba_surv.shape}")
             print("Expected reabsorption time E(T_A): {:.3f} ({} cycles)".format(expected_absorption_time, learning_info['num_cycles']))
@@ -441,7 +446,8 @@ class Simulator:
                             dist_proba_for_start_state: dict=None,
                             expected_absorption_time=None, expected_exit_time=None,
                             estimated_average_reward=None,
-                            seed=None, verbose=False, verbose_period=1, plot=False):
+                            seed=None, verbose=False, verbose_period=1,
+                            plot=False, colormap="seismic", pause=0.1):
         """
         Runs the Fleming-Viot simulation of the particle system and estimates the different pieces of information that
         are part of the Fleming-Viot estimator of the average reward:
@@ -550,8 +556,9 @@ class Simulator:
             done_reactivate = False
             state = envs[idx_particle].getState()
             if DEBUG_TRAJECTORIES:
+                # We can add a `True` condition above in order to show the following useful piece of information of the proportion of particles at the state of interest x is useful for tracking the stabilization of Phi(t,x) around the QSD
                 flags_particle_at_terminal_state = [1 if envs[p].getState() in self.env.getTerminalStates() else 0 for p in range(len(envs))]
-                print(f"[reactivate_particle_internal] % particles at terminal states: {np.mean(flags_particle_at_terminal_state)*100}% ({np.sum(flags_particle_at_terminal_state)} out of {len(envs)})")
+                print("[reactivate_particle_internal] % particles at terminal states: {:.1f}% ({} out of {})".format(np.mean(flags_particle_at_terminal_state)*100, np.sum(flags_particle_at_terminal_state), len(envs)))
             new_state = None
             while not done_reactivate:
                 idx_reactivate = reactivate_particle(envs, idx_particle, 0, reactivation_number=None)
@@ -564,8 +571,8 @@ class Simulator:
                     done_reactivate = True
                     new_state = envs[idx_particle].getState()
                     if DEBUG_TRAJECTORIES:
-                        print("*** Particle #{} ABSORBED at state={} and REACTIVATED to particle {} at state {}" \
-                              .format(idx_particle, state, idx_reactivate, new_state))
+                        print("*** t={}: Particle #{} ABSORBED at state={} and REACTIVATED to particle #{} at state {}" \
+                              .format(t, idx_particle, state, idx_reactivate, new_state))
 
             return new_state
         #------------------------------- Auxiliary functions ----------------------------------#
@@ -699,6 +706,7 @@ class Simulator:
                 # only when the FV SIMULATION IS OVER, not at the end of each episode. Otherwise, the estimated average
                 # reward will fluctuate a lot (i.e. as the average reward observed by episode fluctuates) and this is NOT what we want,
                 # we want a stable estimate of the average reward over all episodes.
+                # TODO: (2024/01/29) Revise the correct use of the `done` variable here, instead of `done_episode`, because actually when we are done by `done`, this line will NEVER be executed because we will NOT enter again the `while done` loop...
                 learner.learn(t, state, action, next_state, reward, done, info)
 
             if next_state in absorption_set:
@@ -772,6 +780,7 @@ class Simulator:
             # as part of the estimated survival probability function.
             n_particles_not_absorbed = N - sum(has_particle_been_absorbed_once)
             survival_times += list(np.repeat(t, n_particles_not_absorbed))
+            print(f"WARNING: Not all {N} particles were absorbed at least ONCE because the maximum number of time steps for all particles ({max_time_steps} has been reached: # NOT absorbed particles = {n_particles_not_absorbed}")
         # The following assertion should be used ONLY when the FV process stops if all N particles are absorbed at least once before reaching max_time_steps
         assert np.max([np.max(dict_phi[x]['t']) for x in dict_phi.keys()]) <= np.max(survival_times), \
                 "The maximum time stored in Phi(t,x) must be at most the maximum observed survival time"
@@ -787,7 +796,6 @@ class Simulator:
         max_survival_time = df_proba_surv['t'].iloc[-1]
 
         if DEBUG_ESTIMATORS:
-            import pandas as pd
             max_rows = pd.get_option('display.max_rows')
             pd.set_option('display.max_rows', None)
             print("Survival probability:\n{}".format(df_proba_surv))
@@ -798,12 +806,63 @@ class Simulator:
 
     @measure_exec_time
     def _run_simulation_fv_learnvaluefunctions( self, t_learn, envs, absorption_set: set, start_set: set,
-                            max_time_steps=None,
-                            dist_proba_for_start_state: dict=None,
-                            expected_absorption_time=None, expected_exit_time=None,
-                            estimated_average_reward=None,
-                            seed=None, verbose=False, verbose_period=1, plot=False):
+                                                max_time_steps=None, number_free_particles=1,
+                                                dist_proba_for_start_state: dict=None,
+                                                expected_absorption_time=None, expected_exit_time=None,
+                                                estimated_average_reward=None,
+                                                seed=None, verbose=False, verbose_period=1,
+                                                plot=False, colormap="seismic", pause=0.1):
+        """
+        Arguments:
+        number_free_particles: (opt) int
+            Number of normal particles that follow the underlying Markov process and that are free to explore the whole environment,
+            which is necessary to be able to learn the value functions for the states in the absorption set A, which are used
+            as bootstrap observations when learning the value functions with FV.
+            default: 1
+        """
         #------------------------------- Auxiliary functions ----------------------------------#
+        def choose_particle_to_move(t, N, df_particles_for_start_state, choose_particles_in_order=False):
+            """
+            Chooses the next particle to move in the FV simulation
+
+            Arguments:
+            t: int
+                Current system's simulation time.
+                Only used when choose_particles_in_order=True.
+
+            N: int
+                Total number of particles in the FV particle system.
+                Only used when df_particles_for_state is None.
+
+            df_particles_for_start_state: pd.DataFrame
+                Data frame containing the particle IDs belonging to each FV particle group that is used to estimate the value functions at the different
+                states and state-actions, among which the next particle to move should be selected.
+                These IDs should be stored in a column called "idx_particles", and a particle is chosen among ALL those IDs.
+                If None, a particle is chosen among the N particles in the FV system.
+
+            choose_particles_in_order: (opt) bool
+                Whether to choose the particles to move in order, i.e. when df_particles_for_start_state is None,
+                first particle ID 0 is chosen, then particle ID 1, etc. If df_particles_for_start_state is not None, the next particle to move is chosen
+                as the `t % len(list-of-particle-IDs-to-choose-from)`-th ID in the list of particle IDs obtained from the concatenation of the particle IDs
+                stored in column "idx_particle" of the data frame, in whatever order they happen to be.
+                Ex: if df_particles_for_start_state['idx_particles'] = [[0, 2, 5], [1, 3, 4, 6]], the particles are indexed in the order defined by the
+                concatenation of the two elements in the above list, i.e.: [0, 2, 5, 1, 3, 4, 6]
+
+            Return: int
+            Index of the particle to move next.
+            """
+            if df_particles_for_start_state is None:
+                if choose_particles_in_order:
+                    return t % N
+                else:
+                    return np.random.choice(N)
+            else:
+                idx_all_particles = np.concatenate(np.array(df_particles_for_start_state['idx_particles'])).astype(int)
+                if choose_particles_in_order:
+                    return idx_all_particles[ t % len(idx_all_particles) ]
+                else:
+                    return np.random.choice(idx_all_particles)
+
         def reactivate_particle_internal(idx_particle):
             """
             Internal function that reactivates a particle until a valid reactivation is obtained
@@ -818,10 +877,25 @@ class Simulator:
             # TODO: (2023/09/06) Try to implement a more efficient way (i.e. without looping) to reactivate the particle to one of the other particles that are NOT at an absorption set
             done_reactivate = False
             state = envs[idx_particle].getState()
+            start_state = learner.getStartState(idx_particle)
+            all_idx_particles_to_choose_from = None
+            if learner.estimate_on_fixed_sample_size:
+                # We need to choose the reactivation particle ONLY among the particles in the current FV group
+                # (i.e. the group of particles that started at the same start state at which the absorbed particles started)
+                all_idx_particles_to_choose_from = df_particles_for_start_state.loc[start_state, 'idx_particles']
+
             if DEBUG_TRAJECTORIES:
-                flags_particle_at_terminal_state = [1 if envs[p].getState() in self.env.getTerminalStates() else 0 for p in range(len(envs))]
-                print(f"[reactivate_particle_internal] % particles at terminal states: {np.mean(flags_particle_at_terminal_state)*100}% ({np.sum(flags_particle_at_terminal_state)} out of {len(envs)})")
+                # We can add a `True` condition above in order to show the following useful piece of information of the proportion of particles at the state of interest x is useful for tracking the stabilization of Phi(t,x) around the QSD
+                if all_idx_particles_to_choose_from is None:
+                    flags_particle_at_terminal_state = [1 if envs[p].getState() in self.env.getTerminalStates() else 0 for p in range(len(envs))]
+                    print("[reactivate_particle_internal] % particles at terminal states: {:.1f}% ({} out of {})" \
+                          .format(np.mean(flags_particle_at_terminal_state) * 100, np.sum(flags_particle_at_terminal_state), len(envs)))
+                else:
+                    flags_particle_at_terminal_state = [1 if envs[p].getState() in self.env.getTerminalStates() else 0 for p in range(len(envs)) if p in all_idx_particles_to_choose_from]
+                    print("[reactivate_particle_internal] % particles at terminal states: {:.1f}% ({} out of N(s={}) = {})" \
+                          .format(np.mean(flags_particle_at_terminal_state)*100, np.sum(flags_particle_at_terminal_state), start_state, learner.N_for_start_state[start_state]))
             new_state = None
+
             while not done_reactivate:
                 idx_reactivate = reactivate_particle(envs, idx_particle, 0, reactivation_number=None)
                     ## (2023/01/05) the third parameter is dummy when we do NOT use method = ReactivateMethod.VALUE_FUNCTION to reactivate the particle inside function reactivate_particle().
@@ -833,15 +907,15 @@ class Simulator:
                     done_reactivate = True
                     new_state = envs[idx_particle].getState()
                     if DEBUG_TRAJECTORIES:
-                        print("*** Particle #{} ABSORBED at state={} and REACTIVATED to particle {} at state {}" \
-                              .format(idx_particle, state, idx_reactivate, new_state))
+                        print("*** t={}, t_clock={}: Particle #{} ABSORBED at state={} and REACTIVATED to particle {} at state {}" \
+                              .format(t, t_clock, idx_particle, state, idx_reactivate, new_state))
 
             return new_state
         #------------------------------- Auxiliary functions ----------------------------------#
 
 
-        # ---------------------------- Check input parameters ---------------------------------#
-        # -- Absorption and activation sets
+        #---------------------------- Check input parameters ---------------------------------#
+        #-- Absorption and activation sets
         # Class
         if not isinstance(absorption_set, set):
             raise ValueError("Parameter `absorption_set` must be a set: {}".format(absorption_set))
@@ -852,7 +926,18 @@ class Simulator:
 
         if expected_absorption_time is None and expected_exit_time is None:
             raise ValueError("Parameter `expected_exit_time` must be provided when `expected_absorption_time` is None")
-        # ---------------------------- Check input parameters ---------------------------------#
+        #---------------------------- Check input parameters ---------------------------------#
+
+
+        #---------------------------- Parse input parameters ---------------------------------#
+        # Plotting setup
+        if plot:
+            # Setup the figures that will be updated at every absorption event
+            colors = cm.get_cmap(colormap)
+            ax_V = plt.figure(figsize=(10, 6)).subplots(1, 1)
+            # Plot the true state value function (to have it as a reference already
+            ax_V.plot(self.env.getAllStates(), self.env.getV(), '.-', color="blue")
+        #---------------------------- Parse input parameters ---------------------------------#
 
         N = len(envs)
         if max_time_steps is None:
@@ -866,28 +951,70 @@ class Simulator:
 
         # Set the start state of each environment/particle to an activation state, as this is a requirement
         # for the empirical distribution Phi(t).
-        for i, env in enumerate(envs):
+        df_particles_for_start_state = None
+        particles_first_action = [-1]*N
+        if learner.estimate_on_fixed_sample_size:
+            # Create a data frame to store the pieces of information that are necessary to perform the FV estimation of value functions using a fixed sample size of particles
+            # defined by the number of particles that start at each possible state and state-actions where the value functions should be estimated.
+            # The data frame contains the following information:
+            # - t: the simulation time within the group (clock) --> required for the computation of the FV estimator of the value functions
+            # - N: the number of particles in the group --> required for the estimation of Phi(t,x) for each group
+            # - N_left: the number of particles in the group who haven't yet experienced the first absorption event --> required for the selection of the next particle to move
+            #   (i.e. when this number becomes 0, no particle in the group needs to be selected to move, because the update of the FV integral at each absorption time is done
+            #   based on the assumption that absorption times are observed in increasing order, and if we keep moving the particles after the last particle in the group has been
+            #   absorbed at least once, such assumption on the absorption times would no longer be true).
+            # - idx_particles: the IDs of the particles belonging to the group --> required for the reactivation step, as the reactivation particle must be chosen ONLY among the particles in the group to which the absorbed particle belongs
+            #
+            # Note the following characteristics about this data frame:
+            # - It is indexed by the start state so that we can quickly access the information for each group.
+            # - It is updated as the simulation proceeds so that it only contains the rows for the start states on which the FV estimation should still proceed.
+            #   The FV estimation of a start state stops when all the associated N(s) particles have been absorbed at least once.
+            # - When the number of rows in the data frame becomes 0, the simulation stops because it means that all FV particles in the system have been absorbed at least once.
+            df_particles_for_start_state = pd.DataFrame([(0, 0, 0, [])], columns=['t', 'N', 'N_left', 'idx_particles'], index=learner.getActiveSet())
+        for p, env in enumerate(envs):
             # Environment seed
-            seed_i = seed + i if seed is not None else None
+            seed_i = seed + p if seed is not None else None
             env.setSeed(seed_i)
 
             # Choose start state from the set of start states given
             start_state = choose_state_from_set(start_set, dist_proba_for_start_state)
-            if learner.getLearningTask() == LearningTask.CONTINUING:
-                assert start_state not in env.getTerminalStates(), \
-                    f"The start state of an FV particle ({start_state}) cannot be a terminal state of the environment (terminal states = {env.getTerminalStates()}) for the CONTINUING learning task context." \
-                    f"\nThe reason is that, before getting to a terminal state, there must be at least ONE transition of the particle" \
-                    f" --because we need the `info` dictionary to be defined when processing a terminal state below."
             env.setState(start_state)
             # We must store the trajectory of the particle in the environment representing the particle because we need to retrieve the particle's trajectory
             # before every absorption, so that we can estimate the survival probability and the conditional occupation probability that are functions of the start state-action.
             env.setStoreTrajectoryFlag(True)
             # The trajectory is reset to one record with time t=0 and both state and next_state equal to the start state of the environment set above
             env.reset_trajectory()
-        # We set the start time of the simulation to the time of the first record stored in the environments representing the particles
-        # i.e. the time where each particle is positioned at their respective start states.
-        # Note that we can change the first time stored in each environment's trajectory and this start time will be automatically updated.
-        start_time = envs[0].getTrajectory()['time'].iloc[0]
+
+            # We set the start time of the simulation to the time of the first record stored in the environments representing each particle
+            # i.e. the time where each particle is positioned at their respective start states.
+            # Note that this time is the same for all particles, it is defined in the EnvironmentDiscrete.reset_trajectory() method as the time of the first record
+            # in the stored trajectory.
+            start_time = env.getTrajectory()['time'].iloc[0]
+
+            if learner.estimate_on_fixed_sample_size:
+                # Update the information associated to the selected start state in the data frame keeping track of each N(s) group
+                _row = df_particles_for_start_state.loc[start_state]
+                df_particles_for_start_state.loc[start_state, :] = pd.Series([start_time, _row['N'] + 1, _row['N'] + 1, _row['idx_particles'] + [p]], index=df_particles_for_start_state.columns)
+
+                # Choose the start action for the particle so that we can store it right now and use it
+                # when updating Q(s,a) when an absorption of a particle occurs, for which we need to know how many particles are in the group of same start (s,a)
+                # Note that we select the action randomly because we want to have as many actions covered as possible
+                start_action = np.random.choice(self.env.getNumActions())
+                particles_first_action[p] = start_action
+                learner.setStartStateAction(p, start_state, start_action)
+        # Store the start states in the learner, so that we know the number of particles that started at each environment's state when updating Phi(t,x; s)
+        N_never_moved = 0
+        if learner.estimate_on_fixed_sample_size:
+            # Take care of the case when N(s) = 1 (which is not allowed, as N(s) should be > 1...)
+            # We remove the start states s having N(s) = 1 from the data frame keeping track of the number of particles left per group, so that those particles are not picked by the simulation
+            ind_valid_groups = df_particles_for_start_state['N'] > 1
+            df_particles_for_start_state = df_particles_for_start_state.loc[ind_valid_groups, :]
+            N_never_moved = N - sum(df_particles_for_start_state['N'])
+            if sum(~ind_valid_groups) == 0:
+                assert N_never_moved == 0
+            else:
+                print(f"A total of {N_never_moved} particles out of {N} will never be moved because they belong to groups of size N(s) = 1")
+        print(f"df_particles_for_start_state:\n{df_particles_for_start_state}")
 
         # Particles that follow the underlying Markov chain and that are used to learn the state and action values inside A
         # while learning the state and action values outside A
@@ -896,7 +1023,7 @@ class Simulator:
         # NOTE that if no particles are used here, the value of the states in A cannot leverage the information about the rare rewards
         # brought in by the FV-based estimation of the value of the states OUTSIDE A.
         envs_normal = []
-        n_normal_max = 1    # Maximum number of particles used to explore the whole environment
+        n_normal_max = number_free_particles  # Maximum number of \particles used to explore the whole environment
 
         # Event times: the first event time is 0
         event_times = [start_time]
@@ -906,9 +1033,11 @@ class Simulator:
         # We initialize the first element as 0 so that the estimated survival probability starts at 1.0 (i.e. P(T>0) = 1.0)
         first_survival_times = [0]    # We set the first element of the survival times list to 0 so that we can "estimate" the survival probability at 0 (which is always equal to 1 actually)
         idx_reactivate = None   # This is only needed when we want to plot a vertical line in the particle evolution plot with the color of the particle to which an absorbed particle is reactivated
-        has_particle_been_absorbed_once = [False] * N  # List that keeps track of whether each particle has been absorbed once
-        # so that we can end the simulation when all particles have been absorbed
-        # when the survival probability is estimated by this function.
+        has_particle_been_absorbed_once = [False]*N     # List that keeps track of whether each particle has been absorbed once,
+                                                        # so that we can end the simulation when all particles have been absorbed
+                                                        # when the survival probability is estimated by this function.
+        has_particle_been_selected_once = [False]*N     # List that keeps track of whether each particle has been selected for movement at least once,
+                                                        # so that we can choose the already selected start action when learning by groups
 
         if True or DEBUG_ESTIMATORS:
             print("[DEBUG] @{}".format(get_current_datetime_as_string()))
@@ -925,10 +1054,16 @@ class Simulator:
         # (this includes the FV particles and the "normal" particles which are free to explore the whole environment)
         # This is used to count the number of total events used by the simulation which can then be used to design experiments where the comparison among learning methods is fair.
         n_steps_on_all_environments = 0
+        n_absorptions = 0
+        info = {}  # We need this variable to be defined when calling learner.learn() for the first time if the first particle picked for moving has started at a terminal state
         while not done:
             t += 1
 
-            if verbose and np.mod(t, verbose_period) == 0:
+            # Clock to use in the FV estimation of the value functions
+            # In the fixed-sample-size estimation mode, this clock is the internal clock of the group to which the particle that is moved belongs to.
+            t_clock = t
+
+            if show_messages(verbose, verbose_period, t):
                 print("@{}".format(get_current_datetime_as_string()))
                 print(f"FV time step t={t} of max_time_steps={max_time_steps} running...")
                 print(f"# FV particles absorbed at least once: {sum(has_particle_been_absorbed_once)} of max N={N}")
@@ -941,11 +1076,21 @@ class Simulator:
 
             event_times += [t]
 
-            # Select the particle to move uniformly at random
-            idx_particle = np.random.choice(N) # If choosing them in order, use: `(idx_particle + 1) % N`
+            # Select the particle to move
+            assert df_particles_for_start_state is None or len(df_particles_for_start_state) > 0, \
+                "In the group-based FV simulation, there must be at least ONE group of particles who still should be moved. Otherwise, the simulation should have stopped."
+            idx_particle = choose_particle_to_move(t, N, df_particles_for_start_state, choose_particles_in_order=False)
+
+            # Update the clock of the group to which the selected particle belongs
+            start_state = learner.getStartState(idx_particle)
+            V_start_prev = learner.getV().getValue(start_state)  # Store the current value of V(s) as PREVIOUS value for informative plotting purposes (title)
+            if learner.estimate_on_fixed_sample_size:
+                df_particles_for_start_state.loc[start_state, 't'] += 1
+                t_clock = df_particles_for_start_state.loc[start_state, 't']
 
             # Get the current state of the selected particle because that's the particle whose state is going to (possibly) change
             state = envs[idx_particle].getState()
+            V_state_prev = learner.getV().getValue(state)  # Store the current value of V(s) as PREVIOUS value for informative plotting purposes (title)
             #print(f"particle {idx_particle} (s={state})", end=", ")
 
             # Check if the particle that was picked for update is CURRENTLY at a terminal state,
@@ -970,16 +1115,19 @@ class Simulator:
                 # Note that the transition from the terminal state to the start state is stored as part of the particle's trajectory
                 # (because we are passing env=envs[idx_particle] as parameter to learn_terminal_state_values()).
                 if learner.getLearningTask() == LearningTask.CONTINUING:
-                    self.learn_terminal_state_values(t, state, next_state, info, envs=envs, idx_particle=idx_particle, update_phi=True)
-                        ## Note that the `info` dictionary is guaranteed to be defined thanks to the assertion
-                        ## at the initialization of the FV particles that asserts the particles cannot be at a terminal state.
-                        ## Thanks to this condition, when a particle is at a terminal state, it means that it MUST have
-                        ## transitioned from a non-terminal state, and this implies that the `info` dictionary has been
-                        ## defined as the output of such transition.
+                    self.learn_terminal_state_values(t_clock, state, next_state, info, envs=envs, idx_particle=idx_particle, update_phi=True)
             else:
                 # Step on the selected particle
                 #print(f"\n[debug] Moving particle #{idx_particle}...")
-                action = policy.choose_action(state)
+                if not learner.estimate_on_fixed_sample_size or \
+                   learner.estimate_on_fixed_sample_size and has_particle_been_selected_once[idx_particle]:
+                    # Normal selection of action, based on the policy
+                    action = policy.choose_action(state)
+                else:
+                    # This is the first movement of the particle
+                    # => Perform the FIRST action that has already been chosen for the particle at the beginning
+                    action = particles_first_action[idx_particle]
+                    has_particle_been_selected_once[idx_particle] = True
                 next_state, reward, done_episode, info = envs[idx_particle].step(action)
                 n_steps_on_all_environments += 1
                 if estimated_average_reward is not None:
@@ -1000,7 +1148,16 @@ class Simulator:
                 # only when the FV SIMULATION IS OVER, not at the end of each episode. Otherwise, the estimated average
                 # reward will fluctuate a lot (i.e. as the average reward observed by episode fluctuates) and this is NOT what we want,
                 # we want a stable estimate of the average reward over all episodes.
-                learner.learn(t, state, action, next_state, reward, done, info, envs=envs, idx_particle=idx_particle, update_phi=True)
+                # 3) We MAY ask to NOT update the state counts at this learning step because we want to update them only when FV learning takes place
+                # i.e. at an absorption time. Otherwise, we risk that the learning rate alpha will be too small when performing the FV learning of the states outside A.
+                # Recall that here the `state` value is a state in the active set of states, excluding terminal states, because when a terminal state is visited, the environment
+                # is reset to a start state in the IF block above.
+                # TODO: (2024/01/29) Revise the correct use of the `done` variable here, instead of `done_episode`, because actually when we are done by `done`, this line will NEVER be executed because we will NOT enter again the `while done` loop...
+                assert state in learner.getActiveSet()
+                if True or df_particles_for_start_state is None or state not in df_particles_for_start_state.index:
+                    info['update_counts'] = True #True #False
+                    learner.learn(t_clock, state, action, next_state, reward, done, info, envs=envs, idx_particle=idx_particle, update_phi=True)
+                    info.pop('update_counts')
 
             # Step on all the "normal" particles that have been created for the exploration of the system following the dynamics of the *underlying* Markov chain
             for idx_env, env in enumerate(envs_normal):
@@ -1009,14 +1166,13 @@ class Simulator:
                 action_normal = policy.choose_action(state_normal)
                 next_state_normal, reward_normal, done_normal, info_normal = env.step(action_normal)
                 n_steps_on_all_environments += 1
-                # We ask NOT to update the learning rates after learning from the superclass learner (called next)
-                # for the states that are NOT in the absorption set A, because the learning rates for those states
-                # will be updated when learning from the FV learner at every absorption time (see the learn_at_absorption() method)
-                # and we want to learn the value of the states outside A using the FV approach, not from the exploration of the underlying Markov process
-                # carried out here by these "normal" particles.
-                # If we update alpha here for the states outside A, when they reach the FV learning stage, alpha will be too small and not much will be learned.
-                info_normal['update_alphas'] = state_normal in absorption_set
-                info_normal['update_trajectory'] = state_normal in absorption_set  # We do this because we don't want the state COUNTS to be updated for states whose value will be learned by FV at learn_at_absorption() (as these state counts are stored in the learner NOT in the environment)
+                # We may ask to NOT update the state counts when learning from the superclass learner (called next)
+                # for the states that are NOT in the absorption set A, because we don't want the learning rates for those states (adjusted by the state counts as alpha0 / count)
+                # to be updated now as we risk that they become too small when learning the values of those states by FV when an absorption event occurs
+                # (see the learn_at_absorption() method), and we want to learn the value of the states outside A using the FV estimator,
+                # not from the exploration of the underlying Markov process carried out here by these "normal" particles.
+                # It is worth noting that state counts are stored in the learner NOT in the environment associated to the particle being updated here)
+                info_normal['update_counts'] = True #state_normal not in df_particles_for_start_state.index if df_particles_for_start_state is not None else state_normal in absorption_set #True
                 learner.learn(t, state_normal, action_normal, next_state_normal, reward_normal, done_normal, info_normal, envs=envs_normal, idx_particle=idx_env, update_phi=False)
                 if done_normal and learner.getLearningTask() == LearningTask.CONTINUING:
                     # Learn the value of the terminal state because we are in the continuing learning task context (where terminal states do not necessarily have zero value)
@@ -1034,6 +1190,7 @@ class Simulator:
                 #   AFTER reactivation, as reactivation happens instantaneously! Hence we should FIRST reactivate the particle and then call the learner
                 #   of the value functions (normally done by the LeaFV.learn_at_absorption() method).
                 # => 2) Reactivate the particle.
+                n_absorptions += 1
 
                 # Record the absorption state (used when learning the value functions)
                 state_absorption = next_state
@@ -1055,11 +1212,16 @@ class Simulator:
                 # depends on the state and action whose value is learned.
                 # The value of Phi(t,x) is also updated for every state of interest x, based on the particle moving from state_absorption
                 # to the reactivated state stored in `next_state`.
-                learner.learn_at_absorption(envs, idx_particle, t, state_absorption, next_state)
+                if learner.estimate_on_fixed_sample_size:
+                    # The time parameter should be the survival time
+                    learner.learn_at_absorption_fixed_sample_size(envs, idx_particle, t_clock - start_time, state_absorption, next_state)
+                else:
+                    # The time parameter should be the absolute system time
+                    learner.learn_at_absorption(envs, idx_particle, t, state_absorption, next_state)
 
-                # Contribution to the overall survival probability (i.e. the survival probability that is used to estimate stationary probabilities of states of interests x)
+                # Collect the new survival time, if it's the first observed survival time
                 if not has_particle_been_absorbed_once[idx_particle]:
-                    first_survival_times += [t - start_time]
+                    first_survival_times += [t_clock - start_time]
                         ## Notes:
                         ## 1) By construction the first survival time is equal to the time elapsed between the simulation's start time
                         ## and the absorption time, since the start since this is the first time the particle has been absorbed.
@@ -1067,9 +1229,9 @@ class Simulator:
                         ##  Therefore, to get the survival time, we simply subtract the simulation's start time from the absorption time.
                         ##  We can also quickly check this by considering the situation where the first particle moved at the start of the simulation and
                         ##  is absorbed rightaway: in such scenario we need to store 1 as survival time because we want to state that it took one step
-                        ##  for the particle to be absorbed; since t is initialized at start_time and at the very beginning of the `while not done` loop t is increased by 1,
-                        ##  t will have the value start_time + 1 at the occurrence of the absorption, hence the value computed above `t - start_time` gives precisely 1,
-                        ##  the survival time of the particle in this example.
+                        ##  for the particle to be absorbed; since, in the simplest case of one group of FV particles, t_clock = t and since t is initialized at start_time
+                        ##  and at the very beginning of the `while not done` loop t is increased by 1, t will have the value start_time + 1 at the occurrence of the absorption,
+                        ##  hence the value computed above `t_clock - start_time` gives precisely 1, the survival time of the particle in this example.
 
                     # Mark the particle as "absorbed once" so that we don't use any other absorption time from this
                     # particle to estimate the survival probability, because the absorption times coming after the first
@@ -1078,6 +1240,17 @@ class Simulator:
                     # (because the particle has been reactivated to any other state)
                     # which is a requirement for the estimation of the survival probability distribution.
                     has_particle_been_absorbed_once[idx_particle] = True
+
+                    if learner.estimate_on_fixed_sample_size:
+                        # Decrease the number of particles left for the group N(s) associated to the start state of the currently updated particle
+                        df_particles_for_start_state.loc[start_state, 'N_left'] -= 1
+                        assert df_particles_for_start_state.loc[start_state, 'N_left'] >= 0
+                        if df_particles_for_start_state.loc[start_state, 'N_left'] == 0:
+                            # When all particles in a given N(s) group have been absorbed at least once,
+                            # we should NO longer choose any particle from tha group for next particle to move
+                            # => Remove the group from the data frame that keeps relevant information of each group of particles
+                            df_particles_for_start_state.drop(start_state, inplace=True)
+
                     if False:
                         print("First-time survival times observed so far: {}".format(sum(has_particle_been_absorbed_once)))
                         print(first_survival_times)
@@ -1091,10 +1264,50 @@ class Simulator:
                         envs_normal[-1].setSeed(int(seed + t))
                     #print(f"\n[debug] New NORMAL particle created after first absorption of particle #{idx_particle}: {len(envs_normal)} in total\n")
 
-            if DEBUG_TRAJECTORIES:
-                print("[FV] Moved P={}, t={}: state={}, action={} -> next_state={}, reward={}" \
-                      .format(idx_particle, t, state, action, next_state, reward),
+                    if plot:
+                        # Plot the updated V(s) estimate
+                        ax_V.plot(self.env.getAllStates(), learner.getV().getValues(), linewidth=0.5, color=colors(n_absorptions / 255))
+                        if False:
+                            # Add the state counts
+                            ax_count = ax_V.twinx()
+                            ax_count.bar(self.env.getAllStates(), learner.getStateCounts(), color="blue", alpha=0.3)
+                            plt.sca(ax_V)  # Go back to the primary axis
+                        plt.title(f"V(s) evolution (blueish: initial, reddish: final)"
+                                  f"\nSystem's time t = {t}, Abs. no. = {n_absorptions} (# first abs. = {sum(has_particle_been_absorbed_once)} of max N = {N}), start_state = {start_state}"
+                                  f"\nfrom state = {state} --> absorption state = {state_absorption} (V(s)={np.round(learner.getV().getValue(state_absorption), 3)}) --> reactivation state = {next_state}"
+                                  f"\nV(start={start_state}) = {np.round(V_start_prev, 3)}) --> V(start={start_state}) = {np.round(learner.getV().getValue(start_state), 3)} (delta(V) = {np.round(learner.getV().getValue(start_state) - V_start_prev, 3)}, {np.round((learner.getV().getValue(start_state) - V_start_prev) / max(1, V_start_prev) * 100, 1)}%)"
+                                  f"\nCount[s] = {learner.getStateCounts()}, alpha[s] = {learner.getAlphasByState()}")
+                        if pause == +np.Inf:
+                            input("Press ENTER to continue...")
+                        else:
+                            plt.pause(min(10*pause, 1))    # A call to pause() is essential if we want the plot to be updated by plt.draw()!! (amazing...)
+                        plt.draw()
+
+            if plot and show_messages(True, verbose_period, t):
+                # next_state is NOT an absorption state
+                # => Plot the updated V(s) estimate showing the TD learning step just performed
+                ax_V.plot(self.env.getAllStates(), learner.getV().getValues(), linewidth=0.5, color=colors(n_absorptions / 255))
+                if False:
+                    # Add the state counts
+                    ax_count = ax_V.twinx()
+                    ax_count.bar(self.env.getAllStates(), learner.getStateCounts(), color="blue", alpha=0.3)
+                    plt.sca(ax_V)  # Go back to the primary axis
+                plt.title(f"V(s) evolution (blueish: initial, reddish: final)"
+                          f"\nSystem's time t = {t} of MAX {max_time_steps} (# first abs. = {sum(has_particle_been_absorbed_once)} of max N = {N}), start_state = {start_state}"
+                          f"\nfrom state = {state} --> next state = {next_state} (V(s)={np.round(learner.getV().getValue(next_state), 3)})"
+                          f"\nV(state={state}) = {np.round(V_state_prev, 3)} --> V(state={state}) = {np.round(learner.getV().getValue(state), 3)} (delta(V) = {np.round(learner.getV().getValue(state) - V_state_prev, 3)}, {np.round((learner.getV().getValue(state) - V_state_prev) / max(1, V_state_prev) * 100, 1)}%)"
+                          f"\nCount[s] = {learner.getStateCounts()}, alpha[s] = {learner.getAlphasByState()}")
+                if pause == +np.Inf:
+                    input("Press ENTER to continue...")
+                else:
+                    plt.pause(pause)    # A call to pause() is essential if we want the plot to be updated by plt.draw()!! (amazing...)
+                plt.draw()
+
+            if False or DEBUG_TRAJECTORIES:
+                print("[FV] Moved P={} (start state={}), t={} (t_clock={}): state={}, action={} -> next_state={}, reward={}" \
+                      .format(idx_particle, start_state, t, t_clock, state, action, next_state, reward),
                       end="\n")
+                print(f"Particles data frame:\n{df_particles_for_start_state}")
 
             idx_reactivate = None
 
@@ -1106,7 +1319,7 @@ class Simulator:
             # THEREFORE, if we are not interested in estimating the average reward using FV, we may want to continue until
             # we reach the maximum number of steps, regardless of the first absorption event of each particle.
             # Use this if we want to stop simulation either when the maximum number of steps has been reached OR all N particles have been absorbed at least once
-            done = t >= max_time_steps or sum(has_particle_been_absorbed_once) == N
+            done = t >= max_time_steps or sum(has_particle_been_absorbed_once) == N - N_never_moved
             # Use this if we want to stop simulation ONLY when the maximum number of steps has been reached.
             # This should be the preferred way if we want to do a FAIR comparison with other benchmark methods,
             # because we guarantee that all time steps specified are used (which normally comes from the FAIR comparison setup)
@@ -1121,8 +1334,9 @@ class Simulator:
             # Note that these survival times are underestimations of the actual survival times, so the FV estimate of the average reward
             # will have a negative bias, but this is a smaller bias than if we didn't consider the last observed time `t`
             # as part of the estimated survival probability function.
-            n_particles_not_absorbed = N - sum(has_particle_been_absorbed_once)
+            n_particles_not_absorbed = N - N_never_moved - sum(has_particle_been_absorbed_once)
             first_survival_times += list(np.repeat(t, n_particles_not_absorbed))
+            print(f"WARNING: Not all {N - N_never_moved} particles were absorbed at least ONCE because the maximum number of time steps for all particles ({max_time_steps}) has been reached: # NOT absorbed particles = {n_particles_not_absorbed}")
         # The following assertion should be used ONLY when the FV process stops if all N particles are absorbed at least once before reaching max_time_steps
         assert np.max([np.max(learner.dict_phi[x]['t']) for x in learner.dict_phi.keys()]) <= np.max(first_survival_times), \
                 "The maximum time stored in Phi(t,x) must be at most the maximum observed survival time"
@@ -1138,7 +1352,6 @@ class Simulator:
         max_survival_time = df_proba_surv['t'].iloc[-1]
 
         if False or DEBUG_ESTIMATORS:
-            import pandas as pd
             max_rows = pd.get_option('display.max_rows')
             pd.set_option('display.max_rows', None)
             print("Survival probability:\n{}".format(df_proba_surv))
@@ -1151,6 +1364,8 @@ class Simulator:
             for x in learner.dict_phi.keys():
                 plt.step(learner.dict_phi[x]['t'], learner.dict_phi[x]['Phi'], color="red", where='post')
                 plt.title(f"P(T>t) (blue) and Phi(t,x) (red) for state x = {x}")
+
+        print(f"Distribution of start actions:\n{pd.Series([learner.getStartAction(idx_particle) for idx_particle in range(N)]).value_counts()}")
 
         return n_steps_on_all_environments, learner.getV().getValues(), learner.getQ().getValues(), learner.getStateCounts(), learner.dict_phi, df_proba_surv, expected_absorption_time, max_survival_time
 

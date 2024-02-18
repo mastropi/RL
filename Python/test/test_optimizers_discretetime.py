@@ -63,6 +63,7 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
                         N=100, T=100,   # N is the number of particles, T is the max number of time steps allowed over ALL episodes in the single Markov chain simulation that estimates E(T_A)
                         absorption_set: Union[list, set]=None,
                         reset_method_value_functions=ResetMethod.ALLZEROS,
+                        estimate_on_fixed_sample_size=False,
                         seed=1717, debug=False):
         env_shape = shape
         cls.debug = debug
@@ -228,6 +229,7 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
                                 adjust_alpha_by_episode=False,
                                 alpha_min=cls.alpha_min,
                                 reset_method=cls.reset_method, reset_params=cls.reset_params, reset_seed=cls.seed,
+                                estimate_on_fixed_sample_size=estimate_on_fixed_sample_size,
                                 debug=False)
         #actor_critic = LeaActorCriticNN(cls.env2d, cls.policy_nn, learner_fv, optimizer_learning_rate=0.1, seed=cls.seed, debug=True)
         #cls.agent_nn_fv = agents.GenericAgent(cls.policy_nn, dict({'value': learner_fv, 'policy': actor_critic}))
