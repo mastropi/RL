@@ -167,7 +167,7 @@ class Simulator:
             else:
                 return self._run_single(**kwargs)
 
-    def _run_fv(self, max_time_steps_fv=None, min_num_cycles_for_expectations=MIN_NUM_CYCLES_FOR_EXPECTATIONS,
+    def _run_fv(self, max_time_steps_fv=None, min_num_cycles_for_expectations=None,
                 reset_value_functions=True, seed=None, verbose=True, verbose_period=100, plot=False, colormap="seismic", pause=0.1):
         """
         Runs all the simulations that are needed to learn differential value functions using the Fleming-Viot approach.
@@ -184,21 +184,23 @@ class Simulator:
             default: None, in which case its default value is defined by method _run_simulation_fv()
 
         min_num_cycles_for_expectations: (opt) int
-            Minimum number of reabsorption cycles that should be observed in order to estimate the expected reabsorption time, E(T_A).
+            Minimum number of reabsorption cycles that should be observed in order to estimate the expected reabsorption time, E(T_A)
+            when learning is done under the AVERAGE reward criterion. Under the DISCOUNTED reward criterion, E(T_A) does not need to be estimated.
             If this minimum number of cycles is NOT observed, then the expected reabsorption time is NOT estimated and the FV simulation is NOT run
             (as there is no use of running it, since we need an estimate of E(T_A) in order to produce an FV estimate of the average reward).
-            NOTE: (2024/02/13) Currently, the lack of an E(T_A) estimate ONLY affects the FV-estimation of the average reward,
-            as the DIFFERENTIAL value functions (which is the definition of value functions in the CONTINUING learning task setting,
-            which is the setting of the FV estimation of value functions) do NOT currently use the average reward estimated by FV for correction,
-            but the traditional average reward estimated from the single Markov chain exploration of the environment used to estimate E(T_A).
+            NOTE: (2024/02/13) Currently, the lack of an E(T_A) estimate ONLY affects the FV estimation of the average reward,
+            but this estimation does NOT affect the estimation of the differential value functions (which is the definition of value functions
+            under the AVERAGE reward criterion used in CONTINUING learning tasks), because such estimation does NOT currently use
+            the average reward estimated by FV for correction of the return to obtain the differential value functions;
+            instead the traditional average reward estimated from the single Markov chain exploration of the environment is used.
             This is NOT the best approach to use (because the average reward could be WAY underestimated if it is rarely observed --as is the case
             in applications of FV!), however in order to use the FV-estimated average reward in place of the traditionally estimated average reward,
             we need to use the ITERATIVE update of the FV-estimated average reward (because value functions are estimated by a TD learner
             and a TD learner of value functions needs an average reward that is either already available OR is updated at every learning step
-            to be used for correction of the return that thus gives the estimate of the value functions. This iterative update of the FV-estimated average
+            to be used for correction of the return that thus gives the estimate of the value functions). This iterative update of the FV-estimated average
             reward, although already implemented in LeaFV, is currently not in place by the FV learning implemented here (because the method
             defined in LeaFV that ITERATIVELY computes the FV-estimated average reward is NOT currently called).
-            default: MIN_NUM_CYCLES_FOR_EXPECTATIONS
+            default: None, in which case the value MIN_NUM_CYCLES_FOR_EXPECTATIONS is used under the AVERAGE reward criterion, and 0 under the DISCOUNTED reward criterion
 
         reset_value_functions: (opt) bool
             Whether the estimated value functions should be reset at the start of the
@@ -214,6 +216,14 @@ class Simulator:
         - n_events_fv: number of events observed during the FV simulation that estimates Phi(t).
         """
         #--- Parse input parameters ---
+        if min_num_cycles_for_expectations is None:
+            if self.agent.getLearner().getLearningCriterion() == LearningCriterion.AVERAGE:
+                min_num_cycles_for_expectations = MIN_NUM_CYCLES_FOR_EXPECTATIONS
+            else:
+                # The expected reabsorption cycle time E(T_A) does not need to be estimated for the DISCOUNTED reward criterion,
+                # so we do not require a minimum number of cycles to be observed during the single Markov chain simulation.
+                # This simulation is simply used to provide a first estimate of the value functions, but NOT of the expected reabsorption cycle time.
+                min_num_cycles_for_expectations = 0
         dict_params_simul = dict({  'max_time_steps_fv': max_time_steps_fv,                         # Maximum number of time steps allowed for the N particles (comprehensively) in the FV simulation used to estimate the QSD Phi(t,x)
                                     'N': self.agent.getLearner().getNumParticles(),
                                     'T': self.agent.getLearner().getNumTimeStepsForExpectation(),   # Maximum number of time steps allowed in each episode of the single Markov chain that estimates the expected reabsorption time E(T_A)
@@ -971,6 +981,9 @@ class Simulator:
             #   The FV estimation of a start state stops when all the associated N(s) particles have been absorbed at least once.
             # - When the number of rows in the data frame becomes 0, the simulation stops because it means that all FV particles in the system have been absorbed at least once.
             df_particles_for_start_state = pd.DataFrame([(0, 0, 0, [])], columns=['t', 'N', 'N_left', 'idx_particles'], index=learner.getActiveSet())
+
+            # Create a list where we store the clock for each particle, which is needed for the estimation of the survival probability P(T>t) for each start state
+            particle_times = [0]*N
         for p, env in enumerate(envs):
             # Environment seed
             seed_i = seed + p if seed is not None else None
@@ -992,10 +1005,12 @@ class Simulator:
             start_time = env.getTrajectory()['time'].iloc[0]
 
             if learner.estimate_on_fixed_sample_size:
+                #-- Information about each group of particles
                 # Update the information associated to the selected start state in the data frame keeping track of each N(s) group
                 _row = df_particles_for_start_state.loc[start_state]
                 df_particles_for_start_state.loc[start_state, :] = pd.Series([start_time, _row['N'] + 1, _row['N'] + 1, _row['idx_particles'] + [p]], index=df_particles_for_start_state.columns)
 
+                #-- Information about each particle
                 # Choose the start action for the particle so that we can store it right now and use it
                 # when updating Q(s,a) when an absorption of a particle occurs, for which we need to know how many particles are in the group of same start (s,a)
                 # Note that we select the action randomly because we want to have as many actions covered as possible
@@ -1082,9 +1097,16 @@ class Simulator:
             idx_particle = choose_particle_to_move(t, N, df_particles_for_start_state, choose_particles_in_order=False)
 
             # Update the clock of the group to which the selected particle belongs
+            # Note that we always (regardless of the value of attribute estimate_on_fixed_sample_size) store the start state of the particle being moved
+            # and the current value of V(s) of such start state (which is the value that is updated by the FV process carried out here)
+            # because these pieces of information are used in plots (regardless of the value of attribute estimate_on_fixed_sample_size).
             start_state = learner.getStartState(idx_particle)
-            V_start_prev = learner.getV().getValue(start_state)  # Store the current value of V(s) as PREVIOUS value for informative plotting purposes (title)
+            V_start_prev = learner.getV().getValue(start_state)
             if learner.estimate_on_fixed_sample_size:
+                # Update the particle's clock (used in the estimation of the survival probability P(T>t) for each start state)
+                particle_times[idx_particle] += 1
+
+                # Update the group's clock (used in the estimation of the conditional occupation probability Phi(t,x) for each start state
                 df_particles_for_start_state.loc[start_state, 't'] += 1
                 t_clock = df_particles_for_start_state.loc[start_state, 't']
 
@@ -1213,8 +1235,14 @@ class Simulator:
                 # The value of Phi(t,x) is also updated for every state of interest x, based on the particle moving from state_absorption
                 # to the reactivated state stored in `next_state`.
                 if learner.estimate_on_fixed_sample_size:
-                    # The time parameter should be the survival time
-                    learner.learn_at_absorption_fixed_sample_size(envs, idx_particle, t_clock - start_time, state_absorption, next_state)
+                    # Case when the survival function's clock is the same as the clock for Phi
+                    # (note that the third and fourth arguments have the same value)
+                    learner.learn_at_absorption_fixed_sample_size(envs, idx_particle, t_clock - start_time, t_clock - start_time, state_absorption, next_state)
+                    # Use the following when there is a clock for the particle (used for the estimation of P(T>t)) and a clock for the system (use for the estimation of Phi(t,x))
+                    # (2024/03/04) Note that this is currently commented out because, when the estimation of P(T>t) follows the particle's clock, the absorption times are NOT
+                    # necessarily observed in order and this complicates a lot the update of the FV "integral". Since we are now going to switch the learning process to the
+                    # average reward criterion context, I don't develop this further now, only will do so if necessary in the future.
+                    #learner.learn_at_absorption_fixed_sample_size(envs, idx_particle, particle_times[idx_particle], t_clock - start_time, state_absorption, next_state)
                 else:
                     # The time parameter should be the absolute system time
                     learner.learn_at_absorption(envs, idx_particle, t, state_absorption, next_state)

@@ -267,10 +267,9 @@ for rep in range(R):
     sim = DiscreteSimulator(env1d, agent_fv, debug=False)
     state_values_fv, action_values_fv, state_counts_fv, probas_stationary, expected_reward, expected_absorption_time, n_cycles_absorption_used, n_events_et, n_events_fv = \
         sim.run(max_time_steps_fv=max_time_steps_fv_for_all_particles,
-                min_num_cycles_for_expectations=0,
                 seed=seed_this,
                 verbose=True, verbose_period=50,
-                plot=False, colormap=colormap, pause=0.1)  # Use plot=True to create plots that show how learning progresses; use pause=+np.Inf to "press ENTER to continue" between plots
+                plot=plot, colormap=colormap, pause=0.1)  # Use plot=True to create plots that show how learning progresses; use pause=+np.Inf to "press ENTER to continue" between plots
     time_fv = timer() - time_start
     avg_reward_fv = learner_fv.getAverageReward()
     if R > 1:
@@ -317,7 +316,7 @@ for rep in range(R):
                 start_state_first_episode=start_state, seed=seed_this,
                 compute_rmse=True, state_observe=None, #nS-2,  # This is the state just before the terminal state
                 verbose=True, verbose_period=50,
-                plot=False, colormap=colormap, pause=0.1)    # Use plot=True to create plots that show how learning progresses; use pause=+np.Inf to "press ENTER to continue" between plots
+                plot=plot, colormap=colormap, pause=0.1)    # Use plot=True to create plots that show how learning progresses; use pause=+np.Inf to "press ENTER to continue" between plots
     time_td = timer() - time_start
     avg_reward_td = learner_td.getAverageReward()
     if R == 1:
@@ -350,7 +349,7 @@ ax_td.plot(learner_td.alphas); ax_td.legend(np.arange(nS), title="States"); ax_t
 ax_fv.plot(learner_fv.alphas); ax_fv.legend(np.arange(nS), title="States"); ax_fv.set_title("Alphas in FV learning by state"); ax_fv.set_ylim((0, alpha))
 plt.suptitle(suptitle)
 
-if False:   # NEED TO FIX THE CORRECT STORAGE OF THE TRAJECTORY HISTORY IN THE FV LEARNER as explainedin the WARNING message below when retrieving the FV trajectory history
+if False:   # NEED TO FIX THE CORRECT STORAGE OF THE TRAJECTORY HISTORY IN THE FV LEARNER as explained in the WARNING message below when retrieving the FV trajectory history
     # Check the state and action distribution for the last replication
     # TD
     states_history_td = np.concatenate(learner_td.states)
@@ -799,7 +798,7 @@ else:
         # Learn the value functions using the FV simulator
         if learning_method == "values_fv":
             V, Q, state_counts, probas_stationary, expected_reward, expected_absorption_time, n_cycles_absorption_used, n_events_et, n_events_fv = \
-                simulator_value_functions.run(max_time_steps_fv=max_time_steps_fv_for_all_particles, min_num_cycles_for_expectations=0,
+                simulator_value_functions.run(max_time_steps_fv=max_time_steps_fv_for_all_particles,
                                                 ## Note: We set the minimum number of cycles for the estimation of E(T_A) to 0 because we do NOT need
                                                 ## the estimation of the average reward to learn the optimal policy, as it cancels out in the advantage function Q(s,a) - V(s)!!
                                               reset_value_functions=reset_value_functions_at_this_step, seed=seed_this, verbose=False, verbose_period=verbose_period)

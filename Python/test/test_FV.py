@@ -301,7 +301,6 @@ if __name__ == '__main__':
             sim.run(nepisodes=nepisodes,
                     max_time_steps_per_episode=np.Inf,
                     max_time_steps_fv=100,
-                    min_num_cycles_for_expectations=0,
                     seed=seed,
                     verbose=True, verbose_period=1,
                     plot=False)

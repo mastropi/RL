@@ -75,17 +75,17 @@ class LeaFV(LeaTDLambda):
         in order to tackle the case of non-ergodic Markov chain induced by a deterministic policies).
         default: LearningCriterion.AVERAGE
 
+    estimate_on_fixed_sample_size: (opt) bool
+        Whether to compute the FV estimation of value functions based on groups of particles of fixed size
+        determined by their start states and state-actions.
+        default: False
+
     burnin_time: (opt) int or None
         Burn-in time to wait until the empirical mean estimation of Phi(t,x) is considered to have reached
         stationarity, and thus be independent of the initial state and action.
         When `None`, the burn-in time is set to twice the number of particles, 2*N, as the time the FV
         system needs to reach stationarity is proportional to the number of particles in the system.
         default: 0
-
-    estimate_on_fixed_sample_size: (opt) bool
-        Whether to compute the FV estimation of value functions based on groups of particles of fixed size
-        determined by their start states and state-actions.
-        default: False
 
     TIME_RESOLUTION: (opt) positive float (in capital letters because the concept is that it's a constant)
         Time resolution for the underlying Markov process governing the dynamics of the Fleming-Viot
@@ -102,11 +102,11 @@ class LeaFV(LeaTDLambda):
                  probas_stationary_start_state_et: dict=None,
                  probas_stationary_start_state_fv: dict=None,
                  criterion=LearningCriterion.AVERAGE,
+                 estimate_on_fixed_sample_size=False,
                  alpha=0.1, gamma=1.0, lmbda=0.0,
                  adjust_alpha=False, alpha_update_type=AlphaUpdateType.EVERY_STATE_VISIT,
                  adjust_alpha_by_episode=False, alpha_min=0., func_adjust_alpha=None,
                  reset_method=ResetMethod.ALLZEROS, reset_params=None, reset_seed=None,
-                 estimate_on_fixed_sample_size=False,
                  burnin_time=0, TIME_RESOLUTION=1E-9,
                  debug=False):
         super().__init__(env, criterion=criterion, task=LearningTask.CONTINUING, alpha=alpha,  gamma=gamma, lmbda=lmbda, adjust_alpha=adjust_alpha,
@@ -451,31 +451,37 @@ class LeaFV(LeaTDLambda):
         # Reset the trajectory of the absorbed particle for the next absorption event to the next state which is the reactivated state
         envs[idx_particle].reset_trajectory(next_state)
 
-    def learn_at_absorption_fixed_sample_size(self, envs, idx_particle, t_surv, state_absorption, next_state):
+    def learn_at_absorption_fixed_sample_size(self, envs, idx_particle, t_surv, t_phi, state_absorption, next_state):
         """
         Arguments:
         t_surv: positive float
-            Survival time as measured in the internal clock of the group of particles to which the absorbed particle belongs to.
+            Survival time as measured in the internal clock of the absorbed particle, used in the estimation of the survival probability P(T>t)
+            associated to the start state of the absorbed particle.
+
+        t_phi: positive float
+            Time used in the estimation of the conditional occupation probability Phi(t,x), which should be the SYSTEM time of the group of FV particles
+            to which the absorbed particle belongs.
         """
-        #-- Update Phi based on the new reactivated position of the particle after the absorption
+        assert t_surv <= t_phi, f"The particle's clock ({t_surv}) must be at MOST equal to the system's clock ({t_phi})"
+        #-- Update Phi based on the new position of the particle following reactivation after the absorption
         # This is important because Phi could have already experienced an update, which is the case when the absorption occurred from a state of interest x
         # as this implies that the occupation frequency of x changed when the particle was absorbed.
         start_state = self.getStartState(idx_particle)
         start_action = self.getStartAction(idx_particle)
-        self._update_phi_function_fixed_sample_size(start_state, start_action, t_surv, state_absorption, next_state)
-        # Check if the Phi function was updated, if NOT, we add the current survival time to the data frame of Phi(t,x) values because we need it for:
+        self._update_phi_function_fixed_sample_size(start_state, start_action, t_phi, state_absorption, next_state)
+        # Check if the Phi function was updated, if NOT, we add the current observed time to the data frame of Phi(t,x) values because we need it for:
         # - updating the Phi contribution to the FV integral at the CURRENT absorption time (as this absorption time defines the end time on which the Phi values are summed)
         # - updating the Phi contribution to the FV integral at the NEXT absorption time (as this absorption time defines the start time on which the Phi values will be summed)
         for x in self.states_of_interest:
-            if self.dict_phi_for_state[start_state][x]['t'].iloc[-1] < t_surv:
+            if self.dict_phi_for_state[start_state][x]['t'].iloc[-1] < t_phi:
                 _phi_last = self.dict_phi_for_state[start_state][x]['Phi'].iloc[-1]
                 self.dict_phi_for_state[start_state][x] = pd.concat([self.dict_phi_for_state[start_state][x],
-                                                                     pd.DataFrame([[t_surv, _phi_last]], index=[self.dict_phi_for_state[start_state][x].shape[0]], columns=['t', 'Phi'])],
+                                                                     pd.DataFrame([[t_phi, _phi_last]], index=[self.dict_phi_for_state[start_state][x].shape[0]], columns=['t', 'Phi'])],
                                                                     axis=0)
-            if self.dict_phi_for_state_action[start_state][start_action][x]['t'].iloc[-1] < t_surv:
+            if self.dict_phi_for_state_action[start_state][start_action][x]['t'].iloc[-1] < t_phi:
                 _phi_last = self.dict_phi_for_state_action[start_state][start_action][x]['Phi'].iloc[-1]
                 self.dict_phi_for_state_action[start_state][start_action][x] = pd.concat([self.dict_phi_for_state_action[start_state][start_action][x],
-                                                                                         pd.DataFrame([[t_surv, _phi_last]], index=[self.dict_phi_for_state_action[start_state][start_action][x].shape[0]], columns=['t', 'Phi'])],
+                                                                                         pd.DataFrame([[t_phi, _phi_last]], index=[self.dict_phi_for_state_action[start_state][start_action][x].shape[0]], columns=['t', 'Phi'])],
                                                                                         axis=0)
 
         #-- Learn the value function using the FV estimator on the group of particles that started at the same state at which the absorbed particle started
@@ -493,7 +499,7 @@ class LeaFV(LeaTDLambda):
         # o.w. we don't want to decrease alpha when no signal was received from the rare rewards outside A.
         #print("Learn: state = {}, next_state = {}, done = {}".format(state, next_state, done))
         if delta_V != 0.0:
-            self._update_state_counts(t_surv, start_state)
+            self._update_state_counts(t_phi, start_state)
             self._update_alphas(start_state)
         # TODO: (2024/01/03) ALSO update the alphas by state-action (to be defined in the GenericLearner class first)
 
@@ -513,7 +519,7 @@ class LeaFV(LeaTDLambda):
         self.dict_phi = update_phi(self.env, self.N, t, self.dict_phi, state, next_state)
 
     def _update_phi_function_fixed_sample_size(self, start_state, start_action, t, state, next_state):
-        "Updates the empirical mean phi(t, x; s) for x in intersection({state, next_state}, states_of_interest) for the given state s"
+        "Updates the empirical mean phi(t, x; s) at the given time t, for x in intersection({state, next_state}, states_of_interest) for the given state s"
         self.dict_phi_for_state[start_state] = update_phi(self.env, self.N_for_start_state[start_state], t, self.dict_phi_for_state[start_state], state, next_state)
         self.dict_phi_for_state_action[start_state][start_action] = update_phi(self.env, self.N_for_start_state_action[start_state][start_action], t, self.dict_phi_for_state_action[start_state][start_action], state, next_state)
 
@@ -690,11 +696,11 @@ class LeaFV(LeaTDLambda):
                                 # When using an estimate of Phi(t,x) that does NOT depend on the start state-action for larger times
                                 if False and self.burnin_time is not None and tt > self.burnin_time:
                                     # Replace the value just computed with an estimate of Phi(t,x) that does NOT depend on the start state, as we assume that stationarity has been reached
-                                    idx_last_time_in_phi_smaller_than_or_equal_to_tt = np.argmax(tt < self.dict_phi[x]['t']) - 1
-                                        ## We subtract -1 because if e.g. Phi['t'] = [0.0, 1.5, 2.3, 5.0] and if 2.3 <= tt < 5.0, the value of Phi at tt is the Phi(t=2.3), because Phi is a piecewise constant function
-                                        ## Note that this logic does NOT work when tt = 5.0 because the returned value is -1, but that situation should NEVER happen because the time in dict_phi
-                                        ## is always larger than the time in the particle trajectory being analyzed as the time in dict_phi is the SYSTEM's time.
-                                        ## Well... perhaps tt could be equal to the last time in dict_phi but that is VERY unlikely.
+                                    # Note that we subtract -1 because if e.g. Phi['t'] = [0.0, 1.5, 2.3, 5.0] and if 2.3 <= tt < 5.0, the value of Phi at tt is Phi(t=2.3), because Phi is a piecewise constant function.
+                                    # The side="right" parameter only affects when the searched value is in the list.
+                                    # In the above example, np.searchsorted(phi, 1.5, side="left") gives 1 whereas with side="right" the result is 2
+                                    # (the parameter indicates on which side of the list the tested value would be inserted if found already in the sorted list, including repetitions)
+                                    idx_last_time_in_phi_smaller_than_or_equal_to_tt = np.searchsorted(self.dict_phi[x]['t'], tt, side="right") - 1
                                     assert idx_last_time_in_phi_smaller_than_or_equal_to_tt >= 0
                                     phi_value_at_tt = self.dict_phi[x]['Phi'].iloc[idx_last_time_in_phi_smaller_than_or_equal_to_tt]
                                     self.dict_phi_for_state[s][x].loc[tt] = [tt, phi_value_at_tt]
@@ -1069,7 +1075,7 @@ class LeaFV(LeaTDLambda):
                 # Since the first time where Phi changes from its value at t(0), may be LARGER than 1, i.e. t(1) could be > 1, we need to make sure that the interval [1, t(1)) is
                 # considered in the sum. To this end we simply replace t = 0 in the first record of Phi with t = 1. If t(1) > 1, we are in business because Phi(1) = Phi(0), as
                 # Phi did NOT change from t=0 to t=1 (o.w. t(1) would be 1); and if t(1) = 1, the value of 'dt' for the first record (computed below) will be 0, making the
-                # value Phi(0) NOT contribute to the sum, as should be the case.
+                # value Phi(0) NOT contribute to the sum, which is what we want.
                 # Ex 1:
                 #   t =   [0, 3, 5]
                 #   Phi = [1.0, 0.6, 0.8]
@@ -1089,7 +1095,8 @@ class LeaFV(LeaTDLambda):
                 #   t =   [1, 1, 3, 5]
                 #   Phi = [1.0, 0.8, 0.6, 0.8]
                 #   dt =  [0, 2, 2, 0]
-                # therefore only the values of Phi(t=1) = 0.8 and Phi(t=3) = 0.6 will contribute to the FV integral, which is the correct thing to do.
+                # therefore, since dt = 0 between the first and second record, only the values of Phi(t=1) = 0.8 and Phi(t=3) = 0.6 will contribute to the FV integral,
+                # which is the correct thing to do.
                 phi_to_sum['t'].iloc[0] = 1
             assert len(phi_to_sum) >= 2, f"The values on which the Phi sum should be computed are at least 2, i.e. the value of Phi at the previous absorption time, and the value of Phi at the current absorption time: Phi at the last inter-absorption interval =\n{phi_to_sum}"
             # Compute the time interval between two consecutive time values stored in Phi(t,x), computed as dt = t(i+1) - t(i)

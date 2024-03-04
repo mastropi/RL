@@ -830,7 +830,6 @@ class Test_EstDifferentialValueV_EnvGridworlds(unittest.TestCase, test_utils.Epi
         sim = DiscreteSimulator(self.env1d, agent_fv, debug=False)
         state_values, action_values, state_counts, probas_stationary, expected_reward, expected_absorption_time, n_cycles_absorption_used, n_events_et, n_events_fv  = \
             sim.run(max_time_steps_fv=1000,
-                    min_num_cycles_for_expectations=0,
                     seed=seed,
                     verbose=True, verbose_period=100,
                     plot=False)
