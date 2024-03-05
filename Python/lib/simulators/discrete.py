@@ -11,6 +11,7 @@ import sys
 import copy
 import warnings
 from typing import Union
+from datetime import datetime
 
 import numpy as np
 import pandas as pd
@@ -113,12 +114,12 @@ class Simulator:
         self.replication = replication
 
         # We use the class name + datetime as prefix for the output files
-        dt_today_str = generate_datetime_string(prefix=self.__class__.__name__)
+        dt_today = datetime.today()
         if self.log:
             if logsdir is None:
                 logsdir = os.getcwd()
             logsdir = os.path.abspath(logsdir)
-            self.logfile = os.path.join(logsdir, generate_datetime_string(dt_str=dt_today_str, extension=".log"))
+            self.logfile = os.path.join(logsdir, generate_datetime_string(dt=dt_today, prefix=self.__class__.__name__, extension=".log"))
             self.fh_log = open(self.logfile, "w")
             self.stdout_sys = sys.stdout
             print("-----> File opened for log:\n{}".format(self.logfile))
@@ -134,7 +135,7 @@ class Simulator:
             if resultsdir is None:
                 resultsdir = os.getcwd()
             resultsdir = os.path.abspath(resultsdir)
-            self.results_file = os.path.join(resultsdir, generate_datetime_string(dt_str=dt_today_str, extension=".csv"))
+            self.results_file = os.path.join(resultsdir, generate_datetime_string(dt=dt_today, prefix=self.__class__.__name__, extension=".csv"))
             self.fh_results = open(self.results_file, "w")
             print("-----> File opened for output with simulation results:\n{}".format(self.results_file))
             print("-----> If the process stops for some reason, finalize the file with simul.close().")
@@ -282,6 +283,7 @@ class Simulator:
         probas_stationary_start_state_et: (opt) dict
             Stationary distribution to use for the selection of the start state of the single Markov chain
             simulation used to estimate the expected reabsorption cycle time, E(T_A).
+            States are the dictionary keys and their probability of selection are the values.
             Normally this is a uniform distribution on the states at the boundary of A.
             default: None, in which case the initial state distribution stored in the environment is used
 
@@ -2245,7 +2247,7 @@ class Simulator:
                 print("\t[DEBUG] Starts at state {}".format(self.env.getState()))
                 print("\t[DEBUG] State value function at start of episode:\n\t{}".format(learner.getV().getValues()))
 
-            # Time step within the current episode (the first time step is t_episode = 0
+            # Time step within the current episode (the first time step where an action is taken is t_episode = 0)
             t_episode = -1
             done_episode = False
             stop = False
@@ -2276,7 +2278,7 @@ class Simulator:
                     next_state = self.env.reset()
                     reward = self.env.getReward(next_state)
                     done_episode = False
-                    # TEMPORARY: (2024/02/13) Two temporary settings are done here, until the proper implementation of a CONTINUING learning task is done, as follows:
+                    # TEMPORARY: (2024/02/13) Two temporary settings are done here, until the proper implementation of a CONTINUING learning task (with NO episodes) is done, as follows:
                     # 1) Non-update of trajectory: the trajectory should NOT be updated when learning from the transition "terminal state" -> "start state" because we do NOT want
                     # to have this transition contribute to the estimation of the average reward (i.e. we do not want to have the reward observed when going from a terminal state
                     # to a start state to be present in the list of episode rewards stored in self._rewards) because the Learner.update_average_reward() method that performs

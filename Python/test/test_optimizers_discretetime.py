@@ -31,6 +31,7 @@ from Python.lib.agents.learners.episodic.discrete import fv, td
 from Python.lib.agents.policies.parameterized import PolNN
 
 from Python.lib.environments import gridworlds
+from Python.lib.environments.gridworlds import get_adjacent_states
 
 from Python.lib.estimators.nn_models import nn_backprop
 
@@ -51,7 +52,7 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
     # See the only answer by Navy Cheng.
 
     @classmethod
-    def setUpClass(cls, shape=(3, 4), obstacles_set: Union[list, set]=None, start_state: int=None,
+    def setUpClass(cls, shape=(3, 4), obstacles_set: Union[list, set]=None, start_states_set: set=None,
                         # Characteristics of the neural network for the Actor Critic policy learner
                         nn_input: InputLayer=InputLayer.ONEHOT, nn_hidden_layer_sizes: list=[8],
                         # Characteristics of all learners
@@ -71,30 +72,9 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
         #-- Environment characteristics
         cls.nS = np.prod(env_shape)
 
-        # Start state at the lower-left cell (if not given)
-        if start_state is None:
-            # We set the start state to be at the bottom-left of the environment
-            start_state = np.ravel_multi_index((env_shape[0]-1, 0), env_shape)
-        else:
-            if not 0 <= start_state < cls.nS:
-                raise ValueError(f"The start state is invalid. It must be between 0 and {cls.nS-1}: {start_state}")
-        isd = np.zeros(cls.nS)
-        isd[start_state] = 1.0
-
         # Exit state defined as the top-right cell
         exit_state = env_shape[1] - 1
         terminal_states = set({exit_state})
-
-        # Check the obstacles
-        if obstacles_set is None:
-            # Set just ONE obstacle in the gridworld, at the second column of the previous to last row
-            state = np.ravel_multi_index((env_shape[0] - 2, 1), env_shape)
-            obstacles_set = set({state})
-        else:
-            obstacles_set = set(obstacles_set)  # Convert to a set if not given as such
-            for state in obstacles_set:
-                if not 0 <= state < cls.nS:
-                    raise ValueError(f"All states in the obstacles set must be between 0 and {cls.nS-1}: {state}")
 
         # Absorption set for FV
         if absorption_set is None:
@@ -108,6 +88,47 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
                 if not 0 <= state < cls.nS:
                     raise ValueError(f"All states in the absorption set must be between 0 and {cls.nS-1}: {state}")
 
+        # Activation set for FV
+        # (defined from the absorption set as all those states adjacent to every state in the absorption set that are not part of the absorption set nor an obstacle)
+        activation_set = set()
+        for s in absorption_set:
+            for sadj, dir in get_adjacent_states(env_shape, s):
+                if sadj is not None and sadj not in set.union(absorption_set, obstacles_set):
+                    activation_set.add(sadj)
+
+        # Set of start states (the lower-left cell, if not given)
+        if start_states_set is None:
+            if absorption_set is None:  # ALTHOUGH ABOVE WE DEFINE THE absorption_set EVEN WHEN IT IS GIVEN AS None BY THE USER (so, this IF condition will never be satisfied --still we leave it for reference, and in case we decide to change this behaviour later on)
+                # The set of start states is defined by just one state, namely the bottom-left of the environment, which is considered to be the entrance to the labyrinth
+                start_states_set = set(np.ravel_multi_index((env_shape[0]-1, 0), env_shape))
+            else:
+                # We set the start state to the same set of states used by the FV learning so that TD and FV are more fairly compared)
+                if learning_criterion == LearningCriterion.AVERAGE:
+                    # The start state is defined as any state in the activation set of the FV learning process (i.e. the outside boundary of the absorption set)
+                    start_states_set = set(activation_set)
+                else:
+                    # The start state is defined as any state in the complement of the absorption set (minus obstacles + terminal state),
+                    # which is where the FV learning of the value functions start in the DISCOUNTED reward criterion.
+                    start_states_set = set(np.arange(cls.nS)).difference(absorption_set.union(obstacles_set).union(terminal_states))
+        else:
+            if not start_states_set.issubset(set(np.arange(cls.nS))):
+                raise ValueError(f"The start states set is invalid: all states in the set must be between 0 and {cls.nS-1}: {start_states_set}")
+        # Define the initial state distribution that will be used when defining the environment class
+        isd = np.zeros(cls.nS)
+        for state in start_states_set:
+            isd[state] = 1.0 / len(start_states_set)
+
+        # Check the obstacles
+        if obstacles_set is None:
+            # Set just ONE obstacle in the gridworld, at the second column of the previous to last row
+            state = np.ravel_multi_index((env_shape[0] - 2, 1), env_shape)
+            obstacles_set = set({state})
+        else:
+            obstacles_set = set(obstacles_set)  # Convert to a set if not given as such
+            for state in obstacles_set:
+                if not 0 <= state < cls.nS:
+                    raise ValueError(f"All states in the obstacles set must be between 0 and {cls.nS-1}: {state}")
+
         reward_terminal = +1
         reward_obstacles = 0
         dict_rewards = dict([(s, reward_terminal if s in terminal_states else reward_obstacles) for s in set.union(set(terminal_states), obstacles_set)])
@@ -117,16 +138,8 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
         print("Gridworld environment:")
         cls.env2d._render()
 
-        # Activation set for FV
-        # (defined from the absorption set as all those states adjacent to every state in the absorption set that are not part of the absorption set not an obstacle)
-        activation_set = set()
-        for s in absorption_set:
-            for sadj, dir in cls.env2d.get_adjacent_states(s):
-                if sadj is not None and sadj not in set.union(absorption_set, obstacles_set):
-                    activation_set.add(sadj)
-
         print("Environment characteristics (2D-labyrinth): (row, col)")
-        print(f"Start state: {np.unravel_index(start_state, env_shape)}")
+        print(f"Start states set: {[np.unravel_index(start_state, env_shape) for start_state in start_states_set]}")
         print(f"Exit state:  {np.unravel_index(exit_state, env_shape)}")
         print(f"Obstacles set:  {[np.unravel_index(s, env_shape) for s in sorted(obstacles_set)]}")
         print("")
@@ -139,7 +152,7 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
         # which is used to estimate the average reward using renewal theory
         cls.A = absorption_set
 
-        #-- Set where a particle activates in the FV context (it should be touching A)
+        #-- Set where a particle activates in the FV context, used in the AVERAGE reward criterion (it should be touching A)
         cls.B = activation_set
 
         #-- Policy characteristics
@@ -185,11 +198,6 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
                                           adjust_alpha=True,
                                           adjust_alpha_by_episode=False,
                                           alpha_min=cls.alpha_min,
-                                          store_history_over_all_episodes=(learning_criterion == LearningCriterion.AVERAGE),
-                                            ## We set the trajectory history storage to True when we are learning using the average reward criterion
-                                            ## because in that case the average reward comes from the average reward observed over all episodes altogether.
-                                            ## NOTE HOWEVER that we do NOT need to set this value because the parameter is set to True
-                                            ## by the constructor of the TD learner when the learning criterion is the average reward
                                           reset_method=cls.reset_method, reset_params=cls.reset_params, reset_seed=cls.seed,
                                           debug=cls.debug)
         cls.agent_nn_td = agents.GenericAgent(cls.policy_nn, learner_tdlambda)
@@ -204,11 +212,6 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
                                                         adjust_alpha=True,
                                                         adjust_alpha_by_episode=False,
                                                         alpha_min=cls.alpha_min,
-                                                        store_history_over_all_episodes=(learning_criterion == LearningCriterion.AVERAGE),
-                                                            ## We set the trajectory history storage to True when we are learning using the average reward criterion
-                                                            ## because in that case the average reward comes from the average reward observed over all episodes altogether.
-                                                            ## NOTE HOWEVER that we do NOT need to set this value because the parameter is set to True
-                                                            ## by the constructor of the TD learner when the learning criterion is the average reward
                                                         reset_method=cls.reset_method, reset_params=cls.reset_params, reset_seed=cls.seed,
                                                         debug=cls.debug)
         cls.agent_nn_tda = agents.GenericAgent(cls.policy_nn, learner_tdlambda_adap)

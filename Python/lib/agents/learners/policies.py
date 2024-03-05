@@ -1032,7 +1032,7 @@ class LeaActorCriticNN(GenericLearner):
                 ## if lr is too large (i.e. lr = 1.0, it works with lr = 0.1)!!
                 ## If we use lr=0.1, momentum=0.9, we get similar results to the Adam optimizer.
 
-    def learn(self, nepisodes, max_time_steps_per_episode=+np.Inf, prob_include_in_train=0.5, action_values=None):
+    def learn(self, nepisodes, start_state=None, max_time_steps_per_episode=+np.Inf, prob_include_in_train=0.5, action_values=None):
         """
         Perform a one step learning of the policy parameter
 
@@ -1049,8 +1049,17 @@ class LeaActorCriticNN(GenericLearner):
         Arguments:
         nepisodes: int
             Number of episodes on which the one-step learning of the policy parameter is based.
-            This is the number of episodes that are run to learn the value functions under the current
-            policy parameter.
+            If no critic is provided (via the `action_values` parameter), it is also the number of episodes on which the value functions are learned
+            under the current policy parameter.
+
+        start_state: (opt) int
+            Index of the start state associated to the problem whose optimal policy is to be learned.
+            It is useful to set this value when the start state is different from the start state defined in the environment, which could be even
+            a *set* of states.
+            This is the case for instance, when using a learner of the value functions which use a different start state to learn them more efficiently,
+            for instance in the Fleming-Viot learner or the TD learner used as benchmark against which the Fleming-Viot learner is compared, which
+            is allowed to start anywhere outside the absorption set used by the Fleming-Viot learner.
+            default: None, in which case the Initial State Distribution information stored in the environment is used to reset the environment at the start of each exploration episode
 
         max_time_steps_per_episode: (opt) int
             Maximum number of time steps to perform within an episode until it is considered `done`.
@@ -1091,7 +1100,10 @@ class LeaActorCriticNN(GenericLearner):
         variance_average_reward = 0.0
         nepisodes_max_steps_reached = 0
         for episode in range(1, nepisodes+1):
-            self.env.reset()
+            if start_state is None:
+                self.env.reset()
+            else:
+                self.env.setState(start_state)
             done_episode = False
             average_reward_current_episode = 0.0
             t = -1

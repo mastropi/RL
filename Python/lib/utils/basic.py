@@ -13,7 +13,7 @@ import joblib
 import numpy as np
 import pandas as pd
 
-from datetime import datetime
+import datetime
 from time import process_time
 from timeit import default_timer as timer
 from unittest import TestCase
@@ -56,7 +56,9 @@ def get_exception_message(e):
 
 def get_current_datetime_as_string(format=None):
     """
-    Returns the current time as a datetime string using datetime.today().strftime()
+    Returns the current time as a datetime string using the current datetime.
+
+    It is the value returned by `datetime.datetime.today().strftime()`.
 
     Arguments:
     format: str or None
@@ -76,30 +78,31 @@ def get_current_datetime_as_string(format=None):
 
 def get_datetime_from_string(dt, format="%Y-%m-%d %H:%M:%S"):
     "Returns the datetime associated to a string in the given format"
-    return datetime.strptime(dt, format)
+    return datetime.datetime.strptime(dt, format)
 
-def generate_datetime_string(dt_str=None, format="%Y%m%d_%H%M%S", prefix="", suffix="", extension="", sep="_"):
+def generate_datetime_string(dt=None, format="%Y%m%d_%H%M%S", prefix="", suffix="", extension="", sep="_"):
     """
-    Returns a string containing today()'s datetime in the given format using the datetime.today().strftime(format)
+    Returns a string containing either the input datetime or the current datetime in the given string format
 
     Arguments:
-    dt_str: (opt) str
-        The datetime string value to use when generating the string.
-        default: None, in which case the datetime string contains today()'s datetime
+    dt: (opt) datetime
+        The datetime value to convert to a string.
+        default: None, in which case the current datetime is used
 
     format: (opt) str
-        Datetime format in the strftime() function to use to generate the datetime string for today()'s datetime.
+        Datetime format in the strftime() function to use to generate the datetime string.
+        default: "%Y%m%d_%H%M%S" (i.e. in format yyyymmdd_HHMMSS)
 
     prefix: (opt) str
-        Prefix to add to the datetime string.
+        Prefix to add to the returned datetime string.
         default: empty string
 
     suffix: (opt) str
-        Suffix to add to the datetime string.
+        Suffix to add to the returned datetime string.
         default: empty string
 
     extension: (opt) str
-        Extension to add at the end of the datetime string, after any suffix.
+        Extension to add at the end of the returned datetime string, after any suffix.
         default: empty string
 
     sep: (opt) str
@@ -107,10 +110,12 @@ def generate_datetime_string(dt_str=None, format="%Y%m%d_%H%M%S", prefix="", suf
         whenever a prefix/suffix is requested.
         default: empty string
     """
-    if dt_str is None:
-        dt_str = datetime.today().strftime(format)
-    elif not isinstance(dt_str, str):
-        raise ValueError("Parameter 'dt_str' must be a string (type={})".format(type(dt_str)))
+    if dt is None:
+        dt_str = datetime.datetime.today().strftime(format)
+    else:
+        if not isinstance(dt, (datetime.datetime, datetime.date)):
+            raise ValueError("Parameter 'dt' must be of type `datetime.datetime` or `datetime.date` (type={})".format(type(dt)))
+        dt_str = dt.strftime(format)
 
     if prefix is not None and prefix != "":
         dt_str = prefix + sep + dt_str
@@ -173,20 +178,50 @@ def convert_str_to_list_of_type(str_value, sep="[, ]", type=float):
     else:
         return str_value_as_list
 
-def save_objects_to_pickle(object_names, filename):
-    "Saves objects into a pickle file stored inside a dictionary whose names are taken from the object_names list and values taken from globals()[<name>]"
-    dict_objects_to_save = dict([(obj_name, globals()[obj_name]) for obj_name in object_names])
+def save_objects_to_pickle(object_names, filename, namespace):
+    """
+    Saves objects into a pickle file stored inside a dictionary whose names are taken from the object_names list and values taken from the given namespace
+
+    Ex: save_objects_to_pickle(['x', 'y', 'z'], "out.pkl", locals())
+
+    Arguments:
+    object_names: list of str
+        List containing the names of the objects to save from the given namespace.
+
+    filename: str
+        Name of the file to which objects are saved in pickle format.
+
+    namespace: dict
+        Dictionary containing the object names as keys and the object values as values.
+    """
+    dict_objects_to_save = dict([(obj_name, namespace[obj_name]) for obj_name in object_names])
     joblib.dump(dict_objects_to_save, filename)
 
-def load_objects_from_pickle(filename):
-    "Loads objects saved in a pickle file and stored inside a dictionary whose names are taken from the dictionary keys and values taken from their values"
+def load_objects_from_pickle(filename, namespace):
+    """
+    Loads objects saved in a pickle file and stored inside a dictionary whose names are taken from the dictionary keys and values taken from their values
+
+    Arguments:
+    filename: str
+        Name of the pickle file containing the objects to load.
+
+    namespace: dict
+        Dictionary representing the namespace where objects read from the filename should be created, where object names are keys and object values are their values.
+
+    Return: list
+    List with the names of the loaded objects into the given namespace.
+    """
     try:
         dict_objects = joblib.load(filename)
     except IOError as e:
         print(get_exception_message(e))
     assert isinstance(dict_objects, dict), f"The object saved in the input pickle file must be a dictionary: {dict_objects}"
-    for obj_name, obj_value in dict_objects.iteritems():
-        globals()[obj_name] = obj_value
+    object_names = []
+    for obj_name, obj_value in dict_objects.items():
+        object_names += [obj_name]
+        namespace[obj_name] = obj_value
+
+    return object_names
 
 def parse_dict_params(dict_params, dict_params_default):
     """

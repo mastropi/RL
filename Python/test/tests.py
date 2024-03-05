@@ -28,12 +28,17 @@ import Python.lib.utils.plotting as plotting
 
 # Environment
 nS = 5
-env1d = EnvGridworld1D_OneTerminalState(length=nS, rewards_dict={nS-1: +1.0}, reward_default=0.0)
+start_states = {0}
+# Use the following for a random selection of the start state outside A
+#start_states = set(np.arange(2, nS-1))
+isd = [1/len(start_states) if s in start_states else 0.0 for s in range(nS)]
+env1d = EnvGridworld1D_OneTerminalState(length=nS, rewards_dict={nS-1: +1.0}, reward_default=0.0, initial_state_distribution=isd)
 print(f"Policy in {nS}-state gridworld:")
 for k, v in env1d.P.items():
     print(f"State {k}: {v}")
 print(f"Terminal states in {nS}-state gridworld: {env1d.getTerminalStates()}")
 print(f"Terminal rewards: {env1d.getTerminalRewards()}")
+print(f"Start state distribution: {env1d.isd}")
 
 # Policy
 policy_probabilities = [0.1, 0.9]   #[0.5, 0.5]) #[0.9, 0.1])
@@ -203,7 +208,7 @@ M = 1   # Number of normal particles created during the FV simulation to explore
 max_time_steps_benchmark = max_time_steps_fv_for_expectation + (1 + M) * max_time_steps_fv_for_all_particles
 
 # Parameters common for all learners
-R = 20 #20 #50             # Replications of the estimation process
+R = 1 #20 #50             # Replications of the estimation process
 seed = 1717
 nepisodes = 100 #1000
 max_time_steps_per_episode = nS*10   #1000 #100
@@ -560,6 +565,7 @@ raise KeyboardInterrupt
 # Learning happens with the ActorCriticNN learner which defines a loss of type `tensor` which can be minimized using the backward() method of torch Tensors
 # IT WORKS!
 from timeit import default_timer as timer
+import os
 import numpy as np
 import pandas as pd
 from  matplotlib import pyplot as plt, cm
@@ -573,6 +579,9 @@ from Python.lib.agents.learners.policies import LeaActorCriticNN
 
 from Python.lib.utils.basic import get_current_datetime_as_string, load_objects_from_pickle, save_objects_to_pickle
 
+# When saving results or reading previously saved results
+resultsdir = "./RL-003-Classic/results"
+
 #--- Auxiliary functions
 KL_THRESHOLD = 0.005
 policy_changed_from_previous_learning_step = lambda KL_distance, num_states: np.abs(KL_distance) / num_states > KL_THRESHOLD
@@ -581,7 +590,7 @@ policy_changed_from_previous_learning_step = lambda KL_distance, num_states: np.
 # Learning task and learning criterion are used by the constructor of the test class below
 learning_task = LearningTask.CONTINUING
 learning_criterion = LearningCriterion.DISCOUNTED; gamma = 0.9
-#learning_criterion = LearningCriterion.AVERAGE; gamma = 1.0
+#learning_criterion = LearningCriterion.AVERAGE; gamma = 1.0    # gamma could be < 1 in the average reward criterion in order to take the limit as gamma -> 1 as presented in Sutton, pag. 251/252.
 
 seed = 1317
 test_ac = Test_EstPolicy_EnvGridworldsWithObstacles()
@@ -591,11 +600,12 @@ size_vertical = 3; size_horizontal = 4
 #size_vertical = 9; size_horizontal = 13
 size_vertical = 10; size_horizontal = 14
 #size_vertical = 10; size_horizontal = 30
-env_shape = (size_vertical, size_horizontal) #(3, 4)
 
-# (2023/12/25) It's IMPORTANT that the start state be part of the absorption set if we want the value functions estimated by FV
-# converge to a constant, as opposed to diverging negatively. Need to investigate why this happens.
-start_state_in_absorption_set = False   #False #True
+env_shape = (size_vertical, size_horizontal)
+
+# Environment's entrance state
+entry_state = np.ravel_multi_index((size_vertical - 1, 0), env_shape)
+entry_state_in_absorption_set = False   #False #True
 
 if False and env_shape == (3, 4):
     obstacles_set = {} #{2, 5, 11} #{} #{5} #{2,5,11}
@@ -620,9 +630,8 @@ else:
 
     # Add the environment's start state to the absorption set
     # (ASSUMED TO BE AT THE LOWER LEFT OF THE LABYRINTH)
-    if start_state_in_absorption_set:
-        _start_state = np.ravel_multi_index((size_vertical-1, 0), env_shape)
-        absorption_set.add(_start_state)
+    if entry_state_in_absorption_set:
+        absorption_set.add(entry_state)
 
     # Number of hidden layers in the neural network model
     # Using multiple layers whose size is proportional to the gridworld size... however this tends to be counterproductive...
@@ -705,11 +714,10 @@ reset_value_functions_at_every_learning_step = False #(learning_method == "value
 verbose_period = n_episodes_per_learning_step // 10
 
 # Saving
-resultsdir = "./RL-003-Classic/results"
 save = True
 
 time_start = timer()
-datetime_start = get_current_datetime_as_string()
+datetime_start_str = get_current_datetime_as_string(format="filename")
 
 # Initialize objects that will contain the results by learning step
 break_when_no_change = False    # Whether to stop the learning process when the average reward doesn't change from one step to the next
@@ -734,7 +742,9 @@ if learning_method == "all_online":
     for t_learn in range(1, n_learning_steps+1):
         print(f"\n\n*** Running learning step {t_learn} of {n_learning_steps} (AVERAGE REWARD at previous step = {R_all[max(0, t_learn-1)]}) of MAX={max_avg_reward_episodic} using {nsteps_all[max(0, t_learn-1)]} time steps for Critic estimationn)...")
         print("Learning the VALUE FUNCTIONS and POLICY simultaneously...")
-        loss_all[t_learn-1] = learner_ac.learn(n_episodes_per_learning_step, max_time_steps_per_episode=max_time_steps_per_policy_learning_episode, prob_include_in_train=1.0) # prob_include_in_train=0.5)
+        loss_all[t_learn-1] = learner_ac.learn(n_episodes_per_learning_step, start_state=entry_state, max_time_steps_per_episode=max_time_steps_per_policy_learning_episode, prob_include_in_train=1.0) # prob_include_in_train=0.5)
+            ## Note that we make sure that the start state when learning the policy is the entrance state to the labyrinth, `entry_state`, because the environment may have defined
+            ## a different initial state distribution (e.g. a random start in the states outside the absorption set used by the FV learner.
 
         state_counts_all[t_learn-1, :] = learner_ac.learner_value_functions.getStateCounts()
         V_all[t_learn-1, :] = learner_ac.learner_value_functions.getV().getValues()
@@ -851,8 +861,12 @@ else:
         # Policy learning
         if policy_learning_mode == "online":
             # ONLINE with critic provided by the action values learned above using the TD simulator
-            loss_all[t_learn - 1] = learner_ac.learn(n_episodes_per_learning_step, max_time_steps_per_episode=max_time_steps_per_policy_learning_episode, prob_include_in_train=1.0,
+            loss_all[t_learn - 1] = learner_ac.learn(n_episodes_per_learning_step, start_state=entry_state, max_time_steps_per_episode=max_time_steps_per_policy_learning_episode, prob_include_in_train=1.0,
                                                      action_values=Q)
+                ## Note that we make sure that the start state when learning the policy is the entrance state to the labyrinth, `entry_state`,
+                ## because the environment may have defined a different initial state distribution, which is used during the learning of the value functions,
+                ## for instance, any randomly selected state outside the absorption set A used by the FV learner.
+                ## Note that the learned value functions are passed as critic to the Actor-Critic policy learner via the `action_values` parameter.
             R_all[t_learn - 1] = learner_ac.average_reward_over_episodes
             R_long_all[t_learn - 1] = average_reward  # This is the FV-based estimated average reward
         else:
@@ -1068,20 +1082,33 @@ print("{} learning process took {:.1f} minutes ({:.1f} hours)".format(learning_m
 
 ############## SAVE
 if save:
+    objects_to_save = ["loss_all", "R_all", "R_long_all", "V_all", "Q_all", "state_counts_all", "nsteps_all", "KL_all", "alpha_all", "time_elapsed"]
     _size = f"{env_shape[0]}x{env_shape[1]}"
     _learning_method = str.replace(learning_method, "values_", "")
-    _filename = f"ActorCritic_labyrinth_{_size}_{datetime_start}_{_learning_method.upper()}.pkl"
-    objects_to_save = ["_".join(obj_name, _learning_method) for obj_name in ["loss_all", "R_all", "R_long_all", "V_all", "Q_all", "state_counts_all", "nsteps_all", "KL_all", "alpha_all", "time_elapsed"]]
-    save_objects_to_pickle(objects_to_save, os.path.join(resultsdir, _filename))
+    _filename = f"ActorCritic_labyrinth_{_size}_{datetime_start_str}_{_learning_method.upper()}AC.pkl"
+    _filepath = os.path.join(resultsdir, _filename)
+    # Save the original object names plus those with the prefix so that, when loading the data back,
+    # we have also the objects without the prefix which are need to generate the plots right-away.
+    # HOWEVER, when reading the saved data, make sure that any object with the original name (without the suffix) has been copied to another object
+    # (e.g. loss_all_td could be a copy of loss_all before reading the data previously saved for the FV learning method)
+    object_names_to_save = objects_to_save + [f"{obj_name}_{_learning_method}" for obj_name in objects_to_save]
+    if _learning_method == "fv":
+        # For the FVAC learning also save the max_time_steps_benchmark_all list so that it is readily available when we load the saved objects to be used by e.g. the TDAC learner
+        # as the number of learning steps to run for the value functions learning prior to each policy learning step.
+        object_names_to_save += ["max_time_steps_benchmark_all"]
+    save_objects_to_pickle(object_names_to_save, _filepath, locals())
+    print(f"Results for {_learning_method.upper()}AC saved to '{_filepath}'")
 ############## SAVE
 
 
 ############## LOAD
-_datetime = ""          # Use format yyymmdd_hhmmss
-_size = "10x14"
+_datetime = "20240219_230301" #"20240219_142206"          # Use format yyymmdd_hhmmss
+_size = "10x14" #"3x4" #"10x14"
 _learning_method = "fv"
-_filename = f"ActorCritic_labyrinth_{_size}_{_datetime}_{_learning_method.upper()}.pkl"
-load_objects_from_pickle(os.path.join(resultsdir, _filename))
+_filename = f"ActorCritic_labyrinth_{_size}_{_datetime}_{_learning_method.upper()}AC.pkl"
+_filepath = os.path.join(resultsdir, _filename)
+object_names = load_objects_from_pickle(_filepath, globals())
+print(f"The following objects were loaded from '{_filepath}':\n{object_names}")
 ############## LOAD
 
 
