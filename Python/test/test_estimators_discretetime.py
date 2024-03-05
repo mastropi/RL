@@ -880,11 +880,6 @@ class Test_EstStateValueV_EnvGridworldsWithObstacles(unittest.TestCase, test_uti
                                                             rewards_dict=dict({3: +1}), obstacles_set=set({5}),
                                                             initial_state_distribution=cls.isd)
 
-        # -- Cycle characteristics
-        # Set of absorbing states, used to define a cycle as re-entrance into the set
-        # which is used to estimate the average reward using renewal theory
-        cls.A = set({0, 4, 8})  # We choose the first column of the 2D-grid as the set A of uninteresting states
-
         #-- Policy characteristics
         # Random walk policy
         cls.policy_rw = random_walks.PolRandomWalkDiscrete(cls.env2d)
@@ -922,6 +917,30 @@ class Test_EstStateValueV_EnvGridworldsWithObstacles(unittest.TestCase, test_uti
         cls.agent_rw_td = agents.GenericAgent(cls.policy_rw, learner_tdlambda)
         cls.sim_td = DiscreteSimulator(cls.env2d, cls.agent_rw_td, debug=False)
 
+        # Fleming-Viot learner using groups of FV particles starting at different states outside A
+        # Set of absorbing states: we choose the first column of the 2D-grid, but without the start state at 8, as the set A of uninteresting states
+        cls.A = set({0, 4})
+        # Set of activation states is the outside boundary of A
+        cls.B = set({1, 8})
+        N = 100
+        T = 50      # We should keep this value small in order to avoid too much learning from the regular excursion of the Markov chain (as opposed to learning from the FV excusrion)
+        absorption_set = cls.A
+        activation_set = cls.B
+        learner_fv = fv.LeaFV(  cls.env2d,
+                                N, T, absorption_set, activation_set,
+                                probas_stationary_start_state_et=None,
+                                probas_stationary_start_state_fv=None,
+                                criterion=LearningCriterion.DISCOUNTED,
+                                estimate_on_fixed_sample_size=True,         # This means that the estimation is done on a fixed number of particles N(s) grouped by starting state s
+                                alpha=1.0,
+                                lmbda=0.0,
+                                adjust_alpha=True,
+                                adjust_alpha_by_episode=False,
+                                alpha_min=0.0,
+                                debug=False)
+        cls.agent_rw_fv = agents.GenericAgent(cls.policy_rw, learner_fv)
+        cls.sim_fv = DiscreteSimulator(cls.env2d, cls.agent_rw_fv, debug=False)
+
         # Expected state values for all tests
         cls.expected_mc_V = [0.18794174, 0.29649877, 0.46634851, 0.,
                              0.10790858, 0.,         0.31369084, 0.46864529,
@@ -954,6 +973,27 @@ class Test_EstStateValueV_EnvGridworldsWithObstacles(unittest.TestCase, test_uti
                              [0.10232160, 0.18439734, 0.09976743, 0.08166934],
                              [0.32572204, 0.26179925, 0.19081792, 0.10207814],
                              [0.47968696, 0.25279819, 0.25260026, 0.1854122 ]]
+
+        # TODO: (2024/02/19) Update the expected results once we have correctly implemented the value functions learning under the DISCOUNTED reward setting and generated the results
+        # For now, these values are the expected results of the not so correct implementation, where the time clock used to estimate P(T>t; s) is the same as the time used to estimate Phi(t,x; s), but they are actually different
+        cls.expected_fv_V = np.array(
+                            [0.025249, 0.172288, 0.499139, 0.007364,
+                             0.005348, 0.000000, 0.285725, 0.461696,
+                             0.014162, 0.059057, 0.140520, 0.287045])
+        cls.expected_fv_Q = np.array(
+                            [[0.00223628, 0.02633083, 0.00110517, 0.00135590],
+                             [0.31180488, 0.11560293, 0.01379764, 0.00229443],
+                             [0.19081149, 0.19313174, 0.18388131, 0.18367353],
+                             [0.00736439, 0.00736439, 0.00736439, 0.00736439],
+                             [0.00266211, 0.00120030, 0.00431562, 0.00134177],
+                             [0.,         0.,         0.,         0.        ],
+                             [0.17717817, 0.25403422, 0.03324080, 0.10277741],
+                             [0.77933535, 0.76791029, 0.76733802, 0.78437482],
+                             [0.00671912, 0.01620425, 0.00349053, 0.00411745],
+                             [0.04231978, 0.05939073, 0.01536841, 0.00478411],
+                             [0.09106267, 0.13971071, 0.04747159, 0.01585069],
+                             [0.39982038, 0.15357294, 0.10374534, 0.05386443]])
+        cls.expected_fv_counts = [74, 75, 93, 36, 77, 0, 95, 89, 228, 165, 96, 70]
 
     def test_Env_PolRandomWalk_MetMC(self):
         print(f"\n*** Running test {self.id()}")
@@ -994,6 +1034,47 @@ class Test_EstStateValueV_EnvGridworldsWithObstacles(unittest.TestCase, test_uti
                self.start_state == 8
         assert np.allclose(observed_V, self.expected_td_V, atol=1E-6)
         assert np.allclose(observed_Q, self.expected_td_Q, atol=1E-6)
+
+    def test_Env_PolRandomWalk_MetFV(self):
+        "Tests the value functions estimation using Fleming-Viot"
+        print(f"\n*** Running test {self.id()}")
+
+        # (2024/02/19) Note that parameter max_time_steps_fv is by default set to None,
+        # which means that it is automatically computed by the _run_simulation_fv() method called by run()
+        # and as of the writing of this, it is set to N*100, where N is the number of particles in the FV system.
+        state_values, action_values, state_counts, probas_stationary, expected_reward, expected_cycle_time, n_cycles, n_events_et, n_events_fv = \
+           self.sim_fv.run(max_time_steps_fv=500,
+                           seed=self.seed, verbose=True, verbose_period=100)
+
+        # The following are the state values (value function) calculated using the average reward observed during the single Markov chain excursion used to estimate E(T_A)
+        # therefore it is NOT an inflated estimation of the average reward. However, if the labyrinth is too large, that reward could be well underestimated
+        # (as in a classical TD or MC estimator of the average reward).
+        observed_values_V = state_values
+        observed_values_Q = action_values.reshape((self.env2d.getNumStates(), self.env2d.getNumActions()))
+
+        # Observed frequency of each state (which is an inflated estimation of the stationary probability distribution)
+        observed_p = state_counts / np.sum(state_counts)
+
+        print(f"\nNumber of learning steps run: {n_events_et + n_events_fv}")
+        print("\nObserved state value function (using the average reward from E(T_A) as correction):\n" + test_utils.array2str(observed_values_V))
+        #print("\nObserved state value function (corrected by FV's average reward) (TO BE IMPLEMENTED, MAYBE): " + test_utils.array2str(observed_values))
+        print("Expected state value function:\n" + test_utils.array2str(self.expected_fv_V))
+        print(f"\nObserved action value function (using the average reward from E(T_A) as correction):\n{observed_values_Q}")
+        print(f"Expected state value function:\n{self.expected_fv_Q}")
+        print(f"State counts: " + test_utils.array2str(state_counts))
+        print(f"Expected state counts: " + test_utils.array2str(self.expected_fv_counts))
+        print("State frequency distribution (observed during FV simulation): " + test_utils.array2str(observed_p))
+
+        assert self.nS == 3*4 and \
+               self.seed == 1717 and \
+               self.start_state == 8 and \
+               self.A == set({0, 4}) and \
+               self.B == set({1, 8})
+        assert np.allclose(observed_values_V, self.expected_fv_V, atol=1E-6)
+        assert np.allclose(observed_values_Q, self.expected_fv_Q, atol=1E-6)
+
+        # Assertions about the state distribution visited by the FV process
+        assert all(state_counts == self.expected_fv_counts)
 
 
 class Test_EstDifferentialStateValueV_EnvGridworldsWithObstacles(unittest.TestCase, test_utils.EpisodeSimulation):
@@ -1370,7 +1451,7 @@ class Test_EstDifferentialStateValueV_EnvGridworldsWithObstacles(unittest.TestCa
         assert learning_info['num_cycles'] == self.expected_n_cycles
 
     def test_Env_PolRandomWalk_MetFV(self):
-        "Tests the differential value function estimation using Fleming-Viot"
+        "Tests the differential value functions estimation using Fleming-Viot"
         print(f"\n*** Running test {self.id()}")
 
         # (2024/02/14) Note that parameter max_time_steps_fv is by default set to None,
