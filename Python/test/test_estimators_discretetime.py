@@ -977,23 +977,23 @@ class Test_EstStateValueV_EnvGridworldsWithObstacles(unittest.TestCase, test_uti
         # TODO: (2024/02/19) Update the expected results once we have correctly implemented the value functions learning under the DISCOUNTED reward setting and generated the results
         # For now, these values are the expected results of the not so correct implementation, where the time clock used to estimate P(T>t; s) is the same as the time used to estimate Phi(t,x; s), but they are actually different
         cls.expected_fv_V = np.array(
-                            [0.025249, 0.172288, 0.499139, 0.007364,
-                             0.005348, 0.000000, 0.285725, 0.461696,
-                             0.014162, 0.059057, 0.140520, 0.287045])
+                            [0.026471, 0.180172, 0.537639, 0.007238,
+                             0.005534, 0.000000, 0.314387, 0.521715,
+                             0.014464, 0.060632, 0.149091, 0.309588])
         cls.expected_fv_Q = np.array(
-                            [[0.00223628, 0.02633083, 0.00110517, 0.00135590],
-                             [0.31180488, 0.11560293, 0.01379764, 0.00229443],
-                             [0.19081149, 0.19313174, 0.18388131, 0.18367353],
-                             [0.00736439, 0.00736439, 0.00736439, 0.00736439],
-                             [0.00266211, 0.00120030, 0.00431562, 0.00134177],
-                             [0.,         0.,         0.,         0.        ],
-                             [0.17717817, 0.25403422, 0.03324080, 0.10277741],
-                             [0.77933535, 0.76791029, 0.76733802, 0.78437482],
-                             [0.00671912, 0.01620425, 0.00349053, 0.00411745],
-                             [0.04231978, 0.05939073, 0.01536841, 0.00478411],
-                             [0.09106267, 0.13971071, 0.04747159, 0.01585069],
-                             [0.39982038, 0.15357294, 0.10374534, 0.05386443]])
-        cls.expected_fv_counts = [74, 75, 93, 36, 77, 0, 95, 89, 228, 165, 96, 70]
+                            [[0.00239757, 0.02766462, 0.00114565, 0.00145606],
+                             [0.31265840, 0.12491134, 0.01472151, 0.00242867],
+                             [0.21288913, 0.60385280, 0.08354980, 0.02622499],
+                             [0.00723798, 0.00723798, 0.00723798, 0.00723798],
+                             [0.00286347, 0.00124553, 0.00435913, 0.00139219],
+                             [0.,                 0.,         0.,         0.],
+                             [0.19301888, 0.28085474, 0.03435416, 0.11141387],
+                             [0.93047469, 0.23359365, 0.16036133, 0.15988098],
+                             [0.00675938, 0.01650643, 0.00353169, 0.00415680],
+                             [0.04270995, 0.06127918, 0.01570903, 0.00482990],
+                             [0.09882721, 0.14403669, 0.04910855, 0.01617216],
+                             [0.42700666, 0.15646508, 0.10887363, 0.05639611]])
+        cls.expected_fv_counts = [74, 75, 88, 48, 77, 0, 95, 82, 228, 165, 96, 70]
 
     def test_Env_PolRandomWalk_MetMC(self):
         print(f"\n*** Running test {self.id()}")
@@ -1060,7 +1060,7 @@ class Test_EstStateValueV_EnvGridworldsWithObstacles(unittest.TestCase, test_uti
         #print("\nObserved state value function (corrected by FV's average reward) (TO BE IMPLEMENTED, MAYBE): " + test_utils.array2str(observed_values))
         print("Expected state value function:\n" + test_utils.array2str(self.expected_fv_V))
         print(f"\nObserved action value function (using the average reward from E(T_A) as correction):\n{observed_values_Q}")
-        print(f"Expected state value function:\n{self.expected_fv_Q}")
+        print(f"Expected action value function:\n{self.expected_fv_Q}")
         print(f"State counts: " + test_utils.array2str(state_counts))
         print(f"Expected state counts: " + test_utils.array2str(self.expected_fv_counts))
         print("State frequency distribution (observed during FV simulation): " + test_utils.array2str(observed_p))
@@ -1267,11 +1267,11 @@ class Test_EstDifferentialStateValueV_EnvGridworldsWithObstacles(unittest.TestCa
                           0.152506, 0.000000, 0.047967, 0.039148,
                           0.200473, 0.129490, 0.070553, 0.056141]
         cls.expected_p_from_cycles = [0.130022, 0.104104, 0.049244, 0.021382,
-                                      0.152700, 0.000000, 0.048164, 0.039309,
-                                      0.200648, 0.130022, 0.070842, 0.056371]
-        cls.expected_p_fv = [   np.nan, np.nan, np.nan, cls.expected_fv_average_reward,
-                                np.nan, np.nan, np.nan, np.nan,
-                                np.nan, np.nan, np.nan, np.nan]
+                                      0.152916, 0.000000, 0.048164, 0.039309,
+                                      0.200864, 0.130022, 0.070842, 0.056371]
+        cls.expected_p_fv = [   0.118954, 0.083317, 0.055110, cls.expected_fv_average_reward,
+                                0.167576,   np.nan, 0.058957, 0.036639,
+                                  np.nan, 0.141033, 0.103620, 0.054808]
 
     def test_Env_PolRandomWalk_MetMC(self):
         print(f"\n*** Running test {self.id()}")

@@ -109,7 +109,7 @@ def empirical_mean(envs: list, state: Union[list, int]):
         return np.mean([int(x == state) for x in [env.getState() for env in envs]])
 
 
-def update_phi(env, N: int, t: float, dict_phi: dict, env_state_prev, env_state_cur):
+def update_phi(env, N: int, t: float, dict_phi: dict, env_state_prev, env_state_cur, alpha: float=1.0):
     """
     Updates the conditional probability Phi of each state of interest at the given time t, which are stored by the keys
     of the dictionary of input parameter dict_phi
@@ -157,10 +157,20 @@ def update_phi(env, N: int, t: float, dict_phi: dict, env_state_prev, env_state_
         as described for parameter `env_state_prev`.
         The same considerations apply as those described for parameter `env_state_prev`.
 
+    alpha: (opt) positive float between 0 and 1
+        Learning parameter to use in the update of Phi for each state present in its keys, as follows:
+            Phi(t, z) = (1 - alpha) * Phi(t_prev, z) + alpha * empirical_mean(t, z)
+        where t_prev is the latest time value at which Phi was estimated for state z, and empirical_mean(t, z) is the occupation frequency of state z.
+        default: 1
+
     Return: dict
     The updated input dictionary which contains a new row for each state x for which the value Phi(t, x)
     changes w.r.t. the last value stored in the data frame for that state x.
     """
+    # Parse learning parameter
+    if alpha is None or np.isnan(alpha):
+        alpha = 1.0
+
     # Parse parameters env_state_prev, env_state_cur
     if isinstance(env, GenericEnvQueueWithJobClasses):
         from Python.lib.environments.queues import BufferType
@@ -183,10 +193,14 @@ def update_phi(env, N: int, t: float, dict_phi: dict, env_state_prev, env_state_
         assert dict_phi[x].shape[0] > 0, "The Phi data frame has been initialized for state = {}".format(x)
         assert t >= dict_phi[x]['t'].iloc[-1], f"The new time to insert in Phi(t,x) (t={t}) must be larger than or equal to the largest time already stored in Phi(t,x) ({dict_phi[x].iloc[-1]['t']})"
         phi_cur = dict_phi[x]['Phi'].iloc[-1]
-        phi_new = empirical_mean_update(phi_cur, x, state_prev, state_cur, N)
+        phi_new = (1 - alpha)*phi_cur + alpha*empirical_mean_update(phi_cur, x, state_prev, state_cur, N)
         # if phi_new > 0:
         #    print("prev state: {} -> state: {}: New Phi: {}".format(state_prev, state_cur, phi_new))
-        if not np.isclose(phi_new, phi_cur, atol=0.5 / N, rtol=0):  # Note that the absolute tolerance is smaller for larger N values.
+        if  alpha < 1 or \
+            alpha == 1 and not np.isclose(phi_new, phi_cur, atol=0.5 / N, rtol=0):
+                ## Note that we compare the new and previous Phi value ONLY when alpha = 1 because otherwise it is difficult to estimate what a large enough change is
+                ## Note also that in that case when alpha = 1, the absolute tolerance is smaller for larger N values, and it is based on the minimum change that may happen
+                ## in the empirical mean for a state, which happens when one particle is added to or removed from the analyzed state, i.e. 1/N (to be safe, we use 0.5/N instead).
             # Also, recall that the isclose() checks if |a - b| <= with atol + rtol*|b|,
             # and since we are interested in analyzing the absolute difference (not the relative difference)
             # between phi_new and phi_cur, we set rtol = 0.
@@ -253,6 +267,43 @@ def empirical_mean_update(mean_value: float,
 
     # Note that the mean value must be between 0 and 1 as it represents a probability
     return min( max(0, mean_value + (int(state_cur == state) - int(state_prev == state)) / N), 1 )
+
+
+def update_phi_on_all_states(envs: list, t: float, dict_phi: dict, alpha: float=None):
+    """
+    Updates the dictionary containing the estimate of the conditional occupation probability (for all states of interest defined by its keys)
+    by adding a new record indexed by the given time t
+
+    Arguments:
+    envs: list
+        List containing the particles on which the value of Phi is updated at time t.
+
+    t: float
+        Time corresponding to the Phi(t,z) estimation for each state z present in the keys of the `dict_phi` dictionary.
+
+    dict_phi: dict
+        Dictionary indexed by the states on which Phi is estimated containing a data frame as value with two columns: 't', 'Phi', which contain
+        respectively each time value at which Phi is estimated and the estimate of Phi at that time.
+
+    alpha: (opt) positive float between 0 and 1
+        Learning parameter to use in the update of Phi for each state present in its keys, as follows:
+            Phi(t, z) = (1 - alpha) * Phi(t_prev, z) + alpha * empirical_mean(t, z)
+        where t_prev is the latest time value at which Phi was estimated for state z, and empirical_mean(t, z) is the occupation frequency of the particles
+        in `envs` of state z.
+        When None or NaN, the new value of Phi (Phi(t, z)) is computed simply as the occupation frequency of the particles in `envs` at each state z.
+        default: None
+    """
+    if alpha is not None and not np.isnan(alpha) and not (0 <= alpha <= 1):
+        raise ValueError(f"Parameter `alpha` must be between 0 and 1: {alpha}")
+    for state in dict_phi.keys():
+        if alpha is None or np.isnan(alpha):
+            new_phi_value = empirical_mean(envs, state)
+        else:
+            new_phi_value = (1 - alpha) * dict_phi[state]['Phi'].iloc[-1] + alpha * empirical_mean(envs, state)
+        dict_phi[state] = pd.concat([dict_phi[state],
+                                    pd.DataFrame([[t, new_phi_value]], columns=['t', 'Phi'], index=[len(dict_phi[state])])],
+                                    axis=0)
+    return dict_phi
 
 
 @measure_exec_time
@@ -379,7 +430,7 @@ def merge_proba_survival_and_phi(df_proba_surv, df_phi, t_origin=0.0):
     # with the time values at which the empirical distribution Phi is measured for each state of interest.
     t, proba_surv_by_t, phi_by_t = merge_values_in_time(list(df_proba_surv['t']), list(df_proba_surv['P(T>t)']),
                                                         list(_df_phi['t'] - t_origin), list(_df_phi['Phi']),
-                                                        unique=False)
+                                                        unique=True)
 
     # -- Merged data frame, where we add the dt, used in the computation of the integral
     df_merged = pd.DataFrame(np.c_[t, proba_surv_by_t, phi_by_t, np.r_[np.diff(t), 0.0]], columns=['t', 'P(T>t)', 'Phi', 'dt'])

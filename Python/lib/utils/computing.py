@@ -11,6 +11,7 @@ import copy
 from unittest import TestCase
 from typing import Union
 
+from collections import deque
 import numpy as np
 import pandas as pd
 
@@ -325,12 +326,12 @@ def generate_min_exponential_time(rates):
     return event_time, idx_event
 
 
-def compute_survival_probability(survival_times: list, colnames: list=None, right_continuous=True):
+def compute_survival_probability(survival_times: Union[list, deque], colnames: list=None, right_continuous=True):
     """
     Computes the survival probability from a list of sorted survival times
 
     Arguments:
-    survival_times: list
+    survival_times: list or deque
         List containing the observed survival times on which the step survival probability is computed.
         The list is assumed SORTED by increasing times, but this is NOT checked because it takes time.
 
@@ -364,7 +365,7 @@ def compute_survival_probability(survival_times: list, colnames: list=None, righ
     elif not isinstance(colnames, (list, tuple, np.ndarray)) or len(colnames) != 2:
         raise ValueError(f"Input parameter `colnames` must be either list, tuple or array and its length must be 2 ({colnames})")
 
-    if not isinstance(survival_times, list):
+    if not isinstance(survival_times, (list, deque)):
         raise ValueError("The `survival_times` parameter must be of type list")
     if len(survival_times) == 0 or survival_times[0] != 0.0:
         raise ValueError("The `survival_times` parameter must have at least one element and the first element must be 0.0")
