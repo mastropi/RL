@@ -636,7 +636,7 @@ class Simulator:
 
         # Phi(t, x): Empirical probability of the states of interest (x)
         # at each time t when a variation in Phi(t, x) is observed.
-        dict_phi = initialize_phi(envs[0], t=event_times[0])
+        dict_phi = initialize_phi(envs, t=event_times[0], states_of_interest=learner.getActiveSet())
 
         # Initialize the list of observed survival times to be filled during the simulation below
         survival_times = [0]    # We set the first element of the survival times list to 0 so that we can "estimate" the survival probability at 0 (which is always equal to 1 actually)

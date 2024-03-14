@@ -31,26 +31,22 @@ class SurvivalProbabilityEstimation(Enum):
     FROM_M_CYCLES = 2
 
 
-def initialize_phi(env, envs: list=None, agent=None, t: float = 0.0, states_of_interest: set=set()):
+def initialize_phi(envs: list, agent=None, t: float=0.0, states_of_interest: set=set()):
     """
     Initializes the conditional probability Phi(t, x) of each state x of interest
 
     These states are the keys of the dictionary that is initialized and returned by this function.
 
     Arguments:
-    env: Environment
-        Environment which an FV particle is made of, i.e. all particles are instances of this environment.
-
-    envs: (opt) list of environments
-        List of environments used to run the FV process.
+    envs: list of environments
+        List of environments used to run the FV process. They are assumed to be all of the same environment class.
         Valid environments are of type Python.lib.environments.queues.GenericEnvQueueWithJobClasses for queue environments
         or Python.lib.environments.EnvironmentDiscrete for discrete-time/state/action environments with optional terminal states.
-        default: None
 
     agent: (opt) Agent
         The Accept/Reject agent interacting with the environment.
         Only used when the environment is a queuing environment, in which case it should be an agent
-        accepted by the get_blocking_states_or_buffer_sizes() function defined in among the queue simulator functions.
+        accepted by the get_blocking_states_or_buffer_sizes() function defined among the queue simulator functions.
         default: None
 
     t: (opt) float
@@ -61,8 +57,7 @@ def initialize_phi(env, envs: list=None, agent=None, t: float = 0.0, states_of_i
         Set of states x on which Phi(t, x) should be estimated.
         When empty, the states of interest depend on the type of environment, and is defined as follows:
         - for GenericEnvQueueWithJobClasses environments: the set of states where blocking can occur.
-        - for EnvironmentDiscrete environments: the set of terminal states, which are assumed to be the ones
-        whose visit yields a non-zero reward.
+        - for EnvironmentDiscrete environments: the set of terminal states.
         default: empty set
 
     Return: dict
@@ -73,34 +68,32 @@ def initialize_phi(env, envs: list=None, agent=None, t: float = 0.0, states_of_i
         (indexing the dictionary).
     """
     #---- Parse input parameters
+    assert isinstance(envs, list) and len(envs) > 0, "The list parameter `envs` must be non-empty"
+
     if states_of_interest is None or len(states_of_interest) == 0:
         # Compute the states of interest from the environment
-        if isinstance(env, GenericEnvQueueWithJobClasses):
+        if isinstance(envs[0], GenericEnvQueueWithJobClasses):
             # TODO: (2023/09/06) Try to remove the circular import that this import implies (because simulators.queues imports functions or constants from this file (e.g. BURNIN_TIME_STEPS)
             from Python.lib.simulators.queues import get_blocking_states_or_buffer_sizes
             # TODO: (2023/03/12) When using the linear step policy, limit the states of interests to those where the derivative is not zero, as we don't need to estimate the probability of the other blocking states (e.g. K-1 is of interest but K is NOT)
-            states_of_interest = get_blocking_states_or_buffer_sizes(env, agent)
-        elif isinstance(env, EnvironmentDiscrete):
+            states_of_interest = get_blocking_states_or_buffer_sizes(envs[0], agent)
+        elif isinstance(envs[0], EnvironmentDiscrete):
             # For discrete-time/state/action environments, for now (2023/09/04) we consider that the states of interest are the TERMINAL states,
             # which are assumed to be the states whose visit yields a non-zero reward.
             # Note that this will give an empty set of states if the environment doesn't have any terminal states!
-            states_of_interest = env.getTerminalStates()
+            states_of_interest = envs[0].getTerminalStates()
         else:
-            raise ValueError("The environment type is not valid: {}".format(type(env)) +
+            raise ValueError("The environment type is not valid: {}".format(type(envs[0])) +
                              "\nValid environments are: GenericEnvQueueWithJobClasses, EnvironmentDiscrete")
-    #---- Parse input parameters
 
     if len(states_of_interest) == 0:
         raise ValueError("The set of states of interest where the occupation probability Phi conditional to survival should be estimated is empty."
                          "\nCheck the definition of the environment where learning takes place or provide a non-empty set in parameter `states_of_interest`.")
+    #---- Parse input parameters
 
     dict_phi = dict()
     for x in states_of_interest:
-        if envs is not None:
-            assert isinstance(envs, list) and len(envs) > 0, "The list parameter `envs` is not empty"
-            dict_phi[x] = pd.DataFrame([[t, empirical_mean(envs, x)]], columns=['t', 'Phi'])
-        else:
-            dict_phi[x] = pd.DataFrame([[t, 0.0]], columns=['t', 'Phi'])
+        dict_phi[x] = pd.DataFrame([[t, empirical_mean(envs, x)]], columns=['t', 'Phi'])
 
     return dict_phi
 
@@ -315,28 +308,30 @@ def estimate_stationary_probabilities(dict_phi, df_proba_surv, expected_absorpti
     - the value of the integral P(T>t) * Phi(t, x)
    """
     states = sorted(list(dict_phi.keys()))  # Note that sorted() still works when the keys, i.e. the elements of the list that is being sorted, are in turn a *list* of values
-    # (e.g. sorted( [(2, 2, 0), (1, 2, 3), (0, 1, 5)] ) returns [(0, 1, 5), (1, 2, 3), (2, 2, 0)]
+                                            # (e.g. sorted( [(2, 2, 0), (1, 2, 3), (0, 1, 5)] ) returns [(0, 1, 5), (1, 2, 3), (2, 2, 0)]
     probas_stationary = dict()
     integrals = dict()
     for x in states:
         if dict_phi[x].shape[0] == 1 and dict_phi[x]['Phi'].iloc[-1] == 0.0:
-            # State or buffer size x was never observed during the simulation
+            # State x was never observed during the simulation
             probas_stationary[x] = 0.0
             integrals[x] = 0.0
         else:
             # Merge the times where (T>t) and Phi(t) are measured
             df_phi_proba_surv = merge_proba_survival_and_phi(df_proba_surv, dict_phi[x])
 
-            # Stationary probability for each buffer size of interest
+            # Stationary probability for each state of interest
             probas_stationary[x], integrals[x] = estimate_proba_stationary(df_phi_proba_surv, expected_absorption_time, interval_size=1/uniform_jump_rate)
 
             if DEBUG_ESTIMATORS:
                 plt.figure()
                 ax = plt.gca()
+                ax.axhline(0, color="lightgray")
                 ax.step(df_phi_proba_surv['t'], df_phi_proba_surv['P(T>t)'], color="blue", where='post')
                 ax2 = ax.twinx()
                 ax2.step(df_phi_proba_surv['t'], df_phi_proba_surv['Phi'], color="red", where='post')
                 ax2.step(df_phi_proba_surv['t'], df_phi_proba_surv['Phi'] * df_phi_proba_surv['P(T>t)'], color="green", where='post')
+                ax2.set_ylim(ax.get_ylim())
                 plt.title("P(T>t) (blue) and Phi(t,x) (red) and their product (green) for state x = {}\n(Integral = Area under the green curve = {:.3f})".format(x, integrals[x]))
 
     return probas_stationary, integrals
@@ -346,14 +341,14 @@ def estimate_stationary_probabilities(dict_phi, df_proba_surv, expected_absorpti
 def merge_proba_survival_and_phi(df_proba_surv, df_phi, t_origin=0.0):
     """
     Merges the survival probability and the empirical distribution of the particle system at a particular
-    buffer size of interest, on a common set of time values into a data frame.
+    state of interest, on a common set of time values into a data frame.
 
     Arguments:
     df_proba_surv: pandas data frame
         Data frame containing the time 't' and the P(T>t) survival probability 'P(T>t)' given activation.
 
     df_phi: pandas data frame
-        Data frame containing the time 't' and the Phi(t) value 'Phi' for a buffer size of interest.
+        Data frame containing the time 't' and the Phi(t) value 'Phi' for a state of interest.
 
     t_origin: (opt) float
         Time that should be used as origin for the times t at which Phi(t) is measured.
@@ -365,7 +360,7 @@ def merge_proba_survival_and_phi(df_proba_surv, df_phi, t_origin=0.0):
     Data frame with the following columns:
     - 't': time at which a change in any of the input quantities happens
     - 'P(T>t)': survival probability given the process started at the stationary activation distribution of states.
-    - 'Phi': empirical distribution at the buffer size of interest given the process started
+    - 'Phi': empirical distribution at the state of interest given the process started
     at the stationary activation distribution of states.
     """
     if t_origin > 0:
@@ -381,7 +376,7 @@ def merge_proba_survival_and_phi(df_proba_surv, df_phi, t_origin=0.0):
     else:
         _df_phi = df_phi
     # Merge the time values at which the survival probability is measured (i.e. where it changes)
-    # with the time values at which the empirical distribution Phi is measured for each buffer size of interest.
+    # with the time values at which the empirical distribution Phi is measured for each state of interest.
     t, proba_surv_by_t, phi_by_t = merge_values_in_time(list(df_proba_surv['t']), list(df_proba_surv['P(T>t)']),
                                                         list(_df_phi['t'] - t_origin), list(_df_phi['Phi']),
                                                         unique=False)
@@ -390,7 +385,7 @@ def merge_proba_survival_and_phi(df_proba_surv, df_phi, t_origin=0.0):
     df_merged = pd.DataFrame(np.c_[t, proba_surv_by_t, phi_by_t, np.r_[np.diff(t), 0.0]], columns=['t', 'P(T>t)', 'Phi', 'dt'])
 
     if DEBUG_ESTIMATORS:
-        print("Survival Probability and Empirical Distribution for a buffer size of interest:")
+        print("Survival Probability and Empirical Distribution for a state of interest:")
         print(df_merged)
 
     return df_merged
