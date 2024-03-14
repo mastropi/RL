@@ -718,6 +718,37 @@ def find_last_value_in_list(alist, value):
             return i
     return -1
 
+# DM-2024/03/04: NOTE: there is also the np.searchsorted() function which tells us at what index a new element would be inserted in a sorted array, so essentially it does the same thing as this function...
+def find_smaller_and_closest_in_sorted_array(arr, value, check=False):
+    """
+    Finds the index in a SORTED array (in ascending order) whose value is the closest to the given value but smaller or equal
+
+    The check of the sort condition is ONLY done when `check=True`.
+
+    Arguments:
+    arr: numpy array
+        Sorted array, in ascending order, of values where the searched-for `value` is performed.
+
+    value: float
+        Value that is searched for in `arr`.
+
+    check: (opt) bool
+        Whether to check whether the array is sorted in ascending order.
+        default: False
+
+    Return: int
+    A value between -1 and len(arr) - 1 containing the index in `arr` satisfying the condition described above in relation to `value`.
+    If the returned value is -1, it means that `value` is smaller than all values in the array.
+    """
+    if check:
+        if not all(arr == sorted(arr)):
+            raise ValueError(f"The input array must be sorted in ascending sequence:\n{arr}")
+
+    # Extend the input array with a +Inf value at the end so that we can easily take care of the case where `value` is larger than all array values,
+    # in which case the index of the last element in the array should be returned.
+    arr = np.r_[arr, +np.Inf]
+    return np.argmax(value < arr) - 1
+
 def list_contains_either(container :list, content):
     "Checks whether a list contains an element or at least one element of another list"
     if not isinstance(content, list):
@@ -732,12 +763,26 @@ def list_contains_either(container :list, content):
 
 def merge_values_in_time(t1, y1, t2, y2, unique=False):
     """
-    Merges two list of values measured at different times into two separate lists
-    of values measured both at the same times.
+    Merges two lists of values measured at different times into two separate lists of values measured both at the same times
+
+    When a time value does not appear in one of the time lists being merged, its y value is kept constantly equal to the y value observed
+    at the time value observed latest in the list.
+
+    When `unique=False` and duplicate time values (> 0) appear in any of the time lists, the duplicate time values appear as many times as the sum of
+    the duplicate count in both lists, extending each list with the y value corresponding to the last duplicate time value.
+    Ex:
+    t1 = [0, 2.5, 2.5, 2.5, 3.2]
+    y1 = [1    2,   3,   4,  10]
+    t2 = [0, 2.5, 2.5, 4.9]
+    y2 = [-1, -2,  -3,  -4]
+    then the result of the merge when unique=False is:
+    t_merged  = [0, 2.5, 2.5, 2.5, 2.5, 2.5, 3.2, 4.9]  # the repeated time value 2.5 appears (3 + 2) times because 2.5 appears 3 times in the first time list and 2 times in the second time list.
+    y1_merged = [1,   2,   3,   4,   4,   4, 10,   10]  # `4` is the value taken by y1 in the LAST duplicate record with t1=2.5
+    y2_merged = [-1, -2,  -3,  -3,  -3,  -3, -3,   -4]  # `-3` is the value taken by y2 in the LAST duplicate record with t2=2.5
 
     ASSUMPTIONS:
     - The length of each time list (ti) is the same as the list of respective measurements (yi).
-    - The two time lists have only ONE value in common, namely t = 0, which is also the smallest time value.
+    - Time value 0 MUST be present at the FIRST element of each time list and must appear only once.
     - The two time lists are sorted increasingly.
 
     Arguments:
@@ -751,12 +796,15 @@ def merge_values_in_time(t1, y1, t2, y2, unique=False):
         List of times associated to the second list of measurements y2, assumed sorted increasingly. 
 
     y2: list
-        List of measurements associated to the first times list t1.
+        List of measurements associated to the second times list t2.
 
-    unique: bool
-        Whether the merged t values should be unique while merging unique values in input t1 and t2.
+    unique: (opt) bool
+        Whether the merged t values should be unique when merging values in input t1 and t2.
         If repeated values are found in the input time lists t1 and t2, the respective y1 or y2 value
-        associated to the index of the LAST occurrence of the repeated time value is kept.
+        associated to the index of the LAST occurrence of the repeated time value is:
+        - kept, when unique=True
+        - repeated further to the right of the current time value, when unique=False
+        default: False
 
     Return: tuple
     - List of merged times
@@ -779,16 +827,22 @@ def merge_values_in_time(t1, y1, t2, y2, unique=False):
     # Note: t1_merged, t2_merged, y1_merged, y2_merged will be updated below when doing the actual merge
     if unique:
         # Remove duplicates from each input time list to merge
-        # For each measurement series y, the y value for the FIRST occurrence of the repeated time value is kept 
-        t1_merged, idx1 = np.unique(t1, return_index=True)
-        t1_merged = list(t1_merged)
-        idx1_next = list(idx1[1:]) + list([ idx1[-1]+1 ])
-        y1_merged = [y1[i-1] for i in idx1_next]
+        # For each measurement series, the y value for the LAST occurrence of the repeated t value is kept
+        # Note that we add a fictitious +Inf value for both the list of times (t1, t2) and the respective list of values (y1, y2) in order to take into account the case
+        # when there are duplicate t values at the END of the list. Otherwise, the duplicates are not removed by keeping the last duplicate record, but by keeping the
+        # previous to last duplicate record.
 
-        t2_merged, idx2 = list( np.unique(t2, return_index=True) )
-        t2_merged = list(t2_merged)
-        idx2_next = list(idx2[1:]) + list([ idx2[-1]+1 ])
-        y2_merged = [y2[i-1] for i in idx2_next]
+        # Process first list to merge
+        t1_merged, idx1 = np.unique(t1 + [np.Inf], return_index=True)
+        t1_merged = list(t1_merged)[:-1]                            # `:-1`: remove the last time corresponding to the fictitious +np.Inf
+        idx1_next = list(idx1[1:]) + list([ idx1[-1]+1 ])           # Compute the indices of the start of the next duplicate groups in order to keep the LAST duplicate record in each group by keeping the idx1_next-1 index in the y list
+        y1_merged = [(y1 + [np.Inf])[i-1] for i in idx1_next][:-1]  # `:-1` remove the last y value corresponding to the fictitious +np.Inf
+
+        # Process second list to merge
+        t2_merged, idx2 = list( np.unique(t2 + [np.Inf], return_index=True) )
+        t2_merged = list(t2_merged)[:-1]                            # Ditto t1_merged
+        idx2_next = list(idx2[1:]) + list([ idx2[-1]+1 ])           # Ditto idx1
+        y2_merged = [(y2 + [np.Inf])[i-1] for i in idx2_next][:-1]  # Ditto y1_merged
     else:
         t1_merged = t1.copy()
         y1_merged = y1.copy()
@@ -796,18 +850,28 @@ def merge_values_in_time(t1, y1, t2, y2, unique=False):
         y2_merged = y2.copy()
 
     # Insert values in the first pair of lists
+    ntimes_t0 = 0   # Counter to check that the number of time values equal to 0 is only one
     for t in t2:
-        if (t > 0):
+        if t == 0:
+            ntimes_t0 += 1
+            if ntimes_t0 > 1:
+                raise ValueError(f"Input time series t1 has at most one value equal to 0, {ntimes_t0} were found.")
+        else:
             idx_insort, found = insort(t1_merged, t, unique=unique)
-            assert idx_insort > 0, "The index to insert the new time is larger than 0 ({})".format(idx_insort)
+            assert idx_insort > 0, "The index to insert the new time must be larger than 0 ({})".format(idx_insort)
             if not unique or not found:
                 y1_merged.insert(idx_insort, y1_merged[idx_insort-1])
 
     # Insert values in the second pair of lists
+    ntimes_t0 = 0   # Counter to check that the number of time values equal to 0 is only one
     for t in t1:
-        if (t > 0):
+        if t == 0:
+            ntimes_t0 += 1
+            if ntimes_t0 > 1:
+                raise ValueError(f"Input time series t1 has at most one value equal to 0, {ntimes_t0} were found.")
+        else:
             idx_insort, found = insort(t2_merged, t, unique=unique)
-            assert idx_insort > 0, "The index to insert the new time is larger than 0 ({})".format(idx_insort)
+            assert idx_insort > 0, "The index to insert the new time must be larger than 0 ({})".format(idx_insort)
             if not unique or not found:
                 y2_merged.insert(idx_insort, y2_merged[idx_insort-1])
 
@@ -989,6 +1053,24 @@ if __name__ == "__main__":
     #----------------- find_first/last_value_in_list ------------------#
 
 
+    #----------------- find_smaller_and_closest_in_sorted_array --------------#
+    # The input array must be sorted increasingly!
+    arr = np.array([2, 5, 7])
+    # Find the closest value to a value NOT present in the array
+    assert find_smaller_and_closest_in_sorted_array(arr, 2.5) == 0
+    assert find_smaller_and_closest_in_sorted_array(arr, 5.3) == 1
+    assert find_smaller_and_closest_in_sorted_array(arr, 7.2) == 2
+    # Find the closest value to a value NOT present in the array, one test per array element
+    assert find_smaller_and_closest_in_sorted_array(arr, 2) == 0
+    assert find_smaller_and_closest_in_sorted_array(arr, 5) == 1
+    assert find_smaller_and_closest_in_sorted_array(arr, 7) == 2
+    # Check sort condition and check ValueError exception when the condition is not satisfied
+    import pytest
+    with pytest.raises(ValueError):
+        find_smaller_and_closest_in_sorted_array(arr[::-1], 2.5, check=True)
+    #----------------- find_smaller_and_closest_in_sorted_array --------------#
+
+
     #---------------------- list_contains_either  ---------------------#
     print("\n--- list_contains_either() ---")
     container = [1, 3, 3]
@@ -1006,7 +1088,7 @@ if __name__ == "__main__":
     
     
     #-------------------- merge_values_in_time ------------------------#
-    print("\n--- merge_values_in_time(): Test #1 on unique time values across series")
+    print("\n--- merge_values_in_time(): Test #1 on unique time values across series of different lengths")
     t1 = [0.0, 2.5, 3.2, 7.2, 11.3]
     y1 = [  4,   3,   2,   1,    0]
     t2 = [0.0, 1.1, 2.51, 2.87, 3.3, 4.8, 6.9]
@@ -1021,7 +1103,7 @@ if __name__ == "__main__":
     assert y2f == [0, 0, 0, 1, 2, 2, 1, 1, 0, 0, 0]   
 
     #-------------------------
-    print("\n--- merge_values_in_time(): Test #2 on UNIQUE time values WITHIN series but some repeated time values across series (UNIQUE=True)")
+    print("\n--- merge_values_in_time(): Test #2 on UNIQUE time values WITHIN series but some common time values across series (UNIQUE=True)")
     t1 = [0.0, 2.5, 3.2, 7.2, 11.3]
     y1 = [  4,   3,   2,   1,    0]
     t2 = [0.0, 1.1, 2.50, 2.87, 3.3, 4.8, 6.9]  # The difference with Test #1 data is here, at element idx=2 which is now 2.5 instead of 2.51
@@ -1036,7 +1118,7 @@ if __name__ == "__main__":
     assert y2f == [0, 0, 1, 2, 2, 1, 1, 0, 0, 0]
 
     #-------------------------
-    print("\n--- merge_values_in_time(): Test #3 on UNIQUE time values WITHIN series but some repeated time values across series (UNIQUE=False)")
+    print("\n--- merge_values_in_time(): Test #3 on UNIQUE time values WITHIN series but some common time values across series (UNIQUE=False)")
     t1 = [0.0, 2.5, 3.2, 7.2, 11.3]
     y1 = [  4,   3,   2,   1,    0]
     t2 = [0.0, 1.1, 2.50, 2.87, 3.3, 4.8, 6.9]
@@ -1051,34 +1133,52 @@ if __name__ == "__main__":
     assert y2f == [0,   0,   1,   1,    2,   2,   1,   1,   0,   0,    0]
 
     #-------------------------
-    print("\n--- merge_values_in_time(): Test #4 on REPEATED time values WITHIN series and some repeated time values across series (UNIQUE=True)")
-    t1 = [0.0, 2.5, 3.2, 3.2, 3.2, 7.2, 11.3]   # 3.2 is repeated 3 times
-    y1 = [  4,   3,   4,   5,   6,   5,    4]
-    t2 = [0.0, 1.1, 2.50, 2.87, 3.3, 4.8, 6.9]
-    y2 = [  0,   0,    1,    2,   1,   1,   0]
+    print("\n--- merge_values_in_time(): Test #4 on REPEATED time values in the MIDDLE of each series and a few common time values across series (UNIQUE=True)")
+    t1 = [0.0, 2.5, 2.5, 2.5, 3.2,   3.2, 3.2, 7.2, 11.3]
+    y1 = [  4,   3,   2,   1,   4,     5,   6,   5,    4]
+    t2 = [0.0, 1.1, 2.5, 2.5, 2.87, 3.3, 4.8,  6.9, 7.5]
+    y2 = [  0,   0,   1,   3,    2,   1,   1,    0,   2]
 
     t, y1f, y2f = merge_values_in_time(t1, y1, t2, y2, unique=True)
 
     print("Merged lists:")
     print(np.c_[t, y1f, y2f])
-    assert t == [0.0, 1.1, 2.5, 2.87, 3.2, 3.3, 4.8, 6.9, 7.2, 11.3]
-    assert y1f == [4,   4,   3,    3,   6,   6,   6,   6,   5,    4]
-    assert y2f == [0,   0,   1,    2,   2,   1,   1,   0,   0,    0]
+    assert t == [0.0, 1.1, 2.5, 2.87, 3.2, 3.3, 4.8, 6.9, 7.2, 7.5, 11.3]
+    assert y1f == [4,   4,   1,    1,   6,   6,   6,   6,   5,   5,    4]
+    assert y2f == [0,   0,   3,    2,   2,   1,   1,   0,   0,   2,    2]
 
-    #-------------------------
-    print("\n--- merge_values_in_time(): Test #5 same as Test #4 but with Unique=False")
-    t1 = [0.0, 2.5, 3.2, 3.2, 7.2, 11.3]
-    y1 = [  4,   3,   4,   5,   4,    3]
-    t2 = [0.0, 1.1, 2.50, 2.87, 3.3, 4.8, 6.9]  # The difference with Test #1 data is here, at element idx=2 which is now 2.5 instead of 2.51
-    y2 = [  0,   0,    1,    2,   1,   1,   0]
-
+    print("\n--- merge_values_in_time(): Test #5 same as previous test but with Unique=False")
     t, y1f, y2f = merge_values_in_time(t1, y1, t2, y2, unique=False)
 
     print("Merged lists:")
     print(np.c_[t, y1f, y2f])
-    assert t == [0.0, 1.1, 2.5, 2.5, 2.87, 3.2, 3.2, 3.3, 4.8, 6.9, 7.2, 11.3]
-    assert y1f == [4,   4,   3,   3,    3,   4,   5,   5,   5,   5,   4,    3]
-    assert y2f == [0,   0,   1,   1,    2,   2,   2,   1,   1,   0,   0,    0]
+    assert t == [0.0, 1.1, 2.5, 2.5, 2.5, 2.5, 2.5, 2.87, 3.2, 3.2, 3.2, 3.3, 4.8, 6.9, 7.2, 7.5, 11.3]
+    assert y1f == [4,   4,   3,   2,   1,   1,   1,    1,   4,   5,   6,   6,   6,   6,   5,   5,    4]
+    assert y2f == [0,   0,   1,   3,   3,   3,   3,    2,   2,   2,   2,   1,   1,   0,   0,   2,    2]
+
+    #-------------------------
+    print("\n--- merge_values_in_time(): Test #6 on REPEATED time values at the END of each series and a few common time values across series (UNIQUE=True)")
+    t1 = [0.0, 2.5, 3.2, 3.2, 3.2, 7.2, 11.3, 11.3]
+    y1 = [  4,   3,   4,   5,   6,   5,    4,  0.5]
+    t2 = [0.0, 1.1, 2.50, 2.87, 3.3, 4.8, 6.9, 20.0]
+    y2 = [  0,   0,    1,    2,   1,   1,   0,    3]
+
+    t, y1f, y2f = merge_values_in_time(t1, y1, t2, y2, unique=True)
+
+    print("Merged lists:")
+    print(np.c_[t, y1f, y2f])
+    assert t == [0.0, 1.1, 2.5, 2.87, 3.2, 3.3, 4.8, 6.9, 7.2, 11.3, 20.0]
+    assert y1f == [4,   4,   3,    3,   6,   6,   6,   6,   5,  0.5,  0.5]
+    assert y2f == [0,   0,   1,    2,   2,   1,   1,   0,   0,    0,    3]
+
+    print("\n--- merge_values_in_time(): Test #7 same as previous test but with Unique=False")
+    t, y1f, y2f = merge_values_in_time(t1, y1, t2, y2, unique=False)
+
+    print("Merged lists:")
+    print(np.c_[t, y1f, y2f])
+    assert t == [0.0, 1.1, 2.5, 2.5, 2.87, 3.2, 3.2, 3.2, 3.3, 4.8, 6.9, 7.2, 11.3, 11.3, 20.0]
+    assert y1f == [4,   4,   3,   3,    3,   4,   5,   6,   6,   6,   6,   5,    4,  0.5,  0.5]
+    assert y2f == [0,   0,   1,   1,    2,   2,   2,   2,   1,   1,   0,   0,    0,    0,    3]
     #-------------------- merge_values_in_time ------------------------#
 
 
