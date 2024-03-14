@@ -67,7 +67,7 @@ class Test_EstStateValueV_MetOffline_EnvDeterministicNextState(unittest.TestCase
 
         assert  self.env_grid.getNumStates() == 21 and \
                 self.env_grid.getTerminalStates() == [0, 20] and \
-                list(self.env_grid.getTerminalRewards()) == [-1.0, 1.0] and \
+                list(self.env_grid.getRewards()) == [-1.0, 1.0] and \
                 gamma == 1.0 and \
                 max_delta == 1E-6
         assert niter == 220
@@ -99,7 +99,7 @@ class Test_EstStateValueV_MetOffline_EnvDeterministicNextState(unittest.TestCase
 
         assert  self.env_grid_oneterminal.getNumStates() == 20 and \
                 self.env_grid_oneterminal.getTerminalStates() == [19] and \
-                list(self.env_grid_oneterminal.getTerminalRewards()) == [1.0] and \
+                list(self.env_grid_oneterminal.getRewards()) == [1.0] and \
                 gamma == 0.9 and \
                 max_delta == 1E-6
         assert niter == 84
@@ -1428,7 +1428,7 @@ class Test_EstDifferentialStateValueV_EnvGridworldsWithObstacles(unittest.TestCa
         print(f"Observed average cycle time on {learning_info['num_cycles']} cycles (expected={self.expected_n_cycles}): {learning_info['expected_cycle_time']}")
 
         # The following calculation of the average reward from cycles assumes that rewards are only observed at terminal states
-        observed_average_reward_from_cycles = sum([p*self.env2d.getTerminalReward(x) for x, p in enumerate(observed_p_from_cycles) if x in self.env2d.getTerminalStates()])
+        observed_average_reward_from_cycles = sum([p*self.env2d.getReward(x) for x, p in enumerate(observed_p_from_cycles) if x in self.env2d.getTerminalStates()])
         print(f"\nAverage reward (usual calculation): {observed_average_reward}")
         print(f"Average reward (using renewal theory): {observed_average_reward_from_cycles}")
         print(f"Expected average reward: {self.expected_average_reward_from_cycles}")
@@ -1472,7 +1472,7 @@ class Test_EstDifferentialStateValueV_EnvGridworldsWithObstacles(unittest.TestCa
         # (note that we convert the result originally stored in a dictionary (probas_stationary) to a list to facilitate
         # the comparison used below in the assertion on this result.
         observed_p_fv = [probas_stationary.get(x, np.nan) for x in self.env2d.getAllStates()]
-        observed_average_reward = np.nansum([p*self.env2d.getTerminalReward(x) for x, p in enumerate(observed_p_fv) if x in self.env2d.getTerminalStates()])
+        observed_average_reward = np.nansum([p*self.env2d.getReward(x) for x, p in enumerate(observed_p_fv) if x in self.env2d.getTerminalStates()])
 
         print(f"\nNumber of learning steps run: {n_events_et + n_events_fv}")
         print("\nObserved state value function (using the average reward from E(T_A) as correction):\n" + test_utils.array2str(observed_values_V))

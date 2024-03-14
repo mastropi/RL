@@ -160,7 +160,7 @@ class Test_Class_Simulator(unittest.TestCase):
         for k, v in cls.env1d.P.items():
             print(f"State {k}: {v}")
         print(f"Terminal states in {nS}-state gridworld: {cls.env1d.getTerminalStates()}")
-        print(f"Terminal rewards: {cls.env1d.getTerminalRewards()}")
+        print(f"Terminal rewards: {cls.env1d.getRewards()}")
 
         # Policy
         policy_probabilities = [0.1, 0.9]   #[0.5, 0.5]) #[0.9, 0.1])

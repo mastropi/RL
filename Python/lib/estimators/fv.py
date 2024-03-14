@@ -564,14 +564,14 @@ def estimate_expected_reward(env, probas_stationary: dict, reward=None):
 
     if reward is None:
         assert isinstance(env, EnvironmentDiscrete)
-        dict_terminal_rewards = env.getTerminalRewardsDict()
-        if not set(dict_terminal_rewards.keys()).issubset(set(probas_stationary.keys())):
-            raise ValueError("The terminal states with non-zero rewards ({}) should all be present in the dictionary of estimated stationary probability ({})." \
-                             .format(set(dict_terminal_rewards.keys()), set(probas_stationary.keys())))
+        dict_rewards = env.getRewardsDict()
+        if not set(dict_rewards.keys()).issubset(set(probas_stationary.keys())):
+            raise ValueError("The states with non-zero rewards ({}) should all be present in the dictionary of estimated stationary probability ({})." \
+                             .format(set(dict_rewards.keys()), set(probas_stationary.keys())))
 
     for s in probas_stationary.keys():
         if probas_stationary[s] > 0.0:  # Note that nan > 0 returns False (OK)
-            expected_reward += (dict_terminal_rewards[s] if reward is None else reward) * probas_stationary[s]
+            expected_reward += (dict_rewards.get(s, 0) if reward is None else reward) * probas_stationary[s]
 
     return expected_reward
 

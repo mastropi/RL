@@ -37,7 +37,7 @@ print(f"Policy in {nS}-state gridworld:")
 for k, v in env1d.P.items():
     print(f"State {k}: {v}")
 print(f"Terminal states in {nS}-state gridworld: {env1d.getTerminalStates()}")
-print(f"Terminal rewards: {env1d.getTerminalRewards()}")
+print(f"Rewards: {env1d.getRewardsDict()}")
 print(f"Start state distribution: {env1d.isd}")
 
 # Policy
@@ -116,8 +116,7 @@ if not policy.isDeterministic():
 # at which b[x=3] = P[x=3,2]*0.0 + P[x=3,4]*1.0 = P[x=3,4]*r (= P[-2,-1]*r in Python extended notation that allows us to be independent of the gridworld size)
 # Finally, in the continuing learning task case, the Bellman equation is: (I - P)*V = b - g*1,
 # where g is the average reward (i.e. the average reward observed over all states under stationarity), and `1` is the vector of ones.
-r = env1d.getTerminalReward(nS-1)     # Reward received at the terminal state (assumed only one)
-gamma = 0.9
+r = env1d.getReward(nS-1)     # Reward received at the terminal state (assumed there is only one terminal state)
 gamma_almost1 = 0.999999
 # True value functions under the different learning tasks and learning criteria, namely:
 # V_true_epi_disc: learning task = EPISODIC; learning criterion = DISCOUNTED
@@ -158,9 +157,8 @@ if policy_probabilities == [0.5, 0.5] and nS == 5:
     assert np.allclose(np.diff(V_true_con_avg), np.diff(V_true_con_avg_minnorm))
 ## ALL OK!
 
-avg_reward_true = np.sum([mu[s]*r for s, r in env1d.getTerminalRewardsDict().items()])
-print(f"True average reward for the cont. learning task: {avg_reward_true}")
-
+avg_reward_true = np.sum([mu[s]*r for s, r in env1d.getRewardsDict().items()])
+print(f"True average reward for the CONTINUING learning task under policy {policy_probabilities}: {avg_reward_true}")
 
 #-- Learn the average reward and the state value function
 learning_task = LearningTask.CONTINUING

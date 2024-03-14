@@ -49,7 +49,7 @@ class Simulator:
         - getShape()
         - getAllStates()
         - getTerminalStates()
-        - getTerminalRewards()
+        - getRewards()
         - getInitialStateDistribution()
         - getV() --> returns the true state value function (which can be None, if unknown)
         - setInitialStateDistribution()
@@ -1878,11 +1878,11 @@ class Simulator:
                     plt.figure(fig_V2.number)
                     (ax_V, ax_C) = fig_V2.subplots(1, 2)
                     shape = self.env.getShape()
-                    terminal_rewards = self.env.getTerminalRewards()
+                    rewards = self.env.getRewards()
 
                     state_values = np.asarray(learner.getV().getValues()).reshape(shape)
-                    if len(terminal_rewards) > 0:
-                        colornorm = plt.Normalize(vmin=np.min(list(terminal_rewards)), vmax=np.max(list(terminal_rewards)))
+                    if len(rewards) > 0:
+                        colornorm = plt.Normalize(vmin=np.min(list(rewards)), vmax=np.max(list(rewards)))
                     else:
                         colornorm = None
                     ax_V.imshow(state_values, cmap=colors) #, norm=colornorm) # (2023/11/23) If we use norm=colornorm we might see all blue colors... even if the V values vary from 0 to 1... why??
@@ -2035,10 +2035,10 @@ class Simulator:
                 }
 
     def _run_single_continuing_task(self, nepisodes=1, max_time_steps=1000, max_time_steps_per_episode=+np.Inf, start_state_first_episode=None, reset_value_functions=True,
-                    seed=None, compute_rmse=False, weights_rmse=None,
-                    state_observe=None, set_cycle=None,
-                    verbose=False, verbose_period=1, verbose_convergence=False,
-                    plot=False, colormap="seismic", pause=0.1):
+                                    seed=None, compute_rmse=False, weights_rmse=None,
+                                    state_observe=None, set_cycle=None,
+                                    verbose=False, verbose_period=1, verbose_convergence=False,
+                                    plot=False, colormap="seismic", pause=0.1):
         """
         Same as _run_single() but where there are no episodes.
 
@@ -2496,11 +2496,11 @@ class Simulator:
                     plt.figure(fig_V2.number)
                     (ax_V, ax_C) = fig_V2.subplots(1, 2)
                     shape = self.env.getShape()
-                    terminal_rewards = self.env.getTerminalRewards()
+                    rewards = self.env.getRewards()
 
                     state_values = np.asarray(learner.getV().getValues()).reshape(shape)
-                    if len(terminal_rewards) > 0:
-                        colornorm = plt.Normalize(vmin=np.min(list(terminal_rewards)), vmax=np.max(list(terminal_rewards)))
+                    if len(rewards) > 0:
+                        colornorm = plt.Normalize(vmin=np.min(list(rewards)), vmax=np.max(list(rewards)))
                     else:
                         colornorm = None
                     ax_V.imshow(state_values, cmap=colors) #, norm=colornorm) # (2023/11/23) If we use norm=colornorm we might see all blue colors... even if the V values vary from 0 to 1... why??

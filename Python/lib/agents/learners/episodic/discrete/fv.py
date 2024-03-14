@@ -790,12 +790,12 @@ class LeaFV(LeaTDLambda):
             # Contribution to the state value
             assert all(np.diff(self.dict_phi_for_state[state][x]['t']) == 1), f"The times 't' stored in Phi(t,x={x}, s={state}) must be CONSECUTIVE integers:\n{self.dict_phi_for_state[state][x]}"
             df_phi_proba_surv_for_state = merge_proba_survival_and_phi(df_proba_surv_for_state, self.dict_phi_for_state[state][x])
-            state_value_killed_process += compute_fv_integral(df_phi_proba_surv_for_state.iloc[1:], reward=self.env.getTerminalReward(x), interval_size=1/uniform_jump_rate, discount_factor=self.gamma)
+            state_value_killed_process += compute_fv_integral(df_phi_proba_surv_for_state.iloc[1:], reward=self.env.getReward(x), interval_size=1/uniform_jump_rate, discount_factor=self.gamma)
 
             # Contribution to the action value
             assert all(np.diff(self.dict_phi_for_state_action[state][action][x]['t']) == 1), f"The times 't' stored in Phi(t,x={x}; s={state}, a={action}) must be CONSECUTIVE integers:\n{self.dict_phi_for_state_action[state][action][x]}"
             df_phi_proba_surv_for_state_action = merge_proba_survival_and_phi(df_proba_surv_for_state_action, self.dict_phi_for_state_action[state][action][x])
-            action_value_killed_process += compute_fv_integral(df_phi_proba_surv_for_state_action.iloc[1:], reward=self.env.getTerminalReward(x), interval_size=1/uniform_jump_rate, discount_factor=self.gamma)
+            action_value_killed_process += compute_fv_integral(df_phi_proba_surv_for_state_action.iloc[1:], reward=self.env.getReward(x), interval_size=1/uniform_jump_rate, discount_factor=self.gamma)
 
             ind_gt0 = (df_phi_proba_surv_for_state['P(T>t)'] > 0.0) & (df_phi_proba_surv_for_state['Phi'] > 0.0) & (df_phi_proba_surv_for_state['dt'] > 0.0)
             if np.sum(ind_gt0) > 0:
@@ -1028,7 +1028,7 @@ class LeaFV(LeaTDLambda):
             first_n_minus1_phi_contributions = self.dict_phi_sum[x]['Phi'].iloc[1:-1]   # We start at index 1 because index 0 contains the dummy value 0, which does not really correspond to a phi contribution to the integral.
             contribution_up_to_n_minus_1 = 1/(n*(n-1)) * np.sum( np.arange(n-1) * first_n_minus1_phi_contributions ) if n > 1 else 0.0
             contribution_from_interval_n = 1/n * self.dict_phi_sum[x]['Phi'].iloc[-1]
-            self.dict_integral[x] += self.env.getTerminalReward(x) * (contribution_up_to_n_minus_1 + contribution_from_interval_n)
+            self.dict_integral[x] += self.env.getReward(x) * (contribution_up_to_n_minus_1 + contribution_from_interval_n)
 
     def _update_integral_fixed_sample_size(self, state):
         """
@@ -1115,7 +1115,7 @@ class LeaFV(LeaTDLambda):
                 assert 0 < self.gamma < 1
                 discounted_phi_sum_in_interval_n = 1 / (1 - self.gamma) * np.sum( self.gamma**(phi_to_sum['t'] - 1) * (1 - self.gamma**(phi_to_sum['dt'])) * phi_to_sum['Phi'] )
             contribution_from_interval_n = (1 - (n-1) / self.N_for_start_state[state]) * discounted_phi_sum_in_interval_n
-            self.dict_integral_for_state[state][x] += interval_size * self.env.getTerminalReward(x) * contribution_from_interval_n
+            self.dict_integral_for_state[state][x] += interval_size * self.env.getReward(x) * contribution_from_interval_n
             fv_integral_over_all_states_of_interest += self.dict_integral_for_state[state][x]
 
         return fv_integral_over_all_states_of_interest
@@ -1154,7 +1154,7 @@ class LeaFV(LeaTDLambda):
                 assert 0 < self.gamma < 1
                 discounted_phi_sum_in_interval_n = 1 / (1 - self.gamma) * np.sum( self.gamma**(phi_to_sum['t'] - 1) * (1 - self.gamma**(phi_to_sum['dt'])) * phi_to_sum['Phi'] )
             contribution_from_interval_n = (1 - (n-1) / self.N_for_start_state[state]) * discounted_phi_sum_in_interval_n
-            self.dict_integral_for_state_action[state][action][x] += interval_size * self.env.getTerminalReward(x) * contribution_from_interval_n
+            self.dict_integral_for_state_action[state][action][x] += interval_size * self.env.getReward(x) * contribution_from_interval_n
             fv_integral_over_all_states_of_interest += self.dict_integral_for_state_action[state][action][x]
 
         return fv_integral_over_all_states_of_interest

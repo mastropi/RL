@@ -41,16 +41,15 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
     - isd: (array-like, i.e. list is also possible) initial state distribution
     - dim: environment dimension (e.g. 1D gridworld, 2D gridworld, etc.), which is just informative 
     - terminal_states: set containing the terminal states of the environment
-    - terminal_rewards: dictionary indexed by the terminal states containing the rewards as values.
-        The number of elements in this dictionary does NOT need to coincide with the number of terminal states.
-        If a terminal state is not found among the keys of the dictionary, its associated reward is returned as 0
-        by the corresponding method.
+    - rewards: dictionary indexed by the states in the environment containing the rewards of visiting them as values.
+        The number of elements in this dictionary does NOT need to coincide with the number of states in the environment.
+        If a state is not found among the keys of the dictionary, its associated reward is returned as 0 by the corresponding method.
     - store_trajectory: (bool) whether to store the trajectory observed during a simulation in the object.
     This is useful for instance when running a Fleming-Viot simulation where N particles evolve separately
     and we want to keep track of the state and actions visited by each particle.
     """
 
-    def __init__(self, nS, nA, P, isd, dim=1, terminal_states=set(), terminal_rewards=dict(), store_trajectory=False):
+    def __init__(self, nS, nA, P, isd, dim=1, terminal_states=set(), rewards=dict(), store_trajectory=False):
         super().__init__(nS, nA, P, isd)
 
         # Dimension of the environment (e.g. 1D (gridworld), 2D (gridworld), etc.)
@@ -70,7 +69,7 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
         self.all_states = list( np.arange(self.getNumStates()) )
         self.terminal_states = terminal_states
         self.non_terminal_states = set(self.all_states).difference( set( self.terminal_states ) )
-        self.terminal_rewards = terminal_rewards
+        self.rewards = rewards
 
         self.store_trajectory = store_trajectory
         self.df_trajectory = None
@@ -175,28 +174,19 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
 
     def getReward(self, s):
         "Returns the reward received when visiting the given state"
-        if s in self.terminal_rewards:
-            return self.terminal_rewards[s]
-        else:
-            return 0.0
+        return self.rewards.get(s, 0.0)
 
     def getTerminalStates(self):
         "Returns the list of terminal states"
         return list(self.terminal_states)
 
-    def getTerminalRewards(self):
-        "Returns the terminal rewards (only their values, not the states where they occur; for the latter, use getTerminalRewardsDict())"
-        return self.getTerminalRewardsDict().values()
+    def getRewards(self):
+        "Returns the rewards (only their values, not the states where they occur; for the latter, use getRewardsDict())"
+        return self.getRewardsDict().values()
 
-    def getTerminalRewardsDict(self):
-        "Returns the dictionary containing the terminal rewards, indexed by the terminal state"
-        return self.terminal_rewards
-
-    def getTerminalReward(self, s):
-        "Returns the reward for the given terminal state"
-        if s not in self.terminal_rewards.keys():
-            warnings.warn(f"The given state s={s} is not present in the terminal rewards dictionary. Have you forgotten to include it? A zero reward is returned.")
-        return self.terminal_rewards.get(s, 0.0)
+    def getRewardsDict(self):
+        "Returns the dictionary containing the rewards, indexed by the state"
+        return self.rewards
 
     def getNonTerminalStates(self):
         "Returns the list of non terminal states"

@@ -222,7 +222,7 @@ class EnvGridworld1D(EnvironmentDiscrete):
         super(EnvGridworld1D, self).__init__(nS, nA, P, isd,
                                              dim=1,
                                              terminal_states=set([i for i, s in enumerate(range(nS)) if is_terminal(s)]),
-                                             terminal_rewards=dict([(s, reward(s)) for s in terminal_states]))
+                                             rewards=dict([(s, reward(s)) for s in terminal_states]))
 
 
 class EnvGridworld1D_OneTerminalState(EnvironmentDiscrete):
@@ -356,7 +356,7 @@ class EnvGridworld1D_OneTerminalState(EnvironmentDiscrete):
         super(EnvGridworld1D_OneTerminalState, self).__init__(nS, nA, P, isd,
                                                               dim=1,
                                                               terminal_states=set([i for i, s in enumerate(range(nS)) if is_terminal(s)]),
-                                                              terminal_rewards=dict([(s, reward(s)) for s in terminal_states]))
+                                                              rewards=rewards_dict)
 
 
 class EnvGridworld2D(EnvironmentDiscrete):
@@ -512,7 +512,7 @@ class EnvGridworld2D(EnvironmentDiscrete):
         super(EnvGridworld2D, self).__init__(nS, nA, P, isd,
                                              dim=2,
                                              terminal_states=terminal_states,
-                                             terminal_rewards=dict([(s, reward(s)) for s in terminal_states]))
+                                             rewards=dict([(s, reward(s)) for s in terminal_states]))
 
     def _render(self, mode='human', close=False):
         """
