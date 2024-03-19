@@ -4,6 +4,12 @@ Created on Sun Jul 10 12:21:54 2022
 
 @author: Daniel Mastropietro
 @description: Definition of functions and classes used for the simulation of discrete-time MDPs with discrete states and actions.
+@notes: Note about the learning step counter, t: in all simulator processes (Monte-Carlo, Fleming-Viot, etc.) we use t to represent the time step counter
+at which a Markov chain transitions to the NEXT state. Therefore t is initialize at 0 (as opposed to -1), so that after the first transition,
+the time step is t = 1 (i.e. t signals precisely the time at which the particle is at the NEXT state, after the transition has taken place).
+This follows the usual convention for continuous-time Markov processes where the event time is the time at which the Markov chain is at the NEXT state,
+after the event takes place, i.e. the state to which the Markov chain transitions to.
+See e.g. Pierre Bremaud's book, Chapter 13, graph of the jump rate process.
 """
 
 import os
@@ -656,11 +662,7 @@ class Simulator:
 
         idx_particle = -1
         done = False
-        t = 0   # IMPORTANT: t represents the time at which a particle transitions to the NEXT state, and this is why we initialize t as 0, so that after the first transition,
-                # the time step is t = 1, i.e. t signals the time at which the particle is at the NEXT state, after the transition has taken place.
-                # This follows the usual convention for continuous-time Markov processes where the event time is the time at which the Markov chain is at the NEXT state,
-                # after the event takes place, i.e. the state to which the Markov chain transitions to.
-                # See e.g. Pierre Bremaud's book, Chapter 13, graph of the jump rate process.
+        t = 0   # Learning step counter: t represents the time at which a particle transitions to the NEXT state. See more details at the @note at the beginning of the file.
         # Initial learning rate for Phi, which is the gamma* defined in Fraiman et al.
         alpha0 = +np.Inf    # Setting this initial learning rate to 1 gives the same weight to all historic (k < t) and current (k = t) Phi values
                             # setting it equal to >1 gives more weight to most recent estimates of Phi,
@@ -935,11 +937,7 @@ class Simulator:
             print("[DEBUG] Action value function at start of simulation:\n\t{}".format(learner.getQ().getValues().reshape(self.env.getNumStates(), self.env.getNumActions())))
 
         done = False
-        t = 0   # IMPORTANT: t represents the time at which a particle transitions to the NEXT state, and this is why we initialize t as 0, so that after the first transition,
-                # the time step is t = 1, i.e. t signals the time at which the particle is at the NEXT state, after the transition has taken place.
-                # This follows the usual convention for continuous-time Markov processes where the event time is the time at which the Markov chain is at the NEXT state,
-                # after the event takes place, i.e. the state to which the Markov chain transitions to.
-                # See e.g. Pierre Bremaud's book, Chapter 13, graph of the jump rate process.
+        t = 0   # Learning step counter: t represents the time at which a particle transitions to the NEXT state. See more details at the @note at the beginning of the file.
         # Initial learning rate for Phi, which is the gamma* defined in Fraiman et al.
         alpha0 = +np.Inf      # Setting this initial learning rate to 1 gives the same weight to all historic (k < t) and current (k = t) Phi values
                         # setting it equal to >1 gives more weight to most recent estimates of Phi,
@@ -1246,11 +1244,7 @@ class Simulator:
             print("[DEBUG] Action value function at start of simulation:\n\t{}".format(learner.getQ().getValues().reshape(self.env.getNumStates(), self.env.getNumActions())))
 
         done = False
-        t = 0   # IMPORTANT: t represents the time at which a particle transitions to the NEXT state, and this is why we initialize t as 0, so that after the first transition,
-                # the time step is t = 1, i.e. t signals the time at which the particle is at the NEXT state, after the transition has taken place.
-                # This follows the usual convention for continuous-time Markov processes where the event time is the time at which the Markov chain is at the NEXT state,
-                # after the event takes place, i.e. the state to which the Markov chain transitions to.
-                # See e.g. Pierre Bremaud's book, Chapter 13, graph of the jump rate process.
+        t = 0   # Learning step counter: t represents the time at which a particle transitions to the NEXT state. See more details at the @note at the beginning of the file.
         # Initial learning rate for Phi, which is the gamma* defined in Fraiman et al.
         alpha0 = +np.Inf      # Setting this initial learning rate to 1 gives the same weight to all historic (k < t) and current (k = t) Phi values
                         # setting it equal to >1 gives more weight to most recent estimates of Phi,
@@ -2239,7 +2233,7 @@ class Simulator:
         # whose value functions are learned with an episodic learning task) do NOT necessarily have value 0,
         # their value needs to be estimated as well.
         terminal_state_previous_episode = None
-        t = -1                  # Learning step counter
+        t = 0   # Learning step counter: t represents the time at which the Markov chain transitions to the NEXT state. See more details at the @note at the beginning of the file.
         episode = -1
         done = False
         while not done:
@@ -2281,7 +2275,7 @@ class Simulator:
                     # We should check this because the counter of learning steps just increased by 1 and perhaps we reach the maximum number of learning steps after that!
                     # Note that this would trigger the same situation as if parameter max_time_steps were 0:
                     # in that case we would not even perform any learning step as the simulation would stop even before performing the first step!
-                    if max_time_steps is not None and t >= max_time_steps - 1:     # `-1` because t_episode starts at 0 and max_time_steps counts the number of steps
+                    if max_time_steps is not None and t >= max_time_steps:
                         max_time_steps_reached = True
                         done_episode = True
                         if self.debug:
@@ -2332,7 +2326,7 @@ class Simulator:
                         print("[DEBUG] (MAX TIME STEPS PER EPISODE = {} REACHED at episode{}!)".format(max_time_steps_per_episode, episode+1))
 
                 # Check early end of episode when max_time_steps is given
-                if max_time_steps is not None and t >= max_time_steps - 1:     # `-1` because t_episode starts at 0 and max_time_steps counts the number of steps
+                if max_time_steps is not None and t >= max_time_steps:
                     max_time_steps_reached = True
                     done_episode = True
                     if self.debug:
@@ -2589,7 +2583,7 @@ class Simulator:
             print("Last episode run = {} of {}".format(episode+1, nepisodes))
 
         return  learner.getV().getValues(), learner.getQ().getValues(), learner.getStateCounts(), RMSE, MAPE, \
-                {   'nsteps': t + 1,   # Number of discrete steps taken during the whole simulation (+1 because t = 0 indexes the first step)
+                {   'nsteps': t,
                     # Value of alpha for each state at the end of the LAST episode run
                     'alphas_at_last_episode': learner._alphas,
                     # All what follows is information by episode (I don't explicitly mention it in the key name because it may make the key name too long...)
@@ -2794,8 +2788,9 @@ class Simulator:
         # Iterate on the episodes to run
         nepisodes_max_steps_reached = 0
         max_time_steps_reached = False  # Flags whether the TOTAL number of steps reaches the maximum number of steps allowed over all episodes (so that we can break the FOR loop on episodes if that happens)
-        t = -1            # This time index is used when a cycle set has been given, in order to compute the cycle time
-                          # which can be used to estimate the stationary probability of states using renewal theory.
+        t = 0   # Learning step counter: t represents the time at which the Markov chain transitions to the NEXT state. See more details at the @note at the beginning of the file.
+                # Note that this time value is used for counting the number of steps / events and, when a cycle set has been given, to compute the expected cycle time,
+                # (which can be used to estimate the stationary probability of states using renewal theory).
         episode = -1
         done = False
         while not done:
@@ -2885,7 +2880,7 @@ class Simulator:
                         print("[DEBUG] (MAX TIME STEPS PER EPISODE = {} REACHED at episode{}!)".format(max_time_steps_per_episode, episode+1))
 
                 # Check end of simulation
-                if t >= max_time_steps - 1:     # `-1` because t_episode starts at 0 and max_time_steps counts the number of steps
+                if t >= max_time_steps:
                     max_time_steps_reached = True
                     done_episode = True
                     stop = True
@@ -3148,7 +3143,7 @@ class Simulator:
             print("Last episode run = {} of {}".format(episode+1, nepisodes))
 
         return  learner.getV().getValues(), learner.getQ().getValues(), learner.getStateCounts(), RMSE, MAPE, \
-                {   'nsteps': t + 1,   # Number of discrete steps taken during the whole simulation (+1 because t = 0 indexes the first step)
+                {   'nsteps': t,
                     # Value of alpha for each state at the end of the LAST episode run
                     'alphas_at_last_episode': learner._alphas,
                     # All what follows is information by episode (I don't explicitly mention it in the key name because it may make the key name too long...)
@@ -3194,19 +3189,15 @@ class Simulator:
         entered_set_cycle = lambda s, ns: s not in set_cycle and ns in set_cycle
         if set_cycle is not None:
             if entered_set_cycle(state, next_state):
-                # Notes on the cycle time calculation:
-                # 1) We sum +1 to t because the next_state happens at the NEXT time step, which is t+1
-                # and the next_state is the one that defines absorption, so we should measure the time at which the next_state occurs.
-                # (in fact, note that the very first t value is 0, therefore we should not consider the first entry
-                # time to be 0 if the system enters the cycle set at the very first step...)
-                # 2) The fact that we use `t` to compute the cycle time --instead of `t_episode`-- indicates that we are considering the task to be a continuing learning task,
+                # Note on the cycle time calculation:
+                # The fact that we use `t` to compute the cycle time --instead of `t_episode`-- indicates that we are considering the task to be a continuing learning task,
                 # as opposed to an episodic learning task, because the value of `t` is NOT reset at the beginning of each episode,
                 # instead it keeps increasing with every new time step.
-                cycle_times += [t + 1 - last_cycle_entrance_time]
+                cycle_times += [t - last_cycle_entrance_time]
                 # We mark the time the system entered the cycle set, so that:
                 # - we can compute the next cycle time
                 # - we can decide when to start measuring cycle times because we know they correspond to FULL cycle times.
-                last_cycle_entrance_time = t + 1
+                last_cycle_entrance_time = t
                 if len(cycle_times) > 1:
                     # We disregard the first cycle time from the computation of the average
                     # because the first entering event may not represent a cycle as the system may have not previously exited the set.
