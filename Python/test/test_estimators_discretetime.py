@@ -696,7 +696,7 @@ class Test_EstStateValueV_EnvGridworlds(unittest.TestCase, test_utils.EpisodeSim
                                                 [0.03680285, 0.02787032, 0.01874832]])
 
 
-class Test_EstDifferentialValueV_EnvGridworlds(unittest.TestCase, test_utils.EpisodeSimulation):
+class Test_EstDifferentialStateValueV_EnvGridworlds(unittest.TestCase, test_utils.EpisodeSimulation):
 
     @classmethod
     def setUpClass(cls):
@@ -708,33 +708,28 @@ class Test_EstDifferentialValueV_EnvGridworlds(unittest.TestCase, test_utils.Epi
         cls.nS = 20
         cls.env1d = gridworlds.EnvGridworld1D_OneTerminalState(length=cls.nS, rewards_dict={cls.nS-1: +1}, reward_default=0.0)
             ## NOTE: By definition of this gridworld, the start state is fixed at the leftmost state 0
-        # I let the start state of the one-terminal gridworld record in the following attribute which is used in the assertions below
+        # I let the start state of the one-terminal gridworld be recorded in the following attribute which is used in the assertions below
         cls.start_state = 0
 
-        # The learning criterion and discount factor
-        # TODO: (2023/12/02) Change the learning_criterion to AVERAGE and the learning_task to CONTINUING once this setup is correctly implemented in the TD learner
-        # NOTES about the TO-DO task above:
-        # - After we update the testing setup as mentioned above, the expected results will have to be changed since the current expected results correspond to
-        # learning_criterion = DISCOUNTED and learning_task = EPISODIC.
-        # - For the FV test, note that the method run for the FV simulation is most likely different when learning_criterion = AVERAGE and when learning_criterion = DISCOUNTED,
-        # e.g. the AVERAGE reward learning criterion may call Simulator._run_simulation_fv() whereas the DISCOUNTED reward learning criterion may call Simulator._run_simulation_fv_learnvaluefunctions()
-        # for the FV simulation.
-        cls.learning_criterion = LearningCriterion.DISCOUNTED
-        cls.learning_task = LearningTask.EPISODIC
-        cls.gamma = 0.9
+        # The learning criterion and learning task definition
+        cls.learning_criterion = LearningCriterion.AVERAGE
+        cls.learning_task = LearningTask.CONTINUING
+        cls.gamma = 1.0
+        cls.lmbda = 0.7        # NOTE THAT lambda is NOT 0!!! I wonder if this makes sense for FV??
 
         # True state differential value functions for the optimal policy
         # We could estimate this OFFLINE by writing a new method in miscellanea.EstValueFunctionOfflineDeterministicNextState,
         # in the like of method estimate_state_values_random_walk() but for the optimal policy where the agent should always go right.
-        cls.V_true_optimal = np.nan*np.ones(cls.nS)
-        cls.V_true_optimal[:-1] = cls.gamma**np.arange(cls.nS-2, -1, -1)    # e.g. if nS = 5 (i.e. 5 states in the environment being the last one the terminal state), this is [3, 2, 1, 0]
-        cls.V_true_optimal[-1] = 0                                          # e.g. for gamma = 0.9, nS = 4: [0.729, 0.81, 0.9, 1.0, 0.0]
+        # NOTE: This is the case for the EPISODIC learning task, but here we are analyzing the CONTINUING learning task, so we disable this now (until further notice).
+        #cls.V_true_optimal = np.nan*np.ones(cls.nS)
+        #cls.V_true_optimal[:-1] = cls.gamma**np.arange(cls.nS-2, -1, -1)    # e.g. if nS = 5 (i.e. 5 states in the environment being the last one the terminal state), this is [3, 2, 1, 0]
+        #cls.V_true_optimal[-1] = 0                                          # e.g. for gamma = 0.9, nS = 4: [0.729, 0.81, 0.9, 1.0, 0.0]
 
         # Store the true state value function in the environment so that we can compare our estimates with those values when running the simulation in the test
-        cls.env1d.setV(cls.V_true_optimal)
+        #cls.env1d.setV(cls.V_true_optimal)
 
         # Deterministic policy that goes always right
-        cls.policy_optimal = probabilistic.PolGenericDiscrete(cls.env1d, policy=dict(), policy_default=[0.0, 1.0])   # We set a dummy random policy for the terminal state
+        cls.policy_optimal = probabilistic.PolGenericDiscrete(cls.env1d, policy=dict(), policy_default=[0.0, 1.0])
 
         # Plotting parameters
         cls.colormap = cm.get_cmap("jet")
@@ -744,13 +739,11 @@ class Test_EstDifferentialValueV_EnvGridworlds(unittest.TestCase, test_utils.Epi
 
         # Simulation setup
         seed = 1717
-        nepisodes = 1000
-        plot = True
 
         # Learner and agent definition
         params = dict({'alpha': 1.0,
                        'gamma': self.gamma,
-                       'lambda': 0.7,
+                       'lambda': self.lmbda,
                        'alpha_min': 0.0,
                        })
         learner_td = td.LeaTDLambda(self.env1d,
@@ -765,45 +758,37 @@ class Test_EstDifferentialValueV_EnvGridworlds(unittest.TestCase, test_utils.Epi
 
         # Simulation
         sim = DiscreteSimulator(self.env1d, agent_td, debug=False)
-        state_values, action_values, state_counts, RMSE_by_episode, MAPE_by_episode, learning_info = \
-            sim.run(nepisodes=nepisodes, seed=seed,
-                    compute_rmse=True, state_observe=self.nS - 1,   # This is the state just before the terminal state
+        state_values, action_values, state_counts, _, _, learning_info = \
+            sim.run(max_time_steps=1000, seed=seed,
+                    compute_rmse=False, state_observe=self.nS-1,   # This is the state just before the terminal state
                     verbose=True, verbose_period=100,
                     plot=False, pause=0.1)
 
         # The expected state values are close to self.V_true_optimal but not quite there
-        expected = [0.09122767, 0.10793339, 0.12715431, 0.14914869, 0.17417813, 0.202504,
-                    0.23438438, 0.27007207, 0.30981446, 0.35385626, 0.40244593, 0.45584704,
-                    0.51435512, 0.57832068, 0.64817802, 0.72447921, 0.80793023, 0.899415,
-                    1.,         0.        ]
-        expected_rmse = 0.0373
-        observed = state_values # This should coincide with agent_td.getLearner().getV().getValues()
-        print("\nObserved V(s): " + test_utils.array2str(observed))
+        expected_V = [-0.317129, -0.284102, -0.247107, -0.205960, -0.160545, -0.110839,
+                      -0.056929,  0.000954,  0.062419,  0.126885,  0.193573,  0.261496,
+                       0.329465,  0.396119,  0.459983,  0.519588,  0.573685,  0.620701, 0.655492, -0.352874]
+        expected_state_counts = [51, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50]
+        expected_time_steps = 1000
+        print("\nObserved V(s): " + test_utils.array2str(state_values))
         print("State count: " + test_utils.array2str(state_counts))
         print(f"Number of time steps in simulation: {learning_info['nsteps']}")
-        print(f"Observed RMSE: {RMSE_by_episode[-1]}")
-        if plot:
-            self.plot_results(params, nepisodes,
-                              observed, self.V_true_optimal, RMSE_by_episode, learning_info['alpha_mean'],
-                              max_rmse=self.max_rmse, color_rmse=self.color_rmse)
         assert self.nS == 20 and \
                seed == 1717 and \
-               nepisodes == 1000 and \
                self.start_state == 0 and \
                params['alpha'] == 1.0 and \
-               params['gamma'] == 0.9 and \
+               params['gamma'] == 1.0 and \
                params['lambda'] == 0.7 and \
                params['alpha_min'] == 0.0
-        assert np.allclose(observed, expected, atol=1E-6)
-        assert np.isclose(RMSE_by_episode[-1], expected_rmse, atol=1E-4)
+        assert learning_info['nsteps'] == expected_time_steps
+        assert all(state_counts == expected_state_counts)
+        assert np.allclose(state_values, expected_V, atol=1E-6)
 
     def test_EnvGridworld1DOneTerminal_PolOptimal_MetFV(self):
         print("\n*** Running test " + self.id() + " ***")
 
         # Simulation setup
         seed = 1717
-        nepisodes = 1000      # Number of episodes for which the single Markov chain is run. This value can be selected much larger than parameter T below because that is the parameter that defines for how long the single Markov chain simulation is actually run
-        plot = True
 
         # Learner and agent definition
         params = dict({'N': 20,
@@ -812,7 +797,7 @@ class Test_EstDifferentialValueV_EnvGridworlds(unittest.TestCase, test_utils.Epi
                        'activation_set': set({5}),
                        'alpha': 1.0,
                        'gamma': self.gamma,
-                       'lambda': 0.7,
+                       'lambda': self.lmbda,
                        'alpha_min': 0.0,
                        })
         learner_fv = fv.LeaFV(  self.env1d, params['N'], params['T'], params['absorption_set'], params['activation_set'],
@@ -828,7 +813,7 @@ class Test_EstDifferentialValueV_EnvGridworlds(unittest.TestCase, test_utils.Epi
 
         # Simulation
         sim = DiscreteSimulator(self.env1d, agent_fv, debug=False)
-        state_values, action_values, state_counts, probas_stationary, expected_reward, expected_absorption_time, n_cycles_absorption_used, n_events_et, n_events_fv  = \
+        state_values, action_values, state_counts, probas_stationary, average_reward, average_absorption_time, n_cycles_absorption_used, n_events_et, n_events_fv  = \
             sim.run(max_time_steps_fv=1000,
                     seed=seed,
                     verbose=True, verbose_period=100,
@@ -836,38 +821,63 @@ class Test_EstDifferentialValueV_EnvGridworlds(unittest.TestCase, test_utils.Epi
 
         # The expected state values are close to self.V_true_optimal but not quite there
         # TODO: (2023/12) Update the expected value with the correct expected result (in fact, this expected result has been copied from test_EnvGridworld1DOneTerminal_PolOptimal_MetTD and not updated to the FV method)
-        expected = [0.09122767, 0.10793339, 0.12715431, 0.14914869, 0.17417813, 0.202504,
-                    0.23438438, 0.27007207, 0.30981446, 0.35385626, 0.40244593, 0.45584704,
-                    0.51435512, 0.57832068, 0.64817802, 0.72447921, 0.80793023, 0.899415,
-                    1.,         0.        ]
-        observed = state_values # This should coincide with agent_td.getLearner().getV().getValues()
-        print("\nObserved V(s): " + test_utils.array2str(observed))
+        expected_V = [-0.289951, -0.266082, -0.238415, -0.206548, -0.170099, -0.117904,
+                      -0.038988,  0.053958,  0.134022,  0.199793,  0.272732,  0.319645,
+                       0.372568,  0.442476,  0.493492,  0.501101,  0.509553,  0.539494, 0.592403, -0.340641]
+        expected_state_counts = [26, 25, 25, 25, 25, 45, 45, 45, 45, 45, 45, 46, 47, 47, 48, 52, 57, 61, 70, 74]
+        expected_n_events_et = params['T']
+        expected_n_events_fv = 397
+        expected_n_cycles_absorption = 24
+        expected_absorption_time = 20.0
+        expected_average_reward = 0.03960625
+        expected_probas_stationary = dict({5: 0.044125,
+                                           6: 0.04875,
+                                           7: 0.066625,
+                                           8: 0.040125,
+                                           9: 0.03175,
+                                           10: 0.05864375,
+                                           11: 0.0677875,
+                                           12: 0.037125,
+                                           13: 0.049325,
+                                           14: 0.05104375,
+                                           15: 0.04918125,
+                                           16: 0.055675,
+                                           17: 0.0387375,
+                                           18: 0.0535,
+                                           19: 0.03960625})
+        print("\nObserved V(s): " + test_utils.array2str(state_values))
         print("State count: " + test_utils.array2str(state_counts))
         print(f"Number of cycles observed in E(T) estimation: {n_cycles_absorption_used}")
-        print(f"Estimated expected reabsorption time E(T): {expected_absorption_time}")
-        print(f"Estimated expected reward: {expected_reward}")
+        print(f"Estimated expected reabsorption time E(T): {average_absorption_time}")
+        print(f"Estimated expected reward: {average_reward}")
         print(f"Number of time steps in E(T) estimation: {n_events_et}")
         print(f"Number of time steps in FV simulation: {n_events_fv}")
         print(f"Total number of time steps in E(T) + FV simulation: {n_events_et + n_events_fv}")
-        if plot:
-            self.plot_results(params, nepisodes,
-                              observed, self.V_true_optimal, None, [0.0]*nepisodes, # For now we set the alpha by episode to 0.0 and not to `sim.getAgent().getLearner().getAverageAlphaByEpisode()` because the number of episodes stored in the alpha by episode information is limited by the number of episodes at which the number of simulation steps of the single Markov chain that estimates E(T_A) reaches the value params['T'], which might be very small
-                              max_rmse=self.max_rmse, color_rmse=self.color_rmse)
+
         assert  self.nS == 20 and \
                 seed == 1717 and \
-                nepisodes == 1000 and \
                 params['N'] == 20 and \
                 params['T'] == 500 and \
                 params['absorption_set'] == set(np.arange(5)) and \
                 params['activation_set'] == set({5}) and \
                 params['alpha'] == 1.0 and \
-                params['gamma'] == 0.9 and \
+                params['gamma'] == 1.0 and \
                 params['lambda'] == 0.7 and \
                 params['alpha_min'] == 0.0
-       #assert np.allclose(observed, expected, atol=1E-6)
+        assert np.allclose(state_values, expected_V, atol=1E-6)
+        assert np.allclose(state_values, agent_fv.getLearner().getV().getValues(), atol=1E-6)
+        assert all(state_counts == expected_state_counts)
+        assert n_events_et == expected_n_events_et
+        assert n_events_fv == expected_n_events_fv
+        assert n_cycles_absorption_used == expected_n_cycles_absorption
+        assert np.isclose(average_absorption_time, expected_absorption_time)
+        assert np.isclose(average_reward, expected_average_reward)
+        assert sorted(list(probas_stationary.keys())) == list(agent_fv.getLearner().getActiveSet())
+        for key, value in probas_stationary.items():
+            assert np.isclose(probas_stationary[key], expected_probas_stationary[key])
 
 
-class Test_EstStateValueV_EnvGridworldsWithObstacles(unittest.TestCase, test_utils.EpisodeSimulation):
+class Test_EstValueFunctions_EnvGridworldsWithObstacles(unittest.TestCase, test_utils.EpisodeSimulation):
 
     @classmethod
     def setUpClass(cls):
@@ -1042,7 +1052,7 @@ class Test_EstStateValueV_EnvGridworldsWithObstacles(unittest.TestCase, test_uti
         # (2024/02/19) Note that parameter max_time_steps_fv is by default set to None,
         # which means that it is automatically computed by the _run_simulation_fv() method called by run()
         # and as of the writing of this, it is set to N*100, where N is the number of particles in the FV system.
-        state_values, action_values, state_counts, probas_stationary, expected_reward, expected_cycle_time, n_cycles, n_events_et, n_events_fv = \
+        state_values, action_values, state_counts, probas_stationary, average_reward, average_cycle_time, n_cycles, n_events_et, n_events_fv = \
            self.sim_fv.run(max_time_steps_fv=500,
                            seed=self.seed, verbose=True, verbose_period=100)
 
@@ -1077,7 +1087,7 @@ class Test_EstStateValueV_EnvGridworldsWithObstacles(unittest.TestCase, test_uti
         assert all(state_counts == self.expected_fv_counts)
 
 
-class Test_EstDifferentialStateValueV_EnvGridworldsWithObstacles(unittest.TestCase, test_utils.EpisodeSimulation):
+class Test_EstDifferentialValueFunctions_EnvGridworldsWithObstacles(unittest.TestCase, test_utils.EpisodeSimulation):
     """
     Test the estimation of the differential value function, i.e. the value function under the average reward setting
 
@@ -1457,7 +1467,7 @@ class Test_EstDifferentialStateValueV_EnvGridworldsWithObstacles(unittest.TestCa
         # (2024/02/14) Note that parameter max_time_steps_fv is by default set to None,
         # which means that it is automatically computed by the _run_simulation_fv() method called by run()
         # and as of the writing of this, it is set to N*100, where N is the number of particles in the FV system.
-        state_values, action_values, state_counts, probas_stationary, expected_reward, expected_cycle_time, n_cycles, n_events_et, n_events_fv = \
+        state_values, action_values, state_counts, probas_stationary, average_reward, average_cycle_time, n_cycles, n_events_et, n_events_fv = \
            self.sim_fv.run(seed=self.seed, verbose=True, verbose_period=100)
 
         # The following are the state values (value function) calculated using the average reward observed during the single Markov chain excursion used to estimate E(T_A)
@@ -1485,7 +1495,7 @@ class Test_EstDifferentialStateValueV_EnvGridworldsWithObstacles(unittest.TestCa
         print("State frequency distribution (observed during FV simulation): " + test_utils.array2str(observed_p))
         print("\nState probability distribution using FV: " + test_utils.array2str(observed_p_fv))
         print("Expected state probability distribution using FV: " + test_utils.array2str(self.expected_p_fv))
-        print(f"(observed average cycle time on {n_cycles} cycles (expected={self.expected_fv_n_cycles}): {expected_cycle_time} (expected={self.expected_fv_cycle_time}))")
+        print(f"(observed average cycle time on {n_cycles} cycles (expected={self.expected_fv_n_cycles}): {average_cycle_time} (expected={self.expected_fv_cycle_time}))")
         print(f"\nEstimated average reward (using FV estimator): {observed_average_reward}")
         print(f"Expected estimated average reward (using FV estimator): {self.expected_fv_average_reward}")
         print(f"Estimated average reward (using TD estimator): {self.expected_average_reward}")
@@ -1500,8 +1510,8 @@ class Test_EstDifferentialStateValueV_EnvGridworldsWithObstacles(unittest.TestCa
 
         # Assertions about the average reward estimated by FV
         assert np.isclose(observed_average_reward, self.expected_fv_average_reward, atol=1E-6)
-        assert np.isclose(observed_average_reward, expected_reward, atol=1E-6), \
-            "The average reward computed from the estimated stationary probabilities by FV must coincide with the estimated average reward (`expected_reward`) returned by the FV simulator"
+        assert np.isclose(observed_average_reward, average_reward, atol=1E-6), \
+            "The average reward computed from the estimated stationary probabilities by FV must coincide with the estimated average reward (`average_reward`) returned by the FV simulator"
         assert np.isclose(observed_average_reward, self.agent_rw_fv.getLearner().getAverageReward(), atol=1E-6), \
             "The average reward stored in the FV learner must coincide with the average reward estimated by the FV estimator"
 
@@ -1509,7 +1519,7 @@ class Test_EstDifferentialStateValueV_EnvGridworldsWithObstacles(unittest.TestCa
         assert np.allclose(observed_p_fv, self.expected_p_fv, atol=1E-6, equal_nan=True)
 
         # Assertions about the estimated expected cycle time
-        assert np.isclose(expected_cycle_time, self.expected_fv_cycle_time, atol=1E-1)
+        assert np.isclose(average_cycle_time, self.expected_fv_cycle_time, atol=1E-1)
         assert n_cycles == self.expected_fv_n_cycles
 
 
@@ -1802,17 +1812,17 @@ if __name__ == '__main__':
 
         # Gridworld with one terminal state (on the right) having +1 reward
         test_suite_gw1d1t = unittest.TestSuite()
-        test_suite_gw1d1t.addTest(Test_EstDifferentialValueV_EnvGridworlds("test_EnvGridworld1DOneTerminal_PolOptimal_MetTD"))
-        test_suite_gw1d1t.addTest(Test_EstDifferentialValueV_EnvGridworlds("test_EnvGridworld1DOneTerminal_PolOptimal_MetFV"))
+        test_suite_gw1d1t.addTest(Test_EstDifferentialStateValueV_EnvGridworlds("test_EnvGridworld1DOneTerminal_PolOptimal_MetTD"))
+        test_suite_gw1d1t.addTest(Test_EstDifferentialStateValueV_EnvGridworlds("test_EnvGridworld1DOneTerminal_PolOptimal_MetFV"))
 
         test_suite_gw2dobstacles = unittest.TestSuite()
-        test_suite_gw2dobstacles.addTest(Test_EstStateValueV_EnvGridworldsWithObstacles("test_Env_PolRandomWalk_MetMC"))
-        test_suite_gw2dobstacles.addTest(Test_EstDifferentialStateValueV_EnvGridworldsWithObstacles("test_Env_PolRandomWalk_MetMC"))
-        test_suite_gw2dobstacles.addTest(Test_EstDifferentialStateValueV_EnvGridworldsWithObstacles("test_Env_PolRandomWalk_MetMC_FromCycles"))
-        test_suite_gw2dobstacles.addTest(Test_EstStateValueV_EnvGridworldsWithObstacles("test_Env_PolRandomWalk_MetTDLambda"))
-        test_suite_gw2dobstacles.addTest(Test_EstDifferentialStateValueV_EnvGridworldsWithObstacles("test_Env_PolRandomWalk_MetTDLambda"))
-        test_suite_gw2dobstacles.addTest(Test_EstDifferentialStateValueV_EnvGridworldsWithObstacles("test_Env_PolRandomWalk_MetTDLambda_FromCycles"))
-        test_suite_gw2dobstacles.addTest(Test_EstDifferentialStateValueV_EnvGridworldsWithObstacles("test_Env_PolRandomWalk_MetFV"))
+        test_suite_gw2dobstacles.addTest(Test_EstValueFunctions_EnvGridworldsWithObstacles("test_Env_PolRandomWalk_MetMC"))
+        test_suite_gw2dobstacles.addTest(Test_EstDifferentialValueFunctions_EnvGridworldsWithObstacles("test_Env_PolRandomWalk_MetMC"))
+        test_suite_gw2dobstacles.addTest(Test_EstDifferentialValueFunctions_EnvGridworldsWithObstacles("test_Env_PolRandomWalk_MetMC_FromCycles"))
+        test_suite_gw2dobstacles.addTest(Test_EstValueFunctions_EnvGridworldsWithObstacles("test_Env_PolRandomWalk_MetTDLambda"))
+        test_suite_gw2dobstacles.addTest(Test_EstDifferentialValueFunctions_EnvGridworldsWithObstacles("test_Env_PolRandomWalk_MetTDLambda"))
+        test_suite_gw2dobstacles.addTest(Test_EstDifferentialValueFunctions_EnvGridworldsWithObstacles("test_Env_PolRandomWalk_MetTDLambda_FromCycles"))
+        test_suite_gw2dobstacles.addTest(Test_EstDifferentialValueFunctions_EnvGridworldsWithObstacles("test_Env_PolRandomWalk_MetFV"))
 
         # --- Mountain Car tests
         test_suite_mountain = unittest.TestSuite()
