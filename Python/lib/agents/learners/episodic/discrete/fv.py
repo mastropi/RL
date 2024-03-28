@@ -1187,6 +1187,9 @@ class LeaFV(LeaTDLambda):
     def getActiveSet(self):
         return self.active_set
 
+    def getIntegral(self):
+        return self.dict_integral
+
     def getProbasStationaryStartStateET(self):
         return self.probas_stationary_start_state_et
 

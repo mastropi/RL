@@ -623,6 +623,18 @@ class Simulator:
         # What is most important of this reset is to reset the learning rates of all states and actions! (so that we start the FV-based learning with full intensity)
         learner.reset(reset_episode=True, reset_value_functions=False)
 
+        # Store the estimated average reward passed by the user as the average reward value of the learner,
+        # so that it can be used as correction value when learning the differential value functions (which is precisely the average reward)
+        # This value is updated iteratively as the FV simulation proceeds, so the correction is updated during the simulation process.
+        if estimated_average_reward is not None:
+            learner.setAverageReward(estimated_average_reward)
+
+        # Initialize a dictionary that will contain the iterative estimation of the stationary probabilities as the simulation proceeds
+        # This is only done when an estimate of the expected re-absorption time is provided,
+        # as this piece of information is needed to compute the iterative update of the stationary probabilities.
+        if expected_absorption_time is not None:
+            probas_stationary = dict.fromkeys(learner.getIntegral(), 0.0)
+
         # Set the start state of each environment/particle to an activation state, as this is a requirement
         # for the empirical distribution Phi(t).
         for i, env in enumerate(envs):
@@ -715,10 +727,6 @@ class Simulator:
                 # Step on the selected particle
                 action = policy.choose_action(state)
                 next_state, reward, done_episode, info = envs[idx_particle].step(action)
-                if estimated_average_reward is not None:
-                    # Store the estimated average reward passed by the user in the `info` dictionary so that it can be used
-                    # by the call to the learn() method below as correction value when learning the value functions under the average reward criterion
-                    info['average_reward'] = estimated_average_reward
 
                 # Learn: i.e. update the value function (stored in the learner) with the new observation
                 # NOTES:
@@ -748,6 +756,19 @@ class Simulator:
                     t_surv = t_abs
                     survival_times += [t_surv]
 
+                    if expected_absorption_time is not None:
+                        # Iterative update of the components of the FV estimator, when survival times happen in increasing order, and update of the average reward
+                        learner._update_absorption_times(t_surv)
+                        learner._update_phi_contribution(t_surv)
+                        learner._update_integral()
+                        for _state, _integral_for_state in learner.getIntegral().items():
+                            probas_stationary[_state] = _integral_for_state / (N * expected_absorption_time)
+                        updated_average_reward = estimate_expected_reward(self.env, probas_stationary)
+                        # Recursive update of the average reward stored in the learner (which is used as correction for the differential value functions)
+                        # which is based on the just updated average reward, based on the newly observed survival time (that's why we divide by len(survival_times))
+                        learner.setAverageReward( learner.getAverageReward() + (updated_average_reward - learner.getAverageReward()) / len(survival_times) )
+                        #learner.setAverageReward(updated_average_reward)
+
                     # Mark the particle as "absorbed once" so that we don't use any other absorption time from this
                     # particle to estimate the survival probability, because the absorption times coming after the first
                     # absorption time should NOT contribute to the survival probability, because their initial state
@@ -772,7 +793,12 @@ class Simulator:
                     f"The state of a reactivated particle must NOT be a state in the absorption set ({next_state})"
 
             # Update Phi based on the new state of the changed (and possibly also reactivated) particle
-            dict_phi = update_phi(envs[0], len(envs), t, dict_phi, state, next_state, alpha=alpha0 / (t + alpha0))
+            if expected_absorption_time is not None:
+                # Iterative update of Phi
+                learner._update_phi(t, state, next_state)
+            else:
+                # One-shot update of Phi
+                dict_phi = update_phi(envs[0], len(envs), t, dict_phi, state, next_state, alpha=alpha0 / (t + alpha0))
 
             if DEBUG_TRAJECTORIES:
                 print("[FV] Moved P={}, t={}: state={}, action={} -> next_state={}, reward={}" \
@@ -800,6 +826,9 @@ class Simulator:
             #done = t >= max_time_steps
 
         # DONE
+        if expected_absorption_time is not None:
+            # Copy the Phi learnerd iteratively to the dict_phi returned by this method, so that the outside world receives the correct estimate of Phi
+            dict_phi = learner.dict_phi
         if t >= max_time_steps:
             # Add the last observed time step to the list of survival times as many times as the number of particles left to absorb,
             # so that we can use the signal information collected in Phi since the last absorbed particle to the FV estimation of the expected reward.
