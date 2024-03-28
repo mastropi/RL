@@ -12,6 +12,7 @@ All learner classes inheriting from this class:
 a) SHOULD implement the following attributes:
     - V --> an object containing the information on how the state value function is ESTIMATED.
     - Q --> an object containing the information on how the state-action value function is ESTIMATED.
+    - A --> an object containing the information on how the advantage function is ESTIMATED.
     - gamma --> the reward discount parameter
 b) COULD implement the following methods:
     - reset() --> resets the state of the learner to start learning anew
@@ -23,6 +24,7 @@ b) COULD implement the following methods:
     - getStateCounts(first_visit) --> returns the state counts over all run episodes, optionally the first visit counts.
     - getV() --> returns the state value function
     - getQ() --> returns the state-action value function
+    - getA() --> returns the advantage function (for each state and action)
 """
 
 import warnings
@@ -312,6 +314,13 @@ class Learner(GenericLearner):
                           f"check whether the `getQ()` is defined in the learner class '{self.__class__.__name__}', "
                           f"and if so, whether the reset() method is defined for the object containing the action value function.")
             print(e)
+        try:
+            self.getA().reset(method=self.reset_method, params_random=self.reset_params, seed=self.reset_seed + 1 if self.reset_seed is not None else None)  # We sum +1 to the seed to avoid having the same initial values for V(s) and Q(s,a)
+        except Exception as e:
+            warnings.warn(f"Resetting the value of the ADVANTAGE function failed. If this is needed, "
+                          f"check whether the `getA()` is defined in the learner class '{self.__class__.__name__}', "
+                          f"and if so, whether the reset() method is defined for the object containing the action value function.")
+            print(e)
 
     def _update_trajectory(self, t, state, action, reward):
         "Updates the trajectory of the CURRENT episode"
@@ -553,6 +562,12 @@ class Learner(GenericLearner):
 
     def getQ(self):
         "Returns the object containing action value function estimation"
+        # This method is not implemented because the subclass implementing the actual learner may define the action value function differently (e.g. using different attribute names)
+        # Also, this method is required because it is called by the reset_value_functions() method defined in this class.
+        raise NotImplementedError
+
+    def getA(self):
+        "Returns the object containing advantage function estimation"
         # This method is not implemented because the subclass implementing the actual learner may define the action value function differently (e.g. using different attribute names)
         # Also, this method is required because it is called by the reset_value_functions() method defined in this class.
         raise NotImplementedError

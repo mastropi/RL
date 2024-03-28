@@ -250,14 +250,14 @@ class Simulator:
         # Create the particles as copies of the main environment
         envs = [self.env if i == 0 else copy.deepcopy(self.env) for i in range(dict_params_simul['N'])]
 
-        state_values, action_values, state_counts_from_single_markov_chain, probas_stationary, expected_reward, expected_absorption_time, n_cycles_absorption_used, \
+        state_values, action_values, advantage_values, state_counts_from_single_markov_chain, probas_stationary, expected_reward, expected_absorption_time, n_cycles_absorption_used, \
             time_last_absorption, max_survival_time, n_events_et, n_events_fv = \
                 self._estimate_state_value_function_and_expected_reward_fv( envs, dict_params_simul, dict_params_info,
                                                                             probas_stationary_start_state_et=self.agent.getLearner().getProbasStationaryStartStateET(),
                                                                             probas_stationary_start_state_fv=self.agent.getLearner().getProbasStationaryStartStateFV(),
                                                                             reset_value_functions=reset_value_functions)
 
-        return state_values, action_values, state_counts_from_single_markov_chain, probas_stationary, expected_reward, expected_absorption_time, n_cycles_absorption_used, n_events_et, n_events_fv
+        return state_values, action_values, advantage_values, state_counts_from_single_markov_chain, probas_stationary, expected_reward, expected_absorption_time, n_cycles_absorption_used, n_events_et, n_events_fv
 
     def _estimate_state_value_function_and_expected_reward_fv(self, envs, dict_params_simul, dict_params_info,
                                                               probas_stationary_start_state_et: dict=None,
@@ -347,7 +347,7 @@ class Simulator:
             start_state = choose_state_from_set(dict_params_simul['absorption_set'], probas_stationary_start_state_et)
         print(f"SINGLE simulation for the estimation of the expected reabsorption time E(T_A) starts at state s={start_state} "
               f"(when None, the simulation starts following the Initial State Distribution of the environment: {self.env.getInitialStateDistribution()}")
-        state_values, action_values, state_counts_et, _, _, learning_info = \
+        state_values, action_values, advantage_values, state_counts_et, _, _, learning_info = \
             self._run_single_continuing_task(
                             max_time_steps=dict_params_simul['T'],      # Max simulation time over ALL episodes
                             start_state_first_episode=start_state,
@@ -413,7 +413,7 @@ class Simulator:
                 # See meeting minutes in entry dated 17-Jan-2024 for more details.
                 method_fv = self._run_simulation_fv_learnvaluefunctions; uniform_jump_rate = 1
                 start_set = self.agent.getLearner().active_set.difference(self.env.getTerminalStates())
-            n_events_fv, state_values, action_values, state_counts_fv, phi, df_proba_surv, expected_absorption_time, max_survival_time = \
+            n_events_fv, state_values, action_values, advantage_values, state_counts_fv, phi, df_proba_surv, expected_absorption_time, max_survival_time = \
                 method_fv(  dict_params_info.get('t_learn', 0), envs,
                             dict_params_simul['absorption_set'],
                             start_set,
@@ -458,7 +458,7 @@ class Simulator:
                 assert np.isclose(expected_reward, self.agent.getLearner().getAverageReward()), \
                     f"The average reward estimated by FV ({expected_reward}) must be equal to the average reward stored in the FV learner ({self.agent.getLearner().getAverageReward()})"
 
-        return state_values, action_values, state_counts_all, probas_stationary, expected_reward, expected_absorption_time, n_cycles_absorption_used, \
+        return state_values, action_values, advantage_values, state_counts_all, probas_stationary, expected_reward, expected_absorption_time, n_cycles_absorption_used, \
                time_last_absorption, max_survival_time, n_events_et, n_events_fv
 
     @measure_exec_time
@@ -831,7 +831,7 @@ class Simulator:
             print("Phi:\n{}".format(dict_phi))
             pd.set_option('display.max_rows', max_rows)
 
-        return t, learner.getV().getValues(), learner.getQ().getValues(), learner._state_counts, dict_phi, df_proba_surv, expected_absorption_time, max_survival_time
+        return t, learner.getV().getValues(), learner.getQ().getValues(), learner.getA().getValues(), learner._state_counts, dict_phi, df_proba_surv, expected_absorption_time, max_survival_time
 
     @measure_exec_time
     def _run_simulation_fv_fraiman( self, t_learn, envs, absorption_set: set, start_set: set,
@@ -1137,7 +1137,7 @@ class Simulator:
 
         n_events_fv = t*N
 
-        return n_events_fv, learner.getV().getValues(), learner.getQ().getValues(), learner._state_counts, dict_phi, df_proba_surv, expected_absorption_time, max_survival_time
+        return n_events_fv, learner.getV().getValues(), learner.getQ().getValues(), learner.getA().getValues(), learner._state_counts, dict_phi, df_proba_surv, expected_absorption_time, max_survival_time
 
     @measure_exec_time
     def _run_simulation_fv_fraiman_modified(self, t_learn, envs, absorption_set: set, start_set: set,
@@ -1416,7 +1416,7 @@ class Simulator:
 
         n_events_fv = t*N
 
-        return n_events_fv, learner.getV().getValues(), learner.getQ().getValues(), learner._state_counts, dict_phi, df_proba_surv, expected_absorption_time, max_survival_time
+        return n_events_fv, learner.getV().getValues(), learner.getQ().getValues(), learner.getA().getValues(), learner._state_counts, dict_phi, df_proba_surv, expected_absorption_time, max_survival_time
 
     @measure_exec_time
     def _run_simulation_fv_learnvaluefunctions( self, t_learn, envs, absorption_set: set, start_set: set,
@@ -2002,7 +2002,7 @@ class Simulator:
 
         print(f"Distribution of start actions:\n{pd.Series([learner.getStartAction(idx_particle) for idx_particle in range(N)]).value_counts()}")
 
-        return n_steps_on_all_environments, learner.getV().getValues(), learner.getQ().getValues(), learner.getStateCounts(), learner.dict_phi, df_proba_surv, expected_absorption_time, max_survival_time
+        return n_steps_on_all_environments, learner.getV().getValues(), learner.getQ().getValues(), learner.getA().getValues(), learner.getStateCounts(), learner.dict_phi, df_proba_surv, expected_absorption_time, max_survival_time
 
     def _run_single(self, nepisodes, max_time_steps=+np.Inf, max_time_steps_per_episode=+np.Inf, start_state_first_episode=None, reset_value_functions=True,
                     seed=None, compute_rmse=False, weights_rmse=None,
@@ -2582,7 +2582,7 @@ class Simulator:
             print("Percentage of episodes reaching max step = {:.1f}%".format(nepisodes_max_steps_reached / nepisodes*100))
             print("Last episode run = {} of {}".format(episode+1, nepisodes))
 
-        return  learner.getV().getValues(), learner.getQ().getValues(), learner.getStateCounts(), RMSE, MAPE, \
+        return  learner.getV().getValues(), learner.getQ().getValues(), learner.getA().getValues(), learner.getStateCounts(), RMSE, MAPE, \
                 {   'nsteps': t,
                     # Value of alpha for each state at the end of the LAST episode run
                     'alphas_at_last_episode': learner._alphas,
@@ -3142,7 +3142,7 @@ class Simulator:
             print("Percentage of episodes reaching max step = {:.1f}%".format(nepisodes_max_steps_reached / nepisodes*100))
             print("Last episode run = {} of {}".format(episode+1, nepisodes))
 
-        return  learner.getV().getValues(), learner.getQ().getValues(), learner.getStateCounts(), RMSE, MAPE, \
+        return  learner.getV().getValues(), learner.getQ().getValues(), learner.getA().getValues(), learner.getStateCounts(), RMSE, MAPE, \
                 {   'nsteps': t,
                     # Value of alpha for each state at the end of the LAST episode run
                     'alphas_at_last_episode': learner._alphas,
@@ -3506,7 +3506,7 @@ class Simulator:
             if verbose:
                 print("Running experiment {} of {} (#episodes = {})..." \
                       .format(exp+1, nexperiments, nepisodes), end=" ")
-            V, Q, n_visits_i, RMSE_by_episode_i, MAPE_by_episode_i, learning_info = \
+            V, Q, A, n_visits_i, RMSE_by_episode_i, MAPE_by_episode_i, learning_info = \
                     self.run(nepisodes=nepisodes, max_time_steps_per_episode=max_time_steps_per_episode,
                              seed=None, # We pass seed=None so that the seed is NOT set for the experiment,
                                         # but it is set indirectly by the seed defined above, before the FOR loop.

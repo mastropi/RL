@@ -270,7 +270,7 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
             '2(n)-Learning-Seed': dict_params_simul['seed'],
         })
         show_exec_params(params)
-        _, _, df_learning = simul.run(dict_params_simul, dict_params_info=dict_params_info, seed=dict_params_simul['seed'], verbose=False)
+        _, _, _, _, _, _, df_learning = simul.run(dict_params_simul, dict_params_info=dict_params_info, seed=dict_params_simul['seed'], verbose=False)
 
         return df_learning
 

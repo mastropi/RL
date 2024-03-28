@@ -136,7 +136,7 @@ class Test_EstStateValueV_MetTDLambda_EnvGridworld1D(unittest.TestCase, test_uti
 
         # Simulation
         sim = DiscreteSimulator(self.env, agent_rw_tdlambda, debug=False)
-        _, _, _, RMSE_by_episode, MAPE_by_episode, learning_info = sim.run(nepisodes=self.nepisodes, seed=self.seed,
+        _, _, _, _, RMSE_by_episode, MAPE_by_episode, learning_info = sim.run(nepisodes=self.nepisodes, seed=self.seed,
                                                                      compute_rmse=True, state_observe=15,
                                                                      verbose=True, verbose_period=100,
                                                                      plot=False, pause=0.1)
@@ -161,7 +161,7 @@ class Test_EstStateValueV_MetTDLambda_EnvGridworld1D(unittest.TestCase, test_uti
 
         # Simulation
         sim = DiscreteSimulator(self.env, agent_rw_tdlambda, debug=False)
-        _, _, _, RMSE_by_episode, MAPE_by_episode, learning_info = sim.run(nepisodes=self.nepisodes, seed=self.seed,
+        _, _, _, _, RMSE_by_episode, MAPE_by_episode, learning_info = sim.run(nepisodes=self.nepisodes, seed=self.seed,
                                                                      compute_rmse=True, state_observe=19,
                                                                      verbose=True, verbose_period=100,
                                                                      plot=False, pause=0.001)
@@ -209,7 +209,7 @@ class Test_EstStateValueV_MetTDLambda_EnvGridworld1D(unittest.TestCase, test_uti
         sim = DiscreteSimulator(self.env, agent_rw_tdlambda, debug=False)
 
         # First run
-        _, _, _, RMSE_by_episode, MAPE_by_episode, _ = sim.run(nepisodes=self.nepisodes, seed=self.seed,
+        _, _, _, _, RMSE_by_episode, MAPE_by_episode, _ = sim.run(nepisodes=self.nepisodes, seed=self.seed,
                                                             compute_rmse=True, state_observe=19,
                                                             verbose=True, verbose_period=100,
                                                             plot=False, pause=0.001)
@@ -231,7 +231,7 @@ class Test_EstStateValueV_MetTDLambda_EnvGridworld1D(unittest.TestCase, test_uti
         assert np.allclose(rmse_observed, rmse_expected, atol=1E-6)
 
         # Second run
-        _, _, _, RMSE_by_episode, MAPE_by_episode, _ = sim.run(nepisodes=self.nepisodes, seed=self.seed,
+        _, _, _, _, RMSE_by_episode, MAPE_by_episode, _ = sim.run(nepisodes=self.nepisodes, seed=self.seed,
                                                             compute_rmse=True, state_observe=19,
                                                             verbose=True, verbose_period=100,
                                                             plot=False, pause=0.001)
@@ -261,7 +261,7 @@ class Test_EstStateValueV_MetTDLambda_EnvGridworld1D(unittest.TestCase, test_uti
 
         # Simulation        
         sim = DiscreteSimulator(self.env, agent_rw_tdlambda_adaptive, debug=False)
-        _, _, _, RMSE_by_episode, MAPE_by_episode, learning_info = sim.run(nepisodes=self.nepisodes, seed=self.seed,
+        _, _, _, _, RMSE_by_episode, MAPE_by_episode, learning_info = sim.run(nepisodes=self.nepisodes, seed=self.seed,
                                                                      compute_rmse=True,
                                                                      verbose=True, verbose_period=100,
                                                                      plot=False, pause=0.001)
@@ -352,7 +352,7 @@ class Test_EstStateValueV_MetTDLambda_EnvGridworld1DOneTerminal(unittest.TestCas
 
         # Simulation
         sim = DiscreteSimulator(self.env, agent_rw_tdlambda_adaptive, debug=False)
-        _, _, _, _, _, learning_info = sim.run(nepisodes=self.nepisodes, seed=self.seed,
+        _, _, _, _, _, _, learning_info = sim.run(nepisodes=self.nepisodes, seed=self.seed,
                                                                      compute_rmse=False,
                                                                      verbose=True, verbose_period=100,
                                                                      plot=False, pause=0.001)
@@ -441,7 +441,7 @@ class Test_EstStateValueV_MetTDLambda_EnvGridworld2D(unittest.TestCase, test_uti
 
         # Simulation
         sim = DiscreteSimulator(self.env, agent_rw_tdlambda, debug=False)
-        _, _, _, _, _, learning_info = sim.run(nepisodes=self.nepisodes, seed=self.seed,
+        _, _, _, _, _, _, learning_info = sim.run(nepisodes=self.nepisodes, seed=self.seed,
                                          compute_rmse=False, state_observe=0,
                                          verbose=True, verbose_period=max(1, int(self.nepisodes/10)),
                                          plot=self.plot, colormap=self.colormap, pause=self.pause)
@@ -505,7 +505,7 @@ class Test_EstStateValueV_MetTDLambda_EnvGridworld2D(unittest.TestCase, test_uti
 
         # Simulation
         sim = DiscreteSimulator(self.env_logn_rewards, agent_rw_tdlambda, debug=False)
-        _, _, _, _, _, learning_info = sim.run(nepisodes=self.nepisodes, seed=self.seed,
+        _, _, _, _, _, _, learning_info = sim.run(nepisodes=self.nepisodes, seed=self.seed,
                                          compute_rmse=False, state_observe=0,
                                          verbose=True, verbose_period=max(1, int(self.nepisodes/10)),
                                          plot=self.plot, colormap=self.colormap, pause=self.pause)
@@ -577,7 +577,7 @@ class Test_EstStateValueV_MetTDLambda_EnvGridworld2D(unittest.TestCase, test_uti
 
         # Simulation        
         sim = DiscreteSimulator(self.env, agent_rw_tdlambda_adaptive, debug=False)
-        _, _, _, _, _, learning_info = sim.run(nepisodes=self.nepisodes, seed=self.seed,
+        _, _, _, _, _, _, learning_info = sim.run(nepisodes=self.nepisodes, seed=self.seed,
                                          compute_rmse=False,
                                          verbose=True, verbose_period=max(1, int(self.nepisodes/10)),
                                          plot=self.plot, colormap=self.colormap, pause=self.pause)
@@ -647,7 +647,7 @@ class Test_EstStateValueV_MetTDLambda_EnvGridworld2D(unittest.TestCase, test_uti
 
         # Simulation        
         sim = DiscreteSimulator(self.env_logn_rewards, agent_rw_tdlambda_adaptive, debug=False)
-        _, _, _, _, _, learning_info = sim.run( nepisodes=self.nepisodes, seed=self.seed,
+        _, _, _, _, _, _, learning_info = sim.run( nepisodes=self.nepisodes, seed=self.seed,
                                                 compute_rmse=False,
                                                 verbose=True, verbose_period=max(1, int(self.nepisodes/10)),
                                                 plot=self.plot, colormap=self.colormap, pause=self.pause)
@@ -884,7 +884,7 @@ class Test_TD_Lambda_MountainCar(unittest.TestCase, test_utils.EpisodeSimulation
         sim = DiscreteSimulator(self.env, agent_rw_tdlambda, debug=False)
 
         time_start = timer()
-        _, _, _, _, _, learning_info = sim.run( nepisodes=self.nepisodes, max_time_steps_per_episode=self.max_time_steps_per_episode,
+        _, _, _, _, _, _, learning_info = sim.run( nepisodes=self.nepisodes, max_time_steps_per_episode=self.max_time_steps_per_episode,
                                                 seed=self.seed,
                                                 compute_rmse=False, state_observe=None,
                                                 verbose=True, verbose_period=max(1, int(self.nepisodes/10)),

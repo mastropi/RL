@@ -297,7 +297,7 @@ if __name__ == '__main__':
         seed = 1717
         nepisodes = 20
         sim = DiscreteSimulator(env, agent_fv, debug=False)
-        state_values, action_values, state_counts, probas_stationary, expected_reward, expected_absorption_time, n_cycles_absorption_used, n_events_et, n_events_fv  = \
+        state_values, action_values, advantage_values, state_counts, probas_stationary, expected_reward, expected_absorption_time, n_cycles_absorption_used, n_events_et, n_events_fv  = \
             sim.run(nepisodes=nepisodes,
                     max_time_steps_per_episode=np.Inf,
                     max_time_steps_fv=100,

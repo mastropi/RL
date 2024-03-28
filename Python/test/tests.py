@@ -316,7 +316,7 @@ for rep in range(R):
     # Simulation
     time_start = timer()
     sim = DiscreteSimulator(env1d, agent_fv, debug=False)
-    state_values_fv, action_values_fv, state_counts_fv, probas_stationary, expected_reward, expected_absorption_time, n_cycles_absorption_used, n_events_et, n_events_fv = \
+    state_values_fv, action_values_fv, advantage_values_fv, state_counts_fv, probas_stationary, expected_reward, expected_absorption_time, n_cycles_absorption_used, n_events_et, n_events_fv = \
         sim.run(max_time_steps_fv=max_time_steps_fv_for_all_particles,
                 seed=seed_this,
                 verbose=True, verbose_period=50,
@@ -363,7 +363,7 @@ for rep in range(R):
     # Simulation
     time_start = timer()
     sim = DiscreteSimulator(env1d, agent_td, debug=False)
-    state_values_td, action_values_td, state_counts_td, RMSE_by_episode, MAPE_by_episode, learning_info = \
+    state_values_td, action_values_td, advantage_values_td, state_counts_td, RMSE_by_episode, MAPE_by_episode, learning_info = \
         sim.run(nepisodes=nepisodes,
                 max_time_steps=time_steps_fv[rep], #max_time_steps_benchmark,
                 max_time_steps_per_episode=+np.Inf, #max_time_steps_per_episode, #+np.Inf
@@ -750,6 +750,7 @@ learning_method = "values_td"; simulator_value_functions = test_ac.sim_td       
 #learning_method = "values_tdl"; simulator_value_functions = test_ac.sim_td     # TD(lambda)
 #learning_method = "values_tda"; simulator_value_functions = test_ac.sim_tda    # Adaptive TD(lambda)
 learning_method = "values_fv"; simulator_value_functions = test_ac.sim_fv
+#learning_method = "values_fvos"; simulator_value_functions = test_ac.sim_fv     # FV used just as an oversampling method
 
 # FV learning parameters (which are used to define parameters of the other learners analyzed so that their comparison with FV is fair)
 max_time_steps_fv_per_particle = 50 #100 #50                            # Max average number of steps allowed for each particle in the FV simulation
@@ -774,6 +775,7 @@ max_time_steps_per_episode = test_ac.env2d.getNumStates()*10    # This parameter
 max_time_steps_per_policy_learning_episode = test_ac.env2d.getNumStates() if problem_2d else test_ac.env2d.getNumStates()*2 #np.prod(env_shape) * 10 #max_time_steps_benchmark // n_episodes_per_learning_step   # Maximum number of steps per episode while LEARNING THE *POLICY* ONLINE (NOT used for the value functions (critic) learning)
 adjust_alpha_initial_by_learning_step = False; t_learn_min_to_adjust_alpha = 30
 policy_learning_mode = "online"     # Whether the policy is learned online or OFFLINE (only used when value functions are learned separately from the policy)
+use_advantage = not (learning_method == "values_fvos") # Set this to True if we want to use the advantage function learned as the TD error, instead of using the advantage function as the difference between the estimated Q(s,a) and the estimated V(s) (where the average reward cancels out)
 optimizer_learning_rate = 0.01 #0.01 #0.1
 reset_value_functions_at_every_learning_step = False #(learning_method == "values_fv")     # Reset the value functions when learning with FV, o.w. the learning can become too unstable due to the oversampling of the states with high value... (or something like that)
 verbose_period = n_episodes_per_learning_step // 10
@@ -790,6 +792,7 @@ break_when_goal_reached = False  # Whether to stop the learning process when the
 state_counts_all = np.zeros((n_learning_steps, test_ac.env2d.getNumStates()))
 V_all = np.zeros((n_learning_steps, test_ac.env2d.getNumStates()))
 Q_all = np.zeros((n_learning_steps, test_ac.env2d.getNumStates(), test_ac.env2d.getNumActions()))
+A_all = np.zeros((n_learning_steps, test_ac.env2d.getNumStates(), test_ac.env2d.getNumActions()))
 R_all = np.nan * np.ones((n_learning_steps,))       # Average reward (EPISODIC learning task)
 R_long_all = np.nan * np.ones((n_learning_steps,))  # Long-run Average reward (CONTINUING learning task). It does NOT converge to the same value as the episodic average reward because there is one more reward value per episode!! (namely the reward going from the terminal state to the start state)
 loss_all = np.nan * np.ones((n_learning_steps,))
@@ -815,6 +818,7 @@ if learning_method == "all_online":
         state_counts_all[t_learn-1, :] = learner_ac.learner_value_functions.getStateCounts()
         V_all[t_learn-1, :] = learner_ac.learner_value_functions.getV().getValues()
         Q_all[t_learn-1, :, :] = learner_ac.learner_value_functions.getQ().getValues().reshape(test_ac.env2d.getNumStates(), test_ac.env2d.getNumActions())
+        A_all[t_learn-1, :, :] = learner_ac.learner_value_functions.getA().getValues().reshape(test_ac.env2d.getNumStates(), test_ac.env2d.getNumActions())
         R_all[t_learn-1] = learner_ac.learner_value_functions.getAverageReward()
         # Could also retrieve the average reward from the Actor-Critic learner (if store_trajectory_history=False in the constructor of the value functions learner)
         #R_all[t_learn-1] = learner_ac.average_reward_over_episodes
@@ -873,9 +877,10 @@ else:
 
         print(f"Learning the CRITIC (at the current policy) using {learning_method.upper()}...")
         # Learn the value functions using the FV simulator
-        if learning_method == "values_fv":
-            V, Q, state_counts, probas_stationary, expected_reward, expected_absorption_time, n_cycles_absorption_used, n_events_et, n_events_fv = \
+        if learning_method in ["values_fv", "values_fvos"]:
+            V, Q, A, state_counts, probas_stationary, expected_reward, expected_absorption_time, n_cycles_absorption_used, n_events_et, n_events_fv = \
                 simulator_value_functions.run(max_time_steps_fv=max_time_steps_fv_for_all_particles,
+                                              min_num_cycles_for_expectations=0,
                                                 ## Note: We set the minimum number of cycles for the estimation of E(T_A) to 0 because we do NOT need
                                                 ## the estimation of the average reward to learn the optimal policy, as it cancels out in the advantage function Q(s,a) - V(s)!!
                                               reset_value_functions=reset_value_functions_at_this_step, seed=seed_this, verbose=False, verbose_period=verbose_period)
@@ -888,8 +893,8 @@ else:
             # TD learners
             learning_episodes_observe = [7, 20, 30, 40]
             if 'max_time_steps_benchmark_all' in locals() and max_time_steps_benchmark_all[t_learn-1] != np.nan:
-                # *** WARNING: Assumes discrete.Simulator.run() calls _run_single_continuing_task() to run the simulation ***
-                V, Q, state_counts, _, _, learning_info = \
+                # *** WARNING: Assumes that discrete.Simulator.run() calls _run_single_continuing_task() to run the simulation (because we do not pass any number of episodes) ***
+                V, Q, A, state_counts, _, _, learning_info = \
                     simulator_value_functions.run(max_time_steps=max_time_steps_benchmark_all[t_learn-1],
                                                   reset_value_functions=reset_value_functions_at_this_step, seed=seed_this,
                                                   state_observe=state_observe,
@@ -900,7 +905,7 @@ else:
                 # and may not be exactly equal to the number of steps the FV learner took at each policy learning step.
                 if False:
                     # When calling discrete.Simulator._run_single() to run the simulation (see how the discrete.Simulator.run() method is defined, i.e. what internal method it calls)
-                    V, Q, state_counts, _, _, learning_info = \
+                    V, Q, A, state_counts, _, _, learning_info = \
                         simulator_value_functions.run(nepisodes=n_episodes_per_learning_step,
                                                       max_time_steps=max_time_steps_benchmark,
                                                       max_time_steps_per_episode=max_time_steps_per_episode, #max_time_steps_benchmark // n_episodes_per_learning_step,
@@ -909,7 +914,7 @@ else:
                                                       verbose=True, verbose_period=verbose_period)
                 else:
                     # When calling discrete.Simulator._run_single_continuing_task() to run the simulation (see how the discrete.Simulator.run() method is defined, i.e. what internal method it calls)
-                    V, Q, state_counts, _, _, learning_info = \
+                    V, Q, A, state_counts, _, _, learning_info = \
                         simulator_value_functions.run(max_time_steps=max_time_steps_benchmark,
                                                       max_time_steps_per_episode=+np.Inf,
                                                       reset_value_functions=reset_value_functions_at_this_step, seed=seed_this,
@@ -923,13 +928,16 @@ else:
         state_counts_all[t_learn-1, :] = state_counts
         V_all[t_learn-1, :] = V
         Q_all[t_learn-1, :, :] = Q.reshape(test_ac.env2d.getNumStates(), test_ac.env2d.getNumActions())
+        A_all[t_learn-1, :, :] = A.reshape(test_ac.env2d.getNumStates(), test_ac.env2d.getNumActions())
 
         print(f"Learning the POLICY {policy_learning_mode.upper()}...")
         # Policy learning
         if policy_learning_mode == "online":
             # ONLINE with critic provided by the action values learned above using the TD simulator
             loss_all[t_learn - 1] = learner_ac.learn(n_episodes_per_learning_step, start_state=entry_state, max_time_steps_per_episode=max_time_steps_per_policy_learning_episode, prob_include_in_train=1.0,
-                                                     action_values=Q)
+                                                     use_advantage=use_advantage,
+                                                     advantage_values=A,
+                                                     action_values=Q)       # This parameter is not used when use_advantage=False
                 ## Note that we make sure that the start state when learning the policy is the entrance state to the labyrinth, `entry_state`,
                 ## because the environment may have defined a different initial state distribution, which is used during the learning of the value functions,
                 ## for instance, any randomly selected state outside the absorption set A used by the FV learner.
@@ -938,7 +946,7 @@ else:
             R_long_all[t_learn - 1] = average_reward  # This is the FV-based estimated average reward
         else:
             # OFFLINE learner where ALL states and actions are swept and the loss computed on all of them using the state distribution as weights
-            loss_all[t_learn-1] = learner_ac.learn_offline_from_estimated_value_functions(V, Q, state_counts)
+            loss_all[t_learn-1] = learner_ac.learn_offline_from_estimated_value_functions(V, A, Q, state_counts, use_advantage=use_advantage)
             R_all[t_learn-1] = average_reward
 
         # Check if we need to stop learning because the average reward didn't change a bit
@@ -956,8 +964,9 @@ if learning_method in ["all_online", "values_tdl"]:
     loss_all_online = loss_all.copy()
     R_all_online = R_all.copy()
     R_long_all_online = R_long_all.copy()
-    Q_all_online = Q_all.copy()
     V_all_online = V_all.copy()
+    Q_all_online = Q_all.copy()
+    A_all_online = A_all.copy()
     state_counts_all_online = state_counts_all.copy()
     nsteps_all_online = nsteps_all.copy()
     KL_all_online = KL_all.copy()
@@ -967,8 +976,9 @@ elif learning_method == "values_td":
     loss_all_td = loss_all.copy()
     R_all_td = R_all.copy()
     R_long_all_td = R_long_all.copy()
-    Q_all_td = Q_all.copy()
     V_all_td = V_all.copy()
+    Q_all_td = Q_all.copy()
+    A_all_td = A_all.copy()
     state_counts_all_td = state_counts_all.copy()
     nsteps_all_td = nsteps_all.copy()
     KL_all_td = KL_all.copy()
@@ -978,8 +988,8 @@ elif learning_method == "values_tda":
     loss_all_tda = loss_all.copy()
     R_all_tda = R_all.copy()
     R_long_all_tda = R_long_all.copy()
-    Q_all_tda = Q_all.copy()
     V_all_tda = V_all.copy()
+    A_all_tda = A_all.copy()
     state_counts_all_tda = state_counts_all.copy()
     nsteps_all_tda = nsteps_all.copy()
     KL_all_tda = KL_all.copy()
@@ -989,13 +999,26 @@ elif learning_method == "values_fv":
     loss_all_fv = loss_all.copy()
     R_all_fv = R_all.copy()
     R_long_all_fv = R_long_all.copy()
-    Q_all_fv = Q_all.copy()
     V_all_fv = V_all.copy()
+    Q_all_fv = Q_all.copy()
+    A_all_fv = A_all.copy()
     state_counts_all_fv = state_counts_all.copy()
     nsteps_all_fv = nsteps_all.copy()
     KL_all_fv = KL_all.copy()
     alpha_all_fv = alpha_all.copy()
     time_elapsed_fv = time_elapsed
+elif learning_method == "values_fvos":
+    loss_all_fvos = loss_all.copy()
+    R_all_fvos = R_all.copy()
+    R_long_all_fvos = R_long_all.copy()
+    V_all_fvos = V_all.copy()
+    Q_all_fvos = Q_all.copy()
+    A_all_fvos = A_all.copy()
+    state_counts_all_fvos = state_counts_all.copy()
+    nsteps_all_fvos = nsteps_all.copy()
+    KL_all_fvos = KL_all.copy()
+    alpha_all_fvos = alpha_all.copy()
+    time_elapsed_fvos = time_elapsed
 
 # Plot loss and average reward for the currently analyzed learner
 print("\nPlotting...")
@@ -1112,6 +1135,37 @@ ax2.legend(["State count"], loc='upper right')
 plt.suptitle(f"{learning_method.upper()} - {learning_task.name} learning task - {learning_criterion.name} reward criterion - Labyrinth {env_shape}\nEvolution of the value functions V(s) and Q(s,a) with the learning step by state\nMaximum average reward (continuing): {max_avg_reward_continuing}")
 
 
+# Plot the ADVANTAGE function
+axes = plt.figure().subplots(test_ac.env2d.shape[0], test_ac.env2d.shape[1])
+first_learning_step = 0 #n_learning_steps * 3 // 4  #0
+y2max = int(round(np.max(state_counts_all)*1.1)) # For a common Y2-axis showing the state counts
+min_A, max_A = np.min(A_all), np.max(A_all)      # For a common Y-axis showing the value functions
+ymin, ymax = min_A, max_A
+
+#ylim = (ymin, ymax)     # Use this for common Y-axis limits
+ylim = (None, None)     # Use this for unequal Y-axis limits
+marker = ''
+for i, ax in enumerate(axes.reshape(-1)):
+    # Value functions on the left axis
+    ax.plot(np.arange(1+first_learning_step, n_learning_steps + 1), A_all[first_learning_step:n_learning_steps, i, :], marker=marker)
+    ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+    ax.set_ylim(ylim)
+
+    # State counts on the right axis
+    ax2 = ax.twinx()
+    ax2.plot(np.arange(1+first_learning_step, n_learning_steps+1), state_counts_all[first_learning_step:n_learning_steps, i], color="violet", linewidth=1)
+    ax2.set_ylim((0, y2max))
+    y2ticks = [0, int(min(state_counts_all[first_learning_step:n_learning_steps, i])), int(max(state_counts_all[first_learning_step:n_learning_steps, i])), int(np.max(state_counts_all))]
+    ax2.set_yticks(y2ticks)
+    ax2.yaxis.set_ticklabels(y2ticks, fontsize=7)
+# Only show the x and y labels on the bottom-right plot (to avoid making the plot too cloggy)
+ax.set_xlabel("Learning step")
+ax2.set_ylabel("State count")
+ax.legend(["A(s," + str(a) + ")" for a in range(A_all.shape[2])], loc='upper left')
+ax2.legend(["State count"], loc='upper right')
+plt.suptitle(f"{learning_method.upper()} - {learning_task.name} learning task - {learning_criterion.name} reward criterion - Labyrinth {env_shape}\nEvolution of the Advantage function A(s,a) with the learning step by state\nMaximum average reward (continuing): {max_avg_reward_continuing}")
+
+
 #-- Final policy parameters and policy distribution by state
 env = test_ac.env2d
 gridworld_shape = env.shape
@@ -1158,7 +1212,7 @@ print("{} learning process took {:.1f} minutes ({:.1f} hours)".format(learning_m
 
 ############## SAVE
 if save:
-    objects_to_save = ["loss_all", "R_all", "R_long_all", "V_all", "Q_all", "state_counts_all", "nsteps_all", "KL_all", "alpha_all", "time_elapsed"]
+    objects_to_save = ["loss_all", "R_all", "R_long_all", "V_all", "Q_all", "A_all", "state_counts_all", "nsteps_all", "KL_all", "alpha_all", "time_elapsed"]
     _size = f"{env_shape[0]}x{env_shape[1]}"
     _learning_method = str.replace(learning_method, "values_", "")
     _filename = f"ActorCritic_labyrinth_{_size}_{datetime_start_str}_{_learning_method.upper()}AC.pkl"
@@ -1178,13 +1232,19 @@ if save:
 
 
 ############## LOAD
-_datetime = "20240219_230301" #"20240219_142206"          # Use format yyymmdd_hhmmss
-_size = "10x14" #"3x4" #"10x14"
-_learning_method = "fv"
-_filename = f"ActorCritic_labyrinth_{_size}_{_datetime}_{_learning_method.upper()}AC.pkl"
+resultsdir = "./RL-003-Classic/results"
+_datetime = "20240322_095848" #"20240219_230301" #"20240219_142206"          # Use format yyymmdd_hhmmss
+_size = "21x1" #"10x14" #"3x4" #"10x14"
+_learning_method = "td" #"fv"
+_N = 100
+_filename = f"ActorCritic_labyrinth_{_size}_{_datetime}_{_learning_method.upper()}AC_N={_N}.pkl"
 _filepath = os.path.join(resultsdir, _filename)
 object_names = load_objects_from_pickle(_filepath, globals())
 print(f"The following objects were loaded from '{_filepath}':\n{object_names}")
+# The following reward values are used in the ALLTOGETHER plotting below
+env_shape = (int(_size[:_size.index("x")]), int(_size[_size.index("x")+1:]))
+max_avg_reward_continuing = 1 / (np.sum(env_shape) - 1)
+max_avg_reward_episodic = 1 / (np.sum(env_shape) - 2)
 ############## LOAD
 
 
@@ -1192,31 +1252,40 @@ print(f"The following objects were loaded from '{_filepath}':\n{object_names}")
 # Plot all average rewards together (to compare methods)
 # Color names are listed here: https://matplotlib.org/stable/gallery/color/named_colors.html
 # We normalize the average reward plots so that they converge to 1.0 (easier interpretation of the plot)
+if "n_learning_steps" not in locals():
+    n_learning_steps = len(loss_all)
+if "policy_learning_mode" not in locals():
+    policy_learning_mode = "online"
 ax_loss, ax_R = plt.figure().subplots(1,2)
 legend = []
 if 'loss_all_online' in locals():
     ax_loss.plot(range(1, n_learning_steps + 1), loss_all_online[:n_learning_steps], '-', marker='x', color="darkred")
-    legend += ["TD ALL online"] if learning_method == "all_online" else [f"TD(Lambda={test_ac.agent_nn_td.getLearner().lmbda})"]
+    legend += ["TD ALL online"] if learning_method == "all_online" else ["TD(Lambda=" + ("test_ac" in locals() and f"{test_ac.agent_nn_td.getLearner().lmbda}" or "N/A") + ")"]
 if 'loss_all_td' in locals():
     ax_loss.plot(range(1, n_learning_steps+1), loss_all_td[:n_learning_steps], marker='.', color="red")
     legend += [f"TD {policy_learning_mode}"]
 if 'loss_all_tda' in locals():
-    ax_loss.plot(range(1, n_learning_steps+1), loss_all_tda[:n_learning_steps], '-.', marker='.', color="red")
+    ax_loss.plot(range(1, n_learning_steps+1), loss_all_tda[:n_learning_steps], '-.', marker='.', color="red", linestyle="dashed")
     legend += [f"TD Adaptive {policy_learning_mode}"]
 if 'loss_all_fv' in locals():
     from Python.lib.agents.learners.episodic.discrete.td import LeaTDLambdaAdaptive
-    ax_loss.plot(range(1, n_learning_steps+1), loss_all_fv[:n_learning_steps], marker='.', color="orangered")
-    legend += [f"FV {policy_learning_mode} (adaptive lambda)"] if issubclass(test_ac.agent_nn_fv.getLearner().__class__, LeaTDLambdaAdaptive) else [f"FV {policy_learning_mode}"]
+    ax_loss.plot(range(1, n_learning_steps+1), loss_all_fv[:n_learning_steps], marker='.', color="green")
+    legend += [f"FV {policy_learning_mode} (adaptive lambda)"] if "test_ac" in locals() and issubclass(test_ac.agent_nn_fv.getLearner().__class__, LeaTDLambdaAdaptive) else [f"FV {policy_learning_mode}"]
+if 'loss_all_fvos' in locals():
+    from Python.lib.agents.learners.episodic.discrete.td import LeaTDLambdaAdaptive
+    ax_loss.plot(range(1, n_learning_steps+1), loss_all_fvos[:n_learning_steps], marker='.', color="green", linestyle="dashed")
+    legend += [f"FVOS {policy_learning_mode} (adaptive lambda)"] if "test_ac" in locals() and issubclass(test_ac.agent_nn_fv.getLearner().__class__, LeaTDLambdaAdaptive) else [f"FVOS {policy_learning_mode}"]
 ax_loss.set_xlabel("Learning step")
 ax_loss.set_ylabel("Loss")
 ax_loss.axhline(0, color="gray")
 ax_loss.xaxis.set_major_locator(MaxNLocator(integer=True))
 ax_loss.set_title("Evolution of the LOSS with the learning step by learning method")
 ax_loss.legend(legend)
-ax_R.plot(range(1, n_learning_steps+1), R_all_online[:n_learning_steps] / max_avg_reward_episodic, '-', marker='x', color="forestgreen") if 'R_all_online' in locals() else None
-ax_R.plot(range(1, n_learning_steps+1), R_all_td[:n_learning_steps] / max_avg_reward_episodic, marker='.', color="green") if 'R_all_td' in locals() else None
-ax_R.plot(range(1, n_learning_steps+1), R_all_tda[:n_learning_steps] / max_avg_reward_episodic, '-.', marker='.', color="green") if 'R_all_tda' in locals() else None
-ax_R.plot(range(1, n_learning_steps+1), R_all_fv[:n_learning_steps] / max_avg_reward_episodic, marker='.', color="greenyellow") if 'R_all_fv' in locals() else None
+ax_R.plot(range(1, n_learning_steps+1), R_all_online[:n_learning_steps] / max_avg_reward_episodic, '-', marker='x', color="darkred") if 'R_all_online' in locals() else None
+ax_R.plot(range(1, n_learning_steps+1), R_all_td[:n_learning_steps] / max_avg_reward_episodic, marker='.', color="red") if 'R_all_td' in locals() else None
+ax_R.plot(range(1, n_learning_steps+1), R_all_tda[:n_learning_steps] / max_avg_reward_episodic, '-.', marker='.', color="red") if 'R_all_tda' in locals() else None
+ax_R.plot(range(1, n_learning_steps+1), R_all_fv[:n_learning_steps] / max_avg_reward_episodic, marker='.', color="green") if 'R_all_fv' in locals() else None
+ax_R.plot(range(1, n_learning_steps+1), R_all_fvos[:n_learning_steps] / max_avg_reward_episodic, marker='.', color="green", linestyle="dashed") if 'R_all_fvos' in locals() else None
 ax_R.set_xlabel("Learning step")
 ax_R.set_ylabel("Average reward (normalized by the MAX average reward = {:.2g})".format(max_avg_reward_episodic))
 ax_R.axhline(1, color="gray")
@@ -1233,6 +1302,15 @@ ax_R_nsamples.axhline(1.0, color="blue", linewidth=0.5, linestyle="dashed")
 ax_R_nsamples.set_ylim((ax_R.get_ylim()[0], None))
 ax_R_nsamples.legend(["Sample size ratio (FV/TD)", "Reference line showing equal sample size ratio"], loc="center right")
 
+
+
+# Plot the number of value function learning steps used at each policy learning step
+plt.figure()
+plt.plot(np.arange(1, n_learning_steps + 1), nsteps_all_td, marker=marker, color="green")
+plt.plot(np.arange(1, n_learning_steps + 1), nsteps_all_fv, marker=marker, color="lightgreen")
+plt.gca().set_xlabel("Learning step")
+plt.gca().set_ylabel("Number of steps")
+plt.suptitle(f"{learning_method.upper()} - {learning_task.name} learning task - {learning_criterion.name} reward criterion - Labyrinth {env_shape}\nNumber of steps for learning the value functions at each policy learning step")
 
 
 # Distribution of state counts at last learning step run

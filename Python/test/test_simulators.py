@@ -249,7 +249,7 @@ class Test_Class_Simulator(unittest.TestCase):
             # Simulation using _run_single()
             time_start = timer()
             sim = discrete.Simulator(self.env1d, agent_td, debug=False)
-            state_values_td_1, action_values_td_1, state_counts_td_1, _, _, learning_info_1 = \
+            state_values_td_1, action_values_td_1, advantage_values_td_1, state_counts_td_1, _, _, learning_info_1 = \
                 sim._run_single(nepisodes=nepisodes, max_time_steps=max_time_steps, max_time_steps_per_episode=+np.Inf,
                                 seed=seed, verbose=True, verbose_period=10)
             time_td_1 = timer() - time_start
@@ -261,7 +261,7 @@ class Test_Class_Simulator(unittest.TestCase):
             # Simulation using _run_single()
             time_start = timer()
             sim = discrete.Simulator(self.env1d, agent_td, debug=False)
-            state_values_td_2, action_values_td_2, state_counts_td_2, _, _, learning_info_2 = \
+            state_values_td_2, action_values_td_2, advantage_values_td_2, state_counts_td_2, _, _, learning_info_2 = \
                 sim._run_single_continuing_task(max_time_steps=max_time_steps, max_time_steps_per_episode=+np.Inf,
                                                 seed=seed, verbose=True, verbose_period=10)
             time_td_2 = timer() - time_start

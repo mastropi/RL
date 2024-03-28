@@ -80,9 +80,11 @@ class LeaMCLambda(Learner):
             # as they have their own value too!
             self.V = StateValueFunctionApprox(self.env.getNumStates(), {})
             self.Q = ActionValueFunctionApprox(self.env.getNumStates(), self.env.getNumActions(), {})
+            self.A = ActionValueFunctionApprox(self.env.getNumStates(), self.env.getNumActions(), {})
         else:
             self.V = StateValueFunctionApprox(self.env.getNumStates(), self.env.getTerminalStates())
             self.Q = ActionValueFunctionApprox(self.env.getNumStates(), self.env.getNumActions(), self.env.getTerminalStates())
+            self.A = ActionValueFunctionApprox(self.env.getNumStates(), self.env.getNumActions(), self.env.getTerminalStates())
         self.gamma = gamma
         
         #-- Attributes specific to the current MC method
@@ -182,6 +184,7 @@ class LeaMCLambda(Learner):
                 delta = gtlambda - self.V.getValue(state)
                 self._updateV(state, delta)
                 self._updateQ(state, action, delta)
+                self._updateA(state, action, delta)
                 # Update the learning rate alpha for the next iteration
                 self._update_alphas(state)
 
@@ -315,6 +318,7 @@ class LeaMCLambda(Learner):
                     delta -= self.getAverageReward()
                 self._updateV(state, delta)
                 self._updateQ(state, action, delta)
+                self._updateA(state, action, delta)
                 # Update the learning rate alpha for the next iteration
                 self._update_alphas(state)
                 n_updates[state] += 1
@@ -493,6 +497,7 @@ class LeaMCLambda(Learner):
 
                 self._updateV(state, delta)
                 self._updateQ(state, action, delta)
+                self._updateA(state, action, delta)
 
                 # Update the learning rate alpha for the next iteration
                 # Note that the update is based ONLY on the state visit frequency, NOT on the state-action visit frequency...
@@ -514,6 +519,14 @@ class LeaMCLambda(Learner):
         gradient_Q = self.Q.X[:, self.Q.getLinearIndex(state, action)]  # row vector
         _alphas = np.repeat(self.getAlphasByState(), self.env.getNumActions()) # We use the same alpha on all the actions associated to each state, but the alpha depends on the state
         self.Q.setWeights( self.Q.getWeights() + _alphas * delta * gradient_Q )
+
+    def _updateA(self, state, action, advantage):
+        """
+        Sets the value of the Advantage function to the given value for the given state and action.
+        An unbiased estimation of the advantage is the delta(V) observed when taking the given action at the given state.
+        """
+        # Recall that _setWeight() assumes that the features are dummy features (so, at some point this would need to be updated)
+        self.A._setWeight(state, action, advantage)
     #------------------- Auxiliary function: value function udpate -------------------------------#
 
     #-- Getters
@@ -522,6 +535,9 @@ class LeaMCLambda(Learner):
 
     def getQ(self):
         return self.Q
+
+    def getA(self):
+        return self.A
 
 
 class LeaMCLambdaAdaptive(LeaMCLambda):

@@ -79,9 +79,11 @@ class LeaTDLambda(Learner):
             # as they have their own value too!
             self.V = StateValueFunctionApprox(self.env.getNumStates(), {})
             self.Q = ActionValueFunctionApprox(self.env.getNumStates(), self.env.getNumActions(), {})
+            self.A = ActionValueFunctionApprox(self.env.getNumStates(), self.env.getNumActions(), {})
         else:
             self.V = StateValueFunctionApprox(self.env.getNumStates(), self.env.getTerminalStates())
             self.Q = ActionValueFunctionApprox(self.env.getNumStates(), self.env.getNumActions(), self.env.getTerminalStates())
+            self.A = ActionValueFunctionApprox(self.env.getNumStates(), self.env.getNumActions(), self.env.getTerminalStates())
         self.gamma = gamma
         
         # Attributes specific to the current TD method
@@ -145,6 +147,7 @@ class LeaTDLambda(Learner):
         # Update the value functions
         self._updateV(delta_V)
         self._updateQ(delta_Q)
+        self._updateA(state, action, delta_V)
 
         # We store the effective learning rates alpha
         # (effective in terms of  the eligibility trace that affects the delta values used when updating V and Q above)
@@ -289,6 +292,14 @@ class LeaTDLambda(Learner):
         """
         return self.V.getValue(next_state)
 
+    def _updateA(self, state, action, advantage):
+        """
+        Sets the value of the Advantage function to the given value for the given state and action.
+        An unbiased estimation of the advantage is the delta(V) observed when taking the given action at the given state.
+        """
+        # Recall that _setWeight() assumes that the features are dummy features (so, at some point this would need to be updated)
+        self.A._setWeight(state, action, advantage)
+
     def _plotZ(self):
         states2plot = self._choose_states2plot()
         plt.figure()
@@ -336,6 +347,9 @@ class LeaTDLambda(Learner):
 
     def getQ(self):
         return self.Q
+
+    def getA(self):
+        return self.A
 
 
 class LeaTDLambdaAdaptive(LeaTDLambda):
@@ -484,6 +498,7 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
         # Update the value functions
         self._updateV(delta_V)
         self._updateQ(delta_Q)
+        self._updateA(state, action, delta_V)
 
         # The effective alphas are only computed for the learning of V, not of Q
         # (as this is only stored for information purposes --e.g. plots of the eligibility traces to check if things are working properly)

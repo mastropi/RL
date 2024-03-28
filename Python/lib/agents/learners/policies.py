@@ -1032,7 +1032,7 @@ class LeaActorCriticNN(GenericLearner):
                 ## if lr is too large (i.e. lr = 1.0, it works with lr = 0.1)!!
                 ## If we use lr=0.1, momentum=0.9, we get similar results to the Adam optimizer.
 
-    def learn(self, nepisodes, start_state=None, max_time_steps_per_episode=+np.Inf, prob_include_in_train=0.5, action_values=None):
+    def learn(self, nepisodes, start_state=None, max_time_steps_per_episode=+np.Inf, prob_include_in_train=0.5, use_advantage=True, advantage_values=None, action_values=None):
         """
         Perform a one step learning of the policy parameter
 
@@ -1071,11 +1071,23 @@ class LeaActorCriticNN(GenericLearner):
             the loss calculation, which is what a neural network training process normally expects.
             default: 0.50
 
-        action_Values: (opt) array-like
+        use_advantage: (opt) bool
+            Whether to use the advantage directly learned by the learner or by the critic as advantage value weighting the policy gradient
+            in the computation of the loss.
+            default: True
+
+        advantage_Values: (opt) array-like
+            Advantage function values previously estimated for all states and actions in the environment.
+            These are used as a critic with the hope of smoothing the learning process (lower variance)
+            because these values do NOT change during the learning of the policy performed here.
+            This parameter is relevant only when use_advantage=True.
+
+        action_values: (opt) array-like
             Action values previously estimated for all states and actions in the environment.
             These are used as a critic and are used to compute the advantage function with the hope of
             smoothing the learning process (lower variance) because these values do NOT change during
             the learning of the policy performed here.
+            This parameter is relevant only when use_advantage=False.
         """
         self.t_learn += 1
         seed = self.seed + self.t_learn - 1
@@ -1137,38 +1149,55 @@ class LeaActorCriticNN(GenericLearner):
                     if self.debug:
                         print(f"[policy, DEBUG] Episode {episode}: MAX TIME STEPS PER EPISODE = {max_time_steps_per_episode} REACHED!")
 
-                if action_values is None:
-                    # The user did not provide any critic, we need to learn it now
-                    # => Learn: i.e. update the value functions stored in the learner with the new observation
-                    self.learner_value_functions.learn(t, state, action, next_state, reward, done_episode, info)
-                    action_value = self.learner_value_functions.getQ().getValue(state, action)
-                else:
-                    # The user provided a critic
-                    # => Use it to compute the advantage function (with the hope that the updates of theta are less wiggly because these estimates do not change any more --as the policy is learned)
-                    # TODO: (2023/11/12) Use Q, the object of type ActionValueFunctionApprox defined in value_functions.py to retrieve the action value (so that we don't need to know how the state and action are stored in the X feature matrix of ActionValueFunctionApprox
-                    action_value = action_values[state * self.env.getActionSpace().n + action]
-
-                # Option 1: (better) The state value is computed as the policy-weighted average of the Q-values
-                # so that the advantage function is not biased because of an incorrect estimation of V(s)
-                state_value = 0.0
-                for a in range(self.env.getActionSpace().n):
-                    if action_values is None:
-                        state_value += self.learner_value_functions.getQ().getValue(state, a)
+                # Compute (get) the advantage function value for the current state and action
+                if use_advantage:
+                    if advantage_values is None:
+                        # The user did not provide any critic, we need to learn it now
+                        # => Learn: i.e. update the value functions and the advantage function (used below as weight of the policy gradient) with the new observation
+                        # This means that we learn the advantage function at the same time as we compute the loss function used to improve the policy
+                        # => the advantage function is NOT a critic
+                        self.learner_value_functions.learn(t, state, action, next_state, reward, done_episode, info)
+                        advantage = self.learner_value_functions.getA().getValue(state, action)
                     else:
-                        state_value += action_values[state * self.env.getActionSpace().n + a]
-                state_value /= self.env.getActionSpace().n
+                        # TODO: (2024/03/19) Use Q, the object of type ActionValueFunctionApprox defined in value_functions.py to retrieve the action value (so that we don't need to know how the state and action are stored in the X feature matrix of ActionValueFunctionApprox
+                        advantage = advantage_values[state * self.env.getActionSpace().n + action]
+                else:
+                    # The advantage function is not given
+                    # => We compute the advantage as the difference between the action value and the state value
+                    if action_values is None:
+                        # The user did not provide any critic, we need to learn it now
+                        # => Learn: i.e. update the value functions (stored in the value function learner of this object) with the new observation
+                        # This means that we learn the advantage function at the same time as we compute the loss function used to improve the policy
+                        # => the advantage function is NOT a critic
+                        self.learner_value_functions.learn(t, state, action, next_state, reward, done_episode, info)
+                        action_value = self.learner_value_functions.getQ().getValue(state, action)
+                    else:
+                        # The user provided a critic
+                        # => Use it to compute the advantage function (with the hope that the updates of theta are less wiggly because these estimates do not change any more --as the policy is learned)
+                        # TODO: (2023/11/12) Use Q, the object of type ActionValueFunctionApprox defined in value_functions.py to retrieve the action value (so that we don't need to know how the state and action are stored in the X feature matrix of ActionValueFunctionApprox
+                        action_value = action_values[state * self.env.getActionSpace().n + action]
 
-                # Option 2: (worse) The state value is directly the estimate of V(s)
-                # HOWEVER, this may give incorrect advantage function values because the value of V(s) is
-                # theoretically the average of the action values Q(s,a) over all actions weighted by the policy(a|s).
-                #state_value = self.learner_value_functions.getV().getValue(state)
+                    # Option 1: (better) The state value is computed as the policy-weighted average of the Q-values
+                    # so that the advantage function is not biased because of an incorrect estimation of V(s)
+                    state_value = 0.0
+                    for a in range(self.env.getActionSpace().n):
+                        if action_values is None:
+                            state_value += self.learner_value_functions.getQ().getValue(state, a)
+                        else:
+                            state_value += action_values[state * self.env.getActionSpace().n + a]
+                    state_value /= self.env.getActionSpace().n
 
-                # Update loss
-                # IMPORTANT: Since the action_distribution() function computes the distribution of actions using
-                # probability distributions implemented by the torch package (e.g. F.sofmax()),
-                # `loss` becomes of type `tensor` which is the required type needed to be able to compute its derivative
-                # using loss.backward() below.
-                advantage = action_value - state_value
+                    # Option 2: (worse) The state value is directly the estimate of V(s)
+                    # HOWEVER, this may give incorrect advantage function values because the value of V(s) is
+                    # theoretically the average of the action values Q(s,a) over all actions weighted by the policy(a|s).
+                    #state_value = self.learner_value_functions.getV().getValue(state)
+
+                    # Update loss
+                    # IMPORTANT: Since the action_distribution() function computes the distribution of actions using
+                    # probability distributions implemented by the torch package (e.g. F.sofmax()),
+                    # `loss` becomes of type `tensor` which is the required type needed to be able to compute its derivative
+                    # using loss.backward() below.
+                    advantage = action_value - state_value
                 logprob = action_distribution.log_prob(torch.tensor(action))
                 if np.random.uniform() <= prob_include_in_train:
                     loss += -advantage * logprob
@@ -1201,21 +1230,26 @@ class LeaActorCriticNN(GenericLearner):
 
         return loss.float()
 
-    def learn_offline_from_estimated_value_functions(self, state_values, action_values, state_counts):
+    def learn_offline_from_estimated_value_functions(self, state_values, advantage_values, action_values, state_counts, use_advantage=True):
         """
         Performs a one step learning of the policy parameter OFFLINE, i.e. by sweeping all possible
         states and actions and using the given (state and) action value functions to compute the advantage function
         (critic) that multiplies the log-policy contributing to the loss that is minimized by the policy learner.
 
         Arguments:
-        state_values, action_values: np.ndarray
-            Estimated state and action value functions that is used here to compute the advantage function.
-            The state value function may not be used if it is calculated as the average of the action value function
-            over all possible actions.
+        state_values, advantage_values, action_values: np.ndarray
+            Estimated state-, action-value functions, and advantage function.
+            The state- and the action-value functions are used to compute the advantage function when use_advantage=False.
+            The state value function may not be used if it is calculated as the average of the action value function over all possible actions.
+            Pass None if the respective information is not used.
 
         state_counts: np.ndarray
             State visit frequency observed during the estimation of the given value functions.
             This is used to compute the state distribution probability that is used as weight in the loss function calculation.
+
+        use_advantage: (opt) bool
+            Whether to use the advantage function directly, instead of computing it as a difference between the action value and the state value.
+            default: True
         """
         prob_states = state_counts / np.sum(state_counts)
 
@@ -1223,18 +1257,20 @@ class LeaActorCriticNN(GenericLearner):
         # as the product of the advantage function times the log-policy.
         loss = 0.0
         for state in range(self.env.getStateSpace().n):
-            #-- Compute the state value V(s)
-            # Option 1: (better) The state value is computed as the policy-weighted average of the Q-values
-            # so that the advantage function is not biased because of an incorrect estimation of V(s)
-            state_value = 0.0
-            for a in range(self.env.getActionSpace().n):
-                state_value += action_values[state * self.env.getActionSpace().n + a]
-            state_value /= self.env.getActionSpace().n
+            if not use_advantage:
+                #-- Compute the state value V(s)
+                # Option 1: (better) The state value is computed as the policy-weighted average of the Q-values
+                # so that the advantage function is not biased because of an incorrect estimation of V(s)
+                state_value = 0.0
+                for a in range(self.env.getActionSpace().n):
+                    # TODO: (2023/11/12) Use Q, the object of type ActionValueFunctionApprox defined in value_functions.py to retrieve the action value (so that we don't need to know how the state and action are stored in the X feature matrix of ActionValueFunctionApprox
+                    state_value += action_values[state * self.env.getActionSpace().n + a]
+                state_value /= self.env.getActionSpace().n
 
-            # Option 2: (worse) The state value is directly the estimate of V(s)
-            # HOWEVER, this may give incorrect advantage function values because the value of V(s) is
-            # theoretically the average of the action values Q(s,a) over all actions weighted by the policy(a|s).
-            #state_value = state_values[state]
+                # Option 2: (worse) The state value is directly the estimate of V(s)
+                # HOWEVER, this may give incorrect advantage function values because the value of V(s) is
+                # theoretically the average of the action values Q(s,a) over all actions weighted by the policy(a|s).
+                #state_value = state_values[state]
 
             for action in range(self.env.getActionSpace().n):
                 # Compute the log-probability of the action given the state by inputting the current state to the neural network
@@ -1251,10 +1287,14 @@ class LeaActorCriticNN(GenericLearner):
                 action_distribution = Categorical(action_probs)
 
                 # Update loss
-                # TODO: (2023/11/07) Use V and Q, the objects of type StateValueFunctionApprox and ActionValueFunctionApprox, respectively, defined in value_functions.py
-                # For now we don't use these classes because the discrete.Simulator._run_single() and discrete.Simulator._run_fv() methods return arrays with the state values and action values, NOT the aforementioned classes.
-                #advantage = Q.getValue(state, action) - V.getValue(state)
-                advantage = action_values[state * self.env.getActionSpace().n + action] - state_value
+                # TODO: (2024/03/19) Use A, the object of type ActionValueFunctionApprox defined in value_functions.py to retrieve the advantage value (so that we don't need to know how the state and action are stored in the X feature matrix of ActionValueFunctionApprox
+                if use_advantage:
+                    advantage = advantage_values[state * self.env.getActionSpace().n + action]
+                else:
+                    # TODO: (2023/11/07) Use V, Q, and A, the objects of type StateValueFunctionApprox, ActionValueFunctionApprox, and ActionValueFunctionApprox respectively, defined in value_functions.py
+                    # For now we don't use these classes because the discrete.Simulator._run_single() and discrete.Simulator._run_fv() methods return arrays with the state values and action values, NOT the aforementioned classes.
+                    #advantage = Q.getValue(state, action) - V.getValue(state)
+                    advantage = action_values[state * self.env.getActionSpace().n + action] - state_value
                     ## Note that the way to access the action value corresponds to how the ActionValueFunctionApprox.getLinearIndex() method computes the linear index
                 logprob = action_distribution.log_prob(torch.tensor(action))
                 loss += -advantage * logprob * prob_states[state]

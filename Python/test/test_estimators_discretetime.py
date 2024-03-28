@@ -233,7 +233,7 @@ class Test_EstStateValueV_EnvGridworlds(unittest.TestCase, test_utils.EpisodeSim
                                               debug=False)
             agent_rw_mc = agents.GenericAgent(self.policy_rw, learner_mclambda)
             sim = DiscreteSimulator(self.env1d, agent_rw_mc, debug=False)
-            _, _, _, RMSE_by_episode, MAPE_by_episode, learning_info = \
+            _, _, _, _, RMSE_by_episode, MAPE_by_episode, learning_info = \
                 sim.run(nepisodes=nepisodes, seed=seed,
                         compute_rmse=True, state_observe=10,
                         verbose=True, verbose_period=nepisodes // 20,
@@ -271,7 +271,7 @@ class Test_EstStateValueV_EnvGridworlds(unittest.TestCase, test_utils.EpisodeSim
 
         # Simulation
         sim = DiscreteSimulator(self.env1d, agent_rw_mclambda, debug=False)
-        _, _, _, RMSE_by_episode, MAPE_by_episode, learning_info = \
+        _, _, _, _, RMSE_by_episode, MAPE_by_episode, learning_info = \
             sim.run(nepisodes=nepisodes, seed=seed,
                     compute_rmse=True, state_observe=10,
                     verbose=True, verbose_period=100,
@@ -324,7 +324,7 @@ class Test_EstStateValueV_EnvGridworlds(unittest.TestCase, test_utils.EpisodeSim
         sim = DiscreteSimulator(self.env1d, agent_rw_mclambda, debug=False)
 
         # First run
-        _, _, _, RMSE_by_episode, MAPE_by_episode, _ = sim.run(nepisodes=nepisodes,
+        _, _, _, _, RMSE_by_episode, MAPE_by_episode, _ = sim.run(nepisodes=nepisodes,
                                                             seed=seed,
                                                             compute_rmse=True, state_observe=19,
                                                             verbose=True, verbose_period=100,
@@ -347,7 +347,7 @@ class Test_EstStateValueV_EnvGridworlds(unittest.TestCase, test_utils.EpisodeSim
         assert np.allclose(rmse_observed, rmse_expected, atol=1E-6)
 
         # Second run
-        _, _, _, RMSE_by_episode, MAPE_by_episode, _ = sim.run(nepisodes=nepisodes,
+        _, _, _, _, RMSE_by_episode, MAPE_by_episode, _ = sim.run(nepisodes=nepisodes,
                                                             seed=seed,
                                                             compute_rmse=True, state_observe=19,
                                                             verbose=True, verbose_period=100,
@@ -411,7 +411,7 @@ class Test_EstStateValueV_EnvGridworlds(unittest.TestCase, test_utils.EpisodeSim
                                               debug=False)
             agent_rw_mc = agents.GenericAgent(self.policy_rw, learner_mclambda)
             sim = DiscreteSimulator(self.env1d, agent_rw_mc, debug=False)
-            _, _, _, RMSE_by_episode, MAPE_by_episode, learning_info = \
+            _, _, _, _, RMSE_by_episode, MAPE_by_episode, learning_info = \
                 sim.run(nepisodes=nepisodes, seed=seed,
                         compute_rmse=True, state_observe=10,
                         verbose=True, verbose_period=100,
@@ -452,7 +452,7 @@ class Test_EstStateValueV_EnvGridworlds(unittest.TestCase, test_utils.EpisodeSim
 
         # Simulation
         sim = DiscreteSimulator(self.env1d, agent_rw_mclambda, debug=False)
-        _, _, _, RMSE_by_episode, MAPE_by_episode, learning_info = \
+        _, _, _, _, RMSE_by_episode, MAPE_by_episode, learning_info = \
             sim.run(nepisodes=nepisodes, seed=seed,
                     compute_rmse=True, state_observe=10,
                     verbose=True, verbose_period=100,
@@ -503,7 +503,7 @@ class Test_EstStateValueV_EnvGridworlds(unittest.TestCase, test_utils.EpisodeSim
 
         # Simulation
         sim = DiscreteSimulator(self.env1d, agent_rw_mclambda_adaptive, debug=False)
-        _, _, _, RMSE_by_episode, MAPE_by_episode, learning_info = sim.run(nepisodes=nepisodes,
+        _, _, _, _, RMSE_by_episode, MAPE_by_episode, learning_info = sim.run(nepisodes=nepisodes,
                                                                         seed=seed,
                                                                         compute_rmse=True, state_observe=10,
                                                                         verbose=True, verbose_period=100,
@@ -758,7 +758,7 @@ class Test_EstDifferentialStateValueV_EnvGridworlds(unittest.TestCase, test_util
 
         # Simulation
         sim = DiscreteSimulator(self.env1d, agent_td, debug=False)
-        state_values, action_values, state_counts, _, _, learning_info = \
+        state_values, action_values, advantage_values, state_counts, _, _, learning_info = \
             sim.run(max_time_steps=1000, seed=seed,
                     compute_rmse=False, state_observe=self.nS-1,   # This is the state just before the terminal state
                     verbose=True, verbose_period=100,
@@ -813,7 +813,7 @@ class Test_EstDifferentialStateValueV_EnvGridworlds(unittest.TestCase, test_util
 
         # Simulation
         sim = DiscreteSimulator(self.env1d, agent_fv, debug=False)
-        state_values, action_values, state_counts, probas_stationary, average_reward, average_absorption_time, n_cycles_absorption_used, n_events_et, n_events_fv  = \
+        state_values, action_values, advantage_values, state_counts, probas_stationary, average_reward, average_absorption_time, n_cycles_absorption_used, n_events_et, n_events_fv  = \
             sim.run(max_time_steps_fv=1000,
                     seed=seed,
                     verbose=True, verbose_period=100,
@@ -1008,7 +1008,7 @@ class Test_EstValueFunctions_EnvGridworldsWithObstacles(unittest.TestCase, test_
     def test_Env_PolRandomWalk_MetMC(self):
         print(f"\n*** Running test {self.id()}")
 
-        state_values, action_values, state_counts, _, _, learning_info = \
+        state_values, action_values, advantage_values, state_counts, _, _, learning_info = \
             self.sim_mc.run(nepisodes=self.nepisodes, seed=self.seed,
                     compute_rmse=True, state_observe=6,
                     verbose=True, verbose_period=self.nepisodes // 20,
@@ -1028,7 +1028,7 @@ class Test_EstValueFunctions_EnvGridworldsWithObstacles(unittest.TestCase, test_
     def test_Env_PolRandomWalk_MetTDLambda(self):
         print(f"\n*** Running test #{self.id()}")
 
-        state_values, action_values, state_counts, _, _, learning_info = \
+        state_values, action_values, advantage_values, state_counts, _, _, learning_info = \
             self.sim_td.run(nepisodes=self.nepisodes, seed=self.seed,
                             compute_rmse=True, state_observe=6,
                             verbose=True, verbose_period=self.nepisodes // 20,
@@ -1052,7 +1052,7 @@ class Test_EstValueFunctions_EnvGridworldsWithObstacles(unittest.TestCase, test_
         # (2024/02/19) Note that parameter max_time_steps_fv is by default set to None,
         # which means that it is automatically computed by the _run_simulation_fv() method called by run()
         # and as of the writing of this, it is set to N*100, where N is the number of particles in the FV system.
-        state_values, action_values, state_counts, probas_stationary, average_reward, average_cycle_time, n_cycles, n_events_et, n_events_fv = \
+        state_values, action_values, advantage_values, state_counts, probas_stationary, average_reward, average_cycle_time, n_cycles, n_events_et, n_events_fv = \
            self.sim_fv.run(max_time_steps_fv=500,
                            seed=self.seed, verbose=True, verbose_period=100)
 
@@ -1286,7 +1286,7 @@ class Test_EstDifferentialValueFunctions_EnvGridworldsWithObstacles(unittest.Tes
     def test_Env_PolRandomWalk_MetMC(self):
         print(f"\n*** Running test {self.id()}")
 
-        state_values, action_values, state_counts, _, _, learning_info = \
+        state_values, action_values, advantage_values, state_counts, _, _, learning_info = \
             self.sim_mc.run(nepisodes=self.nepisodes, max_time_steps=self.max_time_steps, seed=self.seed,
                              compute_rmse=True, state_observe=6,
                              verbose=True, verbose_period=self.nepisodes // 20,
@@ -1324,7 +1324,7 @@ class Test_EstDifferentialValueFunctions_EnvGridworldsWithObstacles(unittest.Tes
         """
         print(f"\n*** Running test {self.id()}")
 
-        state_values, action_values, state_counts, _, _, learning_info = \
+        state_values, action_values, advantage_values, state_counts, _, _, learning_info = \
             self.sim_mc.run(nepisodes=self.nepisodes, max_time_steps=self.max_time_steps, seed=self.seed,
                             compute_rmse=False, state_observe=None, set_cycle=self.A,
                             verbose=True, verbose_period=100,
@@ -1370,7 +1370,7 @@ class Test_EstDifferentialValueFunctions_EnvGridworldsWithObstacles(unittest.Tes
     def test_Env_PolRandomWalk_MetTDLambda(self):
         print(f"\n*** Running test {self.id()}")
 
-        state_values, action_values, state_counts, _, _, learning_info = \
+        state_values, action_values, advantage_values, state_counts, _, _, learning_info = \
             self.sim_td.run(nepisodes=self.nepisodes, max_time_steps=self.max_time_steps, seed=self.seed,
                              compute_rmse=True, state_observe=6,
                              verbose=True, verbose_period=self.nepisodes // 20,
@@ -1412,7 +1412,7 @@ class Test_EstDifferentialValueFunctions_EnvGridworldsWithObstacles(unittest.Tes
         """
         print(f"\n*** Running test {self.id()}")
 
-        state_values, action_values, state_counts, _, _, learning_info = \
+        state_values, action_values, advantage_values, state_counts, _, _, learning_info = \
            self.sim_td.run(nepisodes=self.nepisodes, max_time_steps=self.max_time_steps, seed=self.seed,
                          compute_rmse=False, state_observe=None, set_cycle=self.A,
                          verbose=True, verbose_period=100,
@@ -1467,7 +1467,7 @@ class Test_EstDifferentialValueFunctions_EnvGridworldsWithObstacles(unittest.Tes
         # (2024/02/14) Note that parameter max_time_steps_fv is by default set to None,
         # which means that it is automatically computed by the _run_simulation_fv() method called by run()
         # and as of the writing of this, it is set to N*100, where N is the number of particles in the FV system.
-        state_values, action_values, state_counts, probas_stationary, average_reward, average_cycle_time, n_cycles, n_events_et, n_events_fv = \
+        state_values, action_values, advantage_values, state_counts, probas_stationary, average_reward, average_cycle_time, n_cycles, n_events_et, n_events_fv = \
            self.sim_fv.run(seed=self.seed, verbose=True, verbose_period=100)
 
         # The following are the state values (value function) calculated using the average reward observed during the single Markov chain excursion used to estimate E(T_A)
@@ -1592,7 +1592,7 @@ class Test_EstValueFunctionV_MetMCLambda_EnvMountainCar(unittest.TestCase, test_
         sim = DiscreteSimulator(self.env, agent_rw_mc, debug=False)
 
         time_start = timer()
-        _, _, _, _, _, learning_info = sim.run( nepisodes=self.nepisodes, max_time_steps_per_episode=self.max_time_steps_per_episode,
+        _, _, _, _, _, _, learning_info = sim.run( nepisodes=self.nepisodes, max_time_steps_per_episode=self.max_time_steps_per_episode,
                                                 seed=self.seed,
                                                 compute_rmse=False, state_observe=None,
                                                 verbose=True, verbose_period=max(1, int(self.nepisodes / 10)),
@@ -1732,7 +1732,7 @@ class Test_EstValueFunctionV_MetMCLambda_EnvMountainCar(unittest.TestCase, test_
 
         # MC execution
         time_start = timer()
-        _, _, _, _, _, learning_info = sim_mc.run( nepisodes=self.nepisodes, max_time_steps_per_episode=self.max_time_steps_per_episode,
+        _, _, _, _, _, _, learning_info = sim_mc.run( nepisodes=self.nepisodes, max_time_steps_per_episode=self.max_time_steps_per_episode,
                                                    seed=self.seed,
                                                    compute_rmse=False, state_observe=None,
                                                    verbose=True, verbose_period=max(1, int(self.nepisodes / 10)),
@@ -1744,7 +1744,7 @@ class Test_EstValueFunctionV_MetMCLambda_EnvMountainCar(unittest.TestCase, test_
 
         # Lambda-Return
         time_start = timer()
-        _, _, _, _, _, learning_info = sim_lambda_return.run( nepisodes=self.nepisodes,
+        _, _, _, _, _, _, learning_info = sim_lambda_return.run( nepisodes=self.nepisodes,
                                                               max_time_steps_per_episode=self.max_time_steps_per_episode,
                                                               seed=self.seed,
                                                               compute_rmse=False, state_observe=None,
@@ -1838,4 +1838,4 @@ if __name__ == '__main__':
         # Use this when we want to recover the output of the test in the Python session and analyze it
         test_obj = Test_EstValueFunctionV_MetMCLambda_EnvMountainCar()
         test_obj.setUpClass()
-        state_values, action_values, state_counts, params, sim, learning_info = test_obj.no_test_Env_PolRandomWalk_MetMC_TestOneCase()
+        state_values, state_counts, params, sim, learning_info = test_obj.no_test_Env_PolRandomWalk_MetMC_TestOneCase()
