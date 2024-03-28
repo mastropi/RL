@@ -319,7 +319,7 @@ class EnvGridworld1D_OneTerminalState(EnvironmentDiscrete):
             P[s] = {a: [] for a in range(nA)}
 
             if is_terminal(s):
-                # Terminal states are assigned value 0 (i.e. they receive 0 reward by convention)
+                # Terminal states are assigned value 0 (i.e. they receive 0 reward when moving to another state by convention)
                 # Also, with probability 1 the next state is the same state `s`.
                 P[s][Direction1D.LEFT.value] = [(1.0, s, 0.0, True)]
                 P[s][Direction1D.RIGHT.value] = [(1.0, s, 0.0, True)]

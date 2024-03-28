@@ -54,7 +54,7 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
     @classmethod
     def setUpClass(cls, shape=(3, 4), obstacles_set: Union[list, set]=None, start_states_set: set=None,
                         # Characteristics of the neural network for the Actor Critic policy learner
-                        nn_input: InputLayer=InputLayer.ONEHOT, nn_hidden_layer_sizes: list=[8],
+                        nn_input: InputLayer=InputLayer.ONEHOT, nn_hidden_layer_sizes: list=[8], initial_policy=None,
                         # Characteristics of all learners
                         learning_task=LearningTask.EPISODIC,
                         learning_criterion=LearningCriterion.DISCOUNTED,
@@ -165,7 +165,7 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
         print(f"Neural network to model the policy:\n{cls.nn_model}")
 
         # Initialize the policy to a random walk
-        cls.policy_nn.init_random_policy()
+        cls.policy_nn.reset(initial_values=initial_policy)
         print(f"Network parameters initialized as follows:\n{list(cls.policy_nn.getThetaParameter())}")
         print("Initial policy for all states (states x actions):")
         policy = cls.policy_nn.get_policy_values()

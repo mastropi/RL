@@ -19,7 +19,7 @@ import numpy as np
 
 from gym.envs.toy_text.discrete import categorical_sample, DiscreteEnv
 
-import torch.nn as nn
+from torch import nn, tensor
 
 import Python.lib.queues as queues
 from Python.lib.agents.policies import AcceptPolicyType, GenericParameterizedPolicyTwoActions
@@ -455,19 +455,32 @@ class PolNN():
                              f"\n# environment actions = {self.env.getNumActions()}"
                              f"\n# model actions = {self.nn_model.getNumOutputs()}")
 
-    def reset(self):
-        "Resets the policy to the random walk"
-        self.init_random_policy()
+    def reset(self, initial_values=None):
+        "Resets the policy to the random walk or to the given initial values"
+        self.init_policy(values=initial_values)
 
-    def init_random_policy(self, eps=1E-2):
+    def init_policy(self, eps=1E-2, values=None):
         """
-        Initializes the parameters of the neural network so that the output is almost constant over all actions for all input states
+        Initializes the parameters of the neural network so that the output policy is either almost constant over all actions for all input states
+        or is almost equal to the `values` given (which are indexed by all possible actions)
 
         The parameters are initialized to achieve "almost" constant output because if all parameters are initialized to 0, their values
-        never change during the learning process!! WHY??
+        never change during the learning process, as the gradient is always 0, because of the chain rule (easy to prove).
 
         The parameters (weights and biases) are initialized using a zero-mean normal distribution with a small standard deviation
-        (compared to 1) given by `eps`.
+        (compared to 1) given by `eps`, except for the biases of the neurons in the output layer which are initialized so that the policy
+        is almost equal to the given values (we write "almost" because there is noise in the output policy induced by the almost zero values
+        to which the other weights and biases are initialized to.
+
+        Arguments:
+        eps: (opt) positive float
+            Small value defining the standard deviation of the normal distribution used to define the weights and biases of all layers except for
+            the biases of the neurons in the output layer.
+            default: 1E-2
+
+        values: (opt) array-like
+            List of values indexed by the possible actions to which the policy should be initialized.
+            default: None, in which case the policy is initialized to almost a uniform policy
         """
         # Inspired by the weights_init() function in this code:
         # https://github.com/pytorch/examples/blob/main/dcgan/main.py
@@ -488,8 +501,20 @@ class PolNN():
                 pass
 
         # Set the bias of the neurons in the output layer (which is the last module referenced in the above loop)
-        # to 1 so that we get a constant probability for each action
-        nn.init.ones_(component.bias)
+        # which are the ones that define the policy.
+        if values is None:
+            # Initialize the biases to the same value (1) so that the policy is almost constant for all possible actions
+            nn.init.ones_(component.bias)
+        else:
+            # Initialize the biases so that the policy is almost equal to the given values (indexed by the possible actions)
+            # The initialization is based on the fact that the probability of each action in the output layer is given by the softmax function
+            # applied on the weights and biases reaching each output neuron. Since weights are approximately 0, the probabilities are approximately equal to
+            # the softmax function applied on the biases.
+            # The initialization performed below (as bias = log(p)) gives biases whose exponential sum is equal to 1
+            # (i.e. the denominator of the softmax function sums up to 1, i.e. sum(exp(beta)) = 1).
+            if len(values) != len(component.bias):
+                raise ValueError(f"The length of parameter `values` ({len(values)}) must be the same as the number of neurons in the output layer ({len(component.bias)})")
+            component.bias = nn.Parameter(tensor(np.log( np.maximum(1E-9, np.array(values)) )))
 
     def choose_action(self, state):
         """
@@ -508,20 +533,20 @@ class PolNN():
             input = np.zeros(self.env.getNumStates(), dtype=int)
             input[state] = 1
             exp_preferences = np.exp(self.nn_model(input).tolist())
-        probs_actions = exp_preferences / np.sum( exp_preferences )
+        proba_actions = exp_preferences / np.sum( exp_preferences )
             ## Note: we could compute the probability of the different actions using the torch function `F.softmax(self.nn_model([state]), dim=0).tolist()`
             ## but astonishingly this gives probabilities that do not sum up to 1!!!
             ## (not exactly at least, they sum up to e.g. 0.999999723, but this makes the call np.random.choice() fail)
-        #print(f"State: {state}, Prob. Actions = {probs_actions}")
+        #print(f"State: {state}, Prob. Actions = {proba_actions}")
 
         # Choose the action
         if isinstance(self.env, DiscreteEnv):
             # Use the random number generator defined in the environment (using the function defined in gym.envs.discrete.toy_text.discrete)
             # to choose an action, so that we use the same generator that has been used elsewhere.
-            action = categorical_sample(probs_actions, self.env.np_random)
+            action = categorical_sample(proba_actions, self.env.np_random)
         else:
             # Use np.random.choice to choose an action
-            action = np.random.choice(range(self.env.getNumActions()), p=probs_actions)
+            action = np.random.choice(range(self.env.getNumActions()), p=proba_actions)
 
         return action
 

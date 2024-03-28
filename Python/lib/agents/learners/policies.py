@@ -994,7 +994,7 @@ class LeaActorCriticNN(GenericLearner):
         the same sequence of random numbers every time trajectories are simulated.
         default: None
     """
-    def __init__(self, env: EnvironmentDiscrete, policy, learner_value_functions, allow_deterministic_policy=False, reset_value_functions=True, optimizer_learning_rate=0.1, seed=None, debug=False):
+    def __init__(self, env: EnvironmentDiscrete, policy, learner_value_functions, allow_deterministic_policy=False, reset_value_functions=True, initial_policy=None, optimizer_learning_rate=0.1, seed=None, debug=False):
         # SEE ALSO ALL THE OTHER LEARNING PARAMETERS DEFINED IN LeaPolicyGradient (e.g. learning rate alpha, etc.)
         super().__init__(env)
         self.policy = policy
@@ -1006,9 +1006,9 @@ class LeaActorCriticNN(GenericLearner):
         self.debug = debug
 
         self.reset_value_functions_at_every_learning_step = reset_value_functions
-        self.reset(reset_value_functions=reset_value_functions, reset_policy=True)
+        self.reset(reset_value_functions=reset_value_functions, reset_policy=True, initial_policy=initial_policy)
 
-    def reset(self, reset_value_functions=True, reset_policy=False):
+    def reset(self, reset_value_functions=True, reset_policy=False, initial_policy=None):
         # Performance measures: the average reward and length of episodes observed over the different episode run on the same policy
         self.average_reward_over_episodes = 0.0
         self.se_average_reward_over_episodes = np.nan
@@ -1022,7 +1022,7 @@ class LeaActorCriticNN(GenericLearner):
             # Policy learning step
             self.t_learn = 0
             # Reset the policy (to a random walk)
-            self.policy.reset()
+            self.policy.reset(initial_values=initial_policy)
             # Neural network optimizer
             # NOTE: The default learning rate of the Adam optimizer is 0.03 (so, quite small!)
             self.optimizer = optim.Adam(self.policy.getThetaParameter(), lr=self.optimizer_learning_rate, betas=(0.9, 0.999))
@@ -1086,11 +1086,11 @@ class LeaActorCriticNN(GenericLearner):
 
         if self.debug:
             print("Policy for each state and action at the current parameter value:")
-            probs_actions = np.nan * np.ones((self.env.getNumStates(), self.env.getNumActions()))
+            proba_actions = np.nan * np.ones((self.env.getNumStates(), self.env.getNumActions()))
             for s in self.env.getAllStates():
                 for a in range(self.env.getNumActions()):
-                    probs_actions[s][a] = np.round(self.policy.getPolicyForAction(a, s), 2)
-            print(probs_actions)
+                    proba_actions[s][a] = np.round(self.policy.getPolicyForAction(a, s), 2)
+            print(proba_actions)
 
         # Reset the information that has to do with the value functions learning and with attributes stored in the object about the performance of the policy
         self.reset(reset_value_functions=self.reset_value_functions_at_every_learning_step, reset_policy=False)

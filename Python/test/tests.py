@@ -28,11 +28,11 @@ import Python.lib.utils.plotting as plotting
 
 # Environment
 nS = 5
-start_states = {2}
+start_states = {0}
 # Use the following for a random selection of the start state outside A
 #start_states = set(np.arange(2, nS-1))
 isd = [1/len(start_states) if s in start_states else 0.0 for s in range(nS)]
-env1d = EnvGridworld1D_OneTerminalState(length=nS, rewards_dict={2: +1.0}, reward_default=0.0, initial_state_distribution=isd)
+env1d = EnvGridworld1D_OneTerminalState(length=nS, rewards_dict={nS-1: +1.0}, reward_default=0.0, initial_state_distribution=isd)
 print(f"Policy in {nS}-state gridworld:")
 for k, v in env1d.P.items():
     print(f"State {k}: {v}")
@@ -41,7 +41,7 @@ print(f"Rewards: {env1d.getRewardsDict()}")
 print(f"Start state distribution: {env1d.isd}")
 
 # Policy
-policy_probabilities = [0.7, 0.3] #[0.7, 0.3] #[0.1, 0.9]   #[0.5, 0.5]) #[0.9, 0.1])
+policy_probabilities = [0.7, 0.3] #[0, 1] #[0.7, 0.3] #[0.1, 0.9]   #[0.5, 0.5]) #[0.9, 0.1])
 policy = probabilistic.PolGenericDiscrete(env1d, dict({0: [0.0, 1.0], nS-1: [0.0, 1.0]}), policy_default=policy_probabilities)
 
 # Transition probability matrix under the given policy
@@ -60,8 +60,9 @@ for s in range(nS):
             P[s,ns] += prob_taking_action_a_at_state_s * prob_transition_from_s_to_ns_given_action_a
 P_epi = P
 P_con = P.copy()
-# For the continuing learning task, update the transition probability of the terminal state, because when reached we want it to start again from state 0
-# so that the learning task is continuing (recall that `-1` means "the last element of the array", i.e. the "last state").
+# For the continuing learning task, update the transition probability of the terminal state, because when reached we want it to start again from the environment's start state
+# (which can be a distribution over states, not necessarily a fixed state)
+# so that the learning task is continuing (recall that `-1` in the row means "transition from the last element of the array", i.e. the "last state").
 P_con[-1, :] = env1d.getInitialStateDistribution()
 # Check that P is a valid transition probability matrix
 for s in range(nS):
@@ -81,16 +82,28 @@ for s in range(nS):
 # *** The SOLUTION is to compute mu as 0.5 * (P^t + P^(t+1)) for t sufficiently large, and this works for both nS odd and even. ***
 # *** Note that the general expression is to compute (P^t + P^(t+1) + ... P^(t+d-1)) / d, where d is the periodicity of the Markov chain. ***
 # *** See also Asmussen, pag. 171, expression (1.6), where he talks about regenerative processes. ***
-mu = 0.5 * (np.squeeze(np.array((P_con**9999)[0,:])) + np.squeeze(np.array((P_con**10000)[0,:])) )
-print(f"Stationary probability distribution for cont. learning task (P^Inf): {mu}")
+if policy.isDeterministic():
+    # In the deterministic policy case, we assume that the policy is always going to the right or always going to the left.
+    # In such case, the period is equal to the number of states in the gridworld and hence, a stationary distribution does not really exist, because it is NOT unique.
+    # as the distribution at each state DEPENDS ON THE START AND END STATES. However, we can compute the "stationary" distribution (which would be obtained as the eigvenvector
+    # of the largest eigenvalue of the transition matrix, as the "period" average of P^d, where d is the period.
+    evector = (P_con**0)[0,:]   # This means: we consider that the start state is state s=0 (because at time 0 we choose the vector [1, 0, ..., 0] as the initial distribution of the states
+    for k in range(1, nS):
+        evector += (P_con**k)[0, :]
+    mu = evector / nS
+else:
+    # There is periodicity ONLY when the number of states in the environment is EVEN, in which case the period is 2
+    mu = 0.5 * (np.squeeze(np.array((P_con**9999)[0, :])) + np.squeeze(np.array((P_con**10000)[0, :])) )
+print(f"Stationary probability distribution for cont. learning task estimated as P^Inf: {mu}")
 # When probs = [0.9, 0.1], we get 0.00054319 for the "terminal" state with reward +1, i.e. a reasonably small occupation probability to showcase FV
 # Check that this is the statioary distribution
 if not policy.isDeterministic():
     assert np.allclose(mu*P_con, mu, atol=1E-4)
 ## OK
 
-# Note that we can also find the stationary distribution as the eigenvector of P' that corresponds to eigenvalue = 1
+# We can also find the stationary distribution as the eigenvector of P' that corresponds to eigenvalue = 1
 # Note that:
+# - the eigen-decomposition is computed on the transpose of P (as we are interested in the left-eigen-decomposition of P, which is equal to the right-eigen-decomposition of P')
 # - the eigenvalues are NOT sorted in a particular order (see help(np.linalg.eig))
 # - the eigenvectors are given as columns
 eigenvalues, eigenvectors = np.linalg.eig(P_con.T)
@@ -101,6 +114,8 @@ prob_stationary = np.squeeze(np.array(np.abs(eigenvector_one) / np.sum(np.abs(ei
 print(f"Stationary probability distribution for cont. learning task (eigen): {prob_stationary}")
 if not policy.isDeterministic():
     assert np.allclose(prob_stationary, mu, 1E-4)
+# Assign mu to prob_stationary, as this value already takes care of the possible periodicity of the Markov chain
+mu = prob_stationary
 ## OK!!
 
 
@@ -168,7 +183,7 @@ else:
 # Generalized inverse (minimum norm solution), applied for the continuing learning task case using the average reward criterion with gamma = 1
 V_true_con_avg_minnorm = np.asarray(np.dot( np.linalg.pinv(np.eye(len(P_con)) - P_con), b_con - g))[0]
 # Check the expected results
-if policy_probabilities == [0.5, 0.5] and nS == 5 and list(env1d.getRewardsDict().keys()) == [nS-1]:
+if policy_probabilities == [0.5, 0.5] and nS == 5 and list(env1d.getRewardsDict().keys()) == [nS-1] and gamma == 0.9:
 #if policy.policy == {0: [0.0, 1.0], 1: [0.5, 0.5], 2: [0.5, 0.5], 3: [0.5, 0.5], 4: [0.0, 1.0]} :
     assert  gamma == 0.9 and \
             np.allclose(V_true_epi_disc, np.array([0.33500299, 0.37222554, 0.49216488, 0.7214742, 0.0]))
@@ -213,7 +228,7 @@ else:
 
 #-- Learn the average reward and the state value function
 # Simulation parameters
-N = 500 #50 #500 #200 #20                            # Number of particles in FV simulation
+N = 100 #50 #500 #200 #20                            # Number of particles in FV simulation
 T = 2000 #200 #500                                   # Number of time steps of the single Markov chain simulation run as first step of the FV learning process
                                                     # This initial simulation is done to:
                                                     # - obtain an initial exploration of the environment that would help determine the absorption set A
@@ -243,8 +258,8 @@ seed = 1717
 nepisodes = 100 #1000       # Note: this parameter is ONLY used in EPISODIC learning tasks
 max_time_steps_per_episode = nS*10   #1000 #100
 start_state = None  # The start state is defined by the Initial State Distribution (isd) of the environment
-plot = False if R == 1 else False
-plot_value_functions = False
+plot = True if R == 1 else False    # True
+plot_value_functions = True
 colormap = "rainbow"
 
 alpha = 1.0
@@ -279,8 +294,8 @@ for rep in range(R):
     # Learner and agent definition
     params = dict({'N': N,  # NOTE: We should use N = 500 if we use N = 200, T = 200 above to compute the benchmark time steps because if here we use the N defined above, the number of time steps used by FV is much smaller than the number of time steps used by TD (e.g. 1500 vs. 5000) --> WHY??
                    'T': T,                           # Max simulation time over ALL episodes run when estimating E(T_A). This should be sufficiently large to obtain an initial non-zero average reward estimate (if possible)
-                   'absorption_set': set(np.arange(2)), #set({1}),  # Note: The absorption set must include ALL states in A (see reasons in the comments in the LeaFV constructor)
-                   'activation_set': set({2}),
+                   'absorption_set': set({1}), #set(np.arange(2)), #set({1}),  # Note: The absorption set must include ALL states in A (see reasons in the comments in the LeaFV constructor)
+                   'activation_set': set({0, 2}),
                    'alpha': alpha,
                    'gamma': gamma,
                    'lambda': lmbda,
@@ -288,7 +303,7 @@ for rep in range(R):
                    })
     learner_fv = fv.LeaFV(env1d, params['N'], params['T'], params['absorption_set'], params['activation_set'],
                           probas_stationary_start_state_et=None,
-                          probas_stationary_start_state_fv=None,
+                          probas_stationary_start_state_fv=None, #dict({0: policy_probabilities[0], 2: policy_probabilities[1]}), #None,
                           criterion=learning_criterion,
                           alpha=params['alpha'], gamma=params['gamma'], lmbda=params['lambda'],
                           adjust_alpha=adjust_alpha, adjust_alpha_by_episode=False, func_adjust_alpha=None, #np.sqrt,
@@ -625,29 +640,36 @@ policy_changed_from_previous_learning_step = lambda KL_distance, num_states: np.
 
 # Learning task and learning criterion are used by the constructor of the test class below
 learning_task = LearningTask.CONTINUING
-learning_criterion = LearningCriterion.DISCOUNTED; gamma = 0.9
-#learning_criterion = LearningCriterion.AVERAGE; gamma = 1.0    # gamma could be < 1 in the average reward criterion in order to take the limit as gamma -> 1 as presented in Sutton, pag. 251/252.
+#learning_criterion = LearningCriterion.DISCOUNTED; gamma = 0.9
+learning_criterion = LearningCriterion.AVERAGE; gamma = 1.0    # gamma could be < 1 in the average reward criterion in order to take the limit as gamma -> 1 as presented in Sutton, pag. 251/252.
 
 seed = 1317
 test_ac = Test_EstPolicy_EnvGridworldsWithObstacles()
-size_vertical = 3; size_horizontal = 4
-#size_vertical = 6; size_horizontal = 8
-#size_vertical = 8; size_horizontal = 12
-#size_vertical = 9; size_horizontal = 13
-size_vertical = 10; size_horizontal = 14
-#size_vertical = 10; size_horizontal = 30
 
+problem_2d = True
+
+if problem_2d:
+    # 2D labyrinth
+    size_vertical = 3; size_horizontal = 4
+    #size_vertical = 6; size_horizontal = 8
+    size_vertical = 8; size_horizontal = 12
+    #size_vertical = 9; size_horizontal = 13
+    #size_vertical = 10; size_horizontal = 14
+    #size_vertical = 10; size_horizontal = 30
+    initial_policy = None   # Random walk as initial policy
+else:
+    # 1D gridworld: the interesting dimension is the vertical dimension, with terminal state at the top (this is to unify the structure of 2D labyrinth and 1D gridworld)
+    size_vertical = 21; size_horizontal = 1     # We choose a value like K = 20 or 40 in the M/M/1/K queue system
+    initial_policy = [0.4, 0.0, 0.6, 0.0]       # We choose a probability of going down which is similar to mu/(lambda + mu) in the queue system where lambda/mu = 0.7, i.e. a value close to 1 / 1.7 = 0.588
 env_shape = (size_vertical, size_horizontal)
+nS = size_vertical * size_horizontal
 
 # Environment's entrance state
 entry_state = np.ravel_multi_index((size_vertical - 1, 0), env_shape)
-entry_state_in_absorption_set = False   #False #True
+entry_state_in_absorption_set = True   #False #True
 
-if False and env_shape == (3, 4):
-    obstacles_set = {} #{2, 5, 11} #{} #{5} #{2,5,11}
-    absorption_set = {0, 1} #{0, 4, 8} #{0, 1, 8}
-    nn_hidden_layer_sizes = [8]
-else:
+if problem_2d:
+    #-- 2D labyrinth
     # The path to the terminal state is just a corridor through the last row right and then the last column up
     # So at the upper left corner there is a rectangle that brings to nowhere
     rectangle_to_nowhere_width = size_horizontal - 2
@@ -663,27 +685,31 @@ else:
     left_margin = 0 #0 #int(rectangle_to_nowhere_width/2)
     top_margin = rectangle_to_nowhere_height
     absorption_set = set(np.concatenate([list(range(x * size_horizontal + left_margin, x * size_horizontal + rectangle_to_nowhere_width)) for x in range(0, top_margin)]))
+else:
+    #-- 1D gridworld
+    obstacles_set = set()
+    absorption_set = set(np.arange(np.prod(env_shape) * 2 // 3 + 1, env_shape[0] - 1))  # We choose an absorption set size J ~ K/3, like in the M/M/1/K queue system (recall that numbering of states here is the opposite than in M/M/1/K
 
-    # Add the environment's start state to the absorption set
-    # (ASSUMED TO BE AT THE LOWER LEFT OF THE LABYRINTH)
-    if entry_state_in_absorption_set:
-        absorption_set.add(entry_state)
+# Add the environment's start state to the absorption set
+# (ASSUMED TO BE AT THE LOWER LEFT OF THE LABYRINTH)
+if entry_state_in_absorption_set:
+    absorption_set.add(entry_state)
 
-    # Number of hidden layers in the neural network model
-    # Using multiple layers whose size is proportional to the gridworld size... however this tends to be counterproductive...
-    # i.e. learning is slower and may fail (e.g. it usually converges to a non-optimal policy where the advantage function is 0), presumably because of the larger number of parameters.
-    # Perhaps the architecture would work if the learning step of the neural network parameters optimizer is smaller and
-    # a larger number of policy learning steps is used (I tried with optimizer_learning_rate = 0.01 instead of 0.1 and
-    # the parameters started to be learned (i.e. the average reward went up --as opposed to 0-- although with large oscillations)
-    # but still 30 learning steps did not suffice to learn completely.
-    # This was tried with the 6x8 gridworld with a large rectangle of states going nowhere at the upper-left part
-    # with adaptive TD(lambda), where the hidden layer sizes were set to [38, 19].
-    #nn_hidden_layer_sizes = [int( 0.8*np.prod(env_shape) ), int( 0.4*np.prod(env_shape) )]
-    # Keep the neural network rather small
-    nn_hidden_layer_sizes = [12]
+# Number of hidden layers in the neural network model
+# Using multiple layers whose size is proportional to the gridworld size... however this tends to be counterproductive...
+# i.e. learning is slower and may fail (e.g. it usually converges to a non-optimal policy where the advantage function is 0), presumably because of the larger number of parameters.
+# Perhaps the architecture would work if the learning step of the neural network parameters optimizer is smaller and
+# a larger number of policy learning steps is used (I tried with optimizer_learning_rate = 0.01 instead of 0.1 and
+# the parameters started to be learned (i.e. the average reward went up --as opposed to 0-- although with large oscillations)
+# but still 30 learning steps did not suffice to learn completely.
+# This was tried with the 6x8 gridworld with a large rectangle of states going nowhere at the upper-left part
+# with adaptive TD(lambda), where the hidden layer sizes were set to [38, 19].
+#nn_hidden_layer_sizes = [int( 0.8*np.prod(env_shape) ), int( 0.4*np.prod(env_shape) )]
+# Keep the neural network rather small
+nn_hidden_layer_sizes = [12]
 print(f"Neural Network architecture:\n{len(nn_hidden_layer_sizes)} hidden layers of sizes {nn_hidden_layer_sizes}")
 
-test_ac.setUpClass(shape=env_shape, nn_input=InputLayer.ONEHOT, nn_hidden_layer_sizes=nn_hidden_layer_sizes,
+test_ac.setUpClass(shape=env_shape, nn_input=InputLayer.ONEHOT, nn_hidden_layer_sizes=nn_hidden_layer_sizes, initial_policy=initial_policy,
                     # General learning parameters
                     learning_task=learning_task,
                     learning_criterion=learning_criterion,
@@ -692,8 +718,9 @@ test_ac.setUpClass(shape=env_shape, nn_input=InputLayer.ONEHOT, nn_hidden_layer_
                     # Fleming-Viot parameters
                     # Small N and T are N=50, T=1000 for the 8x12 labyrinth with corridor
                     N=200, #50 #20 #100
-                    T=100, #1000, #3000,  # np.prod(env_shape) * 10  #100 #1000
+                    T=1000, #1000, #3000,  # np.prod(env_shape) * 10  #100 #1000
                     obstacles_set=obstacles_set, absorption_set=absorption_set,
+                    start_states_set=None, #{nS-1}, #None,
                     reset_method_value_functions=ResetMethod.ALLZEROS,
                     estimate_on_fixed_sample_size=True,
                     seed=seed, debug=False)
@@ -711,6 +738,8 @@ alpha_initial = test_ac.agent_nn_td.getLearner().getInitialLearningRate()
 max_avg_reward_continuing = 1 / (np.sum(test_ac.env2d.shape) - 1)   # In this case the start state counts! (we subtract 1 because the bottom-right state must NOT count twice!)
 max_avg_reward_episodic = 1 / (np.sum(test_ac.env2d.shape) - 2) # In this case the start state does not count (we subtract 2 because, besides not counting twice the bottom-right state, the start state does not count in the episodic setting)
 
+# State to observe and e.g. plot Q values, etc
+state_observe = np.ravel_multi_index((1, env_shape[1] - 1), env_shape)
 
 # Learning method (of the value functions and the policy)
 # Both value functions and policy are learned online using the same simulation
@@ -739,10 +768,10 @@ print(f"A MAXIMUM of {max_time_steps_benchmark} steps will be allowed during the
 print("******")
 
 # Common learning parameters
-n_learning_steps = 100 #200 #50 #100 #30
+n_learning_steps = 50 #200 #50 #100 #30
 n_episodes_per_learning_step = 50   #100 #30   # This parameter is used as the number of episodes to run both for the value functions learning AND the policy learning, and both for the traditional and the FV methods method (for FV, this number of episodes is used to learn the expected reabsorption time E(T_A))
 max_time_steps_per_episode = test_ac.env2d.getNumStates()*10    # This parameter is just set as a SAFEGUARD against being blocked in an episode at some state of which the agent could be liberated by restarting to a new episode (when this max number of steps is reached)
-max_time_steps_per_policy_learning_episode = test_ac.env2d.getNumStates() #np.prod(env_shape) * 10 #max_time_steps_benchmark // n_episodes_per_learning_step   # Maximum number of steps per episode while LEARNING THE *POLICY* ONLINE (NOT used for the value functions (critic) learning)
+max_time_steps_per_policy_learning_episode = test_ac.env2d.getNumStates() if problem_2d else test_ac.env2d.getNumStates()*2 #np.prod(env_shape) * 10 #max_time_steps_benchmark // n_episodes_per_learning_step   # Maximum number of steps per episode while LEARNING THE *POLICY* ONLINE (NOT used for the value functions (critic) learning)
 adjust_alpha_initial_by_learning_step = False; t_learn_min_to_adjust_alpha = 30
 policy_learning_mode = "online"     # Whether the policy is learned online or OFFLINE (only used when value functions are learned separately from the policy)
 optimizer_learning_rate = 0.01 #0.01 #0.1
@@ -774,7 +803,8 @@ if learning_method == "values_fv":
     max_time_steps_benchmark_all = np.nan * np.ones((n_learning_steps,))
 if learning_method == "all_online":
     # Online Actor-Critic policy learner with TD(lambda) as value functions learner and value functions learning happens at the same time as policy learning
-    learner_ac = LeaActorCriticNN(test_ac.env2d, test_ac.agent_nn_td.getPolicy(), test_ac.agent_nn_td.getLearner(), reset_value_functions=reset_value_functions_at_every_learning_step, optimizer_learning_rate=optimizer_learning_rate, seed=test_ac.seed, debug=True)
+    learner_ac = LeaActorCriticNN(test_ac.env2d, test_ac.agent_nn_td.getPolicy(), test_ac.agent_nn_td.getLearner(),
+                                  reset_value_functions=reset_value_functions_at_every_learning_step, initial_policy=initial_policy, optimizer_learning_rate=optimizer_learning_rate, seed=test_ac.seed, debug=True)
     for t_learn in range(1, n_learning_steps+1):
         print(f"\n\n*** Running learning step {t_learn} of {n_learning_steps} (AVERAGE REWARD at previous step = {R_all[max(0, t_learn-1)]}) of MAX={max_avg_reward_episodic} using {nsteps_all[max(0, t_learn-1)]} time steps for Critic estimationn)...")
         print("Learning the VALUE FUNCTIONS and POLICY simultaneously...")
@@ -794,7 +824,8 @@ else:
     simulator_value_functions.getAgent().getLearner().setInitialLearningRate(alpha_initial)
 
     # Value functions (Critic) are learned separately from the application of the policy and the policy (Actor) may be learned OFFLINE or online
-    learner_ac = LeaActorCriticNN(test_ac.env2d, simulator_value_functions.getAgent().getPolicy(), simulator_value_functions.getAgent().getLearner(), reset_value_functions=reset_value_functions_at_every_learning_step, optimizer_learning_rate=optimizer_learning_rate, seed=test_ac.seed, debug=True)
+    learner_ac = LeaActorCriticNN(test_ac.env2d, simulator_value_functions.getAgent().getPolicy(), simulator_value_functions.getAgent().getLearner(),
+                                  reset_value_functions=reset_value_functions_at_every_learning_step, initial_policy=initial_policy, optimizer_learning_rate=optimizer_learning_rate, seed=test_ac.seed, debug=True)
 
     # Keep track of the policy learned so that we can analyze how much it changes after each learning step w.r.t. the previous learning step
     policy_prev = None
@@ -861,7 +892,7 @@ else:
                 V, Q, state_counts, _, _, learning_info = \
                     simulator_value_functions.run(max_time_steps=max_time_steps_benchmark_all[t_learn-1],
                                                   reset_value_functions=reset_value_functions_at_this_step, seed=seed_this,
-                                                  state_observe=np.ravel_multi_index((1, env_shape[1] - 1), env_shape),
+                                                  state_observe=state_observe,
                                                   compute_rmse=True if t_learn in learning_episodes_observe else False, plot=False if t_learn in learning_episodes_observe else False,
                                                   verbose=True, verbose_period=verbose_period)
             else:
@@ -874,7 +905,7 @@ else:
                                                       max_time_steps=max_time_steps_benchmark,
                                                       max_time_steps_per_episode=max_time_steps_per_episode, #max_time_steps_benchmark // n_episodes_per_learning_step,
                                                       reset_value_functions=reset_value_functions_at_this_step, seed=seed_this,
-                                                      state_observe=np.ravel_multi_index((1, env_shape[1]-1), env_shape), compute_rmse=True if t_learn in learning_episodes_observe else False, plot=False if t_learn in learning_episodes_observe else False,
+                                                      state_observe=state_observe, compute_rmse=True if t_learn in learning_episodes_observe else False, plot=False if t_learn in learning_episodes_observe else False,
                                                       verbose=True, verbose_period=verbose_period)
                 else:
                     # When calling discrete.Simulator._run_single_continuing_task() to run the simulation (see how the discrete.Simulator.run() method is defined, i.e. what internal method it calls)
@@ -882,7 +913,7 @@ else:
                         simulator_value_functions.run(max_time_steps=max_time_steps_benchmark,
                                                       max_time_steps_per_episode=+np.Inf,
                                                       reset_value_functions=reset_value_functions_at_this_step, seed=seed_this,
-                                                      state_observe=np.ravel_multi_index((1, env_shape[1] - 1), env_shape),
+                                                      state_observe=state_observe,
                                                       compute_rmse=True if t_learn in learning_episodes_observe else False, plot=False if t_learn in learning_episodes_observe else False,
                                                       verbose=True, verbose_period=verbose_period)
             average_reward = simulator_value_functions.getAgent().getLearner().getAverageReward()
@@ -996,12 +1027,11 @@ plt.title(f"{learning_method.upper()} - {learning_task.name} learning task - {le
 marker = ''
 Q_all_baseline = Q_all[:n_learning_steps, :, :] - np.tile(V_all[:n_learning_steps, :].T, (test_ac.env2d.getNumActions(), 1, 1)).T
 ax_Q, ax_Q_baseline = plt.figure().subplots(1, 2)
-state_of_interest = np.ravel_multi_index((1, env_shape[1]-1), env_shape)
-ax_Q.plot(range(1, n_learning_steps + 1), V_all[:n_learning_steps, state_of_interest], marker=marker, color="black")
-ax_Q.plot(range(1, n_learning_steps + 1), Q_all[:n_learning_steps, state_of_interest, :], marker=marker)
+ax_Q.plot(range(1, n_learning_steps + 1), V_all[:n_learning_steps, state_observe], marker=marker, color="black")
+ax_Q.plot(range(1, n_learning_steps + 1), Q_all[:n_learning_steps, state_observe, :], marker=marker)
 ax_Q.legend(["V(s)"] + ["Q(s," + str(a) + ")" for a in range(Q_all.shape[2])], loc='upper left')
-ax_Q_baseline.plot(range(1, n_learning_steps + 1), V_all[:n_learning_steps, state_of_interest] - V_all[:n_learning_steps, state_of_interest], marker=marker, color="white") # We plot this constant value 0 so that the legend is correct
-ax_Q_baseline.plot(range(1, n_learning_steps + 1), Q_all_baseline[:n_learning_steps, state_of_interest, :], marker=marker)
+ax_Q_baseline.plot(range(1, n_learning_steps + 1), V_all[:n_learning_steps, state_observe] - V_all[:n_learning_steps, state_observe], marker=marker, color="white") # We plot this constant value 0 so that the legend is correct
+ax_Q_baseline.plot(range(1, n_learning_steps + 1), Q_all_baseline[:n_learning_steps, state_observe, :], marker=marker)
 ax_Q_baseline.legend(["V(s) - V(s)"] + ["Q(s," + str(a) + ") - V(s)" for a in range(Q_all.shape[2])], loc='upper left')
 
 # Optimum Q-values (for the optimum deterministic policy)
@@ -1009,7 +1039,7 @@ ax_Q_baseline.legend(["V(s) - V(s)"] + ["Q(s," + str(a) + ") - V(s)" for a in ra
 if learning_criterion == LearningCriterion.AVERAGE:
     assert learning_task == LearningTask.CONTINUING
     svalue  = 0.5 * (1.0 - max_avg_reward_continuing)     # Differential state value V(s) under the optimal policy (since the policy tells the agent to always go up, the agent receives reward 1.0, which is corrected (subtracted) by the max (because we are following the OPTIMAL policy) average reward; the 0.5 factor is explained by the calculations on my Mas de Canelles notebook sheet)
-    qvalue0 = 0.5 * (1.0 - max_avg_reward_continuing)     # Differential optimal action value Q(s,a) of going up (a=0) when we start at s = state_of_interest, one cell away from the terminal state, which gives reward 1.0 (we subtract the max average reward because we are following the OPTIMAL policy; the 0.5 factor is explained by the calculations on my Mas de Canelles notebook sheet)
+    qvalue0 = 0.5 * (1.0 - max_avg_reward_continuing)     # Differential optimal action value Q(s,a) of going up (a=0) when we start at s = state_observe, one cell away from the terminal state, which gives reward 1.0 (we subtract the max average reward because we are following the OPTIMAL policy; the 0.5 factor is explained by the calculations on my Mas de Canelles notebook sheet)
     qvalue1 = qvalue0 - max_avg_reward_continuing
     qvalue2 = qvalue0 - 2*max_avg_reward_continuing
     qvalue3 = qvalue0 - max_avg_reward_continuing
@@ -1037,7 +1067,7 @@ ax_Q_baseline.axhline(qvalue2 - svalue, linestyle='dashed', color="green")
 ax_Q_baseline.axhline(qvalue3 - svalue, linestyle='dashed', color="red")
 ax_Q_baseline.set_xlabel("Learning step")
 ax_Q_baseline.set_ylabel("Q values w.r.t. baseline")
-plt.suptitle(f"{learning_method.upper()} - {learning_task.name} learning task - {learning_criterion.name} reward criterion (gamma={simulator_value_functions.getAgent().getLearner().gamma}) - Labyrinth {env_shape}\nQ(s,a) and V(s) for state previous to the terminal state under the optimal policy, i.e. s={state_of_interest}\nMax average reward (continuing) = {max_avg_reward_continuing}")
+plt.suptitle(f"{learning_method.upper()} - {learning_task.name} learning task - {learning_criterion.name} reward criterion (gamma={simulator_value_functions.getAgent().getLearner().gamma}) - Labyrinth {env_shape}\nQ(s,a) and V(s) for state previous to the terminal state under the optimal policy, i.e. s={state_observe}\nMax average reward (continuing) = {max_avg_reward_continuing}")
 
 
 # Same plot for all states
@@ -1098,17 +1128,27 @@ colornorm = None
 
 # Policy for each action at each state
 axes = plt.figure().subplots(*gridworld_shape)
-probs_actions_toplot = np.nan*np.ones((3, 3))
-for i in range(axes.shape[0]):
-    for j in range(axes.shape[1]):
-        state_1d = np.ravel_multi_index((i, j), gridworld_shape)
-        print("")
+proba_actions_toplot = np.nan*np.ones((3, 3))
+if problem_2d:
+    for i in range(axes.shape[0]):
+        for j in range(axes.shape[1]):
+            state_1d = np.ravel_multi_index((i, j), gridworld_shape)
+            print("")
+            for action in range(env.getNumActions()):
+                print(f"Computing policy Pr(a={action}|s={(i,j)})...", end= " ")
+                idx_2d = (0, 1) if action == 0 else (1, 2) if action == 1 else (2, 1) if action == 2 else (1, 0)
+                proba_actions_toplot[idx_2d] = policy.getPolicyForAction(action, state_1d)
+                print("p = {:.3f}".format(proba_actions_toplot[idx_2d]))
+            img = axes[i,j].imshow(proba_actions_toplot, cmap=colormap, vmin=0, vmax=1)
+else:
+    for i in range(len(axes)):
+        state = i
         for action in range(env.getNumActions()):
-            print(f"Computing policy Pr(a={action}|s={(i,j)})...", end= " ")
+            print(f"Computing policy Pr(a={action}|s={state})...", end=" ")
             idx_2d = (0, 1) if action == 0 else (1, 2) if action == 1 else (2, 1) if action == 2 else (1, 0)
-            probs_actions_toplot[idx_2d] = policy.getPolicyForAction(action, state_1d)
-            print("p = {:.3f}".format(probs_actions_toplot[idx_2d]))
-        img = axes[i,j].imshow(probs_actions_toplot, cmap=colormap, vmin=0, vmax=1)
+            proba_actions_toplot[idx_2d] = policy.getPolicyForAction(action, state)
+            print("p = {:.3f}".format(proba_actions_toplot[idx_2d]))
+        img = axes[i].imshow(proba_actions_toplot, cmap=colormap, vmin=0, vmax=1)
 plt.colorbar(img, ax=axes)  # This adds a colorbar to the right of the FIGURE. However, the mapping from colors to values is taken from the last generated image! (which is ok because all images have the same range of values.
                             # Otherwise see answer by user10121139 in https://stackoverflow.com/questions/13784201/how-to-have-one-colorbar-for-all-subplots
 plt.suptitle(f"{learning_method.upper()}\nPolicy at each state")
