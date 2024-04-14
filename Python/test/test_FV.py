@@ -33,10 +33,11 @@ class Test_Class_LeaFV_discretetime(unittest.TestCase):
         print("\n*** Running test " + self.id() + " ***")
 
         # Define the FV learner
+        N = 5
         absorption_set = set(range(2))
         absorption_boundary = max(absorption_set)
         activation_set = {absorption_boundary + 1}
-        learner_fv = LeaFV(self.env, N=5, T=10, absorption_set=absorption_set, activation_set=activation_set, TIME_RESOLUTION=1)
+        learner_fv = LeaFV(self.env, N=N, T=10, absorption_set=absorption_set, activation_set=activation_set) #, TIME_RESOLUTION=1) # This was commented out because the default value of TIME_RESOLUTION is supposed to be 1 and by omitting its value here we want to stress this out, as normally when creating the LeaFV object, we will forget about setting this parameter... This value of TIME_RESOLUTION=1 should we set for discrete-time Markov chains.
 
         # Create the particles and mock where they are so that we can have a Phi estimate
         envs = [copy.deepcopy(self.env) for _ in range(learner_fv.N)]
@@ -119,36 +120,46 @@ class Test_Class_LeaFV_discretetime(unittest.TestCase):
                             print(f"--> Particle p={p} reactivated to state s={state}")
                         print("----------------------")
                         print(f"Processing absorption time t_abs={t}...")
-                        learner_fv._update_absorption_times(t)
-                        learner_fv._update_phi_contribution(t)
-                        learner_fv._update_integral()
-                    learner_fv._update_phi(t, state_prev, state)
+                        learner_fv.update_integral(t, fixed_sample_size=True)
+                    learner_fv.update_phi(t, state_prev, state)
 
                     if t == t_max:
                         done = True
 
+            # Kill the particles that have not been absorbed (censored particles) at t=t_max, so that we can consider the contribution
+            n_particles_not_absorbed = N - len(absorption_times)
+
+            # Update the integral taking into account this last absorption of all remaining particles, which makes the estimated survival probability at t_max be equal to 0.
+            # NOTE that we only need to update the integral ONCE, even when more than one particle has yet to be absorbed.
+            learner_fv.update_integral(t, fixed_sample_size=True)
+
             # ASSERTIONS
             # Compute the after the fact survival probability (i.e. after all absorption times are observed)
             # and check the correctness of the iteratively computed integral of P(T>t)*Phi(t,x) for each state of interest x
-            df_surv = pd.DataFrame({'t': [0] + absorption_times,
-                                    'P(T>t)': [ n /len(absorption_times) for n in range(len(absorption_times), -1, -1)]})
+            _absorption_times_including_censoring = absorption_times + list(np.repeat(t_max, n_particles_not_absorbed))
+            df_surv = pd.DataFrame({'t': [0] + _absorption_times_including_censoring,
+                                    'P(T>t)': [ n /len(_absorption_times_including_censoring) for n in range(len(_absorption_times_including_censoring), -1, -1)]})
 
             print(f"\n--- Seed {seed} ({idx_seed + 1} of {len(seeds)}):")
 
-            # Assert the value of the integral
+            # Assert the value of Phi and of the integral, and check that the iteratively computed integral gives the same result as the integral computed in one shot at the end
             for x in learner_fv.states_of_interest:
-                df_proba_surv_and_phi = merge_proba_survival_and_phi(df_surv, learner_fv.dict_phi[x])
-                proba, integral = estimate_proba_stationary(df_proba_surv_and_phi, 1.0)
-                print(f"Components of the integral:\n{df_proba_surv_and_phi}")
-                print(f"Integral computed after the fact: {integral}")
-
-                print(f"Observed integral[x={x}]: {learner_fv.dict_integral[x]}")
-                assert np.isclose(learner_fv.dict_integral[x], integral), "The iterative method and the after the fact method must give the same value for the FV integral"
-
-            # Assert the value of Phi(t,x) for each seed
-            for x in learner_fv.states_of_interest:
+                print(f"CHECK Phi[x={x}]")
                 print(f"Observed Phi[x={x}]:\n{learner_fv.dict_phi[x]}")
                 assert np.allclose(learner_fv.dict_phi[x], dict_expected[seed]['dict_phi'])
+                print("(OK)")
+
+                # Compute the integral
+                print(f"\nCHECK Integral[x={x}]")
+                df_proba_surv_and_phi = merge_proba_survival_and_phi(df_surv, learner_fv.dict_phi[x])
+                _, integral = estimate_proba_stationary(df_proba_surv_and_phi, 1.0) # We pass a dummy expected reabsorption time value of 1.0 as we are not interested in checking the stationary probability value
+                print(f"Components of the integral:\n{df_proba_surv_and_phi}")
+                print(f"One-shot computed Integral[x={x}]: {integral}")
+
+                print(f"Iteratively computed Integral[x={x}]: {learner_fv.dict_integral[x]}")
+                assert np.isclose(learner_fv.dict_integral[x], integral), "The iterative method and the after the fact method must give the same value for the FV integral"
+                print("(OK)")
+
 
     def test_computation_of_phi_as_function_of_start_state_and_action(self):
         "Tests the calculation of Phi(t,x) for different start states s using mocked particle trajectories"
@@ -194,7 +205,7 @@ class Test_Class_LeaFV_discretetime(unittest.TestCase):
                 print(f"Particle #{pp}:\n{_particle.getTrajectory()}")
 
         # Update the value of Phi(t,x) for each state of interest x defined in the FV learner (which by default is the set of terminal states of the environment)
-        learner_fv._update_phi_function(particles)
+        learner_fv.update_phi_function(particles)
         for x in learner_fv.states_of_interest:
             print(f"\n*** Phi(t, x={x})***")
             for s in sorted(learner_fv.dict_phi_for_state.keys()):
@@ -362,7 +373,7 @@ if __name__ == '__main__':
                 print(f"Particle #{pp}:\n{_particle.getTrajectory()}")
 
         # Update the value of Phi(t,x) for each state of interest x defined in the FV learner (which by default is the set of terminal states of the environment)
-        learner_fv._update_phi_function(particles)
+        learner_fv.update_phi_function(particles)
         for x in learner_fv.states_of_interest:
             print(f"\n*** Phi(t, x={x})***")
             for s in sorted(learner_fv.dict_phi_for_state.keys()):

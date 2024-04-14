@@ -94,7 +94,7 @@ class LeaFV(LeaTDLambda):
         Otherwise, it should be set to a small real number compared to the typical inter-event times
         of the continuous-time Markov process, such as 1/lambda for a network system where lambda is the
         event arrival rate.
-        default: 1E-9
+        default: 1
     """
 
     def __init__(self, env, N: int, T: int, absorption_set: set, activation_set: set,
@@ -107,7 +107,7 @@ class LeaFV(LeaTDLambda):
                  adjust_alpha=False, alpha_update_type=AlphaUpdateType.EVERY_STATE_VISIT,
                  adjust_alpha_by_episode=False, alpha_min=0., func_adjust_alpha=None,
                  reset_method=ResetMethod.ALLZEROS, reset_params=None, reset_seed=None,
-                 burnin_time=0, TIME_RESOLUTION=1E-9,
+                 burnin_time=0, TIME_RESOLUTION=1,
                  debug=False):
         super().__init__(env, criterion=criterion, task=LearningTask.CONTINUING, alpha=alpha,  gamma=gamma, lmbda=lmbda, adjust_alpha=adjust_alpha,
                          alpha_update_type=alpha_update_type, adjust_alpha_by_episode=adjust_alpha_by_episode,
@@ -149,15 +149,16 @@ class LeaFV(LeaTDLambda):
         self.TIME_RESOLUTION = TIME_RESOLUTION
 
         #-- Attributes that are defined in reset()
+        # List of absorption times
+        # Note that these are NOT the survival times but the (absolute) absorption times. See for instance the comment about parameter `t` in learn_at_absorption()
+        # where we explicitly state that `t` is the system's clock and it is NOT used to compute the survival time.
         self.absorption_times = None
         self.start_states = None
         self.start_actions = None
         self.start_state_actions = None
         # Dictionary indicating the indices in self.dict_phi (for each state of interest x)
-        # that inform the last Phi(x) row index whose time 't' is BEHIND the respective absorption time
-        # stored in self.absorption_times.
-        # Note that, for each x, dict_last_indices_phi_prior_to_absorption_times[x] contains
-        # as many indices as the length of self.absorption_times).
+        # that inform the last Phi(x) row index whose time 't' is BEHIND the respective absorption time stored in self.absorption_times.
+        # Note that, for each x, dict_last_indices_phi_prior_to_absorption_times[x] contains as many indices as the length of self.absorption_times).
         # This dictionary allows us to quickly retrieve, for each x, the first index in Phi(x) that should contribute
         # to the computation of the Phi(x) sum for all the times contained between the previous absorption time
         # and the absorption time currently being processed.
@@ -209,6 +210,7 @@ class LeaFV(LeaTDLambda):
         #-- Reset the (integer) absorption times
         # We initialize the list of absorption times to 0 to make the update of the Phi contribution to the FV integral
         # easier to carry out, with less IF conditions that check whether a particle has already been absorbed.
+        # See also comment about this being the absorption times, as opposed to the survival times, in the constructor, where this attribute is defined.
         self.absorption_times = [0]
 
         #-- Reset attributes related to the iterative update of the FV integral when survival times are observed in order
@@ -314,7 +316,7 @@ class LeaFV(LeaTDLambda):
                     self._update_phi_function_fixed_sample_size(self.getStartState(idx_particle), self.getStartAction(idx_particle), t, state, next_state)
                     #print(f"[learn] Updated Phi(t,x; s={self.start_states[idx_particle]}):\n{self.dict_phi_for_state[self.start_states[idx_particle]]}")
                 else:
-                    self._update_phi(t, state, next_state)
+                    self.update_phi(t, state, next_state)
 
             # Store the trajectory in the particle (environment) that has evolved
             # (so that we are able to retrieve its history when learning the value functions by the FV estimator)
@@ -323,8 +325,8 @@ class LeaFV(LeaTDLambda):
 
     def learn_at_absorption(self, envs, idx_particle, t, state_absorption, next_state):
         """
-        Learns the value functions at the time of the particle's absorption for EVERY state and action
-        the particle visited prior to absorption, using:
+        Learns the value functions at the time of the particle's absorption for EVERY state and action in the trajectory of
+        the particle prior to absorption, using:
         - the FV estimator of the value function of the killed process
         - the n-step bootstrap estimator of the value function, where n is the number of steps taken
         until absorption as measured from the time the particle was at the state and action whose value
@@ -366,12 +368,13 @@ class LeaFV(LeaTDLambda):
         #-- Update Phi based on the new reactivated position of the particle after the absorption
         # This is important because Phi could have already experienced an update, which is the case when the absorption occurred from a state of interest x
         # as this implies that the occupation frequency of x changed when the particle was absorbed.
-        self._update_phi(t, state_absorption, next_state)
+        self.update_phi(t, state_absorption, next_state)
 
         # Update the Phi(t,x) as a function of the start state, for all states in the active set
-        self._update_phi_function(envs)
+        self.update_phi_function(envs)
 
-        # Update the list of observed absorption times (this is used when updating the FV integral, normally by _update_integral())
+        # Update the list of observed absorption times
+        # (this is used when updating the FV integral, normally by update_integral(), where the absorption time is assumed to be a survival time)
         self.absorption_times += [t]
 
         #-- Learn the value function using the FV estimator
@@ -453,6 +456,12 @@ class LeaFV(LeaTDLambda):
 
     def learn_at_absorption_fixed_sample_size(self, envs, idx_particle, t_surv, t_phi, state_absorption, next_state):
         """
+        Learns the value functions at the time of the particle's absorption for the state and action at which the particle STARTED,
+        an information that is retrieved by the methods self.getStartState() and self.getStartAction().
+
+        The method also updates Phi(t,x) for the given start state and action, for every state of interest x as a result of reactivation
+        from the absorption state `state_absorption` to `next_state`.
+
         Arguments:
         t_surv: positive float
             Survival time as measured in the internal clock of the absorbed particle, used in the estimation of the survival probability P(T>t)
@@ -469,7 +478,9 @@ class LeaFV(LeaTDLambda):
         start_state = self.getStartState(idx_particle)
         start_action = self.getStartAction(idx_particle)
         self._update_phi_function_fixed_sample_size(start_state, start_action, t_phi, state_absorption, next_state)
-        # Check if the Phi function was updated, if NOT, we add the current observed time to the data frame of Phi(t,x) values because we need it for:
+        # Check if the Phi function was REALLY updated by the above call (i.e. if a new entry with time `t_phi` was added to Phi --which doesn't happen when the value of Phi
+        # at x doesn't change due to the reactivation of the particle from state `state_absorption` to `next_state` just because no state tracked by Phi is either one of those states).
+        # If Phi was NOT updated by the above call, we add `t_phi` to the data frame of Phi(t,x) values below because we need it for:
         # - updating the Phi contribution to the FV integral at the CURRENT absorption time (as this absorption time defines the end time on which the Phi values are summed)
         # - updating the Phi contribution to the FV integral at the NEXT absorption time (as this absorption time defines the start time on which the Phi values will be summed)
         for x in self.states_of_interest:
@@ -514,16 +525,45 @@ class LeaFV(LeaTDLambda):
                 assert np.isclose(self.getQ().getValue(start_state, _action), self.getQ().getValue(start_state, start_action)), \
                     f"All Q-values are the same for the terminal state {start_state}:\n{self.getQ().getValues()}"
 
-    def _update_phi(self, t, state, next_state):
+    def update_integral(self, t_absorption, fixed_sample_size=True):
+        """
+        Updates the FV integral based on the given absorption time
+
+        This update assumes that all absorption times are equal to SURVIVAL times contributing to the estimator of P(T>t)
+        which are assumed to occur in increasing order.
+
+        The following attributes are updated by this call:
+        - self.absorption_times is updated with the given `t_absorption` time, which is added at the end of the list of observed absorption times.
+        Note that, for the purpose of the FV integral update done here, absorption times are assumed to be survival times, as they are assumed to be
+        the FIRST absorption time observed for each particle, which clearly coincides with their first observed survival time (i.e. only survival times
+        coming from the first absorption event of each particle are considered for contribution to the estimation of P(T>t)).
+        - self.dict_phi_sum is updated with the new cumulative sum of the Phi values up to time `t_absorption` at each state of interest x stored in self.states_of_interest,
+        - self.dict_integral is updated with the new FV integral value of Integral{ P(T>t)*Phi(t,x) } after observing `t_absorption` as the latest and
+        so far largest survival time contributing to the estimation of P(T>t). This is done for each state of interest x stored in self.states_of_interest.
+
+        t_absorption: positive float
+            Latest observed absorption time, which is assumed to be the latest observed survival time when estimating the survival probability P(T>t).
+            These absorption/survival times are assumed to be observed in order.
+            Both these conditions are satisfied when the only times contributing to the estimation of the survival probability P(T>t) are the FIRST
+            absorption times of each particle in the FV system. Normally, this is implemented in discrete.Simulator._run_simulation_fv().
+
+        fixed_sample_size: (opt) bool
+            Whether the integral should be updated based on self.N survival times contributing to the estimation of the survival probability P(T>t).
+            This is the case, for instance, when we only consider the FIRST survival time of each particle as contribution to the estimation of P(T>t).
+            When False, the estimate of P(T>t) is given by (1 - k/n) for k = 1, ..., n at survival times t(1) < t(2) < ... < t(n) = t_absorption
+            observed so far.
+            default: True
+        """
+        assert t_absorption > 0, f"The absorption time must be positive ({t_absorption})"
+        self._update_absorption_times_and_phi(t_absorption)
+        self._update_phi_contribution(t_absorption)
+        self._update_integral(fixed_sample_size=fixed_sample_size)
+
+    def update_phi(self, t, state, next_state):
         "Updates the empirical mean phi(t, x) for x in intersection({state, next_state}, states_of_interest)"
         self.dict_phi = update_phi(self.env, self.N, t, self.dict_phi, state, next_state)
 
-    def _update_phi_function_fixed_sample_size(self, start_state, start_action, t, state, next_state):
-        "Updates the empirical mean phi(t, x; s) at the given time t, for x in intersection({state, next_state}, states_of_interest) for the given state s"
-        self.dict_phi_for_state[start_state] = update_phi(self.env, self.N_for_start_state[start_state], t, self.dict_phi_for_state[start_state], state, next_state)
-        self.dict_phi_for_state_action[start_state][start_action] = update_phi(self.env, self.N_for_start_state_action[start_state][start_action], t, self.dict_phi_for_state_action[start_state][start_action], state, next_state)
-
-    def _update_phi_function(self, envs):
+    def update_phi_function(self, envs):
         """
         Updates the empirical mean phi(t, x) for all states x listed in the self.states_of_interest attribute for all the historical discrete times t
         of which we have information at the time of estimation (e.g. at the absorption time of a particle).
@@ -534,7 +574,7 @@ class LeaFV(LeaTDLambda):
         The update is done for all the states and actions that are visited by all the particles passed in the input list `envs`
         whose values (of the states and actions to update) are taken from the particle trajectories stored in each environment present in the list.
 
-        In particular, the above sentence implies that we can run _update_phi_function() at the time we need to compute the phi(t,x; s,a) estimates,
+        In particular, the above sentence implies that we can run update_phi_function() at the time we need to compute the phi(t,x; s,a) estimates,
         normally at the time of a new absorption of a particle in the FV system.
 
         Note that the times at which phi(t, x) is estimated for each state and for each state-action are CONSECUTIVE integers, because Phi is estimated
@@ -711,6 +751,11 @@ class LeaFV(LeaTDLambda):
                                 if n_particles_tt_after_state_s_actions[a] > 0:  # We don't want to update Phi if there is no sample for the given start state-action
                                     empirical_mean_actions[a] /= n_particles_tt_after_state_s_actions[a]
                                     last_tt_inserted_in_phi_actions[s][a][x] = update_phi_internal(self.dict_phi_for_state_action[s][a], tt, x, empirical_mean_actions[a], last_tt_inserted_in_phi_actions[s][a][x])
+
+    def _update_phi_function_fixed_sample_size(self, start_state, start_action, t, state, next_state):
+        "Updates the empirical mean phi(t, x; s) at the given time t, for x in intersection({state, next_state}, states_of_interest) for the given state s"
+        self.dict_phi_for_state[start_state] = update_phi(self.env, self.N_for_start_state[start_state], t, self.dict_phi_for_state[start_state], state, next_state)
+        self.dict_phi_for_state_action[start_state][start_action] = update_phi(self.env, self.N_for_start_state_action[start_state][start_action], t, self.dict_phi_for_state_action[start_state][start_action], state, next_state)
 
     def _update_particle_trajectory(self, env, t, state, action, next_state, reward):
         # Update the trajectory stored in the environment
@@ -913,13 +958,13 @@ class LeaFV(LeaTDLambda):
 
         return delta_V, delta_Q, state_value_killed_process, action_value_killed_process
 
-    def _update_absorption_times(self, t_absorption: int):
+    def _update_absorption_times_and_phi(self, t_absorption: int):
         """
-        Updates the list of observed absorption times and the dictionary containing the index,
+        Updates the list of observed absorption times and the dictionary containing the index (normally self.dict_last_indices_phi_prior_to_absorption_times),
         for each state of interest x and for each observed absorption time,
         that signals the latest entry in dict_phi[x] whose measurement time occurs before the respective
         absorption time (where "respective" means: "stored at the same index position (of the attribute
-        storing all observed absorption times) as the index position at which the information in the
+        storing all observed absorption times, normally self.absorption_times) as the index position at which the information in the
         aforementioned dictionary is stored").
 
         This index information is used when computing the Phi contribution to the Fv integral update
@@ -958,12 +1003,18 @@ class LeaFV(LeaTDLambda):
                 # => Add an new row entry in Phi(x) in order to indicate that Phi(x) remained constant in the
                 # previous inter-absorption interval, in order to facilitate the calculation of the update
                 # of the Phi contribution to the FV integral typically done by _update_phi_contribution().
-                # The new entry will have t_absorption - 1 which is the last possible discrete-time value
-                # that can be part of the previous inter-absorption interval.
+                # The new entry will have t_absorption - TIME_RESOLUTION (i.e. a value strictly smaller than t_absorption)
+                # so that the assigned time value is part of the latest inter-absorption interval, i.e. the interval that ends at the currently observed absorption time.
+                # NOTE that t_absorption - TIME_RESOLUTION is *lower bounded* by the previous absorption time, and the bound is materialized normally when
+                # the current absorption time *coincides* with the previous absorption time (in the current implementation of the FV simulation,
+                # this happens when, precisely at the maximum simulation time (e.g. max_time_steps = 5000), a particle is absorbed while some particles are left unabsorbed,
+                # a situation that triggers their forced absorption at the EXACT same time of the last particle absorption (e.g. at t = 5000).
                 self.dict_phi[x] = pd.concat([self.dict_phi[x],
-                                              pd.DataFrame({'t': [t_absorption - self.TIME_RESOLUTION], 'Phi': [self.dict_phi[x]['Phi'].iloc[-1]]})],
+                                              pd.DataFrame({'t': [max(previous_absorption_time, t_absorption - self.TIME_RESOLUTION)],
+                                                            'Phi': [self.dict_phi[x]['Phi'].iloc[-1]]},
+                                                           index=[self.dict_phi[x].shape[0]])],
                                              axis=0)
-            # Store the last index in Phi(x) that contributes to the latest/current inter-absorption interval
+            # Add to the corresponding dictionary the last index in Phi(x) that contributes to the latest/current inter-absorption interval
             self.dict_last_indices_phi_prior_to_absorption_times[x] += [ self.dict_phi[x].shape[0] - 1 ]
 
         # Store the current absorption time
@@ -998,7 +1049,7 @@ class LeaFV(LeaTDLambda):
                 _deltat = t2 - t1
                 assert _deltat >= 0, f"t1={t1}, t2={t2}, deltat={_deltat}"
                 # The value of Phi(x) contributing to each interval deltat = t(i) - t(i-1) is the value at t(i-1), NOT the value at t(i)
-                # because at t(i) is when Phi(x) changes value (following the chnage of a step function, which is what Phi(x) is, a step function)
+                # because at t(i) is when Phi(x) changes value (following the change of a step function, which is what Phi(x) is, a step function)
                 _phi = self.dict_phi[x]['Phi'].iloc[idx-1]
                 #print(f"delta={_deltat}, Phi={_phi}")
                 phi_sum_latest_interval_x += _phi * _deltat
@@ -1010,10 +1061,10 @@ class LeaFV(LeaTDLambda):
 
             # Store this value in the dictionary of Phi sums
             self.dict_phi_sum[x] = pd.concat([self.dict_phi_sum[x],
-                                              pd.DataFrame({'t': [t_absorption], 'Phi': [phi_sum_latest_interval_x]})],
+                                              pd.DataFrame({'t': [t_absorption], 'Phi': [phi_sum_latest_interval_x]}, index=[self.dict_phi_sum[x].shape[0]])],
                                              axis=0)
 
-    def _update_integral(self):
+    def _update_integral(self, fixed_sample_size=True):
         """
         Updates, for each x among the states of interest, the FV integral by computing the change in the area below the curve P(T>t) * Phi(t,x)
         generated by the observation of a new survival time, which is assumed to have already been stored in attribute self.absorption_times.
@@ -1021,14 +1072,24 @@ class LeaFV(LeaTDLambda):
         This update assumes that all survival times contributing to the P(T>t) estimator occur in increasing order.
 
         The attribute self.dict_integral is updated with the updated integral value for each x in self.states_of_interest.
+
+        fixed_sample_size: (opt) bool
+            Whether the integral should be updated based on N survival times contributing to the estimation of the survival probability P(T>t).
+            This is the case when we only consider the FIRST survival time of each particle as contribution to the estimation of P(T>t).
+            default: True
         """
         # Number of absorption times observed so far (assumed observed in increasing order)
         n = len(self.absorption_times) - 1  # -1 because the first absorption time in the list is dummy, and is set to 0
-        for x in self.states_of_interest:
-            first_n_minus1_phi_contributions = self.dict_phi_sum[x]['Phi'].iloc[1:-1]   # We start at index 1 because index 0 contains the dummy value 0, which does not really correspond to a phi contribution to the integral.
-            contribution_up_to_n_minus_1 = 1/(n*(n-1)) * np.sum( np.arange(n-1) * first_n_minus1_phi_contributions ) if n > 1 else 0.0
-            contribution_from_interval_n = 1/n * self.dict_phi_sum[x]['Phi'].iloc[-1]
-            self.dict_integral[x] += self.env.getReward(x) * (contribution_up_to_n_minus_1 + contribution_from_interval_n)
+        if fixed_sample_size:
+            for x in self.states_of_interest:
+                phi_contribution_from_latest_interval = self.dict_phi_sum[x]['Phi'].iloc[-1]
+                self.dict_integral[x] += self.env.getReward(x) * (1 - (n - 1) / self.N) * phi_contribution_from_latest_interval
+        else:
+            for x in self.states_of_interest:
+                first_n_minus1_phi_contributions = self.dict_phi_sum[x]['Phi'].iloc[1:-1]   # We start at index 1 because index 0 contains the dummy value 0, which does not really correspond to a phi contribution to the integral.
+                phi_contribution_up_to_n_minus_1 = 1/(n*(n-1)) * np.sum( np.arange(n-1) * first_n_minus1_phi_contributions ) if n > 1 else 0.0
+                phi_contribution_from_interval_n = 1/n * self.dict_phi_sum[x]['Phi'].iloc[-1]
+                self.dict_integral[x] += self.env.getReward(x) * (phi_contribution_up_to_n_minus_1 + phi_contribution_from_interval_n)
 
     def _update_integral_fixed_sample_size(self, state):
         """
@@ -1204,3 +1265,9 @@ class LeaFV(LeaTDLambda):
         self.N_for_start_state[state] += 1
         self.N_for_start_action[action] += 1
         self.N_for_start_state_action[state][action] += 1
+
+    def setProbasStationaryStartStateET(self, dict_proba):
+        self.probas_stationary_start_state_et = dict_proba
+
+    def setProbasStationaryStartStateFV(self, dict_proba):
+        self.probas_stationary_start_state_fv = dict_proba

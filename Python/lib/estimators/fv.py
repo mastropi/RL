@@ -326,7 +326,7 @@ def estimate_stationary_probabilities(dict_phi, df_proba_surv, expected_absorpti
         started at the stationary activation distribution of states.
 
     expected_absorption_time: float
-        Estimated expected absorption cycle time, i.e. the expected time the queue system takes in a
+        Estimated expected absorption cycle time, i.e. the expected time the system takes to complete a
         reabsorption cycle when starting at the stationary absorption distribution of states.
 
     uniform_jump_rate: (opt) positive float

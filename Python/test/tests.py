@@ -720,7 +720,7 @@ test_ac.setUpClass(shape=env_shape, nn_input=InputLayer.ONEHOT, nn_hidden_layer_
                     N=200, #50 #20 #100
                     T=1000, #1000, #3000,  # np.prod(env_shape) * 10  #100 #1000
                     obstacles_set=obstacles_set, absorption_set=absorption_set,
-                    start_states_set=None, #{nS-1}, #None,
+                    start_states_set={entry_state}, #{nS-1}, #None,
                     reset_method_value_functions=ResetMethod.ALLZEROS,
                     estimate_on_fixed_sample_size=True,
                     seed=seed, debug=False)

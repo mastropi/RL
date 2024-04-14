@@ -96,13 +96,25 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
                 if sadj is not None and sadj not in set.union(absorption_set, obstacles_set):
                     activation_set.add(sadj)
 
-        # Set of start states (the lower-left cell, if not given)
+        # Set of start states, embedded in the environment below as part of the initial state distribution set as the uniform distribution on these states
+        # When None, the set of start states is defined as:
+        # - The lower-left cell if the set is not given and no absorption set has been specified (although this is never the case because of the above definition of absorption_set,
+        # but still we leave the condition in the logic below in case we decide to change this behaviour later on).
+        # - A set of states in the FV active set. The precise set of states used depends on the learning criterion:
+        #   - for AVERAGE learning criterion: it is defined as the set of activation states, i.e. the outside boundary of the absorption set A, so that the TD learner and the FV
+        #   learner have a fair comparison.
+        #   NOTE that, in this case, this set of start states is used to start the single Markov chain excursion used to estimate the expected reabsorption time E(T_A).
+        #   And this is OK (as opposed to e.g. start such excursion INSIDE the absorption set A), because we first need to enter the absorption set A in order to measure the
+        #   reabsorption cycle time. What is questionable, however, is whether we should start the single Markov chain excursion at a state chosen UNIFORMLY at random in the
+        #   outside boundary of A or, instead, the state should be chosen following the exit state distribution.
+        #   - for all other learning criteria (e.g. DISCOUNTED learning criterion): it is defined as ALL states in the FV ACTIVE set
+        #   (N.B. *not* "activATION" set, which is usually much smaller than the ACTIVE set).
         if start_states_set is None:
-            if absorption_set is None:  # ALTHOUGH ABOVE WE DEFINE THE absorption_set EVEN WHEN IT IS GIVEN AS None BY THE USER (so, this IF condition will never be satisfied --still we leave it for reference, and in case we decide to change this behaviour later on)
+            if absorption_set is None:
                 # The set of start states is defined by just one state, namely the bottom-left of the environment, which is considered to be the entrance to the labyrinth
                 start_states_set = set(np.ravel_multi_index((env_shape[0]-1, 0), env_shape))
             else:
-                # We set the start state to the same set of states used by the FV learning so that TD and FV are more fairly compared)
+                # We set the start state to the same set of states used by the FV learning so that TD and FV are more fairly compared
                 if learning_criterion == LearningCriterion.AVERAGE:
                     # The start state is defined as any state in the activation set of the FV learning process (i.e. the outside boundary of the absorption set)
                     start_states_set = set(activation_set)

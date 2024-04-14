@@ -211,7 +211,14 @@ class Simulator:
             default: None, in which case the value MIN_NUM_CYCLES_FOR_EXPECTATIONS is used under the AVERAGE reward criterion, and 0 under the DISCOUNTED reward criterion
 
         reset_value_functions: (opt) bool
-            Whether the estimated value functions should be reset at the start of the
+            Whether value function estimates, possibly stored in the value functions learner, should be reset at the beginning of the learning process
+            (i.e. before launching the single Markov chain simulation used to estimate the expected reabsorption time, E(T_A)).
+            Note that it might be useful to NOT reset the value functions if the value function learner is used to e.g. generate critic values used in
+            an Actor-Critic policy learning context. In that case, we usually like to use the value function estimates obtained from the critic
+            (i.e. from this value function learner) run when learning the policy at the PREVIOUS policy learning step (so that we don't start
+            the learning of the value functions from scratch. This makes sense because the value functions associated to ONE policy learning step
+            (of the Actor-Critic algorithm) are expected to be similar to those associated to the previous policy learning step.
+            default: True
 
         Return: tuple
         Tuple with the following elements:
@@ -300,13 +307,7 @@ class Simulator:
             default: None, in which case a uniform random distribution on the activation set is used
 
         reset_value_functions: (opt) bool
-            Whether value function estimates, possibly stored in the value functions learner, should be reset at the beginning of the learning process
-            (i.e. before launching the single Markov chain simulation used to estimate the expected reabsorption time, E(T_A)).
-            Note that it might be useful to NOT reset the value functions if the value function learner is used to e.g. generate critic values used in
-            an Actor-Critic policy learning context. In that case, we usually like to use the value function estimates obtained from the critic
-            (i.e. from this value function learner) run when learning the policy at the PREVIOUS policy learning step (so that we don't start
-            the learning of the value functions from scratch. This makes sense because the value functions associated to ONE policy learning step
-            (of the Actor-Critic algorithm) are expected to be similar to those associated to the previous policy learning step.
+            See the description in _run_fv().
             default: True
 
         Return: tuple
@@ -435,13 +436,26 @@ class Simulator:
             print(f"Time-average Phi value per state of interest:\n{average_phi_values}")
             print(f"Max survival time: {max_survival_time}")
 
-            probas_stationary, integrals = estimate_stationary_probabilities(phi, df_proba_surv,
-                                                                             expected_absorption_time,
-                                                                             uniform_jump_rate=uniform_jump_rate)
-            expected_reward = estimate_expected_reward(envs[0], probas_stationary)
-            # Store the expected reward as average reward in the learner object
-            # so that we can retrieve the average reward estimated by FV by using the method GenericLearner.getAverageReward()
-            self.agent.getLearner().setAverageReward(expected_reward)
+            assert expected_absorption_time is not None
+            if self.agent.getLearner().getLearningCriterion() == LearningCriterion.AVERAGE:
+                # The expected reward and stationary probabilities have been computed iteratively by the learner
+                # => Retrieve this information from the learner
+                integrals = self.agent.getLearner().getIntegral()
+                probas_stationary = dict.fromkeys(integrals, 0.0)
+                for _state, _integral_for_state in integrals.items():
+                    probas_stationary[_state] = _integral_for_state / uniform_jump_rate / expected_absorption_time
+                expected_reward = self.agent.getLearner().getAverageReward()
+            else:
+                # The expected reward and stationary probabilities have NOT yet been computed (e.g. iteratively by the FV simulation)
+                # => Compute these quantities now
+                probas_stationary, integrals = estimate_stationary_probabilities(phi, df_proba_surv,
+                                                                                 expected_absorption_time,
+                                                                                 uniform_jump_rate=uniform_jump_rate)
+                expected_reward = estimate_expected_reward(envs[0], probas_stationary)
+
+                # Store the expected reward as average reward in the learner object
+                # so that we can retrieve the average reward estimated by FV by using the method GenericLearner.getAverageReward()
+                self.agent.getLearner().setAverageReward(expected_reward)
 
             if True or DEBUG_ESTIMATORS or show_messages(dict_params_info.get('verbose', False),
                                                  dict_params_info.get('verbose_period', 1),
@@ -520,10 +534,9 @@ class Simulator:
 
         expected_exit_time: (opt) positive float
             Expected exit time from the absorption set, which is needed when expected_absorption_time = None, as this
-            value will be used to estimate it as expected_exit_time + "expected killing time" computed as the average
-            of the survival times observed during the N-particle FV simulation from where df_proba_surv is estimated.
-            This value should be provided when expected_absorption_time is None. If the latter is provided, the value
-            is ignored.
+            value will be used to estimate it as expected_exit_time + "expected killing/survival time" computed as the average
+            of the first N survival times observed for the respective N FV particles from where P(T>t) (df_proba_surv) is estimated.
+            This value should be provided when expected_absorption_time is None. If the latter is provided, the value is ignored.
             default: None
 
         estimated_average_reward: (opt) None
@@ -596,7 +609,69 @@ class Simulator:
                               .format(t, idx_particle, state, idx_reactivate, new_state))
 
             return new_state
-        #------------------------------- Auxiliary functions ----------------------------------#
+
+        def update_average_reward(learner, survival_times, expected_absorption_time, estimated_average_reward_at_start_of_fv_process=None):
+            """
+            Updates the average reward stored in the given learner ITERATIVELY, based on the newly observed survival time,
+            which is assumed to be the FIRST absorption time of each particle, so as to guarantee survival times that are observed in increasing order,
+            a condition that is required by the average reward update procedure.
+
+            Arguments:
+            learner: LeaFV
+                This is the FV learner where all the iterative estimates needed to update the average reward are stored (e.g. the FV integral, Phi, etc.).
+
+            survival_times: list
+                List of survival times observed so far, where the newly observed survival time is the last element of the list.
+                This last survival time is used to update the FV integral which in turn is used to update the average reward,
+                using the value of the expected reabsorption time.
+
+            expected_absorption_time: positive float
+                Estimate of the expected reabsorption time E(T_A) that is used to estimate the stationary probabilities that are used to update
+                the estimate of the average reward.
+
+            estimated_average_reward_at_start_of_fv_process: (opt) float
+                Initial estimate of the average reward that is used as initial hint of the average reward value that is currently being estimated.
+                Normally this would be an estimate of the average reward from a previous FV simulation, e.g. carried out under the policy estimated
+                at the previous policy learning step.
+                This value is normally kept fixed as the current FV simulation carries on, and is used to update the FV estimate of the average reward as:
+                    avgR(n) = avgR(n-1) + (updated_fv_integral(n) / E(T_A) - avgR(n)) * n / (N + n)
+                where n is the number of survival times observed so far and used in the calculation of the FV integral,
+                and updated_fv_integral(n) is the result of the iterative update of the FV integral after observing the n-th survival time.
+                When None, the average reward is simply set to:
+                    avgR(n) = updated_fv_integral(n) / E(T_A)
+                default: None
+            """
+            assert expected_absorption_time is not None and expected_absorption_time > 0, f"The expected reabsorption time must be given and be positive ({expected_absorption_time})"
+
+            # Initialize the dictionary with the estimated stationary probabilities that is used to compute the updated average reward,
+            # based on the updated FV integral, which in turn is based on the updated Phi(t, x) function in the latest inter-survival interval [t_surv_prev, t_surv).
+            probas_stationary = dict.fromkeys(learner.getIntegral(), 0.0)
+
+            # Latest observed survival time which is used to update the FV integral
+            t_surv = survival_times[-1]
+            learner.update_integral(t_surv, fixed_sample_size=True)
+            for _state, _integral_for_state in learner.getIntegral().items():
+                probas_stationary[_state] = _integral_for_state / (learner.getNumParticles() * expected_absorption_time)
+            updated_average_reward = estimate_expected_reward(self.env, probas_stationary)
+            if estimated_average_reward_at_start_of_fv_process is not None:
+                # We have a START value for the average reward (possibly provided from the FV estimate under a previously learned policy)
+                # => Recursively update such average reward using the newly updated FV-based average reward just computed
+                # Note that the weight given to the current estimate of the average reward is equal to the fraction of survival times observed so far
+                # out of ("number of particles" + "number of survival times observed so far").
+                # By doing this, we are assuming that the previous estimate of the average reward (stored in the learner) was done on as many survival times as
+                # the number of particles in the FV system, which is a reasonable assumption, as normally such previous estimate was computed by this same iterative
+                # procedure done here.
+                # (recall the k-step update of an average X(n) as X(n+k) = X(n) + (X(n, n+k) - X(n)) * k / (n+k), where X(n, n+k) is the average observed between
+                # observations n and n+k), and this means that the weight given to the current average X(n) is n/(n+k) and the weight given to the latest observed
+                # average, X(n, n+k) is k/(n+k))
+                n_survival_times_observed_so_far = len(survival_times) - 1  # -1 because the first value in the survival_times list is a dummy survival time of 0
+                learner.setAverageReward(estimated_average_reward_at_start_of_fv_process + (updated_average_reward - estimated_average_reward_at_start_of_fv_process) * n_survival_times_observed_so_far / (learner.getNumParticles() + n_survival_times_observed_so_far))
+            else:
+                # We do NOT have a starting point for the average reward
+                # => The updated average reward computed above (as FV_integral / E(T_A)) is directly the estimate of the average reward which we store in the learner
+                # for use as correction value when learning the value functions.
+                learner.setAverageReward(updated_average_reward)
+            #------------------------------- Auxiliary functions ----------------------------------#
 
 
         # ---------------------------- Check input parameters ---------------------------------#
@@ -628,12 +703,6 @@ class Simulator:
         # This value is updated iteratively as the FV simulation proceeds, so the correction is updated during the simulation process.
         if estimated_average_reward is not None:
             learner.setAverageReward(estimated_average_reward)
-
-        # Initialize a dictionary that will contain the iterative estimation of the stationary probabilities as the simulation proceeds
-        # This is only done when an estimate of the expected re-absorption time is provided,
-        # as this piece of information is needed to compute the iterative update of the stationary probabilities.
-        if expected_absorption_time is not None:
-            probas_stationary = dict.fromkeys(learner.getIntegral(), 0.0)
 
         # Set the start state of each environment/particle to an activation state, as this is a requirement
         # for the empirical distribution Phi(t).
@@ -758,16 +827,9 @@ class Simulator:
 
                     if expected_absorption_time is not None:
                         # Iterative update of the components of the FV estimator, when survival times happen in increasing order, and update of the average reward
-                        learner._update_absorption_times(t_surv)
-                        learner._update_phi_contribution(t_surv)
-                        learner._update_integral()
-                        for _state, _integral_for_state in learner.getIntegral().items():
-                            probas_stationary[_state] = _integral_for_state / (N * expected_absorption_time)
-                        updated_average_reward = estimate_expected_reward(self.env, probas_stationary)
-                        # Recursive update of the average reward stored in the learner (which is used as correction for the differential value functions)
-                        # which is based on the just updated average reward, based on the newly observed survival time (that's why we divide by len(survival_times))
-                        learner.setAverageReward( learner.getAverageReward() + (updated_average_reward - learner.getAverageReward()) / len(survival_times) )
-                        #learner.setAverageReward(updated_average_reward)
+                        # This is only done when an estimate of the expected re-absorption time is provided, as this piece of information is needed to compute
+                        # the iterative update of the stationary probabilities, which in turn is used to compute the updated average reward.
+                        update_average_reward(learner, survival_times, expected_absorption_time, estimated_average_reward_at_start_of_fv_process=estimated_average_reward)
 
                     # Mark the particle as "absorbed once" so that we don't use any other absorption time from this
                     # particle to estimate the survival probability, because the absorption times coming after the first
@@ -795,7 +857,7 @@ class Simulator:
             # Update Phi based on the new state of the changed (and possibly also reactivated) particle
             if expected_absorption_time is not None:
                 # Iterative update of Phi
-                learner._update_phi(t, state, next_state)
+                learner.update_phi(t, state, next_state)
             else:
                 # One-shot update of Phi
                 dict_phi = update_phi(envs[0], len(envs), t, dict_phi, state, next_state, alpha=alpha0 / (t + alpha0))
@@ -827,7 +889,7 @@ class Simulator:
 
         # DONE
         if expected_absorption_time is not None:
-            # Copy the Phi learnerd iteratively to the dict_phi returned by this method, so that the outside world receives the correct estimate of Phi
+            # Assign the Phi learned iteratively to the dict_phi returned by this method, so that the outside world receives the correct estimate of Phi
             dict_phi = learner.dict_phi
         if t >= max_time_steps:
             # Add the last observed time step to the list of survival times as many times as the number of particles left to absorb,
@@ -838,7 +900,12 @@ class Simulator:
             n_particles_not_absorbed = N - sum(has_particle_been_absorbed_once)
             survival_times += list(np.repeat(t, n_particles_not_absorbed))
             if n_particles_not_absorbed > 0:
-                print(f"WARNING: Not all {N} particles were absorbed at least ONCE because the maximum number of time steps for all particles ({max_time_steps} has been reached: # NOT absorbed particles = {n_particles_not_absorbed}")
+                print(f"WARNING: Not all {N} particles were absorbed at least ONCE because the maximum number of time steps for all particles ({max_time_steps} has been reached: # NOT absorbed particles = {n_particles_not_absorbed} ({np.round(n_particles_not_absorbed / N * 100, 1)}%)")
+
+            # Update the iterative computation of the FV integral and stationary probabilities
+            if expected_absorption_time is not None:
+                update_average_reward(learner, survival_times, expected_absorption_time, estimated_average_reward_at_start_of_fv_process=estimated_average_reward)
+
         # The following assertion should be used ONLY when the FV process stops if all N particles are absorbed at least once before reaching max_time_steps
         assert np.max([np.max(dict_phi[x]['t']) for x in dict_phi.keys()]) <= np.max(survival_times), \
                 "The maximum time stored in Phi(t,x) must be at most the maximum observed survival time"
@@ -1143,7 +1210,7 @@ class Simulator:
             for e in np.repeat(t, n_particles_not_absorbed):
                 survival_times.append(e)
             if n_particles_not_absorbed > 0:
-                print(f"WARNING: Not all {N} particles were absorbed at least ONCE because the maximum number of time steps for all particles ({max_time_steps} has been reached: # NOT absorbed particles = {n_particles_not_absorbed}")
+                print(f"WARNING: Not all {N} particles were absorbed at least ONCE because the maximum number of time steps for all particles ({max_time_steps} has been reached: # NOT absorbed particles = {n_particles_not_absorbed} ({np.round(n_particles_not_absorbed / N * 100, 1)}%)")
         # The following assertion should be used ONLY when the FV process stops if all N particles are absorbed at least once before reaching max_time_steps
         assert np.max([np.max(dict_phi[x]['t']) for x in dict_phi.keys()]) <= np.max(survival_times), "The maximum time stored in Phi(t,x) must be at most the maximum observed survival time"
         if show_messages(verbose, verbose_period, t_learn):
@@ -1422,7 +1489,7 @@ class Simulator:
             for e in np.repeat(t, n_particles_not_absorbed):
                 survival_times.append(e)
             if n_particles_not_absorbed > 0:
-                print(f"WARNING: Not all {N} particles were absorbed at least ONCE because the maximum number of time steps for all particles ({max_time_steps} has been reached: # NOT absorbed particles = {n_particles_not_absorbed}")
+                print(f"WARNING: Not all {N} particles were absorbed at least ONCE because the maximum number of time steps for all particles ({max_time_steps} has been reached: # NOT absorbed particles = {n_particles_not_absorbed} ({np.round(n_particles_not_absorbed / N * 100, 1)}%)")
         # The following assertion should be used ONLY when the FV process stops if all N particles are absorbed at least once before reaching max_time_steps
         assert np.max([np.max(dict_phi[x]['t']) for x in dict_phi.keys()]) <= np.max(survival_times), "The maximum time stored in Phi(t,x) must be at most the maximum observed survival time"
         if show_messages(verbose, verbose_period, t_learn):
@@ -2000,7 +2067,7 @@ class Simulator:
             n_particles_not_absorbed = N - N_never_moved - sum(has_particle_been_absorbed_once)
             first_survival_times += list(np.repeat(t, n_particles_not_absorbed))
             if n_particles_not_absorbed > 0:
-                print(f"WARNING: Not all {N - N_never_moved} particles were absorbed at least ONCE because the maximum number of time steps for all particles ({max_time_steps}) has been reached: # NOT absorbed particles = {n_particles_not_absorbed}")
+                print(f"WARNING: Not all {N - N_never_moved} particles were absorbed at least ONCE because the maximum number of time steps for all particles ({max_time_steps}) has been reached: # NOT absorbed particles = {n_particles_not_absorbed} ({np.round(n_particles_not_absorbed / N * 100, 1)}%)")
         # The following assertion should be used ONLY when the FV process stops if all N particles are absorbed at least once before reaching max_time_steps
         assert np.max([np.max(learner.dict_phi[x]['t']) for x in learner.dict_phi.keys()]) <= np.max(first_survival_times), \
                 "The maximum time stored in Phi(t,x) must be at most the maximum observed survival time"
@@ -2287,8 +2354,12 @@ class Simulator:
 
             # Reset variables at the start of a new episode
             done_episode = False
-            t_episode = -1          # Time step within the current episode (the first time step will have t_episode = 0)
-
+            t_episode = -1          # Time step within the current episode
+                                    # Note that we initialize it at -1 because the time within an episode indexes the time at which the ACTION is taken,
+                                    # (and this will happen AFTER increasing t_episode by 1, so that the first time an action is taken will be indexed by t_episode = 0)
+                                    # as opposed to the time at which the next state is observed (which is the convention used for variable `t` defined above).
+                                    # This is done like that so that we have the state-action-reward sequence S(0), A(0), R(1), S(1), A(1), R(2), ...
+                                    # So, t_episode indexes the state BEFORE transitioning.
             if episode > 0:
                 # Learn the value of the terminal state visited at the end of the previous episode in the CONTINUING learning task context
                 # IMPORTANT: This step must come BEFORE resetting the learner (done below) because the learner erases all history about the previous episode
@@ -2388,7 +2459,7 @@ class Simulator:
             terminal_state_previous_episode = next_state
 
             if show_messages(verbose, verbose_period, episode):
-                print(", agent ENDS at state: {} at discrete time t = {})".format(self.env.getState(), t_episode), end=" ")
+                print(", agent ENDS at state: {} at discrete time t = {})".format(self.env.getState(), t_episode+1), end=" ")
                 print("")
 
             # Change of V w.r.t. previous episode (to monitor convergence)
@@ -2470,7 +2541,7 @@ class Simulator:
             if plot and show_messages(True, verbose_period, episode):
                 # Plot the estimated value function at the end of the episode
                 # in both 1D layout and 2D layout, if the environment is 2D.
-                #print("episode: {} (T={}), color: {}".format(episode, t_episode, colors(episode/nepisodes)))
+                #print("episode: {} (T={}), color: {}".format(episode, t_episode+1, colors(episode/nepisodes)))
                 plt.figure(fig_V.number)
                 plt.plot(self.env.getAllStates(), learner.getV().getValues(), linewidth=0.5,
                          color=colors(min(episode, nepisodes - 1) / nepisodes))
@@ -2842,7 +2913,12 @@ class Simulator:
                 print("\t[DEBUG] Starts at state {}".format(self.env.getState()))
                 print("\t[DEBUG] State value function at start of episode:\n\t{}".format(learner.getV().getValues()))
 
-            # Time step within the current episode (the first time step where an action is taken is t_episode = 0)
+            # Time step within the current episode
+            # Note that we initialize it at -1 because the time within an episode indexes the time at which the ACTION is taken,
+            # (and this will happen AFTER increasing t_episode by 1, so that the first time an action is taken will be indexed by t_episode = 0)
+            # as opposed to the time at which the next state is observed (which is the convention used for variable `t` defined above).
+            # This is done like that so that we have the state-action-reward sequence S(0), A(0), R(1), S(1), A(1), R(2), ...
+            # So, t_episode indexes the state BEFORE transitioning.
             t_episode = -1
             done_episode = False
             stop = False
@@ -2998,9 +3074,8 @@ class Simulator:
 
 
             #------- EPISODE FINISHED --------#
-            if show_messages(verbose, verbose_period, episode):
-                print(", agent ENDS at state: {} at discrete time t = {})".format(self.env.getState(), t_episode), end=" ")
-                print("")
+            print(", agent ENDS at state: {} at discrete time t = {})".format(self.env.getState(), t_episode+1), end=" ")
+            print("")
 
             # Change of V w.r.t. previous episode (to monitor convergence)
             deltaV = (learner.getV().getValues() - V)
