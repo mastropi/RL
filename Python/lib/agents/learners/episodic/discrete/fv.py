@@ -182,6 +182,7 @@ class LeaFV(LeaTDLambda):
         self.dict_phi_for_state = None
         self.dict_phi_for_state_action = None
         # FV integral value for each state of interest x (updated every time a new absorption is observed)
+        # The integrals do NOT include the contribution from received rewards at each state of interest x.
         self.dict_integral = None
         self.dict_integral_for_state = None
         self.dict_integral_for_state_action = None
@@ -1072,6 +1073,7 @@ class LeaFV(LeaTDLambda):
         This update assumes that all survival times contributing to the P(T>t) estimator occur in increasing order.
 
         The attribute self.dict_integral is updated with the updated integral value for each x in self.states_of_interest.
+        The integral is NOT multiplied by the reward received by visiting the state of interest x.
 
         fixed_sample_size: (opt) bool
             Whether the integral should be updated based on N survival times contributing to the estimation of the survival probability P(T>t).
@@ -1083,13 +1085,13 @@ class LeaFV(LeaTDLambda):
         if fixed_sample_size:
             for x in self.states_of_interest:
                 phi_contribution_from_latest_interval = self.dict_phi_sum[x]['Phi'].iloc[-1]
-                self.dict_integral[x] += self.env.getReward(x) * (1 - (n - 1) / self.N) * phi_contribution_from_latest_interval
+                self.dict_integral[x] += (1 - (n - 1) / self.N) * phi_contribution_from_latest_interval
         else:
             for x in self.states_of_interest:
                 first_n_minus1_phi_contributions = self.dict_phi_sum[x]['Phi'].iloc[1:-1]   # We start at index 1 because index 0 contains the dummy value 0, which does not really correspond to a phi contribution to the integral.
                 phi_contribution_up_to_n_minus_1 = 1/(n*(n-1)) * np.sum( np.arange(n-1) * first_n_minus1_phi_contributions ) if n > 1 else 0.0
                 phi_contribution_from_interval_n = 1/n * self.dict_phi_sum[x]['Phi'].iloc[-1]
-                self.dict_integral[x] += self.env.getReward(x) * (phi_contribution_up_to_n_minus_1 + phi_contribution_from_interval_n)
+                self.dict_integral[x] += phi_contribution_up_to_n_minus_1 + phi_contribution_from_interval_n
 
     def _update_integral_fixed_sample_size(self, state):
         """
@@ -1108,16 +1110,16 @@ class LeaFV(LeaTDLambda):
         In fact, the survival time for ALL particles will be eventually observed.
         For more details on this equivalence, see my notes in the blue notebook "Univ. Lorraine" dated 28-Jan-2024.
 
-        The attribute self.dict_integral is updated with the updated integral value for each x in self.states_of_interest.
+        The attribute self.dict_integral_for_state[state] is updated with the updated integral value for each x in self.states_of_interest.
 
         Arguments:
         state: int
             Index of the start state for which the FV integral is updated.
 
         Return: float
-        The updated FV integral (discrete sum) in the discounted (self.gamma < 1) or undiscounted setting (self.gamma = 1) computed as the sum of the
-        r(x)*gamma^(t-1)*P(T>t)*Phi(t,x) contributions --for the start state given as input parameter-- on all states of interest x,
-        where r(x) is the reward observed when visiting x.
+        The updated reward-weighted FV integral (discrete sum) in the discounted (self.gamma < 1) or undiscounted setting (self.gamma = 1)
+        computed as the sum of the `r(x) * gamma^(t-1) * P(T>t) * Phi(t,x)` contributions --for the start state given as input parameter--
+        on all states of interest x, where r(x) is the received reward when visiting x.
         """
         # Number of absorption times observed so far (assumed observed in increasing order)
         n = len(self.dict_survival_times_for_state[state]) - 1  # -1 because the first survival time stored in the list of survival times is dummy, and is set to 0
@@ -1176,14 +1178,13 @@ class LeaFV(LeaTDLambda):
                 assert 0 < self.gamma < 1
                 discounted_phi_sum_in_interval_n = 1 / (1 - self.gamma) * np.sum( self.gamma**(phi_to_sum['t'] - 1) * (1 - self.gamma**(phi_to_sum['dt'])) * phi_to_sum['Phi'] )
             contribution_from_interval_n = (1 - (n-1) / self.N_for_start_state[state]) * discounted_phi_sum_in_interval_n
-            self.dict_integral_for_state[state][x] += interval_size * self.env.getReward(x) * contribution_from_interval_n
-            fv_integral_over_all_states_of_interest += self.dict_integral_for_state[state][x]
+            self.dict_integral_for_state[state][x] += interval_size * contribution_from_interval_n
+            fv_integral_over_all_states_of_interest += self.env.getReward(x) * self.dict_integral_for_state[state][x]
 
         return fv_integral_over_all_states_of_interest
 
     def _update_integral_fixed_sample_size_action(self, state, action):
-        """
-        """
+        "Same as _update_integral_fixed_sample_size() but for the given start state and action"
         # Number of absorption times observed so far (assumed observed in increasing order)
         n = len(self.dict_survival_times_for_state_action[state][action]) - 1  # -1 because the first survival time stored in the list of survival times is dummy, and is set to 0
         interval_size = 1 #1 / self.N_for_start_state_action[state][action] # This would be the adjustment to the FV integral because the observed times come from several Markov chains (partilces), as opposed to from just one Markov chain
@@ -1215,8 +1216,8 @@ class LeaFV(LeaTDLambda):
                 assert 0 < self.gamma < 1
                 discounted_phi_sum_in_interval_n = 1 / (1 - self.gamma) * np.sum( self.gamma**(phi_to_sum['t'] - 1) * (1 - self.gamma**(phi_to_sum['dt'])) * phi_to_sum['Phi'] )
             contribution_from_interval_n = (1 - (n-1) / self.N_for_start_state[state]) * discounted_phi_sum_in_interval_n
-            self.dict_integral_for_state_action[state][action][x] += interval_size * self.env.getReward(x) * contribution_from_interval_n
-            fv_integral_over_all_states_of_interest += self.dict_integral_for_state_action[state][action][x]
+            self.dict_integral_for_state_action[state][action][x] += interval_size * contribution_from_interval_n
+            fv_integral_over_all_states_of_interest += self.env.getReward(x) * self.dict_integral_for_state_action[state][action][x]
 
         return fv_integral_over_all_states_of_interest
 
@@ -1247,6 +1248,9 @@ class LeaFV(LeaTDLambda):
 
     def getActiveSet(self):
         return self.active_set
+
+    def getStatesOfInterest(self):
+        return self.states_of_interest
 
     def getIntegral(self):
         return self.dict_integral

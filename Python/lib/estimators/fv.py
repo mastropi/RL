@@ -536,6 +536,8 @@ def compute_fv_integral(df_phi_proba_surv, reward: float=1.0, interval_size: flo
     reward: (opt) float
         Reward received when visiting the state of interest on which the FV integral is computed
         and that weights the contribution by Phi(t,x) to the integral.
+        When equal to 1, the computed integral is associated to the FV estimator of the stationary probability distribution
+        at the state of interest x associated to the values stored in Phi(t,x) stored in input data frame `df_phi_proba_surv`.
         default: 1.0
 
     interval_size: (opt) positive float

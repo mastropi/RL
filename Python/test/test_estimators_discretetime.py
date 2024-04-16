@@ -820,10 +820,9 @@ class Test_EstDifferentialStateValueV_EnvGridworlds(unittest.TestCase, test_util
                     plot=False)
 
         # The expected state values are close to self.V_true_optimal but not quite there
-        # TODO: (2023/12) Update the expected value with the correct expected result (in fact, this expected result has been copied from test_EnvGridworld1DOneTerminal_PolOptimal_MetTD and not updated to the FV method)
         expected_V = [-0.289951, -0.266082, -0.238415, -0.206548, -0.170099, -0.117904,
-                      -0.038988,  0.053958,  0.134022,  0.199793,  0.272732,  0.319645,
-                       0.372568,  0.442476,  0.493492,  0.501101,  0.509553,  0.539494, 0.592403, -0.340641]
+                      -0.038988,  0.053958,  0.134022,  0.199793,  0.273783,  0.322961,
+                       0.381211,  0.456445,  0.512606,  0.529801,  0.543513,  0.575199,  0.618719, -0.333237]
         expected_state_counts = [26, 25, 25, 25, 25, 45, 45, 45, 45, 45, 45, 46, 47, 47, 48, 52, 57, 61, 70, 74]
         expected_n_events_et = params['T']
         expected_n_events_fv = 397
@@ -844,7 +843,7 @@ class Test_EstDifferentialStateValueV_EnvGridworlds(unittest.TestCase, test_util
                                            16: 0.055675,
                                            17: 0.0387375,
                                            18: 0.0535,
-                                           19: 0.03960625})
+                                           19: expected_average_reward})
         print("\nObserved V(s): " + test_utils.array2str(state_values))
         print("State count: " + test_utils.array2str(state_counts))
         print(f"Number of cycles observed in E(T) estimation: {n_cycles_absorption_used}")
@@ -864,17 +863,16 @@ class Test_EstDifferentialStateValueV_EnvGridworlds(unittest.TestCase, test_util
                 params['gamma'] == 1.0 and \
                 params['lambda'] == 0.7 and \
                 params['alpha_min'] == 0.0
-        assert np.allclose(state_values, expected_V, atol=1E-6)
-        assert np.allclose(state_values, agent_fv.getLearner().getV().getValues(), atol=1E-6)
         assert all(state_counts == expected_state_counts)
         assert n_events_et == expected_n_events_et
         assert n_events_fv == expected_n_events_fv
         assert n_cycles_absorption_used == expected_n_cycles_absorption
         assert np.isclose(average_absorption_time, expected_absorption_time)
         assert np.isclose(average_reward, expected_average_reward)
-        assert sorted(list(probas_stationary.keys())) == list(agent_fv.getLearner().getActiveSet())
         for key, value in probas_stationary.items():
             assert np.isclose(probas_stationary[key], expected_probas_stationary[key])
+        assert np.allclose(state_values, expected_V, atol=1E-6)
+        assert np.allclose(state_values, agent_fv.getLearner().getV().getValues(), atol=1E-6)
 
 
 class Test_EstValueFunctions_EnvGridworldsWithObstacles(unittest.TestCase, test_utils.EpisodeSimulation):
@@ -985,7 +983,7 @@ class Test_EstValueFunctions_EnvGridworldsWithObstacles(unittest.TestCase, test_
                              [0.47968696, 0.25279819, 0.25260026, 0.1854122 ]]
 
         # TODO: (2024/02/19) Update the expected results once we have correctly implemented the value functions learning under the DISCOUNTED reward setting and generated the results
-        # For now, these values are the expected results of the not so correct implementation, where the time clock used to estimate P(T>t; s) is the same as the time used to estimate Phi(t,x; s), but they are actually different
+        # For now, these values are the expected results of the not so correct implementation, where the time clock used to estimate P(T>t; s) is the same as the time used to estimate Phi(t,x; s), but these two time clocks are actually different
         cls.expected_fv_V = np.array(
                             [0.026471, 0.180172, 0.537639, 0.007238,
                              0.005534, 0.000000, 0.314387, 0.521715,
@@ -1003,7 +1001,7 @@ class Test_EstValueFunctions_EnvGridworldsWithObstacles(unittest.TestCase, test_
                              [0.04270995, 0.06127918, 0.01570903, 0.00482990],
                              [0.09882721, 0.14403669, 0.04910855, 0.01617216],
                              [0.42700666, 0.15646508, 0.10887363, 0.05639611]])
-        cls.expected_fv_counts = [74, 75, 88, 48, 77, 0, 95, 82, 228, 165, 96, 70]
+        cls.expected_fv_state_counts = [74, 75, 88, 48, 77, 0, 95, 82, 228, 165, 96, 70]
 
     def test_Env_PolRandomWalk_MetMC(self):
         print(f"\n*** Running test {self.id()}")
@@ -1072,7 +1070,7 @@ class Test_EstValueFunctions_EnvGridworldsWithObstacles(unittest.TestCase, test_
         print(f"\nObserved action value function (using the average reward from E(T_A) as correction):\n{observed_values_Q}")
         print(f"Expected action value function:\n{self.expected_fv_Q}")
         print(f"State counts: " + test_utils.array2str(state_counts))
-        print(f"Expected state counts: " + test_utils.array2str(self.expected_fv_counts))
+        print(f"Expected state counts: " + test_utils.array2str(self.expected_fv_state_counts))
         print("State frequency distribution (observed during FV simulation): " + test_utils.array2str(observed_p))
 
         assert self.nS == 3*4 and \
@@ -1080,11 +1078,9 @@ class Test_EstValueFunctions_EnvGridworldsWithObstacles(unittest.TestCase, test_
                self.start_state == 8 and \
                self.A == set({0, 4}) and \
                self.B == set({1, 8})
+        assert all(state_counts == self.expected_fv_state_counts)
         assert np.allclose(observed_values_V, self.expected_fv_V, atol=1E-6)
         assert np.allclose(observed_values_Q, self.expected_fv_Q, atol=1E-6)
-
-        # Assertions about the state distribution visited by the FV process
-        assert all(state_counts == self.expected_fv_counts)
 
 
 class Test_EstDifferentialValueFunctions_EnvGridworldsWithObstacles(unittest.TestCase, test_utils.EpisodeSimulation):
@@ -1108,14 +1104,11 @@ class Test_EstDifferentialValueFunctions_EnvGridworldsWithObstacles(unittest.Tes
                                                             initial_state_distribution=cls.isd)
 
         #-- Cycle characteristics
-        # Set of absorbing states, used to define a cycle as re-entrance into the set
-        # which is used to estimate the average reward using renewal theory
-        # TODO: (2023/09/20) Choose a multi-state set A so that we can try the FV estimation where there is no single state on which the single Markov chain simulation should start
-        # Such set is commented out in the next line, selected as the first column of the 2D grid.
-        cls.A = set({8}) # set({0, 4, 8})  # We choose the first column of the 2D-grid as the set A of uninteresting states
+        # Set of absorbing states, used to define a cycle as re-entrance into the set which is used to estimate the average reward using renewal theory
+        cls.A = set({8})
 
         #-- Set where a particle activates in the FV context (it should be touching A)
-        cls.B = set({4, 9}) # set({1, 5, 9})
+        cls.B = set({4, 9})
 
         #-- Policy characteristics
         # Random walk policy
@@ -1170,6 +1163,7 @@ class Test_EstDifferentialValueFunctions_EnvGridworldsWithObstacles(unittest.Tes
                                 N, T, absorption_set, activation_set,
                                 probas_stationary_start_state_et=None,
                                 probas_stationary_start_state_fv=None,
+                                states_of_interest=set(cls.env2d.getAllValidStates()).difference(absorption_set),
                                 criterion=LearningCriterion.AVERAGE,
                                 alpha=1.0,
                                 lmbda=0.0,
@@ -1238,27 +1232,28 @@ class Test_EstDifferentialValueFunctions_EnvGridworldsWithObstacles(unittest.Tes
         # as the particles reach a terminal state --in which case they are restarted inside A, e.g. at the START of the labyrinth).
         # The maximum number of particles in the system is N.
         cls.expected_fv_V = np.array(
-                            [0.013229, 0.140583, 0.402322, -0.036303,
-                             -0.035931, 0.000000, 0.243924, 0.428985,
-                             -0.020319, -0.033132, 0.081578, 0.169730])
+                            [ 0.034743,  0.233790, 0.489875, -0.037515,
+                             -0.039710,  0.000000, 0.298950,  0.447024,
+                             -0.020319, -0.039758, 0.095426, 0.181439])
         # (2023/12/18) The expected action value function seems reasonable in terms of what action is better at each state to reach the terminal state at the upper-right cell of the labyrinth
         cls.expected_fv_Q = np.array(
-                            [[-0.00651336,  0.08629082,  -0.03966782, -0.00154227],
-                             [ 0.09228241,  0.28295434,   0.08282155, -0.00694051],
-                             [ 0.31118385,  0.85759387,   0.15127531,  0.09079347],
-                             [-0.03630308, -0.03630308,  -0.03630308, -0.03630308],
-                             [-0.00417349, -0.04167712,  -0.02578904, -0.04509638],
-                             [         0.,          0.,           0.,          0.],
-                             [ 0.27862619,  0.32861358,   0.01579894,  0.15401375],
-                             [ 0.81856770,  0.31460214,   0.07664007,  0.15722049],
-                             [-0.00798979, -0.00769294,  -0.00754817, -0.00751653],
-                             [-0.05721751, -0.01031166,  -0.03895159, -0.03373602],
-                             [ 0.13793704,  0.04794333,   0.00357570, -0.05685559],
-                             [ 0.28670145,  0.07124142,   0.07181386,  0.00890284]])
-        cls.expected_fv_average_reward = 0.019128
+                            [[-0.01367791,  0.11848694, -0.05318403, -0.01168208],
+                             [0.17164916,  0.45940778,  0.1586421,  -0.00842918],
+                             [0.52806234,  0.95464411,  0.24212508,  0.16495517],
+                             [-0.03751482, -0.03751482, -0.03751482, -0.03751482],
+                             [-0.01941363, -0.04611871, -0.02248051, -0.0529884],
+                             [0., 0., 0., 0.],
+                             [0.5021308,   0.27621888,  0.00773258,  0.12787165],
+                             [0.84994117, 0.34307159, 0.0664185, 0.23193807],
+                             [-0.00798979, -0.00769294, -0.00754817, -0.00751653],
+                             [-0.05953017, -0.02484684, -0.04193591, -0.02717974],
+                             [0.14703614,  0.02765407, -0.01561109, -0.06454853],
+                             [0.28667113,  0.04775472,  0.04977956, -0.0088709]])
+        cls.expected_fv_average_reward = 0.023652
         cls.expected_fv_cycle_time = 10.912
         cls.expected_fv_n_cycles = 91
-        cls.expected_fv_counts = [1252, 1171, 625, 288, 949, 0, 680, 470, 186, 696, 746, 666]
+        cls.expected_fv_state_counts = [1085, 843, 481, 224, 817, 0, 528, 383, 186, 533, 559, 513]
+        cls.expected_fv_total_events = sum(cls.expected_fv_state_counts)
 
         #-- Expected values that do NOT depend on the estimation method (e.g. average reward, number of cycles, etc.)
         # (except for the average reward, whose estimated value depends on whether we estimate it using cycles or not --thus the distinction done here between these two alternatives)
@@ -1279,9 +1274,9 @@ class Test_EstDifferentialValueFunctions_EnvGridworldsWithObstacles(unittest.Tes
         cls.expected_p_from_cycles = [0.130022, 0.104104, 0.049244, 0.021382,
                                       0.152916, 0.000000, 0.048164, 0.039309,
                                       0.200864, 0.130022, 0.070842, 0.056371]
-        cls.expected_p_fv = [   0.118954, 0.083317, 0.055110, cls.expected_fv_average_reward,
-                                0.167576,   np.nan, 0.058957, 0.036639,
-                                  np.nan, 0.141033, 0.103620, 0.054808]
+        cls.expected_p_fv = [0.171830, 0.085760, 0.048607, cls.expected_fv_average_reward,
+                             0.017149,   np.nan, 0.056226, 0.036251,
+                               np.nan, 0.013654, 0.072440, 0.050885]
 
     def test_Env_PolRandomWalk_MetMC(self):
         print(f"\n*** Running test {self.id()}")
@@ -1484,17 +1479,19 @@ class Test_EstDifferentialValueFunctions_EnvGridworldsWithObstacles(unittest.Tes
         observed_p_fv = [probas_stationary.get(x, np.nan) for x in self.env2d.getAllStates()]
         observed_average_reward = np.nansum([p*self.env2d.getReward(x) for x, p in enumerate(observed_p_fv) if x in self.env2d.getTerminalStates()])
 
-        print(f"\nNumber of learning steps run: {n_events_et + n_events_fv}")
-        print("\nObserved state value function (using the average reward from E(T_A) as correction):\n" + test_utils.array2str(observed_values_V))
-        #print("\nObserved state value function (corrected by FV's average reward) (TO BE IMPLEMENTED, MAYBE): " + test_utils.array2str(observed_values))
+        print(f"\nNumber of learning steps run: {n_events_et + n_events_fv} (should coincide with the sum of the state counts minus 1, because the start state is not counted in the number of learning steps ({sum(state_counts)-1}))")
+        assert n_events_et + n_events_fv == sum(state_counts) - 1
+        print(f"Expected number of learning steps: {self.expected_fv_total_events}")
+
+        print("\nObserved state value function (using the FV-based average reward as correction):\n" + test_utils.array2str(observed_values_V))
         print("Expected state value function:\n" + test_utils.array2str(self.expected_fv_V))
-        print(f"\nObserved action value function (using the average reward from E(T_A) as correction):\n{observed_values_Q}")
+        print(f"\nObserved action value function (using the FV-based average reward as correction):\n{observed_values_Q}")
         print(f"Expected state value function:\n{self.expected_fv_Q}")
         print(f"State counts: " + test_utils.array2str(state_counts))
-        print(f"Expected state counts: " + test_utils.array2str(self.expected_fv_counts))
+        print(f"Expected state counts: " + test_utils.array2str(self.expected_fv_state_counts))
         print("State frequency distribution (observed during FV simulation): " + test_utils.array2str(observed_p))
-        print("\nState probability distribution using FV: " + test_utils.array2str(observed_p_fv))
-        print("Expected state probability distribution using FV: " + test_utils.array2str(self.expected_p_fv))
+        print("\nState probability distribution using the ET+FV estimator: " + test_utils.array2str(observed_p_fv))
+        print("Expected state probability distribution using the ET+FV estimator: " + test_utils.array2str(self.expected_p_fv))
         print(f"(observed average cycle time on {n_cycles} cycles (expected={self.expected_fv_n_cycles}): {average_cycle_time} (expected={self.expected_fv_cycle_time}))")
         print(f"\nEstimated average reward (using FV estimator): {observed_average_reward}")
         print(f"Expected estimated average reward (using FV estimator): {self.expected_fv_average_reward}")
@@ -1505,22 +1502,26 @@ class Test_EstDifferentialValueFunctions_EnvGridworldsWithObstacles(unittest.Tes
                self.start_state == 8 and \
                self.A == set({8}) and \
                self.B == set({4, 9})
-        assert np.allclose(observed_values_V, self.expected_fv_V, atol=1E-6)
-        assert np.allclose(observed_values_Q, self.expected_fv_Q, atol=1E-6)
-
-        # Assertions about the average reward estimated by FV
-        assert np.isclose(observed_average_reward, self.expected_fv_average_reward, atol=1E-6)
-        assert np.isclose(observed_average_reward, average_reward, atol=1E-6), \
-            "The average reward computed from the estimated stationary probabilities by FV must coincide with the estimated average reward (`average_reward`) returned by the FV simulator"
-        assert np.isclose(observed_average_reward, self.agent_rw_fv.getLearner().getAverageReward(), atol=1E-6), \
-            "The average reward stored in the FV learner must coincide with the average reward estimated by the FV estimator"
-
-        # Assertions about the stationary distribution of the state of interest estimated by FV
-        assert np.allclose(observed_p_fv, self.expected_p_fv, atol=1E-6, equal_nan=True)
+        # Assertions about state counts
+        assert all(state_counts == self.expected_fv_state_counts)
 
         # Assertions about the estimated expected cycle time
         assert np.isclose(average_cycle_time, self.expected_fv_cycle_time, atol=1E-1)
         assert n_cycles == self.expected_fv_n_cycles
+
+        # Assertions about the stationary distribution of the state of interest estimated by FV
+        assert np.allclose(observed_p_fv, self.expected_p_fv, atol=1E-6, equal_nan=True)
+
+        # Assertions about the average reward estimated by FV
+        assert np.isclose(observed_average_reward, self.expected_fv_average_reward, atol=1E-6)
+        assert np.isclose(observed_average_reward, average_reward, atol=1E-6), \
+            f"The average reward computed from the estimated stationary probabilities by FV ({observed_average_reward}) must coincide with the estimated average reward (`average_reward={average_reward}`) returned by the FV simulator"
+        assert np.isclose(observed_average_reward, self.agent_rw_fv.getLearner().getAverageReward(), atol=1E-6), \
+            "The average reward stored in the FV learner must coincide with the average reward estimated by the FV estimator"
+
+        # Assertions about the value functions
+        assert np.allclose(observed_values_V, self.expected_fv_V, atol=1E-6)
+        assert np.allclose(observed_values_Q, self.expected_fv_Q, atol=1E-6)
 
 
 class Test_EstValueFunctionV_MetMCLambda_EnvMountainCar(unittest.TestCase, test_utils.EpisodeSimulation):
@@ -1817,9 +1818,10 @@ if __name__ == '__main__':
 
         test_suite_gw2dobstacles = unittest.TestSuite()
         test_suite_gw2dobstacles.addTest(Test_EstValueFunctions_EnvGridworldsWithObstacles("test_Env_PolRandomWalk_MetMC"))
+        test_suite_gw2dobstacles.addTest(Test_EstValueFunctions_EnvGridworldsWithObstacles("test_Env_PolRandomWalk_MetTDLambda"))
+        test_suite_gw2dobstacles.addTest(Test_EstValueFunctions_EnvGridworldsWithObstacles("test_Env_PolRandomWalk_MetFV"))
         test_suite_gw2dobstacles.addTest(Test_EstDifferentialValueFunctions_EnvGridworldsWithObstacles("test_Env_PolRandomWalk_MetMC"))
         test_suite_gw2dobstacles.addTest(Test_EstDifferentialValueFunctions_EnvGridworldsWithObstacles("test_Env_PolRandomWalk_MetMC_FromCycles"))
-        test_suite_gw2dobstacles.addTest(Test_EstValueFunctions_EnvGridworldsWithObstacles("test_Env_PolRandomWalk_MetTDLambda"))
         test_suite_gw2dobstacles.addTest(Test_EstDifferentialValueFunctions_EnvGridworldsWithObstacles("test_Env_PolRandomWalk_MetTDLambda"))
         test_suite_gw2dobstacles.addTest(Test_EstDifferentialValueFunctions_EnvGridworldsWithObstacles("test_Env_PolRandomWalk_MetTDLambda_FromCycles"))
         test_suite_gw2dobstacles.addTest(Test_EstDifferentialValueFunctions_EnvGridworldsWithObstacles("test_Env_PolRandomWalk_MetFV"))

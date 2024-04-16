@@ -330,13 +330,13 @@ def choose_state_from_set(_set, dist_proba: dict=None):
 
     if dist_proba is None:
         # Uniformly selected state
-        start_state = np.random.choice(list(_set))
+        start_state = np.random.choice(sorted(_set)) if len(_set) > 1 else list(_set)[0]
     else:
         # State is selected following the given distribution
         # Note that we sort the dictionary keys because `list(_set)` returns the elements in `_set` sorted.
         if not isinstance(dist_proba, dict):
             raise ValueError("The probability distribution of states must be a dictionary ({})".format(type(dist_proba)))
-        start_state = np.random.choice(list(_set), 1, p=[dist_proba[k] for k in sorted(dist_proba.keys())])[0]  # `[0]` because the returned value is an array of one element
+        start_state = np.random.choice(sorted(_set), p=[dist_proba[k] for k in sorted(dist_proba.keys())])
     return start_state
 
 

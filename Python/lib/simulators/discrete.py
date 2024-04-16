@@ -175,8 +175,9 @@ class Simulator:
             else:
                 return self._run_single(**kwargs)
 
-    def _run_fv(self, max_time_steps_fv=None, min_num_cycles_for_expectations=None,
-                reset_value_functions=True, seed=None, verbose=True, verbose_period=100, plot=False, colormap="seismic", pause=0.1):
+    def _run_fv(self, t_learn=0, max_time_steps_fv=None, min_num_cycles_for_expectations=None,
+                use_average_reward_stored_in_learner=False, reset_value_functions=True,
+                seed=None, verbose=True, verbose_period=100, plot=False, colormap="seismic", pause=0.1):
         """
         Runs all the simulations that are needed to learn differential value functions using the Fleming-Viot approach.
 
@@ -187,6 +188,11 @@ class Simulator:
         to the numerator of the Fleming-Viot estimator of stationary state probabilities.
 
         Arguments:
+        t_learn: (opt) int
+            The learning step number (starting at 0) for which the FV simulation is run when FV is used in the context of FVRL,
+            i.e. to learn an optimal policy.
+            This is ONLY used for informational purposes, i.e. to show which stage of the policy learning we are at.
+
         max_time_steps_fv: (opt) int
             Maximum number of steps to be observed for ALL particles when running the FV simulation.
             default: None, in which case its default value is defined by method _run_simulation_fv()
@@ -248,7 +254,7 @@ class Simulator:
                                     'seed': seed})
         dict_params_info = dict({'verbose': verbose,
                                  'verbose_period': verbose_period,
-                                 't_learn': 0,
+                                 't_learn': t_learn,
                                  'plot': plot,
                                  'colormap': colormap,
                                  'pause': pause}) # This indexes the learning epoch of the optimal policy
@@ -287,7 +293,7 @@ class Simulator:
             Accepted keys are:
             - verbose: whether to be verbose during the simulation.
             - verbose_period: the number of simulation time steps at which to be verbose.
-            - t_learn: the number of learning steps, when FV is used in the context of FVRL, i.e. to learn an optimum policy
+            - t_learn: the learning step number (starting at 0), when FV is used in the context of FVRL, i.e. to learn an optimal policy.
             This is ONLY used for informational purposes, i.e. to show which stage of the policy learning we are at.
             - plot: whether to generate an interactive plot showing the evolution of the state value function estimate.
             - colormap: name of the colormap to use for each new estimate of the state value function added to the plot (e.g. "seismic").
@@ -344,8 +350,12 @@ class Simulator:
         # Define the start state, ONLY used at the very first episode
         # (all subsequent episodes are started using the initial state distribution (isd) stored in the environment object)
         start_state = None
-        if probas_stationary_start_state_et is not None:
-            start_state = choose_state_from_set(dict_params_simul['absorption_set'], probas_stationary_start_state_et)
+        if probas_stationary_start_state_et is not None and len(probas_stationary_start_state_et) > 0:
+            # DM-2024/04/07: We comment out the following selection of the start state for the single Markov chain simulation in the absorption set A
+            # because we want to be free to select the start state anywhere we want,
+            # for instance at the outside boundary of A using the estimated exit distribution from the previous policy learning step.
+            #start_state = choose_state_from_set(dict_params_simul['absorption_set'], probas_stationary_start_state_et)
+            start_state = choose_state_from_set(set(probas_stationary_start_state_et.keys()), probas_stationary_start_state_et)
         print(f"SINGLE simulation for the estimation of the expected reabsorption time E(T_A) starts at state s={start_state} "
               f"(when None, the simulation starts following the Initial State Distribution of the environment: {self.env.getInitialStateDistribution()}")
         state_values, action_values, advantage_values, state_counts_et, _, _, learning_info = \
@@ -363,7 +373,7 @@ class Simulator:
         average_reward_from_single_simulation = self.agent.getLearner().getAverageReward()
         print(f"--> Average reward estimated from the single simulation: {average_reward_from_single_simulation} (it will be used to correct the value functions estimated by the FV simulation")
 
-        # -- Step 2: Simulate N particles with FLeming-Viot to compute the empirical distribution and estimate the stationary probabilities, and from them the expected reward
+        #-- Step 2: Simulate N particles with Fleming-Viot to compute the empirical distribution and estimate the stationary probabilities, and from them the expected reward
         # BUT do this ONLY when the estimation of E(T_A) is reliable... otherwise, set the stationary probabilities and expected reward to NaN.
         print("\n*** RESULTS OF FLEMING-VIOT SIMULATION ***")
         if is_estimation_of_denominator_unreliable():
@@ -403,6 +413,18 @@ class Simulator:
                 #method_fv = self._run_simulation_fv_fraiman; uniform_jump_rate = 1  # In this case, all FV particles are updated at the same system's time step, therefore no adjustmend needs to be done to the FV sum.
                 #method_fv = self._run_simulation_fv_fraiman_modified; uniform_jump_rate = 1  # In this case, all FV particles are updated at the same system's time step, therefore no adjustmend needs to be done to the FV sum.
                 start_set = dict_params_simul['activation_set']
+                if probas_stationary_start_state_fv is None:
+                    # Define the stationary probability for the start state in the FV simulation to be carried out below
+                    # to the stationary exit probability estimated by the single Markov chain run above.
+                    # Note that this distribution is NOT stored in the FV learner; o.w. if this simulation is part of policy learning,
+                    # the next time the simulation is called (e.g. at a subsequent policy learning step) the start distribution for the FV particles
+                    # will no longer be None because the distribution is read from the distribution stored in the FV learner,
+                    # hence impeding an update of the start distribution (an update that may occur following and update of the policy).
+                    probas_stationary_start_state_fv = learning_info['probas_stationary_exit_cycle_set']
+                    # Set the distribution for the start state for the E(T_A) simulation also to the stationary exit distribution from A so that
+                    # there are more chances that the entrance to A follows the stationary entry distribution in the NEXT policy learning step
+                    # (as the start state for E(T_A) is set BEFORE estimating the stationary exit distribution!).
+                    self.getAgent().getLearner().setProbasStationaryStartStateET(learning_info['probas_stationary_exit_cycle_set'])
             else:
                 # When running FV to learn the value functions V(s) and Q(s,a) the particles should start all over the place outside A, so that we can explore all those states
                 # more uniformly, as we need to estimate the value of EACH state.
@@ -498,7 +520,7 @@ class Simulator:
 
         Arguments:
         t_learn: int
-            The policy learning time step to which the simulation will contribute.
+            The policy learning time step (starting at 0) to which the simulation will contribute.
             Only used for informative purposes on where we are at when learning the policy or to decide whether to show information in the log.
 
         envs: list
@@ -527,9 +549,13 @@ class Simulator:
             default: None, in which case a uniform distribution on the activation set is used
 
         expected_absorption_time: (opt) positive float
-            Expected absorption cycle time E(T_A) used to estimate the stationary state probabilities.
-            If None, it is estimated by this function, after observing the killing times on the N particles used in the
-            FV simulation.
+            Expected reabsorption time E(T_A) used to estimate the stationary state probability distribution.
+            When given, this value is also used by the iterative update of the FV-based average reward, which is updated at every new survival time
+            observed for an FV particle that has never been absorbed before.
+            If None, the expected reabsorption time E(T_A) is estimated as the sum of `expected_exit_time`
+            (which should be given when this parameter is None) and the average of the first N survival times of the respective FV particles.
+            In addition, the FV-based estimate of the average reward is carried out at the end of the simulation, once all observations
+            needed to estimate P(T>t) and Phi(t,x) are available.
             default: None
 
         expected_exit_time: (opt) positive float
@@ -540,14 +566,13 @@ class Simulator:
             default: None
 
         estimated_average_reward: (opt) None
-            An existing estimation of the average reward that is used as correction of the value functions
-            being learned by this FV simulation process.
-            default: None, in which case the average reward observed by the FV particles excursion is used
-            as correction term. Note that this is an INFLATED estimation of the true average reward, observed
-            by the original underlying Markov chain (from which the FV particle system is created), hence
-            it might not be very sensible to use it. Instead, a prior estimation of the average reward is preferred,
-            for instance from the single Markov chain simulation that is used to estimate the expected
+            An existing estimation of the average reward to be used as initial value for the iterative FV-based estimation of the average reward,
+            where the average reward is updated every time a new survival time (used in the estimation of P(T>t), normally the first survival time
+            of each particle) is observed.
+            Usually, this estimated average reward comes from the single Markov chain simulation that is used to estimate the expected
             reabsorption time, E(T_A).
+            If None, the FV-based average reward is estimated from scratch, i.e. by starting with an initial estimate of zero.
+            default: None
 
         seed: (opt) int
             Seed to use in the simulations as base seed (then the seed for each simulation is changed from this base seed).
@@ -637,9 +662,21 @@ class Simulator:
                     avgR(n) = avgR(n-1) + (updated_fv_integral(n) / E(T_A) - avgR(n)) * n / (N + n)
                 where n is the number of survival times observed so far and used in the calculation of the FV integral,
                 and updated_fv_integral(n) is the result of the iterative update of the FV integral after observing the n-th survival time.
-                When None, the average reward is simply set to:
+                When None **or when the contribution to the integral update comes from the last possible observed survival time (i.e. the N-th survival time)**,
+                the average reward is simply set to:
                     avgR(n) = updated_fv_integral(n) / E(T_A)
+                Note that, when the update is computed on the last possible observed survival time (i.e. the N-the survival time), we finally have a complete
+                picture of the average reward estimated by the FV simulation, so there is no need to weigh in an initially computed average reward
+                --as the weighing is done simply to get a better estimate for the average reward (i.e. a possibly non-zero estimate) WHILE the FV simulation
+                is still going on... but this should no longer be done at the END of the FV simulation, because we want to base the average reward estimation
+                SOLELY on the FV simulation when we effectively arrive to the end of the FV simulation.
                 default: None
+
+            Return: float
+            The updated average reward value following the newly observed survival time.
+            Note that this may NOT be the average reward stored in the learner when parameter estimated_average_reward_at_start_of_fv_process is not None,
+            as in that case the average reward stored in the learner is a weighted average of the value given in that parameter and the updated average reward,
+            as described above.
             """
             assert expected_absorption_time is not None and expected_absorption_time > 0, f"The expected reabsorption time must be given and be positive ({expected_absorption_time})"
 
@@ -651,11 +688,24 @@ class Simulator:
             t_surv = survival_times[-1]
             learner.update_integral(t_surv, fixed_sample_size=True)
             for _state, _integral_for_state in learner.getIntegral().items():
-                probas_stationary[_state] = _integral_for_state / (learner.getNumParticles() * expected_absorption_time)
+                probas_stationary[_state] = _integral_for_state / learner.getNumParticles() / expected_absorption_time
             updated_average_reward = estimate_expected_reward(self.env, probas_stationary)
-            if estimated_average_reward_at_start_of_fv_process is not None:
+            n_survival_times_observed_so_far = len(survival_times) - 1  # -1 because the first value in the survival_times list is a dummy survival time of 0
+            if estimated_average_reward_at_start_of_fv_process is not None and n_survival_times_observed_so_far < N:
                 # We have a START value for the average reward (possibly provided from the FV estimate under a previously learned policy)
-                # => Recursively update such average reward using the newly updated FV-based average reward just computed
+                # => Recursively update such average reward using the newly updated FV-based average reward just computed,
+                # UNLESS THE NEWLY OBSERVED SURVIVAL TIME COMPLETES THE MAXIMUM NUMBER OF SURVIVAL TIMES TO OBSERVE (which is N, the number of particles).
+                # (If this is the case, we compute the average reward SOLELY on the information gained by this FV simulation, i.e. we do not weigh in any more
+                # the value initially estimated for the average reward --e.g. coming from the initial E(T_A) excursion or coming from a previous policy learning step;
+                # we do this because we want the average reward at the end of the FV simulation to coincide with the average reward that we obtain by computing
+                # it using the estimated stationary probabilities which are computed from the integral values stored in the learner; and in fact, this is what we
+                # do in one of the unit tests about FV in test_estimators_discretetime.py (see the *_MetFV test for the estimation of the differential value functions
+                # in the 2D gridworld with obstacles. NOTE also that if the average reward computed at the end of the FV simulation is 0.0, then that would be the value
+                # stored as average reward in the learner, even if the initial estimate of the average reward passed as parameter estimated_average_reward_at_start_of_fv_process
+                # is not 0... but this is unlikely, because the FV simulation should estimate a non-zero average reward when the initial E(T_A) excursion estimates a non-zero
+                # average reward; what is more likely is that the average reward estimated by the FV simulation is 0.0 and that the average reward estimated at the previous
+                # policy learning step is not zero... but well, that is ok, because we are talking about two different policies, so it makes sense to keep the average reward
+                # estimated under the current policy, even if it is zero!).
                 # Note that the weight given to the current estimate of the average reward is equal to the fraction of survival times observed so far
                 # out of ("number of particles" + "number of survival times observed so far").
                 # By doing this, we are assuming that the previous estimate of the average reward (stored in the learner) was done on as many survival times as
@@ -664,13 +714,14 @@ class Simulator:
                 # (recall the k-step update of an average X(n) as X(n+k) = X(n) + (X(n, n+k) - X(n)) * k / (n+k), where X(n, n+k) is the average observed between
                 # observations n and n+k), and this means that the weight given to the current average X(n) is n/(n+k) and the weight given to the latest observed
                 # average, X(n, n+k) is k/(n+k))
-                n_survival_times_observed_so_far = len(survival_times) - 1  # -1 because the first value in the survival_times list is a dummy survival time of 0
                 learner.setAverageReward(estimated_average_reward_at_start_of_fv_process + (updated_average_reward - estimated_average_reward_at_start_of_fv_process) * n_survival_times_observed_so_far / (learner.getNumParticles() + n_survival_times_observed_so_far))
             else:
                 # We do NOT have a starting point for the average reward
                 # => The updated average reward computed above (as FV_integral / E(T_A)) is directly the estimate of the average reward which we store in the learner
                 # for use as correction value when learning the value functions.
                 learner.setAverageReward(updated_average_reward)
+
+            return updated_average_reward
             #------------------------------- Auxiliary functions ----------------------------------#
 
 
@@ -706,12 +757,38 @@ class Simulator:
 
         # Set the start state of each environment/particle to an activation state, as this is a requirement
         # for the empirical distribution Phi(t).
+        print(f"Distribution of start states for FV particles:")
+        for state in sorted(dist_proba_for_start_state.keys()):
+            print(f"{state}: {dist_proba_for_start_state[state]}")
+        if len(start_set) == 1:
+            # When there is only one set in the start set, there is no need to use a probability distribution and make the process waste time in choosing a state randomly
+            # in a singleton!
+            # In addition, if we run a random choice selection of the start state explicitly specifying the probability distribution,
+            # even if this probability distribution is on a single state and is equal to p=1.0, the random selector draws a random number,
+            # whereas this seems NOT to be the case if the probability distribution of np.random.choice() is not specified (via parameter `p`).
+            # (this was proved by running the following two lines and observing that the results of the second random draw are different from the first one:
+            #   np.random.seed(1713); print(np.random.choice(list({3}))); np.random.choice(sorted({3, 2, 1}), 5, p=[0.5, 0.3, 0.2])
+            #   np.random.seed(1713); print(np.random.choice(list({3})), p=[1.0]); np.random.choice(sorted({3, 2, 1}), 5, p=[0.5, 0.3, 0.2])
+            # Note that the results are also different when the set of values to select from is *more than one* and `p` is defined as the uniform distribution;
+            # i.e. when we define `p=` and when we NOT pass `p=` explicitly to the first call to np.random.choice() in each of the two lines above
+            # (which means that the value is chosen uniformly at random), results of such random selection are different!
+            # )
+            # (2024/04/14) I found this out after noting that the number of events observed during the FV simulation changed when I started using a probability distribution
+            # to select the start state (defined in `dist_proba_for_start_state`) on a singleton set (the context is a 1D gridworld),
+            # via the call to the choose_state_from_set() function below, which precisely calls np.random.choice() passing a value for the `p=` parameter
+            # when the `dist_proba_start_state` parameter is NOT None.
+            dist_proba_for_start_state = None
         for i, env in enumerate(envs):
             # Environment seed
             seed_i = seed + i if seed is not None else None
             env.setSeed(seed_i)
 
             # Choose start state from the activation set
+            if dist_proba_for_start_state is not None and start_set != set(dist_proba_for_start_state.keys()):
+                warnings.warn(f"[_run_simulation_fv] The set of start states given in `start_set` ({start_set}) "
+                              f"is NOT equal to the keys present in the dictionary containing the start state distribution to use `dist_proba_for_start_state`:\n{dist_proba_for_start_state}"
+                              f"\nThe start states will be selected UNIFORMLY AT RANDOM (but this may not be what is wished).")
+                dist_proba_for_start_state = None
             start_state = choose_state_from_set(start_set, dist_proba_for_start_state)
             if learner.getLearningTask() == LearningTask.CONTINUING:
                 assert start_state not in env.getTerminalStates(), \
@@ -726,7 +803,7 @@ class Simulator:
 
         # Phi(t, x): Empirical probability of the states of interest (x)
         # at each time t when a variation in Phi(t, x) is observed.
-        dict_phi = initialize_phi(envs, t=event_times[0], states_of_interest=learner.getActiveSet())
+        dict_phi = initialize_phi(envs, t=event_times[0], states_of_interest=learner.getStatesOfInterest())
 
         # Initialize the list of observed survival times to be filled during the simulation below
         survival_times = [0]    # We set the first element of the survival times list to 0 so that we can "estimate" the survival probability at 0 (which is always equal to 1 actually)
@@ -905,6 +982,7 @@ class Simulator:
             # Update the iterative computation of the FV integral and stationary probabilities
             if expected_absorption_time is not None:
                 update_average_reward(learner, survival_times, expected_absorption_time, estimated_average_reward_at_start_of_fv_process=estimated_average_reward)
+        assert len(survival_times) - 1 == N, f"The number of elements stored in the `survival_times` list ({len(survival_times)}) must be N+1 ({N+1}) at the end of the FV simulation"
 
         # The following assertion should be used ONLY when the FV process stops if all N particles are absorbed at least once before reaching max_time_steps
         assert np.max([np.max(dict_phi[x]['t']) for x in dict_phi.keys()]) <= np.max(survival_times), \
@@ -926,6 +1004,13 @@ class Simulator:
             print("Survival probability:\n{}".format(df_proba_surv))
             print("Phi:\n{}".format(dict_phi))
             pd.set_option('display.max_rows', max_rows)
+
+            # Make a plot
+            plt.figure()
+            plt.step(df_proba_surv['t'], df_proba_surv['P(T>t)'], color="blue", where='post')
+            for x in dict_phi.keys():
+                plt.step(dict_phi[x]['t'], dict_phi[x]['Phi'], color="red", where='post')
+                plt.title(f"Learning step {t_learn+1}\nP(T>t) (blue) and Phi(t,x) (red) for state x = {x}")
 
         return t, learner.getV().getValues(), learner.getQ().getValues(), learner.getA().getValues(), learner._state_counts, dict_phi, df_proba_surv, expected_absorption_time, max_survival_time
 
@@ -1002,6 +1087,11 @@ class Simulator:
             env.setSeed(seed_i)
 
             # Choose start state from the activation set
+            if dist_proba_for_start_state is not None and start_set != set(dist_proba_for_start_state.keys()):
+                warnings.warn(f"[_run_simulation_fv_fraiman] The set of start states given in `start_set` ({start_set}) "
+                              f"is NOT equal to the keys present in the dictionary containing the start state distribution to use `dist_proba_for_start_state`:\n{dist_proba_for_start_state})"
+                              f"\nThe start states will be selected UNIFORMLY AT RANDOM (but this may not be what is wished).")
+                dist_proba_for_start_state = None
             start_state = choose_state_from_set(start_set, dist_proba_for_start_state)
             if learner.getLearningTask() == LearningTask.CONTINUING:
                 assert start_state not in env.getTerminalStates(), \
@@ -1014,7 +1104,8 @@ class Simulator:
         # This implies t=0 is considered the time at which each particle is positioned to their start state.
         event_times = deque([0])
 
-        # Phi(t, z): Empirical probability of all active states z, at each time t when a variation in Phi(t, z) is observed.
+        # Phi(t, z): Empirical probability of ALL active states z, at each time t when a variation in Phi(t, z) is observed.
+        # Note that we need to estimate Phi(t, z) for all active states because we use it as the probability distribution to reactivate ALL absorbed particles at one time.
         dict_phi = initialize_phi(envs, t=event_times[0], states_of_interest=learner.getActiveSet())
 
         # Initialize the list of observed survival times to be filled during the simulation below
@@ -1312,6 +1403,11 @@ class Simulator:
             env.setSeed(seed_i)
 
             # Choose start state from the activation set
+            if dist_proba_for_start_state is not None and start_set != set(dist_proba_for_start_state.keys()):
+                warnings.warn(f"[_run_simulation_fv_fraiman_modified] The set of start states given in `start_set` ({start_set}) "
+                              f"is NOT equal to the keys present in the dictionary containing the start state distribution to use `dist_proba_for_start_state`:\n{dist_proba_for_start_state})"
+                              f"\nThe start states will be selected UNIFORMLY AT RANDOM (but this may not be what is wished).")
+                dist_proba_for_start_state = None
             start_state = choose_state_from_set(start_set, dist_proba_for_start_state)
             if learner.getLearningTask() == LearningTask.CONTINUING:
                 assert start_state not in env.getTerminalStates(), \
@@ -1324,7 +1420,8 @@ class Simulator:
         # This implies t=0 is considered the time at which each particle is positioned to their start state.
         event_times = deque([0])
 
-        # Phi(t, z): Empirical probability of all active states z, at each time t when a variation in Phi(t, z) is observed.
+        # Phi(t, z): Empirical probability of ALL active states z, at each time t when a variation in Phi(t, z) is observed.
+        # Note that we need to estimate Phi(t, z) for all active states because we use it as the probability distribution to reactivate ALL absorbed particles at one time.
         dict_phi = initialize_phi(envs, t=event_times[0], states_of_interest=learner.getActiveSet())
 
         # Initialize the list of observed survival times to be filled during the simulation below
@@ -1666,6 +1763,8 @@ class Simulator:
         if learner.estimate_on_fixed_sample_size:
             # Create a data frame to store the pieces of information that are necessary to perform the FV estimation of value functions using a fixed sample size of particles
             # defined by the number of particles that start at each possible state and state-actions where the value functions should be estimated.
+            # These states and state-actions are those corresponding to the states belonging to the active set, and this is why we index each row of the data frame
+            # with the different states in the active set, as defined in the FV learner.
             # The data frame contains the following information:
             # - t: the simulation time within the group (clock) --> required for the computation of the FV estimator of the value functions
             # - N: the number of particles in the group --> required for the estimation of Phi(t,x) for each group
@@ -1690,6 +1789,11 @@ class Simulator:
             env.setSeed(seed_i)
 
             # Choose start state from the set of start states given
+            if dist_proba_for_start_state is not None and start_set != set(dist_proba_for_start_state.keys()):
+                warnings.warn(f"[_run_simulation_fv_learnvaluefunctions] The set of start states given in `start_set` ({start_set}) "
+                              f"is NOT equal to the keys present in the dictionary containing the start state distribution to use `dist_proba_for_start_state`:\n{dist_proba_for_start_state})"
+                              f"\nThe start states will be selected UNIFORMLY AT RANDOM (but this may not be what is wished).")
+                dist_proba_for_start_state = None
             start_state = choose_state_from_set(start_set, dist_proba_for_start_state)
             env.setState(start_state)
             # We must store the trajectory of the particle in the environment representing the particle because we need to retrieve the particle's trajectory
@@ -2094,7 +2198,7 @@ class Simulator:
             plt.step(df_proba_surv['t'], df_proba_surv['P(T>t)'], color="blue", where='post')
             for x in learner.dict_phi.keys():
                 plt.step(learner.dict_phi[x]['t'], learner.dict_phi[x]['Phi'], color="red", where='post')
-                plt.title(f"P(T>t) (blue) and Phi(t,x) (red) for state x = {x}")
+                plt.title(f"Learning step {t_learn+1}\nP(T>t) (blue) and Phi(t,x) (red) for state x = {x}")
 
         print(f"Distribution of start actions:\n{pd.Series([learner.getStartAction(idx_particle) for idx_particle in range(N)]).value_counts()}")
 
@@ -2632,7 +2736,7 @@ class Simulator:
                 # We reached the number of episodes to run (only checked when the maximum number of steps to run is not given
                     done = True
 
-        if verbose:
+        if DEBUG_ESTIMATORS:
             V = learner.getV().getValues()
             Q = learner.getQ().getValues()
             print(f"Estimated value functions at END of experiment (last episode run = {episode+1} of {nepisodes}):")
@@ -2812,6 +2916,9 @@ class Simulator:
         # (not during the first "cycle" which may be degenerate --i.e. incomplete, as the start state for the first cycle may not be in the cycle set)
         # This can be used to estimate the stationary probability of the states using renewal theory
         state_counts_in_complete_cycles = np.zeros(self.env.getNumStates(), dtype=int)
+        # Dictionary that keeps track of the counts of the states visited at every exit event from the cycle set
+        # This information can be used to estimate the stationary exit distribution from the cycle set.
+        dict_state_counts_exit_cycle_set = dict()
 
         # Plotting setup
         if plot:
@@ -2858,7 +2965,7 @@ class Simulator:
         # Initial state value function
         V = learner.getV().getValues()
         Q = learner.getQ().getValues()
-        if verbose:
+        if True or DEBUG_ESTIMATORS:
             print("Value functions at start of experiment:")
             print("V = {}".format(V))
             print("Q = {}".format(Q.reshape(self.env.getNumStates(), self.env.getNumActions())))
@@ -3019,10 +3126,13 @@ class Simulator:
                     # Store the value function of the state just estimated
                     V_state_observe += [learner.getV().getValue(state_observe)]
 
-                # Check if the system has entered the set of states defining a cycle
+                # Check if the system has ENTERED the set of states defining a cycle
                 cycle_times, state_counts_in_complete_cycles, last_cycle_entrance_time, expected_cycle_time, num_cycles = \
                     self._check_cycle_occurrence_and_update_cycle_variables(set_cycle, t, state, next_state,
                                                                             cycle_times, state_counts_in_complete_cycles, last_cycle_entrance_time, expected_cycle_time, num_cycles)
+
+                # Check if the system has EXITED the set of states defining a cycle
+                dict_state_counts_exit_cycle_set = self._check_cycle_exit_and_update_exit_counts(set_cycle, state, next_state, dict_state_counts_exit_cycle_set)
 
                 # ---- UPDATE FOR CONTINUING TASK
                 # Plotting step moved INSIDE the episode because there is only 1 episode!
@@ -3235,16 +3345,34 @@ class Simulator:
                 # The maximum number of steps over ALL episodes has been reached, so we need to stop the simulation
                 done = True
 
-        if verbose:
+        # Compute the stationary exit distribution from the cycle set
+        # Only compute and keep the distribution of the OUTSIDE boundary of the cycle set
+        # (since for now this is the only one that interests us for the start distribution of the FV simulation that may be called after this method has finished)
+        # NOTE that ONLY the states in the outside boundary (a.k.a. "activation set" in the FV context) that are visited by the excursion are updated.
+        # This is NOT the best option because there may be states that are never visited and they will NOT be added to the exit distribution (with probability 0)...
+        # TODO: (2024/03/30) Consider ALL states in the outside boundary of the cycle set in the estimation of the exit distribution (to solve the problem written just above)
+        # The information about the exit states set should be given in a separate parameter, as the simulation implemented in the current method knows nothing about FV.
+        probas_stationary_exit_cycle_set = dict()
+        if len(dict_state_counts_exit_cycle_set) > 0:
+            for state in dict_state_counts_exit_cycle_set.keys():
+                if state not in set_cycle:
+                    probas_stationary_exit_cycle_set[state] = dict_state_counts_exit_cycle_set[state]
+            _total_number_of_visits_of_exit_states = sum(probas_stationary_exit_cycle_set.values())
+            for state in probas_stationary_exit_cycle_set.keys():
+                probas_stationary_exit_cycle_set[state] /= _total_number_of_visits_of_exit_states
+            assert np.isclose(sum(probas_stationary_exit_cycle_set.values()), 1.0)
+
+        if DEBUG_ESTIMATORS:
+            if set_cycle is not None and len(set_cycle) > 0:
+                print(f"Estimated distribution of EXIT states from the cycle set (on {num_cycles} cycles):")
+                for state in sorted(probas_stationary_exit_cycle_set.keys()):
+                    print(f"{state}: {probas_stationary_exit_cycle_set[state]}")
+                print("")
             V = learner.getV().getValues()
             Q = learner.getQ().getValues()
             print(f"Estimated value functions at END of experiment (last episode run = {episode+1} of {nepisodes}):")
             print("V = {}".format(V))
             print("Q = {}".format(Q.reshape(self.env.getNumStates(), self.env.getNumActions())))
-
-        if verbose:
-            print("Percentage of episodes reaching max step = {:.1f}%".format(nepisodes_max_steps_reached / nepisodes*100))
-            print("Last episode run = {} of {}".format(episode+1, nepisodes))
 
         return  learner.getV().getValues(), learner.getQ().getValues(), learner.getA().getValues(), learner.getStateCounts(), RMSE, MAPE, \
                 {   'nsteps': t,
@@ -3276,9 +3404,11 @@ class Simulator:
                     'last_cycle_entrance_time': last_cycle_entrance_time if set_cycle else None,
                     'expected_cycle_time': expected_cycle_time if set_cycle is not None else None,
                     'state_counts_in_complete_cycles': state_counts_in_complete_cycles if set_cycle is not None else None,
+                    'probas_stationary_exit_cycle_set': probas_stationary_exit_cycle_set,
                 }
 
-    def _check_cycle_occurrence_and_update_cycle_variables(self, set_cycle, t, state, next_state, cycle_times, state_counts_in_complete_cycles, last_cycle_entrance_time, expected_cycle_time, num_cycles):
+    @staticmethod
+    def _check_cycle_occurrence_and_update_cycle_variables(set_cycle, t, state, next_state, cycle_times, state_counts_in_complete_cycles, last_cycle_entrance_time, expected_cycle_time, num_cycles):
         """
         Checks the occurrence of a cycle and updates the estimated cycle time and related tracking variables
 
@@ -3318,6 +3448,38 @@ class Simulator:
                 state_counts_in_complete_cycles[state] += 1
 
         return cycle_times, state_counts_in_complete_cycles, last_cycle_entrance_time, expected_cycle_time, num_cycles
+
+    @staticmethod
+    def _check_cycle_exit_and_update_exit_counts(set_cycle, state, next_state, dict_state_counts_exit_cycle_set):
+        """
+        Checks the occurrence of a cycle and updates the estimated cycle time and related tracking variables
+
+        Arguments:
+        set_cycle: set
+            Set whose visit from a state NOT in `set_cycle` defines a new cycle whenever an entrance event to the set has been observed previously.
+
+        state: int
+            Index of the state before the current transition.
+
+        next_state: int
+            Index of the state after the current transition.
+
+        dict_state_counts_exit_cycle_set: dict
+            Dictionary containing the exit count of each state in the cycle set boundary.
+            Initially the dictionary can be empty and the key associated to an exit state will be either created or updated, if already existing in the dict.
+            The states in either side of the boundary are updated, i.e. the state in the inside boundary and the state in the outside boundary,
+            respectively `state` and `next_state` whenever an exit even occurs.
+
+        Return: dict
+        The updated dict_state_counts_exit_cycle_set dictionary, based on the current visit of `state` and `next_state`.
+        """
+        exited_set_cycle = lambda s, ns: s in set_cycle and ns not in set_cycle
+        if set_cycle is not None:
+            if exited_set_cycle(state, next_state):
+                dict_state_counts_exit_cycle_set[state] = dict_state_counts_exit_cycle_set.get(state, 0) + 1
+                dict_state_counts_exit_cycle_set[next_state] = dict_state_counts_exit_cycle_set.get(next_state, 0) + 1
+
+        return dict_state_counts_exit_cycle_set
 
     def initialize_run_with_learner_status(self, nepisodes, learner, compute_rmse, weights, state_observe):
         """

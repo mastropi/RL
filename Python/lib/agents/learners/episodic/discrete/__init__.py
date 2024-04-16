@@ -421,8 +421,8 @@ class Learner(GenericLearner):
             # IMPORTANT 1: This computation adjusts an episodic average to a continuing average, which has ONE MORE STEP in the trajectory, namely the start state,
             # which is NOT counted in the episodic average (because the rewards happen when the environment CHANGES from one state to the next,
             # meaning that the first average seen by the episodic learning agent is the reward observed when going from the start state to the next state
-            # (meaning that no reward is counted when going to the start state, because this "going to the start state" NEVER happens in an episodic task,
-            # it only happens in a continuing learning task (whose average reward we are interested here in computing)
+            # (and this in turn means that no reward is counted when going to the start state, because this "going to the start state" NEVER happens in an episodic learning task,
+            # it only happens in a continuing learning task (whose average reward we are interested here in computing)).
             # IMPORTANT 2: This adjustment of the episodic average to the continuing average assumes that going to the start state does NOT give any reward!!
             # (this is usually the case, but it is not really generic)
             # TODO: (2023/12/18) Fix the adjustment performed of the episodic average reward to a continuing average reward to the cases where a non-zero reward is perceived when transitioning to *a* start state (see "IMPORTANT 2" note written above)
