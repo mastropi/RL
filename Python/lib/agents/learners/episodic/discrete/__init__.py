@@ -185,7 +185,7 @@ class Learner(GenericLearner):
         # Instructions about storing the trajectory
         self.store_history_over_all_episodes = store_history_over_all_episodes
 
-    def reset(self, reset_episode=False, reset_value_functions=False):
+    def reset(self, reset_episode=False, reset_value_functions=False, reset_average_reward=False):
         """
         Resets the variables that store information about the episode
 
@@ -193,9 +193,15 @@ class Learner(GenericLearner):
         reset_episode: (opt) bool
             Whether to reset the episode to the first one, which includes resetting
             all measures that are tracked by episode (e.g. alpha_mean_by_episode).
+            default: False
 
         reset_value_functions: (opt) bool
             Whether to reset all the value functions to their initial estimates (e.g. all zeros or a random value).
+            default: False
+
+        reset_average_reward: (opt) bool
+            Whether to reset the average reward its initial estimate (zero).
+            default: False
         """
         if reset_episode:
             self._reset_at_start_of_first_episode()
@@ -209,11 +215,11 @@ class Learner(GenericLearner):
 
         # Only reset the initial estimates of the value functions at the very first episode (the episode counter starts at 1)
         # (since each episode should leverage what the agent learned so far!)
-        if self.episode == 1 or reset_value_functions:
+        if self.episode == 1 or reset_value_functions or reset_average_reward:
             # Reset all the learning information by calling the super class reset, which is generic, i.e. it does NOT assume episodic tasks
             # Note that such super class calls the reset_value_function() method defined in the specific class that is inheriting from the super class!
             # So, in this case, it ends up calling the reset_value_functions() defined below!!
-            super().reset(reset_learning_epoch=True, reset_alphas=True, reset_value_functions=reset_value_functions, reset_trajectory=True, reset_counts=True)
+            super().reset(reset_learning_epoch=True, reset_alphas=True, reset_value_functions=reset_value_functions, reset_average_reward=reset_average_reward, reset_trajectory=True, reset_counts=True)
 
     def setParams(self, alpha, adjust_alpha, alpha_update_type, adjust_alpha_by_episode, alpha_min):
         self.alpha = alpha if alpha is not None else self.alpha
@@ -395,23 +401,41 @@ class Learner(GenericLearner):
 
     def update_average_reward(self, T, state_end):
         """
-        Updates the average reward over all episodes when storing the history over all episodes
+        Updates the average reward over all episodes, when storing the history over all episodes, at the end of a new episode
 
         This is used when estimating the average reward of a continuing learning task.
+
+        Arguments:
+        T: int
+            Length of the last episode, i.e. the number of steps that were taken until the episode ended.
+
+        state_end: int
+            Index of the state at which the last episode ended. Normally, this is only used for information purposes.
         """
         if self.store_history_over_all_episodes:
             # Update the average reward over all episodes because we are storing the history over all episodes,
             # therefore we might be interested in the average reward over all episodes.
             # Note that the update formula is the generalization of the usual update formula with just one new value
             # with the difference that here the update comes from T newly observed rewards (as opposed to 1),
-            # i.e. what we need to sum to the current average reward is \sum{t=1}{T} R(t)
+            # i.e. what we need to sum to the current estimate of the average reward is \sum{t=1}{T} R(t)
             # (and we note that the average reward over E episodes is defined as: [ \sum{e=1}{E} \sum{t=1}{T} R_e(t) ] / \sum{e=1}{E} T_e
             # where T_e is the length of episode e).
             # Deducing the update formula is a little bit trickier than in the one-new-reward-observation case but it is perfectly doable --I just did it!
             # Therefore the update formula becomes:
-            #   average <- average + (new_average_value - average) * T / (sample_size_for(average) + T)
-            # Note also that, in the tests run in test_estimators_discretetime.py we observe that the average reward
-            # computed like this is very close to the average reward computed from cycles.
+            #   average <- average + (new_average_value - average) * (T + 1) / (sample_size_for(average) + T + 1)
+            # where T + 1 is the length of the last observed episode + one step that corresponds to the step of going from the episode end state to the start state of the next
+            # episode. This step should be taken into account when computing the average reward because the average reward is associated to a continuing learning task,
+            # and when we are working on an environment that naturally calls for an EPISODIC learning task --e.g. a labyrinth where we look for the shortest path to the exit--
+            # we define the CONTINUING learning task on which the average reward is computed by taking a final step of going from the episode end state to an episode start state.
+            # And that is why we sum +1 to T as the sample size behind the `new_average_value`.
+            # Note in addition, that the `new_average_value` to consider in the formula is the average reward observed in the episode but computed on (T+1) steps, meaning that
+            # it is computed as:
+            #   new_average_value = average_reward_observed_in_episode * T / (T+1)
+            # which uses the formula that converts the episodic average reward to the continuing average reward, WHICH ASSUMES THAT THERE IS NO REWARD OBSERVED WHEN GOING FROM
+            # THE EPISODE END STATE TO AN EPISODE START STATE (which is usually the case and reasonable, anyway).
+            #
+            # Note also that, in the tests run in test_estimators_discretetime.py we observe that the average reward computed like this
+            # is very close to the average reward computed from cycles.
             #
             # Note finally that the attribute updated by this call to setAverageReward() is an attribute of the super class
             # (which is a generic learner, i.e. not only for learners on episodic tasks)
@@ -424,11 +448,16 @@ class Learner(GenericLearner):
             # (and this in turn means that no reward is counted when going to the start state, because this "going to the start state" NEVER happens in an episodic learning task,
             # it only happens in a continuing learning task (whose average reward we are interested here in computing)).
             # IMPORTANT 2: This adjustment of the episodic average to the continuing average assumes that going to the start state does NOT give any reward!!
-            # (this is usually the case, but it is not really generic)
+            # (this is usually the case and reasonable, but it is not really generic)
             # TODO: (2023/12/18) Fix the adjustment performed of the episodic average reward to a continuing average reward to the cases where a non-zero reward is perceived when transitioning to *a* start state (see "IMPORTANT 2" note written above)
             # NOTE that this may NOT be needed if we generalize the learning of value functions to the MC and TD(lambda) learners using the proposed method described in today's entry at Tasks-Projects.xlsx, where we would have only ONE episode on which the episodic average reward is computed.
-            updated_average = self.getAverageReward() + int(T>0) * (self._average_reward_in_episode * T / (T+1) - self.getAverageReward()) * (T + 1) \
-                                                                    / (np.sum(self.times_at_episode_end) + T + len(self.times_at_episode_end) + 1)
+            sample_size_for_current_estimated_average = self.sample_size_initial_reward_stored_in_learner + np.sum(self.times_at_episode_end) + len(self.times_at_episode_end)
+                ## NOTE: (2024/04/17) Explanation of the use of `len(self.times_at_episode_end)` which I haven't explained so far, but needs an explanation:
+                ## it is due to what is explained above about the sample size behind the EPISODIC average reward (which is T)
+                ## and the sample size behind the CONTINUING average reward (T+1), i.e. each episode length stored in self.times_at_episode_end contains the EPISODIC sample size
+                ## and therefore we need to sum +1 to EACH of thus we obtain the len(self.times_at_episode_end) as the +1 summed len(self.times_at_episode_end) times.
+            updated_average = self.getAverageReward() + int(T>0) * (self._average_reward_in_episode * T / (T+1) - self.getAverageReward()) \
+                                                                 * (T + 1) / (sample_size_for_current_estimated_average + (T + 1))
             # (2023/12/18) The following is a check that the updated average is equal to the regular average computed on all the rewards seen so far over ALL episodes
             # (Note: at some point, the print() below gives an error that something is an int and not a list, but I haven't figured out what the problem is, so I commented out, because this step is not crucial for the functioning of the process)
             #all_rewards_so_far = self.rewards + self._rewards
@@ -571,3 +600,12 @@ class Learner(GenericLearner):
         # This method is not implemented because the subclass implementing the actual learner may define the action value function differently (e.g. using different attribute names)
         # Also, this method is required because it is called by the reset_value_functions() method defined in this class.
         raise NotImplementedError
+
+    def setSampleSizeForAverageReward(self):
+        """
+        Sets the sample size behind the calculation of the average reward based on the information stored in the self.times_at_episode_end
+        which stores the length of each episode (at the end of which the average reward is updated).
+        This information can be used to update the average reward from a previous estimate in subsequent learning moments carried out with the same learner.
+        """
+        sample_size = np.sum(self.times_at_episode_end)
+        super().setSampleSizeForAverageReward(sample_size)

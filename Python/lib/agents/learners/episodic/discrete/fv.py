@@ -205,8 +205,8 @@ class LeaFV(LeaTDLambda):
 
         self.reset()
 
-    def reset(self, reset_episode=False, reset_value_functions=False):
-        super().reset(reset_episode=reset_episode, reset_value_functions=reset_value_functions)
+    def reset(self, reset_episode=False, reset_value_functions=False, reset_average_reward=False,):
+        super().reset(reset_episode=reset_episode, reset_value_functions=reset_value_functions, reset_average_reward=reset_average_reward)
 
         #-- Reset the (integer) absorption times
         # We initialize the list of absorption times to 0 to make the update of the Phi contribution to the FV integral

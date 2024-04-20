@@ -146,9 +146,12 @@ class GenericLearner:
         self.action = None          # A(t): action taken at state S(t)
         self.reward = None          # R(t+1): reward received by the agent when taking action A(t) on state S(t)
 
-        # Average reward for contiuing tasks
+        # Average reward for continuing tasks
         # Only used when criterion = LearningCriterion.AVERAGE
         self.average_reward = 0.0   # Average reward observed so far: useful for continuing tasks where the average reward is used to compute the differential value functions
+        self.sample_size_initial_reward_stored_in_learner = 0   # Sample size behind the average reward potentially stored in the learner when a new learning process starts
+                                                                # (e.g. a new learning of the value functions used as Critic for a subsequent policy learning step)
+                                                                # This can be used by an updater of the average reward coming from subsequent learning processes.
 
         # Trajectory history: information of the times, states, actions, and rewards stored as part of the learning process
         # (so that we can be retrieve it for e.g. analysis or plotting)
@@ -197,9 +200,19 @@ class GenericLearner:
                                 # When a scalar is stored, the scalar value would normally correspond to the alpha value used when learning at the moment when
                                 # the store_learning_rate() method was called, REGARDLESS of the state and action the process just visited.
 
-    def reset(self, reset_learning_epoch=True, reset_alphas=True, reset_value_functions=True, reset_trajectory=True, reset_counts=True):
+    def reset(self, reset_learning_epoch=True, reset_alphas=True, reset_value_functions=True, reset_average_reward=True, reset_trajectory=True, reset_counts=True):
         """
         Resets the variables that store information about the learning process
+
+        Note that there is a RESET flag for the value functions and a separate RESET flag for the average reward because of the two different strategies
+        used to learn each of them, as follows:
+        - Value functions: the TD error is used as update innovation.
+        - Average reward: a newly observed reward is used as innovation, which does NOT leverage any information about the next state to which
+        the Markov chain transitions (as is the case with the TD error used to update value functions).
+
+        Therefore, we may want to reset the average reward even if we do not reset the value function estimates.
+        If the average reward were learned using the same TD error as the one used to learn value functions, then we would probably merge the two flags
+        into one, and either reset the value functions AND the average reward or not reset neither of them.
 
         Parameters:
         reset_learning_epoch: (opt) bool
@@ -212,6 +225,10 @@ class GenericLearner:
 
         reset_value_functions: (opt) bool
             Whether to reset all the value functions to their initial estimates.
+            default: True
+
+        reset_average_reward: (opt) bool
+            Whether to reset the average reward its initial estimate (zero).
             default: True
 
         reset_trajectory: (opt) bool
@@ -241,8 +258,11 @@ class GenericLearner:
         if reset_value_functions:
             # Only reset the initial estimates of the value functions when requested
             self.reset_value_functions()
-            # Reset the average reward
+
+        if reset_average_reward:
+            # Reset the average reward and the sample size behind its calculation
             self.average_reward = 0.0
+            self.sample_size_initial_reward_stored_in_learner = 0
 
         if reset_trajectory:
             self.reset_trajectory()
@@ -462,3 +482,10 @@ class GenericLearner:
 
     def setAverageReward(self, average_reward):
         self.average_reward = average_reward
+
+    def setSampleSizeForAverageReward(self, sample_size):
+        """
+        Sets the sample size behind the calculation of the average reward, which can be used to update the average reward from a previous estimate
+        in subsequent learning moments carried out with the same learner.
+        """
+        self.sample_size_initial_reward_stored_in_learner = sample_size

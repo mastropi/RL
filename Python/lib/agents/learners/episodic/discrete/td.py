@@ -415,8 +415,8 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
         # (i.e. it's not an average over the lambdas by state!)
         self.lambda_mean_by_episode = []
 
-    def reset(self, reset_episode=False, reset_value_functions=False):
-        super().reset(reset_episode=reset_episode, reset_value_functions=reset_value_functions)
+    def reset(self, reset_episode=False, reset_value_functions=False, reset_average_reward=False):
+        super().reset(reset_episode=reset_episode, reset_value_functions=reset_value_functions, reset_average_reward=reset_average_reward)
         if reset_episode:
             self.lambda_mean_by_episode = []
             self._all_lambdas_by_episode = []
