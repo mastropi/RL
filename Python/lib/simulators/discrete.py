@@ -177,6 +177,7 @@ class Simulator:
 
     def _run_fv(self, t_learn=0, max_time_steps_fv=None, min_prop_absorbed_particles=0.90, min_num_cycles_for_expectations=None,
                 use_average_reward_stored_in_learner=False, reset_value_functions=True,
+                epsilon_random_action=0.0,
                 seed=None, verbose=True, verbose_period=100, plot=False, colormap="seismic", pause=0.1):
         """
         Runs all the simulations that are needed to learn differential value functions using the Fleming-Viot approach.
@@ -255,6 +256,11 @@ class Simulator:
             (of the Actor-Critic algorithm) are expected to be similar to those associated to the previous policy learning step.
             default: True
 
+        epsilon_random_action: (opt) float in [0, 1]
+            Probability to take a random action instead of choosing an action dictated by the policy.
+            This is useful to guarantee ergodicity when policies are deterministic or have some actions with zero probability.
+            default: 0.0
+
         Return: tuple
         Tuple with the following elements:
         - state_values: the estimated differential state value function V(s).
@@ -281,6 +287,7 @@ class Simulator:
                                     'absorption_set': self.agent.getLearner().getAbsorptionSet(),
                                     'activation_set': self.agent.getLearner().getActivationSet(),
                                     'min_num_cycles_for_expectations': min_num_cycles_for_expectations,
+                                    'epsilon_random_action': epsilon_random_action,
                                     'seed': seed})
         dict_params_info = dict({'verbose': verbose,
                                  'verbose_period': verbose_period,
@@ -410,6 +417,7 @@ class Simulator:
                             start_state_first_episode=start_state,
                             estimated_average_reward=estimated_average_reward_before_single_simulation,
                             reset_value_functions=reset_value_functions,
+                            epsilon_random_action=dict_params_simul.get('epsilon_random_action', 0.0),
                             seed=dict_params_simul['seed'],
                             set_cycle=dict_params_simul['absorption_set'],
                             verbose=dict_params_info.get('verbose', False),
@@ -554,6 +562,7 @@ class Simulator:
                             dist_proba_for_start_state: dict=None,
                             expected_absorption_time=None, expected_exit_time=None,
                             estimated_average_reward=None,
+                            epsilon_random_action=0.0,
                             seed=None, verbose=False, verbose_period=1,
                             plot=False, colormap="seismic", pause=0.1):
         """
@@ -630,6 +639,11 @@ class Simulator:
             reabsorption time, E(T_A).
             If None, the FV-based average reward is estimated from scratch, i.e. by starting with an initial estimate of zero.
             default: None
+
+        epsilon_random_action: (opt) float in [0, 1]
+            Probability to take a random action instead of choosing an action dictated by the policy.
+            This is useful to guarantee ergodicity when policies are deterministic or have some actions with zero probability.
+            default: 0.0
 
         seed: (opt) int
             Seed to use in the simulations as base seed (then the seed for each simulation is changed from this base seed).
@@ -935,7 +949,7 @@ class Simulator:
                         ## defined as the output of such transition.
             else:
                 # Step on the selected particle
-                action = policy.choose_action(state)
+                action = self._choose_action(policy, state, epsilon_random_action=epsilon_random_action)
                 next_state, reward, done_episode, info = envs[idx_particle].step(action)
 
                 # Learn: i.e. update the value function (stored in the learner) with the new observation
@@ -1103,6 +1117,7 @@ class Simulator:
                                     dist_proba_for_start_state: dict=None,
                                     expected_absorption_time=None, expected_exit_time=None,
                                     estimated_average_reward=None,
+                                    epsilon_random_action=0.0,
                                     seed=None, verbose=False, verbose_period=1,
                                     plot=False, colormap="seismic", pause=0.1):
         """
@@ -1253,7 +1268,7 @@ class Simulator:
                             ## defined as the output of such transition.
                 else:
                     # Step on the selected particle
-                    action = policy.choose_action(state)
+                    action = self._choose_action(policy, state, epsilon_random_action=epsilon_random_action)
                     next_state, reward, done_episode, info = envs[idx_particle].step(action)
                     if estimated_average_reward is not None:
                         # Store the estimated average reward passed by the user in the `info` dictionary so that it can be used
@@ -1421,6 +1436,7 @@ class Simulator:
                                             dist_proba_for_start_state: dict=None,
                                             expected_absorption_time=None, expected_exit_time=None,
                                             estimated_average_reward=None,
+                                            epsilon_random_action=0.0,
                                             seed=None, verbose=False, verbose_period=1,
                                             plot=False, colormap="seismic", pause=0.1):
         """
@@ -1572,7 +1588,7 @@ class Simulator:
                             ## defined as the output of such transition.
                 else:
                     # Step on the selected particle
-                    action = policy.choose_action(state)
+                    action = self._choose_action(policy, state, epsilon_random_action=epsilon_random_action)
                     next_state, reward, done_episode, info = envs[idx_particle].step(action)
                     if estimated_average_reward is not None:
                         # Store the estimated average reward passed by the user in the `info` dictionary so that it can be used
@@ -1712,6 +1728,7 @@ class Simulator:
                                                 dist_proba_for_start_state: dict=None,
                                                 expected_absorption_time=None, expected_exit_time=None,
                                                 estimated_average_reward=None,
+                                                epsilon_random_action=0.0,
                                                 seed=None, verbose=False, verbose_period=1,
                                                 plot=False, colormap="seismic", pause=0.1):
         """
@@ -2045,7 +2062,7 @@ class Simulator:
                 if not learner.estimate_on_fixed_sample_size or \
                    learner.estimate_on_fixed_sample_size and has_particle_been_selected_once[idx_particle]:
                     # Normal selection of action, based on the policy
-                    action = policy.choose_action(state)
+                    action = self._choose_action(policy, state, epsilon_random_action=epsilon_random_action)
                 else:
                     # This is the first movement of the particle
                     # => Perform the FIRST action that has already been chosen for the particle at the beginning
@@ -2086,7 +2103,7 @@ class Simulator:
             for idx_env, env in enumerate(envs_normal):
                 #print(f"\n[debug] Moving normal particle #{idx_env}...")
                 state_normal = env.getState()
-                action_normal = policy.choose_action(state_normal)
+                action_normal = self._choose_action(policy, state_normal, epsilon_random_action=epsilon_random_action)
                 next_state_normal, reward_normal, done_normal, info_normal = env.step(action_normal)
                 n_steps_on_all_environments += 1
                 # We may ask to NOT update the state counts when learning from the superclass learner (called next)
@@ -2308,6 +2325,7 @@ class Simulator:
     def _run_single(self, nepisodes, max_time_steps=+np.Inf, max_time_steps_per_episode=+np.Inf, start_state_first_episode=None, reset_value_functions=True,
                     seed=None, compute_rmse=False, weights_rmse=None,
                     state_observe=None,
+                    epsilon_random_action=0.0,
                     verbose=False, verbose_period=1, verbose_convergence=False,
                     plot=False, colormap="seismic", pause=0.1):
         # TODO: (2020/04/11) Convert the plotting parameters to a dictionary named plot_options or similar.
@@ -2357,6 +2375,11 @@ class Simulator:
             A state index whose RMSE should be observed as the episode progresses.
             Only used when compute_rmse = True
             default: None
+
+        epsilon_random_action: (opt) float in [0, 1]
+            Probability to take a random action instead of choosing an action dictated by the policy.
+            This is useful to guarantee ergodicity when policies are deterministic or have some actions with zero probability.
+            default: 0.0
 
         verbose: (opt) bool
             Whether to show the experiment that is being run and the episodes for each experiment.
@@ -2615,7 +2638,7 @@ class Simulator:
 
                 # Current state and action on that state leading to the next state
                 state = self.env.getState()
-                action = policy.choose_action(state)
+                action = self._choose_action(policy, state, epsilon_random_action=epsilon_random_action)
                 next_state, reward, done_episode, info = self.env.step(action)
 
                 # Check early end of episode when max_time_steps_per_episode is given
@@ -2919,6 +2942,7 @@ class Simulator:
                                     estimated_average_reward=None, reset_value_functions=True,
                                     seed=None, compute_rmse=False, weights_rmse=None,
                                     state_observe=None, set_cycle=None,
+                                    epsilon_random_action=0.0,
                                     verbose=False, verbose_period=1, verbose_convergence=False,
                                     plot=False, colormap="seismic", pause=0.1):
         """
@@ -2939,6 +2963,11 @@ class Simulator:
             The reason is that the set is used to determine which states are tracked for their visit frequency for the computation
             of their stationary probability using renewal theory.
             default: None
+
+        epsilon_random_action: (opt) float in [0, 1]
+            Probability to take a random action instead of choosing an action dictated by the policy.
+            This is useful to guarantee ergodicity when policies are deterministic or have some actions with zero probability.
+            default: 0.0
 
         Returns: tuple
         Tuple containing the following elements:
@@ -3186,7 +3215,7 @@ class Simulator:
                             'update_counts': False}
                 # ---- UPDATE FOR CONTINUING TASK
                 else:
-                    action = policy.choose_action(state)
+                    action = self._choose_action(policy, state, epsilon_random_action=epsilon_random_action)
                     next_state, reward, done_episode, info = self.env.step(action)
 
                 # Check early end of episode when max_time_steps_per_episode is given
@@ -3524,6 +3553,22 @@ class Simulator:
                     'state_counts_in_complete_cycles': state_counts_in_complete_cycles if set_cycle is not None else None,
                     'probas_stationary_exit_cycle_set': probas_stationary_exit_cycle_set,
                 }
+
+    def _choose_action(self, policy, state, epsilon_random_action=0.0):
+        """
+        Chooses an action to take on the environment (stored in the object) at the given state, following the given policy, with the given probability of taking a random action
+
+        A positive probability of choosing a random action can be given in order to have ergodic Markov chains under deterministic policies or under
+        policies having a subset of the actions with probability zero.
+        """
+        if epsilon_random_action == 0 or np.random.uniform() > epsilon_random_action:
+            # Choose an action following the policy if no random action should be taken
+            action = policy.choose_action(state)
+        else:
+            # Choose a random action with probability `epsilon_random_action`
+            action = np.random.choice(np.arange(self.env.getNumActions()))
+
+        return action
 
     @staticmethod
     def _check_cycle_occurrence_and_update_cycle_variables(set_cycle, t, state, next_state, cycle_times, state_counts_in_complete_cycles, last_cycle_entrance_time, expected_cycle_time, num_cycles):
