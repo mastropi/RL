@@ -226,9 +226,19 @@ class Simulator:
             In the AVERAGE reward criterion case, this indicates whether the average reward already stored in the FV learner should be used as correction
             for the differential value functions estimated by TD at every visit to each state and action.
             When True, the average reward stored in the learner is used by both the single Markov chain excursion used to estimate E(T_A) and
-            the FV excursion, AS LONG AS IT IS NOT ZERO. During the single Markov chain excursion, the value is used as a fixed correction value,
-            i.e. it is NOT updated along the way. For the FV excursion instead, the FV-based average reward is iteratively updated using this value
-            as an initial estimate.
+            the FV excursion, AS LONG AS IT IS NOT ZERO. In both excursions, the average reward is iteratively updated based on newly observed rewards.
+
+            Note that, for the iterative update of the average reward, we need to know the sample size behind the initial average reward stored in the learner,
+            which weights the contribution of such initial average reward in the update formula used to compute the new average reward.
+            This is possible because:
+            - In the single Markov chain excursion, the GenericLearner class (from which the FV learner inherits) has an attribute
+            (normally sample_size_initial_reward_stored_in_learner) that stores the sample size on which the average reward already stored
+            in the learner is based upon (typically this sample size is updated at the end of the single Markov chain excursion with the newly observed sample size,
+            which is exclusively based on the current learning process that just finished, i.e. the sample size does NOT increase from the sample size
+            behind the initial average reward passed when the current learning process started).
+            - In the FV excursion, the initial average reward estimate receives a weight of N, the number of particles, at is assumed to have come from
+            a previous simulation carried out also on N particles, i.e. the same number of particles used in the current FV simulation and learning process.
+
             If the average reward stored in the learner is zero (which we consider an indication of no reward being observed during e.g. a previous excursion,
             and thus no information is available about it), the average reward is learned during the single Markov chain excursion
             (i.e. learned by the TD learner) and the average reward estimated at the end of such excursion is used as initial correction value when learning
@@ -482,7 +492,9 @@ class Simulator:
                             min_prop_absorbed_particles=dict_params_simul.get('min_prop_absorbed_particles', 0.90),
                             dist_proba_for_start_state=probas_stationary_start_state_fv,
                             expected_absorption_time=expected_absorption_time,
-                            estimated_average_reward=estimated_average_reward_before_single_simulation if use_average_reward_stored_in_learner else None, #average_reward_from_single_simulation,
+                            estimated_average_reward=estimated_average_reward_before_single_simulation  if use_average_reward_stored_in_learner and estimated_average_reward_before_single_simulation is not None
+                                                                                                        else average_reward_from_single_simulation,
+                            epsilon_random_action=dict_params_simul.get('epsilon_random_action', 0.0),
                             seed=dict_params_simul['seed'] + 131713,    # Choose a different seed from the one used by the single Markov chain simulation (note that this seed is the base seed used for the seeds assigned to the different FV particles)
                             verbose=dict_params_info.get('verbose', False),
                             verbose_period=dict_params_info.get('verbose_period', 1),
@@ -715,6 +727,10 @@ class Simulator:
                 --as the weighing is done simply to get a better estimate for the average reward (i.e. a possibly non-zero estimate) WHILE the FV simulation
                 is still going on... but this should no longer be done at the END of the FV simulation, because we want to base the average reward estimation
                 SOLELY on the FV simulation when we effectively arrive to the end of the FV simulation.
+                In addition and MOST IMPORTANTLY, when the FV simulation finished, the average reward must be consistent with the estimated stationary
+                probabilities and the reward landscape, i.e. the average reward should satisfy its definition as expected reward under stationarity, namely:
+                    avgR = sum{x} p(x)*r(x)
+                where p(x) is the estimated stationary probability for state x and r(x) is the reward received when visiting state x.
                 default: None
 
             Return: float
@@ -767,11 +783,11 @@ class Simulator:
                 learner.setAverageReward(updated_average_reward)
 
             return updated_average_reward
-            #------------------------------- Auxiliary functions ----------------------------------#
+        #------------------------------- Auxiliary functions ----------------------------------#
 
 
-        # ---------------------------- Check input parameters ---------------------------------#
-        # -- Absorption and activation sets
+        #---------------------------- Check input parameters ---------------------------------#
+        #-- Absorption and activation sets
         # Class
         if not isinstance(absorption_set, set):
             raise ValueError("Parameter `absorption_set` must be a set: {}".format(absorption_set))
@@ -782,7 +798,7 @@ class Simulator:
 
         if expected_absorption_time is None and expected_exit_time is None:
             raise ValueError("Parameter `expected_exit_time` must be provided when `expected_absorption_time` is None")
-        # ---------------------------- Check input parameters ---------------------------------#
+        #---------------------------- Check input parameters ---------------------------------#
 
         N = len(envs)
         if max_time_steps is None:
@@ -933,6 +949,9 @@ class Simulator:
                 # reward will fluctuate a lot (i.e. as the average reward observed by episode fluctuates) and this is NOT what we want,
                 # we want a stable estimate of the average reward over all episodes.
                 # TODO: (2024/01/29) Revise the correct use of the `done` variable here, instead of `done_episode`, because actually when we are done by `done`, this line will NEVER be executed because we will NOT enter again the `while done` loop...
+                # DM-2024/04/22: Uncomment the following set of info['average_reward'] if we want to use a fixed value for the average reward as correction at every learning step
+                #if estimated_average_reward is not None:
+                #    info['average_reward'] = estimated_average_reward
                 learner.learn(t, state, action, next_state, reward, done, info)
 
             if next_state in absorption_set:
@@ -977,7 +996,7 @@ class Simulator:
                     if int((n_particles_absorbed_once - 1) / N * 100) % 10 != 0 and int(n_particles_absorbed_once / N * 100) % 10 == 0:
                         print("t={} of {}: {:.1f}% of particles absorbed at least once ({} of {})".format(t, max_time_steps, n_particles_absorbed_once / N * 100, n_particles_absorbed_once, N))
                     if False:
-                        print("Survival times observed so far: {}".format(sum(has_particle_been_absorbed_once)))
+                        print("Survival times observed so far: {}".format(n_particles_absorbed_once))
                         print(survival_times)
 
                 # Reactivate the particle
@@ -1141,7 +1160,7 @@ class Simulator:
 
         # Reset the learner, but WITHOUT resetting the value functions as they were possibly learned a bit during an initial exploration of the environment
         # What is most important of this reset is to reset the learning rates of all states and actions! (so that we start the FV-based learning with full intensity)
-        learner.reset(reset_episode=True, reset_value_functions=False)
+        learner.reset(reset_episode=True, reset_value_functions=False, reset_average_reward=estimated_average_reward is None)
 
         # Set the start state of each environment/particle to an activation state, as this is a requirement
         # for the empirical distribution Phi(t).
@@ -1463,7 +1482,7 @@ class Simulator:
 
         # Reset the learner, but WITHOUT resetting the value functions as they were possibly learned a bit during an initial exploration of the environment
         # What is most important of this reset is to reset the learning rates of all states and actions! (so that we start the FV-based learning with full intensity)
-        learner.reset(reset_episode=True, reset_value_functions=False)
+        learner.reset(reset_episode=True, reset_value_functions=False, reset_average_reward=estimated_average_reward is None)
 
         # Set the start state of each environment/particle to an activation state, as this is a requirement
         # for the empirical distribution Phi(t).
@@ -1830,7 +1849,7 @@ class Simulator:
 
         # Reset the learner, but WITHOUT resetting the value functions as they were possibly learned a bit during an initial exploration of the environment
         # What is most important of this reset is to reset the learning rates of all states and actions! (so that we start the FV-based learning with full intensity)
-        learner.reset(reset_episode=True, reset_value_functions=False)
+        learner.reset(reset_episode=True, reset_value_functions=False, reset_average_reward=estimated_average_reward is None)
 
         # Set the start state of each environment/particle to an activation state, as this is a requirement
         # for the empirical distribution Phi(t).
@@ -3200,6 +3219,9 @@ class Simulator:
                                   state), end="")
 
                 # Learn: i.e. update the value functions (stored in the learner) for the *currently visited state and action* with the new observation
+                # DM-2024/04/22: Uncomment the following set of info['average_reward'] if we want to use a fixed value for the average reward as correction at every learning step
+                #if estimated_average_reward is not None:
+                #    info['average_reward'] = estimated_average_reward
                 learner.learn(t_episode, state, action, next_state, reward, done_episode, info)
                 if state in self.env.getTerminalStates():
                     # We need to copy the Q-values of the terminal state to the other actions because the action chosen to go to the start state is always the same (action 0)
