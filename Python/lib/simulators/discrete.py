@@ -370,14 +370,20 @@ class Simulator:
         # -- Parse input parameters
 
         # -- Step 1: Simulate a single Markov chain to estimate the expected cycle time of return to A, E(T_A)
-        # Define the start state, ONLY used at the very first episode
-        # (all subsequent episodes are started using the initial state distribution (isd) stored in the environment object)
-        start_state = None
-        if probas_stationary_start_state_et is not None and len(probas_stationary_start_state_et) > 0:
-            # DM-2024/04/07: We comment out the following selection of the start state for the single Markov chain simulation in the absorption set A
-            # because we want to be free to select the start state anywhere we want,
-            # for instance at the outside boundary of A using the estimated exit distribution from the previous policy learning step.
-            #start_state = choose_state_from_set(dict_params_simul['absorption_set'], probas_stationary_start_state_et)
+        # Define the start state for the VERY FIRST episode
+        # All subsequent episodes, the start state is defined by the initial state distribution (isd) stored in the environment object,
+        # because this is the strategy that allows converting a naturally episodic learning task to a continuous learning task.
+        # Since the estimation of E(T_A) requires full entrance cycles to A, it is better to start the simulation OUTSIDE A, and in particular
+        # following the stationary exit distribution, as required by the theory.
+        # An estimate of this stationary distribution is the one that is expected to be stored in input parameter probas_stationary_start_state_et.
+        # When this is None (which is the case at the very beginning of a policy learning process, the start state is chosen uniformly at random from
+        # the states in the outside boundary of A.
+        if probas_stationary_start_state_et is None or len(probas_stationary_start_state_et) == 0:
+            if self.agent.getLearner().getActivationSet() is not None and len(self.agent.getLearner().getActivationSet()) > 0:
+                start_state = choose_state_from_set(self.agent.getLearner().getActivationSet(), None)
+            else:
+                start_state = None
+        else:
             start_state = choose_state_from_set(set(probas_stationary_start_state_et.keys()), probas_stationary_start_state_et)
         print(f"SINGLE simulation for the estimation of the expected reabsorption time E(T_A) starts at state s={start_state} "
               f"(when None, the simulation starts following the Initial State Distribution of the environment: {self.env.getInitialStateDistribution()}")
