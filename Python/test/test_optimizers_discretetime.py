@@ -37,7 +37,8 @@ from Python.lib.estimators.nn_models import nn_backprop
 
 from Python.lib.simulators.discrete import Simulator as DiscreteSimulator
 
-from Python.lib.utils.basic import assert_equal_data_frames, is_scalar, show_exec_params
+from Python.lib.utils.basic import assert_equal_data_frames, show_exec_params
+from Python.lib.utils.computing import compute_transition_matrices, compute_state_value_function_from_transition_matrix
 
 @unique
 class InputLayer(Enum):
@@ -180,8 +181,17 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
         cls.policy_nn.reset(initial_values=initial_policy)
         print(f"Network parameters initialized as follows:\n{list(cls.policy_nn.getThetaParameter())}")
         print("Initial policy for all states (states x actions):")
-        policy = cls.policy_nn.get_policy_values()
-        print(policy)
+        policy_probabilities = cls.policy_nn.get_policy_values()
+        print(policy_probabilities)
+
+        # Compute the true state value function for the given policy
+        # and store it in the environment so that we can compare our estimates with those values when running simulations that estimate the state value function.
+        P_epi, P_con, b_epi, b_con, g, mu = compute_transition_matrices(cls.env2d, cls.policy_nn)
+        P = P_con if learning_task == LearningTask.CONTINUING else P_epi
+        b = b_con if learning_task == LearningTask.CONTINUING else b_epi
+        bias = g if learning_criterion == LearningCriterion.AVERAGE else None
+        V_true = compute_state_value_function_from_transition_matrix(P, b, bias=bias, gamma=gamma)
+        cls.env2d.setV(V_true)
 
         #-- Plotting parameters
         cls.colormap = cm.get_cmap("jet")

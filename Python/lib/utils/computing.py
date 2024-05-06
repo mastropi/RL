@@ -280,6 +280,120 @@ def all_combos_with_max_limits(L: Union[list, tuple]):
     return gen
 
 
+def compute_transition_matrices(env, policy):
+    """
+    Computes the transition probability matrices for the EPISODIC and CONTINUING learning tasks on a given discrete-state / discrete-action environment
+    where an agent acts under the given policy with transition probabilities defined by the environment (i.e. the environment defines the probability
+    of going from each state s to any other state in the environment when taking each possible action `a` accepted by the environment at state s.
+
+    For the CONTINUING learning task, when a terminal state is reached, the agent is assumed to start at a state chosen following
+    the initial state distribution defined in the environment.
+
+    Arguments:
+    env: EnvironmentDiscrete
+        Environment with discrete states and discrete actions with ANY initial state distribution.
+        Rewards can be anywhere.
+
+    policy: policy object with method getPolicyForAction(a, s) defined, returning Prob(action | state)
+        Policy object acting on a discrete-state / discrete-action environment.
+        This could be of class e.g. probabilistic.PolGenericDiscrete or PolNN.
+        Normally the policy for all states can be retrieved by either policy.getPolicy() (as a dictionary) or policy.get_policy_values() (as a matrix whose
+        rows are indexed by the states.
+
+    Return: tuple
+    Tuple with the following 6 elements:
+    - P_epi: matrix containing the transition probability matrix for the EPISODIC learning task.
+    - P_con: matrix containing the transition probability matrix for the CONTINUING learning task where, once the Markov chain reaches
+    a terminal state, it restarts at an environment's start state chosen following the environment's initial state distribution.
+    - b_epi: 1D array containing the expected reward over all actions for each state in the system under the EPISODIC learning task.
+    - b_con: 1D array containing the expected reward over all actions for each state in the system under the CONTINUING learning task.
+    - g: expected reward over all states under stationarity for the CONTINUING learning task.
+    - mu: the stationary probability under the CONTINUING learning task.
+    """
+    nS = env.getNumStates()
+
+    # Transition probability matrix under the given policy for the EPISODIC learning task
+    # It is based on the environment transition probabilities (given the action at each state) and the defined probabilistic policy
+    # i.e. P[x,y] = sum_{a}{ p(x,y|a) * policy(a|x) }, where p(x,y|a) is the transition probability of going from x -> y when taking action a at state x.
+    P = np.matrix(np.zeros((nS, nS)))
+    for s in range(nS):
+        for a in range(env.getNumActions()):
+            # In the environment, P[s][a] is a list of tuples of the form (prob, next_state, reward, is_terminal) (see the DiscreteEnv environment defined in envs/toy_text/discrete.py)
+            # and in each tuple, the transition probability to each possible next state for the GIVEN action 'a' is given at index 0 and the next state is given at index 1.
+            for info_transition in env.P[s][a]:
+                # Next state to be updated in the transition probability matrix
+                ns = info_transition[1]
+                prob_transition_from_s_to_ns_given_action_a = info_transition[0]
+                prob_taking_action_a_at_state_s = policy.getPolicyForAction(a, s)
+                P[s, ns] += prob_taking_action_a_at_state_s * prob_transition_from_s_to_ns_given_action_a
+
+    # Transition matrix for the EPISODIC learning task (where the rightmost state is TERMINAL)
+    P_epi = P
+
+    # Transition matrix for the CONTINUING learning task where, when reaching a terminal state, the process restarts at an environment's start state following
+    # its initial state distribution.
+    P_con = P.copy()
+    for s in env.getTerminalStates():
+        P_con[s, :] = env.getInitialStateDistribution()
+
+    # Check that P_epi and P_con are valid transition probability matrices
+    for s in range(nS):
+        assert np.isclose(np.sum(P_epi[s]), 1.0), f"Row P[s={s}] for the EPISODIC environment must sum up to 1: sum={np.sum(P_epi[s])}"
+        assert np.isclose(np.sum(P_con[s]), 1.0), f"Row P[s={s}] for the CONTINUING environment must sum up to 1: sum={np.sum(P_con[s])}"
+
+    # Stationary probability distribution of the Markov chain associated to the CONTINUING learning task, which is needed to compute the expected or average reward or bias g below
+    eigenvalues, eigenvectors = np.linalg.eig(P_con.T)
+    idx_eigenvalue_one = np.where(np.abs(eigenvalues - 1.0) < 1E-6)[0][0]
+    assert np.isclose(eigenvalues[idx_eigenvalue_one], 1.0)
+    eigenvector_one = eigenvectors[:, idx_eigenvalue_one]
+    mu = np.squeeze(np.array(np.abs(eigenvector_one) / np.sum(np.abs(eigenvector_one))))
+
+    # Independent terms `b` of the `(I - P)*V = b - g*1` Bellman equation, for the EPISODIC (where g = 0) and the CONTINUING learning tasks
+    b_epi = np.array([np.sum([P_epi[x, y] * env.getReward(y) for y in range(nS)]) for x in range(nS)])
+    b_con = np.array([np.sum([P_con[x, y] * env.getReward(y) for y in range(nS)]) for x in range(nS)])
+
+    # Expected reward, i.e. the average reward observed over all states under stationarity for the CONTINUING task, since avg.reward = sum_{x} mu[x] * r[x]
+    # Recall that the average reward is the one that makes the system of equations satisfied by V(s) (the Bellman equations) feasible (i.e. consistent, as opposed to inconsistent).
+    # And recall that the average reward g appears in the independent term of the Bellman equations which is `b - g*1`.
+    # For more details, see the very good notes by Ger Koole: https://www.scribd.com/document/177118281/Lecture-Notes-Stochastic-Optimization-Koole
+    g = sum([mu[x] * env.getReward(x) for x in range(nS)])
+
+    return P_epi, P_con, b_epi, b_con, g, mu
+
+
+def compute_state_value_function_from_transition_matrix(P, expected_one_step_reward, bias=0.0, gamma=1.0):
+    """
+    Computes the state value function V(s) based on the transition matrix, the expected one-step reward (b) (expectation computed over all possible actions),
+    bias (g, a.k.a. expected reward under stationarity which is needed for the average reward criterion) and discount factor (gamma)
+
+    To avoid problems with over parameterization of system, we compute the minimum norm inverse of (I - gamma*P), which does not have an inverse when gamma = 1.
+
+    Arguments:
+    P: np.matrix
+        Transition probability matrix of the Markov chain whose state value function is of interest.
+
+    expected_one_step_reward: np.array
+        Array containing the expected one-step reward (over all actions) for each state of the Markov chain.
+        It's the `b` term in the `(I - gamma*P) * V = b - g*1` Bellman equation.
+
+    bias: (opt) float
+        Expected reward over all states under stationarity, i.e. g = sum_{x} mu[x] * r[x].
+        Recall that the expected reward is the one that makes the system of equations satisfied by V(s) (the Bellman equations)
+        feasible (i.e. consistent, as opposed to inconsistent).
+        This value should be given only under the CONTINUING learning task.
+        For more details, see the very good notes by Ger Koole: https://www.scribd.com/document/177118281/Lecture-Notes-Stochastic-Optimization-Koole
+        default: 0.
+
+    gamma: (opt) float in (0, 1]
+        Discount factor for the DISCOUNTED learning criterion.
+        default: 1.0
+    """
+    b = expected_one_step_reward
+    g = bias
+    V = np.asarray(np.dot(np.linalg.pinv(np.eye(len(P)) - gamma*P), b - g))[0]
+    return V
+
+
 def generate_min_exponential_time(rates):
     """
     Generates a realization of the minimum of exponential times at the given rates
@@ -1156,6 +1270,59 @@ if __name__ == "__main__":
     assert values == list(range(L[0] + 1))
     print("OK! {} combinations generated for L={}.".format(count, L))
     #--------------- all_combos_with_max_limits(L) ------------------#
+
+
+    #---------------- compute_state_value_function_from_transition_matrix() ----------------#
+    # Tests on a 1D gridworld under different learning tasks (EPISODIC or CONTINUING) and different learning criteria (DISCOUNTED or AVERAGE)
+    print("\n--- Testing compute_state_value_function_from_transition_matrix(P, b, g, gamma) for EPISODIC and CONTINUING learning tasks:")
+
+    #-- DATA PREPARATION
+    from Python.lib.environments.gridworlds import EnvGridworld1D_OneTerminalState
+    from Python.lib.agents.policies import probabilistic
+
+    # Environment with start state at 0
+    nS = 5
+    isd = np.zeros(nS); isd[0] = 1.0
+    env1d = EnvGridworld1D_OneTerminalState(length=nS, rewards_dict={nS-1: +1.0}, reward_default=0.0, initial_state_distribution=isd)
+    print(f"Policy in {nS}-state gridworld:")
+    for k, v in env1d.P.items():
+        print(f"State {k}: {v}")
+    print(f"Terminal states in {nS}-state gridworld: {env1d.getTerminalStates()}")
+    print(f"Rewards: {env1d.getRewardsDict()}")
+    print(f"Start state distribution: {env1d.isd}")
+
+    # Policy for all states except state 0 where with probability 1 it goes to state 1 (i.e. it goes right)
+    policy_probabilities = [0.1, 0.9]
+    policy = probabilistic.PolGenericDiscrete(env1d, dict({0: [0.0, 1.0]}), policy_default=policy_probabilities)
+    P_epi, P_con, b_epi, b_con, g, mu = compute_transition_matrices(env1d, policy)
+    print(f"EPISODIC transition probability matrix, P_epi:\n{P_epi}")
+    print(f"CONTINUING transition probability matrix, P_con:\n{P_con}")
+    print(f"EPISODIC expected one-step reward vector, b_epi:\n{b_epi}")
+    print(f"CONTINUING expected one-step reward vector, b_con:\n{b_con}")
+    print(f"CONTINUING expected average reward, g:\n{g}")
+    print(f"Stationary probability distribution for the CONTINUING learning task in the 1D gridworld: {mu}")
+
+    # Discount factor for the EPISODIC learning task
+    gamma = 0.9
+    #-- DATA PREPARATION
+
+    #-- TESTS
+    # EPISODIC learning task under the DISCOUNTED reward criterion
+    V = compute_state_value_function_from_transition_matrix(P_epi, b_epi, gamma=gamma)
+    print(f"\nState value function for EPISODIC learning task under the DISCOUNTED reward criterion with gamma = {gamma}: {V}")
+    assert np.allclose(V, np.array([6.82117389,  7.5790821 ,  8.59898327,  9.77390849, 10.]))
+
+    # CONTINUING learning task under the DISCOUNTED reward criterion
+    V = compute_state_value_function_from_transition_matrix(P_con, b_con, bias=g, gamma=gamma)
+    print(f"State value function for CONTINUING learning task under the DISCOUNTED reward criterion with gamma = {gamma}: {V}")
+    assert np.allclose(V, np.array([-0.22428486, -0.05491426,  0.17300442,  0.43556688, -0.37671823]))
+
+    # CONTINUING learning task under the AVERAGE reward criterion
+    V = compute_state_value_function_from_transition_matrix(P_con, b_con, bias=g)
+    print(f"State value function for CONTINUING learning task under the AVERAGE reward criterion with gamma = {gamma}: {V}")
+    assert np.allclose(V, np.array([-0.19904054, -0.02417846,  0.18954186,  0.40757976, -0.37390261]))
+    #-- TESTS
+    #---------------- compute_state_value_function_from_transition_matrix() ----------------#
 
 
     #------------ stationary_distribution_product_form --------------#

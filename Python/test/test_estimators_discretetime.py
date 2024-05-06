@@ -737,13 +737,15 @@ class Test_EstDifferentialStateValueV_EnvGridworlds(unittest.TestCase, test_util
         cls.learning_task = LearningTask.CONTINUING
         cls.gamma = 1.0
 
-        # True state differential value functions for the optimal policy
-        # We could estimate this OFFLINE by writing a new method in miscellanea.EstValueFunctionOfflineDeterministicNextState,
-        # in the like of method estimate_state_values_random_walk() but for the optimal policy where the agent should always go right.
-        # NOTE: This is the case for the EPISODIC learning task, but here we are analyzing the CONTINUING learning task, so we disable this now (until further notice).
-        #cls.V_true_optimal = np.nan*np.ones(cls.nS)
-        #cls.V_true_optimal[:-1] = cls.gamma**np.arange(cls.nS-2, -1, -1)    # e.g. if nS = 5 (i.e. 5 states in the environment being the last one the terminal state), this is [3, 2, 1, 0]
-        #cls.V_true_optimal[-1] = 0                                          # e.g. for gamma = 0.9, nS = 4: [0.729, 0.81, 0.9, 1.0, 0.0]
+        # Compute the TRUE differential state value function, for the optimal policy and for the random policy
+        # Optimal
+        policy = probabilistic.PolGenericDiscrete(cls.env1d, dict(), policy_default=[0.0, 1.0])
+        _, P, _, b, g, mu = computing.compute_transition_matrices(cls.env1d, policy)
+        cls.V_true_optimal = computing.compute_state_value_function_from_transition_matrix(P, b, bias=g, gamma=cls.gamma)
+        # Random
+        policy = probabilistic.PolGenericDiscrete(cls.env1d, dict(), policy_default=[0.5, 0.5])
+        _, P, _, b, g, mu = computing.compute_transition_matrices(cls.env1d, policy)
+        cls.V_true_random = computing.compute_state_value_function_from_transition_matrix(P, b, bias=g, gamma=cls.gamma)
 
         # Deterministic and random policies that are used in the agents interacting with the environment in tests
         cls.policy_optimal = probabilistic.PolGenericDiscrete(cls.env1d, policy=dict(), policy_default=[0.0, 1.0])
@@ -1450,6 +1452,11 @@ class Test_EstDifferentialValueFunctions_EnvGridworldsWithObstacles(unittest.Tes
         # NOT on the average reward criterion.
         cls.nepisodes = 100
         cls.max_time_steps = 4648   # Maximum number of steps over ALL episodes
+
+        #-- True state value function so that we can compare it with the estimated V(s)
+        _, P, _, b, g, mu = computing.compute_transition_matrices(cls.env2d, cls.policy_rw)
+        V_true = computing.compute_state_value_function_from_transition_matrix(P, b, bias=g, gamma=1.0)
+        cls.env2d.setV(V_true)
 
         # Monte-Carlo learner
         learner_mclambda = mc.LeaMCLambda(cls.env2d,
