@@ -175,7 +175,7 @@ class Simulator:
             else:
                 return self._run_single(**kwargs)
 
-    def _run_fv(self, t_learn=0, max_time_steps_fv=None, min_num_cycles_for_expectations=None,
+    def _run_fv(self, t_learn=0, max_time_steps_fv=None, min_prop_absorbed_particles=0.90, min_num_cycles_for_expectations=None,
                 use_average_reward_stored_in_learner=False, reset_value_functions=True,
                 seed=None, verbose=True, verbose_period=100, plot=False, colormap="seismic", pause=0.1):
         """
@@ -196,6 +196,12 @@ class Simulator:
         max_time_steps_fv: (opt) int
             Maximum number of steps to be observed for ALL particles when running the FV simulation.
             default: None, in which case its default value is defined by method _run_simulation_fv()
+
+        min_prop_absorbed_particles: (opt) float in [0, 1]
+            Under the AVERAGE reward criterion, proportion of particles that should be absorbed at least once
+            after the maximum number of steps has been reached, in order to avoid spending a very long time in the FV simulation,
+            because in some cases it may not be easy for all particles to be absorbed.
+            default: 0.90
 
         min_num_cycles_for_expectations: (opt) int
             Minimum number of reabsorption cycles that should be observed in order to estimate the expected reabsorption time, E(T_A)
@@ -259,6 +265,7 @@ class Simulator:
                 # This simulation is simply used to provide a first estimate of the value functions, but NOT of the expected reabsorption cycle time.
                 min_num_cycles_for_expectations = 0
         dict_params_simul = dict({  'max_time_steps_fv': max_time_steps_fv,                         # Maximum number of time steps allowed for the N particles (comprehensively) in the FV simulation used to estimate the QSD Phi(t,x)
+                                    'min_prop_absorbed_particles': min_prop_absorbed_particles,
                                     'N': self.agent.getLearner().getNumParticles(),
                                     'T': self.agent.getLearner().getNumTimeStepsForExpectation(),   # Maximum number of time steps allowed in each episode of the single Markov chain that estimates the expected reabsorption time E(T_A)
                                     'absorption_set': self.agent.getLearner().getAbsorptionSet(),
@@ -472,6 +479,7 @@ class Simulator:
                             dict_params_simul['absorption_set'],
                             start_set,
                             max_time_steps=dict_params_simul.get('max_time_steps_fv'),
+                            min_prop_absorbed_particles=dict_params_simul.get('min_prop_absorbed_particles', 0.90),
                             dist_proba_for_start_state=probas_stationary_start_state_fv,
                             expected_absorption_time=expected_absorption_time,
                             estimated_average_reward=estimated_average_reward_before_single_simulation if use_average_reward_stored_in_learner else None, #average_reward_from_single_simulation,
@@ -530,7 +538,7 @@ class Simulator:
 
     @measure_exec_time
     def _run_simulation_fv( self, t_learn, envs, absorption_set: set, start_set: set,
-                            max_time_steps=None,
+                            max_time_steps=None, min_prop_absorbed_particles=0.90,
                             dist_proba_for_start_state: dict=None,
                             expected_absorption_time=None, expected_exit_time=None,
                             estimated_average_reward=None,
@@ -568,7 +576,13 @@ class Simulator:
         max_time_steps: (opt) int
             Maximum number of steps to run the simulation for, computed as the comprehensive number of
             transitions observed over ALL particles.
-            default: None, in which case N*100 is used, where N is the number of particles in the FV system
+            Set it to `np.Inf` in order to run the FV simulation until all the N particles are absorbed at least once.
+            default: None, in which case 100*N is used, where N is the number of particles in the FV system
+
+        min_prop_absorbed_particles: (opt) float in [0, 1]
+            Proportion of particles that should be absorbed at least once after the maximum number of steps has been reached,
+            in order to avoid spending a very long time in the FV simulation, because in some cases it may not be easy for all particles to be absorbed.
+            default: 0.90
 
         dist_proba_for_start_state: (opt) dict
             Probability distribution to use for the selection of the start state of each FV particle.
@@ -936,6 +950,15 @@ class Simulator:
                     t_surv = t_abs
                     survival_times += [t_surv]
 
+                    # Mark the particle as "absorbed once" so that we don't use any other absorption time from this
+                    # particle to estimate the survival probability, because the absorption times coming after the first
+                    # absorption time should NOT contribute to the survival probability, because their initial state
+                    # is NOT the correct one --i.e. it is not a state in the activation set
+                    # (because the particle has been reactivated to any other state)
+                    # which is a requirement for the estimation of the survival probability distribution.
+                    has_particle_been_absorbed_once[idx_particle] = True
+                    n_particles_absorbed_once += 1
+
                     if expected_absorption_time is not None:
                         # Iterative update of the components of the FV estimator, when survival times happen in increasing order, and update of the average reward
                         # This is only done when an estimate of the expected re-absorption time is provided, as this piece of information is needed to compute
@@ -983,15 +1006,18 @@ class Simulator:
             idx_reactivate = None
 
             # CHECK DONE
-            # If we want to interrupt the simulation by EITHER reaching the maximum time steps
+            # If we want to interrupt the simulation by EITHER:
+            # - when all N particles have been absorbed at least once (because this completes the estimation of P(T>t) making its value = 0 for t > the time of the last particle absorption
             # OR
-            # having all particles absorbed at least once, which is a logic that impacts ONLY the estimation of the average reward using FV,
-            # but it does NOT impact the estimation of the value functions done by the call to learner.learn() inside this loop.
-            # THEREFORE, if we are not interested in estimating the average reward using FV, we may want to continue until
-            # we reach the maximum number of steps, regardless of the first absorption event of each particle.
-            # Use this if we want to stop simulation either when the maximum number of steps has been reached OR all N particles have been absorbed at least once
-            done = t >= max_time_steps or sum(has_particle_been_absorbed_once) == N
-            # Use this if we want to stop simulation ONLY when the maximum number of steps has been reached.
+            # - when the maximum simulation time has been reached and overpassed (makes sense only when max_time_steps is NOT infinite)
+            # AND having a large enough number of particles (e.g. 90%) absorbed at least once.
+            # Note that this logic impacts ONLY the estimation of the FV-based AVERAGE REWARD, but it does NOT impact the estimation of the value functions
+            # done by the call to learner.learn() inside this loop.
+            # THEREFORE, if we are not interested in estimating the average reward using FV (but instead we are using FV just as a oversampling mechanism),
+            # we may want to continue until we reach the maximum number of steps, regardless of the first absorption event of each particle.
+            done = n_particles_absorbed_once == N or \
+                   t >= max_time_steps and n_particles_absorbed_once >= min_prop_absorbed_particles*N
+            # Use this if we want to stop simulation ONLY when the maximum number of steps has been reached (which implies that max_time_steps must NOT be infinite)
             # This should be the preferred way if we want to do a FAIR comparison with other benchmark methods,
             # because we guarantee that all time steps specified are used (which normally comes from the FAIR comparison setup)
             # Note that at this point max_time_steps ALWAYS has a value because if `None` was given by the user, a default value is set at the beginning of the method.
@@ -1002,13 +1028,14 @@ class Simulator:
         if expected_absorption_time is not None:
             # Assign the Phi learned iteratively to the dict_phi returned by this method, so that the outside world receives the correct estimate of Phi
             dict_phi = learner.dict_phi
-        if t >= max_time_steps:
-            # Add the last observed time step to the list of survival times as many times as the number of particles left to absorb,
+        if n_particles_absorbed_once < N:
+            # There are still particles that have not been absorbed at least once
+            # => Add the last observed time step to the list of survival times as many times as the number of particles left to absorb,
             # so that we can use the signal information collected in Phi since the last absorbed particle to the FV estimation of the expected reward.
             # Note that these survival times are underestimations of the actual survival times, so the FV estimate of the average reward
             # will have a negative bias, but this is a smaller bias than if we didn't consider the last observed time `t`
             # as part of the estimated survival probability function.
-            n_particles_not_absorbed = N - sum(has_particle_been_absorbed_once)
+            n_particles_not_absorbed = N - n_particles_absorbed_once
             survival_times += list(np.repeat(t, n_particles_not_absorbed))
             if n_particles_not_absorbed > 0:
                 print(f"WARNING: Not all {N} particles were absorbed at least ONCE because the maximum number of time steps for all particles ({max_time_steps} has been reached: # NOT absorbed particles = {n_particles_not_absorbed} ({np.round(n_particles_not_absorbed / N * 100, 1)}%)")
@@ -1018,13 +1045,16 @@ class Simulator:
                 update_average_reward(learner, survival_times, expected_absorption_time, estimated_average_reward_at_start_of_fv_process=estimated_average_reward)
         assert len(survival_times) - 1 == N, f"The number of elements stored in the `survival_times` list ({len(survival_times)}) must be N+1 ({N+1}) at the end of the FV simulation"
 
-        # The following assertion should be used ONLY when the FV process stops if all N particles are absorbed at least once before reaching max_time_steps
+        # The following assertion should be used ONLY when the condition on the absorption of the N particles (or a percentage of them) can stop the simulation
+        # (as opposed to the simulation being stopped just by the condition of reaching the max_time_steps number of simulation steps (which implies that the simulation can go on
+        # even if the largest FIRST-time survival time has been stored in the `survival_times` list, making the times stored in Phi(t, x) possibly be LARGER than the maximum
+        # observed FIRST-time survival time.
         assert np.max([np.max(dict_phi[x]['t']) for x in dict_phi.keys()]) <= np.max(survival_times), \
                 "The maximum time stored in Phi(t,x) must be at most the maximum observed survival time"
         if show_messages(verbose, verbose_period, t_learn):
             print("==> FV agent ENDS at state {} at discrete time t = {} ({:.1f}% of max_time_steps={}, {:.1f}% of particles were absorbed once),"
                   " compared to maximum observed time for P(T>t) = {:.1f}." \
-                    .format(envs[idx_particle].getState(), t, t/max_time_steps*100, max_time_steps, np.sum(has_particle_been_absorbed_once)/N*100, survival_times[-1]))
+                    .format(envs[idx_particle].getState(), t, t/max_time_steps*100, max_time_steps, n_particles_absorbed_once/N*100, survival_times[-1]))
 
         # Compute the stationary probability of each state x in Phi(t, x) using Phi(t, x), P(T>t) and E(T_A)
         df_proba_surv = compute_survival_probability(survival_times)
@@ -1050,7 +1080,7 @@ class Simulator:
 
     @measure_exec_time
     def _run_simulation_fv_fraiman( self, t_learn, envs, absorption_set: set, start_set: set,
-                                    max_time_steps=None,
+                                    max_time_steps=None, min_prop_absorbed_particles=0.90,
                                     dist_proba_for_start_state: dict=None,
                                     expected_absorption_time=None, expected_exit_time=None,
                                     estimated_average_reward=None,
@@ -1147,6 +1177,7 @@ class Simulator:
         has_particle_been_absorbed_once = [False]*N   # List that keeps track of whether each particle has been absorbed once
                                                         # so that we can end the simulation when all particles have been absorbed
                                                         # when the survival probability is estimated by this function.
+        n_particles_absorbed_once = 0
         # Times at which each particle visited an activation set state, so that we can measure the survival time of absorptions beyond the first one
         times_last_visit_activation_set = [0]*N
         # Times at which each particle was reactivated, which is used to decide whether we need to update the respective time of the last visit to the activation set (see logic explanation below)
@@ -1249,8 +1280,9 @@ class Simulator:
                         # (because the particle has been reactivated to any other state)
                         # which is a requirement for the estimation of the survival probability distribution.
                         has_particle_been_absorbed_once[idx_particle] = True
+                        n_particles_absorbed_once += 1
                         if False:
-                            print("Survival times observed so far: {}".format(sum(has_particle_been_absorbed_once)))
+                            print("Survival times observed so far: {}".format(n_particles_absorbed_once))
                             print(survival_times)
                     else:
                         t_surv = t_abs - times_last_visit_activation_set[idx_particle]
@@ -1303,20 +1335,24 @@ class Simulator:
                     if N <= 10:
                         print(f"Current state of system:\n{[env.getState() for env in envs]}")
 
-            print("t={} of {}: % particles absorbed at least once = {:.1f}% ({} of {})".format(t, max_time_steps, np.mean(has_particle_been_absorbed_once)*100, np.sum(has_particle_been_absorbed_once), N))
+            print("t={} of {}: % particles absorbed at least once = {:.1f}% ({} of {})".format(t, max_time_steps, n_particles_absorbed_once/N*100, n_particles_absorbed_once, N))
 
             # Update Phi after all particles have been updated
             dict_phi = update_phi_on_all_states(envs, t, dict_phi, alpha=alpha0 / (t + alpha0))
 
             # CHECK DONE
-            # If we want to interrupt the simulation by EITHER reaching the maximum time steps
+            # If we want to interrupt the simulation by EITHER:
+            # - when all N particles have been absorbed at least once (because this completes the estimation of P(T>t) making its value = 0 for t > the time of the last particle absorption
             # OR
-            # having all particles absorbed at least once, which is a logic that impacts ONLY the estimation of the average reward using FV,
-            # but it does NOT impact the estimation of the value functions done by the call to learner.learn() inside this loop.
+            # - when the maximum simulation time has been reached and overpassed (makes sense only when max_time_steps is NOT infinite)
+            # AND having a large enough number of particles (e.g. 90%) absorbed at least once.
+            # Note that this logic impacts ONLY the estimation of the FV-based AVERAGE REWARD, but it does NOT impact the estimation of the value functions
+            # done by the call to learner.learn() inside this loop.
             # THEREFORE, if we are not interested in estimating the average reward using FV, we may want to continue until
             # we reach the maximum number of steps, regardless of the first absorption event of each particle.
-            # Use this if we want to stop simulation either when the maximum number of steps has been reached OR all N particles have been absorbed at least once
-            done = t >= max_time_steps or sum(has_particle_been_absorbed_once) == N
+            # Use this if we want to stop simulation either when the maximum number of steps has been reached OR all N particles (or a percentage of them) have been absorbed at least once
+            done = n_particles_absorbed_once == N or \
+                   t >= max_time_steps and n_particles_absorbed_once >= min_prop_absorbed_particles*N
             # Use this if we want to stop simulation ONLY when the maximum number of steps has been reached.
             # This should be the preferred way if we want to do a FAIR comparison with other benchmark methods,
             # because we guarantee that all time steps specified are used (which normally comes from the FAIR comparison setup)
@@ -1325,13 +1361,13 @@ class Simulator:
             #done = t >= max_time_steps
 
         # DONE
-        if t >= max_time_steps:
+        if n_particles_absorbed_once < N:
             # Add the last observed time step to the list of survival times as many times as the number of particles left to absorb,
             # so that we can use the signal information collected in Phi since the last absorbed particle to the FV estimation of the expected reward.
             # Note that these survival times are underestimations of the actual survival times, so the FV estimate of the average reward
             # will have a negative bias, but this is a smaller bias than if we didn't consider the last observed time `t`
             # as part of the estimated survival probability function.
-            n_particles_not_absorbed = N - sum(has_particle_been_absorbed_once)
+            n_particles_not_absorbed = N - n_particles_absorbed_once
             for e in np.repeat(t, n_particles_not_absorbed):
                 survival_times.append(e)
             if n_particles_not_absorbed > 0:
@@ -1341,7 +1377,7 @@ class Simulator:
         if show_messages(verbose, verbose_period, t_learn):
             print("==> FV agent ENDS at state {} at discrete time t = {} ({:.1f}% of max_time_steps={}, {:.1f}% of particles were absorbed once),"
                   " compared to maximum observed time for P(T>t) = {:.1f}." \
-                    .format(envs[idx_particle].getState(), t, t/max_time_steps*100, max_time_steps, np.sum(has_particle_been_absorbed_once)/N*100, survival_times[-1]))
+                    .format(envs[idx_particle].getState(), t, t/max_time_steps*100, max_time_steps, n_particles_absorbed_once/N*100, survival_times[-1]))
 
         # Compute the stationary probability of each state x in Phi(t, x) using Phi(t, x), P(T>t) and E(T_A)
         df_proba_surv = compute_survival_probability(survival_times)
@@ -1362,7 +1398,7 @@ class Simulator:
 
     @measure_exec_time
     def _run_simulation_fv_fraiman_modified(self, t_learn, envs, absorption_set: set, start_set: set,
-                                            max_time_steps=None,
+                                            max_time_steps=None, min_prop_absorbed_particles=0.90,
                                             dist_proba_for_start_state: dict=None,
                                             expected_absorption_time=None, expected_exit_time=None,
                                             estimated_average_reward=None,
@@ -1463,6 +1499,7 @@ class Simulator:
         has_particle_been_absorbed_once = [False]*N     # List that keeps track of whether each particle has been absorbed once
                                                         # so that we can end the simulation when all particles have been absorbed
                                                         # when the survival probability is estimated by this function.
+        n_particles_absorbed_once = 0
         has_particle_been_absorbed = [False]*N          # This is used to determine what particles are used to compute the reactivation distribution, namely the non-absorbed ones
 
         if True or DEBUG_ESTIMATORS:
@@ -1561,12 +1598,13 @@ class Simulator:
                         # (because the particle has been reactivated to any other state)
                         # which is a requirement for the estimation of the survival probability distribution.
                         has_particle_been_absorbed_once[idx_particle] = True
+                        n_particles_absorbed_once += 1
                         if False:
-                            print("Survival times observed so far: {}".format(sum(has_particle_been_absorbed_once)))
+                            print("Survival times observed so far: {}".format(n_particles_absorbed_once))
                             print(survival_times)
 
             # Reactivate absorbed particles
-            if sum(has_particle_been_absorbed) == N:
+            if n_particles_absorbed_once == N:
                 # All particles have been absorbed
                 # => Use the distribution of the particles at the previous step as reactivation distribution
                 reactivation_probability_distribution = extract_latest_phi_values(dict_phi)
@@ -1588,20 +1626,24 @@ class Simulator:
                     if N <= 10:
                         print(f"Current state of system:\n{[env.getState() for env in envs]}")
 
-            print("t={} of {}: % particles absorbed at least once = {:.1f}% ({} of {})".format(t, max_time_steps, np.mean(has_particle_been_absorbed_once)*100, np.sum(has_particle_been_absorbed_once), N))
+            print("t={} of {}: % particles absorbed at least once = {:.1f}% ({} of {})".format(t, max_time_steps, n_particles_absorbed_once/N*100, n_particles_absorbed_once, N))
 
             # Update Phi after all particles have been updated
             dict_phi = update_phi_on_all_states(envs, t, dict_phi, alpha=alpha0 / (t + alpha0))
 
             # CHECK DONE
-            # If we want to interrupt the simulation by EITHER reaching the maximum time steps
+            # If we want to interrupt the simulation by EITHER:
+            # - when all N particles have been absorbed at least once (because this completes the estimation of P(T>t) making its value = 0 for t > the time of the last particle absorption
             # OR
-            # having all particles absorbed at least once, which is a logic that impacts ONLY the estimation of the average reward using FV,
-            # but it does NOT impact the estimation of the value functions done by the call to learner.learn() inside this loop.
+            # - when the maximum simulation time has been reached and overpassed (makes sense only when max_time_steps is NOT infinite)
+            # AND having a large enough number of particles (e.g. 90%) absorbed at least once.
+            # Note that this logic impacts ONLY the estimation of the FV-based AVERAGE REWARD, but it does NOT impact the estimation of the value functions
+            # done by the call to learner.learn() inside this loop.
             # THEREFORE, if we are not interested in estimating the average reward using FV, we may want to continue until
             # we reach the maximum number of steps, regardless of the first absorption event of each particle.
-            # Use this if we want to stop simulation either when the maximum number of steps has been reached OR all N particles have been absorbed at least once
-            done = t >= max_time_steps or sum(has_particle_been_absorbed_once) == N
+            # Use this if we want to stop simulation either when the maximum number of steps has been reached OR all N particles (or a percentage of them) have been absorbed at least once
+            done = n_particles_absorbed_once == N or \
+                   t >= max_time_steps and n_particles_absorbed_once >= min_prop_absorbed_particles*N
             # Use this if we want to stop simulation ONLY when the maximum number of steps has been reached.
             # This should be the preferred way if we want to do a FAIR comparison with other benchmark methods,
             # because we guarantee that all time steps specified are used (which normally comes from the FAIR comparison setup)
@@ -1610,13 +1652,13 @@ class Simulator:
             #done = t >= max_time_steps
 
         # DONE
-        if t >= max_time_steps:
+        if n_particles_absorbed_once < N:
             # Add the last observed time step to the list of survival times as many times as the number of particles left to absorb,
             # so that we can use the signal information collected in Phi since the last absorbed particle to the FV estimation of the expected reward.
             # Note that these survival times are underestimations of the actual survival times, so the FV estimate of the average reward
             # will have a negative bias, but this is a smaller bias than if we didn't consider the last observed time `t`
             # as part of the estimated survival probability function.
-            n_particles_not_absorbed = N - sum(has_particle_been_absorbed_once)
+            n_particles_not_absorbed = N - n_particles_absorbed_once
             for e in np.repeat(t, n_particles_not_absorbed):
                 survival_times.append(e)
             if n_particles_not_absorbed > 0:
@@ -1626,7 +1668,7 @@ class Simulator:
         if show_messages(verbose, verbose_period, t_learn):
             print("==> FV agent ENDS at state {} at discrete time t = {} ({:.1f}% of max_time_steps={}, {:.1f}% of particles were absorbed once),"
                   " compared to maximum observed time for P(T>t) = {:.1f}." \
-                    .format(envs[idx_particle].getState(), t, t/max_time_steps*100, max_time_steps, np.sum(has_particle_been_absorbed_once)/N*100, survival_times[-1]))
+                    .format(envs[idx_particle].getState(), t, t/max_time_steps*100, max_time_steps, n_particles_absorbed_once/N*100, survival_times[-1]))
 
         # Compute the stationary probability of each state x in Phi(t, x) using Phi(t, x), P(T>t) and E(T_A)
         df_proba_surv = compute_survival_probability(survival_times)
@@ -1647,7 +1689,7 @@ class Simulator:
 
     @measure_exec_time
     def _run_simulation_fv_learnvaluefunctions( self, t_learn, envs, absorption_set: set, start_set: set,
-                                                max_time_steps=None, number_free_particles=1,
+                                                max_time_steps=None, min_prop_absorbed_particles=0.90, number_free_particles=1,
                                                 dist_proba_for_start_state: dict=None,
                                                 expected_absorption_time=None, expected_exit_time=None,
                                                 estimated_average_reward=None,
@@ -1889,6 +1931,7 @@ class Simulator:
         has_particle_been_absorbed_once = [False]*N     # List that keeps track of whether each particle has been absorbed once,
                                                         # so that we can end the simulation when all particles have been absorbed
                                                         # when the survival probability is estimated by this function.
+        n_particles_absorbed_once = 0
         has_particle_been_selected_once = [False]*N     # List that keeps track of whether each particle has been selected for movement at least once,
                                                         # so that we can choose the already selected start action when learning by groups
 
@@ -1919,7 +1962,7 @@ class Simulator:
             if show_messages(verbose, verbose_period, t):
                 print("@{}".format(get_current_datetime_as_string()))
                 print(f"FV time step t={t} of max_time_steps={max_time_steps} running...")
-                print(f"# FV particles absorbed at least once: {sum(has_particle_been_absorbed_once)} of max N={N}")
+                print(f"# FV particles absorbed at least once: {n_particles_absorbed_once} of max N={N}")
                 print(f"# particles exploring absorption set A: {len(envs_normal)} of max M={n_normal_max}")
 
             # We define a reactivation number, an integer between 0 and N-2 which is used to deterministically choose
@@ -2108,6 +2151,7 @@ class Simulator:
                     # (because the particle has been reactivated to any other state)
                     # which is a requirement for the estimation of the survival probability distribution.
                     has_particle_been_absorbed_once[idx_particle] = True
+                    n_particles_absorbed_once += 1
 
                     if learner.estimate_on_fixed_sample_size:
                         # Decrease the number of particles left for the group N(s) associated to the start state of the currently updated particle
@@ -2120,7 +2164,7 @@ class Simulator:
                             df_particles_for_start_state.drop(start_state, inplace=True)
 
                     if False:
-                        print("First-time survival times observed so far: {}".format(sum(has_particle_been_absorbed_once)))
+                        print("First-time survival times observed so far: {}".format(n_particles_absorbed_once))
                         print(first_survival_times)
 
                     # Add a new particle to the list of "normal" particles, i.e. those that evolve following the dynamics of the underlying Markov chain,
@@ -2180,14 +2224,18 @@ class Simulator:
             idx_reactivate = None
 
             # CHECK DONE
-            # If we want to interrupt the simulation by EITHER reaching the maximum time steps
+            # If we want to interrupt the simulation by EITHER:
+            # - when all N particles have been absorbed at least once (because this completes the estimation of P(T>t) making its value = 0 for t > the time of the last particle absorption
             # OR
-            # having all particles absorbed at least once, which is a logic that impacts ONLY the estimation of the average reward using FV,
-            # but it does NOT impact the estimation of the value functions done by the call to learner.learn() inside this loop.
+            # - when the maximum simulation time has been reached and overpassed (makes sense only when max_time_steps is NOT infinite)
+            # AND having a large enough number of particles (e.g. 90%) absorbed at least once.
+            # Note that this logic impacts ONLY the estimation of the FV-based AVERAGE REWARD, but it does NOT impact the estimation of the value functions
+            # done by the call to learner.learn() inside this loop.
             # THEREFORE, if we are not interested in estimating the average reward using FV, we may want to continue until
             # we reach the maximum number of steps, regardless of the first absorption event of each particle.
-            # Use this if we want to stop simulation either when the maximum number of steps has been reached OR all N particles have been absorbed at least once
-            done = t >= max_time_steps or sum(has_particle_been_absorbed_once) == N - N_never_moved
+            # Use this if we want to stop simulation either when the maximum number of steps has been reached OR all N particles (or a percentage of them) have been absorbed at least once
+            done = n_particles_absorbed_once == N or \
+                   t >= max_time_steps and n_particles_absorbed_once >= min_prop_absorbed_particles*(N - N_never_moved)
             # Use this if we want to stop simulation ONLY when the maximum number of steps has been reached.
             # This should be the preferred way if we want to do a FAIR comparison with other benchmark methods,
             # because we guarantee that all time steps specified are used (which normally comes from the FAIR comparison setup)
@@ -2196,13 +2244,13 @@ class Simulator:
             #done = t >= max_time_steps
 
         # DONE
-        if t >= max_time_steps:
+        if n_particles_absorbed_once < N - N_never_moved:
             # Add the last observed time step to the list of first-time survival times as many times as the number of particles left to absorb,
             # so that we can use the signal information collected in Phi since the last absorbed particle to the FV estimation of the expected reward.
             # Note that these survival times are underestimations of the actual survival times, so the FV estimate of the average reward
             # will have a negative bias, but this is a smaller bias than if we didn't consider the last observed time `t`
             # as part of the estimated survival probability function.
-            n_particles_not_absorbed = N - N_never_moved - sum(has_particle_been_absorbed_once)
+            n_particles_not_absorbed = N - N_never_moved - n_particles_absorbed_once
             first_survival_times += list(np.repeat(t, n_particles_not_absorbed))
             if n_particles_not_absorbed > 0:
                 print(f"WARNING: Not all {N - N_never_moved} particles were absorbed at least ONCE because the maximum number of time steps for all particles ({max_time_steps}) has been reached: # NOT absorbed particles = {n_particles_not_absorbed} ({np.round(n_particles_not_absorbed / N * 100, 1)}%)")
@@ -2212,7 +2260,7 @@ class Simulator:
         if show_messages(verbose, verbose_period, t_learn):
             print("==> FV agent ENDS at state {} at discrete time t = {} ({:.1f}% of max_time_steps={}, {:.1f}% of particles were absorbed once),"
                   " compared to maximum observed time for P(T>t) = {:.1f}." \
-                    .format(envs[idx_particle].getState(), t, t/max_time_steps*100, max_time_steps, np.sum(has_particle_been_absorbed_once)/N*100, first_survival_times[-1]))
+                    .format(envs[idx_particle].getState(), t, t/max_time_steps*100, max_time_steps, n_particles_absorbed_once/N*100, first_survival_times[-1]))
 
         # Compute the stationary probability of each state x in Phi(t, x) using Phi(t, x), P(T>t) and E(T_A)
         df_proba_surv = compute_survival_probability(first_survival_times)
