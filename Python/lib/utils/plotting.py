@@ -95,6 +95,77 @@ def plot_colormap(x, y, ax=None, ncolors=None, cmap_name="Blues", marker='.'):
     return ax, line
 
 
+def update_plots(dict_axes, dict_points, dict_lines, show_title=True):
+    """
+    Updates a set of plots with new points on the axes stored in a dictionary indexed by the points to add
+
+    Arguments:
+    dict_axes: dict of matplotlib.axes._subplots.AxesSubplot
+        Dictionary containing the axis objects indexed by the concept being plotted in the respective axis.
+
+    dict_points: dict of 2D lists of list or tuple
+        Dictionary containing the 2D points that should be added to the respective axis indexed by the key.
+        Not all keys present in `dict_axes` must be present, only the keys of the plots to update should be present.
+        Ex: {'average_reward': [(3, 0.512), (7, 0.81)]}, which indicates that two new points should be added to the axis object indexed by 'average_reward'
+
+    dict_lines: dict of lists of matplotlib.lines.Line2D
+        Dictionary containing the list of the last line or last point objects that have been added to the axis indexed by the key,
+        so that we can add a new line connecting each last plotted line or point connecting to the new each new point to add to the plot given
+        in the respective key of `dict_points`.
+        If a key in `dict_points` is not found in `dict_lines`, now connecting lines are added to the plot, only the new points are added.
+        If respective key is present, the length of the list stored in `dict_lines[key]` must coincide with the length of the list stored in
+        `dict_points[key]` so that each element in `dict_lines[key]` is matched to each element in `dict_points[key]`.
+
+    show_title: (opt) bool
+        Whether to show a title stating the "name" of the plot that was updated (taken from the dictionary key in `dict_points`) and the coordinates
+        of the added point.
+        default: True
+
+    Return: dictionary
+    Dictionary containing the new graphical objects added to each axis indexed by the keys present in `dict_points`.
+    This dictionary can be passed as parameter `dict_lines` at the next call to this function to add new points to the plots just updated and thus create
+    iteratively updated plots.
+    """
+    # Dictionary that will store the new plotted points or lines so that subsequent calls to this function will continue connecting the new added points
+    dict_new_points_or_lines = dict.fromkeys(dict_points, [])
+
+    # Go over the points stored in the keys of `dict_points` and add them to the axis associated to the respective key, if present
+    for key, points in dict_points.items():
+        if key not in dict_axes.keys():
+            warn(f"[update_plots] No axis was found in parameter `dict_axes` having the key '{key}' associated to the points to add as stored in parameter `dict_points`."
+                 f"\nNo plot will be updated for the given key.")
+        else:
+            # Get the current objects and characteristics associated to the current key
+            ax = dict_axes[key]
+            lines = dict_lines.get(key)
+
+            # Add each point in `dict_points` to the axis indexed by `key` and store the added graphical object in the `dict_new_points_or_lines` dictionary as described above
+            for idx, point in enumerate(points):
+                # Try extracting the line or point already plotted to which the new point should be connected to form a line, and its color
+                try:
+                    point_last_in_line = lines[idx].get_xydata()[-1]
+                    marker = lines[idx].get_marker()
+                    linewidth = lines[idx].get_linewidth()
+                    linestyle = lines[idx].get_linestyle()
+                    color = lines[idx].get_color()
+                except:
+                    point_last_in_line = None
+                    marker = None
+                    linewidth = None
+                    linestyle = None
+                    color = "blue"  # Note: this could also be `None` as `color=None` is accepted by `plt.plot()`
+
+                # Add the point to the plot add connect it to a previously existing line or point, if any
+                if point_last_in_line is None:
+                    dict_new_points_or_lines[key] += ax.plot(point[0], point[1], marker=marker, linewidth=linewidth, linestyle=linestyle, color=color)
+                else:
+                    dict_new_points_or_lines[key] += ax.plot([point_last_in_line[0], point[0]], [point_last_in_line[1], point[1]], marker=marker, linewidth=linewidth, linestyle=linestyle, color=color)
+                if show_title:
+                    ax.set_title(f"{key}: New point added at {point}")
+
+    return dict_new_points_or_lines
+
+
 def deprecated_errorbars_standalone(df, x, y, yref=None,
                          figsize=(4,4),    #(8,4)    #(width, height)
                          subplots=(1,1),   #(1,2)    #(height, width) GRRRRRRRRRRRRRRRRRRR!!@!@#@@#@#$@#!!! 

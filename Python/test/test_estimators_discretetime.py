@@ -1354,7 +1354,7 @@ class Test_EstValueFunctions_EnvGridworldsWithObstacles(unittest.TestCase, test_
             self.sim_td.run(nepisodes=self.nepisodes, seed=self.seed,
                             compute_rmse=True, state_observe=6,
                             verbose=True, verbose_period=self.nepisodes // 20,
-                            plot=True, pause=0.1)
+                            plot=False, pause=0.1)
         observed_V = state_values
         observed_Q = action_values.reshape((self.env2d.getNumStates(), self.env2d.getNumActions()))
         print("\nObserved state value function: " + test_utils.array2str(observed_V))

@@ -23,6 +23,7 @@ from collections import deque   # Used for fast update of lists at the borders (
 import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt, cm
+from matplotlib.ticker import MaxNLocator
 import gym
 
 from Python.lib.agents.learners import LearningCriterion, LearningTask
@@ -36,6 +37,18 @@ from Python.lib.simulators import DEBUG_TRAJECTORIES, MIN_NUM_CYCLES_FOR_EXPECTA
 
 from Python.lib.utils.basic import find_signed_max_value, generate_datetime_string, get_current_datetime_as_string, insort, is_integer, measure_exec_time
 from Python.lib.utils.computing import compute_survival_probability, mape, rmse
+from Python.lib.utils.plotting import update_plots
+
+#-- Constants used in the iterative plots
+# Parameters for the windows containing the plots
+WINDOW_TOP_LEFT_HORIZONTAL = 15
+WINDOW_TOP_LEFT_VERTICAL = 35
+WINDOW_WIDTH = 600
+WINDOW_HEIGHT = 480
+SPACE_BETWEEN_WINDOWS = 15
+# Parameters for the labels shown in some 2D plots (e.g. for the visit counts)
+LABELS_FONTSIZE = 14
+LABELS_COLOR = "orange"
 
 
 class Simulator:
@@ -153,6 +166,10 @@ class Simulator:
         self.env = env
         self.agent = agent
         self.seed = seed
+
+        # Plotting handles that are used by different methods
+        # Figure handle where the policy is plotted (if requested)
+        self.fig_policy = None
 
     def close(self):
         if self.fh_log is not None:
@@ -413,6 +430,7 @@ class Simulator:
               f"(when None, the simulation starts following the Initial State Distribution of the environment: {self.env.getInitialStateDistribution()}")
         state_values, action_values, advantage_values, state_counts_et, _, _, learning_info = \
             self._run_single_continuing_task(
+                            t_learn=dict_params_info.get('t_learn', 0),
                             max_time_steps=dict_params_simul['T'],      # Max simulation time over ALL episodes
                             start_state_first_episode=start_state,
                             estimated_average_reward=estimated_average_reward_before_single_simulation,
@@ -420,6 +438,7 @@ class Simulator:
                             epsilon_random_action=dict_params_simul.get('epsilon_random_action', 0.0),
                             seed=dict_params_simul['seed'],
                             set_cycle=dict_params_simul['absorption_set'],
+                            plot=dict_params_info['plot'],
                             verbose=dict_params_info.get('verbose', False),
                             verbose_period=dict_params_info.get('verbose_period', 1))
         n_events_et = learning_info['nsteps']
@@ -657,6 +676,19 @@ class Simulator:
             The time step period to be verbose.
             default: 1 => be verbose at every simulation step.
 
+        plot: (opt) bool
+            Whether to generate plots showing the evolution of the value function estimates.
+
+        colormap: (opt) str
+            Name of the colormap to use in the generation of the animated plots showing the evolution of the value function estimates.
+            It must be a valid colormap among those available in the matplotlib.cm module.
+            default: seismic, a colormap that ranges from blue to red, where the middle is white
+
+        pause: (opt) float
+            Number of seconds to wait before updating the plot that shows the evolution of the value function estimates.
+            It should be positive if we want the plot to be updated every time the value function estimate is updated.
+            default: 0.1
+
         Return: tuple
         Tuple with the following elements:
         - t: the last (discrete) time step of the simulation process, which coincides with the number of FV events, as at each time step t only one particle is updated.
@@ -891,6 +923,36 @@ class Simulator:
                                                         # when the survival probability is estimated by this function.
         n_particles_absorbed_once = 0
 
+        # Plotting setup
+        if plot:
+            #-- Setup the concepts and figures to plot (e.g. that will be updated at every absorption event)
+            # Setup the figures that will be updated at every verbose_period
+            num_colors_in_colormap = N # Use the following if we plan to update the plot of V(s) at verbose_period (instead of at every absorption event) #None if max_time_steps is None or max_time_steps == +np.Inf else max_time_steps
+            fig_V, fig_V2, fig_C, fig_RMSE_state, colors_V, _ = self._setup_plots(colormap=colormap, lut=num_colors_in_colormap, setup_policy_plot=False)
+
+            # Setup the axes to use for each plotted object, indexed by the name of the plotted object (e.g. "average_reward")
+            dict_axes = dict({'average_reward': plt.figure().subplots(1, 1)})
+            # Initialize the average reward plot with the current estimate of the average reward stored in the learner
+            # Note that we add two line objects, one that will plot the updated average reward coming solely from the FV excursion (dashed line),
+            # and the other line will plot the updated average reward stored in the learner, which may have a contribution from the original average reward stored in the learner (continuous line).
+            dict_lines = dict({'average_reward': [dict_axes['average_reward'].plot(0, learner.getAverageReward(), '.-', color="red", linestyle="dashed")[0],
+                                                  dict_axes['average_reward'].plot(0, learner.getAverageReward(), '.-', color="green")[0]]})
+            # Set the maximum X axis value if the number simulation steps to run in advance is known
+            dict_axes['average_reward'].set_xlim((None, max_time_steps)) if max_time_steps < +np.Inf else None
+            dict_axes['average_reward'].set_xlabel("Survival time contributing to P(T>t)")
+            dict_axes['average_reward'].set_ylabel("Estimated average reward")
+            dict_axes['average_reward'].legend(["FV-based average reward", "Weighted initial + FV-based average reward"])
+            plt.suptitle(f"[_run_simulation_fv, Learning step {t_learn+1}]")
+
+            # Reposition and resize the figure to avoid overlapping with the other figures
+            # Ref: https://stackoverflow.com/questions/7449585/how-do-you-set-the-absolute-position-of-figure-windows-with-matplotlib
+            plt.figure(dict_axes['average_reward'].get_figure().number)
+            fig_mgr = plt.get_current_fig_manager()
+            fig_mgr.window.setGeometry( WINDOW_TOP_LEFT_HORIZONTAL + WINDOW_WIDTH + SPACE_BETWEEN_WINDOWS,
+                                        WINDOW_TOP_LEFT_VERTICAL + WINDOW_HEIGHT + 3*SPACE_BETWEEN_WINDOWS, # `3*` because we need to leave space for the WINDOW's title
+                                        WINDOW_WIDTH,
+                                        WINDOW_HEIGHT)
+
         if True or DEBUG_ESTIMATORS:
             print("[DEBUG] @{}".format(get_current_datetime_as_string()))
             print("[DEBUG] State value function at start of simulation:\n\t{}".format(learner.getV().getValues()))
@@ -996,16 +1058,34 @@ class Simulator:
                         # Iterative update of the components of the FV estimator, when survival times happen in increasing order, and update of the average reward
                         # This is only done when an estimate of the expected re-absorption time is provided, as this piece of information is needed to compute
                         # the iterative update of the stationary probabilities, which in turn is used to compute the updated average reward.
-                        update_average_reward(learner, survival_times, expected_absorption_time, estimated_average_reward_at_start_of_fv_process=estimated_average_reward)
+                        updated_average_reward = update_average_reward(learner, survival_times, expected_absorption_time, estimated_average_reward_at_start_of_fv_process=estimated_average_reward)
+                        if plot:
+                            self._update_plots(learner, t_learn, fig_V, fig_C, colors_V, len(colors_V.colors) if num_colors_in_colormap is None else num_colors_in_colormap,
+                                               t, max_time_steps, pause=pause, method_name="_run_simulation_fv, ")
+                                ## Notes:
+                                ## - We might pass `None` to `fig_C`, the parameter after `fig_V` if we want a new figure to be generated (so that we see the evolution of the state counts)
+                                ## - The parameter after `colors_V` defining the number of colors in the colormap is extracted from the length of attribute colors_V.colors
+                                ## ONLY if num_colors_in_colormap is None (which is used as `lut=` parameter of the cm.get_cmap() function creating the colormap)
+                                ## because of num_colors_in_colormap is specified (e.g. 10), colors_V does NOT have any `colors` attribute!!!!
 
-                    # Mark the particle as "absorbed once" so that we don't use any other absorption time from this
-                    # particle to estimate the survival probability, because the absorption times coming after the first
-                    # absorption time should NOT contribute to the survival probability, because their initial state
-                    # is NOT the correct one --i.e. it is not a state in the activation set
-                    # (because the particle has been reactivated to any other state)
-                    # which is a requirement for the estimation of the survival probability distribution.
-                    has_particle_been_absorbed_once[idx_particle] = True
-                    n_particles_absorbed_once += 1
+                            dict_lines = update_plots(dict_axes, dict({'average_reward': [(t_surv, updated_average_reward),
+                                                                                          (t_surv, learner.getAverageReward())]}), dict_lines, show_title=False)
+                            # Make sure that the Y axis is re-scaled after adding the new point (because after setting the axis limits (as done right below with set_ylim()),
+                            # the axis limit is NOT re-calculated after adding new points (see: https://matplotlib.org/stable/users/explain/axes/autoscale.html))
+                            dict_axes['average_reward'].autoscale(axis='y')
+                            if learner.getAverageReward() < 0:
+                                # We assume the rewards are negative
+                                # => Set the MAXIMUM at 0, so that we get a visual comparison with other figures plotting the same concept
+                                dict_axes['average_reward'].set_ylim((None, 0))
+                            else:
+                                # We assume the rewards are positive
+                                # => Set the minimum at 0, so that we get a visual comparison with other figures plotting the same concept
+                                dict_axes['average_reward'].set_ylim((0, None))
+                            plt.figure(dict_axes['average_reward'].get_figure().number)  # Need to select the figure so that it is re-drawn, otherwise, the redraw applies to the active figure (already redrawn) selected above by plt.figure()
+                            plt.suptitle(f"[_run_simulation_fv, Learning step {t_learn+1}]\nSurvival time #{n_particles_absorbed_once} out of max possible {N} with survival time t_surv={t_surv}")
+                            plt.pause(pause)
+                            plt.draw()
+
                     # Show the progress of particles absorption
                     if int((n_particles_absorbed_once - 1) / N * 100) % 10 != 0 and int(n_particles_absorbed_once / N * 100) % 10 == 0:
                         print("t={} of {}: {:.1f}% of particles absorbed at least once ({} of {})".format(t, max_time_steps, n_particles_absorbed_once / N * 100, n_particles_absorbed_once, N))
@@ -1107,7 +1187,11 @@ class Simulator:
             plt.step(df_proba_surv['t'], df_proba_surv['P(T>t)'], color="blue", where='post')
             for x in dict_phi.keys():
                 plt.step(dict_phi[x]['t'], dict_phi[x]['Phi'], color="red", where='post')
-                plt.title(f"Learning step {t_learn+1}\nP(T>t) (blue) and Phi(t,x) (red) for state x = {x}")
+                plt.title(f"[_run_simulation_fv, Learning step {t_learn+1}]\nP(T>t) (blue) and Phi(t,x) (red) for state x = {x}")
+
+        if plot:
+            self._update_plots_at_episode_end(0, 1, learner, t_learn, fig_V, fig_V2, None, colors_V, None, 0.0, pause=pause, method_name="_run_simulation_fv, ")
+            self._final_plots(learner, t_learn, fig_V, fig_C, method_name="_run_simulation_fv, ")
 
         return t, learner.getV().getValues(), learner.getQ().getValues(), learner.getA().getValues(), learner._state_counts, dict_phi, df_proba_surv, expected_absorption_time, max_survival_time
 
@@ -2220,8 +2304,8 @@ class Simulator:
                             ax_count = ax_V.twinx()
                             ax_count.bar(self.env.getAllStates(), learner.getStateCounts(), color="blue", alpha=0.3)
                             plt.sca(ax_V)  # Go back to the primary axis
-                        plt.title(f"V(s) evolution (blueish: initial, reddish: final)"
-                                  f"\nSystem's time t = {t}, Abs. no. = {n_absorptions} (# first abs. = {sum(has_particle_been_absorbed_once)} of max N = {N}), start_state = {start_state}"
+                        plt.title(f"[_run_simulation_fv_learnvaluefunctions, Learning step {t_learn+1}] V(s) evolution (blueish: initial, reddish: final)"
+                                  f"\nSystem's time t = {t}, Abs. no. = {n_absorptions} (# first abs. = {n_particles_absorbed_once} of max N = {N}), start_state = {start_state}"
                                   f"\nfrom state = {state} --> absorption state = {state_absorption} (V(s)={np.round(learner.getV().getValue(state_absorption), 3)}) --> reactivation state = {next_state}"
                                   f"\nV(start={start_state}) = {np.round(V_start_prev, 3)}) --> V(start={start_state}) = {np.round(learner.getV().getValue(start_state), 3)} (delta(V) = {np.round(learner.getV().getValue(start_state) - V_start_prev, 3)}, {np.round((learner.getV().getValue(start_state) - V_start_prev) / max(1, V_start_prev) * 100, 1)}%)"
                                   f"\nCount[s] = {learner.getStateCounts()}, alpha[s] = {learner.getAlphasByState()}")
@@ -2240,8 +2324,8 @@ class Simulator:
                     ax_count = ax_V.twinx()
                     ax_count.bar(self.env.getAllStates(), learner.getStateCounts(), color="blue", alpha=0.3)
                     plt.sca(ax_V)  # Go back to the primary axis
-                plt.title(f"V(s) evolution (blueish: initial, reddish: final)"
-                          f"\nSystem's time t = {t} of MAX {max_time_steps} (# first abs. = {sum(has_particle_been_absorbed_once)} of max N = {N}), start_state = {start_state}"
+                plt.title(f"[_run_simulation_fv_learnvaluefunctions, Learning step {t_learn+1}] V(s) evolution (blueish: initial, reddish: final)"
+                          f"\nSystem's time t = {t} of MAX {max_time_steps} (# first abs. = {n_particles_absorbed_once} of max N = {N}), start_state = {start_state}"
                           f"\nfrom state = {state} --> next state = {next_state} (V(s)={np.round(learner.getV().getValue(next_state), 3)})"
                           f"\nV(state={state}) = {np.round(V_state_prev, 3)} --> V(state={state}) = {np.round(learner.getV().getValue(state), 3)} (delta(V) = {np.round(learner.getV().getValue(state) - V_state_prev, 3)}, {np.round((learner.getV().getValue(state) - V_state_prev) / max(1, V_state_prev) * 100, 1)}%)"
                           f"\nCount[s] = {learner.getStateCounts()}, alpha[s] = {learner.getAlphasByState()}")
@@ -2316,13 +2400,13 @@ class Simulator:
             plt.step(df_proba_surv['t'], df_proba_surv['P(T>t)'], color="blue", where='post')
             for x in learner.dict_phi.keys():
                 plt.step(learner.dict_phi[x]['t'], learner.dict_phi[x]['Phi'], color="red", where='post')
-                plt.title(f"Learning step {t_learn+1}\nP(T>t) (blue) and Phi(t,x) (red) for state x = {x}")
+                plt.title(f"[_run_simulation_fv_learnvaluefunctions, Learning step {t_learn+1}]\nP(T>t) (blue) and Phi(t,x) (red) for state x = {x}")
 
         print(f"Distribution of start actions:\n{pd.Series([learner.getStartAction(idx_particle) for idx_particle in range(N)]).value_counts()}")
 
         return n_steps_on_all_environments, learner.getV().getValues(), learner.getQ().getValues(), learner.getA().getValues(), learner.getStateCounts(), learner.dict_phi, df_proba_surv, expected_absorption_time, max_survival_time
 
-    def _run_single(self, nepisodes, max_time_steps=+np.Inf, max_time_steps_per_episode=+np.Inf, start_state_first_episode=None, reset_value_functions=True,
+    def _run_single(self, nepisodes, t_learn=0, max_time_steps=+np.Inf, max_time_steps_per_episode=+np.Inf, start_state_first_episode=None, reset_value_functions=True,
                     seed=None, compute_rmse=False, weights_rmse=None,
                     state_observe=None,
                     epsilon_random_action=0.0,
@@ -2337,6 +2421,10 @@ class Simulator:
         nepisodes: int
             Length of the experiment: number of episodes to run.
             This value may be overridden if parameter `max_time_steps` has a finite value.
+
+        t_learn: (opt) int
+            The learning step number (starting at 0) for which the simulation is run when learning is used in the context of policy learning.
+            This is ONLY used for informational purposes, i.e. to show which stage of the policy learning we are at.
 
         max_time_steps: (opt) int
             Number of steps to run.
@@ -2403,8 +2491,7 @@ class Simulator:
             Whether to generate plots showing the evolution of the value function estimates.
 
         colormap: (opt) str
-            Name of the colormap to use in the generation of the animated plots
-            showing the evolution of the value function estimates.
+            Name of the colormap to use in the generation of the animated plots showing the evolution of the value function estimates.
             It must be a valid colormap among those available in the matplotlib.cm module.
             default: seismic, a colormap that ranges from blue to red, where the middle is white
 
@@ -2478,17 +2565,7 @@ class Simulator:
         # Plotting setup
         if plot:
             # Setup the figures that will be updated at every verbose_period
-            colors = cm.get_cmap(colormap, lut=nepisodes)
-            # 1D plot (even for 2D environments)
-            fig_V = plt.figure()
-            # Plot the true state value function (to have it as a reference already
-            plt.plot(self.env.getAllStates(), self.env.getV(), '.-', color="blue")
-            if self.env.getDimension() == 2:
-                # 2D plot
-                fig_V2 = plt.figure()
-            if state_observe is not None:
-                # Plot with the evolution of the V estimate and its error
-                fig_RMSE_state = plt.figure()
+            fig_V, fig_V2, fig_C, fig_RMSE_state, colors_V, self.fig_policy = self._setup_plots(colormap=colormap, lut=nepisodes, state_observe=state_observe)
         #--- Parse input parameters
 
         # Define the policy and the learner
@@ -2515,7 +2592,7 @@ class Simulator:
             self.env.setSeed(seed)
 
         # Store initial values used in the analysis of all the episodes run
-        V_state_observe, RMSE, MAPE, ntimes_rmse_inside_ci95 = self.initialize_run_with_learner_status(nepisodes, learner, compute_rmse, weights, state_observe)
+        V_state_observe, RMSE, MAPE, ntimes_rmse_inside_ci95 = self._initialize_run_with_learner_status(nepisodes, learner, compute_rmse, weights, state_observe)
 
         # Initial state value function
         V = learner.getV().getValues()
@@ -2763,83 +2840,16 @@ class Simulator:
                 if self.env.getV() is not None:
                     if weights_rmse is not None:
                         weights = learner.getStateCounts()
-                    RMSE[min(episode+1, nepisodes)] = rmse(self.env.getV(), learner.getV().getValues(), weights=weights)
-                    MAPE[min(episode+1, nepisodes)] = mape(self.env.getV(), learner.getV().getValues(), weights=weights)
+                    # For the AVERAGE reward criterion, plot the state value function referenced to V(s=0) as in this case V(s) is NOT unique
+                    ref_V_true = ref_V = 0.0
+                    if self.agent.getLearner().getLearningCriterion() == LearningCriterion.AVERAGE:
+                        ref_V_true = self.env.getV()[0]
+                        ref_V = learner.getV().getValue(0)
+                    RMSE[min(episode+1, nepisodes)] = rmse(self.env.getV() - ref_V_true, learner.getV().getValues() - ref_V, weights=weights)
+                    MAPE[min(episode+1, nepisodes)] = mape(self.env.getV() - ref_V_true, learner.getV().getValues() - ref_V, weights=weights)
 
             if plot and show_messages(True, verbose_period, episode):
-                # Plot the estimated value function at the end of the episode
-                # in both 1D layout and 2D layout, if the environment is 2D.
-                #print("episode: {} (T={}), color: {}".format(episode, t_episode+1, colors(episode/nepisodes)))
-                plt.figure(fig_V.number)
-                plt.plot(self.env.getAllStates(), learner.getV().getValues(), linewidth=0.5,
-                         color=colors(min(episode, nepisodes - 1) / nepisodes))
-                plt.title("State values evolution (blue: initial, red: final)\nEpisode {} of {}".format(episode + 1, nepisodes))
-                plt.pause(pause)
-                plt.draw()
-                #fig_V.canvas.draw()    # This should be equivalent to plt.draw()
-                if self.env.getDimension() == 2:
-                    # Update the 2D plots
-                    plt.figure(fig_V2.number)
-                    (ax_V, ax_C) = fig_V2.subplots(1, 2)
-                    shape = self.env.getShape()
-                    rewards = self.env.getRewards()
-
-                    state_values = np.asarray(learner.getV().getValues()).reshape(shape)
-                    if len(rewards) > 0:
-                        colornorm = plt.Normalize(vmin=np.min(list(rewards)), vmax=np.max(list(rewards)))
-                    else:
-                        colornorm = None
-                    ax_V.imshow(state_values, cmap=colors) #, norm=colornorm) # (2023/11/23) If we use norm=colornorm we might see all blue colors... even if the V values vary from 0 to 1... why??
-
-                    arr_state_counts = learner.getStateCounts().reshape(shape)
-                    colors_count = cm.get_cmap("Blues")
-                    colornorm = plt.Normalize(vmin=0, vmax=np.max(arr_state_counts))
-                    ax_C.imshow(arr_state_counts, cmap=colors_count, norm=colornorm)
-
-                    fig_V2.suptitle("State values (left) and state counts (right)\nEpisode {} of {}".format(episode, nepisodes))
-                    plt.pause(pause)
-                    plt.draw()
-
-                if state_observe is not None:
-                    plt.figure(fig_RMSE_state.number)
-
-                    # Compute quantities to plot
-                    RMSE_state_observe = rmse(np.array(self.env.getV()[state_observe]), np.array(learner.getV().getValue(state_observe)), weights=weights)
-                    se95 = 2*np.sqrt( 0.5*(1-0.5) / (episode+1))
-                    # Only count falling inside the CI starting at episode 100 so that
-                    # the normal approximation of the SE is more correct.
-                    if episode + 1 >= 100:
-                        ntimes_rmse_inside_ci95 += (RMSE_state_observe <= se95)
-
-                    # Plot of the estimated value of the state at the end of the episode
-                    # NOTE: the plot is just ONE point, the state value at the end of the episode;
-                    # at each new episode, a new point with this information will be added to the plot.
-                    plt.plot(episode+1, learner.getV().getValue(state_observe), 'r*-', markersize=7)
-                    # Plot the average of the state value function over the values that it took along the episode while it was being learned.
-                    #plt.plot(episode, np.mean(np.array(V_state_observe)), 'r.-')
-                    # Plot of the estimation error and the decay of the "confidence bands" for the true value function
-                    plt.plot(episode+1, RMSE_state_observe, 'k.-', markersize=7)
-                    plt.plot(episode+1,  se95, color="gray", marker=".", markersize=5)
-                    plt.plot(episode+1, -se95, color="gray", marker=".", markersize=5)
-                    # Plot of learning rate
-                    #plt.plot(episode+1, learner.getAlphaForState(state_observe), 'g.-')
-
-                    # Finalize plot
-                    ax = plt.gca()
-                    ax.set_ylim((-1, 1))
-                    yticks = np.arange(-10,10)/10
-                    ax.set_yticks(yticks)
-                    ax.axhline(y=self.env.getV()[state_observe], color="red", linewidth=0.5)
-                    ax.axhline(y=0, color="gray")
-                    plt.title("State value (estimated and true) and |error| for state {} - episode {} of {}".format(state_observe, episode+1, nepisodes))
-                    legend = ['Estimated value', '|error|', 'true value', '2*SE = 2*sqrt(0.5*(1-0.5)/episode)']
-                    plt.legend(legend)
-                    if episode + 1 == nepisodes:
-                        # Show the true value function coverage as x-axis label
-                        ax.set_xlabel("% Episodes error is inside 95% Confidence Interval (+/- 2*SE) (for episode>=100): {:.1f}%" \
-                                      .format(ntimes_rmse_inside_ci95/(episode+1 - 100 + 1)*100))
-                    plt.legend(legend)
-                    plt.draw()
+                self._update_plots_at_episode_end(episode, nepisodes, learner, t_learn, fig_V, fig_V2, fig_RMSE_state, colors_V, state_observe, ntimes_rmse_inside_ci95, weights=weights, pause=pause, method_name="_run_single, ")
 
             if plot and isinstance(learner, LeaTDLambdaAdaptive) and episode == nepisodes - 1:
                 learner.plot_info(episode, nepisodes)
@@ -2867,44 +2877,9 @@ class Simulator:
             print("V = {}".format(V))
             print("Q = {}".format(Q.reshape(self.env.getNumStates(), self.env.getNumActions())))
 
-        # Comment this out to NOT show the plot right away
-        # in case the calling function adds a new plot to the graph generated here
-        if plot and show_messages(True, verbose_period, t):
-            if self.env.getDimension() == 2:
-                # Plot the state counts in a separate image
-                fig_C = plt.figure()
-                plt.figure(fig_C.number)
-
-                state_counts_min = np.min( learner.getStateCounts() )
-                state_counts_mean = np.mean( learner.getStateCounts() )
-                state_counts_max = np.max( learner.getStateCounts() )
-
-                shape = self.env.getShape()
-                arr_state_counts = learner.getStateCounts().reshape(shape)
-                colors_count = cm.get_cmap("Blues")
-                colornorm = plt.Normalize(vmin=0, vmax=np.max(arr_state_counts))
-                plt.imshow(arr_state_counts, cmap=colors_count, norm=colornorm)
-                # Font size factor
-                fontsize = 14
-                factor_fs = np.min((5/shape[0], 5/shape[1]))
-                for x in range(shape[0]):
-                    for y in range(shape[1]):
-                        # Recall the x axis corresponds to the columns of the matrix shown in the image
-                        # and the y axis corresponds to the rows
-                        plt.text(y, x, "{:.0f}".format(arr_state_counts[x,y]),
-                                 fontsize=fontsize*factor_fs, horizontalalignment='center', verticalalignment='center')
-
-                plt.title("State counts by state\n# visits: (min, mean, max) = ({:.0f}, {:.1f}, {:.0f})" \
-                          .format(state_counts_min, state_counts_mean, state_counts_max))
-            else:
-                # Add the state counts to the plot of the state value function
-                #plt.colorbar(cm.ScalarMappable(cmap=colormap))    # Does not work
-                plt.figure(fig_V.number)
-                ax = plt.gca()
-                ax2 = ax.twinx()    # Create a secondary axis sharing the same x axis
-                ax2.bar(self.env.getAllStates(), learner.getStateCounts(), color="blue", alpha=0.3)
-                plt.sca(ax) # Go back to the primary axis
-                #plt.figure(fig_V.number)
+        # Comment this out to NOT show the plot right away in case the calling function adds a new plot to the graph generated here
+        if plot:
+            self._final_plots(learner, t_learn, fig_V, fig_C, method_name="_run_single, ")
 
         if verbose:
             print("Percentage of episodes reaching max step = {:.1f}%".format(nepisodes_max_steps_reached / nepisodes*100))
@@ -2938,7 +2913,7 @@ class Simulator:
                     'V_state_observe': V_state_observe,
                 }
 
-    def _run_single_continuing_task(self, nepisodes=1, max_time_steps=1000, max_time_steps_per_episode=+np.Inf, start_state_first_episode=None,
+    def _run_single_continuing_task(self, t_learn=0, nepisodes=1, max_time_steps=1000, max_time_steps_per_episode=+np.Inf, start_state_first_episode=None,
                                     estimated_average_reward=None, reset_value_functions=True,
                                     seed=None, compute_rmse=False, weights_rmse=None,
                                     state_observe=None, set_cycle=None,
@@ -2956,6 +2931,10 @@ class Simulator:
         estimated_average_reward: (opt) None
             An existing estimation of the average reward that is used as correction of the value functions being learned during this simulation process.
             default: None
+
+        t_learn: (opt) int
+            The learning step number (starting at 0) for which the simulation is run when learning is used in the context of policy learning.
+            This is ONLY used for informational purposes, i.e. to show which stage of the policy learning we are at.
 
         set_cycle: (opt) set
             Set of states whose entrance from the complement set defines a cycle.
@@ -3054,21 +3033,6 @@ class Simulator:
         # Dictionary that keeps track of the counts of the states visited at every exit event from the cycle set
         # This information can be used to estimate the stationary exit distribution from the cycle set.
         dict_state_counts_exit_cycle_set = dict()
-
-        # Plotting setup
-        if plot:
-            # Setup the figures that will be updated at every verbose_period
-            colors = cm.get_cmap(colormap, lut=max_time_steps)
-            # 1D plot (even for 2D environments)
-            fig_V = plt.figure(figsize=(10, 16))
-            # Plot the true state value function (to have it as a reference already
-            plt.plot(self.env.getAllStates(), self.env.getV(), '.-', color="blue")
-            if self.env.getDimension() == 2:
-                # 2D plot
-                fig_V2 = plt.figure()
-            if state_observe is not None:
-                # Plot with the evolution of the V estimate and its error
-                fig_RMSE_state = plt.figure()
         #--- Parse input parameters
 
         # Define the policy and the learner
@@ -3090,6 +3054,32 @@ class Simulator:
         # o.w. the given estimated average reward should be used as initial estimate of the average reward during further learning.
         learner.reset(reset_episode=True, reset_value_functions=reset_value_functions, reset_average_reward=estimated_average_reward is None)
 
+        # Plotting setup
+        if plot:
+            # Setup the figures that will be updated at every verbose_period
+            num_colors_in_colormap = max_time_steps
+            fig_V, fig_V2, fig_C, fig_RMSE_state, colors_V, self.fig_policy = self._setup_plots(colormap=colormap, lut=num_colors_in_colormap, state_observe=state_observe)
+
+            # Setup the axes to use for the average reward evolution plot
+            dict_axes = dict({'average_reward': plt.figure().subplots(1, 1)})
+            # Initialize the average reward plot with the current estimate of the average reward stored in the learner
+            dict_lines = dict({'average_reward': dict_axes['average_reward'].plot(0, learner.getAverageReward(), '.-', color="red")})
+            # Set the maximum X axis value if the number simulation steps to run in advance is known
+            dict_axes['average_reward'].set_xlim((None, max_time_steps)) if max_time_steps < +np.Inf else None
+            dict_axes['average_reward'].set_xlabel("Step")
+            dict_axes['average_reward'].set_ylabel("Estimated average reward")
+            dict_axes['average_reward'].legend(["TD average reward"])
+            plt.suptitle(f"[_run_single_continuing_task, Learning step {t_learn+1}]")
+
+            # Reposition and resize the figure to avoid overlapping with the other figures
+            # Ref: https://stackoverflow.com/questions/7449585/how-do-you-set-the-absolute-position-of-figure-windows-with-matplotlib
+            plt.figure(dict_axes['average_reward'].get_figure().number)
+            fig_mgr = plt.get_current_fig_manager()
+            fig_mgr.window.setGeometry( WINDOW_TOP_LEFT_HORIZONTAL,
+                                        WINDOW_TOP_LEFT_VERTICAL + WINDOW_HEIGHT + 3*SPACE_BETWEEN_WINDOWS, # `3*` because we need to leave space for the WINDOW's title
+                                        WINDOW_WIDTH,
+                                        WINDOW_HEIGHT)
+
         # Environment seed
         # We only set the seed when it is not None because when this method is called by the simulate() method,
         # seed is set to None in order to avoid having each experiment (i.e. each replication) produce the same results
@@ -3100,7 +3090,7 @@ class Simulator:
             self.env.setSeed(seed)
 
         # Store initial values used in the analysis of all the episodes run
-        V_state_observe, RMSE, MAPE, ntimes_rmse_inside_ci95 = self.initialize_run_with_learner_status(nepisodes, learner, compute_rmse, weights, state_observe)
+        V_state_observe, RMSE, MAPE, ntimes_rmse_inside_ci95 = self._initialize_run_with_learner_status(nepisodes, learner, compute_rmse, weights, state_observe)
 
         # Initial state value function
         V = learner.getV().getValues()
@@ -3160,7 +3150,7 @@ class Simulator:
                 print("\t[DEBUG] Starts at state {}".format(self.env.getState()))
                 print("\t[DEBUG] State value function at start of episode:\n\t{}".format(learner.getV().getValues()))
 
-            # Time step within the current episode
+            # Time step within the current episode (which in this case is only ONE episode, because we are dealing with a CONTINUING learning task)
             # Note that we initialize it at -1 because the time within an episode indexes the time at which the ACTION is taken,
             # (and this will happen AFTER increasing t_episode by 1, so that the first time an action is taken will be indexed by t_episode = 0)
             # as opposed to the time at which the next state is observed (which is the convention used for variable `t` defined above).
@@ -3182,6 +3172,34 @@ class Simulator:
                     # The episode ended at the previous step
                     # => Reset the episode-related information (needed most importantly for a correct calculation of the average reward)
                     # => Reset the environment to a start state because the process honours a CONTINUING learning task (of the value functions)
+
+                    if plot:
+                        # Update plots that are updated at the end of an episode
+                        self._update_plots_at_episode_end(episode, nepisodes, learner, t_learn, fig_V, fig_V2, fig_RMSE_state, colors_V, state_observe, ntimes_rmse_inside_ci95,
+                                                          weights=weights, pause=pause, method_name="_run_single_continuing_task, ")
+
+                        # Update the average reward plot, which happens only at the end of each "episode"
+                        # (i.e. when the terminal state is reached or when the episode finishes because the maximum simulation time was reached)
+                        # since the average reward is updated by the LeaTD.learn_at_episode_end() method.
+                        dict_lines = update_plots(dict_axes, dict({'average_reward': [(t, learner.getAverageReward())]}), dict_lines, show_title=False)
+                        # Make sure that the Y axis is re-scaled after adding the new point (because after setting the axis limits (as done right below with set_ylim()),
+                        # the axis limit is NOT re-calculated after adding new points (see: https://matplotlib.org/stable/users/explain/axes/autoscale.html))
+                        dict_axes['average_reward'].autoscale(axis='y')
+                        if learner.getAverageReward() < 0:
+                            # We assume the rewards are negative
+                            # => Set the MAXIMUM at 0, so that we get a visual comparison with other figures plotting the same concept
+                            dict_axes['average_reward'].set_ylim((None, 0))
+                        else:
+                            # We assume the rewards are positive
+                            # => Set the minimum at 0, so that we get a visual comparison with other figures plotting the same concept
+                            dict_axes['average_reward'].set_ylim((0, None))
+                        plt.figure(dict_axes['average_reward'].get_figure().number)  # Need to select the figure so that it is re-drawn, otherwise, the redraw applies to the active figure (already redrawn) selected above by plt.figure()
+                        plt.suptitle(f"[_run_single_continuing_task, Learning step {t_learn+1}]\nEpisode ended at episode time t_episode={t_episode}, simulation time t={t}")
+                        plt.pause(pause)
+                        plt.draw()
+
+                        if isinstance(learner, LeaTDLambdaAdaptive):
+                            learner.plot_info(episode, nepisodes)
 
                     t_episode = -1      # Reset the episode counter. Note that we reset it to -1 and NOT 0 because the episode is considered to start when `state` is a START state and here state is a terminal state, whereas *`next_state`* is the start state. So t_episode = 0 should be set at the next iteration.
                     # Reset the learner as a new episode will start
@@ -3279,54 +3297,13 @@ class Simulator:
 
                 # ---- UPDATE FOR CONTINUING TASK
                 # Plotting step moved INSIDE the episode because there is only 1 episode!
-                if plot and show_messages(True, verbose_period, t):
-                    if self.env.getDimension() == 2:
-                        # Plot the state counts in a separate image
-                        fig_C = plt.figure()
-                        plt.figure(fig_C.number)
-
-                        state_counts_min = np.min(learner.getStateCounts())
-                        state_counts_mean = np.mean(learner.getStateCounts())
-                        state_counts_max = np.max(learner.getStateCounts())
-
-                        shape = self.env.getShape()
-                        arr_state_counts = learner.getStateCounts().reshape(shape)
-                        colors_count = cm.get_cmap("Blues")
-                        colornorm = plt.Normalize(vmin=0, vmax=np.max(arr_state_counts))
-                        plt.imshow(arr_state_counts, cmap=colors_count, norm=colornorm)
-                        # Font size factor
-                        fontsize = 14
-                        factor_fs = np.min((5 / shape[0], 5 / shape[1]))
-                        for x in range(shape[0]):
-                            for y in range(shape[1]):
-                                # Recall the x axis corresponds to the columns of the matrix shown in the image
-                                # and the y axis corresponds to the rows
-                                plt.text(y, x, "{:.0f}".format(arr_state_counts[x, y]),
-                                         fontsize=fontsize * factor_fs, horizontalalignment='center', verticalalignment='center')
-
-                        plt.title("State counts by state\n# visits: (min, mean, max) = ({:.0f}, {:.1f}, {:.0f})" \
-                                  .format(state_counts_min, state_counts_mean, state_counts_max))
-                    else:
-                        # Add the state counts to the plot of the state value function
-                        # plt.colorbar(cm.ScalarMappable(cmap=colormap))    # Does not work
-                        plt.figure(fig_V.number)
-                        plt.plot(self.env.getAllStates(), learner.getV().getValues(), linewidth=0.5, color=colors(t / max_time_steps))
-                        if False:
-                            ax = plt.gca()
-                            ax2 = ax.twinx()  # Create a secondary axis sharing the same x axis
-                            ax2.bar(self.env.getAllStates(), learner.getStateCounts(), color="blue", alpha=0.3)
-                            plt.sca(ax)  # Go back to the primary axis
-                        plt.title(f"V(s) evolution (blueish: initial, reddish: final)"
-                                  f"\nSystem's time t = {t} of max {max_time_steps}, from state = {state} --> next state = {next_state} (V(s) = {np.round(learner.getV().getValue(next_state), 3)})"
-                                  f"\nV(state={state}) = {np.round(V_state_prev, 3)} --> V(state={state}) = {np.round(learner.getV().getValue(state), 3)} (delta(V) = {np.round(learner.getV().getValue(state) - V_state_prev, 3)}, {np.round((learner.getV().getValue(state) - V_state_prev) / max(1, V_state_prev) * 100, 1)}%)"
-                                  f"\nCount[s] = {learner.getStateCounts()}, alpha[s] = {learner.getAlphasByState()}")
-                        plt.pause(pause)
-                        plt.draw()
+                if plot and show_messages(True, verbose_period, t_episode):
+                    self._update_plots(learner, t_learn, fig_V, fig_C, colors_V, num_colors_in_colormap, t, max_time_steps, pause=pause, method_name="_run_single_continuing_task, ")
                 # ---- UPDATE FOR CONTINUING TASK
 
 
 
-            #------- EPISODE FINISHED --------#
+            #------- FICTITIOUS EPISODE FINISHED --------#
             print(", agent ENDS at state: {} at discrete time t = {})".format(self.env.getState(), t_episode+1), end=" ")
             print("")
 
@@ -3401,85 +3378,15 @@ class Simulator:
 
             if compute_rmse:
                 if self.env.getV() is not None:
+                    # For the AVERAGE reward criterion, plot the state value function referenced to V(s=0) as in this case V(s) is NOT unique
+                    ref_V_true = ref_V = 0.0
+                    if self.agent.getLearner().getLearningCriterion() == LearningCriterion.AVERAGE:
+                        ref_V_true = self.env.getV()[0]
+                        ref_V = learner.getV().getValue(0)
                     if weights_rmse is not None:
                         weights = learner.getStateCounts()
-                    RMSE[min(episode+1, nepisodes)] = rmse(self.env.getV(), learner.getV().getValues(), weights=weights)
-                    MAPE[min(episode+1, nepisodes)] = mape(self.env.getV(), learner.getV().getValues(), weights=weights)
-
-            if plot and show_messages(True, verbose_period, episode):
-                # Plot the estimated value function at the end of the simulation
-                # in both 1D layout and 2D layout, if the environment is 2D.
-                plt.figure(fig_V.number)
-                plt.plot(self.env.getAllStates(), learner.getV().getValues(), linewidth=0.5, color=colors(t / max_time_steps))
-                plt.pause(pause)
-                plt.draw()
-                #fig_V.canvas.draw()    # This should be equivalent to plt.draw()
-                if self.env.getDimension() == 2:
-                    # Update the 2D plots
-                    plt.figure(fig_V2.number)
-                    (ax_V, ax_C) = fig_V2.subplots(1, 2)
-                    shape = self.env.getShape()
-                    rewards = self.env.getRewards()
-
-                    state_values = np.asarray(learner.getV().getValues()).reshape(shape)
-                    if len(rewards) > 0:
-                        colornorm = plt.Normalize(vmin=np.min(list(rewards)), vmax=np.max(list(rewards)))
-                    else:
-                        colornorm = None
-                    ax_V.imshow(state_values, cmap=colors) #, norm=colornorm) # (2023/11/23) If we use norm=colornorm we might see all blue colors... even if the V values vary from 0 to 1... why??
-
-                    arr_state_counts = learner.getStateCounts().reshape(shape)
-                    colors_count = cm.get_cmap("Blues")
-                    colornorm = plt.Normalize(vmin=0, vmax=np.max(arr_state_counts))
-                    ax_C.imshow(arr_state_counts, cmap=colors_count, norm=colornorm)
-
-                    fig_V2.suptitle("State values (left) and state counts (right)\nEpisode {} of {}".format(episode, nepisodes))
-                    plt.pause(pause)
-                    plt.draw()
-
-                if state_observe is not None:
-                    plt.figure(fig_RMSE_state.number)
-
-                    # Compute quantities to plot
-                    RMSE_state_observe = rmse(np.array(self.env.getV()[state_observe]), np.array(learner.getV().getValue(state_observe)), weights=weights)
-                    se95 = 2*np.sqrt( 0.5*(1-0.5) / (episode+1))
-                    # Only count falling inside the CI starting at episode 100 so that
-                    # the normal approximation of the SE is more correct.
-                    if episode + 1 >= 100:
-                        ntimes_rmse_inside_ci95 += (RMSE_state_observe <= se95)
-
-                    # Plot of the estimated value of the state at the end of the episode
-                    # NOTE: the plot is just ONE point, the state value at the end of the episode;
-                    # at each new episode, a new point with this information will be added to the plot.
-                    plt.plot(episode+1, learner.getV().getValue(state_observe), 'r*-', markersize=7)
-                    # Plot the average of the state value function over the values that it took along the episode while it was being learned.
-                    #plt.plot(episode, np.mean(np.array(V_state_observe)), 'r.-')
-                    # Plot of the estimation error and the decay of the "confidence bands" for the true value function
-                    plt.plot(episode+1, RMSE_state_observe, 'k.-', markersize=7)
-                    plt.plot(episode+1,  se95, color="gray", marker=".", markersize=5)
-                    plt.plot(episode+1, -se95, color="gray", marker=".", markersize=5)
-                    # Plot of learning rate
-                    #plt.plot(episode+1, learner.getAlphaForState(state_observe), 'g.-')
-
-                    # Finalize plot
-                    ax = plt.gca()
-                    ax.set_ylim((-1, 1))
-                    yticks = np.arange(-10,10)/10
-                    ax.set_yticks(yticks)
-                    ax.axhline(y=self.env.getV()[state_observe], color="red", linewidth=0.5)
-                    ax.axhline(y=0, color="gray")
-                    plt.title("State value (estimated and true) and |error| for state {} - episode {} of {}".format(state_observe, episode+1, nepisodes))
-                    legend = ['Estimated value', '|error|', 'true value', '2*SE = 2*sqrt(0.5*(1-0.5)/episode)']
-                    plt.legend(legend)
-                    if episode + 1 == nepisodes:
-                        # Show the true value function coverage as x-axis label
-                        ax.set_xlabel("% Episodes error is inside 95% Confidence Interval (+/- 2*SE) (for episode>=100): {:.1f}%" \
-                                      .format(ntimes_rmse_inside_ci95/(episode+1 - 100 + 1)*100))
-                    plt.legend(legend)
-                    plt.draw()
-
-            if plot and isinstance(learner, LeaTDLambdaAdaptive) and episode == nepisodes - 1:
-                learner.plot_info(episode, nepisodes)
+                    RMSE[min(episode+1, nepisodes)] = rmse(self.env.getV() - ref_V_true, learner.getV().getValues() - ref_V, weights=weights)
+                    MAPE[min(episode+1, nepisodes)] = mape(self.env.getV() - ref_V_true, learner.getV().getValues() - ref_V, weights=weights)
 
             # Use the following IF when we want to stop the simulation EITHER when the maximum time steps (over all episodes) is reached
             # OR
@@ -3520,6 +3427,9 @@ class Simulator:
             print(f"Estimated value functions at END of experiment (last episode run = {episode+1} of {nepisodes}):")
             print("V = {}".format(V))
             print("Q = {}".format(Q.reshape(self.env.getNumStates(), self.env.getNumActions())))
+
+        if plot:
+            self._final_plots(learner, t_learn, fig_V, fig_C, method_name="_run_single_continuing_task, ")
 
         return  learner.getV().getValues(), learner.getQ().getValues(), learner.getA().getValues(), learner.getStateCounts(), RMSE, MAPE, \
                 {   'nsteps': t,
@@ -3644,7 +3554,7 @@ class Simulator:
 
         return dict_state_counts_exit_cycle_set
 
-    def initialize_run_with_learner_status(self, nepisodes, learner, compute_rmse, weights, state_observe):
+    def _initialize_run_with_learner_status(self, nepisodes, learner, compute_rmse, weights, state_observe):
         """
         The run is initialized by storing the initial learner status in terms of:
         - RMSE (if its computation is requested)
@@ -3682,9 +3592,14 @@ class Simulator:
             RMSE = np.nan*np.zeros(nepisodes+1)
             MAPE = np.nan*np.zeros(nepisodes+1)
             # RMSE (True vs. Estimated values)
-            print(f"True value function:\n{self.env.getV()}")
-            RMSE[0] = rmse(self.env.getV(), learner.getV().getValues(), weights=weights)
-            MAPE[0] = mape(self.env.getV(), learner.getV().getValues(), weights=weights)
+            # For the AVERAGE reward criterion, plot the state value function referenced to V(s=0) as in this case V(s) is NOT unique
+            ref_V_true = ref_V = 0.0
+            if self.agent.getLearner().getLearningCriterion() == LearningCriterion.AVERAGE:
+                ref_V_true = self.env.getV()[0]
+                ref_V = learner.getV().getValue(0)
+            print(f"True value function:\n{self.env.getV() - ref_V_true}")
+            RMSE[0] = rmse(self.env.getV() - ref_V_true, learner.getV().getValues() - ref_V, weights=weights)
+            MAPE[0] = mape(self.env.getV() - ref_V_true, learner.getV().getValues() - ref_V, weights=weights)
         else:
             RMSE = None
             MAPE = None
@@ -3698,6 +3613,413 @@ class Simulator:
         ntimes_rmse_inside_ci95 = 0
 
         return V, RMSE, MAPE, ntimes_rmse_inside_ci95
+
+    def _setup_plots(self, colormap="seismic", lut=None, state_observe=None, setup_policy_plot=True):
+        """
+        Sets up the plots when iterative plots are requested
+
+        These mainly includes the plot of the state value function V(s) estimated during the learning process, the state counts, the policy,
+        and possibly the RMSE of a particle state of interest.
+
+        lut: (opt) int
+            Lookup Up Table size defining the number of colors in the colormap used for the value function plots.
+            The colormap is defined by the matplotlib.cm.get_cmap() function.
+            default: None
+
+        colormap: (opt) str
+            Name of the colormap to use in the generation of the animated plots showing the evolution of the value function estimates.
+            It must be a valid colormap among those available in the matplotlib.cm module.
+            default: seismic, a colormap that ranges from blue to red, where the middle is white
+
+        setup_policy_plot: (opt) bool
+            Whether to setup (create) a figure for the plot of the policy when the value functions learning process ends.
+            default: True
+
+        Return: tuple
+        Tuple with the following elements:
+        - fig_V: figure handle for the line plot of the state value function. It is NEVER None.
+        - fig_V2: (It is None for 1D environments) figure handle for the image plot of the state value function for 2D environments.
+        - fig_C: (It is None for 1D environments as state counts are plotted on fig_V) figure handle for the image plot of the state count for 2D environments.
+        - fig_RMSE_state: (It is None when state_observe=None) figure handle for the RMSE of V(s) for the state s to observe, if any.
+        - colors_V: colormap object generated by cm.get_cmap() to use for the state value function plots. A color in the map can be retrieved by color(i/lut) where
+        i is an integer between 0 and lut-1 defining the color number in the colormap we want to retrieve.
+        - fig_P: (It is None when setup_policy_plot=False) figure handle for the image plot of the policy at each state.
+        """
+        # Colormap for the plot of the state value function V(s)
+        colors_V = cm.get_cmap(colormap, lut=lut)
+
+        # 1D plot (even for 2D environments)
+        fig_V = plt.figure()
+        ax = plt.gca()
+        # Plot the true state value function (to have it as a reference already) and set integer values on the horizontal axis as states are integer-valued
+        if self.env.getV() is not None:
+            # For the AVERAGE reward criterion, plot the state value function referenced to V(s=0) as in this case V(s) is NOT unique
+            _ref_V = self.env.getV()[0] if self.agent.getLearner().getLearningCriterion() == LearningCriterion.AVERAGE else 0.0
+            ax.plot(self.env.getAllStates(), self.env.getV() - _ref_V, '.-', color="blue")
+            ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+        # Plot the initial estimate of the state value function stored in the learner
+        _learner_state_values = self.agent.getLearner().getV().getValues()
+        _ref_V = _learner_state_values[0] if self.agent.getLearner().getLearningCriterion() == LearningCriterion.AVERAGE else 0.0
+        ax.plot(self.env.getAllStates(), _learner_state_values - _ref_V, '-', color=colors_V(0))
+
+        # Create other figures, depending on the environment's dimension
+        if self.env.getDimension() == 2:
+            # 2D plots
+            fig_V2 = plt.figure()   # 2D state value function and 2D state counts
+            fig_C = plt.figure()    # State counts
+        else:
+            # Add a secondary Y axis to fig_V where we will show the state counts
+            fig_V.gca().twinx()
+            fig_V2 = None
+            fig_C = None
+
+        # Plot for the state to observe
+        if state_observe is not None:
+            # Plot with the evolution of the V estimate and its error
+            fig_RMSE_state = plt.figure()
+        else:
+            fig_RMSE_state = None
+
+        if setup_policy_plot:
+            # Image plot of the policy, it has as many subplots as state in the environment, laid out with its shape
+            fig_P = plt.figure()
+            # Plot the initial policy
+            self._update_policy_plot(fig_P)
+        else:
+            fig_P = None
+
+        # Reposition and resize the figures so that we can see their updated clearly, without overlapping
+        # It's NOT so easy!! The mechanism also depends on the matplotlib backend! (e.g. Qt5Agg or another one)
+        # Ref: https://stackoverflow.com/questions/7449585/how-do-you-set-the-absolute-position-of-figure-windows-with-matplotlib
+        # The method window.setGeometry() is used which modifies the position and size of the ACTIVE figure.
+        # Its parameters are:
+        # - position of window's top left corner, horizontal position from left
+        # - position of window's top left corner, vertical position from top
+        # - window width in pixels
+        # - window height in pixels
+        # ALSO, we need to leave a margin for the figure title, which is NOT accounted for in the window size!
+        plt.figure(fig_V.number)
+        fig_mgr = plt.get_current_fig_manager()
+        fig_mgr.window.setGeometry(WINDOW_TOP_LEFT_HORIZONTAL,
+                                   WINDOW_TOP_LEFT_VERTICAL,
+                                   WINDOW_WIDTH,
+                                   WINDOW_HEIGHT)
+        if fig_V2 is not None:
+            plt.figure(fig_V2.number)
+            fig_mgr = plt.get_current_fig_manager()
+            fig_mgr.window.setGeometry(WINDOW_TOP_LEFT_HORIZONTAL + WINDOW_WIDTH + SPACE_BETWEEN_WINDOWS,
+                                       WINDOW_TOP_LEFT_VERTICAL,
+                                       WINDOW_WIDTH,
+                                       WINDOW_HEIGHT)
+        if fig_C is not None:
+            plt.figure(fig_C.number)
+            fig_mgr = plt.get_current_fig_manager()
+            fig_mgr.window.setGeometry(WINDOW_TOP_LEFT_HORIZONTAL + 2*(WINDOW_WIDTH + SPACE_BETWEEN_WINDOWS),
+                                       WINDOW_TOP_LEFT_VERTICAL,
+                                       WINDOW_WIDTH,
+                                       WINDOW_HEIGHT)
+        if fig_RMSE_state is not None:
+            plt.figure(fig_RMSE_state.number)
+            fig_mgr = plt.get_current_fig_manager()
+            fig_mgr.window.setGeometry(WINDOW_TOP_LEFT_HORIZONTAL + 3*(WINDOW_WIDTH + SPACE_BETWEEN_WINDOWS),
+                                       WINDOW_TOP_LEFT_VERTICAL,
+                                       WINDOW_WIDTH,
+                                       WINDOW_HEIGHT)
+        if fig_P is not None:
+            plt.figure(fig_P.number)
+            fig_mgr = plt.get_current_fig_manager()
+            fig_mgr.window.setGeometry(WINDOW_TOP_LEFT_HORIZONTAL + 2 * (WINDOW_WIDTH + SPACE_BETWEEN_WINDOWS),
+                                       WINDOW_TOP_LEFT_VERTICAL + WINDOW_HEIGHT + 3*SPACE_BETWEEN_WINDOWS,  # `3*` because we need to leave space for the WINDOW's title
+                                       WINDOW_WIDTH,
+                                       WINDOW_HEIGHT)
+
+        return fig_V, fig_V2, fig_C, fig_RMSE_state, colors_V, fig_P
+
+    def _update_plots(self, learner, t_learn, fig_V, fig_C, colors_V, colors_V_length, t, max_time_steps,
+                      pause=0.1, method_name="", fontsize_labels=LABELS_FONTSIZE, color_labels=LABELS_COLOR):
+        # NOTE: If fig_C is None and a state counts plot should be generated SEPARATE from the state value function plot (because e.g. the environment is 2D),
+        # a new figure is created by this method. This is useful when we want to see how the state counts evolve.
+
+        # Update the state value function plot
+        plt.figure(fig_V.number)
+        ax = plt.gca()
+        # For the AVERAGE reward criterion, plot the state value function referenced to V(s=0) as in this case V(s) is NOT unique
+        ref_V = learner.getV().getValue(0) if self.agent.getLearner().getLearningCriterion() == LearningCriterion.AVERAGE else 0.0
+        ax.plot(self.env.getAllStates(), learner.getV().getValues() - ref_V, linewidth=0.5, color=colors_V(t / colors_V_length))
+        ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+        plt.title(f"[{method_name}UPDATE, Learning step {t_learn+1}]\nV(s) evolution (blueish: initial, reddish: final): # Steps={t} of {max_time_steps}")
+                  #f"\nSystem's time t = {t} of max {max_time_steps}, from state = {state} --> next state = {next_state} (V(s) = {np.round(learner.getV().getValue(next_state), 3)})"
+                  #f"\nV(state={state}) = {V_state_prev is not None and np.round(V_state_prev, 3) or 'N/A'} --> V(state={state}) = {np.round(learner.getV().getValue(state), 3)} (delta(V) = {V_state_prev is not None and np.round(learner.getV().getValue(state) - V_state_prev, 3) or 'N/A'}, {V_state_prev is not None and np.round((learner.getV().getValue(state) - V_state_prev) / max(1, V_state_prev) * 100, 1) or 'N/A'}%)"
+                  #f"\nCount[s] = {learner.getStateCounts()}, alpha[s] = {learner.getAlphasByState()}")
+        plt.pause(pause)
+        plt.draw()
+
+        # Update of the state counts plot (or creation of a new one if environment is 2D and fig_C is None)
+        if self.env.getDimension() == 1:
+            # Add the state counts to the plot of the state value function
+            axes = fig_V.get_axes()
+            assert len(axes) == 2
+            axes[1].cla()   # Clear the plot in the axis so that the color of the bars do not get more and more intense which would cover the plot of the state value function
+            axes[1].bar(self.env.getAllStates(), learner.getStateCounts(), color="blue", alpha=0.3)
+            axes[1].xaxis.set_major_locator(MaxNLocator(integer=True))
+            plt.sca(axes[0])  # Go back to the primary axis
+        else:
+            # Plot the state counts as a separate image from the image containing the state value function (because the environment is 2D)
+            if fig_C is None:
+                fig_C = plt.figure()
+                fig_mgr = plt.get_current_fig_manager()
+                fig_mgr.window.setGeometry(WINDOW_TOP_LEFT_HORIZONTAL + 2*(WINDOW_WIDTH + SPACE_BETWEEN_WINDOWS),
+                                           WINDOW_TOP_LEFT_VERTICAL,
+                                           WINDOW_WIDTH,
+                                           WINDOW_HEIGHT)
+            plt.figure(fig_C.number)
+            plt.clf()   # Clear the figure in order to properly see the labels showing the state counts (o.w. they overlap on the existing ones when the figure they are plotted on is not new, i.e. when the value of the fig_C parameter is not None)
+            ax_C = plt.gca()
+
+            state_counts_min = np.min(learner.getStateCounts())
+            state_counts_mean = np.mean(learner.getStateCounts())
+            state_counts_max = np.max(learner.getStateCounts())
+
+            shape = self.env.getShape()
+            arr_state_counts = learner.getStateCounts().reshape(shape)
+            colors_count = cm.get_cmap("Blues")
+            colornorm = plt.Normalize(vmin=0, vmax=np.max(arr_state_counts))
+            ax_C.imshow(arr_state_counts, cmap=colors_count, norm=colornorm)
+            ax_C.xaxis.set_major_locator(MaxNLocator(integer=True))
+            ax_C.yaxis.set_major_locator(MaxNLocator(integer=True))
+            self._add_count_labels(ax_C, arr_state_counts, fontsize=fontsize_labels, color=color_labels)
+
+            plt.title("[{}UPDATE, Learning step {}]\nState counts by state: # visits: (min, mean, max) = ({:.0f}, {:.1f}, {:.0f})" \
+                      .format(method_name, t_learn+1, state_counts_min, state_counts_mean, state_counts_max))
+            plt.pause(pause)
+            plt.draw()
+
+    def _update_plots_at_episode_end(self, episode, nepisodes, learner, t_learn, fig_V, fig_V2, fig_RMSE_state, colors_V, state_observe, ntimes_rmse_inside_ci95,
+                                     weights=None, pause=0.1, method_name="", fontsize_labels=LABELS_FONTSIZE, color_labels=LABELS_COLOR):
+        # Plot the estimated state value function at the end of the episode, in both 1D layout and 2D layout, if the environment is 2D.
+        #print("episode: {} (T={}), color: {}".format(episode, t_episode+1, colors_V(episode/nepisodes)))
+        plt.figure(fig_V.number)
+        # For the AVERAGE reward criterion, plot the state value function referenced to V(s=0) as in this case V(s) is NOT unique
+        ref_V = learner.getV().getValue(0) if self.agent.getLearner().getLearningCriterion() == LearningCriterion.AVERAGE else 0.0
+        plt.plot(self.env.getAllStates(), learner.getV().getValues() - ref_V, linewidth=0.5, color=colors_V(min(episode, nepisodes-1) / nepisodes))
+        plt.title(f"[{method_name}UPDATE@Episode, Learning step {t_learn+1}]\nState values evolution (blueish: initial, reddish: final): Episode {episode+1} of {nepisodes}")
+        plt.pause(pause)
+        plt.draw()
+        # fig_V.canvas.draw()    # This should be equivalent to plt.draw()
+        if fig_V2 is not None:
+            # Update the 2D plots
+            plt.figure(fig_V2.number)
+            (ax_V2, ax_C) = fig_V2.subplots(1, 2)   # Layout is LEFT: state value function, RIGHT: state counts
+            shape = self.env.getShape()
+            rewards = self.env.getRewards()
+
+            state_values = np.asarray(learner.getV().getValues()).reshape(shape)
+            if len(rewards) > 0:
+                colornorm = plt.Normalize(vmin=np.min(list(rewards)), vmax=np.max(list(rewards)))
+            else:
+                colornorm = None
+            ax_V2.cla()
+            ax_V2.imshow(state_values, cmap=colors_V)  #, norm=colornorm) # (2023/11/23) If we use norm=colornorm we might see all blue colors... even if the V values vary from 0 to 1... why??
+            ax_V2.xaxis.set_major_locator(MaxNLocator(integer=True))
+            ax_V2.yaxis.set_major_locator(MaxNLocator(integer=True))
+
+            arr_state_counts = learner.getStateCounts().reshape(shape)
+            colors_count = cm.get_cmap("Blues")
+            colornorm = plt.Normalize(vmin=0, vmax=np.max(arr_state_counts))
+            ax_C.cla()
+            ax_C.imshow(arr_state_counts, cmap=colors_count, norm=colornorm)
+            ax_C.xaxis.set_major_locator(MaxNLocator(integer=True))
+            ax_C.yaxis.set_major_locator(MaxNLocator(integer=True))
+            self._add_count_labels(ax_C, arr_state_counts, fontsize=fontsize_labels, color=color_labels, factor_fontsize=0.8)
+
+            fig_V2.suptitle(f"[{method_name}UPDATE@Episode, Learning step {t_learn+1}]\nState values (left) and state counts (right): Episode {episode+1} of {nepisodes}")
+            plt.pause(pause)
+            plt.draw()
+
+        if state_observe is not None:
+            assert fig_RMSE_state is not None
+            plt.figure(fig_RMSE_state.number)
+            ax = plt.gca()
+
+            # Compute quantities to plot
+            # For the AVERAGE reward criterion, plot the state value function referenced to V(s=0) as in this case V(s) is NOT unique
+            ref_V_true = ref_V = 0.0
+            if self.agent.getLearner().getLearningCriterion() == LearningCriterion.AVERAGE:
+                ref_V_true = self.env.getV()[0]
+                ref_V = learner.getV().getValue(0)
+            RMSE_state_observe = rmse(np.array(self.env.getV()[state_observe] - ref_V_true), np.array(learner.getV().getValue(state_observe) - ref_V), weights=weights)
+            se95 = 2 * np.sqrt(0.5 * (1 - 0.5) / (episode + 1))
+            # Only count falling inside the CI starting at episode 100 so that
+            # the normal approximation of the SE is more correct.
+            if episode + 1 >= 100:
+                ntimes_rmse_inside_ci95 += (RMSE_state_observe <= se95)
+
+            # Plot of the estimated value of the state at the end of the episode
+            # NOTE: the plot is just ONE point, the state value at the end of the episode;
+            # at each new episode, a new point with this information will be added to the plot.
+            ax.plot(episode + 1, learner.getV().getValue(state_observe) - ref_V, 'r*-', markersize=7)
+            # Plot the average of the state value function over the values that it took along the episode while it was being learned.
+            # plt.plot(episode, np.mean(np.array(V_state_observe)), 'r.-')
+            # Plot of the estimation error and the decay of the "confidence bands" for the true value function
+            ax.plot(episode + 1, RMSE_state_observe, 'k.-', markersize=7)
+            ax.plot(episode + 1, se95, color="gray", marker=".", markersize=5)
+            ax.plot(episode + 1, -se95, color="gray", marker=".", markersize=5)
+            # Plot of learning rate
+            # plt.plot(episode+1, learner.getAlphaForState(state_observe), 'g.-')
+
+            # Finalize plot
+            ax.set_ylim((-1, 1))
+            yticks = np.arange(-10, 10) / 10
+            ax.set_yticks(yticks)
+            ax.axhline(y=self.env.getV()[state_observe], color="red", linewidth=0.5)
+            ax.axhline(y=0, color="gray")
+            legend = ['Estimated value', '|error|', 'true value', '2*SE = 2*sqrt(0.5*(1-0.5)/episode)']
+            ax.legend(legend)
+            if episode + 1 == nepisodes:
+                # Show the true value function coverage as x-axis label
+                ax.set_xlabel("% Episodes error is inside 95% Confidence Interval (+/- 2*SE) (for episode>=100): {:.1f}%" \
+                              .format(ntimes_rmse_inside_ci95 / (episode + 1 - 100 + 1) * 100))
+            ax.legend(legend)
+            plt.title(f"[{method_name}UPDATE@Episode, Learning step {t_learn+1}]\nState value (estimated and true) and |error| for state {state_observe} - episode {episode+1} of {nepisodes}")
+            plt.pause(pause)
+            plt.draw()
+
+    def _final_plots(self, learner, t_learn, fig_V, fig_C, method_name="", fontsize_labels=LABELS_FONTSIZE, color_labels=LABELS_COLOR):
+        if self.env.getDimension() == 2:
+            # The state counts plot is shown on a separate image than the state value function plot
+            if fig_C is None:
+                fig_C = plt.figure()
+                fig_mgr = plt.get_current_fig_manager()
+                fig_mgr.window.setGeometry(WINDOW_TOP_LEFT_HORIZONTAL + 2*(WINDOW_WIDTH + SPACE_BETWEEN_WINDOWS),
+                                           WINDOW_TOP_LEFT_VERTICAL,
+                                           WINDOW_WIDTH,
+                                           WINDOW_HEIGHT)
+            plt.figure(fig_C.number)
+            plt.clf()   # Clear the figure in order to properly see the labels showing the state counts (o.w. they overlap on the existing ones when the figure they are plotted on is not new, i.e. when the value of the fig_C parameter is not None)
+            ax_C = plt.gca()
+
+            state_counts_min = np.min(learner.getStateCounts())
+            state_counts_mean = np.mean(learner.getStateCounts())
+            state_counts_max = np.max(learner.getStateCounts())
+
+            shape = self.env.getShape()
+            arr_state_counts = learner.getStateCounts().reshape(shape)
+            colors_count = cm.get_cmap("Blues")
+            colornorm = plt.Normalize(vmin=0, vmax=np.max(arr_state_counts))
+            ax_C.imshow(arr_state_counts, cmap=colors_count, norm=colornorm)
+            ax_C.xaxis.set_major_locator(MaxNLocator(integer=True))
+            ax_C.yaxis.set_major_locator(MaxNLocator(integer=True))
+            self._add_count_labels(ax_C, arr_state_counts, fontsize=fontsize_labels, color=color_labels)
+
+            plt.title("[{}FINAL, Learning step {}]\nState counts by state: # visits: (min, mean, max) = ({:.0f}, {:.1f}, {:.0f})" \
+                      .format(method_name, t_learn+1, state_counts_min, state_counts_mean, state_counts_max))
+        else:
+            # Add the state counts to the plot of the state value function
+            assert self.env.getDimension() == 1, "The environment is expected to be 1D"
+            #plt.colorbar(cm.ScalarMappable(cmap=colormap))    # Does not work
+            axes = fig_V.get_axes()
+            assert len(axes) == 2
+            axes[1].cla()   # Clear the plot in the axis so that the color of the bars do not get more and more intense which would cover the plot of the state value function
+            axes[1].bar(self.env.getAllStates(), learner.getStateCounts(), color="blue", alpha=0.3)
+            axes[1].xaxis.set_major_locator(MaxNLocator(integer=True))
+            plt.sca(axes[0])  # Go back to the primary axis
+
+        plt.pause(0.1)  # Need to call plt.pause() in order for immediate update of the plot
+        plt.draw()
+
+        # Update the policy plot
+        if self.fig_policy is not None:
+            self._update_policy_plot(self.fig_policy, fontsize=fontsize_labels, color="white", factor_fontsize=0.8, title_prefix=f"[{method_name}FINAL, Learning step {t_learn+1}]\n")
+            plt.pause(0.1)
+            plt.draw()
+
+    def _update_policy_plot(self, fig, fontsize=14, color="black", factor_fontsize=1.0, title_prefix="", title_suffix=""):
+        # Read the environment's shape
+        assert len(self.env.getShape()) <= 2, "The environment must be at most 2D"
+        shape = self.env.getShape()
+        is_env_2d = len(shape) == 2 and shape[0] > 0 and shape[1] > 0
+
+        # Get the current policy
+        policy = self.agent.getPolicy()
+        colormap = cm.get_cmap("rainbow")  # useful colormaps are "jet", "rainbow", seismic"
+
+        # Update the policy plot
+        if is_env_2d:
+            # Create a grid for EACH state having at most 4 actions (going UP, RIGHT, DOWN, LEFT for 2D environments)
+            proba_actions_toplot = np.nan * np.ones((3, 3))
+
+            # Create the subplots with the same layout as the states in the environment
+            axes = fig.subplots(*shape)
+            # Factor to multiply the given fontsize depending on the image (environment) size
+            factor_fs = factor_fontsize * np.min((5 / shape[0], 5 / shape[1]))
+            for i in range(axes.shape[0]):
+                for j in range(axes.shape[1]):
+                    state_1d = np.ravel_multi_index((i, j), shape)
+                    for action in range(self.env.getNumActions()):
+                        idx_2d = (0, 1) if action == 0 else (1, 2) if action == 1 else (2, 1) if action == 2 else (1, 0)
+                        proba_actions_toplot[idx_2d] = policy.getPolicyForAction(action, state_1d)
+                    # Clear the axis to avoid having modified colors as new updates are done (because the new image is overlaid on the existing image)
+                    axes[i, j].cla()
+                    img = axes[i, j].imshow(proba_actions_toplot, cmap=colormap, vmin=0, vmax=1)
+                    # Remove the axes ticks as they do not convey any information
+                    axes[i, j].set_xticks([])
+                    axes[i, j].set_yticks([])
+                    for action in range(self.env.getNumActions()):
+                        idx_2d = (0, 1) if action == 0 else (1, 2) if action == 1 else (2, 1) if action == 2 else (1, 0)
+                        # Recall the first coordinate indexes the row of the matrix representing the actions (vertical axis of the image)
+                        # and the second coordinate indexes the column of the matrix representing the actions (horizontal axis of the image)
+                        # That's why the text is placed at coordinate (idx_2d[1], idx_2d[0]) instead of (idx_2d[0], idx_2d[1]).
+                        # Note that the policy values are shown as percent and using exactly 2 digits (i.e. zero-padded if needed).
+                        axes[i, j].text(idx_2d[1], idx_2d[0], "{:02d}".format(int(round(proba_actions_toplot[idx_2d]*100))), color=color, fontsize=fontsize*factor_fs, horizontalalignment="center", verticalalignment="center")
+        else:
+            # Create a grid for EACH state with the two possible actions (going LEFT or RIGHT)
+            # Note that we define this object as an 2D array (as opposed to 1D) because a 2D array is required by the imshow() method used below to generate the image.
+            proba_actions_toplot = np.nan * np.ones((1, 2))
+
+            # Create the subplots with the same layout as the states in the environment
+            # The 1D environment is laid out horizontally, for better fit of the plot in the figure
+            axes = fig.subplots(1, shape[0])
+            # Factor to multiply the given fontsize depending on the image (environment) size
+            factor_fs = factor_fontsize * 5 / shape[0]
+            for i in range(len(axes)):
+                state = i
+                for action in range(self.env.getNumActions()):
+                    proba_actions_toplot[0, action] = policy.getPolicyForAction(action, state)
+                # Clear the axis to avoid having modified colors as new updates are done (because the new image is overlaid on the existing image)
+                axes[i].cla()
+                img = axes[i].imshow(proba_actions_toplot, cmap=colormap, vmin=0, vmax=1)
+                # Remove the axes ticks as they do not convey any information
+                axes[i].set_xticks([])
+                axes[i].set_yticks([])
+                for action in range(self.env.getNumActions()):
+                    # Recall the first coordinate in text() indexes the row of the matrix representing the actions (vertical axis of the image)
+                    # and the second coordinate indexes the column of the matrix representing the actions (horizontal axis of the image)
+                    # Note that the policy values are shown as percent and using exactly 2 digits (i.e. zero-padded if needed).
+                    axes[i].text(0, action, "{:02d}".format(int(round(proba_actions_toplot[0, action]*100))), color=color, fontsize=fontsize*factor_fs, horizontalalignment="center", verticalalignment="center")
+
+        # Finalize plot
+        # Activate the current figure so that we can add the title and force drawing (with plt.draw() outside of this method)
+        plt.figure(img.get_figure().number)
+        plt.colorbar(img, ax=axes)  # This adds a colorbar to the right of the FIGURE. However, the mapping from colors to values is taken from the last generated image! (which is ok because all images have the same range of values.
+                                    # Otherwise see answer by user10121139 in https://stackoverflow.com/questions/13784201/how-to-have-one-colorbar-for-all-subplots
+        plt.suptitle(f"{title_prefix}Policy at each state{title_suffix}")
+
+    def _add_count_labels(self, ax, state_counts, fontsize=14, color="orange", factor_fontsize=1.0):
+        "Adds the counts in `state_counts` as labels of each cell in the given `ax` axis which is assumed to contain a 2D image"
+        # Read the environment's shape and convert it to a 2D array if the environment is 1D in order to facilitate all the processes below that use shape[1]
+        # Note that the 1D environment is laid out horizontally (we use e.g. (1, 20) instead of (20, 1))
+        assert len(self.env.getShape()) <= 2, "The environment must be at most 2D"
+        assert len(self.env.getShape()) == self.env.getDimension()
+        shape = self.env.getShape() if self.env.getDimension() == 2 else (1, self.env.getShape()[0])
+
+        # Factor to multiply the given fontsize depending on the image (environment) size
+        factor_fs = factor_fontsize * np.min((5 / shape[0], 5 / shape[1]))
+        for x in range(shape[0]):
+            for y in range(shape[1]):
+                # Recall the x value indexes the row of the matrix shown in the image (vertical axis of the plot)
+                # and the y value indexes the column of the matrix shown in the image (horizontal axis of the plot)
+                # That's why the text is placed at coordinate (y, x).
+                ax.text(y, x, "{:.0f}".format(state_counts[x, y]), color=color, fontsize=fontsize*factor_fs, horizontalalignment="center", verticalalignment="center")
 
     def learn_terminal_state_values(self, t, terminal_state, next_state, reward, info, done_episode=False, envs=None, idx_particle=None, update_phi=False):
         """
