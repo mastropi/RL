@@ -686,7 +686,7 @@ class EnvGridworld2D(EnvironmentDiscrete):
         super(EnvGridworld2D, self).__init__(nS, nA, P, isd,
                                              dim=2,
                                              terminal_states=set_terminal_states,
-                                             rewards=dict([(s, reward(s)) for s in set_terminal_states]))
+                                             rewards=rewards_dict)
 
     def isObstacleState(self, state):
         return state in self.set_obstacle_states

@@ -586,6 +586,7 @@ def compute_fv_integral(df_phi_proba_surv, reward: float=1.0, interval_size: flo
     return integral
 
 
+# TODO: (2024/05/02) Move this function to utils.computing because it is NOT specific to the FV estimators
 def estimate_expected_reward(env, probas_stationary: dict, reward=None):
     """
     Estimates the expected reward (a.k.a. long-run average reward) of the Markov Reward Process defined in the given environment,
@@ -613,9 +614,10 @@ def estimate_expected_reward(env, probas_stationary: dict, reward=None):
     if reward is None:
         assert isinstance(env, EnvironmentDiscrete)
         dict_rewards = env.getRewardsDict()
-        if not set(dict_rewards.keys()).issubset(set(probas_stationary.keys())):
+        dict_nonzero_rewards = dict([(s, r) for (s, r) in dict_rewards.items() if r != 0])
+        if not set(dict_nonzero_rewards.keys()).issubset(set(probas_stationary.keys())):
             raise ValueError("The states with non-zero rewards ({}) should all be present in the dictionary of estimated stationary probability ({})." \
-                             .format(set(dict_rewards.keys()), set(probas_stationary.keys())))
+                             .format(set(dict_nonzero_rewards.keys()), set(probas_stationary.keys())))
 
     for s in probas_stationary.keys():
         if probas_stationary[s] > 0.0:  # Note that nan > 0 returns False (OK)
