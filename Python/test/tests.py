@@ -944,14 +944,14 @@ for rep in range(nrep):
                 # we do NOT carry over whatever this distribution was at the end of the previous replication or at the end of the previous execution of the learning process
                 # using this same learner.
                 if t_learn == 0:
-                    learner_ac.setProbasStationaryStartStateET(None)
+                    simulator_value_functions.getAgent().getLearner().setProbasStationaryStartStateET(None)
                 V, Q, A, state_counts, probas_stationary, expected_reward, expected_absorption_time, n_cycles_absorption_used, n_events_et, n_events_fv = \
                     simulator_value_functions.run(t_learn=t_learn,
                                                   max_time_steps_fv=max_time_steps_fv_for_all_particles,
                                                   min_num_cycles_for_expectations=0,
                                                   reset_value_functions=reset_value_functions_at_this_step,
                                                   seed=seed_learn, verbose=False, verbose_period=verbose_period)
-                #average_reward = learner_ac.getAverageReward()  # This average reward should not be used because it is inflated by the FV process that visits the states with rewards more often
+                #average_reward = simulator_value_functions.getAgent().getLearner().getAverageReward()  # This average reward should not be used because it is inflated by the FV process that visits the states with rewards more often
                 average_reward = expected_reward
                 nsteps_all[rep, t_learn] = n_events_et + n_events_fv
                 max_time_steps_benchmark_all[rep, t_learn] = n_events_et + n_events_fv  # Number of steps to use when running TDAC at the respective learning step
