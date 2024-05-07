@@ -965,6 +965,7 @@ class Simulator:
         alpha0 = +np.Inf    # Setting this initial learning rate to 1 gives the same weight to all historic (k < t) and current (k = t) Phi values
                             # setting it equal to >1 gives more weight to most recent estimates of Phi,
                             # setting it equal to <1 gives more weight to older estimates of the Phi.
+        n_consecutive_steps_at_same_system_state = 0    # Counter of what the variable name indicates that is used to check whether the system gets stuck (see explanation and example below, where this variable is updated)
         while not done:
             t += 1
 
@@ -1117,6 +1118,22 @@ class Simulator:
                     print(f"Current state of system:\n{[env.getState() for env in envs]}")
 
             idx_reactivate = None
+
+            # CHECK CHANGE OF SYSTEM'S STATE
+            # Check whether the system state has changed after updating the selected particle
+            # Goal: Detect a possible "get stuck" situation that could arise when the absorption set A is not connected
+            # (e.g. 2D labyrinth with corridor where the start state is part of the absorption set)
+            if next_state == state:
+                n_consecutive_steps_at_same_system_state += 1
+            else:
+                n_consecutive_steps_at_same_system_state = 0
+            if n_consecutive_steps_at_same_system_state > 0 and n_consecutive_steps_at_same_system_state % 20 == 0:
+                    ## Note: we check for `MOD 20` and NOT `>= 20` because we don't want to show this message all the time (i.e. for values 20, 21, 22, etc.)
+                    ## but just when a new block of 20 consecutive time steps in this situation is observed again.
+                warnings.warn(f"The FV system's state hasn't changed for {n_consecutive_steps_at_same_system_state} consecutive steps."
+                              "\nThis may happen when the absorption set A is not connected and the start state distribution on the outside boundary of A is very uneven."
+                              "\nExample of such situation is: 2D labyrinth with corridor where the start state is part of the absorption set A, and the policy is close to optimal."
+                              f"\nThe repeated system state is:\n{[env.getState() for env in envs]}")
 
             # CHECK DONE
             # If we want to interrupt the simulation by EITHER:
