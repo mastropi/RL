@@ -22,6 +22,7 @@ a dictionary with an Enum is probably slower than indexing it with an integer).
 import io
 import numpy as np
 import sys
+import warnings
 
 from enum import Enum, unique
 
@@ -111,6 +112,7 @@ def get_opposite_direction(d: Direction2D):
     return Direction2D(opposite_d)
 
 
+# TODO: (2024/05/01) Make this environment inherit from EnvGridworld1D_OneTerminalState, which currently has a more general constructor (e.g. accepting parameter `terminal_states`), and thus should be renamed to EnvGridworld1D actually!
 class EnvGridworld1D(EnvironmentDiscrete):
     """
     1D Grid World environment from Sutton's Reinforcement Learning book chapter 4.
@@ -223,6 +225,9 @@ class EnvGridworld1D(EnvironmentDiscrete):
                                              dim=1,
                                              terminal_states=set([i for i, s in enumerate(range(nS)) if is_terminal(s)]),
                                              rewards=dict([(s, reward(s)) for s in terminal_states]))
+
+    def getShape(self):
+        return (self.nS,)
 
 
 class EnvGridworld1D_OneTerminalState(EnvironmentDiscrete):
@@ -350,13 +355,16 @@ class EnvGridworld1D_OneTerminalState(EnvironmentDiscrete):
             "The initial state probabilities sum up to 1 ({})".format(np.sum(isd))
 
         self.P = P
-        # print("P")
-        # print(P)
+        #print("P")
+        #print(P)
 
         super(EnvGridworld1D_OneTerminalState, self).__init__(nS, nA, P, isd,
                                                               dim=1,
                                                               terminal_states=set([i for i, s in enumerate(range(nS)) if is_terminal(s)]),
                                                               rewards=rewards_dict)
+
+    def getShape(self):
+        return (self.nS,)
 
 
 class EnvGridworld2D(EnvironmentDiscrete):
@@ -394,17 +402,29 @@ class EnvGridworld2D(EnvironmentDiscrete):
 
     The constructor receives the following parameters:
     
-    shape: list/tuple
+    shape: (opt) list/tuple
         Size of the 2D gridworld given as #rows x #cols.
         default: [5, 5]
 
-    terminal_states: set
+    terminal_states: (opt) set, list, tuple
         Set with the 1D state numbers considered as terminal states.
-        default: set([0, 5*5-1])
+        default: set([0, shape[0]*shape[1]-1])
 
-    rewards_dict: dict
+    obstacle_states: (opt) set, list, tuple
+        Set with the 1D state numbers (cells) where the agent cannot go.
+        Normally a "good" number of obstacles for a grid of size N is int(log(N)).
+        default: None
+
+    rewards_dict: (opt) dict
         Reward values for a subset of states in the grid. The 1D state number is used as dictionary key.
-        default: {0: -1.0, 5*5-1: +1.0}
+        default: {0: -1.0, shape[0]*shape[1]-1: +1.0}
+
+    wind_dict: (opt) dict
+        Wind direction, if any. It must contain the following two keys:
+        - 'direction': Direction2D object (e.g. Direction2D.UP, Direction2D.RIGHT, etc.)
+        - 'intensity': value in [0, 1] indicating the probability that the agent is deviated towards the direction of the wind when it choose to move (to any direction).
+        Ex: wind_dict = {'direction': Direction2D.LEFT, 'intensity': 0.1}
+        default: None
 
     initial_state_distribution: (opt) 1D list or array
         Probability distribution defining how to choose the initial state when the environment is
@@ -417,215 +437,262 @@ class EnvGridworld2D(EnvironmentDiscrete):
 
     metadata = {'render.modes': ['human', 'ansi']}
 
-    def __init__(self, shape=[5,5], terminal_states=None, rewards_dict=None, initial_state_distribution=None):
+    def __init__(self, shape=[5, 5], terminal_states=None, obstacle_states=None, rewards_dict=None, wind_dict=None, initial_state_distribution=None):
+        #----- Parse input parameters 1
+        # Environment shape
         if not isinstance(shape, (list, tuple)) or len(shape) != 2:
             raise ValueError("Shape argument must be a list/tuple of length 2")
-        if terminal_states is not None and len(terminal_states) == 0:
-            raise ValueError("There must be at least one terminal state")
-        if rewards_dict is not None and not isinstance(rewards_dict, dict):
-            raise ValueError("The rewards information must be a dictionary indexed by the 1D state number")
-        if initial_state_distribution is not None:
-            if not isinstance(initial_state_distribution, (list, tuple, np.ndarray)) or len(initial_state_distribution) != np.prod(shape):
-                raise ValueError(f"The initial state distribution must be a list, tuple or numpy array with as many elements as the number of states in the environment ({np.prod(shape)}): {initial_state_distribution}")
-            if not all(np.array(initial_state_distribution) >= 0) or not np.isclose(np.sum(initial_state_distribution), 1.0):
-                raise ValueError(f"The values in the initial state distribution must sum up to 1 (sum = {np.sum(initial_state_distribution)})")
 
         # Environment geometry
         self.shape = shape
         nS = np.prod(shape)         # Number of states
         nA = 4                      # Number of actions (one in each cardinal point)
 
-        # Terminal states and reward obtained when reaching any possible state
+        # Maximum values for the X and Y dimensions: note that we substract 1 because the x and y values are base 0 (as they represent indices)
+        MAX_Y = self.shape[0] - 1
+        MAX_X = self.shape[1] - 1
+
+        #----- Parse input parameters 2
+        # Terminal states
+        if terminal_states is not None and len(terminal_states) == 0:
+            raise ValueError("There must be at least one terminal state")
+        # Rewards
+        if rewards_dict is not None:
+            if not isinstance(rewards_dict, dict):
+                raise ValueError("The rewards information must be a dictionary indexed by the 1D state number")
+            if not set(rewards_dict.keys()).issubset(np.arange(nS)):
+                warnings.warn(f"Some keys of the rewards dictionary `rewards_dict` are NOT a valid state of the environment (valid keys are between 0 and {nS-1}). The reward for those states will be ignored.")
+        # Initial state distribution
+        if initial_state_distribution is not None:
+            if not isinstance(initial_state_distribution, (list, tuple, np.ndarray)) or len(initial_state_distribution) != np.prod(self.shape):
+                raise ValueError(f"The initial state distribution must be a list, tuple or numpy array with as many elements as the number of states in the environment ({np.prod(self.shape)}): {initial_state_distribution}")
+            if not all(np.array(initial_state_distribution) >= 0) or not np.isclose(np.sum(initial_state_distribution), 1.0):
+                raise ValueError(f"The values in the initial state distribution must sum up to 1 (sum = {np.sum(initial_state_distribution)})")
+
+        #----- Parse input parameters 3
+        # Terminal states and their rewards
         if terminal_states is None:
-            terminal_states = set([0, nS-1])
-            rewards_dict = dict({0: -1.0, nS-1: 1.0})
-        elif not isinstance(terminal_states, set):
-            terminal_states = set(terminal_states)
+            set_terminal_states = set([0, nS-1])
+            if rewards_dict is None:
+                rewards_dict = dict({0: -1.0, nS-1: 1.0})
+        else:
+            set_terminal_states = set(terminal_states)
+        # Obstacle states
+        if obstacle_states is not None:
+            if not set(obstacle_states).issubset(np.arange(nS)):
+                raise ValueError(f"The obstacle states must be a subset of the environment states, i.e. they must be integer values between 0 and {nS-1}: {obstacle_states}")
+        else:
+            # Convert None to an emtpy set so that we can more easily handle the obstacle states below
+            obstacle_states = set({})
 
-        if initial_state_distribution is not None and not all([p == 0 for s, p in enumerate(initial_state_distribution) if s in terminal_states]):
-            raise ValueError(f"The initial state distribution must be 0 at the terminal states ({terminal_states}):\ngiven distribution = {initial_state_distribution}")
+        # Terminal and obstacle states (which cannot be chosen as start states => the corresponding value of the isd array for those states should be set to 0)
+        set_terminal_and_obstacle_states = set.union(set_terminal_states, obstacle_states)
+        num_nonterminal_and_nonobstacle_states = nS - len(set_terminal_and_obstacle_states)
 
-        # We substract 1 because the x and y values are base 0 (as they represent indices)
-        MAX_Y = shape[0] - 1
-        MAX_X = shape[1] - 1
+        # Check the initial state distribution if given
+        if initial_state_distribution is not None and not all([p == 0 for s, p in enumerate(initial_state_distribution) if s in set_terminal_and_obstacle_states]):
+            raise ValueError(f"The initial state distribution must be 0 at the terminal and obstacle states ({set_terminal_states}):\ngiven distribution = {initial_state_distribution}")
 
-        # Define the possible actions based on the geometry
-        P = {}
-        grid = np.arange(nS).reshape(shape)
-        it = np.nditer(grid, flags=['multi_index'])
-
-        # Function that checks whether we arrived at a terminal state
-        num_nonterminal_states = nS - len(terminal_states)
-        is_terminal = lambda s: s in terminal_states
+        #----- Auxiliary functions
+        # Function that checks whether the state is a terminal state
+        # (Note: we cannot use the superclass method because we haven't called the superclass constructor yet)
+        is_terminal = lambda s: s in set_terminal_states
+        # Function that checks whether the state is an obstacle state
+        is_obstacle = lambda s: s in obstacle_states
+        # Function that returns the reward received when visiting a state
         reward = lambda s: rewards_dict[s] if s in rewards_dict.keys() else 0.0
+        #----- Auxiliary functions
 
+        # Define the initial state distribution to pass to the superclass
         if initial_state_distribution is None:
             # Initialize the initial state distribution matrix to 0
             # This matrix will be updated as we go along constructing the environment below
-            # and will be set to a uniform distribution on the NON-terminal states.
+            # and will be set to a uniform distribution on the NON-terminal and NON-obstacle states.
             isd = np.zeros(nS)
         else:
             isd = initial_state_distribution
+
+        # Obstacles set given in 2D-coordinate states
+        # This is used to define the next state based on the action chosen by the agent and on the eventual wind present in the environment.
+        # Note that we define the outer border of the gridworld as part of the obstacles set so that computing the next state is easier.
+        # Recall that below the 2D coordinates are referred to as (y, x) where y varies downwards and x varies rightwards.
+        # All natural obstacles (i.e. gridworld outer borders) are out of range for the given `shape` of the environment.
+        set_obstacle_states_2d = set.union( set([(y,            -1) for y in np.arange(-1, self.shape[0]+1)]),
+                                            set([(y, self.shape[1]) for y in np.arange(-1, self.shape[0]+1)]),
+                                            set([(-1,            x) for x in np.arange(-1, self.shape[1]+1)]),
+                                            set([(self.shape[0], x) for x in np.arange(-1, self.shape[1]+1)]),
+                                            set([np.unravel_index(o, self.shape) for o in obstacle_states]))
+
+        # Obstacles set given in 1D-coordinate states, which is stored as an attribute of the class
+        self.set_obstacle_states = set(obstacle_states)
+
+        # Define the transition probabilities
+        P = {}
+        grid = np.arange(nS).reshape(self.shape)
+        it = np.nditer(grid, flags=['multi_index'])
         while not it.finished:
             s = it.iterindex
             y, x = it.multi_index   # 0 <= y <= shape[0]-1, 0 <= x <= shape[1]-1
 
             # Initial state distribution
             if initial_state_distribution is None:
-                if not is_terminal(s):
-                    isd[s] = 1 / num_nonterminal_states
+                if not is_terminal(s) and not self.is_obstacle_state(s):
+                    isd[s] = 1 / num_nonterminal_and_nonobstacle_states
 
-            # Transition matrix and rewards: P[s][a] = (prob, next_state, reward, is_terminal)
-            # Given that we are state 's' and take action 'a':
-            # prob: probability of going to state 'next_state'
-            # next_state: a possible next_state when taking action 'a'
-            # reward: reward received when going to state 'next_state'
-            # is_terminal: whether 'next_state' is a terminal state
+            # Transition dictionary containing the rewards information:
+            # Given that the system is at state 's' and the agent takes action 'a', it has the form:
+            # P[s][a] = (prob, next_state, reward, is_terminal), where:
+            # - prob: probability of going to state 'next_state'
+            # - next_state: a possible next_state when taking action 'a'
+            # - reward: reward received when going to state 'next_state'
+            # - is_terminal: whether 'next_state' is a terminal state
             P[s] = {a : [] for a in range(nA)}
 
-            # We're stuck in a terminal state
-            if is_terminal(s):
-                P[s][Direction2D.UP.value] = [(1.0, s, reward(s), True)]
-                P[s][Direction2D.RIGHT.value] = [(1.0, s, reward(s), True)]
-                P[s][Direction2D.DOWN.value] = [(1.0, s, reward(s), True)]
-                P[s][Direction2D.LEFT.value] = [(1.0, s, reward(s), True)]
-            # Not a terminal state
+            if is_terminal(s) or is_obstacle(s):
+                # The system has reached a terminal state or is at an obstacle state
+                # => Set the transition information to indicate that the system stays there
+                # Note that this is not really what happens with obstacle states, where the system can NEVER go, but we still set the transition probability to 1 of staying there
+                # because this facilitates the treatment an checks done on the transition probability.
+                P[s][Direction2D.UP.value]    = [(1.0, s, reward(s), is_terminal(s))]
+                P[s][Direction2D.RIGHT.value] = [(1.0, s, reward(s), is_terminal(s))]
+                P[s][Direction2D.DOWN.value]  = [(1.0, s, reward(s), is_terminal(s))]
+                P[s][Direction2D.LEFT.value]  = [(1.0, s, reward(s), is_terminal(s))]
             else:
-                # ns = Next State!
-                ns_up = s if y == 0 else s - (MAX_X + 1)
-                ns_right = s if x == MAX_X else s + 1
-                ns_down = s if y == MAX_Y else s + (MAX_X + 1)
-                ns_left = s if x == 0 else s - 1
-                P[s][Direction2D.UP.value] = [(1.0, ns_up, reward(ns_up), is_terminal(ns_up))]
-                P[s][Direction2D.RIGHT.value] = [(1.0, ns_right, reward(ns_right), is_terminal(ns_right))]
-                P[s][Direction2D.DOWN.value] = [(1.0, ns_down, reward(ns_down), is_terminal(ns_down))]
-                P[s][Direction2D.LEFT.value] = [(1.0, ns_left, reward(ns_left), is_terminal(ns_left))]
+                # Not a terminal state
+                # ns = Next State
+
+                # CONVENTIONS FOR WHAT FOLLOWS:
+                # - All 2D-coordinate states may be INVALID states, i.e. either obstacle or out of range (they will become valid when they are converted to 1D coordinates).
+                # - All 1D-coordinate states must be VALID states, i.e. neither obstacle nor out of range.
+                # - All UP, RIGHT, DOWN, LEFT directions are abbreviated as UP, RT, DN, LT when given as 2D coordinates, but written in full when given in 2D coordinates.
+                ns_up_2d = (y - 1, x)
+                ns_rt_2d = (y    , x + 1)
+                ns_dn_2d = (y + 1, x)
+                ns_lt_2d = (y    , x - 1)
+
+                # 1D states that are VALID states of the environment, i.e. none of these states must be part of the obstacle states
+                ns_up    = s if ns_up_2d in set_obstacle_states_2d else np.ravel_multi_index(ns_up_2d, self.shape)
+                ns_right = s if ns_rt_2d in set_obstacle_states_2d else np.ravel_multi_index(ns_rt_2d, self.shape)
+                ns_down  = s if ns_dn_2d in set_obstacle_states_2d else np.ravel_multi_index(ns_dn_2d, self.shape)
+                ns_left  = s if ns_lt_2d in set_obstacle_states_2d else np.ravel_multi_index(ns_lt_2d, self.shape)
+                assert not set({ns_up, ns_right, ns_down, ns_left}).issubset(obstacle_states)
+                if wind_dict is None:
+                    # Deterministic movement of the agent given the selected action
+                    P[s][Direction2D.UP.value]    = [(1.0, ns_up,    reward(ns_up),    is_terminal(ns_up))]
+                    P[s][Direction2D.RIGHT.value] = [(1.0, ns_right, reward(ns_right), is_terminal(ns_right))]
+                    P[s][Direction2D.DOWN.value]  = [(1.0, ns_down,  reward(ns_down),  is_terminal(ns_down))]
+                    P[s][Direction2D.LEFT.value]  = [(1.0, ns_left,  reward(ns_left),  is_terminal(ns_left))]
+                else:
+                    # There is WIND (for now only ONE wind direction is allowed)
+                    # => The transition is no longer deterministic when the agent takes an action on a given state
+
+                    # Define the (objective) diagonal cells for the current state in 2D coordinates, regardless of whether those states are obstacles ore out of range
+                    ns_ne_2d = (y - 1, x + 1)
+                    ns_se_2d = (y + 1, x + 1)
+                    ns_sw_2d = (y + 1, x - 1)
+                    ns_nw_2d = (y - 1, x - 1)
+
+                    # Define the next state given the direction the agent decides to move and the direction of the wind
+                    # Note that each next state is given as a 1D-coordinate state and that they are VALID states
+                    # (because they are determined after analyzing whether each possible next state (based on movement direction and wind direction) is valid).
+                    dict_next_state_dictated_by_wind_for_each_direction = dict({
+                        # Directions (of movement)
+                        Direction2D.UP: {
+                                        # Possible wind directions
+                                        Direction2D.UP: ns_up,
+                                        Direction2D.RIGHT: np.ravel_multi_index(ns_ne_2d, self.shape) if ns_ne_2d not in set_obstacle_states_2d
+                                                    else   np.ravel_multi_index(ns_up_2d, self.shape) if ns_up_2d not in set_obstacle_states_2d
+                                                    else   s,
+                                        Direction2D.DOWN: s,
+                                        Direction2D.LEFT: np.ravel_multi_index(ns_nw_2d, self.shape) if ns_nw_2d not in set_obstacle_states_2d
+                                                    else  np.ravel_multi_index(ns_up_2d, self.shape) if ns_up_2d not in set_obstacle_states_2d
+                                                    else  s
+                                        },
+                        Direction2D.RIGHT: {
+                                        # Possible wind directions
+                                        Direction2D.UP: np.ravel_multi_index(ns_ne_2d, self.shape) if ns_ne_2d not in set_obstacle_states_2d
+                                                else    np.ravel_multi_index(ns_rt_2d, self.shape) if ns_rt_2d not in set_obstacle_states_2d
+                                                else    s,
+                                        Direction2D.RIGHT: ns_right,
+                                        Direction2D.DOWN: np.ravel_multi_index(ns_se_2d, self.shape) if ns_se_2d not in set_obstacle_states_2d
+                                                    else  np.ravel_multi_index(ns_rt_2d, self.shape) if ns_rt_2d not in set_obstacle_states_2d
+                                                    else  s,
+                                        Direction2D.LEFT: s
+                                        },
+                        Direction2D.DOWN: {
+                                        # Possible wind directions
+                                        Direction2D.UP: s,
+                                        Direction2D.RIGHT: np.ravel_multi_index(ns_se_2d, self.shape) if ns_se_2d not in set_obstacle_states_2d
+                                                    else   np.ravel_multi_index(ns_dn_2d, self.shape) if ns_dn_2d not in set_obstacle_states_2d
+                                                    else   s,
+                                        Direction2D.DOWN: ns_down,
+                                        Direction2D.LEFT: np.ravel_multi_index(ns_sw_2d, self.shape) if ns_sw_2d not in set_obstacle_states_2d
+                                                    else  np.ravel_multi_index(ns_dn_2d, self.shape) if ns_dn_2d not in set_obstacle_states_2d
+                                                    else  s
+                                        },
+                        Direction2D.LEFT: {
+                                        # Possible wind directions
+                                        Direction2D.UP: np.ravel_multi_index(ns_nw_2d, self.shape) if ns_nw_2d not in set_obstacle_states_2d
+                                                else    np.ravel_multi_index(ns_lt_2d, self.shape) if ns_lt_2d not in set_obstacle_states_2d
+                                                else    s,
+                                        Direction2D.RIGHT: s,
+                                        Direction2D.DOWN: np.ravel_multi_index(ns_sw_2d, self.shape) if ns_sw_2d not in set_obstacle_states_2d
+                                                    else  np.ravel_multi_index(ns_lt_2d, self.shape) if ns_lt_2d not in set_obstacle_states_2d
+                                                    else  s,
+                                        Direction2D.LEFT: ns_left
+                                        }
+                    })
+
+                    # Use the WIND information to define the transition probabilities dictionary values for the current state s
+                    wind_direction = wind_dict['direction']
+                    wind_intensity = wind_dict['intensity']
+                    assert wind_direction in Direction2D.__members__.values()
+                    assert 0 <= wind_intensity <= 1, f"The wind intensity must be in [0, 1]: {wind_intensity}"
+
+                    # Start with the deterministic next state for each action if there were no wind
+                    P[s][Direction2D.UP.value]    = [(1.0 - wind_intensity, ns_up,    reward(ns_up),    is_terminal(ns_up))]
+                    P[s][Direction2D.RIGHT.value] = [(1.0 - wind_intensity, ns_right, reward(ns_right), is_terminal(ns_right))]
+                    P[s][Direction2D.DOWN.value]  = [(1.0 - wind_intensity, ns_down,  reward(ns_down),  is_terminal(ns_down))]
+                    P[s][Direction2D.LEFT.value]  = [(1.0 - wind_intensity, ns_left,  reward(ns_left),  is_terminal(ns_left))]
+
+                    # Now add the other possible next state where the agent can end up given the wind
+                    for direction in Direction2D.__members__.values():
+                        ns_by_wind = dict_next_state_dictated_by_wind_for_each_direction[direction][wind_direction]
+                        P[s][direction.value] += [(wind_intensity, ns_by_wind, reward(ns_by_wind), is_terminal(ns_by_wind))]
+
+            # Check that probabilities of moving to any possible next state for the current state s sum up to 1
+            for direction in Direction2D.__members__.values():
+                assert np.isclose(sum([e[0] for e in P[s][direction.value]]), 1), f"The probabilities of the next state given action {direction} must sum up to 1: {sum([e[0] for e in P[s][direction.value]])}"
 
             it.iternext()
-
-        assert np.isclose(np.sum(isd), 1.0), "The initial state probabilities must sum up to 1 ({})".format(np.sum(isd))
 
         self.P = P
         #print("P")
         #print(P)
 
+        # For obstacle states, check that the transition probabilities of every adjacent state of going to the obstacle state is 0
+        for s_obstacle in obstacle_states:
+            set_adjacent_states = get_adjacent_states(self.getShape(), s_obstacle)
+            for s_adjacent, d in set_adjacent_states:
+                if s_adjacent is not None:
+                    opposite_d = get_opposite_direction(d)
+                    proba_going_to_obstacle_from_adjacent_state = sum([e[0] for e in self.P[s_adjacent][opposite_d.value] if e[1] == s_obstacle])
+                    assert proba_going_to_obstacle_from_adjacent_state == 0, \
+                        "The transition probability going {} to obstacle state s_obstacle={} from its {} adjacent state (s_adjacent={}) must be 0: P[{}][{}] = {}, P(s_adjacent -> s_obstacle) = {}" \
+                            .format(opposite_d.name, s_obstacle, d.name, s_adjacent, s_adjacent, opposite_d.name, self.P[s_adjacent][opposite_d.value], proba_going_to_obstacle_from_adjacent_state)
+
+        assert np.isclose(np.sum(isd), 1.0), "The initial state probabilities must sum up to 1 ({})".format(np.sum(isd))
+
         super(EnvGridworld2D, self).__init__(nS, nA, P, isd,
                                              dim=2,
-                                             terminal_states=terminal_states,
-                                             rewards=dict([(s, reward(s)) for s in terminal_states]))
+                                             terminal_states=set_terminal_states,
+                                             rewards=dict([(s, reward(s)) for s in set_terminal_states]))
 
-    def _render(self, mode='human', close=False):
-        """
-        Renders the current gridworld layout
-         For example, a 4x4 grid with the mode="human" looks like:
-            T  o  o  o
-            o  x  o  o
-            o  o  o  o
-            o  o  o  T
-        where x is your position and T are the two terminal states.
-        """
-        if close:
-            return
+    def isObstacleState(self, state):
+        return state in self.set_obstacle_states
 
-        outfile = io.StringIO() if mode == 'ansi' else sys.stdout
-
-        grid = np.arange(self.nS).reshape(self.shape)
-        it = np.nditer(grid, flags=['multi_index'])
-        while not it.finished:
-            s = it.iterindex
-            y, x = [idx + 1 for idx in it.multi_index]
-
-            if self.s == s:
-                output = " ({:2d}) x ".format(s)
-            elif self.isTerminalState(s):
-                output = " ({:2d}) T ".format(s)
-            else:
-                output = " ({:2d}) o ".format(s)
-
-            if x == 1:
-                output = output.lstrip()
-            if x == self.shape[1]:
-                output = output.rstrip()
-
-            outfile.write(output)
-
-            if x == self.shape[1]:
-                outfile.write("\n")
-
-            it.iternext()
-
-    #--- Getters
-    def getShape(self):
-        return self.shape
-
-
-class EnvGridworld2D_WithObstacles(EnvGridworld2D):
-    """
-    2D Grid World environment with obstacles that inherits from class EnvGridworld2D.
-
-    The constructor receives the following parameters:
-
-    shape: list/tuple
-        Size of the 2D gridworld given as #rows x #cols.
-        default: [5, 5]
-
-    terminal_states: set
-        Set with the 1D state numbers considered as terminal states.
-        default: set([0, 5*5-1])
-
-    rewards_dict: dict
-        Reward values for a subset of states in the grid. The 1D state number is used as dictionary key.
-        default: {0: -1.0, 5*5-1: +1.0}
-
-    obstacles_set: set
-        Set with the 1D state numbers (cells) where the agent cannot go.
-        Normally a "good" number of obstacles for a grid of size N is int(log(N)).
-        default: None
-
-    initial_state_distribution: (opt) 1D list or array
-        See definition in super class.
-        default: None
-    """
-
-    def __init__(self, shape=[5, 5], terminal_states=None, rewards_dict=None, obstacles_set=None, initial_state_distribution=None):
-        super().__init__(shape=shape, terminal_states=terminal_states, rewards_dict=rewards_dict, initial_state_distribution=initial_state_distribution)
-
-        # Update the `isd` attribute defined by the super constructor (containing the initial state distribution)
-        # (which does NOT know of obstacles in the gridworld) to ensure that the agent does NOT start at an obstacle state.
-        if initial_state_distribution is None and obstacles_set is not None and len(obstacles_set) > 0:
-            set_terminal_and_obstacles_states = set.union(terminal_states, obstacles_set)
-            set_nonterminal_and_nonobstacles_states = set(range(self.nS)).difference(set_terminal_and_obstacles_states)
-            num_terminal_states = len(terminal_states)
-            num_nonterminal_and_nonobstacles_states = len(set_nonterminal_and_nonobstacles_states)
-            for s in set_terminal_and_obstacles_states:
-                self.isd[s] = 0.0
-            # Uplift the probability of non-obstacle and non-terminal states after we have set to 0 the probability of obstacle and terminal states
-            assert num_nonterminal_and_nonobstacles_states < self.nS - num_terminal_states
-            for s in set_nonterminal_and_nonobstacles_states:
-                self.isd[s] *= (self.nS - num_terminal_states) / num_nonterminal_and_nonobstacles_states
-        elif initial_state_distribution is not None:
-            for s in obstacles_set:
-                if self.isd[s] != 0.0:
-                    raise ValueError(f"The initial state distribution must be 0 for obstacles states ({obstacles_set}):\ngiven distribution = {self.isd}")
-        assert np.isclose(np.sum(self.isd), 1.0), "The initial state probabilities must sum up to 1 ({})".format(np.sum(self.isd))
-
-        # Treat the obstacles as such by setting the transition probability of the adjacent cells when moving towards the obstacle to 0
-        self.obstacles_set = obstacles_set
-        for s_obstacle in self.obstacles_set:
-            # Get the 4 states that are adjacent to the obstacle set, in each of the geographical directions (N, S, E, W)
-            # so that we can set their transition probabilities to 0 and the reward of the obstacle cell
-            # when taking the action that intends to go to the obstacle cell.
-            set_adjacent_states = get_adjacent_states(shape, s_obstacle)
-            for ss, d in set_adjacent_states:
-                if ss is not None:
-                    opposite_d = get_opposite_direction(d)
-                    # We state that the probability of staying in state ss when the agent wants to move in the opposite direction
-                    # to where ss is w.r.t. s_obstacle (d) is 1, i.e. the agent cannot move from ss in the opposite direction to `d`.
-                    # Ex: d = UP => the agent cannot come from the state ss that is above s_obstacle when going DOWN (`minusd`)
-                    self.P[ss][opposite_d.value] = [(1, ss, rewards_dict.get(ss, 0.0), self.isTerminalState(ss))]
-
-    def isObstacleState(self, s):
-        return s in self.obstacles_set
+    def is_obstacle_state(self, state):
+        return self.isObstacleState(state)
 
     def _render(self, mode='human', close=False):
         """
@@ -653,15 +720,7 @@ class EnvGridworld2D_WithObstacles(EnvGridworld2D):
             elif self.isTerminalState(s):
                 output = " ({:2d}) T ".format(s)
             elif self.isObstacleState(s):
-                # Check that the transition probabilities of every adjacent state going to the obstacle state is 0
-                set_adjacent_states = get_adjacent_states(self.getShape(), s)
-                for ss, d in set_adjacent_states:
-                    if ss is not None:
-                        opposite_d = get_opposite_direction(d)
-                        assert self.P[ss][opposite_d.value][0][0] == 1 and self.P[ss][opposite_d.value][0][1] == ss, \
-                            "The transition probability going {} to obstacle state s={} from the adjacent state {} ss={} is 0: P[{}][{}] = {}, P(ss->s) = {}" \
-                            .format(opposite_d.name, s, d.name, ss, ss, opposite_d.name, self.P[ss][opposite_d.value][0], 1 - self.P[ss][opposite_d.value][0][0])
-                output = " ({:2d}) P ".format(s)
+                output = " ({:2d}) P ".format(s)    # "P" stands for "Prohibited"
             else:
                 output = " ({:2d}) o ".format(s)
 
@@ -678,6 +737,10 @@ class EnvGridworld2D_WithObstacles(EnvGridworld2D):
             it.iternext()
 
         return outfile
+
+    #--- Getters
+    def getShape(self):
+        return self.shape
 
     def getAllValidStates(self):
         "Returns the list of valid states (i.e. states that are not obstacles)"

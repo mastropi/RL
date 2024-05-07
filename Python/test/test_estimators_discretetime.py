@@ -1208,9 +1208,9 @@ class Test_EstValueFunctions_EnvGridworldsWithObstacles(unittest.TestCase, test_
         cls.nS = np.prod(shape)
         cls.start_state = 8
         cls.isd = np.array([1 if s == cls.start_state else 0 for s in range(cls.nS)])
-        cls.env2d = gridworlds.EnvGridworld2D_WithObstacles(shape=shape, terminal_states=set({3}),
-                                                            rewards_dict=dict({3: +1}), obstacles_set=set({5}),
-                                                            initial_state_distribution=cls.isd)
+        cls.env2d = gridworlds.EnvGridworld2D(  shape=shape, terminal_states=set({3}), obstacle_states=set({5}),
+                                                rewards_dict=dict({3: +1}),
+                                                initial_state_distribution=cls.isd)
 
         #-- Policy characteristics
         # Random walk policy
@@ -1427,9 +1427,9 @@ class Test_EstDifferentialValueFunctions_EnvGridworldsWithObstacles(unittest.Tes
         cls.nS = np.prod(shape)
         cls.start_state = 8
         cls.isd = np.array([1 if s == cls.start_state else 0 for s in range(cls.nS)])
-        cls.env2d = gridworlds.EnvGridworld2D_WithObstacles(shape=shape, terminal_states=set({3}),
-                                                            rewards_dict=dict({3: +1}), obstacles_set=set({5}),
-                                                            initial_state_distribution=cls.isd)
+        cls.env2d = gridworlds.EnvGridworld2D(shape=shape, terminal_states=set({3}), obstacle_states=set({5}),
+                                              rewards_dict=dict({3: +1}),
+                                              initial_state_distribution=cls.isd)
 
         #-- Cycle characteristics
         # Set of absorbing states, used to define a cycle as re-entrance into the set which is used to estimate the average reward using renewal theory
@@ -1564,6 +1564,7 @@ class Test_EstDifferentialValueFunctions_EnvGridworldsWithObstacles(unittest.Tes
         # particles varies as time progresses (it goes up as new particles exit the absorption set A, and it goes down
         # as the particles reach a terminal state --in which case they are restarted inside A, e.g. at the START of the labyrinth).
         # The maximum number of particles in the system is N.
+        # TODO: (2024/05/07) Check these expected V(s) values because after the recent changes I did on different aspects of the FV simulation and FV-based value function estimation process, the estimated V(s) is worse than before the changes, i.e. it is farther away from the true V(s) value computed by the brand new computing.compute_state_value_function_from_transition_matrix() function, as is also farther away than the V(s) estimated by TD(0).
         cls.expected_fv_V = np.array(
                             [ 0.034743,  0.233790, 0.489875, -0.037515,
                              -0.039710,  0.000000, 0.298950,  0.447024,

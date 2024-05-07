@@ -15,7 +15,7 @@ from unittest_data_provider import data_provider
 
 import numpy as np
 
-from Python.lib.environments.gridworlds import Direction2D, EnvGridworld2D_WithObstacles, get_adjacent_states, get_opposite_direction
+from Python.lib.environments.gridworlds import Direction2D, EnvGridworld2D, get_adjacent_states, get_opposite_direction
 
 
 class Test_Support_EnvGridworld2D_WithObstacles(unittest.TestCase):
@@ -24,7 +24,7 @@ class Test_Support_EnvGridworld2D_WithObstacles(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.gridworld = EnvGridworld2D_WithObstacles(shape=[3, 4], terminal_states=set({3, 7}), rewards_dict=dict({3: +1, 7: -1}), obstacles_set=set({5, 6}))
+        cls.gridworld = EnvGridworld2D(shape=[3, 4], terminal_states=set({3, 7}), obstacle_states=set({5, 6}), rewards_dict=dict({3: +1, 7: -1}))
         # Set the initial state so that we can test the environment rendering
         cls.gridworld.setState(2)
 
@@ -47,8 +47,8 @@ class Test_Support_EnvGridworld2D_WithObstacles(unittest.TestCase):
                             3: {Direction2D.UP.value: [(1.0, 3, +1, True)], Direction2D.RIGHT.value: [(1.0, 3, +1, True)], Direction2D.DOWN.value: [(1.0, 3, +1, True)], Direction2D.LEFT.value: [(1.0, 3, +1, True)]},
 
                             4: {Direction2D.UP.value: [(1.0, 0, 0, False)], Direction2D.RIGHT.value: [(1.0, 4, 0, False)], Direction2D.DOWN.value: [(1.0, 8, 0, False)], Direction2D.LEFT.value: [(1.0, 4, 0, False)]},
-                            5: {Direction2D.UP.value: [(1.0, 1, 0, False)], Direction2D.RIGHT.value: [(1.0, 5, 0, False)], Direction2D.DOWN.value: [(1.0, 9, 0, False)], Direction2D.LEFT.value: [(1.0, 4, 0, False)]},
-                            6: {Direction2D.UP.value: [(1.0, 2, 0, False)], Direction2D.RIGHT.value: [(1.0, 7, -1, True)], Direction2D.DOWN.value: [(1.0, 10, 0, False)], Direction2D.LEFT.value: [(1.0, 6, 0, False)]},
+                            5: {Direction2D.UP.value: [(1.0, 5, 0, False)], Direction2D.RIGHT.value: [(1.0, 5, 0, False)], Direction2D.DOWN.value: [(1.0, 5, 0, False)], Direction2D.LEFT.value: [(1.0, 5, 0, False)]},
+                            6: {Direction2D.UP.value: [(1.0, 6, 0, False)], Direction2D.RIGHT.value: [(1.0, 6, 0, False)], Direction2D.DOWN.value: [(1.0, 6, 0, False)], Direction2D.LEFT.value: [(1.0, 6, 0, False)]},
                             7: {Direction2D.UP.value: [(1.0, 7, -1, True)], Direction2D.RIGHT.value: [(1.0, 7, -1, True)], Direction2D.DOWN.value: [(1.0, 7, -1, True)], Direction2D.LEFT.value: [(1.0, 7, -1, True)]},
 
                             8: {Direction2D.UP.value: [(1.0, 4, 0, False)], Direction2D.RIGHT.value: [(1.0, 9, 0, False)], Direction2D.DOWN.value: [(1.0, 8, 0, False)], Direction2D.LEFT.value: [(1.0, 8, 0, False)]},
