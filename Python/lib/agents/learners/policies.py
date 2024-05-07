@@ -1001,7 +1001,10 @@ class LeaActorCriticNN(GenericLearner):
         self.allow_deterministic_policy = allow_deterministic_policy
         self.epsilon_away_from_deterministic = 0.05     # epsilon used to adjust deterministic policies away from probability 1
         self.optimizer_learning_rate = optimizer_learning_rate
-        self.learner_value_functions = learner_value_functions
+        # Note: the value functions learner is ONLY used when no critic is provided to the self.learn() method defined in this object to learn the optimal policy.
+        # Since this attribute is reset by calling reset() below and we do NOT want to reset the value functions learner used to create a critic when one is provided to learn(),
+        # we here create a COPY of the value functions learner passed as parameter.
+        self.learner_value_functions = copy.deepcopy(learner_value_functions)
         self.seed = seed
         self.debug = debug
 
@@ -1015,7 +1018,9 @@ class LeaActorCriticNN(GenericLearner):
         self.average_episode_length = 0.0
 
         # Reset the value functions learner with the option of resetting the learned value functions or not
-        self.learner_value_functions.reset(reset_episode=True, reset_value_functions=reset_value_functions)
+        # Note that we may not want to reset the value functions and average reward when we would like to leverage the value functions and average reward learned
+        # from the previous policy learning step.
+        self.learner_value_functions.reset(reset_episode=True, reset_value_functions=reset_value_functions, reset_average_reward=reset_value_functions)
 
         # Reset the policy learner and learning process
         if reset_policy:
