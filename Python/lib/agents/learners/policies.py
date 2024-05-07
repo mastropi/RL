@@ -999,7 +999,7 @@ class LeaActorCriticNN(GenericLearner):
         super().__init__(env)
         self.policy = policy
         self.allow_deterministic_policy = allow_deterministic_policy
-        self.epsilon_away_from_deterministic = 0.05     # epsilon used to adjust deterministic policies away from probability 1
+        self.epsilon_away_from_deterministic = 0.05     # epsilon used to adjust deterministic policies away from probability 1. Note that this value is divided by the number of actions when forcing policies away from deterministic, so its actual effect may be much smaller than stated by this attribute value.
         self.optimizer_learning_rate = optimizer_learning_rate
         # Note: the value functions learner is ONLY used when no critic is provided to the self.learn() method defined in this object to learn the optimal policy.
         # Since this attribute is reset by calling reset() below and we do NOT want to reset the value functions learner used to create a critic when one is provided to learn(),
@@ -1007,6 +1007,13 @@ class LeaActorCriticNN(GenericLearner):
         self.learner_value_functions = copy.deepcopy(learner_value_functions)
         self.seed = seed
         self.debug = debug
+
+        # Set the seed of ALL random number generators used in the process
+        # It is important to do this here, before the reset step done below, because the policy initialization has randomness when setting the model weights!
+        # (see e.g. PolNN.init_policy() for more details)
+        self.env.seed(self.seed)
+        np.random.seed(self.seed)
+        torch.manual_seed(self.seed)
 
         self.reset_value_functions_at_every_learning_step = reset_value_functions
         self.reset(reset_value_functions=reset_value_functions, reset_policy=True, initial_policy=initial_policy)
@@ -1099,6 +1106,7 @@ class LeaActorCriticNN(GenericLearner):
 
         # Set the seed of ALL random number generators used in the process!
         self.env.seed(seed)
+        np.random.seed(seed)
         torch.manual_seed(seed)
 
         if self.debug:
@@ -1187,6 +1195,8 @@ class LeaActorCriticNN(GenericLearner):
                     state_value = 0.0
                     for a in range(self.env.getActionSpace().n):
                         if action_values is None:
+                            # The user did not provide any critic, we extract the state value from the value function learner defined in this object
+                            # which is learning the value functions on the fly, as the current simulation progresses (see call to the learner_value_functions.learn() method above).
                             state_value += self.learner_value_functions.getQ().getValue(state, a)
                         else:
                             state_value += action_values[state * self.env.getActionSpace().n + a]
@@ -1204,6 +1214,7 @@ class LeaActorCriticNN(GenericLearner):
                     # using loss.backward() below.
                     advantage = action_value - state_value
                 logprob = action_distribution.log_prob(torch.tensor(action))
+                #print(f"advantage={advantage}, logprob={logprob}", end="; ")
                 if np.random.uniform() <= prob_include_in_train:
                     loss += -advantage * logprob
 
@@ -1228,9 +1239,10 @@ class LeaActorCriticNN(GenericLearner):
                       self.average_episode_length, nepisodes_max_steps_reached / nepisodes * 100, loss))
 
         # Learn
-        self.optimizer.zero_grad()      # We can easily look at the neural network parameters by printing self.optimizer.param_groups
+        self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
+        # We can easily look at the neural network parameters by printing self.optimizer.param_groups
         #print(f"New network parameters:\n{self.optimizer.param_groups}")
 
         return loss.float()

@@ -464,13 +464,16 @@ class PolNN():
         Initializes the parameters of the neural network so that the output policy is either almost constant over all actions for all input states
         or is almost equal to the `values` given (which are indexed by all possible actions)
 
-        The parameters are initialized to achieve "almost" constant output because if all parameters are initialized to 0, their values
-        never change during the learning process, as the gradient is always 0, because of the chain rule (easy to prove).
-
         The parameters (weights and biases) are initialized using a zero-mean normal distribution with a small standard deviation
         (compared to 1) given by `eps`, except for the biases of the neurons in the output layer which are initialized so that the policy
-        is almost equal to the given values (we write "almost" because there is noise in the output policy induced by the almost zero values
-        to which the other weights and biases are initialized to.
+        is almost equal to the given `values` or to a constant value for all actions, if no `values` are given
+        (we write "almost" because there is noise in the output policy induced by the almost zero values
+        to which the other weights and biases are initialized to, but this is perfectly ok for most purposes).
+
+        We need to initialize parameters randomly because, if all parameters were initialized to 0, their values would never change during the learning process(!)
+        as the gradient would be always 0 due to the chain rule (easy to prove).
+
+        IMPORTANT: for reproducibility, the torch seed should be set prior to calling this method, for instance through the torch.manual_seed() method.
 
         Arguments:
         eps: (opt) positive float
