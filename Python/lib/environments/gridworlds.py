@@ -31,9 +31,6 @@ from . import EnvironmentDiscrete
 
 from Python.lib.utils.basic import index_linear2multi, index_multi2linear
 
-#__all__ = [ "EnvGridworld2D",
-#            "EnvGridworld1D" ]
-
 
 @unique
 class Direction1D(Enum):
@@ -112,143 +109,12 @@ def get_opposite_direction(d: Direction2D):
     return Direction2D(opposite_d)
 
 
-# TODO: (2024/05/01) Make this environment inherit from EnvGridworld1D_OneTerminalState, which currently has a more general constructor (e.g. accepting parameter `terminal_states`), and thus should be renamed to EnvGridworld1D actually!
 class EnvGridworld1D(EnvironmentDiscrete):
     """
-    1D Grid World environment from Sutton's Reinforcement Learning book chapter 4.
-    You are an agent on an M-long grid and your goal is to reach the terminal
-    state on the right.
-    You receive a reward of 0 at each step until you reach a terminal state
-    in which case you receive reward -1 on the left state, and +1 on the right cell.
+    1D Gridworld environment with any number of terminal states and any rewards landscape
 
-    For example, a 10-long grid looks as follows:
-    T  o  o  o  o  x  o  o  o  T
-    x is your position and T are the two terminal states.
-
-    Arguments:
-    length: (opt) int
-        Number of states in the gridworld.
-        default: 21
-
-    initial_state_distribution: (opt) 1D list or array
-        See definition in super class.
-        default: None
-    """
-
-    def __init__(self, length=21, initial_state_distribution=None):
-        if length < 3:
-            raise ValueError('the length of the grid must be at least 3')
-
-        nS = length
-        nA = 2
-
-        # We substract 1 because the state are base 0 (i.e. they represent indices)
-        MAX_S = nS - 1
-
-        # Terminal states and reward obtained when reaching each possible state
-        terminal_states = set([0, nS-1])
-        rewards_dict = dict({0: -1.0, nS-1: +1.0})
-
-        #-- True value functions (for algorithm evaluation purposes)
-        #-- Note that terminal states have value = 0
-        # Value functions for the RANDOM walk policy ONLY!
-        self.V = -1.0 + 2/(nS-1) * np.arange(nS)    # Note that this is the same as np.arange(-(nS-1), nS+1, 2) / (nS-1)
-                                                    # (note that stop=nS+1, because the end value is NOT included!)
-        self.V[0] = self.V[nS-1] = 0.0              # The value of terminal states is defined as 0.0.
-                                                    # This is VERY IMPORTANT, meaning that the estimated value of
-                                                    # terminal states should be ALWAYS 0, o.w. learning diverges...
-                                                    # (in fact, if this were not the case, when transitioning to a
-                                                    # terminal state, the TD error would receive twice the reward, as
-                                                    # it is computed (when gamma = 1) as:
-                                                    # delta(T) = R(T) + V(S(T)) - V(S(T-1)) = 2 R(T) - V(S(T-1)),
-                                                    # where the 2 multiplying R(T) doesn't look right.
-        self.Q = None
-
-        # Define the possible actions based on the geometry
-        P = {}
-        grid = np.arange(nS)
-        it = np.nditer(grid)
-
-        # Function that checks whether we arrived at a terminal state
-        num_nonterminal_states = nS - len(terminal_states)
-        is_terminal = lambda s: s in terminal_states
-        reward = lambda s: rewards_dict[s] if s in rewards_dict.keys() else 0.0
-
-        while not it.finished:
-            s = it.iterindex
-
-            # P[s] is a dictionary indexed by the action "a" and its value a list of tuples for each possible next state that can be reached from state 's' taking action 'a':
-            # P[s][a] = [(prob_1, next_state_1, reward_1, is_terminal_1), (prob_2, next_state_2, reward_2, is_terminal_2), ...]
-            # Given that we are state 's' and take action 'a':
-            # prob: probability of going to state 'next_state'
-            # next_state: a possible next_state when taking action 'a'
-            # reward: reward received when going to state 'next_state'
-            # is_terminal: whether 'next_state' is a terminal state
-            P[s] = {a : [] for a in range(nA)}
-
-            if is_terminal(s):
-                # Terminal states are assigned value 0 (i.e. they receive 0 reward by convention)
-                # Also, with probability 1 the next state is the same state `s`.
-                P[s][Direction1D.LEFT.value] = [(1.0, s, 0.0, True)]
-                P[s][Direction1D.RIGHT.value] = [(1.0, s, 0.0, True)]
-            else:
-                # Not a terminal state
-                # ns = Next State!
-                ns_left = np.max([0, s-1])
-                ns_right = np.min([s+1, MAX_S])
-                P[s][Direction1D.LEFT.value] = [(1.0, ns_left, reward(ns_left), is_terminal(ns_left))]
-                P[s][Direction1D.RIGHT.value] = [(1.0, ns_right, reward(ns_right), is_terminal(ns_right))]
-
-            it.iternext()
-
-        # Initial state distribution is uniform, excluding terminal state which have zero probability
-        if initial_state_distribution is None:
-            isd = np.ones(nS) / num_nonterminal_states
-            isd[0] = 0.0
-            isd[nS-1] = 0.0
-        else:
-            if initial_state_distribution is not None:
-                if not isinstance(initial_state_distribution, (list, tuple, np.ndarray)) or len(initial_state_distribution) != length:
-                    raise ValueError("The initial state distribution must be a list, tuple or numpy array with as many elements as the number of states in the environment")
-                if not all(np.array(initial_state_distribution) >= 0) or not np.isclose(np.sum(initial_state_distribution), 1.0):
-                    raise ValueError(f"The values in the initial state distribution must sum up to 1 (sum = {np.sum(initial_state_distribution)})")
-                if not all([p == 0 for s, p in enumerate(initial_state_distribution) if s in terminal_states]):
-                    raise ValueError(f"The initial state distribution must be 0 at the terminal states ({terminal_states}):\ngiven distribution = {initial_state_distribution}")
-            isd = initial_state_distribution
-        assert np.isclose(np.sum(isd), 1.0), "The initial state probabilities sum up to 1 ({})".format(np.sum(isd))
-
-        self.P = P
-        #print("P")
-        #print(P)
-
-        super(EnvGridworld1D, self).__init__(nS, nA, P, isd,
-                                             dim=1,
-                                             terminal_states=set([i for i, s in enumerate(range(nS)) if is_terminal(s)]),
-                                             rewards=dict([(s, reward(s)) for s in terminal_states]))
-
-    def getShape(self):
-        return (self.nS,)
-
-
-class EnvGridworld1D_OneTerminalState(EnvironmentDiscrete):
-    """
-    1D Grid World environment with one terminal state (right one) and one transient state at state 0
-    (the leftmost state) for which the probability of going right is 1.
-    The goal is to analyze the conjecture that lambda should start near 1 and decrease towards 0 as more reliable
-    estimates of the value function are obtained, in particular to see if this happens in our adaptive TD(lambda)
-    algorithm.
-
-    This example is mentioned in Bertsekas, pag. 200-201 and, similar to this also in Sutton,
-    chapter 7 when analyzing the advantages of TD(0) (more model-based) over Monte Carlo (more experience-based)
-    through a two non-terminal states A and B and two terminal states reachable in one step from B.
-
-    The default reward landscape is +1 for all states except at the terminal state.
-
-    The initial state of the environment is the transient state.
-
-    For example, a 10-long grid looks as follows:
-    t  o  o  o  o  x  o  o  o  T
-    where t = "transient, T = "Terminal", and "x" is the current state of the environment.
+    The default is a 21-state gridworld with deterministic initial state distribution on the left state (s=0)
+    and one terminal state at the rightmost state (s=20) with an all-zero reward landscape except at the right state where it is +1.
 
     Arguments:
     length: (opt) int
@@ -256,27 +122,40 @@ class EnvGridworld1D_OneTerminalState(EnvironmentDiscrete):
         default: 21
 
     terminal_states: (opt) set or list or array-like
-        State indices considered as terminal states.
+        Indices of the terminal states.
         default: set([`length` - 1])
 
     rewards_dict: dict
         Reward values for a subset of states in the grid. The state index is used as dictionary key.
-        default: {`length`: 0.0}
+        default: {`length`: 1.0}
 
     reward_default: float
-        Default value for the state reward.
-        This value is used as reward delivered by a state when the state does not appear in `rewards_dict`.
-        default: +1.0
+        Default value for the reward.
+        This value is used as the reward obtained when visiting a state that does not appear among the keys of `rewards_dict`.
+        default: 0.0
 
     initial_state_distribution: (opt) list or array
         Probability distribution defining how to choose the initial state when the environment is initialized or reset.
-        It should have the same length as the number of states in the environment and terminal states
-        must have probability 0, while the sum of the probability on all other states should equal 1.
+        It should have the same length as the number of states in the environment. Terminal states must have probability 0,
+        and the sum of the probability on all other states must equal 1.
         This value is passed to the super class constructor as parameter `isd`.
-        default: None
+        default: None, in which case state s=0 has mass 1 and the rest mass 0
     """
 
-    def __init__(self, length=21, terminal_states=None, rewards_dict=None, reward_default=1.0, initial_state_distribution=None):
+    # NOTE: This class was originally created as EnvGridworld1D_OneTerminalState with the goal of analyzing the conjecture by Urtzi
+    # that an adaptive lambda should start near 1 and decrease towards 0 as more reliable estimates of the value function are obtained,
+    # in particular to see if this happens in our adaptive TD(lambda) algorithm.
+    #
+    # This example is mentioned in Bertsekas, pag. 200-201 and, similar to this also in Sutton,
+    # chapter 6 when analyzing the advantages of TD(0) (more model-based) over Monte Carlo (more experience-based)
+    # through a two non-terminal states A and B and two terminal states reachable in one step from B.
+    #
+    # The initial state of the environment is the leftmost state which, under the example mentioned in Bertsekas and in Sutton,
+    # is a transient state, meaning that the Markov chain goes right with probability 1.
+    #
+    # Note that this environment can still be created using the new version of the class.
+
+    def __init__(self, length=21, terminal_states=None, rewards_dict=None, reward_default=0.0, initial_state_distribution=None):
         if length < 3:
             raise ValueError('the length of the grid must be at least 3')
         if terminal_states is not None and len(terminal_states) == 0:
@@ -296,8 +175,8 @@ class EnvGridworld1D_OneTerminalState(EnvironmentDiscrete):
         MAX_S = nS - 1
 
         # Terminal states and reward obtained when reaching each possible state
-        terminal_states = set([nS - 1]) if terminal_states is None else set(terminal_states)
-        rewards_dict = dict({nS - 1: 0.0}) if rewards_dict is None else rewards_dict
+        terminal_states = set([nS-1]) if terminal_states is None else set(terminal_states)
+        rewards_dict = dict({nS-1: 1.0}) if rewards_dict is None else rewards_dict
 
         if initial_state_distribution is not None and not all([p == 0 for s, p in enumerate(initial_state_distribution) if s in terminal_states]):
             raise ValueError(f"The initial state distribution must be 0 at the terminal states ({terminal_states}):\ngiven distribution = {initial_state_distribution}")
@@ -329,18 +208,12 @@ class EnvGridworld1D_OneTerminalState(EnvironmentDiscrete):
                 P[s][Direction1D.LEFT.value] = [(1.0, s, 0.0, True)]
                 P[s][Direction1D.RIGHT.value] = [(1.0, s, 0.0, True)]
             else:
-                if s > 0:
-                    # Not a terminal state, nor the transient state
-                    # ns = Next State!
-                    ns_left = np.max([0, s - 1])
-                    ns_right = np.min([s + 1, MAX_S])
-                    P[s][Direction1D.LEFT.value] = [(1.0, ns_left, reward(ns_left), is_terminal(ns_left))]
-                    P[s][Direction1D.RIGHT.value] = [(1.0, ns_right, reward(ns_right), is_terminal(ns_right))]
-                else:
-                    # Transient state: the state transitions to the right with probability 1
-                    # i.e. the LEFT action is not possible (transition probability = 0.0)
-                    P[s][Direction1D.LEFT.value] = [(0.0, 0, 0.0, False)]
-                    P[s][Direction1D.RIGHT.value] = [(1.0, 1, 0.0, False)]
+                # Not a terminal state
+                # ns = Next State!
+                ns_left = np.max([0, s - 1])
+                ns_right = np.min([s + 1, MAX_S])
+                P[s][Direction1D.LEFT.value] = [(1.0, ns_left, reward(ns_left), is_terminal(ns_left))]
+                P[s][Direction1D.RIGHT.value] = [(1.0, ns_right, reward(ns_right), is_terminal(ns_right))]
 
             it.iternext()
 
@@ -358,18 +231,59 @@ class EnvGridworld1D_OneTerminalState(EnvironmentDiscrete):
         #print("P")
         #print(P)
 
-        super(EnvGridworld1D_OneTerminalState, self).__init__(nS, nA, P, isd,
-                                                              dim=1,
-                                                              terminal_states=set([i for i, s in enumerate(range(nS)) if is_terminal(s)]),
-                                                              rewards=rewards_dict)
+        super(EnvGridworld1D, self).__init__(nS, nA, P, isd,
+                                             dim=1,
+                                             terminal_states=set([i for i, s in enumerate(range(nS)) if is_terminal(s)]),
+                                             rewards=rewards_dict)
 
     def getShape(self):
         return (self.nS,)
 
 
+class EnvGridworld1D_Classic(EnvGridworld1D):
+    """
+    1D Gridworld environment from Sutton's Reinforcement Learning book chapter 4.
+    You are an agent on an M-long grid and your goal is to reach the terminal state on the right.
+    You receive a reward of 0 at each step until you reach a terminal state
+    in which case you receive reward -1 on the left state, and +1 on the right cell.
+
+    For example, a 10-long grid looks as follows:
+    T  o  o  o  o  x  o  o  o  T
+    x is your position and T are the two terminal states.
+
+    Arguments:
+    length: (opt) int
+        Number of states in the gridworld.
+        default: 21
+
+    initial_state_distribution: (opt) 1D list or array
+        See definition in super class.
+        default: None
+    """
+
+    def __init__(self, length=21, initial_state_distribution=None):
+        super().__init__(length, terminal_states=set({0, length-1}), rewards_dict=dict({0: -1.0, length-1: +1.0}), reward_default=0.0, initial_state_distribution=initial_state_distribution)
+        nS = length
+
+        #-- True value functions (for algorithm evaluation purposes)
+        #-- Note that terminal states have value = 0
+        # Value functions for the RANDOM walk policy ONLY!
+        self.V = -1.0 + 2/(nS-1) * np.arange(nS)    # Note that this is the same as np.arange(-(nS-1), nS+1, 2) / (nS-1)
+                                                    # (note that stop=nS+1, because the end value is NOT included!)
+        self.V[0] = self.V[nS-1] = 0.0              # The value of terminal states is defined as 0.0.
+                                                    # This is VERY IMPORTANT, meaning that the estimated value of
+                                                    # terminal states should be ALWAYS 0, o.w. learning diverges...
+                                                    # (in fact, if this were not the case, when transitioning to a
+                                                    # terminal state, the TD error would receive twice the reward, as
+                                                    # it is computed (when gamma = 1) as:
+                                                    # delta(T) = R(T) + V(S(T)) - V(S(T-1)) = 2 R(T) - V(S(T-1)),
+                                                    # where the 2 multiplying R(T) doesn't look right.
+        self.Q = None
+
+
 class EnvGridworld2D(EnvironmentDiscrete):
     """
-    2D Grid World environment from Sutton's Reinforcement Learning book chapter 4.
+    2D Gridworld environment from Sutton's Reinforcement Learning book chapter 4.
     The agent's goal on an MxN grid is to reach the terminal
     state at the top left or the bottom right corner.
     
@@ -394,7 +308,7 @@ class EnvGridworld2D(EnvironmentDiscrete):
     The agent receives a reward of 0 at each step until it reaches a terminal state
     in which case it receives reward -1 at the top-left cell, and +1 at the bottom-right cell.
 
-    This can be specialized to a 1D Grid world by setting one of the dimensions of `shape` to 1.
+    This can be specialized to a 1D gridworld by setting one of the dimensions of `shape` to 1.
     For example, a 10-long grid looks as follows:
     T  o  o  o  o  x  o  o  o  T
     x is your position and T are the two terminal states,

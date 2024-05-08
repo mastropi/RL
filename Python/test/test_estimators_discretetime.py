@@ -58,26 +58,26 @@ class Test_EstStateValueV_MetOffline_EnvDeterministicNextState(unittest.TestCase
 
     @classmethod
     def setUpClass(cls):
-        cls.env_grid = gridworlds.EnvGridworld1D(length=19+2)
-        cls.env_grid_oneterminal = gridworlds.EnvGridworld1D_OneTerminalState(length=20, rewards_dict={19: +1}, reward_default=0.0)
+        cls.env_grid_classic = gridworlds.EnvGridworld1D_Classic(length=19+2)
+        cls.env_grid_oneterminal = gridworlds.EnvGridworld1D(length=20, rewards_dict={19: +1}, reward_default=0.0)
         cls.env_mountain = mountaincars.MountainCarDiscrete(5)
             ## Note: we use more density to discretize the positions because we need to make sure that the car reaches the terminal state
             ## and this is not given if the discretization on the right side of the ramp is not dense enough because
             ## the new position is determined by x + v and vmax = 0.07, so the closest non-terminal x should 0.5 - 0.07 = 0.43
             ## where 0.5 = self.goal_position defined in mountain_cars.py in the MountainCarEnv class.
 
-    def test_EnvGridworld1D_PolRandomWalk_Met_TestOneCase(self):
+    def test_EnvGridworld1DClassic_PolRandomWalk_Met_TestOneCase(self):
         gamma = 1.0
         max_iter = 1000
         max_delta = 1E-6
-        estimator = estimators_miscellanea.EstValueFunctionOfflineDeterministicNextState(self.env_grid, gamma=gamma)
+        estimator = estimators_miscellanea.EstValueFunctionOfflineDeterministicNextState(self.env_grid_classic, gamma=gamma)
         niter, mean_deltaV_abs, max_deltaV_abs, max_deltaV_rel_abs = estimator.estimate_state_values_random_walk(synchronous=True, max_delta=1E-6, max_delta_rel=np.nan, max_iter=max_iter)
 
-        nS = self.env_grid.getNumStates()
+        nS = self.env_grid_classic.getNumStates()
         expected_values = np.arange(-nS + 1, nS, 2) / (nS - 1); expected_values[0] = expected_values[-1] = 0.0
         observed_values = estimator.getV().getValues()
         print("\n***** Estimated state values on {}-state '1D gridworld environment' after {} iterations out of {}, with:\n" \
-              .format(self.env_grid.getNumStates(), niter, max_iter) + \
+              .format(self.env_grid_classic.getNumStates(), niter, max_iter) + \
                 "mean|delta(V)| = {}, max|delta(V)| = {}, max|delta_rel(V)| = {}:\n{}" \
               .format(mean_deltaV_abs, max_deltaV_abs, max_deltaV_rel_abs, estimator.getV().getValues()))
         print("Average V = {}, Average |V| = {}".format(np.mean(observed_values), np.mean(np.abs(observed_values))))
@@ -86,9 +86,9 @@ class Test_EstStateValueV_MetOffline_EnvDeterministicNextState(unittest.TestCase
         plt.plot(observed_values, 'r.-')
         plt.title("1D gridworld: Estimated value function V(s) using offline deterministic estimation")
 
-        assert  self.env_grid.getNumStates() == 21 and \
-                self.env_grid.getTerminalStates() == [0, 20] and \
-                list(self.env_grid.getRewards()) == [-1.0, 1.0] and \
+        assert  self.env_grid_classic.getNumStates() == 21 and \
+                self.env_grid_classic.getTerminalStates() == [0, 20] and \
+                list(self.env_grid_classic.getRewards()) == [-1.0, 1.0] and \
                 gamma == 1.0 and \
                 max_delta == 1E-6
         assert niter == 220
@@ -109,7 +109,7 @@ class Test_EstStateValueV_MetOffline_EnvDeterministicNextState(unittest.TestCase
                             2.73601575e-01, 4.36514912e-01, 6.96431566e-01, 0.00000000e+00]
         observed_values = estimator.getV().getValues()
         print("\n***** Estimated state values on {}-state '1D gridworld environment with left transient state and left terminal state' after {} iterations out of {}, with:\n" \
-              .format(self.env_grid.getNumStates(), niter, max_iter) + \
+              .format(self.env_grid_classic.getNumStates(), niter, max_iter) + \
                 "mean|delta(V)| = {}, max|delta(V)| = {}, max|delta_rel(V)| = {}:\n{}" \
               .format(mean_deltaV_abs, max_deltaV_abs, max_deltaV_rel_abs, estimator.getV().getValues()))
         print("Average V = {}, Average |V| = {}".format(np.mean(observed_values), np.mean(np.abs(observed_values))))
@@ -170,7 +170,7 @@ class Test_EstStateValueV_MetOffline_EnvDeterministicNextState(unittest.TestCase
         ax.set_title("Average V by dimension (position / velocity) (scaled on non-terminal states range)")
 
 
-class Test_EstStateValueV_EnvGridworlds(unittest.TestCase, test_utils.EpisodeSimulation):
+class Test_EstStateValueV_EnvGridworld1D(unittest.TestCase, test_utils.EpisodeSimulation):
     # Note: nice explanation about the three types of methods that can be defined in Python: instance, class, static
     # https://stackoverflow.com/questions/54264073/what-is-the-use-and-when-to-use-classmethod-in-python
     # See the only answer by Navy Cheng.
@@ -201,7 +201,7 @@ class Test_EstStateValueV_EnvGridworlds(unittest.TestCase, test_utils.EpisodeSim
         cls.nS = 21
         cls.start_state = 10
         cls.isd = np.array([1 if s == cls.start_state else 0 for s in range(cls.nS)])
-        cls.env1d = gridworlds.EnvGridworld1D(length=cls.nS, initial_state_distribution=cls.isd)
+        cls.env1d = gridworlds.EnvGridworld1D_Classic(length=cls.nS, initial_state_distribution=cls.isd)
 
         # True state value function when gamma = 1.0
         cls.V_true = np.arange(-cls.nS + 1, cls.nS, 2) / (cls.nS - 1)
@@ -217,22 +217,22 @@ class Test_EstStateValueV_EnvGridworlds(unittest.TestCase, test_utils.EpisodeSim
     # -------- DATA -------
     # Case number, description, expected value, parameters
     # These are the same tests 1, 2 and 3 from data_test_lambda_return_random_walk
-    data_test_EnvGridworld1D_PolRandomWalk_MetMC_TestSeveralAlphasAndAlphaAdjustments = lambda DEFAULT_EXECUTION = False: (
+    data_test_EnvGridworld1DClassic_PolRandomWalk_MetMC_TestSeveralAlphasAndAlphaAdjustments = lambda DEFAULT_EXECUTION = False: (
         (1, DEFAULT_EXECUTION, 'MC, no alpha adjustment',
-         Test_EstStateValueV_EnvGridworlds.EXPECTED_TEST_RANDOM_WALK_1,
+         Test_EstStateValueV_EnvGridworld1D.EXPECTED_TEST_RANDOM_WALK_1,
          (0.1, 1.0), False, False, 0.0),
         (2, DEFAULT_EXECUTION, 'MC, adjusted alpha by state count (good results if run for 200 episodes)',
-         Test_EstStateValueV_EnvGridworlds.EXPECTED_TEST_RANDOM_WALK_2,
+         Test_EstStateValueV_EnvGridworld1D.EXPECTED_TEST_RANDOM_WALK_2,
          (1.0, 1.0), True, False, 0.0),
         (3, DEFAULT_EXECUTION, 'MC, adjusted alpha by episode',
-         Test_EstStateValueV_EnvGridworlds.EXPECTED_TEST_RANDOM_WALK_3,
+         Test_EstStateValueV_EnvGridworld1D.EXPECTED_TEST_RANDOM_WALK_3,
          (1.0, 1.0), True, True, 0.0),
     )
 
     # -------- DATA -------
 
-    @data_provider(data_test_EnvGridworld1D_PolRandomWalk_MetMC_TestSeveralAlphasAndAlphaAdjustments)
-    def test_EnvGridworld1D_PolRandomWalk_MetMC_TestSeveralAlphasAndAlphaAdjustments(self, casenum, run, desc, expected,
+    @data_provider(data_test_EnvGridworld1DClassic_PolRandomWalk_MetMC_TestSeveralAlphasAndAlphaAdjustments)
+    def test_EnvGridworld1DClassic_PolRandomWalk_MetMC_TestSeveralAlphasAndAlphaAdjustments(self, casenum, run, desc, expected,
                                                                                      params_alpha_gamma,
                                                                                      adjust_alpha, adjust_alpha_by_episode,
                                                                                      alpha_min):
@@ -268,7 +268,7 @@ class Test_EstStateValueV_EnvGridworlds(unittest.TestCase, test_utils.EpisodeSim
                    self.start_state == 10
             assert np.allclose(observed, expected, atol=1E-6)
 
-    def test_EnvGridworld1D_PolRandomWalk_MetMC_TestGammaSmallerThan1(self):
+    def test_EnvGridworld1DClassic_PolRandomWalk_MetMC_TestGammaSmallerThan1(self):
         print("\n*** Running test " + self.id() + " ***")
 
         # Simulation setup
@@ -318,7 +318,7 @@ class Test_EstStateValueV_EnvGridworlds(unittest.TestCase, test_utils.EpisodeSim
                params['alpha_min'] == 0.0
         assert np.allclose(observed, expected, atol=1E-6)
 
-    def test_EnvGridworld1D_PolRandomWalk_MetMC_TestRMSETwice(self):
+    def test_EnvGridworld1DClassic_PolRandomWalk_MetMC_TestRMSETwice(self):
         # -- All tests are run using seed = 1717, nepisodes = 20, start_state = 10
         print("\n*** Running test " + self.id() + " ***")
 
@@ -381,15 +381,15 @@ class Test_EstStateValueV_EnvGridworlds(unittest.TestCase, test_utils.EpisodeSim
     # ------------------------ TESTS OF MC(LAMBDA): MC as lambda-return ---------------------------#
     # -------- DATA -------
     # Case number, description, expected value, parameters
-    data_test_EnvGridworld1D_PolRandomWalk_MetLambdaReturn_TestSeveralAlphasLambdasAlphaAdjustments = lambda DEFAULT_EXECUTION = True: (
+    data_test_EnvGridworld1DClassic_PolRandomWalk_MetLambdaReturn_TestSeveralAlphasLambdasAlphaAdjustments = lambda DEFAULT_EXECUTION = True: (
         (1, DEFAULT_EXECUTION, 'MC, no alpha adjustment',
-         Test_EstStateValueV_EnvGridworlds.EXPECTED_TEST_RANDOM_WALK_1,
+         Test_EstStateValueV_EnvGridworld1D.EXPECTED_TEST_RANDOM_WALK_1,
          (0.1, 1.0, 1.0), False, False, 0.0),
         (2, DEFAULT_EXECUTION, 'MC, adjusted alpha by state count (good results if run for 200 episodes)',
-         Test_EstStateValueV_EnvGridworlds.EXPECTED_TEST_RANDOM_WALK_2,
+         Test_EstStateValueV_EnvGridworld1D.EXPECTED_TEST_RANDOM_WALK_2,
          (1.0, 1.0, 1.0), True, False, 0.0),
         (3, DEFAULT_EXECUTION, 'MC, adjusted alpha by episode',
-         Test_EstStateValueV_EnvGridworlds.EXPECTED_TEST_RANDOM_WALK_3,
+         Test_EstStateValueV_EnvGridworld1D.EXPECTED_TEST_RANDOM_WALK_3,
          (1.0, 1.0, 1.0), True, True, 0.0),
         (4, DEFAULT_EXECUTION, 'L-return (lambda<1), no alpha adjustment',
          [-0.000000, -0.648738, -0.440867, -0.228680, -0.172241, -0.093122, -0.023765,
@@ -405,8 +405,8 @@ class Test_EstStateValueV_EnvGridworlds(unittest.TestCase, test_utils.EpisodeSim
 
     # -------- DATA -------
 
-    @data_provider(data_test_EnvGridworld1D_PolRandomWalk_MetLambdaReturn_TestSeveralAlphasLambdasAlphaAdjustments)
-    def test_EnvGridworld1D_PolRandomWalk_MetLambdaReturn_TestSeveralAlphasLambdasAlphaAdjustments(self, casenum, run, desc,
+    @data_provider(data_test_EnvGridworld1DClassic_PolRandomWalk_MetLambdaReturn_TestSeveralAlphasLambdasAlphaAdjustments)
+    def test_EnvGridworld1DClassic_PolRandomWalk_MetLambdaReturn_TestSeveralAlphasLambdasAlphaAdjustments(self, casenum, run, desc,
                                                                                                    expected,
                                                                                                    params_alpha_gamma_lambda,
                                                                                                    adjust_alpha,
@@ -446,7 +446,7 @@ class Test_EstStateValueV_EnvGridworlds(unittest.TestCase, test_utils.EpisodeSim
                    self.start_state == 10
             assert np.allclose(observed, expected, atol=1E-6)
 
-    def test_EnvGridworld1D_PolRandomWalk_MetLambdaReturn_TestGammaLessThan1(self):
+    def test_EnvGridworld1DClassic_PolRandomWalk_MetLambdaReturn_TestGammaLessThan1(self):
         # -- All tests are run using seed = 1717, nepisodes = 20, start_state = 10
         print("\n*** Running test " + self.id() + " ***")
 
@@ -499,7 +499,7 @@ class Test_EstStateValueV_EnvGridworlds(unittest.TestCase, test_utils.EpisodeSim
                               max_rmse=self.max_rmse, color_rmse=self.color_rmse)
         assert np.allclose(observed, expected, atol=1E-6)
 
-    def fails_test_EnvGridworld1D_PolRandomWalk_MetLambdaReturnAdaptive_TestOneCase(self):
+    def fails_test_EnvGridworld1DClassic_PolRandomWalk_MetLambdaReturnAdaptive_TestOneCase(self):
         # NOTE: (2021/10/16) This test currently fails for two reasons:
         # - the `observed` array is an array of all -1.0 followed by all +1.0 (i.e. a step function)
         # - the plot_results() call at the end fails because the alpha_mean_by_episode_mean variable used when calling
@@ -553,7 +553,7 @@ class Test_EstStateValueV_EnvGridworlds(unittest.TestCase, test_utils.EpisodeSim
         assert np.allclose(observed, expected, atol=1E-6)
     # ------------------------ TESTS OF MC(LAMBDA): MC as lambda-return ---------------------------#
 
-    def test_EnvGridworld1D_PolRandomWalk_MetTDLambda_TestSeveralAlphasLambdas(self):
+    def test_EnvGridworld1DClassic_PolRandomWalk_MetTDLambda_TestSeveralAlphasLambdas(self):
         """
         This test intends to reproduce the results in Sutton 2018 (pag. 295) on the TD(lambda) algorithm applied to learn
         the state value function in a 1D gridworld. The results shown in Sutton correspond to the episode always starting
@@ -717,7 +717,7 @@ class Test_EstStateValueV_EnvGridworlds(unittest.TestCase, test_utils.EpisodeSim
                                                 [0.03680285, 0.02787032, 0.01874832]])
 
 
-class Test_EstDifferentialStateValueV_EnvGridworlds(unittest.TestCase, test_utils.EpisodeSimulation):
+class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_utils.EpisodeSimulation):
 
     @classmethod
     def setUpClass(cls):
@@ -727,7 +727,7 @@ class Test_EstDifferentialStateValueV_EnvGridworlds(unittest.TestCase, test_util
 
         # The environment
         cls.nS = 20
-        cls.env1d = gridworlds.EnvGridworld1D_OneTerminalState(length=cls.nS, rewards_dict={cls.nS-1: +1}, reward_default=0.0)
+        cls.env1d = gridworlds.EnvGridworld1D(length=cls.nS, rewards_dict={cls.nS-1: +1}, reward_default=0.0)
             ## NOTE: By definition of this gridworld, the start state is fixed at the leftmost state 0
         # I let the start state of the one-terminal gridworld be recorded in the following attribute which is used in the assertions below
         cls.start_state = 0
@@ -1199,7 +1199,7 @@ class Test_EstDifferentialStateValueV_EnvGridworlds(unittest.TestCase, test_util
         assert np.allclose(state_values, agent_fv_random.getLearner().getV().getValues(), atol=1E-6), "The observed V(s) must coincide with the V(s) stored in the learner"
 
 
-class Test_EstValueFunctions_EnvGridworldsWithObstacles(unittest.TestCase, test_utils.EpisodeSimulation):
+class Test_EstValueFunctions_EnvGridworld2DWithObstacles(unittest.TestCase, test_utils.EpisodeSimulation):
 
     @classmethod
     def setUpClass(cls):
@@ -1411,7 +1411,7 @@ class Test_EstValueFunctions_EnvGridworldsWithObstacles(unittest.TestCase, test_
         assert np.allclose(observed_values_Q, self.expected_fv_Q, atol=1E-6)
 
 
-class Test_EstDifferentialValueFunctions_EnvGridworldsWithObstacles(unittest.TestCase, test_utils.EpisodeSimulation):
+class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.TestCase, test_utils.EpisodeSimulation):
     """
     Test the estimation of the differential value function, i.e. the value function under the average reward setting
 
@@ -2137,7 +2137,7 @@ if __name__ == '__main__':
         # Create the test suites
         # --- Offline learning on Gridworld
         test_suite_offline = unittest.TestSuite()
-        test_suite_offline.addTest(Test_EstStateValueV_MetOffline_EnvDeterministicNextState("test_EnvGridworld1D_PolRandomWalk_Met_TestOneCase"))
+        test_suite_offline.addTest(Test_EstStateValueV_MetOffline_EnvDeterministicNextState("test_EnvGridworld1DClassic_PolRandomWalk_Met_TestOneCase"))
         test_suite_offline.addTest(Test_EstStateValueV_MetOffline_EnvDeterministicNextState("test_EnvGridworld1DOneTerminal_PolRandomWalk_Met_TestOneCase"))
         # DM-2022/06: For now we skip the test on the Mountain Car because the estimation takes too long to converge because
         # we are using a random policy and reaching the reward under this policy is very rare...
@@ -2146,31 +2146,31 @@ if __name__ == '__main__':
 
         # --- Gridworld tests
         test_suite_gw1d = unittest.TestSuite()
-        test_suite_gw1d.addTest(Test_EstStateValueV_EnvGridworlds("test_EnvGridworld1D_PolRandomWalk_MetMC_TestSeveralAlphasAndAlphaAdjustments"))
-        test_suite_gw1d.addTest(Test_EstStateValueV_EnvGridworlds("test_EnvGridworld1D_PolRandomWalk_MetMC_TestGammaSmallerThan1"))
-        test_suite_gw1d.addTest(Test_EstStateValueV_EnvGridworlds("test_EnvGridworld1D_PolRandomWalk_MetMC_TestRMSETwice"))
-        test_suite_gw1d.addTest(Test_EstStateValueV_EnvGridworlds("test_EnvGridworld1D_PolRandomWalk_MetLambdaReturn_TestSeveralAlphasLambdasAlphaAdjustments"))
-        test_suite_gw1d.addTest(Test_EstStateValueV_EnvGridworlds("test_EnvGridworld1D_PolRandomWalk_MetLambdaReturn_TestGammaLessThan1"))
-        test_suite_gw1d.addTest(Test_EstStateValueV_EnvGridworlds("test_EnvGridworld1D_PolRandomWalk_MetTDLambda_TestSeveralAlphasLambdas"))
+        test_suite_gw1d.addTest(Test_EstStateValueV_EnvGridworld1D("test_EnvGridworld1DClassic_PolRandomWalk_MetMC_TestSeveralAlphasAndAlphaAdjustments"))
+        test_suite_gw1d.addTest(Test_EstStateValueV_EnvGridworld1D("test_EnvGridworld1DClassic_PolRandomWalk_MetMC_TestGammaSmallerThan1"))
+        test_suite_gw1d.addTest(Test_EstStateValueV_EnvGridworld1D("test_EnvGridworld1DClassic_PolRandomWalk_MetMC_TestRMSETwice"))
+        test_suite_gw1d.addTest(Test_EstStateValueV_EnvGridworld1D("test_EnvGridworld1DClassic_PolRandomWalk_MetLambdaReturn_TestSeveralAlphasLambdasAlphaAdjustments"))
+        test_suite_gw1d.addTest(Test_EstStateValueV_EnvGridworld1D("test_EnvGridworld1DClassic_PolRandomWalk_MetLambdaReturn_TestGammaLessThan1"))
+        test_suite_gw1d.addTest(Test_EstStateValueV_EnvGridworld1D("test_EnvGridworld1DClassic_PolRandomWalk_MetTDLambda_TestSeveralAlphasLambdas"))
 
         # Gridworld with one terminal state (on the right) having +1 reward
         test_suite_gw1d1t = unittest.TestSuite()
-        test_suite_gw1d1t.addTest(Test_EstDifferentialStateValueV_EnvGridworlds("test_EnvGridworld1DOneTerminal_PolOptimal_MetTDLambdaGt0"))
-        test_suite_gw1d1t.addTest(Test_EstDifferentialStateValueV_EnvGridworlds("test_EnvGridworld1DOneTerminal_PolOptimal_MetTDLambda0"))
-        test_suite_gw1d1t.addTest(Test_EstDifferentialStateValueV_EnvGridworlds("test_EnvGridworld1DOneTerminal_PolOptimal_MetFV"))
-        test_suite_gw1d1t.addTest(Test_EstDifferentialStateValueV_EnvGridworlds("test_EnvGridworld1DOneTerminal_PolRandomWalk_MetTDLambdaGt0"))
-        test_suite_gw1d1t.addTest(Test_EstDifferentialStateValueV_EnvGridworlds("test_EnvGridworld1DOneTerminal_PolRandomWalk_MetTDLambda0"))
-        test_suite_gw1d1t.addTest(Test_EstDifferentialStateValueV_EnvGridworlds("test_EnvGridworld1DOneTerminal_PolRandomWalk_MetFV"))
+        test_suite_gw1d1t.addTest(Test_EstDifferentialStateValueV_EnvGridworld1D("test_EnvGridworld1DOneTerminal_PolOptimal_MetTDLambdaGt0"))
+        test_suite_gw1d1t.addTest(Test_EstDifferentialStateValueV_EnvGridworld1D("test_EnvGridworld1DOneTerminal_PolOptimal_MetTDLambda0"))
+        test_suite_gw1d1t.addTest(Test_EstDifferentialStateValueV_EnvGridworld1D("test_EnvGridworld1DOneTerminal_PolOptimal_MetFV"))
+        test_suite_gw1d1t.addTest(Test_EstDifferentialStateValueV_EnvGridworld1D("test_EnvGridworld1DOneTerminal_PolRandomWalk_MetTDLambdaGt0"))
+        test_suite_gw1d1t.addTest(Test_EstDifferentialStateValueV_EnvGridworld1D("test_EnvGridworld1DOneTerminal_PolRandomWalk_MetTDLambda0"))
+        test_suite_gw1d1t.addTest(Test_EstDifferentialStateValueV_EnvGridworld1D("test_EnvGridworld1DOneTerminal_PolRandomWalk_MetFV"))
 
         test_suite_gw2dobstacles = unittest.TestSuite()
-        test_suite_gw2dobstacles.addTest(Test_EstValueFunctions_EnvGridworldsWithObstacles("test_Env_PolRandomWalk_MetMC"))
-        test_suite_gw2dobstacles.addTest(Test_EstValueFunctions_EnvGridworldsWithObstacles("test_Env_PolRandomWalk_MetTDLambda"))
-        test_suite_gw2dobstacles.addTest(Test_EstValueFunctions_EnvGridworldsWithObstacles("test_Env_PolRandomWalk_MetFV"))
-        test_suite_gw2dobstacles.addTest(Test_EstDifferentialValueFunctions_EnvGridworldsWithObstacles("test_Env_PolRandomWalk_MetMC"))
-        test_suite_gw2dobstacles.addTest(Test_EstDifferentialValueFunctions_EnvGridworldsWithObstacles("test_Env_PolRandomWalk_MetMC_FromCycles"))
-        test_suite_gw2dobstacles.addTest(Test_EstDifferentialValueFunctions_EnvGridworldsWithObstacles("test_Env_PolRandomWalk_MetTDLambda"))
-        test_suite_gw2dobstacles.addTest(Test_EstDifferentialValueFunctions_EnvGridworldsWithObstacles("test_Env_PolRandomWalk_MetTDLambda_FromCycles"))
-        test_suite_gw2dobstacles.addTest(Test_EstDifferentialValueFunctions_EnvGridworldsWithObstacles("test_Env_PolRandomWalk_MetFV"))
+        test_suite_gw2dobstacles.addTest(Test_EstValueFunctions_EnvGridworld2DWithObstacles("test_Env_PolRandomWalk_MetMC"))
+        test_suite_gw2dobstacles.addTest(Test_EstValueFunctions_EnvGridworld2DWithObstacles("test_Env_PolRandomWalk_MetTDLambda"))
+        test_suite_gw2dobstacles.addTest(Test_EstValueFunctions_EnvGridworld2DWithObstacles("test_Env_PolRandomWalk_MetFV"))
+        test_suite_gw2dobstacles.addTest(Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles("test_Env_PolRandomWalk_MetMC"))
+        test_suite_gw2dobstacles.addTest(Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles("test_Env_PolRandomWalk_MetMC_FromCycles"))
+        test_suite_gw2dobstacles.addTest(Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles("test_Env_PolRandomWalk_MetTDLambda"))
+        test_suite_gw2dobstacles.addTest(Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles("test_Env_PolRandomWalk_MetTDLambda_FromCycles"))
+        test_suite_gw2dobstacles.addTest(Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles("test_Env_PolRandomWalk_MetFV"))
 
         # --- Mountain Car tests
         test_suite_mountain = unittest.TestSuite()

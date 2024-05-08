@@ -26,7 +26,7 @@ class Test_Class_LeaFV_discretetime(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.env = gridworlds.EnvGridworld1D_OneTerminalState(length=5, rewards_dict={4: +1}, reward_default=0.0)
+        cls.env = gridworlds.EnvGridworld1D(length=5, rewards_dict={4: +1}, reward_default=0.0)
 
     def test_iterative_computation_of_FV_integral(self):
         "Tests the iterative calculation of the integral appearing in the FV estimator when survival times are observed in increasing order"
@@ -291,9 +291,9 @@ if __name__ == '__main__':
         from Python.lib.agents.learners.episodic.discrete.fv import LeaFV
         from Python.lib.simulators.discrete import Simulator as DiscreteSimulator
 
-        # Note: the EnvGridworld1D_OneTerminalState environment always starts at 0, so no need to define an initial state distribution (isd)
+        # Note: the EnvGridworld1D environment always starts at 0, so no need to define an initial state distribution (isd)
         nS = 5
-        env = gridworlds.EnvGridworld1D_OneTerminalState(length=nS, rewards_dict={nS-1: +1}, reward_default=0.0)
+        env = gridworlds.EnvGridworld1D(length=nS, rewards_dict={nS-1: +1}, reward_default=0.0)
         absorption_set = set(range(2))              # ALL states in A should be part of the absorption set, because the set of active states in LeaFV is determined from the complement of the absorption set, and the active set is needed to define the dictionaries of the survival probability estimates.
         absorption_boundary = max(absorption_set)
         activation_set = {absorption_boundary + 1}
@@ -327,9 +327,9 @@ if __name__ == '__main__':
         from Python.lib.agents.learners import LearningCriterion
         from Python.lib.agents.learners.episodic.discrete.fv import LeaFV
 
-        # Note: the EnvGridworld1D_OneTerminalState environment always starts at 0, so no need to define an initial state distribution (isd)
+        # Note: the EnvGridworld1D environment always starts at 0, so no need to define an initial state distribution (isd)
         nS = 5
-        env = gridworlds.EnvGridworld1D_OneTerminalState(length=nS, rewards_dict={nS-1: +1}, reward_default=0.0)
+        env = gridworlds.EnvGridworld1D(length=nS, rewards_dict={nS-1: +1}, reward_default=0.0)
         env.setStoreTrajectoryFlag(True)
         absorption_set = set(range(1))
         absorption_boundary = max(absorption_set)

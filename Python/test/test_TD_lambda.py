@@ -62,7 +62,7 @@ class Test_EstStateValueV_MetTDLambda_EnvGridworld1D(unittest.TestCase, test_uti
         cls.nS = 21
         cls.start_state = 10
         cls.isd = np.array([1 if s == cls.start_state else 0 for s in range(cls.nS)])
-        cls.env = gridworlds.EnvGridworld1D(length=cls.nS, initial_state_distribution=cls.isd)
+        cls.env = gridworlds.EnvGridworld1D_Classic(length=cls.nS, initial_state_distribution=cls.isd)
 
         # Random walk policy on the above environment
         print("Check subclass")
@@ -325,7 +325,7 @@ class Test_EstStateValueV_MetTDLambda_EnvGridworld1DOneTerminal(unittest.TestCas
 
         # Environment: 1D gridworld
         cls.nS = 20
-        cls.env = gridworlds.EnvGridworld1D_OneTerminalState(length=cls.nS)  # nS states plus one terminal state
+        cls.env = gridworlds.EnvGridworld1D(length=cls.nS, rewards_dict={cls.nS-1: +1}, reward_default=0.0)  # nS states plus one terminal state
 
         # Random walk policy on the above environment
         cls.policy_rw = random_walks.PolRandomWalkDiscrete(cls.env)
@@ -946,7 +946,7 @@ if __name__ == "__main__":
         nepisodes = 500
         plot = True
         test_obj = Test_EstStateValueV_MetTDLambda_EnvGridworld1DOneTerminal(seed=1717, nepisodes=nepisodes, plot=plot)
-        test_obj.env = gridworlds.EnvGridworld1D_OneTerminalState(nstates)
+        test_obj.env = gridworlds.EnvGridworld1D(nstates)
         test_obj.policy_rw = random_walks.PolRandomWalkDiscrete(test_obj.env)
 
         learning_info = test_obj.run_random_walk_adaptive_onecase()

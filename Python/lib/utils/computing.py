@@ -1277,13 +1277,13 @@ if __name__ == "__main__":
     print("\n--- Testing compute_state_value_function_from_transition_matrix(P, b, g, gamma) for EPISODIC and CONTINUING learning tasks:")
 
     #-- DATA PREPARATION
-    from Python.lib.environments.gridworlds import EnvGridworld1D_OneTerminalState
+    from Python.lib.environments.gridworlds import EnvGridworld1D
     from Python.lib.agents.policies import probabilistic
 
     # Environment with start state at 0
     nS = 5
     isd = np.zeros(nS); isd[0] = 1.0
-    env1d = EnvGridworld1D_OneTerminalState(length=nS, rewards_dict={nS-1: +1.0}, reward_default=0.0, initial_state_distribution=isd)
+    env1d = EnvGridworld1D(length=nS, rewards_dict={nS-1: +1.0}, reward_default=0.0, initial_state_distribution=isd)
     print(f"Policy in {nS}-state gridworld:")
     for k, v in env1d.P.items():
         print(f"State {k}: {v}")

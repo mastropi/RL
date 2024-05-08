@@ -171,7 +171,7 @@ resultsdir = resultsdir_grid
 nstates = 19 # Number of states excluding terminal states
 start_state = int((nstates + 1) / 2)
 isd = np.array([1 if s == start_state else 0 for s in range(nstates+2)])
-env_grid1d = gridworlds.EnvGridworld1D(length=nstates+2, initial_state_distribution=isd)
+env_grid1d = gridworlds.EnvGridworld1D_Classic(length=nstates + 2, initial_state_distribution=isd)
 max_time_steps_per_episode = None
 weights_rmse = False
 env_desc = str(nstates) + r"-state 1D gridworld environment"

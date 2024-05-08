@@ -19,7 +19,7 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
 
 from Python.lib.agents.policies import probabilistic
-from Python.lib.environments.gridworlds import EnvGridworld1D_OneTerminalState
+from Python.lib.environments.gridworlds import EnvGridworld1D
 import Python.lib.agents as agents
 from Python.lib.agents.learners import LearningCriterion, LearningTask, ResetMethod
 from Python.lib.agents.learners.episodic.discrete import td, fv
@@ -32,7 +32,7 @@ start_states = {0}
 # Use the following for a random selection of the start state outside A
 #start_states = set(np.arange(2, nS-1))
 isd = [1/len(start_states) if s in start_states else 0.0 for s in range(nS)]
-env1d = EnvGridworld1D_OneTerminalState(length=nS, rewards_dict={nS-1: +1.0}, reward_default=0.0, initial_state_distribution=isd)
+env1d = EnvGridworld1D(length=nS, rewards_dict={nS-1: +1.0}, reward_default=0.0, initial_state_distribution=isd)
 print(f"Policy in {nS}-state gridworld:")
 for k, v in env1d.P.items():
     print(f"State {k}: {v}")

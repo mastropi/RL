@@ -17,7 +17,7 @@ import copy
 import numpy as np
 
 from Python.lib.simulators import SetOfStates, discrete
-from Python.lib.environments.gridworlds import EnvGridworld1D_OneTerminalState
+from Python.lib.environments.gridworlds import EnvGridworld1D
 from Python.lib.agents import GenericAgent
 from Python.lib.agents.learners import LearningCriterion, LearningTask
 from Python.lib.agents.learners.episodic.discrete import td
@@ -155,7 +155,7 @@ class Test_Class_Simulator(unittest.TestCase):
     def setUpClass(cls):
         # Test environment
         nS = 5
-        cls.env1d = EnvGridworld1D_OneTerminalState(length=nS, rewards_dict={nS-1: +1.0}, reward_default=0.0)
+        cls.env1d = EnvGridworld1D(length=nS, rewards_dict={nS-1: +1.0}, reward_default=0.0)
         print(f"Policy in {nS}-state gridworld:")
         for k, v in cls.env1d.P.items():
             print(f"State {k}: {v}")

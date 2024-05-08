@@ -740,7 +740,7 @@ if __name__ == "__main__":
     for x in active_set:
         isd[x] = 1/len(active_set)
     assert np.isclose(sum(isd), 1.0)
-    env = gridworlds.EnvGridworld1D(nS, initial_state_distribution=isd)
+    env = gridworlds.EnvGridworld1D_Classic(nS, initial_state_distribution=isd)
     nA = env.getNumActions()
     env.setSeed(1717)
 

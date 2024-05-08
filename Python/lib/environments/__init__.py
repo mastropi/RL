@@ -67,8 +67,8 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
         #--- 2023/10/04 ---
 
         self.all_states = list( np.arange(self.getNumStates()) )
-        self.terminal_states = terminal_states
-        self.non_terminal_states = set(self.all_states).difference( set( self.terminal_states ) )
+        self.terminal_states = set(terminal_states)
+        self.non_terminal_states = set(self.all_states).difference(self.terminal_states)
         self.rewards = rewards
 
         self.store_trajectory = store_trajectory
@@ -131,7 +131,10 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
                                        axis=0)
 
     def isTerminalState(self, state):
-        return set([state]).issubset( set(self.terminal_states) )
+        return set([state]).issubset(self.terminal_states)
+
+    def is_terminal_state(self, state):
+        return self.isTerminalState(state)
 
     #--- Getters
     def getDimension(self):

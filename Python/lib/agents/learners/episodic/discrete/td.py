@@ -330,7 +330,7 @@ class LeaTDLambda(Learner):
     def _choose_states2plot(self):
         from Python.lib.environments.gridworlds import EnvGridworld1D
         from Python.lib.environments.mountaincars import MountainCarDiscrete
-        if isinstance(self.env, EnvGridworld1D) and self.env.getNumStates() > 12:
+        if issubclass(self.env.__class__, EnvGridworld1D) and self.env.getNumStates() > 12:
             states2plot = list(range(9, 12))
         elif isinstance(self.env, MountainCarDiscrete):
             # Assuming MountainCar environment
