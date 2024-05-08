@@ -145,9 +145,12 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
         reward_terminal = +1
         reward_obstacles = 0
         dict_rewards = dict([(s, reward_terminal if s in terminal_states else reward_obstacles) for s in set.union(set(terminal_states), obstacles_set)])
-        cls.env2d = gridworlds.EnvGridworld2D_WithObstacles(shape=env_shape, terminal_states=terminal_states,
-                                                            rewards_dict=dict_rewards, obstacles_set=obstacles_set,
-                                                            initial_state_distribution=isd)
+        cls.env2d = gridworlds.EnvGridworld2D(  shape=env_shape,
+                                                terminal_states=terminal_states,
+                                                obstacle_states=obstacles_set,
+                                                rewards_dict=dict_rewards,
+                                                wind_dict=wind_dict,
+                                                initial_state_distribution=isd)
         print("Gridworld environment:")
         cls.env2d._render()
 
