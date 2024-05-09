@@ -704,8 +704,9 @@ exit_state_at_bottom = False
 if problem_2d:
     # 2D labyrinth
     size_vertical = 3; size_horizontal = 4
+    size_vertical = 4; size_horizontal = 5
     #size_vertical = 6; size_horizontal = 8
-    size_vertical = 8; size_horizontal = 12
+    #size_vertical = 8; size_horizontal = 12
     #size_vertical = 9; size_horizontal = 13
     #size_vertical = 10; size_horizontal = 14
     #size_vertical = 10; size_horizontal = 30
@@ -756,8 +757,8 @@ if problem_2d:
     #lower_left_state = (size_vertical-1) * size_horizontal
     #absorption_set = set(np.concatenate([list(range(x*size_horizontal, x*size_horizontal + size_horizontal-2)) for x in range(size_vertical-2)]))
     # The absorption set is a rectangular area that touches the right and bottom walls of the big rectangular area that leads to nowhere
-    left_margin = 0 #0 #int(rectangle_to_nowhere_width/2)
-    top_margin = rectangle_to_nowhere_height
+    left_margin = 0 #int(rectangle_to_nowhere_width/2)
+    top_margin = max(1, int(rectangle_to_nowhere_width/2) - 1) #rectangle_to_nowhere_height #rectangle_to_nowhere_height - 2
     absorption_set = set(np.concatenate([list(range(x * size_horizontal + left_margin, x * size_horizontal + rectangle_to_nowhere_width)) for x in range(0, top_margin)]))
 else:
     #-- 1D gridworld
@@ -792,8 +793,8 @@ test_ac.setUpClass( shape=env_shape, exit_state=exit_state, wind_dict=wind_dict,
                     alpha_min=0.1,
                     # Fleming-Viot parameters
                     # Small N and T are N=50, T=1000 for the 8x12 labyrinth with corridor
-                    N=200, #50 #20 #100
-                    T=1000, #1000, #3000,  # np.prod(env_shape) * 10  #100 #1000
+                    N=20, #50, #200, #200 if problem_2d else 100, #50 #20 #100
+                    T=500, #1000, #100, #10000 if problem_2d else 1000, #1000, #1000, #3000,  # np.prod(env_shape) * 10  #100 #1000
                     obstacles_set=obstacles_set, absorption_set=absorption_set,
                     start_states_set={entry_state}, #{nS-1}, #None,
                     reset_method_value_functions=ResetMethod.ALLZEROS,
@@ -911,9 +912,9 @@ learning_method = "values_fv"; simulator_value_functions = test_ac.sim_fv
 learning_method_type = learning_method[:9]  # This makes e.g. "values_fvos" become "values_fv"
 
 # FV learning parameters (which are used to define parameters of the other learners analyzed so that their comparison with FV is fair)
-max_time_steps_fv_per_particle = 50 #100 #50                            # Max average number of steps allowed for each particle in the FV simulation
-max_time_steps_fv_for_expectation = test_ac.agent_nn_fv.getLearner().getNumTimeStepsForExpectation()                         # This is parameter T
-max_time_steps_fv_for_all_particles = test_ac.agent_nn_fv.getLearner().getNumParticles() * max_time_steps_fv_per_particle    # This is parameter N * max_time_steps_fv_per_particle which defines the maximum number of steps to run the FV system when learning the value functions that are used as critic of the loss function at each policy learning step
+max_time_steps_fv_per_particle = 5*len(test_ac.agent_nn_fv.getLearner().getActiveSet()) #100 #50                            # Max average number of steps allowed for each particle in the FV simulation. We set this value proportional to the size of the active set of the FV learner, in order to scale this value with the size of the labyrinth.
+max_time_steps_fv_for_expectation = test_ac.agent_nn_fv.getLearner().getNumTimeStepsForExpectation()                        # This is parameter T
+max_time_steps_fv_for_all_particles = test_ac.agent_nn_fv.getLearner().getNumParticles() * max_time_steps_fv_per_particle   # This is parameter N * max_time_steps_fv_per_particle which defines the maximum number of steps to run the FV system when learning the value functions that are used as critic of the loss function at each policy learning step
 
 # Traditional method learning parameters
 # They are set for a fair comparison with FV learning
@@ -930,7 +931,7 @@ print("******")
 # Parameters about policy learning (Actor)
 n_learning_steps = 50 #200 #50 #100 #30
 n_episodes_per_learning_step = 50   #100 #30   # This parameter is used as the number of episodes to run the policy learning process for and, if the learning task is EPISODIC, also as the number of episodes to run the simulators that estimate the value functions
-max_time_steps_per_policy_learning_episode = test_ac.env2d.getNumStates() if problem_2d else 2*test_ac.env2d.getNumStates() #np.prod(env_shape) * 10 #max_time_steps_benchmark // n_episodes_per_learning_step   # Maximum number of steps per episode while LEARNING THE *POLICY* ONLINE (NOT used for the value functions (critic) learning)
+max_time_steps_per_policy_learning_episode = 5*test_ac.env2d.getNumStates() if problem_2d else 2*test_ac.env2d.getNumStates() #np.prod(env_shape) * 10 #max_time_steps_benchmark // n_episodes_per_learning_step   # Maximum number of steps per episode while LEARNING THE *POLICY* ONLINE (NOT used for the value functions (critic) learning)
 policy_learning_mode = "online"     # Whether the policy is learned online or OFFLINE (only used when value functions are learned separately from the policy)
 allow_deterministic_policy = True #False
 use_average_reward_from_previous_step = True #learning_method_type == "values_fv" #False #True            # Under the AVERAGE reward crtierion, whether to use the average reward estimated from the previous policy learning step as correction of the value functions (whenever it is not 0), at least as an initial estimate
