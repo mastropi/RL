@@ -35,7 +35,7 @@ class GenericParameterizedPolicyTwoActions:
     Arguments:
     env: Environment
         A generic environment object accepting two actions which must have the following methods defined:
-        - np_random() which generates a random value between 0 and 1.
+        - np_random() which generates a random value between 0 and 1, used to choose an action for the policy.
         - getActions() which returns all possible actions to be done when interacting with the environment.
 
     theta: float

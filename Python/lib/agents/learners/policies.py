@@ -1011,6 +1011,7 @@ class LeaActorCriticNN(GenericLearner):
         # Set the seed of ALL random number generators used in the process
         # It is important to do this here, before the reset step done below, because the policy initialization has randomness when setting the model weights!
         # (see e.g. PolNN.init_policy() for more details)
+        # See also the following chapter on Reproducibility in PyTorch about some caveats: https://pytorch.org/docs/stable/notes/randomness.html
         self.env.seed(self.seed)
         np.random.seed(self.seed)
         torch.manual_seed(self.seed)

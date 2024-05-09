@@ -455,11 +455,11 @@ class PolNN():
                              f"\n# environment actions = {self.env.getNumActions()}"
                              f"\n# model actions = {self.nn_model.getNumOutputs()}")
 
-    def reset(self, initial_values=None):
-        "Resets the policy to the random walk or to the given initial values"
-        self.init_policy(values=initial_values)
+    def reset(self, initial_values=None, seed=None):
+        "Resets the policy to the random walk or to the given initial values, optionally using a seed for the random initialization of the neural network weights"
+        self.init_policy(values=initial_values, seed=seed)
 
-    def init_policy(self, eps=1E-2, values=None):
+    def init_policy(self, eps=1E-2, values=None, seed=None):
         """
         Initializes the parameters of the neural network so that the output policy is either almost constant over all actions for all input states
         or is almost equal to the `values` given (which are indexed by all possible actions)
@@ -484,10 +484,17 @@ class PolNN():
         values: (opt) array-like
             List of values indexed by the possible actions to which the policy should be initialized.
             default: None, in which case the policy is initialized to almost a uniform policy
+
+        seed: (opt) int
+            Seed to use in the random initialization of the neural network weights as described above.
+            default: None
         """
         # Inspired by the weights_init() function in this code:
         # https://github.com/pytorch/examples/blob/main/dcgan/main.py
         # Note also the use of Module.apply() method which calls a function on each submodule of a module (e.g. of a neural network).
+
+        if seed is not None:
+            nn.init.torch.manual_seed(seed)
 
         for i, component in enumerate(self.nn_model.modules()):
             # Use the following if we want to filter out specific module types. But the problem is that this is not an exhaustive list!

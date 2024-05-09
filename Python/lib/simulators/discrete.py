@@ -852,6 +852,12 @@ class Simulator:
         policy = self.agent.getPolicy()  # Used to define the next action and next state
         learner = self.agent.getLearner()  # Used to learn (or keep learning) the value functions
 
+        # Set the seed of the environment stored in the policy which is the one responsible for defining the next action of the agent
+        # Note that this environment normally coincides with the environment stored in this Simulator object, but it may not always be the case
+        # (this already happened when I was using different COPIES of a policy to compare different value function learners! May-2024)
+        if seed is not None:
+            policy.env.seed(seed)
+
         # Reset the learner, but WITHOUT resetting the value functions as they were possibly learned a bit during an initial exploration of the environment
         # The average reward is reset when no initially estimated average reward is given. If such initially estimated average reward is given,
         # it means that it should be used as initial estimate of the average reward during further learning. Otherwise, when it is not given,
@@ -890,6 +896,9 @@ class Simulator:
             dist_proba_for_start_state = None
         for i, env in enumerate(envs):
             # Environment seed
+            # IMPORTANT: (2024/05/07) Setting this seed is ONLY relevant when the environment has some stochastic component --e.g. wind in a gridworld.
+            # HOWEVER, the seed is NOT used to choose the action taken by the agent! In fact, the seed for the agent's action is the seed that was used when defining
+            # the random number generator of the environment stored in the `policy` object. This seed is set above.
             seed_i = seed + i if seed is not None else None
             env.setSeed(seed_i)
 
@@ -1274,6 +1283,12 @@ class Simulator:
         policy = self.agent.getPolicy()  # Used to define the next action and next state
         learner = self.agent.getLearner()  # Used to learn (or keep learning) the value functions
 
+        # Set the seed of the environment stored in the policy which is the one responsible for defining the next action of the agent
+        # Note that this environment normally coincides with the environment stored in this Simulator object, but it may not always be the case
+        # (this already happened when I was using different COPIES of a policy to compare different value function learners! May-2024)
+        if seed is not None:
+            policy.env.seed(seed)
+
         # Reset the learner, but WITHOUT resetting the value functions as they were possibly learned a bit during an initial exploration of the environment
         # What is most important of this reset is to reset the learning rates of all states and actions! (so that we start the FV-based learning with full intensity)
         learner.reset(reset_episode=True, reset_value_functions=False, reset_average_reward=estimated_average_reward is None)
@@ -1596,6 +1611,12 @@ class Simulator:
             max_time_steps = N * 100   # N * "MAX # transitions allowed on average for each particle"
         policy = self.agent.getPolicy()  # Used to define the next action and next state
         learner = self.agent.getLearner()  # Used to learn (or keep learning) the value functions
+
+        # Set the seed of the environment stored in the policy which is the one responsible for defining the next action of the agent
+        # Note that this environment normally coincides with the environment stored in this Simulator object, but it may not always be the case
+        # (this already happened when I was using different COPIES of a policy to compare different value function learners! May-2024)
+        if seed is not None:
+            policy.env.seed(seed)
 
         # Reset the learner, but WITHOUT resetting the value functions as they were possibly learned a bit during an initial exploration of the environment
         # What is most important of this reset is to reset the learning rates of all states and actions! (so that we start the FV-based learning with full intensity)
@@ -1964,6 +1985,12 @@ class Simulator:
             max_time_steps = N * 100   # N * "MAX # transitions allowed on average for each particle"
         policy = self.agent.getPolicy()  # Used to define the next action and next state
         learner = self.agent.getLearner()  # Used to learn (or keep learning) the value functions
+
+        # Set the seed of the environment stored in the policy which is the one responsible for defining the next action of the agent
+        # Note that this environment normally coincides with the environment stored in this Simulator object, but it may not always be the case
+        # (this already happened when I was using different COPIES of a policy to compare different value function learners! May-2024)
+        if seed is not None:
+            policy.env.seed(seed)
 
         # Reset the learner, but WITHOUT resetting the value functions as they were possibly learned a bit during an initial exploration of the environment
         # What is most important of this reset is to reset the learning rates of all states and actions! (so that we start the FV-based learning with full intensity)
@@ -2589,6 +2616,12 @@ class Simulator:
         policy = self.agent.getPolicy()
         learner = self.agent.getLearner()
 
+        # Set the seed of the environment stored in the policy which is the one responsible for defining the next action of the agent
+        # Note that this environment normally coincides with the environment stored in this Simulator object, but it may not always be the case
+        # (this already happened when I was using different COPIES of a policy to compare different value function learners! May-2024)
+        if seed is not None:
+            policy.env.seed(seed)
+
         # Reset the learner (i.e. prepare it for a fresh new learning experience with all learning memory erased and learning rates reset to their initial values)
         # Note that a special treatment may be granted to the reset of the value functions because we may want NOT to reset them,
         # for instance when we are learning a policy and we use this simulator to learn the value functions...
@@ -2599,13 +2632,16 @@ class Simulator:
         # value functions to 0 at every policy learning step, while the problem does NOT happen when the value functions are NOT reset.)
         learner.reset(reset_episode=True, reset_value_functions=reset_value_functions)
 
-        # Environment seed
+        # Numpy seed and Environment seed
+        # (the numpy seed is needed when epsilon_random_action > 0 because in that case a random number is drawn to decide whether to choose a random action
+        # --without following the policy-- and subsequently to choose a random action, if that ends up being the case)
         # We only set the seed when it is not None because when this method is called by the simulate() method,
         # seed is set to None in order to avoid having each experiment (i.e. each replication) produce the same results
         # (which would certainly invalidate the replications!). In that case, the environment's seed is set *before*
         # calling this method run() and we don't want to revert that seed setting, o.w. the experiments repeatability
         # would be broken.
         if seed is not None:
+            np.random.seed(seed)
             self.env.setSeed(seed)
 
         # Store initial values used in the analysis of all the episodes run
@@ -3056,6 +3092,12 @@ class Simulator:
         policy = self.agent.getPolicy()
         learner = self.agent.getLearner()
 
+        # Set the seed of the environment stored in the policy which is the one responsible for defining the next action of the agent
+        # Note that this environment normally coincides with the environment stored in this Simulator object, but it may not always be the case
+        # (this already happened when I was using different COPIES of a policy to compare different value function learners! May-2024)
+        if seed is not None:
+            policy.env.seed(seed)
+
         # Reset the learner (i.e. prepare it for a fresh new learning experience with all learning memory erased and learning rates reset to their initial values)
         # Note that a special treatment may be granted to the reset of the value functions because we may want NOT to reset them,
         # for instance when we are learning a policy and we use this simulator to learn the value functions...
@@ -3097,13 +3139,16 @@ class Simulator:
                                         WINDOW_WIDTH,
                                         WINDOW_HEIGHT)
 
-        # Environment seed
+        # Numpy seed and Environment seed
+        # (the numpy seed is needed when epsilon_random_action > 0 because in that case a random number is drawn to decide whether to choose a random action
+        # --without following the policy-- and subsequently to choose a random action, if that ends up being the case)
         # We only set the seed when it is not None because when this method is called by the simulate() method,
         # seed is set to None in order to avoid having each experiment (i.e. each replication) produce the same results
         # (which would certainly invalidate the replications!). In that case, the environment's seed is set *before*
         # calling this method run() and we don't want to revert that seed setting, o.w. the experiments repeatability
         # would be broken.
         if seed is not None:
+            np.random.seed(seed)
             self.env.setSeed(seed)
 
         # Store initial values used in the analysis of all the episodes run
