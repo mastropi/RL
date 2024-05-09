@@ -798,24 +798,35 @@ print("******")
 print(f"A MAXIMUM of {max_time_steps_benchmark} steps will be allowed during the simulation of either FV or any benchmark method used.")
 print("******")
 
-# Common learning parameters
+#-- Common learning parameters
+# Parameters about policy learning (Actor)
 n_learning_steps = 50 #200 #50 #100 #30
-n_episodes_per_learning_step = 50   #100 #30   # This parameter is used as the number of episodes to run both for the value functions learning AND the policy learning, and both for the traditional and the FV methods method (for FV, this number of episodes is used to learn the expected reabsorption time E(T_A))
-max_time_steps_per_episode = test_ac.env2d.getNumStates()*10    # This parameter is just set as a SAFEGUARD against being blocked in an episode at some state of which the agent could be liberated by restarting to a new episode (when this max number of steps is reached)
-max_time_steps_per_policy_learning_episode = test_ac.env2d.getNumStates() if problem_2d else test_ac.env2d.getNumStates()*2 #np.prod(env_shape) * 10 #max_time_steps_benchmark // n_episodes_per_learning_step   # Maximum number of steps per episode while LEARNING THE *POLICY* ONLINE (NOT used for the value functions (critic) learning)
-adjust_alpha_initial_by_learning_step = False; t_learn_min_to_adjust_alpha = 30
+n_episodes_per_learning_step = 50   #100 #30   # This parameter is used as the number of episodes to run the policy learning process for and, if the learning task is EPISODIC, also as the number of episodes to run the simulators that estimate the value functions
+max_time_steps_per_policy_learning_episode = test_ac.env2d.getNumStates() if problem_2d else 2*test_ac.env2d.getNumStates() #np.prod(env_shape) * 10 #max_time_steps_benchmark // n_episodes_per_learning_step   # Maximum number of steps per episode while LEARNING THE *POLICY* ONLINE (NOT used for the value functions (critic) learning)
 policy_learning_mode = "online"     # Whether the policy is learned online or OFFLINE (only used when value functions are learned separately from the policy)
+allow_deterministic_policy = True #False
+use_average_reward_from_previous_step = True #learning_method_type == "values_fv" #False #True            # Under the AVERAGE reward crtierion, whether to use the average reward estimated from the previous policy learning step as correction of the value functions (whenever it is not 0), at least as an initial estimate
 use_advantage = not (learning_method == "values_fvos") # Set this to True if we want to use the advantage function learned as the TD error, instead of using the advantage function as the difference between the estimated Q(s,a) and the estimated V(s) (where the average reward cancels out)
 optimizer_learning_rate = 0.01 #0.01 #0.1
 reset_value_functions_at_every_learning_step = False #(learning_method == "values_fv")     # Reset the value functions when learning with FV, o.w. the learning can become too unstable due to the oversampling of the states with high value... (or something like that)
-verbose_period = n_episodes_per_learning_step // 10
 
-# Saving
+# Parameters about value function learning (Critic)
+alpha_initial = simulator_value_functions.getAgent().getLearner().getInitialLearningRate()
+adjust_alpha_initial_by_learning_step = False; t_learn_min_to_adjust_alpha = 30 # based at 1 (regardless of the base value used for t_learn)
+#max_time_steps_per_episode = test_ac.env2d.getNumStates()*10  # (2024/05/02) NO LONGER USED!  # This parameter is just set as a SAFEGUARD against being blocked in an episode at some state of which the agent could be liberated by restarting to a new episode (when this max number of steps is reached)
+epsilon_random_action = 0.1 #0.1 #0.05 #0.0 #0.01
+use_average_max_time_steps_in_td_learner = False #learning_method == "values_td2" #True #False
+learning_steps_observe = [50, 90] #[2, 30, 48] #[2, 10, 11, 30, 31, 49, 50] #[7, 20, 30, 40]  # base at 1, regardless of the base value used for t_learn
+verbose_period = max_time_steps_fv_for_all_particles // 10
+plot = False         # Whether to plot the evolution of value function and average reward estimation
+colormap = "seismic"  # "Reds"  # Colormap to use in the plot of the estimated state value function V(s)
+
 save = True
 
 time_start = timer()
 datetime_start_str = get_current_datetime_as_string(format="filename")
 
+# A few further parameters for the policy learning process
 break_when_no_change = False    # Whether to stop the learning process when the average reward doesn't change from one step to the next
 break_when_goal_reached = False  # Whether to stop the learning process when the average reward is close enough to the maximum average reward (by a relative tolerance of 0.1%)
 
@@ -842,12 +853,17 @@ if learning_method_type == "values_fv":
     probas_stationary_start_state_et = test_ac.agent_nn_fv.getLearner().getProbasStationaryStartStateET()
     probas_stationary_start_state_fv = test_ac.agent_nn_fv.getLearner().getProbasStationaryStartStateFV()
 if learning_method == "all_online":
-    # Online Actor-Critic policy learner with TD(lambda) as value functions learner and value functions learning happens at the same time as policy learning
-    learner_ac = LeaActorCriticNN(test_ac.env2d, test_ac.agent_nn_td.getPolicy(), test_ac.agent_nn_td.getLearner(),
+    # Online Actor-Critic policy learner with TD as value functions learner and value functions learning happens at the same time as policy learning
+    learner_ac = LeaActorCriticNN(test_ac.env2d, simulator_value_functions.getAgent().getPolicy(), simulator_value_functions.getAgent().getLearner(),
+                                  allow_deterministic_policy=allow_deterministic_policy,
                                   reset_value_functions=reset_value_functions_at_every_learning_step, initial_policy=initial_policy, optimizer_learning_rate=optimizer_learning_rate, seed=test_ac.seed, debug=True)
 else:
     # Value functions (Critic) are learned separately from the application of the policy and the policy (Actor) may be learned OFFLINE or online
+    # IMPORTANT: We pass the policy of the agent stored in the value functions simulator as policy for the Actor-Critic learner so that when the Actor-Critic learner
+    # updates the policy, the policy of the agent stored in the value functions simulator is ALSO updated. This is crucial for using the updated policy
+    # when learning the value functions at the next policy learning step.
     learner_ac = LeaActorCriticNN(test_ac.env2d, simulator_value_functions.getAgent().getPolicy(), simulator_value_functions.getAgent().getLearner(),
+                                  allow_deterministic_policy=allow_deterministic_policy,
                                   reset_value_functions=reset_value_functions_at_every_learning_step, initial_policy=initial_policy, optimizer_learning_rate=optimizer_learning_rate, seed=test_ac.seed, debug=True)
 
 seed_base = test_ac.seed
@@ -948,7 +964,12 @@ for rep in range(nrep):
                     simulator_value_functions.run(t_learn=t_learn,
                                                   max_time_steps_fv=max_time_steps_fv_for_all_particles,
                                                   min_num_cycles_for_expectations=0,
+                                                      ## Note: We set the minimum number of cycles for the estimation of E(T_A) to 0 because we do NOT need
+                                                      ## the estimation of the average reward to learn the optimal policy, as it cancels out in the advantage function Q(s,a) - V(s)!!
+                                                  use_average_reward_stored_in_learner=use_average_reward_from_previous_step,
                                                   reset_value_functions=reset_value_functions_at_this_step,
+                                                  plot=plot if t_learn+1 in learning_steps_observe else False, colormap=colormap,
+                                                  epsilon_random_action=epsilon_random_action,
                                                   seed=seed_learn, verbose=False, verbose_period=verbose_period)
                 #average_reward = simulator_value_functions.getAgent().getLearner().getAverageReward()  # This average reward should not be used because it is inflated by the FV process that visits the states with rewards more often
                 average_reward = expected_reward
@@ -958,7 +979,12 @@ for rep in range(nrep):
             else:
                 # TD learners
                 if 'max_time_steps_benchmark_all' in locals() and max_time_steps_benchmark_all[rep, t_learn] != np.nan:
-                    _max_time_steps = max_time_steps_benchmark_all[rep, t_learn]
+                    # The FV learner was run before running this TD learner
+                    if use_average_max_time_steps_in_td_learner:
+                        _max_time_steps = int( np.mean(max_time_steps_benchmark_all[rep, :]) )
+                    else:
+                        # => Use the number of steps used by the FV learner at the current policy learning step (t_learn) as maximum number of steps to allow for the TD learner
+                        _max_time_steps = max_time_steps_benchmark_all[rep, t_learn]
                 else:
                     # When max_time_steps_benchmark_all is not defined, it means that the number of steps to run the TD learner for is calculated above
                     # and may not be exactly equal to the number of steps the FV learner took at each policy learning step.
@@ -974,16 +1000,21 @@ for rep in range(nrep):
                                                       reset_value_functions=reset_value_functions_at_this_step,
                                                       seed=seed_learn,
                                                       state_observe=state_observe, compute_rmse=True if t_learn+1 in learning_steps_observe else False,
+                                                      epsilon_random_action=epsilon_random_action,
+                                                      plot=plot if t_learn+1 in learning_steps_observe else False, colormap=colormap,
                                                       verbose=True, verbose_period=verbose_period)
                 else:
                     # Use this when the discrete.Simulator.run() calls the _run_single_continuing_task() method to run the simulation (where there are no episodes)
                     V, Q, A, state_counts, _, _, learning_info = \
                         simulator_value_functions.run(t_learn=t_learn,
                                                       max_time_steps=_max_time_steps,
+                                                      estimated_average_reward=simulator_value_functions.getAgent().getLearner().getAverageReward() if use_average_reward_from_previous_step else None,
                                                       reset_value_functions=reset_value_functions_at_this_step,
                                                       seed=seed_learn,
                                                       state_observe=state_observe,
-                                                      compute_rmse=True if t_learn in learning_episodes_observe else False, plot=False if t_learn in learning_episodes_observe else False,
+                                                      compute_rmse=True if t_learn+1 in learning_steps_observe else False,
+                                                      plot=plot if t_learn+1 in learning_steps_observe else False, colormap=colormap,
+                                                      epsilon_random_action=epsilon_random_action,
                                                       verbose=True, verbose_period=verbose_period)
                 average_reward = simulator_value_functions.getAgent().getLearner().getAverageReward()
                 nsteps_all[rep, t_learn] = learning_info['nsteps']
