@@ -15,6 +15,7 @@ if __name__ == "__main__":
     import runpy
     runpy.run_path('../../../../setup.py')
 
+import copy
 import numpy as np
 
 from gym.envs.toy_text.discrete import categorical_sample, DiscreteEnv
@@ -536,18 +537,7 @@ class PolNN():
         Return: int
         Index of the action chosen by the policy.
         """
-        # Probability of choosing each possible action represented by each neuron of the output layer of the neural network
-        if self.nn_model.getNumInputs() == 1:
-            exp_preferences = np.exp(self.nn_model([state]).tolist())  # We use tolist() to avoid the error message "Numpy not found"
-        elif self.nn_model.getNumInputs() == self.env.getNumStates():
-            input = np.zeros(self.env.getNumStates(), dtype=int)
-            input[state] = 1
-            exp_preferences = np.exp(self.nn_model(input).tolist())
-        proba_actions = exp_preferences / np.sum( exp_preferences )
-            ## Note: we could compute the probability of the different actions using the torch function `F.softmax(self.nn_model([state]), dim=0).tolist()`
-            ## but astonishingly this gives probabilities that do not sum up to 1!!!
-            ## (not exactly at least, they sum up to e.g. 0.999999723, but this makes the call np.random.choice() fail)
-        #print(f"State: {state}, Prob. Actions = {proba_actions}")
+        proba_actions = self.getPolicyForState(state)
 
         # Choose the action
         if isinstance(self.env, DiscreteEnv):
@@ -569,6 +559,27 @@ class PolNN():
 
         return policy
 
+    def getPolicyForState(self, state):
+        "Returns the probability of choosing each possible action for the given state"
+        # Compute the action preferences output by the neural network (each output node represents a possible action)
+        if self.nn_model.getNumInputs() == 1:
+            exp_preferences = np.exp(self.nn_model([state]).tolist())  # We use tolist() to avoid the error message "Numpy not found"
+        elif self.nn_model.getNumInputs() == self.env.getNumStates():
+            input = np.zeros(self.env.getNumStates(), dtype=int)
+            input[state] = 1
+            exp_preferences = np.exp(self.nn_model(input).tolist())
+        else:
+            raise ValueError(f"The number of inputs in the neural network ({self.nn_model.getNumInputs()}) cannot be handled by the policy learner. It must be either 1 or as many as the number of states in the environment.")
+
+        # Compute the action probabilities from the action preferences using the soft-max function
+        proba_actions = exp_preferences / np.sum( exp_preferences )
+            ## Note: we could compute the probability of the different actions using the torch function `F.softmax(self.nn_model([state]), dim=0).tolist()`
+            ## but astonishingly this gives probabilities that do not sum up to 1!!!
+            ## (not exactly at least, they sum up to e.g. 0.999999723, but this makes the call np.random.choice() fail)
+        #print(f"State: {state}, Prob. Actions = {proba_actions}")
+
+        return proba_actions
+
     def getPolicyForAction(self, action, state):
         """
         Returns the value of the policy for the given action when the environment is at the given state
@@ -582,23 +593,41 @@ class PolNN():
         Return: float in [0, 1]
         Value of the policy (probability) for the given action at the given environment's state.
         """
-        if self.nn_model.getNumInputs() == 1:
-            preferences = self.nn_model([state]).tolist()
-        elif self.nn_model.getNumInputs() == self.env.getNumStates():
-            input = np.zeros(self.env.getNumStates(), dtype=int)
-            input[state] = 1
-            preferences = self.nn_model(input).tolist()
-        else:
-            raise ValueError(f"The number of inputs in the neural network ({self.policy.nn_model.getNumInputs()}) cannot be handled by the policy learner. It must be either 1 or as many as the number of states in the environment.")
-
-        # Compute the policy as the soft-max of the preferences on the given state and action
-        policy_value_for_action = np.exp(preferences[action]) / np.sum( np.exp(preferences) )
+        proba_actions = self.getPolicyForState(state)
+        policy_value_for_action = proba_actions[action]
 
         return policy_value_for_action
 
     def getThetaParameter(self):
         "Returns the parameters of the neural network"
         return self.nn_model.parameters()
+
+    def copy(self, keep_same_environment=True):
+        """
+        Creates a copy of the object by optionally keeping the same reference of the environment on which it acts (default).
+
+        In general we would like to keep the same environment in the copy (i.e. the environment in the copy should reference the same environment
+        in the original policy) for REPRODUCIBILITY purposes.
+        In fact, actions taken by the policy are chosen using the RANDOM NUMBER GENERATOR stored in the environment attribute of the policy object, self.env.
+        So, if we create a policy passing an environment on which random numbers will be generated to simulate the agent's interaction with the environment
+        using such policy, and we set the seed of the environment at the beginning of the simulation, we need to make sure that the random number generator
+        defined by that initial seeding step is the same random number generator used by the self.choose_action() method defined in this policy object
+        to generate an action, namely the random number generator stored in the self.env attribute of this policy object (typically called `np_random`).
+        If the environment attribute of this policy object is DIFFERENT from the environment whose seed was set at the beginning of the simulation,
+        (which typically is the environment passed to a Simulator object, typically the same environment that is used to instantiate this policy object
+        when defining a policy), the agent's interaction with the environment will NOT be reproducible, even if we set the environment's seed
+        at the beginning of the simulation.
+
+        Note: A use case of copying a policy is to compare the values of policies learned by different agents at the end of a policy learning process,
+        such as an Actor-Critic policy learning algorithm.
+        """
+        policy_copy = copy.deepcopy(self)
+
+        if keep_same_environment:
+            # VERY IMPORTANT TO KEEP THE SAME ENVIRONMENT IN THE COPY OF THE POLICY FOR REPRODUCIBILITY!! (see explanation in method's documentation above)
+            policy_copy.env = self.env
+
+        return policy_copy
 
 
 if __name__ == "__main__":

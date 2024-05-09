@@ -788,7 +788,7 @@ test_ac.setUpClass( shape=env_shape, exit_state=exit_state, wind_dict=wind_dict,
                     # General learning parameters
                     learning_task=learning_task,
                     learning_criterion=learning_criterion,
-                    alpha=1.0, gamma=gamma, lmbda=0.0,
+                    alpha=1.0, gamma=gamma, lmbda=0.7,  # lmbda parameter is ONLY used for TD(lambda), NOT for TD(0), which is created separately nor for FV (for which lambda > 0 does not make sense)
                     alpha_min=0.1,
                     # Fleming-Viot parameters
                     # Small N and T are N=50, T=1000 for the 8x12 labyrinth with corridor
@@ -880,6 +880,7 @@ dict_colors['values_fvos'] = "lightgreen"; dict_linestyles['values_fvos'] = "sol
 dict_loss = dict()
 dict_R = dict()
 dict_R_long = dict()
+dict_R_long_true = dict()   # True average reward under the policy used at each policy learning step to learn value functions. GOAL: Keep track on how rare is reaching the reward.
 dict_V = dict()
 dict_Q = dict()
 dict_A = dict()
@@ -899,10 +900,12 @@ nrep = 5 #10
 learning_method = "all_online"; simulator_value_functions = None
 # Value functions are learned separately from the policy
 # Policy learning can happen online or OFFLINE
-learning_method = "values_td"; simulator_value_functions = test_ac.sim_td       # Normally TD(0), but could be TD(lambda)
+learning_method = "values_td"; simulator_value_functions = test_ac.sim_td0      # TD(0)
+#learning_method = "values_td2"; simulator_value_functions = test_ac.sim_td0    # TD(0)
 #learning_method = "values_tdl"; simulator_value_functions = test_ac.sim_td     # TD(lambda)
 #learning_method = "values_tda"; simulator_value_functions = test_ac.sim_tda    # Adaptive TD(lambda)
 learning_method = "values_fv"; simulator_value_functions = test_ac.sim_fv
+#learning_method = "values_fv2"; simulator_value_functions = test_ac.sim_fv
 #learning_method = "values_fvos"; simulator_value_functions = test_ac.sim_fv     # FV used just as an oversampling method
 
 learning_method_type = learning_method[:9]  # This makes e.g. "values_fvos" become "values_fv"
@@ -970,6 +973,7 @@ Q_all = np.zeros((nrep, n_learning_steps, test_ac.env2d.getNumStates(), test_ac.
 A_all = np.zeros((nrep, n_learning_steps, test_ac.env2d.getNumStates(), test_ac.env2d.getNumActions()))
 R_all = np.nan * np.ones((nrep, n_learning_steps))       # Average reward (EPISODIC learning task)
 R_long_all = np.nan * np.ones((nrep, n_learning_steps))  # Long-run Average reward (CONTINUING learning task). It does NOT converge to the same value as the episodic average reward because there is one more reward value per episode!! (namely the reward going from the terminal state to the start state)
+R_long_true_all = np.nan * np.ones((nrep, n_learning_steps))  # True Long-run Average reward (CONTINUING learning task) under the policy at the start of each policy learning step
 loss_all = np.nan * np.ones((nrep, n_learning_steps))
 nsteps_all = np.nan * np.ones((nrep, n_learning_steps))  # Number of value function time steps run per every policy learning step
 KL_all = np.nan * np.ones((nrep, n_learning_steps))      # K-L divergence between two consecutive policies
@@ -1005,8 +1009,11 @@ for rep in range(nrep):
     print(f"\n->>>>>>>>>>>\nRunning replication {rep+1} of {nrep} (seed={seed_rep})... @{format(get_current_datetime_as_string())}")
 
     # Reset the policy actor and the critic every time a new replication starts
+    # Note that this performs a further reset of the policy (besides the one done above by the constructor that creates the learner_ac object),
+    # and thus resets the policy to ANOTHER slightly different policy (because of the normally distributed random values around 0 that are set as neural network weights)
     print("Resetting the policy learner and the critic (if any)...")
     learner_ac.reset(reset_value_functions=True, reset_policy=True, initial_policy=initial_policy)
+    print(f"Initial policy (states x actions):\n{learner_ac.getPolicy().get_policy_values()}")
 
     if simulator_value_functions is not None:
         # Whenever there is a critic, do a couple of resets
@@ -1045,9 +1052,14 @@ for rep in range(nrep):
         # Keep track of the policy learned so that we can analyze how much it changes after each learning step w.r.t. the previous learning step
         policy_prev = None
         for t_learn in range(n_learning_steps):
+            # Compute or update the true state value function stored in the environment for the current policy
+            # (used as reference when plotting the evolution of the estimated state value function V(s) when plot=True)
+            V_true, avg_reward_true, mu = compute_true_state_value_function(test_ac.env2d, learner_ac.getPolicy(), learning_task, learning_criterion)
+            R_long_true_all[rep, t_learn] = avg_reward_true
+
             # Pass a different seed (for the simulator) for each learning step... o.w. we will be using the same seed for them at every learning step!!
             seed_learn = seed_rep + t_learn
-            print(f"\n\n*** Running learning step {t_learn+1} of {n_learning_steps} (AVERAGE REWARD at previous step = {R_all[rep, max(0, t_learn-1)]} of MAX={max_avg_reward_episodic})... (seed={seed_learn}) @{get_current_datetime_as_string()}")
+            print(f"\n\n*** Running learning step {t_learn+1} of {n_learning_steps} (True average reward under current policy = {avg_reward_true}) (AVERAGE REWARD at previous step = {R_all[rep, max(0, t_learn-1)]} of MAX={max_avg_reward_episodic})... (seed={seed_learn}) @{get_current_datetime_as_string()}")
             reset_value_functions_at_this_step = reset_value_functions_at_every_learning_step if t_learn > 0 else True  # ALWAYS RESET THE VALUE FUNCTIONS WHEN IT'S THE VERY FIRST LEARNING STEP (becaue we don't want to keep histroy from a earlier learning process on the same learner!)
             # Update the initial learning rate for the value functions at each learning step to a smaller value than the previous learning step
             # SHOULD WE SET IT TO THE AVERAGE LEARNING RATE FROM THE PREVIOUS LEARNING STEP?? (so that we start off where we left at the last learning moment)
@@ -1200,6 +1212,7 @@ else:
 dict_loss[learning_method] = loss_all.copy()
 dict_R[learning_method] = R_all.copy()
 dict_R_long[learning_method] = R_long_all.copy()
+dict_R_long_true[learning_method] = R_long_true_all.copy()
 dict_V[learning_method] = V_all.copy()
 dict_Q[learning_method] = Q_all.copy()
 dict_A[learning_method] = A_all.copy()
@@ -1211,9 +1224,13 @@ dict_time_elapsed[learning_method] = time_elapsed_all.copy()
 ############# Store the measures that we would like to compare
 
 
+#------------------ Plots -----------------
+# Default figure size for the plots below
+figsize = (10, 8)
+
 # Plot loss and average reward for the currently analyzed learner
 print("\nPlotting...")
-ax_loss = plt.figure().subplots(1,1)
+ax_loss = plt.figure(figsize=figsize).subplots(1, 1)
 ax_loss.plot(range(1, n_learning_steps+1), loss_all[rep, :n_learning_steps], marker='.', color="red")
 ax_loss.plot(range(1, n_learning_steps+1), alpha_all[rep, :n_learning_steps], '--', color="cyan")
 ax_loss.set_xlabel("Learning step")
@@ -1244,7 +1261,7 @@ plt.title(f"{learning_method.upper()}\n{learning_task.name} learning task - {lea
 # ONLY VALID WHEN THE EXIT STATE IS AT THE TOP RIGHT OF THE LABYRINTH
 marker = ''
 Q_all_baseline = Q_all[rep, :n_learning_steps, :, :] - np.tile(V_all[rep, :n_learning_steps, :].T, (test_ac.env2d.getNumActions(), 1, 1)).T
-ax_Q, ax_Q_baseline = plt.figure().subplots(1,2)
+ax_Q, ax_Q_baseline = plt.figure().subplots(1, 2)
 ax_Q.plot(range(1, n_learning_steps + 1), V_all[rep, :n_learning_steps, state_observe], marker=marker, color="black")
 ax_Q.plot(range(1, n_learning_steps + 1), Q_all[rep, :n_learning_steps, state_observe, :], marker=marker)
 ax_Q.legend(["V(s)"] + ["Q(s," + str(a) + ")" for a in range(Q_all.shape[2])], loc='upper left')
@@ -1335,7 +1352,7 @@ plt.suptitle(f"{learning_method.upper()}\n{learning_task.name} learning task - {
 
 
 # Plot the ADVANTAGE function
-axes = plt.figure().subplots(test_ac.env2d.shape[0], test_ac.env2d.shape[1])
+axes = plt.figure(figsize=(10, 9)).subplots(test_ac.env2d.shape[0], test_ac.env2d.shape[1])
 first_learning_step = 0 #n_learning_steps * 3 // 4  #0
 y2max = int(round(np.max(state_counts_all)*1.1)) # For a common Y2-axis showing the state counts
 min_A, max_A = np.min(A_all), np.max(A_all)      # For a common Y-axis showing the value functions
@@ -1368,10 +1385,7 @@ plt.suptitle(f"{learning_method.upper()}\n{learning_task.name} learning task - {
 
 
 #-- Final policy parameters and policy distribution by state
-env = test_ac.env2d
-gridworld_shape = env.shape
-policy = learner_ac.getPolicy()
-learner = learner_ac.getValueFunctionsLearner()
+policy = simulator_value_functions.getAgent().getPolicy()
 print("Final network parameters:")
 print(list(policy.getThetaParameter()))
 
@@ -1380,35 +1394,86 @@ print(list(policy.getThetaParameter()))
 
 colormap = cm.get_cmap("rainbow")  # useful colormaps are "jet", "rainbow", seismic"
 colornorm = None
+fontsize = 14
+factor_fontsize = 1.0   # Scaling factor when computing the final fontsize to use for labels showing the policy values of the different actions
 
 # Policy for each action at each state
-axes = plt.figure().subplots(*gridworld_shape)
+axes = plt.figure().subplots(*env_shape)
 proba_actions_toplot = np.nan*np.ones((3, 3))
 if problem_2d:
+    # Factor for the fontsize that depends on the environment size
+    factor_fs = factor_fontsize * np.min((5 / axes.shape[0], 5 / axes.shape[1]))
     for i in range(axes.shape[0]):
         for j in range(axes.shape[1]):
-            state_1d = np.ravel_multi_index((i, j), gridworld_shape)
+            state_1d = np.ravel_multi_index((i, j), env_shape)
             print("")
-            for action in range(env.getNumActions()):
+            for action in range(test_ac.env2d.getNumActions()):
                 print(f"Computing policy Pr(a={action}|s={(i,j)})...", end= " ")
                 idx_2d = (0, 1) if action == 0 else (1, 2) if action == 1 else (2, 1) if action == 2 else (1, 0)
                 proba_actions_toplot[idx_2d] = policy.getPolicyForAction(action, state_1d)
                 print("p = {:.3f}".format(proba_actions_toplot[idx_2d]))
-            img = axes[i,j].imshow(proba_actions_toplot, cmap=colormap, vmin=0, vmax=1)
+            img = axes[i, j].imshow(proba_actions_toplot, cmap=colormap, vmin=0, vmax=1)
+            # Remove the axes ticks as they do not convey any information
+            axes[i, j].set_xticks([])
+            axes[i, j].set_yticks([])
+            for action in range(test_ac.env2d.getNumActions()):
+                idx_2d = (0, 1) if action == 0 else (1, 2) if action == 1 else (2, 1) if action == 2 else (1, 0)
+                axes[i, j].text(idx_2d[1], idx_2d[0], "{:02d}".format(int(round(proba_actions_toplot[idx_2d]*100))),
+                                color="white", fontsize=fontsize*factor_fs,
+                                horizontalalignment="center", verticalalignment="center")
 else:
+    factor_fs = factor_fontsize * 5 / axes.shape[0]
     for i in range(len(axes)):
         state = i
-        for action in range(env.getNumActions()):
+        for action in range(test_ac.env2d.getNumActions()):
             print(f"Computing policy Pr(a={action}|s={state})...", end=" ")
             idx_2d = (0, 1) if action == 0 else (1, 2) if action == 1 else (2, 1) if action == 2 else (1, 0)
             proba_actions_toplot[idx_2d] = policy.getPolicyForAction(action, state)
             print("p = {:.3f}".format(proba_actions_toplot[idx_2d]))
         img = axes[i].imshow(proba_actions_toplot, cmap=colormap, vmin=0, vmax=1)
+        # Remove the axes ticks as they do not convey any information
+        axes[i].set_xticks([])
+        axes[i].set_yticks([])
+        for action in range(test_ac.env2d.getNumActions()):
+            axes[i].text(0, action, "{:02d}".format(int(round(proba_actions_toplot[0, action] * 100))),
+                         color="white", fontsize=fontsize*factor_fs,
+                         horizontalalignment="center", verticalalignment="center")
 plt.colorbar(img, ax=axes)  # This adds a colorbar to the right of the FIGURE. However, the mapping from colors to values is taken from the last generated image! (which is ok because all images have the same range of values.
                             # Otherwise see answer by user10121139 in https://stackoverflow.com/questions/13784201/how-to-have-one-colorbar-for-all-subplots
 plt.suptitle(f"{learning_method.upper()}\nPolicy at each state")
 
 print("{} learning process took {:.1f} minutes ({:.1f} hours)".format(learning_method.upper(), time_elapsed / 60, time_elapsed / 3600))
+
+
+# Distribution of state counts at last learning step run
+state_counts = simulator_value_functions.getAgent().getLearner().getStateCounts()
+state_counts_2d = np.array(state_counts).reshape(*env_shape)
+print(state_counts_2d)
+print(state_counts_2d / np.sum(state_counts_2d.reshape(-1)))
+ax = plt.figure(figsize=(8, 7)).subplots(1, 1)
+img = ax.imshow(state_counts_2d, cmap="Blues")
+plt.colorbar(img)
+simulator_value_functions._add_count_labels(ax, state_counts_2d)
+plt.suptitle(f"{learning_method.upper()}\n{learning_task.name} learning task - {learning_criterion.name} reward criterion - Labyrinth {env_shape}"
+             f"\nN={test_ac.agent_nn_fv.getLearner().getNumParticles()}, T={test_ac.agent_nn_fv.getLearner().getNumTimeStepsForExpectation()}, MAX budget={max_time_steps_benchmark} steps per policy learning step"
+             f"\nDistribution of state counts at end of policy learning process")
+
+
+# Let's look at the trajectories of the learner (it works when constructing the learner with store_history_over_all_episodes=True)
+#print(len(simulator_value_functions.getAgent().getLearner().getStates()))
+#print([len(trajectory) for trajectory in simulator_value_functions.getAgent().getLearner().getStates()])
+
+
+# Distribution of number of steps
+plt.figure(figsize=(8, 7))
+plt.bar(np.arange(1, n_learning_steps+1), dict_nsteps[learning_method][rep], color="blue")
+#plt.plot(np.arange(1, n_learning_steps+1), dict_nsteps[learning_method][rep], color="blue")
+plt.gca().set_xlabel("Learning step")
+plt.gca().set_ylabel("Number of simulation steps")
+plt.suptitle(f"{learning_method.upper()}\n{learning_task.name} learning task - {learning_criterion.name} reward criterion - Labyrinth {env_shape}"
+             f"\nN={test_ac.agent_nn_fv.getLearner().getNumParticles()}, T={test_ac.agent_nn_fv.getLearner().getNumTimeStepsForExpectation()}, MAX budget={max_time_steps_benchmark} steps per policy learning step"
+             f"\nNumber of steps used to learn the value functions at each policy learning step")
+
 
 
 ############## SAVE ALL RESULTS TOGETHER
@@ -1466,26 +1531,35 @@ if "n_learning_steps" not in locals():
     n_learning_steps = len(dict_loss[list(dict_loss.keys())[0]][0])
 if "policy_learning_mode" not in locals():
     policy_learning_mode = "online"
-ax_loss, ax_R = plt.figure().subplots(1,2)
+ax_loss, ax_R = plt.figure(figsize=figsize).subplots(1, 2)
 legend = []
 for meth in dict_loss.keys():
     ax_loss.plot(np.arange(1, n_learning_steps + 1), dict_loss[meth][nrep-1, :n_learning_steps], '-', marker='.', color=dict_colors[meth])
+    #ax_R_true = ax_loss.twinx()
+    #ax_R_true.plot(np.arange(1, n_learning_steps + 1), dict_R_long_true[meth][nrep-1, :n_learning_steps], '-', color="blue")
+    #ax_R_true.axhline(max_avg_reward_continuing, color="blue", linestyle="dashed", linewidth=2)
+    #ax_R_true.set_ylim((0, None))
+    #ax_R_true.set_ylabel("Expected reward under current policy (log scale)")
     legend += [f"{dict_legends[meth]} (average reward)"]
     ax_R.plot(np.arange(1, n_learning_steps+1), dict_R[meth][nrep-1, :n_learning_steps] / max_avg_reward_episodic, '-', marker='.', color=dict_colors[meth])
+    # True average reward (it should give a good fit of the average reward points just plotted
+    ax_R.plot(np.arange(1, n_learning_steps + 1), dict_R_long_true[meth][nrep - 1, :n_learning_steps] / max_avg_reward_continuing, '-', color=dict_colors[meth], linestyle="dashed")
+    legend += [f"{dict_legends[meth]} (expected reward)"]
 ax_loss.set_xlabel("Learning step")
 ax_loss.set_ylabel("Loss")
 ax_loss.axhline(0, color="gray")
 ax_loss.xaxis.set_major_locator(MaxNLocator(integer=True))
-ax_loss.set_title(f"Evolution of the LOSS with the learning step by learning method (last replication {nrep})")
+ax_loss.set_title(f"Evolution of LOSS")
 ax_loss.legend(legend)
 ax_R.set_xlabel("Learning step")
 ax_R.set_ylabel("Average reward (normalized by the MAX average reward = {:.2g})".format(max_avg_reward_episodic))
 ax_R.axhline(1, color="gray")
 ax_R.axhline(0, color="gray")
-ax_R.set_title(f"Evolution of the NORMALIZED Average Reward with the learning step by learning method (last replication {nrep})")
+ax_R.set_title(f"Evolution of NORMALIZED Average Reward")
 ax_R.legend(legend, loc="center left")
 plt.suptitle(f"ALL LEARNING METHODS: Labyrinth {env_shape} - {learning_task.name} learning task - {learning_criterion.name} reward criterion (gamma={gamma})"
-             f"\nN={test_ac.agent_nn_fv.getLearner().getNumParticles()}, T={test_ac.agent_nn_fv.getLearner().getNumTimeStepsForExpectation()}, MAX budget={max_time_steps_benchmark} steps per policy learning step")
+             f"\nN={test_ac.agent_nn_fv.getLearner().getNumParticles()}, T={test_ac.agent_nn_fv.getLearner().getNumTimeStepsForExpectation()}, MAX budget={max_time_steps_benchmark} steps per policy learning step"
+             f"\n(last replication #{nrep})")
 
 # If we want to add the ratio between number of steps used by two methods compared
 if "values_td" in dict_nsteps.keys() and "values_fv" in dict_nsteps.keys():
@@ -1498,8 +1572,9 @@ if "values_td" in dict_nsteps.keys() and "values_fv" in dict_nsteps.keys():
 
 # Plot results on several replications
 if nrep > 1:
+    plot_bands = True #False
     dict_stats_R = dict.fromkeys(dict_loss.keys())
-    ax = plt.figure().subplots(1,1)
+    ax = plt.figure(figsize=figsize).subplots(1, 1)
     lines = []
     legend = []
     _xshift = -0.1 # shift on the X axis to avoid overlap of vertical error bars
@@ -1532,15 +1607,16 @@ if nrep > 1:
         line = ax.plot(_xvalues, dict_stats_R[meth]['median'] / max_avg_reward_episodic, color=dict_colors[meth], linestyle="dashed", linewidth=2, marker="x", markersize=12)[0]
         lines += [line]
         legend += [f"{dict_legends[meth]} (median)"]
-        line = ax.plot(_xvalues, dict_stats_R[meth]['max'] / max_avg_reward_episodic, color=dict_colors[meth], linestyle="dashed")[0]
-        lines += [line]
-        legend += [f"{dict_legends[meth]} (min/max)"]
-        ax.plot(_xvalues, dict_stats_R[meth]['min'] / max_avg_reward_episodic, color=dict_colors[meth], linestyle="dashed")
-        ax.fill_between(_xvalues,
-                        dict_stats_R[meth]['max'] / max_avg_reward_episodic,
-                        dict_stats_R[meth]['min'] / max_avg_reward_episodic,
-                        color=dict_colors[meth],
-                        alpha=0.1)
+        if plot_bands:
+            line = ax.plot(_xvalues, dict_stats_R[meth]['max'] / max_avg_reward_episodic, color=dict_colors[meth], linestyle="dashed")[0]
+            lines += [line]
+            legend += [f"{dict_legends[meth]} (min/max)"]
+            ax.plot(_xvalues, dict_stats_R[meth]['min'] / max_avg_reward_episodic, color=dict_colors[meth], linestyle="dashed")
+            ax.fill_between(_xvalues,
+                            dict_stats_R[meth]['max'] / max_avg_reward_episodic,
+                            dict_stats_R[meth]['min'] / max_avg_reward_episodic,
+                            color=dict_colors[meth],
+                            alpha=0.1)
     ax.axhline(1, color="gray")
     ax.legend(lines, legend, loc="center left")
     ax.set_ylim((-0.01, 1.01))
@@ -1588,6 +1664,7 @@ if nrep > 1:
         ax_nsamples.set_ylabel("Average sample Ratio FV/TD across replications")
         ax_nsamples.legend(legend_nsamples, loc="lower right")
 #-- ALTOGETHER PLOT
+#------------------ Plots -----------------
 
 
 raise KeyboardInterrupt

@@ -29,8 +29,7 @@ class PolGenericDiscrete():
 
     policy_default: (opt) list
         List indexed by all possible actions in the environment containing the default probability of each action
-        to be assigned for a state not present in the `policy` dictionary.
-        When given, the states
+        to be assigned for a state NOT present in the `policy` dictionary.
         default: None
     """
 
@@ -87,5 +86,16 @@ class PolGenericDiscrete():
     def getPolicyForState(self, state):
         return self.policy[state]
 
+    def getPolicyForAction(self, action, state):
+        return self.policy[state][action]
+
     def getPolicy(self):
         return self.policy
+
+    def get_policy_values(self):
+        "Returns the policy values in a 2D array indexed by each state and each action of the environment"
+        policy_probabilities_matrix = np.nan * np.ones((self.env.getNumStates(), self.env.getNumActions()))
+        for s in self.env.getAllStates():
+            policy_probabilities_matrix[s] = self.policy[s]
+
+        return policy_probabilities_matrix

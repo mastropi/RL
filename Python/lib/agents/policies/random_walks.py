@@ -50,3 +50,6 @@ class PolRandomWalkDiscrete():
         # with np.random would NOT be deterministic...)
         action = self.env.np_random.choice(self.env.getNumActions())
         return action
+
+    def getPolicyForAction(self, action, state):
+        return 1/self.env.getNumActions()

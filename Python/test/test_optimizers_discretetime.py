@@ -14,12 +14,11 @@ if __name__ == "__main__":
 from enum import Enum, unique
 
 import unittest
-from unittest_data_provider import data_provider
 from typing import Union
 
 import numpy as np
 import pandas as pd
-from matplotlib import pyplot as plt, cm
+from matplotlib import cm
 
 from torch import nn
 
@@ -69,6 +68,7 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
                         seed=1717, debug=False):
         env_shape = shape
         cls.debug = debug
+        cls.seed = seed
 
         #-- Environment characteristics
         cls.nS = np.prod(env_shape)
@@ -181,7 +181,7 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
         print(f"Neural network to model the policy:\n{cls.nn_model}")
 
         # Initialize the policy to a random walk
-        cls.policy_nn.reset(initial_values=initial_policy)
+        cls.policy_nn.reset(initial_values=initial_policy, seed=cls.seed)
         print(f"Network parameters initialized as follows:\n{list(cls.policy_nn.getThetaParameter())}")
         print("Initial policy for all states (states x actions):")
         policy_probabilities = cls.policy_nn.get_policy_values()
@@ -199,19 +199,27 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
         #-- Plotting parameters
         cls.colormap = cm.get_cmap("jet")
 
-        #-- Simulation setup
-        cls.seed = seed
-        # We use a large number of episodes (200) so that we can test that the results with MC and with TD(lambda) are similar and close to the true ones
-        # at least when the MC learner is ready... which currently is not because both the state value and the average reward are based on episodic learning,
-        # NOT on the average reward criterion.
-        cls.nepisodes = 200
-
         #-- Learning parameters
-        cls.gamma = gamma;
+        cls.gamma = gamma
         cls.alpha = alpha
         cls.alpha_min = alpha_min
         cls.reset_method = reset_method_value_functions
         cls.reset_params = dict({'min': -1, 'max': +1})
+
+        # TD(0) learner
+        learner_td0 = td.LeaTDLambda(cls.env2d,
+                                          criterion=learning_criterion,
+                                          task=learning_task,
+                                          gamma=gamma,
+                                          lmbda=0.0,
+                                          alpha=cls.alpha,
+                                          adjust_alpha=True,
+                                          adjust_alpha_by_episode=False,
+                                          alpha_min=cls.alpha_min,
+                                          reset_method=cls.reset_method, reset_params=cls.reset_params, reset_seed=cls.seed,
+                                          debug=cls.debug)
+        cls.agent_nn_td0 = agents.GenericAgent(cls.policy_nn.copy(), learner_td0)
+        cls.sim_td0 = DiscreteSimulator(cls.env2d, cls.agent_nn_td0, debug=cls.debug)
 
         # TD(lambda) learner
         learner_tdlambda = td.LeaTDLambda(cls.env2d,
@@ -225,8 +233,8 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
                                           alpha_min=cls.alpha_min,
                                           reset_method=cls.reset_method, reset_params=cls.reset_params, reset_seed=cls.seed,
                                           debug=cls.debug)
-        cls.agent_nn_td = agents.GenericAgent(cls.policy_nn, learner_tdlambda)
-        cls.sim_td = DiscreteSimulator(cls.env2d, cls.agent_nn_td, debug=False)
+        cls.agent_nn_td = agents.GenericAgent(cls.policy_nn.copy(), learner_tdlambda)
+        cls.sim_td = DiscreteSimulator(cls.env2d, cls.agent_nn_td, debug=cls.debug)
 
         # Adaptive TD(lambda) learner
         learner_tdlambda_adap = td.LeaTDLambdaAdaptive( cls.env2d,
@@ -239,8 +247,8 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
                                                         alpha_min=cls.alpha_min,
                                                         reset_method=cls.reset_method, reset_params=cls.reset_params, reset_seed=cls.seed,
                                                         debug=cls.debug)
-        cls.agent_nn_tda = agents.GenericAgent(cls.policy_nn, learner_tdlambda_adap)
-        cls.sim_tda = DiscreteSimulator(cls.env2d, cls.agent_nn_tda, debug=False)
+        cls.agent_nn_tda = agents.GenericAgent(cls.policy_nn.copy(), learner_tdlambda_adap)
+        cls.sim_tda = DiscreteSimulator(cls.env2d, cls.agent_nn_tda, debug=cls.debug)
 
         # Fleming-Viot learner
         absorption_set = cls.A
@@ -252,17 +260,17 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
                                 criterion=learning_criterion,
                                 alpha=cls.alpha,
                                 gamma=gamma,
-                                lmbda=lmbda,
+                                lmbda=0.0,
                                 adjust_alpha=True,
                                 adjust_alpha_by_episode=False,
                                 alpha_min=cls.alpha_min,
                                 reset_method=cls.reset_method, reset_params=cls.reset_params, reset_seed=cls.seed,
                                 estimate_on_fixed_sample_size=estimate_on_fixed_sample_size,
-                                debug=False)
+                                debug=cls.debug)
         #actor_critic = LeaActorCriticNN(cls.env2d, cls.policy_nn, learner_fv, optimizer_learning_rate=0.1, seed=cls.seed, debug=True)
         #cls.agent_nn_fv = agents.GenericAgent(cls.policy_nn, dict({'value': learner_fv, 'policy': actor_critic}))
-        cls.agent_nn_fv = agents.GenericAgent(cls.policy_nn, learner_fv)
-        cls.sim_fv = DiscreteSimulator(cls.env2d, cls.agent_nn_fv, debug=False)
+        cls.agent_nn_fv = agents.GenericAgent(cls.policy_nn.copy(), learner_fv)
+        cls.sim_fv = DiscreteSimulator(cls.env2d, cls.agent_nn_fv, debug=cls.debug)
 
     def getAbsorptionSet(self):
         return self.A
