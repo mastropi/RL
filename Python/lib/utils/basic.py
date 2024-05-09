@@ -8,6 +8,8 @@ Created on Thu Jun 07 21:43:52 2020
 
 import bisect   # To insert elements in order in a list (bisect.insort(list, element)
 import copy
+import os
+import sys
 import re
 import joblib
 import numpy as np
@@ -124,6 +126,108 @@ def generate_datetime_string(dt=None, format="%Y%m%d_%H%M%S", prefix="", suffix=
     dt_str = dt_str + extension
 
     return dt_str
+
+def log_file_open(path, subdir="", prefix="run", suffix="", use_datetime=True):
+    """
+    Redirects the standard output and standard error streams to a file which is used to log messages.
+    The file is located in <path>/<subdir>.
+
+    Ref: https://www.stackabuse.com/writing-to-a-file-with-pythons-print-function/
+
+    Arguments:
+    path: str
+        Path to the directory that contains log files, possibly inside subdirectories.
+
+    subdir: (opt) str
+        Name of subdirectory within `path` where the log file is created.
+        default: ""
+
+    prefix: (opt) str
+        Prefix to use in the log filename. Include any separator with the other parts of the filename such as "_".
+        default: "run"
+
+    suffix: (opt) str
+        Suffix to use in log filename. Include any separator with the other parts of the filename such as "_".
+        default: ""
+
+    use_datetime: (opt) bool
+        Whether to add a suffix showing the execution datetime in the log filename.
+        default: True
+
+    Return: tuple
+    A tuple with the following elements:
+    - dt_open: str containing the datetime at which the log file was opened for writing (normally in format "%Y-%m-%d %H:%M:%S").
+    - stdout_sys: value of the standard output stream before calling this function, as defined by `sys.stdout`.
+    This can be used to reset the original output destination after the log file has been closed, by e.g. log_file_close()
+    which accepts this type of object as parameter.
+    - stderr_sys: ditto for the standard error stream defined by `sys.stderr`.
+    - fh_log: handle to the log file (returned by `open(<logfile>, "w")`).
+    - logfile: full path to the log file which has the form: "<path>/<subdir>/<prefix><datetime><suffix>.log"
+    """
+    # Parse input parameters
+    dt_open = get_current_datetime_as_string()
+    if use_datetime:
+        datetime_str = get_current_datetime_as_string(format="filename")
+    else:
+        datetime_str = ""
+
+    # Directories
+    logsdir = f"{path}/{subdir}"
+    logfilename = f"{prefix}{datetime_str}{suffix}.log"
+    logfile = os.path.join(logsdir, logfilename)
+
+    # Open the log file for writing
+    fh_log = open(logfile, "w")
+    print("Log file '{}' has been open for output.".format(logfile))
+    print("Started at: {}".format(dt_open))
+    stdout_sys = sys.stdout
+    stderr_sys = sys.stderr
+    sys.stdout = fh_log
+    sys.stderr = fh_log
+
+    print("Started at: {}".format(dt_open))
+
+    return dt_open, stdout_sys, stderr_sys, fh_log, logfile
+
+def log_file_close(fh_log, stdout_sys, stderr_sys, dt_open):
+    """
+    Closes a previously opened log file and re-establishes output to the given output handle `stdout_sys` (normally the standard output)
+
+    The time elapsed since the log file was opened at `dt_open` is also sent to the log file and to the restored standard output, and returned.
+
+    Arguments:
+    fh_log: file handle
+        File handle of the log file to close.
+
+    stdout_sys: StreamWrapper (e.g. the one returned by sys.stdout)
+        Stream to which the standard output is restored after closing the log file.
+
+    stdout_sys: StreamWrapper (e.g. the one returned by sys.stderr)
+        Stream to which the standard error is restored after closing the log file.
+
+    dt_open: str
+        String containing the datetime when the log file was open in format "%Y-%m-%d %H:%M:%S", in order to compute the elapsed time since then.
+
+    Return: tuple
+    A tuple with the following two elements:
+    - dt_close: str containing the datetime at which the log file is closed.
+    - time_elapsed: the number of seconds elapsed since the opening of the log file given in `dt_open`.
+    """
+    dt_close = get_current_datetime_as_string()
+    print("Ended at: {}".format(dt_close))
+    datetime_diff = get_datetime_from_string(dt_close) - get_datetime_from_string(dt_open)
+    time_elapsed = datetime_diff.total_seconds()
+    print("Execution time: {:.1f} min, {:.1f} hours".format(time_elapsed / 60, time_elapsed / 3600))
+
+    fh_log.close()
+
+    # Reset the standard output and standard error streams and show the execution time
+    sys.stdout = stdout_sys
+    sys.stderr = stderr_sys
+    print("Ended at: {}".format(dt_close))
+    print("Execution time: {:.1f} min, {:.1f} hours".format(time_elapsed / 60, time_elapsed / 3600))
+
+    return dt_close, time_elapsed
 
 def is_integer(x):
     "Returns whether the input parameter is an integer (i.e. either int, np.int32, np.int64)"

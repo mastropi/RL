@@ -629,13 +629,16 @@ from Python.lib.agents.policies import probabilistic
 
 from Python.lib.environments.gridworlds import Direction2D
 from Python.lib.estimators.fv import estimate_expected_reward
+
+from Python.lib.utils.basic import get_current_datetime_as_string, load_objects_from_pickle, log_file_open, log_file_close, save_objects_to_pickle
 from Python.lib.utils.computing import compute_transition_matrices, compute_state_value_function_from_transition_matrix
 
-from Python.lib.utils.basic import get_current_datetime_as_string, load_objects_from_pickle, save_objects_to_pickle
 from Python.test.test_optimizers_discretetime import InputLayer, Test_EstPolicy_EnvGridworldsWithObstacles
 
 # When saving results or reading previously saved results
-resultsdir = "./RL-003-Classic/results"
+rootdir = "./RL-003-Classic"
+resultsdir = f"./{rootdir}/results"
+logsdir = f"./{rootdir}/logs"
 
 #--- Auxiliary functions
 KL_THRESHOLD = 0.005
@@ -717,6 +720,8 @@ else:
     initial_policy = [0.4, 0.0, 0.6, 0.0]       # We choose a probability of going down which is similar to mu/(lambda + mu) in the queue system where lambda/mu = 0.7, i.e. a value close to 1 / 1.7 = 0.588
 env_shape = (size_vertical, size_horizontal)
 nS = size_vertical * size_horizontal
+size_str = f"{size_vertical}x{size_horizontal}"
+
 
 # Environment's entry and exit states
 entry_state = np.ravel_multi_index((size_vertical - 1, 0), env_shape)
@@ -941,10 +946,18 @@ verbose_period = max_time_steps_fv_for_all_particles // 10
 plot = False         # Whether to plot the evolution of value function and average reward estimation
 colormap = "seismic"  # "Reds"  # Colormap to use in the plot of the estimated state value function V(s)
 
+# Results saving and logging, with filename prefix and suffix
 save = True
+log = True #learning_method_type == "values_fv"
+prefix = f"ActorCritic_labyrinth_{size_str}_"
+suffix = f"_{learning_method}"
+
+# Open log file if one requested
+if log:
+    dt_start, stdout_sys, stderr_sys, fh_log, _logfile_not_used = log_file_open(logsdir, subdir="", prefix=prefix, suffix=suffix, use_datetime=True)
 
 time_start = timer()
-datetime_start_str = get_current_datetime_as_string(format="filename")
+dt_start_filename = get_current_datetime_as_string(format="filename")
 
 # A few further parameters for the policy learning process
 break_when_no_change = False    # Whether to stop the learning process when the average reward doesn't change from one step to the next
@@ -1176,7 +1189,11 @@ for rep in range(nrep):
 
 time_end = timer()
 time_elapsed = time_end - time_start
-print("{} learning process took {:.1f} minutes ({:.1f} hours)".format(learning_method.upper(), time_elapsed / 60, time_elapsed / 3600))
+
+if log:
+    log_file_close(fh_log, stdout_sys, stderr_sys, dt_start)
+else:
+    print("{} learning process took {:.1f} minutes ({:.1f} hours)".format(learning_method.upper(), time_elapsed / 60, time_elapsed / 3600))
 
 
 ############# Store the measures that we would like to compare
@@ -1394,16 +1411,15 @@ plt.suptitle(f"{learning_method.upper()}\nPolicy at each state")
 print("{} learning process took {:.1f} minutes ({:.1f} hours)".format(learning_method.upper(), time_elapsed / 60, time_elapsed / 3600))
 
 
-############## SAVE
+############## SAVE ALL RESULTS TOGETHER
 if save:
-    _size = f"{env_shape[0]}x{env_shape[1]}"
-    _learning_method = str.replace(learning_method, "values_", "")
-    _filename = f"ActorCritic_labyrinth_{_size}_{datetime_start_str}_{_learning_method.upper()}AC.pkl"
     objects_to_save = ["dict_loss", "dict_R", "dict_R_long", "dict_R_long_true", "dict_V", "dict_Q", "dict_A", "dict_state_counts", "dict_nsteps", "dict_KL", "dict_alpha", "dict_time_elapsed"]
     if "max_time_steps_benchmark_all" in locals():
         objects_to_save += ["max_time_steps_benchmark_all"]
     else:
         objects_to_save += ["max_time_steps_benchmark"]
+    _size_str = f"{env_shape[0]}x{env_shape[1]}"
+    _filename = f"{prefix}{dt_start_filename}_ALL.pkl"
     _filepath = os.path.join(resultsdir, _filename)
     # Save the original object names plus those with the prefix so that, when loading the data back,
     # we have also the objects without the prefix which are need to generate the plots right-away.
@@ -1420,20 +1436,21 @@ if save:
 resultsdir = "./RL-003-Classic/results"
 _datetime = "20240428_092427" #"20240428_205959" #"20240421_140558" #"20240405_094608" #"20240322_095848" #"20240219_230301" #"20240219_142206"          # Use format yyymmdd_hhmmss
 _size_str = "6x8" #"21x1" #"10x14" #"3x4" #"10x14"
+_prefix = f"ActorCritic_labyrinth_{size_str}_"
 _learning_method = "ALL" #"td" #"fv"
 _suffix = "_LabyrinthWithConnectedActiveSetAndFinishAtBottomRightLostPolicy_TDAC,FVAC,N=20,T=500,LimitedTime5xFVWorksTDFails" #"_LabyrinthWithConnectedActiveSetAndFinishAtBottomRightRandomPolicy_TDAC,FVAC,N=20,T=100,LimitedTime5xFVSlightlyBetterThanTD" #"_N=50,T=5000,InfiniteTimeFVisBetterLessVariance" #"_FV&TD_FVIsWorse" #""
 _N = 50
 _T = 5000
 if _learning_method == "ALL":
-    _filename = f"{prefix}{_datetime}_{_learning_method.upper()}{_suffix}.pkl"
+    _filename = f"{_prefix}{_datetime}_{_learning_method.upper()}{_suffix}.pkl"
 else:
-    _filename = f"{prefix}{_datetime}_{_learning_method.upper()}AC_N={_N}.pkl"
+    _filename = f"{_prefix}{_datetime}_{_learning_method.upper()}AC_N={_N}.pkl"
 _filepath = os.path.join(resultsdir, _filename)
 object_names = load_objects_from_pickle(_filepath, globals())
 print(f"The following objects were loaded from '{_filepath}':\n{object_names}")
 # The following reward values are used in the ALLTOGETHER plotting below
-env_shape = (int(_size[:_size.index("x")]), int(_size[_size.index("x")+1:]))
 _methods = list(dict_loss.keys())
+env_shape = (int(_size_str[:_size_str.index("x")]), int(_size_str[_size_str.index("x")+1:]))
 max_avg_reward_continuing = 1 / (np.sum(env_shape) - 1)
 max_avg_reward_episodic = 1 / (np.sum(env_shape) - 2)
 nrep = len(dict_loss[_methods[0]])
