@@ -40,6 +40,16 @@ def mad(x):
     return x_mad
 
 
+# Function that returns a function to compute percentiles using the agg() aggregation method in pandas `groupby` data frames
+# Ref: https://stackoverflow.com/questions/17578115/pass-percentiles-to-pandas-agg-function
+def percentile(n):
+    def percentile_(x):
+        return x.quantile(n / 100)
+
+    percentile_.__name__ = 'percentile_{:.0f}'.format(n)
+    return percentile_
+
+
 def rmse(Vtrue: np.ndarray, Vest: np.ndarray, weights: np.ndarray=None):
     """Root Mean Square Error (RMSE) between Vtrue and Vest, optionally weighted
 

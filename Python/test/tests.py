@@ -24,6 +24,7 @@ import Python.lib.agents as agents
 from Python.lib.agents.learners import LearningCriterion, LearningTask, ResetMethod
 from Python.lib.agents.learners.episodic.discrete import td, fv
 from Python.lib.simulators.discrete import Simulator as DiscreteSimulator
+from Python.lib.utils.computing import percentile
 import Python.lib.utils.plotting as plotting
 
 # Environment
@@ -228,7 +229,7 @@ else:
 
 #-- Learn the average reward and the state value function
 # Simulation parameters
-N = 100 #50 #500 #200 #20                            # Number of particles in FV simulation
+N = 200 #50 #500 #200 #20                            # Number of particles in FV simulation
 T = 2000 #200 #500                                   # Number of time steps of the single Markov chain simulation run as first step of the FV learning process
                                                     # This initial simulation is done to:
                                                     # - obtain an initial exploration of the environment that would help determine the absorption set A
@@ -253,7 +254,7 @@ M = 1   # Number of normal particles created during the FV simulation to explore
 max_time_steps_benchmark = max_time_steps_fv_for_expectation + (1 + M) * max_time_steps_fv_for_all_particles
 
 # Parameters common for all learners
-R = 10 #20 #50             # Replications of the estimation process
+R = 1 #20 #50             # Replications of the estimation process
 seed = 1717
 nepisodes = 100 #1000       # Note: this parameter is ONLY used in EPISODIC learning tasks
 max_time_steps_per_episode = nS*10   #1000 #100
@@ -311,6 +312,8 @@ for rep in range(R):
                           alpha_min=params['alpha_min'],
                           estimate_on_fixed_sample_size=estimate_on_fixed_sample_size,
                           debug=False)
+    if False:
+        learner_fv.setAverageReward(avg_reward_true)
     agent_fv = agents.GenericAgent(policy, learner_fv)
 
     # Simulation
@@ -318,6 +321,7 @@ for rep in range(R):
     sim = DiscreteSimulator(env1d, agent_fv, debug=False)
     state_values_fv, action_values_fv, advantage_values_fv, state_counts_fv, probas_stationary, expected_reward, expected_absorption_time, n_cycles_absorption_used, n_events_et, n_events_fv = \
         sim.run(max_time_steps_fv=max_time_steps_fv_for_all_particles,
+                use_average_reward_stored_in_learner=False,
                 seed=seed_this,
                 verbose=True, verbose_period=50,
                 plot=plot, colormap=colormap, pause=0.1)  # Use plot=True to create plots that show how learning progresses; use pause=+np.Inf to "press ENTER to continue" between plots
@@ -341,7 +345,8 @@ for rep in range(R):
 
 
     #-- Learning the average reward using TD(lambda)
-    seed_this = seed_this + 1
+    # Comment out to use same seed as for the FV case
+    #seed_this = seed_this + 1
 
     print(f"\nTD(lambda={lmbda})")
     # Learner and agent definition
@@ -368,6 +373,7 @@ for rep in range(R):
                 max_time_steps=time_steps_fv[rep], #max_time_steps_benchmark,
                 max_time_steps_per_episode=+np.Inf, #max_time_steps_per_episode, #+np.Inf
                 start_state_first_episode=start_state, seed=seed_this,
+                estimated_average_reward=None, #avg_reward_true,
                 compute_rmse=True, state_observe=None, #nS-2,  # This is the state just before the terminal state
                 verbose=True, verbose_period=50,
                 plot=plot, colormap=colormap, pause=0.1)    # Use plot=True to create plots that show how learning progresses; use pause=+np.Inf to "press ENTER to continue" between plots
@@ -444,13 +450,6 @@ if R > 1:
         min_V_fv, max_V_fv, median_V_fv, mean_V_fv, std_V_fv, avg_events_fv = estimates_V_fv.min(axis=0), estimates_V_fv.max(axis=0), np.median(estimates_V_fv, axis=0), estimates_V_fv.mean(axis=0), estimates_V_fv.std(axis=0), time_steps_fv.mean(axis=0)
 
         # Compute percentiles
-        # Function that returns a function to compute percentiles using the agg() aggregation method in pandas `groupby` data frames
-        # Ref: https://stackoverflow.com/questions/17578115/pass-percentiles-to-pandas-agg-function
-        def percentile(n):
-            def percentile_(x):
-                return x.quantile(n / 100)
-            percentile_.__name__ = 'percentile_{:.0f}'.format(n)
-            return percentile_
         percentiles_low = [10, 25]
         percentiles_upp = [90, 75]
         alphas = [0.10, 0.15, 0.20]
