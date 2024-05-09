@@ -1224,8 +1224,18 @@ class Test_EstValueFunctions_EnvGridworld2DWithObstacles(unittest.TestCase, test
         cls.nepisodes = 100
         cls.start_state = 8
 
+        cls.gamma = 0.9
+
+        #-- True state value function which is stored in the environment for comparison purposes with the estimated V(s)
+        # TODO: (2024/05/02) Fix the correct computation of the true state value function V(s), in terms of: (i) honouring the states that are terminal (currently they have a value that is not zero) (ii) taking care of the obstacles in the environment. The fix should be done mostly in function computing.compute_transition_matrices().
+        # Once the above to-do task is done, uncomment the following lines, o.w. we get confused when plotting the observed V(s) on the same plot as the expected V(s)
+        #P, _, b, _, _, _ = computing.compute_transition_matrices(cls.env2d, cls.policy_rw)
+        #V_true = computing.compute_state_value_function_from_transition_matrix(P, b, gamma=cls.gamma)
+        #cls.env2d.setV(V_true)
+
+        #-- Learners and simulators used in tests
         learner_mclambda = mc.LeaMCLambda(cls.env2d, alpha=1.0,
-                                          gamma=0.9,
+                                          gamma=cls.gamma,
                                           adjust_alpha=True,
                                           adjust_alpha_by_episode=False,
                                           alpha_min=0.0,
@@ -1240,7 +1250,7 @@ class Test_EstValueFunctions_EnvGridworld2DWithObstacles(unittest.TestCase, test
         # We can reach the same speed of learning as MC if we decrease alpha as 1/sqrt(n) OR if we use e.g. lambda = 0.7.
         # INTERESTING!
         learner_tdlambda = td.LeaTDLambda(cls.env2d, alpha=1.0,
-                                          gamma=0.9, lmbda=0.0,
+                                          gamma=cls.gamma, lmbda=0.0,
                                           adjust_alpha=True,
                                           adjust_alpha_by_episode=False,
                                           alpha_min=0.0,
@@ -1265,6 +1275,7 @@ class Test_EstValueFunctions_EnvGridworld2DWithObstacles(unittest.TestCase, test
                                 criterion=LearningCriterion.DISCOUNTED,
                                 estimate_on_fixed_sample_size=True,         # This means that the estimation is done on a fixed number of particles N(s) grouped by starting state s
                                 alpha=1.0,
+                                gamma=cls.gamma,
                                 lmbda=0.0,
                                 adjust_alpha=True,
                                 adjust_alpha_by_episode=False,

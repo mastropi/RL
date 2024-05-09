@@ -902,13 +902,23 @@ class Simulator:
             seed_i = seed + i if seed is not None else None
             env.setSeed(seed_i)
 
-            # Choose start state from the activation set
-            if dist_proba_for_start_state is not None and start_set != set(dist_proba_for_start_state.keys()):
-                warnings.warn(f"[_run_simulation_fv] The set of start states given in `start_set` ({start_set}) "
-                              f"is NOT equal to the keys present in the dictionary containing the start state distribution to use `dist_proba_for_start_state`:\n{dist_proba_for_start_state}"
-                              f"\nThe start states will be selected UNIFORMLY AT RANDOM (but this may not be what is wished).")
-                dist_proba_for_start_state = None
-            start_state = choose_state_from_set(start_set, dist_proba_for_start_state)
+            # Choose the start state from the activation set or a subset of it, if not all those states are present in the dictionary of the start state distribution
+            # --because e.g. they were not observed during the E(T_A) excursion used for the stationary exit state distribution.
+            _start_set_parsed = start_set.copy()
+            if dist_proba_for_start_state is not None:
+                if len(dist_proba_for_start_state) == 0:
+                    warnings.warn(f"[_run_simulation_fv] The dictionary containing the start state distribution to use `dist_proba_for_start_state` is empty."
+                                  f"\nThe start states will be selected UNIFORMLY AT RANDOM (but this may not be what is wished).")
+                    dist_proba_for_start_state = None
+                elif not set(dist_proba_for_start_state.keys()).issubset(start_set):
+                    warnings.warn(f"[_run_simulation_fv] The set of start states given in `start_set` ({start_set}) "
+                                  f"is NOT a subset of the keys present in the dictionary containing the start state distribution to use `dist_proba_for_start_state`:\n{dist_proba_for_start_state}"
+                                  f"\nThe start states will be selected UNIFORMLY AT RANDOM (but this may not be what is wished).")
+                    dist_proba_for_start_state = None
+                else:
+                    # Define the set of start states as the keys of the given distribution, which define precisely which states the start state should be chosen from
+                    _start_set_parsed = set(dist_proba_for_start_state.keys())
+            start_state = choose_state_from_set(_start_set_parsed, dist_proba_for_start_state)
             if learner.getLearningTask() == LearningTask.CONTINUING:
                 assert start_state not in env.getTerminalStates(), \
                     f"The start state of an FV particle ({start_state}) cannot be a terminal state of the environment (terminal states = {env.getTerminalStates()}) for the CONTINUING learning task context." \
