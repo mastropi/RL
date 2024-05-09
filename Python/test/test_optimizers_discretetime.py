@@ -53,7 +53,7 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
     # See the only answer by Navy Cheng.
 
     @classmethod
-    def setUpClass(cls, shape=(3, 4), obstacles_set: Union[list, set]=None, start_states_set: set=None,
+    def setUpClass(cls, shape=(3, 4), exit_state=None, wind_dict: dict=None, obstacles_set: Union[list, set]=None, start_states_set: set=None,
                         # Characteristics of the neural network for the Actor Critic policy learner
                         nn_input: InputLayer=InputLayer.ONEHOT, nn_hidden_layer_sizes: list=[8], initial_policy=None,
                         # Characteristics of all learners
@@ -74,7 +74,7 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
         cls.nS = np.prod(env_shape)
 
         # Exit state defined as the top-right cell
-        exit_state = env_shape[1] - 1
+        exit_state = env_shape[1] - 1 if exit_state is None else exit_state
         terminal_states = set({exit_state})
 
         # Absorption set for FV

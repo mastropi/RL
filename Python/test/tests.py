@@ -623,11 +623,16 @@ from matplotlib.ticker import MaxNLocator
 from scipy.special import rel_entr
 
 from Python.lib.agents.learners import ResetMethod
-from Python.test.test_optimizers_discretetime import InputLayer, Test_EstPolicy_EnvGridworldsWithObstacles
 from Python.lib.agents.learners import LearningCriterion, LearningTask
 from Python.lib.agents.learners.policies import LeaActorCriticNN
+from Python.lib.agents.policies import probabilistic
+
+from Python.lib.environments.gridworlds import Direction2D
+from Python.lib.estimators.fv import estimate_expected_reward
+from Python.lib.utils.computing import compute_transition_matrices, compute_state_value_function_from_transition_matrix
 
 from Python.lib.utils.basic import get_current_datetime_as_string, load_objects_from_pickle, save_objects_to_pickle
+from Python.test.test_optimizers_discretetime import InputLayer, Test_EstPolicy_EnvGridworldsWithObstacles
 
 # When saving results or reading previously saved results
 resultsdir = "./RL-003-Classic/results"
@@ -635,6 +640,51 @@ resultsdir = "./RL-003-Classic/results"
 #--- Auxiliary functions
 KL_THRESHOLD = 0.005
 policy_changed_from_previous_learning_step = lambda KL_distance, num_states: np.abs(KL_distance) / num_states > KL_THRESHOLD
+
+def compute_true_state_value_function(env, policy, learning_task, learning_criterion, gamma=1.0):
+    #*********************************** IMPORTANT **********************************#
+    # This function may give a bad value of the true state value function for policies close to deterministic.
+    # This would be most likely due to the ill-conditioning of the transition matrix P derived from the policy and the transition probabilities of the environment
+    # when eigenvalues are computed.
+    # For more details and possible fix see function computing.compute_state_value_function_from_transition_matrix().
+    #*********************************** IMPORTANT **********************************#
+    # TODO: (2024/05/07) Try to solve the above problem of instability in the calculation of the state value function
+    """
+    Computes the true state value function for the given policy applied on the given environment
+    under the given learning task, learning criterion and discount factor gamma.
+
+    It also computes the expected reward under stationarity for the CONTINUING learning task (with no discount applied of course).
+
+    The state value function is stored in the environment object, so that it can be used as reference for comparing the estimated state value function.
+
+    Arguments:
+    env: EnvironmentDiscrete
+        Environment with discrete states and discrete actions with ANY initial state distribution.
+        Rewards can be anywhere.
+
+    policy: policy object with method getPolicyForAction(a, s) defined, returning Prob(action | state)
+        Policy object acting on a discrete-state / discrete-action environment.
+        This could be of class e.g. random_walks.PolRandomWalkDiscrete, probabilistic.PolGenericDiscrete, PolNN.
+
+    gamma: (opt) float in (0, 1]
+        Discount factor for the observed rewards.
+        default: 1.0
+
+    Return: tuple
+    Tuple containing the following 3 elements:
+    - V_true: the true state value function for the given learning task, learning criterion and discount gamma.
+    - expected_reward: the expected reward for the CONTINUING learning task.
+    - mu: the stationary probability for the CONTINUING learning task.
+    """
+    P_epi, P_con, b_epi, b_con, g, mu = compute_transition_matrices(env, policy)
+    P = P_con if learning_task == LearningTask.CONTINUING else P_epi
+    b = b_con if learning_task == LearningTask.CONTINUING else b_epi
+    bias = g if learning_criterion == LearningCriterion.AVERAGE else None
+    V_true = compute_state_value_function_from_transition_matrix(P, b, bias=bias, gamma=gamma)
+    env.setV(V_true)
+    dict_proba_stationary = dict(zip(np.arange(len(mu)), mu))
+    avg_reward_true = estimate_expected_reward(env, dict_proba_stationary)
+    return V_true, avg_reward_true, mu
 #--- Auxiliary functions
 
 # Learning task and learning criterion are used by the constructor of the test class below
@@ -646,6 +696,7 @@ seed = 1317
 test_ac = Test_EstPolicy_EnvGridworldsWithObstacles()
 
 problem_2d = True
+exit_state_at_bottom = False
 
 if problem_2d:
     # 2D labyrinth
@@ -655,7 +706,11 @@ if problem_2d:
     #size_vertical = 9; size_horizontal = 13
     #size_vertical = 10; size_horizontal = 14
     #size_vertical = 10; size_horizontal = 30
-    initial_policy = None   # Random walk as initial policy
+
+    # Whether the active set in FV should be connected (in order to avoid isolation of the two activation states and reduce possible problems)
+    # When this is the case, the connectedness of the active set is achieved by removing the left-most obstacle in the previous-to-bottom row.
+    connected_active_set = True
+    initial_policy = None #[0.4, 0.15, 0.05, 0.4] #None   # Random walk as initial policy when None
 else:
     # 1D gridworld: the interesting dimension is the vertical dimension, with terminal state at the top (this is to unify the structure of 2D labyrinth and 1D gridworld)
     size_vertical = 21; size_horizontal = 1     # We choose a value like K = 20 or 40 in the M/M/1/K queue system
@@ -663,10 +718,22 @@ else:
 env_shape = (size_vertical, size_horizontal)
 nS = size_vertical * size_horizontal
 
-# Environment's entrance state
+# Environment's entry and exit states
 entry_state = np.ravel_multi_index((size_vertical - 1, 0), env_shape)
+exit_state = entry_state + env_shape[1] - 1 if exit_state_at_bottom else None   # None means that the EXIT state is set at the top-right of the labyrinth
 entry_state_in_absorption_set = True   #False #True
 
+# Presence of wind: direction and probability of deviation in that direction when moving
+if problem_2d:
+    wind_dict = None
+    wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.6})
+    wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.7})
+    #wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.8})
+else:
+    # WIND is currently not allowed in 1D gridworlds
+    wind_dict = None
+
+# Obstacles and absorption set
 if problem_2d:
     #-- 2D labyrinth
     # The path to the terminal state is just a corridor through the last row right and then the last column up
@@ -676,6 +743,9 @@ if problem_2d:
     states_previous_to_last_row = np.ravel_multi_index([np.repeat(rectangle_to_nowhere_height, rectangle_to_nowhere_width), [y for y in range(1, rectangle_to_nowhere_width+1)]], env_shape)
     states_previous_to_last_column = np.ravel_multi_index([[x for x in range(0, rectangle_to_nowhere_height+1)], np.repeat(rectangle_to_nowhere_width, rectangle_to_nowhere_height+1)], env_shape)
     obstacles_set = set(np.concatenate([list(states_previous_to_last_row) + list(states_previous_to_last_column)]))
+
+    if connected_active_set:
+        obstacles_set = obstacles_set.difference({min(states_previous_to_last_row)})
 
     # The absorption set is a rectangular area at the upper left corner of the grid + (possibly) the lower left corner
     #lower_left_state = (size_vertical-1) * size_horizontal
@@ -708,7 +778,8 @@ if entry_state_in_absorption_set:
 nn_hidden_layer_sizes = [12]
 print(f"Neural Network architecture:\n{len(nn_hidden_layer_sizes)} hidden layers of sizes {nn_hidden_layer_sizes}")
 
-test_ac.setUpClass(shape=env_shape, nn_input=InputLayer.ONEHOT, nn_hidden_layer_sizes=nn_hidden_layer_sizes, initial_policy=initial_policy,
+test_ac.setUpClass( shape=env_shape, exit_state=exit_state, wind_dict=wind_dict,
+                    nn_input=InputLayer.ONEHOT, nn_hidden_layer_sizes=nn_hidden_layer_sizes, initial_policy=initial_policy,
                     # General learning parameters
                     learning_task=learning_task,
                     learning_criterion=learning_criterion,
@@ -726,19 +797,68 @@ test_ac.setUpClass(shape=env_shape, nn_input=InputLayer.ONEHOT, nn_hidden_layer_
 test_ac.setUp()
 print(test_ac.policy_nn.nn_model)
 test_ac.env2d._render()
-print(f"True state value function (dummy values for now):\n{test_ac.env2d.getV()}")
-alpha_initial = test_ac.agent_nn_td.getLearner().getInitialLearningRate()
+print(f"Absorption set (1D):\n{absorption_set}")
+print(f"Absorption set (2D):\n{[np.unravel_index(s, env_shape) for s in absorption_set]}")
+
+# Average reward of random policy
+policy_random = probabilistic.PolGenericDiscrete(test_ac.env2d, policy=dict(), policy_default=[0.25, 0.25, 0.25, 0.25])
+V_true, avg_reward_true, mu = compute_true_state_value_function(test_ac.env2d, policy_random, learning_task, learning_criterion)
+print(f"Average reward under RANDOM policy: {avg_reward_true}")
+if initial_policy is not None:
+    policy_initial = probabilistic.PolGenericDiscrete(test_ac.env2d, policy=dict(), policy_default=initial_policy)
+    V_true, avg_reward_true, mu = compute_true_state_value_function(test_ac.env2d, policy_random, learning_task, learning_criterion)
+    print(f"Average reward under INITIAL policy: {avg_reward_true}")
+
+print(f"True state value function under initial policy:\n{test_ac.env2d.getV()}")
 
 # Maximum average reward (to use as reference in information and plots)
 # It is computed as the inverse of the shortest path from Start to Terminal in Manhattan-like movements,
 # INCLUDING THE START STATE for continuing learning tasks (just think about it, we restart every time we reach the terminal state with reward = 0)
 # EXCLUDING THE START STATE for episodic learning tasks (just think about it)
 # *** This value is problem dependent and should be adjusted accordingly ***
-max_avg_reward_continuing = 1 / (np.sum(test_ac.env2d.shape) - 1)   # In this case the start state counts! (we subtract 1 because the bottom-right state must NOT count twice!)
-max_avg_reward_episodic = 1 / (np.sum(test_ac.env2d.shape) - 2) # In this case the start state does not count (we subtract 2 because, besides not counting twice the bottom-right state, the start state does not count in the episodic setting)
+if wind_dict is None:
+    print("\nComputing MAX average in DETERMINISTIC environment...")
+    if exit_state == entry_state + env_shape[1] - 1:
+        # This is the case when the exit state is at the bottom-right of the labyrinth
+        max_avg_reward_continuing = 1 / env_shape[1]          # In this case the start state counts! (we subtract 1 because the bottom-right state must NOT count twice!)
+        max_avg_reward_episodic = 1 / (env_shape[1] - 1)      # In this case the start state does not count (we subtract 2 because, besides not counting twice the bottom-right state, the start state does not count in the episodic setting)
+    else:
+        # This is the case when the exit state is at the top-right of the labyrinth (the default)
+        assert exit_state is None
+        max_avg_reward_continuing = 1 / (np.sum(env_shape) - 1)   # In this case the start state counts! (we subtract 1 because the bottom-right state must NOT count twice!)
+        max_avg_reward_episodic = 1 / (np.sum(env_shape) - 2)     # In this case the start state does not count (we subtract 2 because, besides not counting twice the bottom-right state, the start state does not count in the episodic setting)
+else:
+    # There is wind in the environment
+    # => Compute the average reward using the transition matrix information of the environment (as the wind makes things more complicated)
+    # together with the optimal policy used by the agent (which we know)
+    print(f"\nComputing MAX average in STOCHASTIC environment with WIND: {wind_dict}...")
+    if exit_state == entry_state + env_shape[1] - 1:
+        policy_optimal = probabilistic.PolGenericDiscrete(test_ac.env2d, policy=dict(), policy_default=[0.0, 1.0, 0.0, 0.0])
+        V_true, avg_reward_true, mu = compute_true_state_value_function(test_ac.env2d, policy_optimal, learning_task, learning_criterion)
+        max_avg_reward_continuing = avg_reward_true
+        # Compute the approximated episodic average reward (it is approximated because of the randomness generated by the wind.
+        # In order to compute the exact episodic average reward, we need to think more.
+        # Here, we use the formula that relates the continuing average reward with the episodic one in the deterministic environment case.
+        max_avg_reward_episodic = avg_reward_true * env_shape[1] / (env_shape[1] - 1)
+    else:
+        # This is the case when the exit state is at the top-right of the labyrinth (the default)
+        rightmost_states = [np.ravel_multi_index((r, env_shape[1]-1), env_shape) for r in np.arange(env_shape[0])]
+        policy_optimal = probabilistic.PolGenericDiscrete(test_ac.env2d, policy=dict(zip(rightmost_states, [[1.0, 0.0, 0.0, 0.0]]*len(rightmost_states))), policy_default=[0.0, 1.0, 0.0, 0.0])
+        V_true, avg_reward_true, mu = compute_true_state_value_function(test_ac.env2d, policy_optimal, learning_task, learning_criterion)
+        max_avg_reward_continuing = avg_reward_true
+        # Compute the approximated episodic average reward (it is approximated because of the randomness generated by the wind.
+        # In order to compute the exact episodic average reward, we need to think more.
+        # Here, we use the formula that relates the continuing average reward with the episodic one in the deterministic environment case.
+        max_avg_reward_episodic = avg_reward_true * np.sum(env_shape) / (np.sum(env_shape) - 1)
+print(f"MAX CONTINUING average reward: {max_avg_reward_continuing}")
+print(f"MAX EPISODIC average reward (approximate when wind present): {max_avg_reward_episodic}")
 
 # State to observe and e.g. plot Q values, etc
-state_observe = np.ravel_multi_index((1, env_shape[1] - 1), env_shape)
+if exit_state == entry_state + env_shape[1] - 1:
+    state_observe = np.ravel_multi_index((env_shape[0] - 1, env_shape[1] - 2), env_shape)
+else:
+    state_observe = np.ravel_multi_index((1, env_shape[1] - 1), env_shape)
+
 # Learning methods: define characteristics to use when plotting results for each method
 dict_colors = dict(); dict_linestyles = dict(); dict_legends = dict()
 dict_colors['all_online'] = "darkred"; dict_linestyles['all_online'] = "solid"; dict_legends['all_online'] = "ALL Online"
