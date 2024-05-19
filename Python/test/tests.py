@@ -250,7 +250,7 @@ max_time_steps_fv_for_all_particles = max_time_steps_fv_per_particle * N
 # - the max number of time steps allowed to estimate E(T_A)
 # - the max number of time steps allowed over all the FV particles
 M = 1   # Number of normal particles created during the FV simulation to explore using the underlying Markov process
-        # This value MUST coincide with n_normal_max variable defined in Simulator._run_simulation_fv_learnvaluefunctions()
+        # This value MUST coincide with n_normal_max variable defined in Simulator._run_simulation_fv_discounted()
 max_time_steps_benchmark = max_time_steps_fv_for_expectation + (1 + M) * max_time_steps_fv_for_all_particles
 
 # Parameters common for all learners
@@ -425,7 +425,7 @@ if False:   # NEED TO FIX THE CORRECT STORAGE OF THE TRAJECTORY HISTORY IN THE F
         print(pd.Series(actions_history_td[ind_s]).value_counts() / np.sum(ind_s))
     ## OK! For the [0.5, 0.5] case, 50% for all states except state 0 and 4
     # FV
-    # WARNING: The trajectory history recovered here most likely includes ONLY the exploration by the "normal" particle (this is the case when running the FV simulation with _run_simulation_fv_learnvaluefunctions())
+    # WARNING: The trajectory history recovered here most likely includes ONLY the exploration by the "normal" particle (this is the case when running the FV simulation with _run_simulation_fv_discounted())
     # The reason is that, in that case, the trajectories taken by the FV particles is stored in their respective environment.
     states_history_fv = np.concatenate(learner_fv.states)
     print(f"Distribution of state visits (FV):\n{pd.Series(states_history_fv).value_counts(sort=False)}")
@@ -614,6 +614,8 @@ raise KeyboardInterrupt
 # 2023/10/12: Learn an actor-critic policy using neural networks (with the torch package)
 # Learning happens with the ActorCriticNN learner which defines a loss of type `tensor` which can be minimized using the backward() method of torch Tensors
 # IT WORKS!
+
+#-------------------- IMPORT AND AUXILIARY FUNCTIONS ------------------#
 from timeit import default_timer as timer
 import os
 import numpy as np
@@ -643,6 +645,20 @@ logsdir = f"./{rootdir}/logs"
 #--- Auxiliary functions
 KL_THRESHOLD = 0.005
 policy_changed_from_previous_learning_step = lambda KL_distance, num_states: np.abs(KL_distance) / num_states > KL_THRESHOLD
+
+def define_plotting_parameters():
+    dict_colors = dict(); dict_linestyles = dict(); dict_legends = dict()
+    dict_colors['all_online'] = "darkred"; dict_linestyles['all_online'] = "solid"; dict_legends['all_online'] = "ALL Online"
+    dict_colors['values_td'] = "red"; dict_linestyles['values_td'] = "solid"; dict_legends['values_td'] = "TD"      # For a second trial of TDAC (which sometimes is useful --e.g. to compare "using the same budget as FV for every policy learning step" vs. "using an average budget at each policy learning step")
+    dict_colors['values_td2'] = "darkorange"; dict_linestyles['values_td2'] = "solid"; dict_legends['values_td2'] = "TD2"
+    dict_colors['values_tdl'] = "orange"; dict_linestyles['values_tdl'] = "dashed"; dict_legends['values_tdl'] = "TD(lambda)"
+    dict_colors['values_fv'] = "green"; dict_linestyles['values_fv'] = "solid"; dict_legends['values_fv'] = "FV"    # For a second trial of FVAC (which sometimes is useful --e.g. to compare "allowing infinite budget for FV" vs. "limited budget")
+    dict_colors['values_fv2'] = "cyan"; dict_linestyles['values_fv2'] = "solid"; dict_legends['values_fv2'] = "FV2"
+    dict_colors['values_fvos'] = "lightgreen"; dict_linestyles['values_fvos'] = "solid"; dict_legends['values_fvos'] = "FV OverSampling"
+
+    figsize = (10, 8)
+
+    return dict_colors, dict_linestyles, dict_legends, figsize
 
 def compute_true_state_value_function(env, policy, learning_task, learning_criterion, gamma=1.0):
     #*********************************** IMPORTANT **********************************#
@@ -688,19 +704,85 @@ def compute_true_state_value_function(env, policy, learning_task, learning_crite
     dict_proba_stationary = dict(zip(np.arange(len(mu)), mu))
     avg_reward_true = estimate_expected_reward(env, dict_proba_stationary)
     return V_true, avg_reward_true, mu
-#--- Auxiliary functions
 
+def compute_max_avg_rewards_in_labyrinth_with_corridor(env, wind_dict, learning_task, learning_criterion):
+    """
+    Computes the maximum CONTINUING and EPISODIC average rewards for the given environment
+
+    The computation of the episodic average reward is approximate when the environment has wind, because its value is given as:
+        max_avg_reward_continuing * L / (L-1)
+    where L is the length of the shortest path, including the start and exit state.
+
+    Return: tuple
+    Tuple with the following two elements:
+    - max_avg_reward_continuing
+    - max_avg_reward_episodic
+    """
+    env_shape = env.getShape()
+    entry_state = np.argmax(env.getInitialStateDistribution())
+    exit_state = env.getTerminalStates()[0]
+
+    if wind_dict is None:
+        # The average rewards are computed as the inverse of the shortest path from Start to Exit in Manhattan-like movements,
+        # - INCLUDING THE START STATE for continuing learning tasks (just think about it, we restart every time we reach the terminal state with reward = 0)
+        # - EXCLUDING THE START STATE for episodic learning tasks (just think about it)
+        # *** WARNING: This calculation is problem dependent and should be adjusted accordingly ***
+        print("\nComputing MAX average in DETERMINISTIC environment...")
+        if exit_state == entry_state + env_shape[1] - 1:
+            # This is the case when the exit state is at the bottom-right of the labyrinth
+            max_avg_reward_continuing = 1 / env_shape[1]        # In this case the start state counts! (we subtract 1 because the bottom-right state must NOT count twice!)
+            max_avg_reward_episodic = 1 / (env_shape[1] - 1)    # In this case the start state does not count (we subtract 2 because, besides not counting twice the bottom-right state, the start state does not count in the episodic setting)
+        else:
+            # This is the case when the exit state is at the top-right of the labyrinth (the default)
+            assert exit_state is None
+            max_avg_reward_continuing = 1 / (np.sum(env_shape) - 1)  # In this case the start state counts! (we subtract 1 because the bottom-right state must NOT count twice!)
+            max_avg_reward_episodic = 1 / (np.sum(env_shape) - 2)    # In this case the start state does not count (we subtract 2 because, besides not counting twice the bottom-right state, the start state does not count in the episodic setting)
+    else:
+        # There is wind in the environment
+        # => Compute the average reward using the transition matrix information of the environment (as the wind makes things more complicated)
+        # together with the optimal policy used by the agent (which we know)
+        print(f"\nComputing MAX average in STOCHASTIC environment with WIND: {wind_dict}...")
+        if exit_state == entry_state + env_shape[1] - 1:
+            policy_optimal = probabilistic.PolGenericDiscrete(env, policy=dict(), policy_default=[0.0, 1.0, 0.0, 0.0])
+            V_true, avg_reward_true, mu = compute_true_state_value_function(env, policy_optimal, learning_task, learning_criterion)
+            max_avg_reward_continuing = avg_reward_true
+            # Compute the approximated episodic average reward (it is approximated because of the randomness generated by the wind.
+            # In order to compute the exact episodic average reward, we need to think more.
+            # Here, we use the formula that relates the continuing average reward with the episodic one in the deterministic environment case.
+            max_avg_reward_episodic = avg_reward_true * env_shape[1] / (env_shape[1] - 1)
+        else:
+            # This is the case when the exit state is at the top-right of the labyrinth (the default)
+            rightmost_states = [np.ravel_multi_index((r, env_shape[1] - 1), env_shape) for r in np.arange(env_shape[0])]
+            policy_optimal = probabilistic.PolGenericDiscrete(test_ac.env2d, policy=dict(zip(rightmost_states, [[1.0, 0.0, 0.0, 0.0]] * len(rightmost_states))),
+                                                              policy_default=[0.0, 1.0, 0.0, 0.0])
+            V_true, avg_reward_true, mu = compute_true_state_value_function(test_ac.env2d, policy_optimal, learning_task, learning_criterion)
+            max_avg_reward_continuing = avg_reward_true
+            # Compute the approximated episodic average reward (it is approximated because of the randomness generated by the wind.
+            # In order to compute the exact episodic average reward, we need to think more.
+            # Here, we use the formula that relates the continuing average reward with the episodic one in the deterministic environment case.
+            max_avg_reward_episodic = avg_reward_true * np.sum(env_shape) / (np.sum(env_shape) - 1)
+
+    return max_avg_reward_continuing, max_avg_reward_episodic
+#--- Auxiliary functions
+#-------------------- IMPORT AND AUXILIARY FUNCTIONS ------------------#
+
+
+#----------------- BASIC SETUP AND SIMULATION PARAMETERS --------------#
 # Learning task and learning criterion are used by the constructor of the test class below
 learning_task = LearningTask.CONTINUING
 #learning_criterion = LearningCriterion.DISCOUNTED; gamma = 0.9
 learning_criterion = LearningCriterion.AVERAGE; gamma = 1.0    # gamma could be < 1 in the average reward criterion in order to take the limit as gamma -> 1 as presented in Sutton, pag. 251/252.
 
 seed = 1317
-test_ac = Test_EstPolicy_EnvGridworldsWithObstacles()
-
 problem_2d = True
-exit_state_at_bottom = False
+exit_state_at_bottom = True
+estimate_absorption_set = True
+estimate_absorption_set_at_every_step = True
+entry_state_in_absorption_set = True   #False #True     # Only used when estimate_absorption_set = False
+#----------------- BASIC SETUP AND SIMULATION PARAMETERS --------------#
 
+
+#-------------------------------- ENVIRONMENT -------------------------#
 if problem_2d:
     # 2D labyrinth
     size_vertical = 3; size_horizontal = 4
@@ -727,19 +809,18 @@ size_str = f"{size_vertical}x{size_horizontal}"
 # Environment's entry and exit states
 entry_state = np.ravel_multi_index((size_vertical - 1, 0), env_shape)
 exit_state = entry_state + env_shape[1] - 1 if exit_state_at_bottom else None   # None means that the EXIT state is set at the top-right of the labyrinth
-entry_state_in_absorption_set = True   #False #True
 
 # Presence of wind: direction and probability of deviation in that direction when moving
 if problem_2d:
     wind_dict = None
     wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.6})
     wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.7})
-    #wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.8})
+    wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.8})
 else:
     # WIND is currently not allowed in 1D gridworlds
     wind_dict = None
 
-# Obstacles and absorption set
+# Obstacles
 if problem_2d:
     #-- 2D labyrinth
     # The path to the terminal state is just a corridor through the last row right and then the last column up
@@ -752,24 +833,15 @@ if problem_2d:
 
     if connected_active_set:
         obstacles_set = obstacles_set.difference({min(states_previous_to_last_row)})
-
-    # The absorption set is a rectangular area at the upper left corner of the grid + (possibly) the lower left corner
-    #lower_left_state = (size_vertical-1) * size_horizontal
-    #absorption_set = set(np.concatenate([list(range(x*size_horizontal, x*size_horizontal + size_horizontal-2)) for x in range(size_vertical-2)]))
-    # The absorption set is a rectangular area that touches the right and bottom walls of the big rectangular area that leads to nowhere
-    left_margin = 0 #int(rectangle_to_nowhere_width/2)
-    top_margin = max(1, int(rectangle_to_nowhere_width/2) - 1) #rectangle_to_nowhere_height #rectangle_to_nowhere_height - 2
-    absorption_set = set(np.concatenate([list(range(x * size_horizontal + left_margin, x * size_horizontal + rectangle_to_nowhere_width)) for x in range(0, top_margin)]))
 else:
     #-- 1D gridworld
     obstacles_set = set()
-    absorption_set = set(np.arange(np.prod(env_shape) * 2 // 3 + 1, env_shape[0] - 1))  # We choose an absorption set size J ~ K/3, like in the M/M/1/K queue system (recall that numbering of states here is the opposite than in M/M/1/K
+#-------------------------------- ENVIRONMENT -------------------------#
 
-# Add the environment's start state to the absorption set
-# (ASSUMED TO BE AT THE LOWER LEFT OF THE LABYRINTH)
-if entry_state_in_absorption_set:
-    absorption_set.add(entry_state)
 
+#----------------------------- MODEL FOR POLICY -----------------------#
+# Number of input neurons (just one with the state value or one-per-state)
+nn_input = InputLayer.ONEHOT
 # Number of hidden layers in the neural network model
 # Using multiple layers whose size is proportional to the gridworld size... however this tends to be counterproductive...
 # i.e. learning is slower and may fail (e.g. it usually converges to a non-optimal policy where the advantage function is 0), presumably because of the larger number of parameters.
@@ -783,29 +855,60 @@ if entry_state_in_absorption_set:
 # Keep the neural network rather small
 nn_hidden_layer_sizes = [12]
 print(f"Neural Network architecture:\n{len(nn_hidden_layer_sizes)} hidden layers of sizes {nn_hidden_layer_sizes}")
+#----------------------------- MODEL FOR POLICY -----------------------#
 
-test_ac.setUpClass( shape=env_shape, exit_state=exit_state, wind_dict=wind_dict,
-                    nn_input=InputLayer.ONEHOT, nn_hidden_layer_sizes=nn_hidden_layer_sizes, initial_policy=initial_policy,
-                    # General learning parameters
-                    learning_task=learning_task,
-                    learning_criterion=learning_criterion,
-                    alpha=1.0, gamma=gamma, lmbda=0.7,  # lmbda parameter is ONLY used for TD(lambda), NOT for TD(0), which is created separately nor for FV (for which lambda > 0 does not make sense)
-                    alpha_min=0.1,
-                    # Fleming-Viot parameters
-                    # Small N and T are N=50, T=1000 for the 8x12 labyrinth with corridor
-                    N=20, #50, #200, #200 if problem_2d else 100, #50 #20 #100
-                    T=500, #1000, #100, #10000 if problem_2d else 1000, #1000, #1000, #3000,  # np.prod(env_shape) * 10  #100 #1000
-                    obstacles_set=obstacles_set, absorption_set=absorption_set,
-                    start_states_set={entry_state}, #{nS-1}, #None,
-                    reset_method_value_functions=ResetMethod.ALLZEROS,
-                    estimate_on_fixed_sample_size=True,
-                    seed=seed, debug=False)
+
+#----------------------------- FV ABSORPTION SET ----------------------#
+# DEFAULT absorption set used when estimate_absorption_set = False
+if problem_2d:
+    # The absorption set is a rectangular area at the upper left corner of the grid + (possibly) the lower left corner
+    #lower_left_state = (size_vertical-1) * size_horizontal
+    #default_absorption_set = set(np.concatenate([list(range(x*size_horizontal, x*size_horizontal + size_horizontal-2)) for x in range(size_vertical-2)]))
+    # The absorption set is a rectangular area that touches the right and bottom walls of the big rectangular area that leads to nowhere
+    left_margin = 0 #int(rectangle_to_nowhere_width/2)
+    top_margin = max(1, int(rectangle_to_nowhere_width/2) - 1) #rectangle_to_nowhere_height #rectangle_to_nowhere_height - 2
+    default_absorption_set = set(np.concatenate([list(range(x * size_horizontal + left_margin, x * size_horizontal + rectangle_to_nowhere_width)) for x in range(0, top_margin)]))
+else:
+    # We choose an absorption set size J ~ K/3, like in the M/M/1/K queue system (recall that numbering of states here is the opposite than in M/M/1/K
+    default_absorption_set = set(np.arange(np.prod(env_shape) * 2 // 3 + 1, env_shape[0] - 1))
+
+# Add the environment's start state to the absorption set
+if entry_state_in_absorption_set:
+    default_absorption_set.add(entry_state)
+#----------------------------- FV ABSORPTION SET ----------------------#
+
+
+#-------------------------------- TEST SETUP --------------------------#
+test_ac = Test_EstPolicy_EnvGridworldsWithObstacles()
+test_ac.setUpClass(shape=env_shape, obstacles_set=obstacles_set, wind_dict=wind_dict,
+                   define_start_state_from_absorption_set=False, start_states_set={entry_state},  #{nS-1}, #None,
+                   exit_state=exit_state,
+                   # Policy model
+                   nn_input=nn_input, nn_hidden_layer_sizes=nn_hidden_layer_sizes, initial_policy=initial_policy,
+                   # General learning parameters
+                   learning_task=learning_task,
+                   learning_criterion=learning_criterion,
+                   alpha=1.0, gamma=gamma, lmbda=0.7,  # lmbda parameter is ONLY used for TD(lambda), NOT for TD(0), which is created separately nor for FV (for which lambda > 0 does not make sense)
+                   alpha_min=0.1,
+                   reset_method_value_functions=ResetMethod.ALLZEROS,
+                   # Fleming-Viot parameters
+                   # Small N and T are N=50, T=1000 for the 8x12 labyrinth with corridor
+                   N=20,  #50, #200, #200 if problem_2d else 100, #50 #20 #100
+                   T=500,  #1000, #100, #10000 if problem_2d else 1000, #1000, #1000, #3000,  # np.prod(env_shape) * 10  #100 #1000
+                   estimate_absorption_set=estimate_absorption_set, absorption_set=default_absorption_set,
+                   estimate_on_fixed_sample_size=True,
+                   seed=seed, debug=False)
 test_ac.setUp()
 print(test_ac.policy_nn.nn_model)
 test_ac.env2d._render()
-print(f"Absorption set (1D):\n{absorption_set}")
-print(f"Absorption set (2D):\n{[np.unravel_index(s, env_shape) for s in absorption_set]}")
+print(f"Absorption set (1D):\n{test_ac.agent_nn_fv.getLearner().getAbsorptionSet()}")
+print(f"Absorption set (2D):\n{[np.unravel_index(s, env_shape) for s in test_ac.agent_nn_fv.getLearner().getAbsorptionSet()]}")
+print(f"Activation set (1D):\n{test_ac.agent_nn_fv.getLearner().getActivationSet()}")
+print(f"Activation set (2D):\n{[np.unravel_index(s, env_shape) for s in test_ac.agent_nn_fv.getLearner().getActivationSet()]}")
+#-------------------------------- TEST SETUP --------------------------#
 
+
+#------------------ INITIAL AND MAXIMUM AVERAGE REWARDS ---------------#
 # Average reward of random policy
 policy_random = probabilistic.PolGenericDiscrete(test_ac.env2d, policy=dict(), policy_default=[0.25, 0.25, 0.25, 0.25])
 V_true, avg_reward_true, mu = compute_true_state_value_function(test_ac.env2d, policy_random, learning_task, learning_criterion)
@@ -818,44 +921,7 @@ if initial_policy is not None:
 print(f"True state value function under initial policy:\n{test_ac.env2d.getV()}")
 
 # Maximum average reward (to use as reference in information and plots)
-# It is computed as the inverse of the shortest path from Start to Terminal in Manhattan-like movements,
-# INCLUDING THE START STATE for continuing learning tasks (just think about it, we restart every time we reach the terminal state with reward = 0)
-# EXCLUDING THE START STATE for episodic learning tasks (just think about it)
-# *** This value is problem dependent and should be adjusted accordingly ***
-if wind_dict is None:
-    print("\nComputing MAX average in DETERMINISTIC environment...")
-    if exit_state == entry_state + env_shape[1] - 1:
-        # This is the case when the exit state is at the bottom-right of the labyrinth
-        max_avg_reward_continuing = 1 / env_shape[1]          # In this case the start state counts! (we subtract 1 because the bottom-right state must NOT count twice!)
-        max_avg_reward_episodic = 1 / (env_shape[1] - 1)      # In this case the start state does not count (we subtract 2 because, besides not counting twice the bottom-right state, the start state does not count in the episodic setting)
-    else:
-        # This is the case when the exit state is at the top-right of the labyrinth (the default)
-        assert exit_state is None
-        max_avg_reward_continuing = 1 / (np.sum(env_shape) - 1)   # In this case the start state counts! (we subtract 1 because the bottom-right state must NOT count twice!)
-        max_avg_reward_episodic = 1 / (np.sum(env_shape) - 2)     # In this case the start state does not count (we subtract 2 because, besides not counting twice the bottom-right state, the start state does not count in the episodic setting)
-else:
-    # There is wind in the environment
-    # => Compute the average reward using the transition matrix information of the environment (as the wind makes things more complicated)
-    # together with the optimal policy used by the agent (which we know)
-    print(f"\nComputing MAX average in STOCHASTIC environment with WIND: {wind_dict}...")
-    if exit_state == entry_state + env_shape[1] - 1:
-        policy_optimal = probabilistic.PolGenericDiscrete(test_ac.env2d, policy=dict(), policy_default=[0.0, 1.0, 0.0, 0.0])
-        V_true, avg_reward_true, mu = compute_true_state_value_function(test_ac.env2d, policy_optimal, learning_task, learning_criterion)
-        max_avg_reward_continuing = avg_reward_true
-        # Compute the approximated episodic average reward (it is approximated because of the randomness generated by the wind.
-        # In order to compute the exact episodic average reward, we need to think more.
-        # Here, we use the formula that relates the continuing average reward with the episodic one in the deterministic environment case.
-        max_avg_reward_episodic = avg_reward_true * env_shape[1] / (env_shape[1] - 1)
-    else:
-        # This is the case when the exit state is at the top-right of the labyrinth (the default)
-        rightmost_states = [np.ravel_multi_index((r, env_shape[1]-1), env_shape) for r in np.arange(env_shape[0])]
-        policy_optimal = probabilistic.PolGenericDiscrete(test_ac.env2d, policy=dict(zip(rightmost_states, [[1.0, 0.0, 0.0, 0.0]]*len(rightmost_states))), policy_default=[0.0, 1.0, 0.0, 0.0])
-        V_true, avg_reward_true, mu = compute_true_state_value_function(test_ac.env2d, policy_optimal, learning_task, learning_criterion)
-        max_avg_reward_continuing = avg_reward_true
-        # Compute the approximated episodic average reward (it is approximated because of the randomness generated by the wind.
-        # In order to compute the exact episodic average reward, we need to think more.
-        # Here, we use the formula that relates the continuing average reward with the episodic one in the deterministic environment case.
-        max_avg_reward_episodic = avg_reward_true * np.sum(env_shape) / (np.sum(env_shape) - 1)
+max_avg_reward_continuing, max_avg_reward_episodic = compute_max_avg_rewards_in_labyrinth_with_corridor(test_ac.env2d, wind_dict, learning_task, learning_criterion)
 print(f"MAX CONTINUING average reward: {max_avg_reward_continuing}")
 print(f"MAX EPISODIC average reward (approximate when wind present): {max_avg_reward_episodic}")
 
@@ -864,18 +930,12 @@ if exit_state == entry_state + env_shape[1] - 1:
     state_observe = np.ravel_multi_index((env_shape[0] - 1, env_shape[1] - 2), env_shape)
 else:
     state_observe = np.ravel_multi_index((1, env_shape[1] - 1), env_shape)
+#------------------ INITIAL AND MAXIMUM AVERAGE REWARDS ---------------#
 
+
+#------------------ RESULTS COLLECTION AND PLOTS SETUP ----------------#
 # Learning methods: define characteristics to use when plotting results for each method
-dict_colors = dict(); dict_linestyles = dict(); dict_legends = dict()
-dict_colors['all_online'] = "darkred"; dict_linestyles['all_online'] = "solid"; dict_legends['all_online'] = "ALL Online"
-dict_colors['values_td'] = "red"; dict_linestyles['values_td'] = "solid"; dict_legends['values_td'] = "TD"
-# For a second trial of TDAC (which sometimes is useful --e.g. to compare "using the same budget as FV for every policy learning step" vs. "using an average budget at each policy learning step")
-dict_colors['values_td2'] = "darkorange"; dict_linestyles['values_td2'] = "solid"; dict_legends['values_td2'] = "TD2"
-dict_colors['values_tdl'] = "orange"; dict_linestyles['values_tdl'] = "dashed"; dict_legends['values_tdl'] = "TD(lambda)"
-dict_colors['values_fv'] = "green"; dict_linestyles['values_fv'] = "solid"; dict_legends['values_fv'] = "FV"
-# For a second trial of FVAC (which sometimes is useful --e.g. to compare "allowing infinite budget for FV" vs. "limited budget")
-dict_colors['values_fv2'] = "cyan"; dict_linestyles['values_fv2'] = "solid"; dict_legends['values_fv2'] = "FV2"
-dict_colors['values_fvos'] = "lightgreen"; dict_linestyles['values_fvos'] = "solid"; dict_legends['values_fvos'] = "FV OverSampling"
+dict_colors, dict_linestyles, dict_legends, figsize = define_plotting_parameters()
 
 # Dictionaries to store the results for the different methods (for comparison purposes)
 dict_loss = dict()
@@ -892,6 +952,8 @@ dict_alpha = dict()
 dict_time_elapsed = dict()
 # Statistics about the results across replications
 dict_stats_R = dict()
+#------------------ RESULTS COLLECTION AND PLOTS SETUP ----------------#
+
 
 # Number of replications to run on each method
 nrep = 5 #10
@@ -915,6 +977,7 @@ learning_method_type = learning_method[:9]  # This makes e.g. "values_fvos" beco
 max_time_steps_fv_per_particle = 5*len(test_ac.agent_nn_fv.getLearner().getActiveSet()) #100 #50                            # Max average number of steps allowed for each particle in the FV simulation. We set this value proportional to the size of the active set of the FV learner, in order to scale this value with the size of the labyrinth.
 max_time_steps_fv_for_expectation = test_ac.agent_nn_fv.getLearner().getNumTimeStepsForExpectation()                        # This is parameter T
 max_time_steps_fv_for_all_particles = test_ac.agent_nn_fv.getLearner().getNumParticles() * max_time_steps_fv_per_particle   # This is parameter N * max_time_steps_fv_per_particle which defines the maximum number of steps to run the FV system when learning the value functions that are used as critic of the loss function at each policy learning step
+max_time_steps_fv_overall = 3*max_time_steps_fv_for_all_particles #max(5000, max_time_steps_fv_for_all_particles)            # To avoid too large simulation times, for instance when the policy is close to optimal: ABSOLUTE maximum number of steps allowed for the FV simulation, regardless of what happens with particle absorption (i.e. if all of them are absorbed or 90% of them are absorbed at least once)
 
 # Traditional method learning parameters
 # They are set for a fair comparison with FV learning
@@ -929,7 +992,7 @@ print("******")
 
 #-- Common learning parameters
 # Parameters about policy learning (Actor)
-n_learning_steps = 50 #200 #50 #100 #30
+n_learning_steps = 100 #200 #50 #100 #30
 n_episodes_per_learning_step = 50   #100 #30   # This parameter is used as the number of episodes to run the policy learning process for and, if the learning task is EPISODIC, also as the number of episodes to run the simulators that estimate the value functions
 max_time_steps_per_policy_learning_episode = 5*test_ac.env2d.getNumStates() if problem_2d else 2*test_ac.env2d.getNumStates() #np.prod(env_shape) * 10 #max_time_steps_benchmark // n_episodes_per_learning_step   # Maximum number of steps per episode while LEARNING THE *POLICY* ONLINE (NOT used for the value functions (critic) learning)
 policy_learning_mode = "online"     # Whether the policy is learned online or OFFLINE (only used when value functions are learned separately from the policy)
@@ -952,13 +1015,17 @@ colormap = "seismic"  # "Reds"  # Colormap to use in the plot of the estimated s
 
 # Results saving and logging, with filename prefix and suffix
 save = True
-log = True #learning_method_type == "values_fv"
+log = True #False #learning_method_type == "values_fv"
 prefix = f"ActorCritic_labyrinth_{size_str}_"
 suffix = f"_{learning_method}"
 
-# Open log file if one requested
+# Open log file if one requested and show method being run
 if log:
     dt_start, stdout_sys, stderr_sys, fh_log, _logfile_not_used = log_file_open(logsdir, subdir="", prefix=prefix, suffix=suffix, use_datetime=True)
+print("******")
+print(f"Running {learning_method.upper()} method for value functions estimation.")
+print(f"A NOMINAL MAXIMUM of {max_time_steps_benchmark} steps will be allowed during the simulation.")
+print("******")
 
 time_start = timer()
 dt_start_filename = get_current_datetime_as_string(format="filename")
@@ -1108,10 +1175,12 @@ for rep in range(nrep):
                     simulator_value_functions.getAgent().getLearner().setProbasStationaryStartStateET(None)
                 V, Q, A, state_counts, probas_stationary, expected_reward, expected_absorption_time, n_cycles_absorption_used, n_events_et, n_events_fv = \
                     simulator_value_functions.run(t_learn=t_learn,
-                                                  max_time_steps_fv=max_time_steps_fv_for_all_particles,
+                                                  max_time_steps=max_time_steps_fv_overall,
+                                                  max_time_steps_for_absorbed_particles_check=max_time_steps_fv_for_all_particles,
                                                   min_num_cycles_for_expectations=0,
                                                       ## Note: We set the minimum number of cycles for the estimation of E(T_A) to 0 because we do NOT need
                                                       ## the estimation of the average reward to learn the optimal policy, as it cancels out in the advantage function Q(s,a) - V(s)!!
+                                                  estimate_absorption_set=estimate_absorption_set_at_every_step,
                                                   use_average_reward_stored_in_learner=use_average_reward_from_previous_step,
                                                   reset_value_functions=reset_value_functions_at_this_step,
                                                   plot=plot if t_learn+1 in learning_steps_observe else False, colormap=colormap,
@@ -1226,9 +1295,6 @@ dict_time_elapsed[learning_method] = time_elapsed_all.copy()
 
 
 #------------------ Plots -----------------
-# Default figure size for the plots below
-figsize = (10, 8)
-
 # Plot loss and average reward for the currently analyzed learner
 print("\nPlotting...")
 ax_loss = plt.figure(figsize=figsize).subplots(1, 1)
@@ -1465,21 +1531,24 @@ plt.suptitle(f"{learning_method.upper()}\n{learning_task.name} learning task - {
 #print([len(trajectory) for trajectory in simulator_value_functions.getAgent().getLearner().getStates()])
 
 
-# Distribution of number of steps
+# Distribution of number of steps (average over all replications)
 plt.figure(figsize=(8, 7))
-plt.bar(np.arange(1, n_learning_steps+1), dict_nsteps[learning_method][rep], color="blue")
+plt.bar(np.arange(1, n_learning_steps+1), np.mean(dict_nsteps[learning_method], axis=0), color="blue")
 #plt.plot(np.arange(1, n_learning_steps+1), dict_nsteps[learning_method][rep], color="blue")
 plt.gca().set_xlabel("Learning step")
 plt.gca().set_ylabel("Number of simulation steps")
 plt.suptitle(f"{learning_method.upper()}\n{learning_task.name} learning task - {learning_criterion.name} reward criterion - Labyrinth {env_shape}"
              f"\nN={test_ac.agent_nn_fv.getLearner().getNumParticles()}, T={test_ac.agent_nn_fv.getLearner().getNumTimeStepsForExpectation()}, MAX budget={max_time_steps_benchmark} steps per policy learning step"
-             f"\nNumber of steps used to learn the value functions at each policy learning step")
+             f"\nAverage number of steps used to learn the value functions at each policy learning step ({nrep} replications)")
 
 
 
 ############## SAVE ALL RESULTS TOGETHER
 if save:
-    objects_to_save = ["dict_loss", "dict_R", "dict_R_long", "dict_R_long_true", "dict_V", "dict_Q", "dict_A", "dict_state_counts", "dict_nsteps", "dict_KL", "dict_alpha", "dict_time_elapsed"]
+    _env2d = test_ac.env2d
+    objects_to_save = ["_env2d", "wind_dict", "learning_task", "learning_criterion", "gamma",
+                       "dict_loss", "dict_R", "dict_R_long", "dict_R_long_true", "dict_V", "dict_Q", "dict_A", "dict_state_counts", "dict_nsteps", "dict_KL", "dict_alpha", "dict_time_elapsed",
+                       "max_time_steps_benchmark"]
     if "max_time_steps_benchmark_all" in locals():
         objects_to_save += ["max_time_steps_benchmark_all"]
     else:
@@ -1499,28 +1568,39 @@ if save:
 
 
 ############## LOAD RESULTS
+#_datetime = "20240428_092427" #"20240428_205959" #"20240421_140558" #"20240405_094608" #"20240322_095848" #"20240219_230301" #"20240219_142206"          # Use format yyymmdd_hhmmss
+#_size_str = "6x8" #"21x1" #"10x14" #"3x4" #"10x14"
+
 resultsdir = "./RL-003-Classic/results"
-_datetime = "20240428_092427" #"20240428_205959" #"20240421_140558" #"20240405_094608" #"20240322_095848" #"20240219_230301" #"20240219_142206"          # Use format yyymmdd_hhmmss
-_size_str = "6x8" #"21x1" #"10x14" #"3x4" #"10x14"
-_prefix = f"ActorCritic_labyrinth_{size_str}_"
-_learning_method = "ALL" #"td" #"fv"
-_suffix = "_LabyrinthWithConnectedActiveSetAndFinishAtBottomRightLostPolicy_TDAC,FVAC,N=20,T=500,LimitedTime5xFVWorksTDFails" #"_LabyrinthWithConnectedActiveSetAndFinishAtBottomRightRandomPolicy_TDAC,FVAC,N=20,T=100,LimitedTime5xFVSlightlyBetterThanTD" #"_N=50,T=5000,InfiniteTimeFVisBetterLessVariance" #"_FV&TD_FVIsWorse" #""
-_N = 50
-_T = 5000
-if _learning_method == "ALL":
-    _filename = f"{_prefix}{_datetime}_{_learning_method.upper()}{_suffix}.pkl"
-else:
-    _filename = f"{_prefix}{_datetime}_{_learning_method.upper()}AC_N={_N}.pkl"
+
+_filename = "ActorCritic_labyrinth_4x5_20240512_232944_ALL_WindyLabyrinth0.7FinishAtBottomAbsorptionSetEstimated0_TDAC,FVAC,N=20,T=500,LimitedTime=5x,epsilon=0.10,Budget4Loss=5x_FVisBetter.pkl"
+#_filename = "ActorCritic_labyrinth_4x5_20240513_070501_ALL_WindyLabyrinth0.7FinishAtBottomAbsorptionSetEstimated_TDAC,FVAC,N=20,T=500,LimitedTime=5x,epsilon=0.10,Budget4Loss=5x_FVisBetter.pkl"
+
+# Compare two FVAC learnings
+# 4x5
+#_filename = "ActorCritic_labyrinth_4x5_20240512_232944_ALL_WindyLabyrinth0.7FinishAtBottomAbsorptionSetEstimated0_TDAC,FVAC,N=20,T=500,LimitedTime=5x,epsilon=0.10,Budget4Loss=5x_FVisBetter.pkl"
+#_filename = "ActorCritic_labyrinth_4x5_20240513_070501_ALL_WindyLabyrinth0.7FinishAtBottomAbsorptionSetEstimated_TDAC,FVAC,N=20,T=500,LimitedTime=5x,epsilon=0.10,Budget4Loss=5x_FVisBetter.pkl"
+_filename = "ActorCritic_labyrinth_4x5_20240513_151849_ALL_WindyLabyrinth0.8FinishAtBottomAbsorptionSetEstimated0_TDAC,FVAC,N=20,T=500,LimitedTime=5x,epsilon=0.10,Budget4Loss=5x_FVisBetter.pkl"
+_filename = "ActorCritic_labyrinth_4x5_20240513_124235_ALL_WindyLabyrinth0.8FinishAtBottomAbsorptionSetEstimated_TDAC,FVAC,N=20,T=500,LimitedTime=5x,epsilon=0.10,Budget4Loss=5x_FVisBetter.pkl"
+# 6x8
+_filename = "ActorCritic_labyrinth_6x8_20240515_111830_ALL_WindyLabyrinth0.8FinishAtBottomAbsorptionSetEstimated0_TDAC,FVAC,N=20,T=500,LimitedTime=5x,epsilon=0.10,Budget4Loss=5x_FVisBetter.pkl"
+_filename = "ActorCritic_labyrinth_6x8_20240515_102102_ALL_WindyLabyrinth0.6FinishAtBottomAbsorptionSetEstimated_TDAC,FVAC,N=20,T=500,LimitedTime=5x,epsilon=0.10,Budget4Loss=5x_FVisBetter.pkl"
+
+_size_str = _filename[len("ActorCritic_labyrinth_"):len("ActorCritic_labyrinth_")+3]
+_N = int(_filename[_filename.index("N=") + len("N="):_filename.index(",", _filename.index("N="))])
+_T = int(_filename[_filename.index("T=") + len("T="):_filename.index(",", _filename.index("T="))])
 _filepath = os.path.join(resultsdir, _filename)
 object_names = load_objects_from_pickle(_filepath, globals())
 print(f"The following objects were loaded from '{_filepath}':\n{object_names}")
+
 # The following reward values are used in the ALLTOGETHER plotting below
 _methods = list(dict_loss.keys())
 env_shape = (int(_size_str[:_size_str.index("x")]), int(_size_str[_size_str.index("x")+1:]))
-max_avg_reward_continuing = 1 / (np.sum(env_shape) - 1)
-max_avg_reward_episodic = 1 / (np.sum(env_shape) - 2)
+max_avg_reward_continuing, max_avg_reward_episodic = compute_max_avg_rewards_in_labyrinth_with_corridor(_env2d, wind_dict, learning_task, learning_criterion)
 nrep = len(dict_loss[_methods[0]])
 n_learning_steps = len(dict_loss[_methods[0]][0])
+learning_task = LearningTask.CONTINUING
+dict_colors, dict_linestyles, dict_legends, figsize = define_plotting_parameters()
 ############## LOAD RESULTS
 
 
@@ -1544,7 +1624,7 @@ for meth in dict_loss.keys():
     legend += [f"{dict_legends[meth]} (average reward)"]
     ax_R.plot(np.arange(1, n_learning_steps+1), dict_R[meth][nrep-1, :n_learning_steps] / max_avg_reward_episodic, '-', marker='.', color=dict_colors[meth])
     # True average reward (it should give a good fit of the average reward points just plotted
-    ax_R.plot(np.arange(1, n_learning_steps + 1), dict_R_long_true[meth][nrep - 1, :n_learning_steps] / max_avg_reward_continuing, '-', color=dict_colors[meth], linestyle="dashed")
+    ax_R.plot(np.arange(1, n_learning_steps + 1), dict_R_long_true[meth][nrep-1, :n_learning_steps] / max_avg_reward_continuing, '-', color=dict_colors[meth], linestyle="dashed")
     legend += [f"{dict_legends[meth]} (expected reward)"]
 ax_loss.set_xlabel("Learning step")
 ax_loss.set_ylabel("Loss")
@@ -1559,7 +1639,7 @@ ax_R.axhline(0, color="gray")
 ax_R.set_title(f"Evolution of NORMALIZED Average Reward")
 ax_R.legend(legend, loc="center left")
 plt.suptitle(f"ALL LEARNING METHODS: Labyrinth {env_shape} - {learning_task.name} learning task - {learning_criterion.name} reward criterion (gamma={gamma})"
-             f"\nN={test_ac.agent_nn_fv.getLearner().getNumParticles()}, T={test_ac.agent_nn_fv.getLearner().getNumTimeStepsForExpectation()}, MAX budget={max_time_steps_benchmark} steps per policy learning step"
+             f"\nN={'test_ac' in locals() and test_ac.agent_nn_fv.getLearner().getNumParticles() or _N}, T={'test_ac' in locals() and test_ac.agent_nn_fv.getLearner().getNumTimeStepsForExpectation() or _T}, MAX budget={'max_time_steps_benchmark' in locals() and max_time_steps_benchmark or 'N/A'} steps per policy learning step"
              f"\n(last replication #{nrep})")
 
 # If we want to add the ratio between number of steps used by two methods compared
@@ -1571,15 +1651,36 @@ if "values_td" in dict_nsteps.keys() and "values_fv" in dict_nsteps.keys():
     ax_R_nsamples.set_ylim((ax_R.get_ylim()[0], None))
     ax_R_nsamples.legend(["Sample size ratio (FV/TD)", "Reference line showing equal sample size ratio"], loc="center right")
 
+# Plot of all replications
+ax = plt.figure(figsize=figsize).subplots(1, 1)
+legend = []
+for rep in range(nrep):
+    for meth in dict_R.keys():
+        legend += [meth] if rep == 0 else []
+        ax.plot(np.arange(1, n_learning_steps+1), dict_R[meth][rep, :n_learning_steps], '-', color=dict_colors[meth], linewidth=0.3)
+        ax.axhline(max_avg_reward_episodic, color="darkgreen")
+        #ax.axhline(max_avg_reward_continuing, color="lightgreen")
+        #ax.axhline(0, color="gray")
+        ax.set_xlabel("Learning step")
+        ax.set_ylabel("Average reward")
+ax.legend(legend, loc="center right")
+plt.suptitle(f"ALL LEARNING METHODS: Labyrinth {env_shape} - {learning_task.name} learning task - {learning_criterion.name} reward criterion (gamma={gamma})"
+             f"\nWIND: {wind_dict}, ALL {nrep} replications"
+             f"\nN={'test_ac' in locals() and test_ac.agent_nn_fv.getLearner().getNumParticles() or _N}, T={'test_ac' in locals() and test_ac.agent_nn_fv.getLearner().getNumTimeStepsForExpectation() or _T}, MAX budget={'max_time_steps_benchmark' in locals() and max_time_steps_benchmark or 'N/A'} steps per policy learning step")
+
 # Plot results on several replications
 if nrep > 1:
-    plot_bands = True #False
+    plot_bands = False #False
+    plot_mean = True #True
     dict_stats_R = dict.fromkeys(dict_loss.keys())
     ax = plt.figure(figsize=figsize).subplots(1, 1)
     lines = []
     legend = []
     _xshift = -0.1 # shift on the X axis to avoid overlap of vertical error bars
     for meth in dict_loss.keys():
+        # Adapt the following filter if we want to exclude a particular method from the comparison plot
+        #if meth in ["values_td"]:
+        #    continue
         _xshift += 0.1
         # Compute distribution of values to plot
         dict_stats_R[meth] = dict()
@@ -1601,11 +1702,12 @@ if nrep > 1:
 
         # Plot
         _xvalues = np.arange(1, n_learning_steps+1) + _xshift
-        #line = ax.plot(_xvalues, dict_stats_R[meth]['mean'] / max_avg_reward_episodic, color=dict_colors[meth], linestyle=dict_linestyles[meth], linewidth=2)[0]
-        line = ax.errorbar(_xvalues, dict_stats_R[meth]['mean'] / max_avg_reward_episodic, yerr=dict_stats_R[meth]['std'] / np.sqrt(dict_stats_R[meth]['n']) / max_avg_reward_episodic, color=dict_colors[meth], linestyle=dict_linestyles[meth], linewidth=2, marker=".", markersize=12)[0]
-        lines += [line]
-        legend += [f"{dict_legends[meth]} (average +/- SE)"]
-        line = ax.plot(_xvalues, dict_stats_R[meth]['median'] / max_avg_reward_episodic, color=dict_colors[meth], linestyle="dashed", linewidth=2, marker="x", markersize=12)[0]
+        if plot_mean:
+            #line = ax.plot(_xvalues, dict_stats_R[meth]['mean'] / max_avg_reward_episodic, color=dict_colors[meth], linestyle=dict_linestyles[meth], linewidth=2)[0]
+            line = ax.errorbar(_xvalues, dict_stats_R[meth]['mean'] / max_avg_reward_episodic, yerr=dict_stats_R[meth]['std'] / np.sqrt(dict_stats_R[meth]['n']) / max_avg_reward_episodic, color=dict_colors[meth], linestyle=dict_linestyles[meth], linewidth=2, marker=".", markersize=12)[0]
+            lines += [line]
+            legend += [f"{dict_legends[meth]} (average +/- SE)"]
+        line = ax.plot(_xvalues, dict_stats_R[meth]['median'] / max_avg_reward_episodic, color=dict_colors[meth], linestyle="dashed" if plot_mean else "solid", linewidth=2, marker="x" if plot_mean else ".", markersize=12)[0]
         lines += [line]
         legend += [f"{dict_legends[meth]} (median)"]
         if plot_bands:
@@ -1623,7 +1725,8 @@ if nrep > 1:
     ax.set_ylim((-0.01, 1.01))
     ax.set_xlabel("Learning step")
     ax.set_ylabel("Average reward (normalized by the MAX average reward = {:.2g})".format(max_avg_reward_episodic))
-    plt.suptitle(f"ALL LEARNING METHODS: Labyrinth {env_shape} - {learning_task.name} learning task - {learning_criterion.name} reward criterion (gamma={gamma})\n{nrep} replications"
+    plt.suptitle(f"ALL LEARNING METHODS: Labyrinth {env_shape} - {learning_task.name} learning task - {learning_criterion.name} reward criterion (gamma={gamma})"
+                 f"\nWIND: {wind_dict}, {nrep} replications"
                  f"\nN={'test_ac' in locals() and test_ac.agent_nn_fv.getLearner().getNumParticles() or _N}, T={'test_ac' in locals() and test_ac.agent_nn_fv.getLearner().getNumTimeStepsForExpectation() or _T}, MAX budget={'max_time_steps_benchmark' in locals() and max_time_steps_benchmark or 'N/A'} steps per policy learning step")
 
     # Plot of number of samples ratios between FV learnings and TD learning
@@ -1659,6 +1762,17 @@ if nrep > 1:
             ax_nsamples.axhline(1.0 - 1E-6, color="magenta", linewidth=0.5, linestyle="dashed")
             legend_nsamples += ["Reference line showing equal sample size ratio"]
         ax_nsamples.set_ylim((ax.get_ylim()[0], None))
+    if "values_fv2" in dict_nsteps.keys() and "values_fv" in dict_nsteps.keys():
+        df_ratio_nsamples = pd.DataFrame({'fv2': np.mean(dict_nsteps['values_fv2'], axis=0),
+                                          'fv': np.mean(dict_nsteps['values_fv'], axis=0)})
+        df_ratio_nsamples['ratio_fv2_fv'] = df_ratio_nsamples['fv2'] / df_ratio_nsamples['fv']
+        if "ax_nsamples" not in locals():
+            ax_nsamples = ax.twinx()
+        ax_nsamples.plot(range(1, n_learning_steps+1), df_ratio_nsamples['ratio_fv2_fv'][:n_learning_steps], color="cyan", linewidth=0.5)
+        legend_nsamples += ["Sample size ratio (FV2/FV)"]
+        if "ref_line" not in locals():
+            ref_line = ax_nsamples.axhline(1.0, color="cyan", linewidth=0.5, linestyle="dashed")
+            legend_nsamples += ["Reference line showing equal sample size ratio"]
 
     if "ax_nsamples" in locals():
         ax_nsamples.set_ylim((ax.get_ylim()[0], None))

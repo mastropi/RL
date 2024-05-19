@@ -315,15 +315,19 @@ def load_objects_from_pickle(filename, namespace):
     Return: list
     List with the names of the loaded objects into the given namespace.
     """
+    # Output object
+    object_names = None
+
     try:
         dict_objects = joblib.load(filename)
     except IOError as e:
         print(get_exception_message(e))
-    assert isinstance(dict_objects, dict), f"The object saved in the input pickle file must be a dictionary: {dict_objects}"
-    object_names = []
-    for obj_name, obj_value in dict_objects.items():
-        object_names += [obj_name]
-        namespace[obj_name] = obj_value
+    if "dict_objects" in locals():
+        assert isinstance(dict_objects, dict), f"The object saved in the input pickle file must be a dictionary: {dict_objects}"
+        object_names = []
+        for obj_name, obj_value in dict_objects.items():
+            object_names += [obj_name]
+            namespace[obj_name] = obj_value
 
     return object_names
 

@@ -290,6 +290,22 @@ def all_combos_with_max_limits(L: Union[list, tuple]):
     return gen
 
 
+def compute_set_of_frequent_states_with_zero_reward(states, rewards, threshold=0.05):
+    # Convert to series
+    if len(states) != len(rewards):
+        raise ValueError(f"The number of elements in `states` and the number of elements in `rewards` must be the same: {len(states)}, {len(rewards)}")
+    states = pd.Series(states)
+    rewards = pd.Series(rewards)
+
+    # Filter on states with zero reward
+    ind_zero_reward = rewards == 0
+    n_nonzero_rewards = sum(ind_zero_reward)
+
+    dist_state_count = pd.Series(states[ind_zero_reward]).value_counts()
+
+    return set(dist_state_count.index[dist_state_count > threshold*n_nonzero_rewards])
+
+
 def compute_transition_matrices(env, policy):
     """
     Computes the transition probability matrices for the EPISODIC and CONTINUING learning tasks on a given discrete-state / discrete-action environment
@@ -1280,6 +1296,30 @@ if __name__ == "__main__":
     assert values == list(range(L[0] + 1))
     print("OK! {} combinations generated for L={}.".format(count, L))
     #--------------- all_combos_with_max_limits(L) ------------------#
+
+
+    #------------------ compute_set_of_frequent_states_with_zero_reward() ------------------#
+    print("\n--- Testing compute_set_of_frequent_states_with_zero_reward(states, rewards, threshold=0.05):")
+
+    print("Case where:\n(i) Not all the states in the system are visited.\n(ii) One of the state counts is exactly equal to the threshold value, so that we test that the threshold condition should be strictly overcome in order to be included in set A.")
+    # Number of states in the system
+    nS = 6
+    np.random.seed(13)
+    states = [0]*20 + [3]*18 + [1]*10 + [2]*3 + [5]*13
+    rewards = [0]*20 + [1]*4 + [0]*14 + [0]*(10 + 3 + 13)
+    nsteps = len(states)
+    assert len(states) == len(rewards)
+    order = np.random.permutation(nsteps)
+    states = [states[o] for o in order]
+    rewards = [rewards[o] for o in order]
+    set_A = compute_set_of_frequent_states_with_zero_reward(states, rewards)
+    print(f"States and rewards observed in the trajectory (n={len(states)}):\n{np.c_[states, rewards].T}")
+    print(f"Distribution of states:\n{pd.Series(states).value_counts(sort=False)}")
+    print(f"Distribution of states with zero reward:\n{pd.Series(states)[pd.Series(rewards)==0].value_counts(sort=False)}")
+    print(f"Default threshold (5% of {sum(pd.Series(rewards)==0)}) = {0.05*sum(pd.Series(rewards)==0)}")
+    print(f"Absorption set A: {set_A}")
+    assert set_A == {0, 1, 3, 5}, f"The absorption set A must be equal to {{0, 1, 3, 4}}: {set_A}"
+    #------------------ compute_set_of_frequent_states_with_zero_reward() ------------------#
 
 
     #---------------- compute_state_value_function_from_transition_matrix() ----------------#

@@ -514,7 +514,9 @@ def parse_simulation_parameters(dict_params_simul, env):
         - T: either the number of simulation steps to use in the Monte-Carlo simulation when estimating probabilities
         using Monte-Carlo or the number of arrival events to use in the Monte-Carlo simulation used in
         the FV estimator of probabilities to estimate E(T_A), i.e. the expected reabsorption time of a single Markov chain,
-        - One of the following set of keys:
+
+        The following keys are optional:
+        - If given, one of the following set of keys:
             a) for queue systems with a single buffer governing blocking (e.g. single-server, multi-server with single buffer)
             holding jobs that await being served. If we call this value J, then J-1 is the absorption buffer size.
                 - buffer_size_activation: the overall system's "buffer size for activation" for systems with a single buffer.
@@ -523,8 +525,6 @@ def parse_simulation_parameters(dict_params_simul, env):
                 - activation_set: SetOfStates object defining the set of activation states.
             When both (a) and (b) are given in the dictionary, and the system is a queue system, precedence is given to
             the information provided in (a).
-
-        The following keys are optional:
         - burnin_time_steps: number of burn-in time steps to allow at the beginning of the simulation in order to
         consider that the Markov process is in stationary regime.
         default: BURNIN_TIME_STEPS
@@ -565,7 +565,7 @@ def parse_simulation_parameters(dict_params_simul, env):
     - method_survival_probability_estimation    (all environments)
     - seed                                      (all environments)
     """
-    set_required_simul_params = set({'T', 'absorption_set', 'activation_set'})
+    set_required_simul_params = set({'T'})
 
     if isinstance(env, GenericEnvQueueWithJobClasses):
         if 'buffer_size_activation' in dict_params_simul.keys():

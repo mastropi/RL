@@ -37,7 +37,7 @@ from Python.lib.estimators.nn_models import nn_backprop
 from Python.lib.simulators.discrete import Simulator as DiscreteSimulator
 
 from Python.lib.utils.basic import assert_equal_data_frames, show_exec_params
-from Python.lib.utils.computing import compute_transition_matrices, compute_state_value_function_from_transition_matrix
+from Python.lib.utils.computing import compute_set_of_frequent_states_with_zero_reward, compute_transition_matrices, compute_state_value_function_from_transition_matrix
 
 @unique
 class InputLayer(Enum):
@@ -52,7 +52,8 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
     # See the only answer by Navy Cheng.
 
     @classmethod
-    def setUpClass(cls, shape=(3, 4), exit_state=None, wind_dict: dict=None, obstacles_set: Union[list, set]=None, start_states_set: set=None,
+    def setUpClass(cls, shape=(3, 4), obstacles_set: Union[list, set]=None, wind_dict: dict=None, exit_state=None, start_states_set: set=None,
+                        define_start_state_from_absorption_set=False,   # This parameter has priority over the value of `start_states_set` when it is True
                         # Characteristics of the neural network for the Actor Critic policy learner
                         nn_input: InputLayer=InputLayer.ONEHOT, nn_hidden_layer_sizes: list=[8], initial_policy=None,
                         # Characteristics of all learners
@@ -60,15 +61,22 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
                         learning_criterion=LearningCriterion.DISCOUNTED,
                         alpha=1.0, gamma=1.0, lmbda=0.0,      # Lambda parameter in non-adaptive TD(lambda) learners
                         alpha_min=0.0,
+                        reset_method_value_functions=ResetMethod.ALLZEROS,
                         # Characteristics of the Fleming-Viot implementation
                         N=100, T=100,   # N is the number of particles, T is the max number of time steps allowed over ALL episodes in the single Markov chain simulation that estimates E(T_A)
-                        absorption_set: Union[list, set]=None,
-                        reset_method_value_functions=ResetMethod.ALLZEROS,
+                        estimate_absorption_set=True, absorption_set: Union[list, set]=None,
                         estimate_on_fixed_sample_size=False,
                         seed=1717, debug=False):
         env_shape = shape
         cls.debug = debug
         cls.seed = seed
+
+        #-- Value function learning parameters
+        cls.gamma = gamma
+        cls.alpha = alpha
+        cls.alpha_min = alpha_min
+        cls.reset_method = reset_method_value_functions
+        cls.reset_params = dict({'min': -1, 'max': +1})
 
         #-- Environment characteristics
         cls.nS = np.prod(env_shape)
@@ -77,61 +85,18 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
         exit_state = env_shape[1] - 1 if exit_state is None else exit_state
         terminal_states = set({exit_state})
 
-        # Absorption set for FV
-        if absorption_set is None:
-            # We choose the first column, i.e. the column above the labyrinth's start state, of the 2D-grid as the set A of uninteresting states
-            absorption_set = set()
-            for i in range(env_shape[0]):
-                state = np.ravel_multi_index((i, 0), env_shape)
-                absorption_set.add(state)
-        else:
-            for state in absorption_set:
-                if not 0 <= state < cls.nS:
-                    raise ValueError(f"All states in the absorption set must be between 0 and {cls.nS-1}: {state}")
-
-        # Activation set for FV
-        # (defined from the absorption set as all those states adjacent to every state in the absorption set that are not part of the absorption set nor an obstacle)
-        activation_set = set()
-        for s in absorption_set:
-            for sadj, dir in get_adjacent_states(env_shape, s):
-                if sadj is not None and sadj not in set.union(absorption_set, obstacles_set):
-                    activation_set.add(sadj)
-
-        # Set of start states, embedded in the environment below as part of the initial state distribution set as the uniform distribution on these states
-        # When None, the set of start states is defined as:
-        # - The lower-left cell if the set is not given and no absorption set has been specified (although this is never the case because of the above definition of absorption_set,
-        # but still we leave the condition in the logic below in case we decide to change this behaviour later on).
-        # - A set of states in the FV active set. The precise set of states used depends on the learning criterion:
-        #   - for AVERAGE learning criterion: it is defined as the set of activation states, i.e. the outside boundary of the absorption set A, so that the TD learner and the FV
-        #   learner have a fair comparison.
-        #   NOTE that, in this case, this set of start states is used to start the single Markov chain excursion used to estimate the expected reabsorption time E(T_A).
-        #   And this is OK (as opposed to e.g. start such excursion INSIDE the absorption set A), because we first need to enter the absorption set A in order to measure the
-        #   reabsorption cycle time. What is questionable, however, is whether we should start the single Markov chain excursion at a state chosen UNIFORMLY at random in the
-        #   outside boundary of A or, instead, the state should be chosen following the exit state distribution.
-        #   - for all other learning criteria (e.g. DISCOUNTED learning criterion): it is defined as ALL states in the FV ACTIVE set
-        #   (N.B. *not* "activATION" set, which is usually much smaller than the ACTIVE set).
         if start_states_set is None:
-            if absorption_set is None:
-                # The set of start states is defined by just one state, namely the bottom-left of the environment, which is considered to be the entrance to the labyrinth
-                start_states_set = set(np.ravel_multi_index((env_shape[0]-1, 0), env_shape))
-            else:
-                # We set the start state to the same set of states used by the FV learning so that TD and FV are more fairly compared
-                if learning_criterion == LearningCriterion.AVERAGE:
-                    # The start state is defined as any state in the activation set of the FV learning process (i.e. the outside boundary of the absorption set)
-                    start_states_set = set(activation_set)
-                else:
-                    # The start state is defined as any state in the complement of the absorption set (minus obstacles + terminal state),
-                    # which is where the FV learning of the value functions start in the DISCOUNTED reward criterion.
-                    start_states_set = set(np.arange(cls.nS)).difference(absorption_set.union(obstacles_set).union(terminal_states))
-        else:
-            if not start_states_set.issubset(set(np.arange(cls.nS))):
-                raise ValueError(f"The start states set is invalid: all states in the set must be between 0 and {cls.nS-1}: {start_states_set}")
+            # The set of start states is defined by just one state, namely the bottom-left of the environment, which is considered to be the entrance to the labyrinth
+            start_states_set = set(np.ravel_multi_index((env_shape[0]-1, 0), env_shape))
+        elif not start_states_set.issubset(set(np.arange(cls.nS))):
+            raise ValueError(f"The start states set is invalid: all states in the set must be between 0 and {cls.nS-1}: {start_states_set}")
+
         # Define the initial state distribution that will be used when defining the environment class
         isd = np.zeros(cls.nS)
         for state in start_states_set:
             isd[state] = 1.0 / len(start_states_set)
 
-        # Check the obstacles
+        # Obstacles
         if obstacles_set is None:
             # Set just ONE obstacle in the gridworld, at the second column of the previous to last row
             state = np.ravel_multi_index((env_shape[0] - 2, 1), env_shape)
@@ -153,6 +118,109 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
                                                 initial_state_distribution=isd)
         print("Gridworld environment:")
         cls.env2d._render()
+        #-- Environment characteristics
+
+        #-- Policy characteristics
+        # Policy model
+        if nn_input == InputLayer.SINGLE:
+            cls.nn_model = nn_backprop(1, nn_hidden_layer_sizes, cls.env2d.getNumActions(), dict_activation_functions=dict({'hidden': [nn.ReLU]*len(nn_hidden_layer_sizes)}))
+        else:
+            cls.nn_model = nn_backprop(cls.env2d.getNumStates(), nn_hidden_layer_sizes, cls.env2d.getNumActions(), dict_activation_functions=dict({'hidden': [nn.ReLU] * len(nn_hidden_layer_sizes)}))
+        cls.policy_nn = PolNN(cls.env2d, cls.nn_model)
+        print(f"Neural network to model the policy:\n{cls.nn_model}")
+
+        # Initialize the policy to the given initial policy
+        cls.policy_nn.reset(initial_values=initial_policy, seed=cls.seed)
+        print(f"Network parameters initialized as follows:\n{list(cls.policy_nn.getThetaParameter())}")
+        print("Initial policy for all states (states x actions):")
+        policy_probabilities = cls.policy_nn.get_policy_values()
+        print(policy_probabilities)
+
+        # Compute the true state value function for the given policy
+        # and store it in the environment so that we can compare our estimates with those values when running simulations that estimate the state value function.
+        P_epi, P_con, b_epi, b_con, g, mu = compute_transition_matrices(cls.env2d, cls.policy_nn)
+        P = P_con if learning_task == LearningTask.CONTINUING else P_epi
+        b = b_con if learning_task == LearningTask.CONTINUING else b_epi
+        bias = g if learning_criterion == LearningCriterion.AVERAGE else None
+        V_true = compute_state_value_function_from_transition_matrix(P, b, bias=bias, gamma=gamma)
+        cls.env2d.setV(V_true)
+        #-- Policy characteristics
+
+        #-- FV learning characteristics
+        # Absorption set
+        cls.learner_for_initial_exploration = None
+        if estimate_absorption_set:
+            # Perform an initial exploration of the environment in order to define the absorption set based on visit frequency and observed non-zero rewards
+            # In this excursion, the start state is defined by the environment's initial state distribution.
+            threshold_absorption_set = 0.05
+            print(f"\nEstimating the absorption set based on visit frequency (> {threshold_absorption_set}) of states with no reward from an initial exploration of the environment...")
+            cls.learner_for_initial_exploration = td.LeaTDLambda(cls.env2d,
+                                                                 criterion=learning_criterion,
+                                                                 task=learning_task,
+                                                                 gamma=cls.gamma,
+                                                                 lmbda=0.0,
+                                                                 alpha=cls.alpha,
+                                                                 adjust_alpha=True,
+                                                                 adjust_alpha_by_episode=False,
+                                                                 alpha_min=cls.alpha_min,
+                                                                 reset_method=cls.reset_method, reset_params=cls.reset_params, reset_seed=cls.seed,
+                                                                 debug=cls.debug)
+            agent_for_initial_exploration = agents.GenericAgent(cls.policy_nn.copy(), cls.learner_for_initial_exploration)
+            sim_for_initial_exploration = DiscreteSimulator(cls.env2d, agent_for_initial_exploration, debug=cls.debug)
+
+            learner = sim_for_initial_exploration.run_exploration(t_learn=0, max_time_steps=T, seed=cls.seed, verbose=cls.debug, verbose_period=1)
+            absorption_set = compute_set_of_frequent_states_with_zero_reward(learner.getStates(), learner.getRewards(), threshold=threshold_absorption_set)
+            print(f"Distribution of state frequency:\n{pd.Series(learner.getStates()).value_counts(normalize=True)}")
+            print(f"Selected absorption set (2D):\n{[str(s) + ': ' + str(np.unravel_index(s, env_shape)) for s in absorption_set]}")
+        elif absorption_set is None:
+            # We choose the first column, i.e. the column above the labyrinth's start state, of the 2D-grid as the set A of uninteresting states
+            absorption_set = set()
+            for i in range(env_shape[0]):
+                state = np.ravel_multi_index((i, 0), env_shape)
+                absorption_set.add(state)
+
+        # Check if absorption set is valid
+        for state in absorption_set:
+            if not 0 <= state < cls.nS:
+                raise ValueError(f"All states in the absorption set must be between 0 and {cls.nS - 1}: {state}")
+
+        # Activation set
+        # (defined from the absorption set as all those states adjacent to every state in the absorption set that are not part of the absorption set nor an obstacle)
+        # Note that we could also define it from the transition matrix P associated to the environment, which is valid for ANY type of environments, not only gridworlds.
+        activation_set = set()
+        for s in absorption_set:
+            for sadj, dir in get_adjacent_states(env_shape, s):
+                if sadj is not None and sadj not in set.union(absorption_set, obstacles_set):
+                    activation_set.add(sadj)
+
+        #-- Possibly update the set of start states of the environment (by updating its Initial State Distribution)
+        # Goal: fair comparison among learners, by having all learners start at the same state (or a state chosen with the same distribution) as the FV learner, when an episode is completed.
+        if define_start_state_from_absorption_set:
+            # Redefine the set of start states as a SUBSET of the active set of the FV learner
+            # The precise subset used depends on the learning criterion:
+            # - for AVERAGE learning criterion: it is defined as the activation set, i.e. the outside boundary of the absorption set A.
+            #   NOTE that, in this case, this set of start states is used to start the single Markov chain excursion used to estimate the expected reabsorption time E(T_A).
+            #   And this is OK (as opposed to e.g. start such excursion INSIDE the absorption set A), because we first need to enter the absorption set A in order to measure the
+            #   reabsorption cycle time. What is questionable, however, is whether we should start the single Markov chain excursion at a state chosen UNIFORMLY at random in the
+            #   outside boundary of A or, instead, the state should be chosen following the exit state distribution.
+            # - for all other learning criteria (e.g. DISCOUNTED learning criterion): it is defined as ALL states in the FV ACTIVE set
+            #   (N.B. *not* "activATION" set, which is usually much smaller than the ACTIVE set).
+            if learning_criterion == LearningCriterion.AVERAGE:
+                # The start state is defined as any state in the activation set of the FV learning process (i.e. the outside boundary of the absorption set)
+                start_states_set = set(activation_set)
+            else:
+                # The start state is defined as any state in the complement of the absorption set (minus obstacles + terminal state),
+                # which is where the FV learning of the value functions start in the DISCOUNTED reward criterion.
+                start_states_set = set(np.arange(cls.nS)).difference(absorption_set.union(obstacles_set).union(terminal_states))
+
+            # Redefine the initial state distribution stored in the environment
+            isd = np.zeros(cls.nS)
+            for state in start_states_set:
+                isd[state] = 1.0 / len(start_states_set)
+            cls.env2d.setInitialStateDistribution(isd)
+
+        assert start_states_set.issubset(cls.env2d.getAllValidStates()), \
+            f"The start states set is invalid: all states in the set must be valid states of the environment:\nvalid states = {cls.env2d.getAllValidStates()}\nstart state set = {start_states_set}"
 
         print("Environment characteristics (2D-labyrinth): (row, col)")
         print(f"Start states set: {[np.unravel_index(start_state, env_shape) for start_state in start_states_set]}")
@@ -171,53 +239,22 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
         #-- Set where a particle activates in the FV context, used in the AVERAGE reward criterion (it should be touching A)
         cls.B = activation_set
 
-        #-- Policy characteristics
-        # Policy model
-        if nn_input == InputLayer.SINGLE:
-            cls.nn_model = nn_backprop(1, nn_hidden_layer_sizes, cls.env2d.getNumActions(), dict_activation_functions=dict({'hidden': [nn.ReLU]*len(nn_hidden_layer_sizes)}))
-        else:
-            cls.nn_model = nn_backprop(cls.env2d.getNumStates(), nn_hidden_layer_sizes, cls.env2d.getNumActions(), dict_activation_functions=dict({'hidden': [nn.ReLU] * len(nn_hidden_layer_sizes)}))
-        cls.policy_nn = PolNN(cls.env2d, cls.nn_model)
-        print(f"Neural network to model the policy:\n{cls.nn_model}")
-
-        # Initialize the policy to a random walk
-        cls.policy_nn.reset(initial_values=initial_policy, seed=cls.seed)
-        print(f"Network parameters initialized as follows:\n{list(cls.policy_nn.getThetaParameter())}")
-        print("Initial policy for all states (states x actions):")
-        policy_probabilities = cls.policy_nn.get_policy_values()
-        print(policy_probabilities)
-
-        # Compute the true state value function for the given policy
-        # and store it in the environment so that we can compare our estimates with those values when running simulations that estimate the state value function.
-        P_epi, P_con, b_epi, b_con, g, mu = compute_transition_matrices(cls.env2d, cls.policy_nn)
-        P = P_con if learning_task == LearningTask.CONTINUING else P_epi
-        b = b_con if learning_task == LearningTask.CONTINUING else b_epi
-        bias = g if learning_criterion == LearningCriterion.AVERAGE else None
-        V_true = compute_state_value_function_from_transition_matrix(P, b, bias=bias, gamma=gamma)
-        cls.env2d.setV(V_true)
-
         #-- Plotting parameters
         cls.colormap = cm.get_cmap("jet")
 
-        #-- Learning parameters
-        cls.gamma = gamma
-        cls.alpha = alpha
-        cls.alpha_min = alpha_min
-        cls.reset_method = reset_method_value_functions
-        cls.reset_params = dict({'min': -1, 'max': +1})
-
+        #-- Possible value function learners to consider
         # TD(0) learner
-        learner_td0 = td.LeaTDLambda(cls.env2d,
-                                          criterion=learning_criterion,
-                                          task=learning_task,
-                                          gamma=gamma,
-                                          lmbda=0.0,
-                                          alpha=cls.alpha,
-                                          adjust_alpha=True,
-                                          adjust_alpha_by_episode=False,
-                                          alpha_min=cls.alpha_min,
-                                          reset_method=cls.reset_method, reset_params=cls.reset_params, reset_seed=cls.seed,
-                                          debug=cls.debug)
+        learner_td0 = td.LeaTDLambda( cls.env2d,
+                                      criterion=learning_criterion,
+                                      task=learning_task,
+                                      gamma=cls.gamma,
+                                      lmbda=0.0,
+                                      alpha=cls.alpha,
+                                      adjust_alpha=True,
+                                      adjust_alpha_by_episode=False,
+                                      alpha_min=cls.alpha_min,
+                                      reset_method=cls.reset_method, reset_params=cls.reset_params, reset_seed=cls.seed,
+                                      debug=cls.debug)
         cls.agent_nn_td0 = agents.GenericAgent(cls.policy_nn.copy(), learner_td0)
         cls.sim_td0 = DiscreteSimulator(cls.env2d, cls.agent_nn_td0, debug=cls.debug)
 
@@ -225,7 +262,7 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
         learner_tdlambda = td.LeaTDLambda(cls.env2d,
                                           criterion=learning_criterion,
                                           task=learning_task,
-                                          gamma=gamma,
+                                          gamma=cls.gamma,
                                           lmbda=lmbda,
                                           alpha=cls.alpha,
                                           adjust_alpha=True,
@@ -240,7 +277,7 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
         learner_tdlambda_adap = td.LeaTDLambdaAdaptive( cls.env2d,
                                                         criterion=learning_criterion,
                                                         task=learning_task,
-                                                        gamma=gamma,
+                                                        gamma=cls.gamma,
                                                         alpha=cls.alpha,
                                                         adjust_alpha=True,
                                                         adjust_alpha_by_episode=False,
@@ -258,9 +295,9 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
                                 probas_stationary_start_state_et=None,
                                 probas_stationary_start_state_fv=None,
                                 criterion=learning_criterion,
-                                alpha=cls.alpha,
-                                gamma=gamma,
+                                gamma=cls.gamma,
                                 lmbda=0.0,
+                                alpha=cls.alpha,
                                 adjust_alpha=True,
                                 adjust_alpha_by_episode=False,
                                 alpha_min=cls.alpha_min,

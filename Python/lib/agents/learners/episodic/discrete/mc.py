@@ -341,7 +341,7 @@ class LeaMCLambda(Learner):
         constant.
         """
         if info.get('update_trajectory', True):
-            # We may not want to update the trajectory when learning the value function
+            # We may not want to update the trajectory when using this call just to learn the value functions
             # (e.g. when using episodes under a continuing learning task context: in that case, the value functions
             # of the terminal state are normally learned at the start of the next episode (before updating the state)
             # and thus the state of the environment and action taken should NOT be recorded because they had already

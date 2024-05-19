@@ -659,3 +659,7 @@ class EnvGridworld2D(EnvironmentDiscrete):
     def getAllValidStates(self):
         "Returns the list of valid states (i.e. states that are not obstacles)"
         return [s for s in self.getAllStates() if not self.isObstacleState(s)]
+
+    def getObstacleStates(self):
+        "Returns the list of obstacle states"
+        return list(self.set_obstacle_states)

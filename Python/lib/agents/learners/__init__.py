@@ -67,8 +67,10 @@ class LearningTask(Enum):
     EPISODIC = 1
     CONTINUING = 2
 
+
 # Identity function: used to define the default transformation function of the counter (n) that adjusts alpha
-identity = lambda x: x
+def identity(x):
+    return x
 
 
 class GenericLearner:
@@ -398,7 +400,7 @@ class GenericLearner:
         self._update_trajectory_history(t)
         # NOTE: # We need to update the average reward AFTER updating the trajectory because the average reward update
         # uses the length of the historic rewards stored (as the number of sampled rewards on which the average is computed).
-        self.update_average_reward()
+        self.update_average_reward(t, state)
 
     def _update_trajectory_history(self, time):
         """
@@ -426,7 +428,8 @@ class GenericLearner:
             # Add the state-action as a new dictionary key since it is the first time it is visited
             self.dict_state_action_counts[state_action_str] = 1
 
-    def update_average_reward(self):
+    def update_average_reward(self, T, state_end):
+        # Parameters T and state_end are NOT used but are defined here because the homonym subclass method in the Learner class in discrete/__init__.py defines them.
         # TODO: (2023/08/31) According to the algorithm for learning the average reward presented in Sutton (2018), pag. 251, a better learner of the average reward uses a separate learning rate which is applied on the delta error... Implement this.
         # I think this should probably be implemented within each learner inheriting from this class...(?) because they store the delta error value to use.
         n_rewards_observed_so_far = len(self.rewards) - 1   # We subtract 1 to the length of self.rewards because the first element in self.rewards is a fictitious reward of 0 (see its initialization in the constructor)

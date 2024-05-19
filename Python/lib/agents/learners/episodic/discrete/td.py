@@ -122,7 +122,7 @@ class LeaTDLambda(Learner):
 
     def learn(self, t, state, action, next_state, reward, done, info):
         if info.get('update_trajectory', True):
-            # We may not want to update the trajectory when learning the value function
+            # We may not want to update the trajectory when using this call just to learn the value functions.
             # This is the case when using episodes under a continuing learning task context: in that case, the value functions
             # of the terminal state are normally learned at the start of the next episode (before updating the environment's state, which is a START state at that point,
             # and which is passed to this method as the value of next_state)
@@ -185,7 +185,7 @@ class LeaTDLambda(Learner):
             especially when a state is visited but no reward innovation is observed, meaning that the learning step is sort of "useless" because
             the delta(V) value to apply to the new V(s) is 0.
         """
-        # Update the average reward over ALL episodes (needed for the AVERAGE reward criterion)
+        # Update the average reward over ALL episodes (needed for the AVERAGE reward criterion scenario)
         self.update_average_reward(T, state_end)
 
         if self.debug: #and self.episode > 45: # Use the condition on `episode` in order to plot just the last episodes
@@ -444,7 +444,7 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
 
     def learn(self, t, state, action, next_state, reward, done, info):
         if info.get('update_trajectory', True):
-            # We may not want to update the trajectory when learning the value function
+            # We may not want to update the trajectory when using this call just to learn the value functions.
             # See the comment in the learn() method of the super class (normally LeaTDLambda) for an use case.
             self._update_trajectory(t, state, action, reward)  # This method belongs to the Learner super class defined in learners.episodic.discrete
         if info.get('update_counts', True):

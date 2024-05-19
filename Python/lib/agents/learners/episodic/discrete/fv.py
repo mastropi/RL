@@ -78,6 +78,7 @@ class LeaFV(LeaTDLambda):
     estimate_on_fixed_sample_size: (opt) bool
         Whether to compute the FV estimation of value functions based on groups of particles of fixed size
         determined by their start states and state-actions.
+        This is only used when FV is run to learn value functions for the DISCOUNTED reward criterion. It is NOT used for the AVERAGE reward criterion.
         default: False
 
     burnin_time: (opt) int or None
