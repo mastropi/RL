@@ -1339,7 +1339,7 @@ class Test_EstValueFunctions_EnvGridworld2DWithObstacles(unittest.TestCase, test
         cls.expected_fv_state_counts = [74, 75, 88, 48, 77, 0, 95, 82, 228, 165, 96, 70]
 
     def test_Env_PolRandomWalk_MetMC(self):
-        print(f"\n*** Running test {self.id()}")
+        print("\n*** Running test " + self.id() + " ***")
 
         state_values, action_values, advantage_values, state_counts, _, _, learning_info = \
             self.sim_mc.run(nepisodes=self.nepisodes, seed=self.seed,
@@ -1359,7 +1359,7 @@ class Test_EstValueFunctions_EnvGridworld2DWithObstacles(unittest.TestCase, test
         assert np.allclose(observed_Q, self.expected_mc_Q, atol=1E-6)
 
     def test_Env_PolRandomWalk_MetTDLambda(self):
-        print(f"\n*** Running test #{self.id()}")
+        print("\n*** Running test " + self.id() + " ***")
 
         state_values, action_values, advantage_values, state_counts, _, _, learning_info = \
             self.sim_td.run(nepisodes=self.nepisodes, seed=self.seed,
@@ -1382,7 +1382,7 @@ class Test_EstValueFunctions_EnvGridworld2DWithObstacles(unittest.TestCase, test
 
     def test_Env_PolRandomWalk_MetFV(self):
         "Tests the value functions estimation using Fleming-Viot"
-        print(f"\n*** Running test {self.id()}")
+        print("\n*** Running test " + self.id() + " ***")
 
         # (2024/02/19) Note that parameter max_time_steps_fv is by default set to None,
         # which means that it is automatically computed by the _run_simulation_fv() method called by run()
@@ -1624,7 +1624,7 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
                                np.nan, 0.013654, 0.072440, 0.050885]
 
     def test_Env_PolRandomWalk_MetMC(self):
-        print(f"\n*** Running test {self.id()}")
+        print("\n*** Running test " + self.id() + " ***")
 
         state_values, action_values, advantage_values, state_counts, _, _, learning_info = \
             self.sim_mc.run(nepisodes=self.nepisodes, max_time_steps=self.max_time_steps, seed=self.seed,
@@ -1662,7 +1662,7 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
         but NOT in terms of the estimated value functions, because the differential value functions are computed using the average reward that is estimated
         NOT on cycles but as a regular average of the observed rewards.
         """
-        print(f"\n*** Running test {self.id()}")
+        print("\n*** Running test " + self.id() + " ***")
 
         state_values, action_values, advantage_values, state_counts, _, _, learning_info = \
             self.sim_mc.run(nepisodes=self.nepisodes, max_time_steps=self.max_time_steps, seed=self.seed,
@@ -1708,7 +1708,7 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
         assert learning_info['num_cycles'] == self.expected_n_cycles
 
     def test_Env_PolRandomWalk_MetTDLambda(self):
-        print(f"\n*** Running test {self.id()}")
+        print("\n*** Running test " + self.id() + " ***")
 
         state_values, action_values, advantage_values, state_counts, _, _, learning_info = \
             self.sim_td.run(nepisodes=self.nepisodes, max_time_steps=self.max_time_steps, seed=self.seed,
@@ -1752,7 +1752,7 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
         but NOT in terms of the estimated value functions, because the differential value functions are computed using the average reward that is estimated
         NOT on cycles but as a regular average of the observed rewards.
         """
-        print(f"\n*** Running test {self.id()}")
+        print("\n*** Running test " + self.id() + " ***")
 
         state_values, action_values, advantage_values, state_counts, _, _, learning_info = \
            self.sim_td.run(nepisodes=self.nepisodes, max_time_steps=self.max_time_steps, seed=self.seed,
@@ -1804,7 +1804,7 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
 
     def test_Env_PolRandomWalk_MetFV(self):
         "Tests the differential value functions estimation using Fleming-Viot"
-        print(f"\n*** Running test {self.id()}")
+        print("\n*** Running test " + self.id() + " ***")
 
         # (2024/02/14) Note that parameter max_time_steps_fv is by default set to None,
         # which means that it is automatically computed by the _run_simulation_fv() method called by run()
@@ -1903,7 +1903,7 @@ class Test_EstValueFunctionV_MetMCLambda_EnvMountainCar(unittest.TestCase, test_
         cls.policy_rw = random_walks.PolRandomWalkDiscrete(cls.env)
 
     def no_test_Env_PolRandomWalk_MetMC_TestOneCase(self, params=None, verbose_convergence=False):
-        print(f"\n*** Running test {self.id()}")
+        print("\n*** Running test " + self.id() + " ***")
 
         # Learner and agent
         if params is None:
@@ -2039,7 +2039,7 @@ class Test_EstValueFunctionV_MetMCLambda_EnvMountainCar(unittest.TestCase, test_
         return observed, state_counts, params, sim, learning_info
 
     def test_Env_PolRandomWalk_MetMCLambdaReturn_TestMCvsLambdaReturn(self, verbose_convergence=False):
-        print(f"\n*** Running test {self.id()}")
+        print("\n*** Running test " + self.id() + " ***")
 
         # Learner and agent
         params = dict({'alpha': 1.0,

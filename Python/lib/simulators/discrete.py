@@ -717,6 +717,116 @@ class Simulator:
 
         return learner
 
+    def run_exploration_and_learn_value_functions(self, t_learn=0, max_time_steps=1000, seed=None, verbose=False, verbose_period=1):
+        """
+        Perform an exploration of the environment with the main objective of collecting state visit frequencies.
+        However, the exploration is also used to learn value functions.
+
+        The learner stored in self.agent is used to learn and store the trajectory, which is assumed to have the following methods defined:
+        - reset()
+        - learn()
+
+        EXAMPLE OF CALLING THIS METHOD:
+        learner, n_events_absorption_set_estimation = self.run_exploration(t_learn=dict_params_info.get('t_learn', 0), max_time_steps=dict_params_simul['T'], seed=dict_params_simul['seed'], verbose=dict_params_info.get('verbose', False), verbose_period=dict_params_info.get('verbose_period', 1))
+
+        t_learn: (opt) int
+            The learning step number (starting at 0) for which the simulation is run when learning is used in the context of policy learning.
+            This is ONLY used for informational purposes, i.e. to show which stage of the policy learning we are at.
+
+        max_time_steps: (opt) int
+            Number of steps to run.
+            default: 1000
+
+        seed: (opt) int
+            Seed to use for the random number generator for the simulation, both for choosing the agent's next action and the next state of the environment
+            given the chosen action.
+            default: None
+
+        verbose: (opt) bool
+            Whether to show a message with the transition of the system at a frequency defined by the `verbose_period` parameter.
+            default: False
+
+        verbose_period: (opt) int
+            The time step period to be verbose.
+            default: 1 => be verbose at every simulation step.
+
+        Return: Tuple
+        Tuple with the following two elements:
+        - learner: the learner object inheriting from class Learner where the trajectory has been stored.
+        - t: the number of steps used by the simulation.
+        """
+        if max_time_steps is None or max_time_steps < 0:
+            raise ValueError(f"Parameter `max_time_steps` must be a positive number: {max_time_steps}")
+
+        policy = self.getAgent().getPolicy()
+        learner = self.getAgent().getLearner()
+
+        # Reset the learner to reset any trajectory potentially stored in the learner
+        learner.reset(reset_episode=True, reset_value_functions=True, reset_average_reward=True)
+
+        # Set seeds of:
+        # - the policy's environment --> responsible for selecting the action.
+        # - the object's environment --> responsible of deciding on the next step given the action.
+        if seed is not None:
+            policy.env.seed(seed)
+            self.env.seed(seed)
+
+        # Reset the environment to a state according to its initial state distribution
+        self.env.reset()
+
+        t = 0  # Step counter: the first step is 1, as t represents the time at which the Markov chain transitions to the NEXT state. See more details at the @note at the beginning of the file.
+        t_episode = -1  # Step counter within episode: the first step is 0, as t_episode indexes the step BEFORE transition so that we can write S(0), A(0), R(1), S(1), A(1), ...
+        done_episode = False
+        while t < max_time_steps:
+            t += 1
+            t_episode += 1
+
+            state = self.env.getState()
+
+            if done_episode:
+                # We have reached a terminal state
+                # => Reset the environment
+
+                # TEMPORARY (2024/05/14): Needed only because of the EPISODIC view of the average reward
+                # Partially reset the learner (only trajectories are reset). See why we need this where we do so in _run_single_continuing_task()
+                t_episode = -1
+                learner.reset(reset_episode=False, reset_value_functions=False, reset_average_reward=False)
+                # TEMPORARY (2024/05/14): Needed only because of the EPISODIC view of the average reward
+
+                action = 0
+                next_state = self.env.reset()
+                reward = self.env.getReward(next_state)
+                done_episode = False
+
+                # TEMPORARY (2024/05/14): Needed only because of the EPISODIC view of the average reward
+                # See the reasons why we set these parameters where we do so in _run_single_continuing_task()
+                info = {'update_trajectory': False,
+                        'update_counts': False}
+                # TEMPORARY (2024/05/14): Needed only because of the EPISODIC view of the average reward
+            else:
+                action = self._choose_action(policy, state)
+                next_state, reward, done_episode, info = self.env.step(action)
+
+            # TEMPORARY (2024/05/14): Needed only because of the EPISODIC view of the average reward
+            # Check end of simulation before learning so that we make the learner do what it usually does at the end of an episode
+            # (e.g. learn the average reward and update trajectory information over all episodes)
+            if t >= max_time_steps:
+                done_episode = True
+                if self.debug:
+                    print("[run_exploration, DEBUG] (TOTAL MAX TIME STEPS = {} REACHED at episode {}!)".format(max_time_steps, learner.episode))
+            # TEMPORARY (2024/05/14): Needed only because of the EPISODIC view of the average reward
+
+            # Learn (and update the trajectory stored in the learner)
+            learner.learn(t_episode, state, action, next_state, reward, done_episode, info)
+            if state in self.env.getTerminalStates():
+                # Copy to all possible actions the Q-value just learned for the taken (dummy) action used to reset the environment when reaching a terminal state
+                self._copy_action_values_for_terminal_state(learner.getQ(), state, action)
+
+            if show_messages(verbose, verbose_period, t):
+                print(f"t: {t}, t in episode: {t_episode}, s={state}, a={action} -> ns={next_state}, r={reward}, " + "avg. reward = {:.4f}".format(learner.getAverageReward()))
+
+        return learner, t
+
     @measure_exec_time
     def _run_simulation_fv( self, t_learn, envs, absorption_set: set, start_set: set,
                             max_time_steps=None,
@@ -4314,14 +4424,30 @@ class Simulator:
             info.pop('update_counts')
 
         # Copy the Q-value just learned for the anchor action to the Q-value of the other possible actions
-        # TODO: (2024/01/17) Move this piece of code to a function as this is done already at two places at least
+        self._copy_action_values_for_terminal_state(learner.getQ(), terminal_state, action_anchor)
+
+    def _copy_action_values_for_terminal_state(self, Q, state, action):
+        """
+        Copies the Q values of a terminal state so that all Q values are the same for all possible actions (as no action is taken at a terminal state!)
+
+        The value of the given state and action are copied to all other actions for the given state stored in the input action values object, Q.
+
+        Arguments:
+        Q: ActionValueFunctionApprox
+            Object containing the action values to modify.
+
+        state: int
+            Index of the state whose action values should be copied. Usually a terminal state of the environment.
+
+        action: int
+            Index of the action whose value is copied to all other possible actions of the environment.
+        """
         for _action in range(self.env.getNumActions()):
             # TODO: (2023/11/23) Generalize this update of the Q-value to ANY function approximation as the following call to _setWeight() assumes that we are in the tabular case!!
-            learner.getQ()._setWeight(terminal_state, _action, learner.getQ().getValue(terminal_state, action_anchor))
-        # Check that all Q values are the same for the terminal state
+            Q._setWeight(state, _action, Q.getValue(state, action))
+        # Check that all Q values are the same for the given state
         for _action in range(self.env.getNumActions()):
-            assert np.isclose(learner.getQ().getValue(terminal_state, _action), learner.getQ().getValue(terminal_state, action_anchor)), \
-                f"All Q-values are the same for the terminal state {terminal_state}:\n{learner.getQ().getValues()}"
+            assert np.isclose(Q.getValue(state, _action), Q.getValue(state, action)), f"All Q-values are the same for the terminal state {state}:\n{Q.getValues()}"
 
     def simulate(self, nexperiments, nepisodes, max_time_steps_per_episode=None, compute_rmse=True, weights_rmse=None,
                  verbose=False, verbose_period=1, verbose_convergence=False, plot=False):

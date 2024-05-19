@@ -182,6 +182,8 @@ class Test_Class_Simulator(unittest.TestCase):
         this includes Monte-Carlo learning.
         - ... possibly other advantages ...
         """
+        print("\n*** Running test " + self.id() + " ***")
+
         # Learner parameters
         alpha = 1.0
         gamma = 1.0
@@ -235,7 +237,7 @@ class Test_Class_Simulator(unittest.TestCase):
                                                52: 0.1698113})
 
         for case, max_time_steps in enumerate(all_max_time_steps_to_test):
-            print(f"\nCase {case} of {len(all_max_time_steps_to_test)}: Testing simulators _run_single() and _run_single_continuing_task() under the CONTINUING learning task in a 1D gridworld for max_time_steps={max_time_steps}...")
+            print(f"\n*** Case {case+1} of {len(all_max_time_steps_to_test)}: Testing simulators _run_single() and _run_single_continuing_task() under the CONTINUING learning task in a 1D gridworld for max_time_steps={max_time_steps}...")
             # Learner and agent definition
             learner_td = td.LeaTDLambda(self.env1d,
                                         criterion=LearningCriterion.AVERAGE,
@@ -245,10 +247,11 @@ class Test_Class_Simulator(unittest.TestCase):
                                         alpha_min=alpha_min,
                                         debug=False)
             agent_td = GenericAgent(self.policy, learner_td)
+            sim = discrete.Simulator(self.env1d, agent_td, debug=False)
 
             # Simulation using _run_single()
+            print(f"Running simulation with _run_single()...")
             time_start = timer()
-            sim = discrete.Simulator(self.env1d, agent_td, debug=False)
             state_values_td_1, action_values_td_1, advantage_values_td_1, state_counts_td_1, _, _, learning_info_1 = \
                 sim._run_single(nepisodes=nepisodes, max_time_steps=max_time_steps, max_time_steps_per_episode=+np.Inf,
                                 seed=seed, verbose=True, verbose_period=10)
@@ -258,9 +261,9 @@ class Test_Class_Simulator(unittest.TestCase):
             print(f"Average reward: {avg_reward_td_1}")
             print("_run_single() took {:.4f} seconds".format(time_td_1))
 
-            # Simulation using _run_single()
+            # Simulation using _run_single_continuing_task()
+            print(f"\nRunning simulation with _run_single_continuing_task()...")
             time_start = timer()
-            sim = discrete.Simulator(self.env1d, agent_td, debug=False)
             state_values_td_2, action_values_td_2, advantage_values_td_2, state_counts_td_2, _, _, learning_info_2 = \
                 sim._run_single_continuing_task(max_time_steps=max_time_steps, max_time_steps_per_episode=+np.Inf,
                                                 seed=seed, verbose=True, verbose_period=10)
@@ -270,12 +273,32 @@ class Test_Class_Simulator(unittest.TestCase):
             print(f"Average reward: {avg_reward_td_2}")
             print("_run_single_continuing_task() took {:.4f} seconds".format(time_td_2))
 
+            # Simulation using run_exploration_and_learn_value_functions()
+            print(f"\nRunning simulation with run_exploration_and_learn_value_functions()...")
+            time_start = timer()
+            learner_exploration, nsteps = sim.run_exploration_and_learn_value_functions(max_time_steps=max_time_steps, seed=seed, verbose=True, verbose_period=10)
+            time_td_3 = timer() - time_start
+            state_counts_td_3 = learner_exploration.getStateCounts()
+            learning_info_3 = {'nsteps': nsteps}
+            state_values_td_3 = learner_exploration.getV().getValues()
+            action_values_td_3 = learner_exploration.getQ().getValues()
+            avg_reward_td_3 = learner_exploration.getAverageReward()
+            print(f"State counts: {state_counts_td_3}")
+            print(f"Average reward: {avg_reward_td_3}")
+            print("run_exploration_and_learn_value_functions() took {:.4f} seconds".format(time_td_3))
+
             assert nepisodes == 10 and seed == 1713
             assert learning_info_1['nsteps'] == learning_info_2['nsteps']
             assert all(state_counts_td_1 == state_counts_td_2)
             assert np.allclose(state_values_td_1, state_values_td_2)
             assert np.allclose(action_values_td_1, action_values_td_2)
             assert np.isclose(avg_reward_td_1, avg_reward_td_2)
+
+            assert learning_info_1['nsteps'] == learning_info_3['nsteps']
+            assert all(state_counts_td_1 == state_counts_td_3)
+            assert np.allclose(state_values_td_1, state_values_td_3)
+            assert np.allclose(action_values_td_1, action_values_td_3)
+            assert np.isclose(avg_reward_td_1, avg_reward_td_3)
 
             # Check whether the estimated values are the expected ones (in order to find out whether something equally affected the outcome of both tested methods above) or,
             # if there is a difference between the two outcomes above, which outcome is correct.
