@@ -9,7 +9,7 @@ where 'generic' means that:
 - the number of states and actions of the environment where they learn may not be fixed (e.g. capacity of a queue).
 - the times observed during the trajectory experienced by the agent interacting with the environment could be either
 continuous or discrete (these are normally stored in attribute self.times).
-HOWEVER, the learning time is ALWAYS discrete (normally stored in attribute self._t).
+HOWEVER, the learning time is ALWAYS discrete (normally stored in attribute self.t).
 
 Classes inheriting from this class should define the following methods:
 - reset_value_functions()
@@ -17,8 +17,8 @@ Classes inheriting from this class should define the following methods:
 
 import copy
 from enum import Enum, unique
+from collections import deque
 
-import numpy as np
 
 MIN_COUNT = 1  # Minimum state count to start shrinking alpha
 
@@ -157,13 +157,13 @@ class GenericLearner:
 
         # Trajectory history: information of the times, states, actions, and rewards stored as part of the learning process
         # (so that we can be retrieve it for e.g. analysis or plotting)
-        self.times = []         # This time is either a DISCRETE time or a CONTINUOUS time depending on what
+        self.times = deque([])  # This time is either a DISCRETE time or a CONTINUOUS time depending on what
                                 # type of process (discrete or continuous) is used to model the evolution of the environment
                                 # with which the learner interacts.
                                 # The time is associated to the state, action and reward stored in the respective attributes.
-        self.states = []        # Stores S(t), the state at each time t stored in `times`
-        self.actions = []       # Stores A(t), the action taken at state S(t)
-        self.rewards = []       # Stores R(t+1) = R(S(t), A(t)), the reward received after taking action A(t) on state S(t)
+        self.states = deque([]) # Stores S(t), the state at each time t stored in `times`
+        self.actions = deque([])# Stores A(t), the action taken at state S(t)
+        self.rewards = deque([])# Stores R(t+1) = R(S(t), A(t)), the reward received after taking action A(t) on state S(t)
                                 # Note that we initialize the rewards list as EMPTY, exactly as we do with the states and actions lists,
                                 # because we leave the responsibility to the ACTUAL learner to fill in the first reward as 0
                                 # (if needed) if the learner wishes to reference to the state-action-reward sequence
@@ -192,15 +192,15 @@ class GenericLearner:
         self.dict_state_action_counts = dict()
 
         # Learning epoch and learning rate at that epoch
-        self._t = 0              # Int: this value is expected to be updated by the user, whenever learning takes place
-        self._alpha = self.alpha # Float: current learning rate (at the learning time `self._t`), REGARDLESS of the state and action the process has just visited.
+        self.t = 0              # Int: this value is expected to be updated by the user, whenever learning takes place
+        self.alpha_t = self.alpha # Float: current learning rate (at the learning time `self.t`), REGARDLESS of the state and action the process has just visited.
 
         # Information about the historical learning rates
-        self.alpha_mean = []    # Average alpha. This is currently (2024/01/06) NOT used.
-        self.alphas = []        # List of alphas used during the learning process, which is updated by EXPLICITLY calling store_learning_rate()
-                                # In principle, this list can contain anything, either scalars or e.g. lists (which are useful when storing the alpha used by state))
-                                # When a scalar is stored, the scalar value would normally correspond to the alpha value used when learning at the moment when
-                                # the store_learning_rate() method was called, REGARDLESS of the state and action the process just visited.
+        self.alpha_mean = deque([])     # Average alpha. This is currently (2024/01/06) NOT used.
+        self.alphas = deque([])         # List of alphas used during the learning process, which is updated by EXPLICITLY calling store_learning_rate()
+                                        # In principle, this list can contain anything, either scalars or e.g. lists (which are useful when storing the alpha used by state))
+                                        # When a scalar is stored, the scalar value would normally correspond to the alpha value used when learning at the moment when
+                                        # the store_learning_rate() method was called, REGARDLESS of the state and action the process just visited.
 
     def reset(self, reset_learning_epoch=True, reset_alphas=True, reset_value_functions=True, reset_average_reward=True, reset_trajectory=True, reset_counts=True):
         """
@@ -250,12 +250,12 @@ class GenericLearner:
         self.reset_return()
 
         if reset_learning_epoch:
-            self._t = 0
+            self.t = 0
 
         if reset_alphas:
-            self._alpha = self.alpha
-            self.alpha_mean = []
-            self.alphas = []
+            self.alpha_t = self.alpha
+            self.alpha_mean = deque([])
+            self.alphas = deque([])
 
         if reset_value_functions:
             # Only reset the initial estimates of the value functions when requested
@@ -273,10 +273,10 @@ class GenericLearner:
             self.reset_counts()
 
     def reset_trajectory(self):
-        self.times = []
-        self.states = []
-        self.actions = []
-        self.rewards = []
+        self.times = deque([])
+        self.states = deque([])
+        self.actions = deque([])
+        self.rewards = deque([])
 
     # Overrides superclass method
     def reset_counts(self):
@@ -294,7 +294,7 @@ class GenericLearner:
 
     def store_learning_rate(self, alpha=None):
         """
-        Stores as part of the alpha history (self.alphas) the current learning rate alpha (self._alpha) that has been used for learning
+        Stores as part of the alpha history (self.alphas) the current learning rate alpha (self.alpha_t) that has been used for learning
         when this method is called, UNLESS parameter `alpha` is given in which case that alpha value (which can be a complex object, such a list or array)
         is stored.
 
@@ -309,10 +309,10 @@ class GenericLearner:
         alpha: object or float
             The alpha "value" to store which can be e.g. a list of alpha values (e.g. one alpha value per state or per state-action of the environment).
             This latter case is useful if we want to keep track of how the alpha values changed by state or state-action as the learning process progressed.
-            default: None, in which case the (float) value of the self._alpha attribute is stored.
+            default: None, in which case the (float) value of the self.alpha_t attribute is stored.
         """
         if alpha is None:
-            self.alphas += [self._alpha]
+            self.alphas += [self.alpha_t]
         else:
             # Add a DEEP copy of alpha in case it is an object, o.w. all elements in self.alphas will end up to be the same!!
             # Note that copy.deecopy(<scalar>) works fine
@@ -326,7 +326,7 @@ class GenericLearner:
         It can be used to update the learning rate alpha by the number of learning epochs
         (see update_learning_rate_by_learning_epoch()).
         """
-        self._t += 1
+        self.t += 1
 
     def update_learning_rate_by_state_action_count(self, state, action):
         """
@@ -355,13 +355,13 @@ class GenericLearner:
                 ## (yielding time_divisor = 2), as when min_count > 0 (e.g. if min_count = 5, then we would have the
                 ## first update at count = 7, with time_divisor = 2 as well (= 7 - 5)).
             print("\tUpdating alpha... state={}, action={}: time divisor = {}".format(state, action, time_divisor))
-            alpha_prev = self._alpha
-            self._alpha = max(self.alpha_min, self.alpha / time_divisor)
-            print("\t\tstate {}: alpha: {} -> {}".format(state, alpha_prev, self._alpha))
+            alpha_prev = self.alpha_t
+            self.alpha_t = max(self.alpha_min, self.alpha / time_divisor)
+            print("\t\tstate {}: alpha: {} -> {}".format(state, alpha_prev, self.alpha_t))
         else:
-            self._alpha = self.alpha
+            self.alpha_t = self.alpha
 
-        return self._alpha
+        return self.alpha_t
 
     def update_learning_rate_by_learning_epoch(self):
         """
@@ -374,16 +374,16 @@ class GenericLearner:
         The updated value of alpha.
         """
         if self.adjust_alpha:
-            time_divisor = self.func_adjust_alpha( max(1, self._t - self.min_time_to_update_alpha) )
+            time_divisor = self.func_adjust_alpha( max(1, self.t - self.min_time_to_update_alpha) )
                 ## See comment in method update_learning_rate_by_state_action_count() about not adding any constant to the difference time - min_time
             print("\tUpdating alpha by learning epoch: time divisor = {}".format(time_divisor))
-            alpha_prev = self._alpha
-            self._alpha = max( self.alpha_min, self.alpha / time_divisor )
-            print("\t\talpha: {} -> {}".format(alpha_prev, self._alpha))
+            alpha_prev = self.alpha_t
+            self.alpha_t = max( self.alpha_min, self.alpha / time_divisor )
+            print("\t\talpha: {} -> {}".format(alpha_prev, self.alpha_t))
         else:
-            self._alpha = self.alpha
+            self.alpha_t = self.alpha
 
-        return self._alpha
+        return self.alpha_t
 
     def update_trajectory(self, t, state, action, reward):
         """
@@ -400,6 +400,7 @@ class GenericLearner:
         self._update_trajectory_history(t)
         # NOTE: # We need to update the average reward AFTER updating the trajectory because the average reward update
         # uses the length of the historic rewards stored (as the number of sampled rewards on which the average is computed).
+        # TODO: (2024/05/21) It would be good to, at some point, disentangle the update of the average reward from the trajectory update because they are two different concepts. However, this change will require important chnages in Learners code (e.g. learn() method) when calling update_trajectory().
         self.update_average_reward(t, state)
 
     def _update_trajectory_history(self, time):
@@ -414,6 +415,19 @@ class GenericLearner:
         self.states += [self.state]
         self.actions += [self.action]
         self.rewards += [self.reward]
+
+    def update_state_counts(self, state):
+        "Updates the number of times the given state has been visited during the learning process"
+        # Create a string version of the state, so that we can store lists as dictionary keys
+        # which are actually not accepted as dictionary keys (with the error message "list type is unhashable").
+        # e.g. [3, 1, 5] becomes '[3, 1, 5]'
+        state_str = str(state)
+        if state_str in self.dict_state_counts.keys():
+            # Update the value of the dictionary key representing the state that is visited now
+            self.dict_state_counts[state_str] += 1
+        else:
+            # Add the state as a new dictionary key since it is the first time it is visited
+            self.dict_state_counts[state_str] = 1
 
     def update_state_action_counts(self, state, action):
         "Updates the number of times the given state and action have been visited during the learning process"
@@ -442,7 +456,7 @@ class GenericLearner:
         return self.alphas
 
     def getLearningRate(self):
-        return self._alpha
+        return self.alpha_t
 
     def getInitialLearningRate(self):
         return self.alpha
@@ -457,7 +471,7 @@ class GenericLearner:
 
     def getLearningEpoch(self):
         "Returns the number of epochs at which learning took place according to the learning epoch attribute"
-        return self._t
+        return self.t
 
     def getStateActionCount(self, state, action):
         "Returns the number of times the given state and action has been visited during the learning process"
@@ -465,16 +479,27 @@ class GenericLearner:
         return self.dict_state_action_counts.get(key, 0)
 
     def getTimes(self):
-        return self.times
+        "Returns a list with the observed event times during the trajectory"
+        # Need to convert to list because the attribute is a deque and deque do not accept slicing as lists do!
+        return list(self.times)
+
+    def getNumSteps(self):
+        return len(self.times) - 1
 
     def getStates(self):
-        return self.states
+        "Returns a list with the observed states during the trajectory"
+        # Need to convert to list because the attribute is a deque and deque do not accept slicing as lists do!
+        return list(self.states)
 
     def getActions(self):
-        return self.actions
+        "Returns a list with the observed actions during the trajectory"
+        # Need to convert to list because the attribute is a deque and deque do not accept slicing as lists do!
+        return list(self.actions)
 
     def getRewards(self):
-        return self.rewards
+        "Returns a list with the observed rewards during the trajectory"
+        # Need to convert to list because the attribute is a deque and deque do not accept slicing as lists do!
+        return list(self.rewards)
 
     def getAverageReward(self):
         return self.average_reward

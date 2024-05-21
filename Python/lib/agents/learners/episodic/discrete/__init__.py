@@ -29,6 +29,7 @@ b) COULD implement the following methods:
 
 import warnings
 from enum import Enum, unique
+from collections import deque
 
 import numpy as np
 
@@ -168,13 +169,13 @@ class Learner(GenericLearner):
         # NOT when it is by episode; in fact, in the latter case, all the alphas are the same
         # for all states visited during the episode, so averaging over all states doesn't give any
         # different information than the alpha value that is common for all states.
-        self.alpha_mean_by_episode = []
+        self.alpha_mean_by_episode = deque([])
 
         # Average reward observed at each episode
-        self.average_reward_by_episode = []
+        self.average_reward_by_episode = deque([])
 
         # Time steps at which each episode ends
-        self.times_at_episode_end = []
+        self.times_at_episode_end = deque([])
 
         # State counts over ALL episodes run after reset, and state counts of just their first visits
         self._state_counts_over_all_episodes = np.zeros(self.env.getNumStates(), dtype=int)
@@ -237,9 +238,9 @@ class Learner(GenericLearner):
         self.episode = 0
 
         # Information about EACH episode run
-        self.alpha_mean_by_episode = []
-        self.average_reward_by_episode = []
-        self.times_at_episode_end = []
+        self.alpha_mean_by_episode = deque([])
+        self.average_reward_by_episode = deque([])
+        self.times_at_episode_end = deque([])
         del self._state_counts_over_all_episodes, self._state_counts_first_visit_over_all_episodes, self._alphas
         self._state_counts_over_all_episodes = np.zeros(self.env.getNumStates())
         self._state_counts_first_visit_over_all_episodes = np.zeros(self.env.getNumStates())
@@ -255,8 +256,9 @@ class Learner(GenericLearner):
         """
 
         # States and actions visited in the current episode and the state count
-        self._states = []
-        self._actions = []
+        self._times = deque([])
+        self._states = deque([])
+        self._actions = deque([])
         self._state_counts = np.zeros(self.env.getNumStates())
         self._states_first_visit_time = np.nan * np.ones(self.env.getNumStates())
 
@@ -282,10 +284,10 @@ class Learner(GenericLearner):
         # The particular learner being used is responsible of making sure that the list of states has the
         # same number of elements as the list of rewards ONCE THE EPISODE HAS ENDED, by calling e.g. the
         # store_trajectory_at_episode_end() method defined in this class.
-        self._rewards = [self.env.getReward(self.env.getState())]
+        self._rewards = deque([self.env.getReward(self.env.getState())])
 
         # List of alphas used during the episode (which may vary from state to state and from the time visited)
-        self._alphas_used_in_episode = []
+        self._alphas_used_in_episode = deque([])
 
         # Average reward observed at each episode
         self._average_reward_in_episode = 0.0
@@ -333,9 +335,11 @@ class Learner(GenericLearner):
 
     def _update_trajectory(self, t, state, action, reward):
         "Updates the trajectory of the CURRENT episode"
+        self._times += [t]
         self._states += [state]
         self._actions += [action]
         self._rewards += [reward]
+        # TODO: (2024/05/21) It would be good to, at some point, disentangle the update of the average reward from the trajectory update because they are two different concepts. However, this change will require important chnages in Learners code (e.g. learn() method) when calling update_trajectory().
         self._update_average_reward()
 
     def _update_state_counts(self, t, state):
@@ -470,8 +474,8 @@ class Learner(GenericLearner):
             # Check that the updated average reward is correctly calculated (by comparing to the regular average over all the rewards observed over ALL episodes)
             # NOTE: This assumes that the store_trajectory_at_episode_end() method has not been called yet
             # (because we assume that the self.rewards attribute has not been updated with the newly observed self._rewards in the latest episode
-            all_rewards_so_far = self.rewards + [self._rewards]     # IMPORTANT: The concatenation of the rewards should be done in the same way it is done in store_trajectory_at_episode_end() when updating self.rewards
-            # TODO: (2024/01/03) Re-establish this assertion once I make it work again for the FV learning in the DISCOUNTED setting (using _run_simulation_fv_iterate())
+            # TODO: (2024/01/03) Re-establish the assertion done here once I make it work again for the FV learning in the DISCOUNTED setting (using _run_simulation_fv_iterate())
+            #all_rewards_so_far = self.rewards + deque([self._rewards])     # IMPORTANT: The concatenation of the rewards should be done in the same way it is done in store_trajectory_at_episode_end() when updating self.rewards
             # The problem comes up because of the parallel simulations that are run together with the FV particles in order to learn the value of the states inside the absorption set A (see the envs_normal environments in discrete.Simulator._run_simulation_fv_iterate()
             #assert np.isclose(updated_average, np.mean(np.concatenate(all_rewards_so_far)))
             # Regular average (over the whole history of stored rewards, as opposed to doing an iterated update)
@@ -531,6 +535,7 @@ class Learner(GenericLearner):
         self.times_at_episode_end += [T]
 
         # Add the end state to the trajectory
+        self._times += [T]
         self._states += [state_end]
         self._actions += [action]
         # TODO: (2024/02/08) Uncomment this when we are ready to compute the average reward associated to the learning task, either EPISODIC or CONTINUING: currently the computed average reward by self.update_average_reward() is ALWAYS the CONTINUING average reward, even if the learning task is EPISODIC!
@@ -543,11 +548,14 @@ class Learner(GenericLearner):
         #    self._rewards += [reward]
 
         # Assign the new trajectory observed in the current episode
+        # NOTE: All the following attributes on the LHS are attributes of the superclass!
         if self.store_history_over_all_episodes:
+            self.times += [self._times.copy()]
             self.states += [self._states.copy()]
             self.actions += [self._actions.copy()]
             self.rewards += [self._rewards.copy()]
         else:
+            self.times = self._times.copy()
             self.states = self._states.copy()
             self.actions = self._actions.copy()
             self.rewards = self._rewards.copy()

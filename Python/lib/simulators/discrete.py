@@ -720,7 +720,7 @@ class Simulator:
         # This is important for the correct association of states and rewards in the sense that learner.states[k] is the state where the reward learner.rewards[k] is observed,
         # and this is particularly useful when estimating the absorption set A in the FV simulation by function compute_set_of_frequent_states_with_zero_reward() where
         # the list of observed states and rewards is passed to the function and these should be aligned as just indicated! (because e.g. we filter on the states receiving zero reward)
-        learner.rewards = [self.env.getReward(self.env.getState())]
+        learner.rewards += [self.env.getReward(self.env.getState())]
 
         t = 0               # Step counter: the first step is 1, as t represents the time at which the Markov chain transitions to the NEXT state. See more details at the @note at the beginning of the file.
         t_episode = -1      # Step counter within episode: the first step is 0, as t_episode indexes the step BEFORE transition so that we can write S(0), A(0), R(1), S(1), A(1), ...
