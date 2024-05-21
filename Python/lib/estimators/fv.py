@@ -641,7 +641,7 @@ if __name__ == "__main__":
     from torch.functional import F
 
     from Python.lib.utils import basic, computing
-    from Python.lib.estimators.nn_models import nn_backprop
+    from Python.lib.estimators.nn_models import NNBackprop
     from Python.lib.environments import gridworlds
     from Python.lib.agents.policies import probabilistic
 
@@ -750,7 +750,7 @@ if __name__ == "__main__":
 
     # Model for the survival probability P(T>t) (strictly "greater than" --this has an impact on how the survival probability is estimated below)
     nn_hidden_layer_sizes = [24]
-    proba_surv_model = nn_backprop(1 + nS + nA, nn_hidden_layer_sizes, 1,
+    proba_surv_model = NNBackprop(1 + nS + nA, nn_hidden_layer_sizes, 1,
                                     dict_activation_functions=dict({'hidden': [torch.nn.ReLU] * len(nn_hidden_layer_sizes)}))
     learning_rate = 0.03
     optimizer = torch.optim.Adam(proba_surv_model.parameters(), lr=learning_rate, betas=(0.9, 0.999))

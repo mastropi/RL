@@ -28,6 +28,8 @@ from Python.lib.agents.policies import AcceptPolicyType, GenericParameterizedPol
 from Python.lib.environments.queues import Actions, BufferType, GenericEnvQueueWithJobClasses, EnvQueueSingleBufferWithJobClasses, rewardOnJobClassAcceptance
 from Python.lib.environments import EnvironmentDiscrete
 
+from Python.lib.estimators import nn_models
+
 from Python.lib.utils.basic import is_scalar
 
 
@@ -431,7 +433,7 @@ class PolQueueTwoActionsLinearStepOnJobClasses(GenericParameterizedPolicyTwoActi
         return self.policy_accept
 
 
-class PolNN():
+class PolNN:
     """
     Parameterized policy that is the output of a neural network model fitted with PyTorch
     which is assumed to output one preference for each possible action in the environment.
@@ -443,7 +445,7 @@ class PolNN():
         Neural network model typically defined in nn_models.py.
         The network should have one input neuron representing the environment state
         and as many output neurons as the number of possible actions over all possible states in the environment.
-        Note: The parameters of the model can be retrieved with nn_model.parameters().
+        Note: The parameters of the model can be retrieved with nn_model.parameters(), which is a generator.
     """
     def __init__(self, env: EnvironmentDiscrete, nn_model: nn.Module):
         self.env = env
@@ -497,35 +499,68 @@ class PolNN():
         if seed is not None:
             nn.init.torch.manual_seed(seed)
 
-        for i, component in enumerate(self.nn_model.modules()):
-            # Use the following if we want to filter out specific module types. But the problem is that this is not an exhaustive list!
-            # So, I think using `try` is better (as done below)
-            #if component.__class__.__name__ not in [self.nn_model.__class__.__name__, "ModuleList"]:
-            try:
-                # Only actual layers containing weights are capable of being initialized
-                # Initializing all parameters to 0 prevents their update during learning as they are always stuck at 0!
-                #nn.init.zeros_(component.weight)
-                #nn.init.zeros_(component.bias)
-                nn.init.normal_(component.weight, 0, eps)
-                nn.init.normal_(component.bias, 0, eps)
-            except:
-                pass
+        if self.nn_model.getNumHiddenLayers() == 0:
+            # The neural network is assumed to be used simply as an implementation of action preferences
+            # which is materialized by using one-hot encoding of the environment states as input layer, and connecting each input neuron directly to each output neuron.
+            # => Set the weights of the input-to-output layer (for EACH input state) as `log(values)` (so that they become `values` when applying the softmax function) and set the output biases to zero
+            assert self.nn_model.getNumInputs() == self.env.getNumStates(), f"The number of neurons in the input layer ({self.nn_model.getNumInputs()} " \
+                                                                            f"must be equal to the number of environment states ({self.env.getNumStates()}) " \
+                                                                            "when the neural network does not have any hidden layer, because the network is assumed to be simply " \
+                                                                            "a transmitter of action preferences from the input (states) to the output (actions)."
+            # Bias
+            self.nn_model.getOutputLayer().bias = nn.Parameter(tensor(np.zeros(self.nn_model.getNumOutputs())))
+            # Weights
+            if values is None:
+                nn.init.ones_(self.nn_model.getOutputLayer().weight)
+            else:
+                # The weights connecting the input to the output layer are set to the `values` array arranged as a column repeated on all columns of the .weight 2D array
+                # Note that we use the broadcast method (i.e. multiplying the `values` array by an array of 1's instead of np.repeat() because broadcasting seems to be faster
+                # than np.repeat() as mentioned here: https://stackoverflow.com/questions/65795393/create-a-numpy-array-with-all-rows-identical
 
-        # Set the bias of the neurons in the output layer (which is the last module referenced in the above loop)
-        # which are the ones that define the policy.
-        if values is None:
-            # Initialize the biases to the same value (1) so that the policy is almost constant for all possible actions
-            nn.init.ones_(component.bias)
+                # We first compute the log(values) because the policy is computed as the softmax function applied to the preferences,
+                # and therefore the preferences (which here are the weights) are defined as log(values)
+                log_values = np.log(np.maximum(1E-9, np.array(values)))
+                matrix_of_ones = np.ones((self.nn_model.getNumOutputs(), self.nn_model.getNumInputs()))
+                weights = np.array(log_values, ndmin=2).T * matrix_of_ones
+                self.nn_model.getOutputLayer().weight = nn.Parameter(tensor(weights))
         else:
-            # Initialize the biases so that the policy is almost equal to the given values (indexed by the possible actions)
-            # The initialization is based on the fact that the probability of each action in the output layer is given by the softmax function
-            # applied on the weights and biases reaching each output neuron. Since weights are approximately 0, the probabilities are approximately equal to
-            # the softmax function applied on the biases.
-            # The initialization performed below (as bias = log(p)) gives biases whose exponential sum is equal to 1
-            # (i.e. the denominator of the softmax function sums up to 1, i.e. sum(exp(beta)) = 1).
-            if len(values) != len(component.bias):
-                raise ValueError(f"The length of parameter `values` ({len(values)}) must be the same as the number of neurons in the output layer ({len(component.bias)})")
-            component.bias = nn.Parameter(tensor(np.log( np.maximum(1E-9, np.array(values)) )))
+            # The neural network is assumed to be used as an actual neural network model
+            # => The initial policy is set approximately by setting small random weights around 0 and the bias of the output layer needed for the initial policy
+            for i, component in enumerate(self.nn_model.modules()):
+                # Use the following if we want to filter out specific module types. But the problem is that this is not an exhaustive list!
+                # So, I think using `try` is better (as done below)
+                #if component.__class__.__name__ not in [self.nn_model.__class__.__name__, "ModuleList"]:
+                try:
+                    # Only actual layers containing weights are capable of being initialized
+                    # Initializing all parameters to 0 prevents their update during learning as they are always stuck at 0!
+                    #nn.init.zeros_(component.weight)
+                    #nn.init.zeros_(component.bias)
+                    nn.init.normal_(component.weight, 0, eps)
+                    nn.init.normal_(component.bias, 0, eps)
+                except:
+                    pass
+
+            # Set the bias of the neurons in the output layer (which is the last module referenced in the above loop)
+            # which are the ones that define the policy.
+            if values is None:
+                # Initialize the biases to the same value (1) so that the policy is almost constant for all possible actions
+                nn.init.ones_(component.bias)
+            else:
+                # Initialize the biases so that the policy is almost equal to the given values (indexed by the possible actions)
+                # The initialization is based on the fact that the probability of each action in the output layer is given by the softmax function
+                # applied on the weights and biases reaching each output neuron. Since weights are approximately 0, the probabilities are approximately equal to
+                # the softmax function applied on the biases.
+                # The initialization performed below (as bias = log(p)) gives biases whose exponential sum is equal to 1
+                # (i.e. the denominator of the softmax function sums up to 1, i.e. sum(exp(beta)) = 1).
+                if len(values) != len(component.bias):
+                    raise ValueError(f"The length of parameter `values` ({len(values)}) must be the same as the number of neurons in the output layer ({len(component.bias)})")
+                component.bias = nn.Parameter(tensor(np.log( np.maximum(1E-9, np.array(values)) )))
+
+    def set_model_params(self, param_values):
+        "Sets the model parameters to the given values if the model is of type `nn_models.NNBackprop`. See the documentation of NNBackprop.set_params() for details of the structure of parameter `param_values`"
+        if not isinstance(self.nn_model, nn_models.NNBackprop):
+            raise NotImplementedError(f"The model stored in the policy must be of type `nn_models.NNBackprop` in order to set its parameter values: {type(self.nn_model)}")
+        self.nn_model.set_params(param_values)
 
     def choose_action(self, state):
         """

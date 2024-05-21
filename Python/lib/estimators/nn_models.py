@@ -12,13 +12,13 @@ in particular the file main/tools_nn.py where he defines a Q neural network.
 - Packages that can be used to visualize a neural network: https://stackoverflow.com/questions/52468956/how-do-i-visualize-a-net-in-pytorch
 """
 
+import warnings
 
 import torch
 from torch import nn
-import torch.nn.functional as F
 
 
-class nn_backprop(nn.Module):
+class NNBackprop(nn.Module):
     """
     Neural network with on input layer, any number of hidden layers and one output layer
     with possibly different activation functions at each layer and output layer.
@@ -44,26 +44,40 @@ class nn_backprop(nn.Module):
         # Parse input parameters
         self.list_activation_functions_hidden, self.activation_function_output = self._parse_input_parameters(hidden_sizes, dict_activation_functions)
 
+        # Extend the hidden sizes so that we have a full specification of input and output of each hidden layer, including the first one
+        hidden_sizes_extended = [input_size] + hidden_sizes
+
         #-- Define the network from input to output through hidden layers
         # First hidden layer
-        #self.hidden_layers = [None]*len(hidden_sizes)
-        #self.hidden_layers[0] = nn.Linear(input_size, hidden_sizes[0], dtype=torch.float)     # Note: Apparently the dtype= argument is no longer needed in pytorch-1.14 (based on Francisco's code)
+        # Note that we need to define the layers as a nn.ModuleList, rather than simply a list, o.w. the layers are not recognized as part of the neural network model
         self.hidden_layers = nn.ModuleList()
-        self.hidden_layers.append( nn.Linear(input_size, hidden_sizes[0], dtype=torch.float) )
-        # If we want to initialize the weights and bias leading to the hidden layer neurons
+        #self.hidden_layers.append( nn.Linear(input_size, hidden_sizes[0], dtype=torch.float) )
+
+        # Additional hidden layers (if any)
+        for h in range(1, len(hidden_sizes_extended)):
+            self.hidden_layers.append( nn.Linear(hidden_sizes_extended[h-1], hidden_sizes_extended[h], dtype=torch.float) )
+
+        # If we want to initialize weights and bias leading to a layer, use the nn.init functions
+        # Here an example of setting the weights and bias reaching the first hidden layer
         #nn.init.ones_(self.hidden_layers[0].weight)
         #nn.init.uniform_(self.hidden_layers[0].weight, -1, 1)     # Uniform weights between -1 and 1
         #nn.init.zeros_(self.hidden_layers[0].bias)
-
-        # Additional hidden layers (if any)
-        for h in range(1, len(hidden_sizes)):
-            #self.hidden_layers[h] = nn.Linear(hidden_sizes[h-1], hidden_sizes[h], dtype=torch.float)
-            self.hidden_layers.append( nn.Linear(hidden_sizes[h-1], hidden_sizes[h], dtype=torch.float) )
+        # Another option is to use the object returned by parameters() (a generator that returns Parameter objects, of type tensor) of a component (e.g. a hidden layer)
+        # When the parameters() generator applied to a component (i.e. to just ONE layer) is viewed as a list, it contains 2 elements: (i) the weights tensor, (ii) the bias tensor
+        # The weights are of size <# output neurons> x <# input neurons>. The bias is of length <# output neurons>.
+        # In the following example we assume that the output layer (i.e. the first hidden layer) contains 2 neurons and the input layer contains 3 neurons.
+        #import torch
+        #weights = [[0.5, 0.2, -0.3],
+        #           [1.0, -0.5, -0.7]]
+        #bias = [0.5, -0.8]
+        #param_values = [weights, bias]
+        #for p, param in enumerate(self.hidden_layers[0].parameters()):
+        #   param.data = nn.parameter.Parameter(torch.tensor(param_values[p]))
 
         # Output layer
-        self.output_layer = nn.Linear(hidden_sizes[-1], output_size, dtype=torch.float)
+        self.output_layer = nn.Linear(hidden_sizes_extended[-1], output_size, dtype=torch.float)
         # If we want to initialize the weights and bias leading to the output layer neurons
-        # Also see init.uniform(), init.xavier_uniform(), etc.
+        # Also see init.uniform_(), init.xavier_uniform_(), etc.
         #nn.init.ones_(self.output_layer.weight)
         #nn.init.zeros_(self.output_layer.bias)
 
@@ -88,6 +102,19 @@ class nn_backprop(nn.Module):
         out = self.activation_function_output()( self.output_layer(tensor) )
 
         return out
+
+    def set_params(self, values):
+        """
+        Sets the neural network parameters (weights and biases) to the given values
+
+        The parameter values must comply with the neural network architecture and must be given in the order specified by the neural network layers,
+        and for each layer it must contain first the weights connecting the input neurons to the output neurons in the layer which should be a 2D array
+        or list of size <# output neurons> x <# input neurons>, and then the biases which should be a 1D array or list of length <# output neurons>.
+
+        Both the weights and biases are converted to tensors when setting the respective parameter value.
+        """
+        for p, param in enumerate(self.parameters()):
+           param.data = nn.parameter.Parameter(torch.tensor(values[p]))
 
     def _parse_input_parameters(self, hidden_sizes: list, dict_activation_functions: dict,
                                 default_hidden_function=nn.ReLU,
@@ -133,7 +160,22 @@ class nn_backprop(nn.Module):
 
     # Getters
     def getNumInputs(self):
-        return self.hidden_layers[0].in_features
+        if len(self.hidden_layers) > 0:
+            return self.hidden_layers[0].in_features
+        else:
+            return self.output_layer.in_features
+
+    def getNumHiddenLayers(self):
+        return len(self.hidden_layers)
 
     def getNumOutputs(self):
         return self.output_layer.out_features
+
+    def getHiddenLayer(self, h):
+        if h > len(self.hidden_layers):
+            warnings.warn(f"The requested hidden layer (h={h}) does not exist. None is returned")
+            return None
+        return self.hidden_layers[h]
+
+    def getOutputLayer(self):
+        return self.output_layer

@@ -32,7 +32,7 @@ from Python.lib.agents.policies.parameterized import PolNN
 from Python.lib.environments import gridworlds
 from Python.lib.environments.gridworlds import get_adjacent_states
 
-from Python.lib.estimators.nn_models import nn_backprop
+from Python.lib.estimators.nn_models import NNBackprop
 
 from Python.lib.simulators.discrete import Simulator as DiscreteSimulator
 
@@ -123,9 +123,9 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
         #-- Policy characteristics
         # Policy model
         if nn_input == InputLayer.SINGLE:
-            cls.nn_model = nn_backprop(1, nn_hidden_layer_sizes, cls.env2d.getNumActions(), dict_activation_functions=dict({'hidden': [nn.ReLU]*len(nn_hidden_layer_sizes)}))
+            cls.nn_model = NNBackprop(1, nn_hidden_layer_sizes, cls.env2d.getNumActions(), dict_activation_functions=dict({'hidden': [nn.ReLU]*len(nn_hidden_layer_sizes)}))
         else:
-            cls.nn_model = nn_backprop(cls.env2d.getNumStates(), nn_hidden_layer_sizes, cls.env2d.getNumActions(), dict_activation_functions=dict({'hidden': [nn.ReLU] * len(nn_hidden_layer_sizes)}))
+            cls.nn_model = NNBackprop(cls.env2d.getNumStates(), nn_hidden_layer_sizes, cls.env2d.getNumActions(), dict_activation_functions=dict({'hidden': [nn.ReLU] * len(nn_hidden_layer_sizes)}))
         cls.policy_nn = PolNN(cls.env2d, cls.nn_model)
         print(f"Neural network to model the policy:\n{cls.nn_model}")
 
