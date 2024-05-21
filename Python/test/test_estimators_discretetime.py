@@ -1036,7 +1036,8 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
 
         sim = DiscreteSimulator(self.env1d, agent_fv_optimal, debug=False)
         state_values, action_values, advantage_values, state_counts, probas_stationary, average_reward, average_absorption_time, n_cycles_absorption_used, n_events_et, n_events_fv  = \
-            sim.run(max_time_steps_fv=max_time_steps_fv,
+            sim.run(max_time_steps=max_time_steps_fv,
+                    max_time_steps_for_absorbed_particles_check=max_time_steps_fv,
                     min_prop_absorbed_particles=min_prop_absorbed_particles,
                     use_average_reward_stored_in_learner=False,
                         ## Set the above parameter to True in case we want to test what happens when we start with an initially estimated average reward,
@@ -1135,7 +1136,8 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
 
         sim = DiscreteSimulator(self.env1d, agent_fv_random, debug=False)
         state_values, action_values, advantage_values, state_counts, probas_stationary, average_reward, average_absorption_time, n_cycles_absorption_used, n_events_et, n_events_fv  = \
-            sim.run(max_time_steps_fv=max_time_steps_fv,
+            sim.run(max_time_steps=max_time_steps_fv,
+                    max_time_steps_for_absorbed_particles_check=max_time_steps_fv,
                     min_prop_absorbed_particles=min_prop_absorbed_particles,
                     use_average_reward_stored_in_learner=False,
                         ## Set the above parameter to True in case we want to test what happens when we start with an initially estimated average reward,
@@ -1388,7 +1390,8 @@ class Test_EstValueFunctions_EnvGridworld2DWithObstacles(unittest.TestCase, test
         # which means that it is automatically computed by the _run_simulation_fv() method called by run()
         # and as of the writing of this, it is set to N*100, where N is the number of particles in the FV system.
         state_values, action_values, advantage_values, state_counts, probas_stationary, average_reward, average_cycle_time, n_cycles, n_events_et, n_events_fv = \
-           self.sim_fv.run(max_time_steps_fv=500,
+           self.sim_fv.run(max_time_steps=500,
+                           max_time_steps_for_absorbed_particles_check=500,
                            seed=self.seed, verbose=True, verbose_period=100)
 
         # The following are the state values (value function) calculated using the average reward observed during the single Markov chain excursion used to estimate E(T_A)
@@ -2086,7 +2089,7 @@ class Test_EstValueFunctionV_MetMCLambda_EnvMountainCar(unittest.TestCase, test_
 
         # MC execution
         time_start = timer()
-        _, _, _, _, _, _, learning_info = sim_mc.run( nepisodes=self.nepisodes, max_time_steps_per_episode=self.max_time_steps_per_episode,
+        _, _, _, _, _, _, learning_info = sim_mc.run(nepisodes=self.nepisodes, max_time_steps_per_episode=self.max_time_steps_per_episode,
                                                    seed=self.seed,
                                                    compute_rmse=False, state_observe=None,
                                                    verbose=True, verbose_period=max(1, int(self.nepisodes / 10)),
@@ -2098,7 +2101,7 @@ class Test_EstValueFunctionV_MetMCLambda_EnvMountainCar(unittest.TestCase, test_
 
         # Lambda-Return
         time_start = timer()
-        _, _, _, _, _, _, learning_info = sim_lambda_return.run( nepisodes=self.nepisodes,
+        _, _, _, _, _, _, learning_info = sim_lambda_return.run(nepisodes=self.nepisodes,
                                                               max_time_steps_per_episode=self.max_time_steps_per_episode,
                                                               seed=self.seed,
                                                               compute_rmse=False, state_observe=None,
