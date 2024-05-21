@@ -68,6 +68,7 @@ class Simulator:
         - getDimension()
         - getShape()
         - getAllStates()
+        - getAllValidStates()
         - getTerminalStates()
         - getRewards()
         - getInitialStateDistribution()
@@ -342,7 +343,7 @@ class Simulator:
 
         state_values, action_values, advantage_values, state_counts_from_single_markov_chain, probas_stationary, expected_reward, expected_absorption_time, n_cycles_absorption_used, \
             time_last_absorption, max_survival_time, n_events_et, n_events_fv = \
-                self._estimate_state_value_function_and_expected_reward_fv( envs, dict_params_simul, dict_params_info,
+                self._estimate_value_functions_and_expected_reward_fv( envs, dict_params_simul, dict_params_info,
                                                                             probas_stationary_start_state_et=self.agent.getLearner().getProbasStationaryStartStateET(),
                                                                             probas_stationary_start_state_fv=self.agent.getLearner().getProbasStationaryStartStateFV(),
                                                                             use_average_reward_stored_in_learner=use_average_reward_stored_in_learner,
@@ -350,7 +351,7 @@ class Simulator:
 
         return state_values, action_values, advantage_values, state_counts_from_single_markov_chain, probas_stationary, expected_reward, expected_absorption_time, n_cycles_absorption_used, n_events_et, n_events_fv
 
-    def _estimate_state_value_function_and_expected_reward_fv(self, envs, dict_params_simul, dict_params_info,
+    def _estimate_value_functions_and_expected_reward_fv(self, envs, dict_params_simul, dict_params_info,
                                                               probas_stationary_start_state_et: dict=None,
                                                               probas_stationary_start_state_fv: dict=None,
                                                               use_average_reward_stored_in_learner=False,
@@ -366,7 +367,7 @@ class Simulator:
         dict_params_simul: dict
             Dictionary containing simulation and estimation parameters.
             The dictionary should contain at least the keys described in function `parse_simulation_parameters()`.
-            If the key 'absorption_set' is not defined or is None, the absorption set A will be estimated from an initial excursion of the Markov chain.
+            If the 'estimate_absorption_set' is True, the absorption set A will be estimated from an initial excursion of the Markov chain.
 
         dict_params_info: dict
             Dictionary containing information to display or parameters to deal with the information to display.
@@ -429,34 +430,61 @@ class Simulator:
 
         dict_params_simul = parse_simulation_parameters(dict_params_simul, envs[0])
 
-        # Estimate absorption set if requested
+        # Estimate absorption set if requested, as long as its proportion is smaller than the maximum allowed (e.g. 70% of valid states)
+        # (recall that states can only be added to the absorption set, NOT removed)
         if dict_params_simul.get('estimate_absorption_set', False):
-            # Perform an initial exploration of the environment in order to define the absorption set based on visit frequency and observed non-zero rewards
-            # In this excursion, the start state is defined by the environment's initial state distribution
-            threshold_absorption_set = dict_params_simul.get('threshold_absorption_set', 0.05)
-            print(f"\n**** ABSORPTION SET SELECTION ****")
-            print(f"Estimating the absorption set based on visit frequency (> {threshold_absorption_set}) of states with no reward from an initial exploration of the environment...")
-            learner = self.run_exploration(t_learn=dict_params_info.get('t_learn', 0), max_time_steps=dict_params_simul['T'], seed=dict_params_simul['seed'], verbose=dict_params_info.get('verbose', False), verbose_period=dict_params_info.get('verbose_period', 1))
-            dict_params_simul['absorption_set'] = compute_set_of_frequent_states_with_zero_reward(learner.getStates(), learner.getRewards(), threshold=threshold_absorption_set)
+            max_prop_absorption_set = dict_params_simul.get('max_prop_absorption_set', 0.7)
+            size_absorption_set = len(self.agent.getLearner().getAbsorptionSet())
+            n_valid_states = len(self.env.getAllValidStates())
+            prop_absorption_set = size_absorption_set / n_valid_states
+            if prop_absorption_set >= max_prop_absorption_set:
+                # The absorption set has become large enough, we won't update it
+                print(f"Absorption set NOT updated, as it has become large enough: "
+                      f"size = {size_absorption_set} states ({prop_absorption_set*100}% of {n_valid_states} valid states >= {max_prop_absorption_set*100}%)")
+            else:
+                # Perform an initial exploration of the environment in order to define the absorption set based on visit frequency and observed non-zero rewards
+                # In this excursion, the start state is defined by the environment's initial state distribution
+                _threshold_absorption_set = dict_params_simul.get('threshold_absorption_set', 0.05)
+                print(f"\n**** ABSORPTION SET SELECTION ****")
+                print(f"Estimating the absorption set based on visit frequency (> {_threshold_absorption_set}) of states with no reward from an initial exploration of the environment...")
+                _learner = self.run_exploration(t_learn=dict_params_info.get('t_learn', 0), max_time_steps=dict_params_simul['T'], seed=dict_params_simul['seed'], verbose=dict_params_info.get('verbose', False), verbose_period=dict_params_info.get('verbose_period', 1))
+                _estimated_absorption_set = compute_set_of_frequent_states_with_zero_reward(_learner.getStates(), _learner.getRewards(), threshold=_threshold_absorption_set)
+                n_events_absorption_set_estimation = _learner.getNumSteps()
+                print(f"Distribution of state frequency on n={len(_learner.getStates())} steps:\n{pd.Series(_learner.getStates()).value_counts(normalize=True)}")
 
-            if len(dict_params_simul['absorption_set']) == 0:
-                # Add at least one state to the absorption set, as it cannot be empty
-                # This state is chosen as one of the most common state chosen as initial state according to the initial state distribution of the environment
-                most_common_state_in_isd = np.argmax(self.env.getInitialStateDistribution())
-                dict_params_simul['absorption_set'] = set({most_common_state_in_isd})
+                # Read the absorption set stored in the learner and add any new states to it (if it's not the first learning step --as indicated by t_learn)
+                # We do this because we do NOT want to remove states already present in the absorption set because they were frequently visited under previous policies,
+                # so they proved to be uninteresting (because they had no reward). In addition, if those states are no longer part of the absorption set it means that the learned
+                # policy takes the agent away from them because they proved not to lead to non-zero reward states, so it doesn't harm to leave them in the absorption set,
+                # even if the policy changed and some of those states are no longer frequently visited.
+                # BUT MORE IMPORTANTLY, we do NOT want to fully update the absorption set A because we may end up in a situation that is not at all favorable for Fleming-Viot,
+                # namely one where the FV particles keep exploring uninteresting states because they are part of the active set! (this already happened and is the reason behind
+                # estimating the average reward by FV as ZERO as the policy becomes closer to optimal, because the reward is no longer observed due to the situation just described!)
+                if dict_params_info['t_learn'] > 0:
+                    _absorption_set_stored_in_learner = self.agent.getLearner().getAbsorptionSet()
+                    _estimated_absorption_set = _absorption_set_stored_in_learner.union(_estimated_absorption_set)
+                    assert len(_estimated_absorption_set) >= len(_absorption_set_stored_in_learner), "The new absorption set must be equal or larger than the absorption set previously stored in the learner:" \
+                                                                                                     f"\nstored A = {_absorption_set_stored_in_learner} (n={len(_absorption_set_stored_in_learner)})" \
+                                                                                                     f"\nupdated A = {_estimated_absorption_set} (n={len(_estimated_absorption_set)})"
 
-            # Define the ACTIVATION set (which is used to select the start states for the E(T_A) and FV simulations below)
-            # IMPORTANT: This is ONLY valid for gridworlds. In the general case, the activation set should be computed from the transition matrix P associated to the environment.
-            # TODO: (2024/05/12) Compute the activation set from the transition matrix of the environment
-            from Python.lib.environments.gridworlds import get_adjacent_states
-            dict_params_simul['activation_set'] = set()
-            for s in dict_params_simul['absorption_set']:
-                for sadj, dir in get_adjacent_states(self.env.getShape(), s):
-                    if sadj is not None and sadj not in set.union(dict_params_simul['absorption_set'], self.env.getObstacleStates()):
-                        dict_params_simul['activation_set'].add(sadj)
+                if len(_estimated_absorption_set) == 0:
+                    # Add at least one state to the absorption set, as it cannot be empty
+                    # This state is chosen as one of the most common state chosen as initial state according to the initial state distribution of the environment
+                    _most_common_state_in_isd = np.argmax(self.env.getInitialStateDistribution())
+                    _estimated_absorption_set = set({_most_common_state_in_isd})
 
-            print(f"Distribution of state frequency on n={len(learner.getStates())} steps:\n{pd.Series(learner.getStates()).value_counts(normalize=True)}")
+                _states_in_absorption_set_with_nonzero_reward = [s for s in _estimated_absorption_set if self.env.getReward(s) != 0.0]
+                assert len(_states_in_absorption_set_with_nonzero_reward) == 0, f"The absorption set must not contain states with non-zero reward. The following states in the absorption set have non-zero reward: {_states_in_absorption_set_with_nonzero_reward}"
+
+                # Set the absorption set in the learner, which also automatically updates the activation and active sets
+                self.agent.getLearner().setAbsorptionSet(_estimated_absorption_set)
+
+            # Update the absorption and activation sets of the simulation parameters dictionary with the sets stored in the learner and possibly just updated
+            dict_params_simul['absorption_set'] = self.agent.getLearner().getAbsorptionSet()
+            dict_params_simul['activation_set'] = self.agent.getLearner().getActivationSet()
+
             print(f"Selected absorption set (2D):\n{[str(s) + ': ' + str(np.unravel_index(s, self.env.getShape())) for s in dict_params_simul['absorption_set']]}")
+            print(f"Activation set (2D):\n{[str(s) + ': ' + str(np.unravel_index(s, self.env.getShape())) for s in dict_params_simul['activation_set']]}")
             print("**** ABSORPTION SET SELECTION ****\n")
         else:
             n_events_absorption_set_estimation = 0
@@ -505,7 +533,7 @@ class Simulator:
 
         #-- Step 2: Simulate N particles with Fleming-Viot to compute the empirical distribution and estimate the stationary probabilities, and from them the expected reward
         # BUT do this ONLY when the estimation of E(T_A) is reliable... otherwise, set the stationary probabilities and expected reward to NaN.
-        print("\n*** RESULTS OF FLEMING-VIOT SIMULATION ***")
+        print("\n*** FLEMING-VIOT SIMULATION ***")
         if is_estimation_of_denominator_unreliable():
             # FV is not run because the simulation that is used to estimate E(T_A) would not generate a reliable estimation
             # (most likely it would UNDERESTIMATE E(T_A) making the probabilities be OVERESTIMATED)

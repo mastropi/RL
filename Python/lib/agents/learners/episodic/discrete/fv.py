@@ -133,7 +133,7 @@ class LeaFV(LeaTDLambda):
         self.absorption_set = absorption_set
         self.activation_set = activation_set
         # The complement of the absorption set A
-        self.active_set = set(self.env.getAllValidStates()).difference(self.absorption_set)
+        self.active_set = self._compute_active_set()
         self.states_of_interest = self.env.getTerminalStates() if states_of_interest is None else states_of_interest
         # Dictionary that stores the optional stationary probability of the start states of the single chain simulation
         # and of the N-particle Fleming-Viot process.
@@ -272,6 +272,10 @@ class LeaFV(LeaTDLambda):
             self.N_for_start_state[s] = count
         import pandas as pd
         print(f"Distribution of particles at start of simulation:\n{pd.DataFrame(np.c_[unique_start_states, count_start_states, dist_start_states], columns=['state', 'freq', 'dist'])}")
+
+    def _compute_active_set(self):
+        "Computes the set of active states, i.e. where FV particles can move, as the valid states of the environment minus the absorption set"
+        return set(self.env.getAllValidStates()).difference(self.absorption_set)
 
     def learn(self, t, state, action, next_state, reward, done, info, envs=None, idx_particle=None, update_phi=False):
         """
@@ -1276,3 +1280,19 @@ class LeaFV(LeaTDLambda):
 
     def setProbasStationaryStartStateFV(self, dict_proba):
         self.probas_stationary_start_state_fv = dict_proba
+
+    def setAbsorptionSet(self, absorption_set):
+        "Sets the absorption set and updates the activation and active sets so that they are consistent with the absorption set"
+        # TEMPORARY: This calculation of the activation set is ONLY valid for gridworld environments.
+        # In the general case, the activation set should be computed from the transition matrix P associated to the environment.
+        # TODO: (2024/05/12) Compute the activation set from the transition matrix of the environment
+        from Python.lib.environments.gridworlds import get_adjacent_states
+        activation_set = set()
+        for s in absorption_set:
+            for sadj, dir in get_adjacent_states(self.env.getShape(), s):
+                if sadj is not None and sadj not in set.union(absorption_set, self.env.getObstacleStates()):
+                    activation_set.add(sadj)
+
+        self.absorption_set = absorption_set
+        self.activation_set = activation_set
+        self.active_set = self._compute_active_set()
