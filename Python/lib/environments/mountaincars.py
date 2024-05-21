@@ -76,7 +76,7 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
     # about the environment itself, namely about how the index state self.s defined in discrete.DiscreteEnv translates
     # into the human-understandable state.
     def __init__(self, nv):
-        super().__init__()
+        MountainCarEnv.__init__(self)
         # Number of intervals  information of the 2D state information
         self.nv = nv
         # Make sure that nv is odd so that v=0.0 is part of the grid (required when defining the grid for positions below)
@@ -180,14 +180,12 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
         self.terminal_rewards = dict()  # TODO: (2022/05/06) Define the terminal rewards, as done in my EnvironmentDiscrete class, from which this class derives
 
         # State of the environment
-        # Duple (x, v) containing the car's position and velocity
-        # IMPORTANT: We need to store this attribute because the attribute is defined in the MountainCarEnv super class
-        # (note that it does not have any getter or setter to access it) and we need to make sure that that the
-        # environment defined in that class knows about the environment we have set here via the discrete.DiscreteEnv
-        # environment (self.s). Otherwise, the Mountain Car environment will be at a different state than we think we are!)
-        self.state = None   # The value of the state is e.g. set by the reset() method below or by the setState() method
-                            # IMPORTANT: It must have THIS name, i.e. the name used in the super class MountainCarEnv
-                            # which reads the current state of the environment from this attribute.
+        # We define both the 1D state `s` of the discrete.DiscreteEnv of the gym library, from which EnvironmentDiscrete inherits,
+        # AND the 2D state `state` = duple (x, v) containing the car's position and velocity of the MountainCarEnv environment, which is the main superclass of this class,
+        # because we need these two state attributes to be ALIGNED.
+        # Otherwise, the Mountain Car environment will be at a different state than we think we are at (via the self.s attribute of discrete.DiscreteEnv)!
+        # Note that the MountainCarEnv environment does not have any getter or setter to access `state`.
+        self.state = self.reset()
 
     # NOTE: (2022/05/05) In the current version gym-0.12.1 that I have installed, the MountainCarEnv environment does not accept
     # a seed when resetting the environment. I should update the gym installation, as the newer version does accept a seed
@@ -495,11 +493,26 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
         Index between 0 and nS-1, where nS is the number of states in the environment.
         """
         idx_state = super().getState()  # This calls the getState() method in the discrete.DiscreteEnv class (since the MountainCarEnv class does not have any getState() method defined)
-        assert all(self.state == self.get_state_from_index(idx_state)), \
-            "The 2D continuous-value state stored in the Mountain Car object ({}) matches the 2D continuous-valued state" \
-            " associated to the 1D state index ({}) stored in the discrete.DiscreteEnv object ({})" \
-            .format(self.state, idx_state, self.get_state_from_index(idx_state))
+        assert self.get_index_from_state(self.state) == idx_state, \
+            "The 2D continuous-valued state stored in the Mountain Car object ({}) falls in the cell represented by the 1D state index stored in the discrete.DiscreteEnv object ({})." \
+            .format(self.state, idx_state, self.get_index_from_state(self.state))
+            # Note that we assert that the 2D continuous-valued state converted to 1D state index match the current 1D state index stored in the environment
+            # and NOT the other way round because an INFINITE number of 2D continuous-valued states are mapped to the same 1D state index, whereas only ONE
+            # 2D continuous-valued state is mapped to the 1D state index conversion to 2D, namely the 2D continuous-valued state that is exactly at one of the
+            # grid points defined by the discretization of the 2D state landscape (position, velocity) that is linearly indexed (column first) by the 1D state index.
+            # Note that the assertion that is based on the 1D to 2D conversion fails soon after the environment is reset by the self.reset() method defined above
+            # become in such reset() method, the 2D state is first chosen at random and a 1D state index mapped to it: if we converted this 1D state index back to
+            # a 2D state, the result would NOT be the 2D state selected at random in the 2D continuous-valued space!
         return idx_state
+
+    def getReward(self, s):
+        """
+        Returns the reward received when visiting a state
+
+        It returns always 0, as the method has been defined only to comply with the processes working with environments that require the definition of this method,
+        such as value function learners inheriting from discrete.Learner.
+        """
+        return 0.0
 
     def isTerminalState(self, idx_state: int):
         state = self.get_state_from_index(idx_state)
