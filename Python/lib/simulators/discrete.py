@@ -688,6 +688,12 @@ class Simulator:
         # Reset the environment to a state according to its initial state distribution
         self.env.reset()
 
+        # Initialize the rewards list to a first dummy element as if the environment came from an action taken by the agent and observed the reward of landing into the current state
+        # This is important for the correct association of states and rewards in the sense that learner.states[k] is the state where the reward learner.rewards[k] is observed,
+        # and this is particularly useful when estimating the absorption set A in the FV simulation by function compute_set_of_frequent_states_with_zero_reward() where
+        # the list of observed states and rewards is passed to the function and these should be aligned as just indicated! (because e.g. we filter on the states receiving zero reward)
+        learner.rewards = [self.env.getReward(self.env.getState())]
+
         t = 0               # Step counter: the first step is 1, as t represents the time at which the Markov chain transitions to the NEXT state. See more details at the @note at the beginning of the file.
         t_episode = -1      # Step counter within episode: the first step is 0, as t_episode indexes the step BEFORE transition so that we can write S(0), A(0), R(1), S(1), A(1), ...
         done_episode = False
@@ -714,6 +720,14 @@ class Simulator:
 
             if show_messages(verbose, verbose_period, t):
                 print(f"t: {t}, t in episode: {t_episode}, s={state}, a={action} -> ns={next_state}, r={reward}")
+
+        # Finalize the trajectory so that the `states`, `actions` and `rewards` list are of the same length
+        learner.times += [t+1]
+        learner.states += [next_state]
+        learner.actions += [np.nan]
+        assert len(learner.states) == len(learner.actions) and len(learner.actions) == len(learner.rewards)
+        if len(learner.times) > 1:
+            assert learner.times[-1] == learner.times[-2] + 1
 
         return learner
 

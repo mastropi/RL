@@ -71,7 +71,10 @@ class Learner(GenericLearner):
         Parameters:
         env: EnvironmentDiscrete
             Environment where learning takes place.
-            It should have method getNumStates() defined, retrieving the number of fixed states in the environment.
+            It should have the following methods defined:
+            - getNumStates() which returns the number of fixed states in the environment.
+            - getState() which returns the current state of the environment.
+            - getReward() which returns the reward received by the agent when visiting a state in the environment.
 
         criterion: (opt) LearningCriterion
             See documentation of the super class.
@@ -258,7 +261,7 @@ class Learner(GenericLearner):
         self._states_first_visit_time = np.nan * np.ones(self.env.getNumStates())
 
         # Store the _rewards obtained after each action
-        # We initialize the _rewards with one element equal to 0 so that there is an INDEX match between the
+        # We initialize the _rewards with one element so that there is an INDEX match between the
         # list of visited states during a trajectory and the list of rewards observed during that trajectory,
         # i.e. if the states in an episode are [2, 3, 2, 6, 5], where `5` is the terminal state,
         # and rewards = [0, -1.0, 0.5, 2.0, 1.0], their values correspond to states S(t=0), S(t=1), ..., S(t=4)
@@ -274,12 +277,12 @@ class Learner(GenericLearner):
         # be EQUAL *only* at the end of the episode (unless we are learning the value functions in a
         # CONTINUING learning task setting, even if the learning environment has terminal states --i.e. where naturally
         # an EPISODIC learning task is called for). In fact, while the episode is ongoing, the list of states
-        # has one element less than the list of rewards, because the list of rewards is initialized as `[0]` here
+        # has one element less than the list of rewards, because the list of rewards is initialized as e.g. `[0]` here
         # while the list of states is initialized as `[]` (empty).
         # The particular learner being used is responsible of making sure that the list of states has the
         # same number of elements as the list of rewards ONCE THE EPISODE HAS ENDED, by calling e.g. the
         # store_trajectory_at_episode_end() method defined in this class.
-        self._rewards = [0]
+        self._rewards = [self.env.getReward(self.env.getState())]
 
         # List of alphas used during the episode (which may vary from state to state and from the time visited)
         self._alphas_used_in_episode = []
