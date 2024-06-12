@@ -11,7 +11,6 @@ import copy
 import os
 import sys
 import re
-import joblib
 import numpy as np
 import pandas as pd
 
@@ -282,7 +281,7 @@ def convert_str_to_list_of_type(str_value, sep="[, ]", type=float):
     else:
         return str_value_as_list
 
-def save_objects_to_pickle(object_names, filename, namespace):
+def save_objects_to_pickle(object_names, filename, namespace, lib="joblib"):
     """
     Saves objects into a pickle file stored inside a dictionary whose names are taken from the object_names list and values taken from the given namespace
 
@@ -297,11 +296,21 @@ def save_objects_to_pickle(object_names, filename, namespace):
 
     namespace: dict
         Dictionary containing the object names as keys and the object values as values.
+
+    lib: (opt) str
+        Library to use to save the pickle file, either "joblib" or "pickle". This is done in case one of the libraries is not available where the function is called.
     """
     dict_objects_to_save = dict([(obj_name, namespace[obj_name]) for obj_name in object_names])
-    joblib.dump(dict_objects_to_save, filename)
+    if lib == "pickle":
+        import pickle
+        file = open(filename, "wb")
+        pickle.dump(dict_objects_to_save, file)
+        file.close()
+    else:
+        import joblib
+        joblib.dump(dict_objects_to_save, filename)
 
-def load_objects_from_pickle(filename, namespace):
+def load_objects_from_pickle(filename, namespace, lib="joblib"):
     """
     Loads objects saved in a pickle file and stored inside a dictionary whose names are taken from the dictionary keys and values taken from their values
 
@@ -312,6 +321,9 @@ def load_objects_from_pickle(filename, namespace):
     namespace: dict
         Dictionary representing the namespace where objects read from the filename should be created, where object names are keys and object values are their values.
 
+    lib: (opt) str
+        Library to use to load the pickle file, either "joblib" or "pickle". This is done in case one of the libraries is not available where the function is called.
+
     Return: list
     List with the names of the loaded objects into the given namespace.
     """
@@ -319,7 +331,14 @@ def load_objects_from_pickle(filename, namespace):
     object_names = None
 
     try:
-        dict_objects = joblib.load(filename)
+        if lib == "pickle":
+            import pickle
+            file = open(filename, "rb")
+            dict_objects = pickle.load(file)
+            file.close()
+        else:
+            import joblib
+            dict_objects = joblib.load(filename)
     except IOError as e:
         print(get_exception_message(e))
     if "dict_objects" in locals():

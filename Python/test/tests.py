@@ -775,9 +775,9 @@ learning_criterion = LearningCriterion.AVERAGE; gamma = 1.0    # gamma could be 
 
 seed = 1317
 problem_2d = True
-exit_state_at_bottom = True
+exit_state_at_bottom = False
 estimate_absorption_set = True
-estimate_absorption_set_at_every_step = True
+estimate_absorption_set_at_every_step = False
 entry_state_in_absorption_set = True   #False #True     # Only used when estimate_absorption_set = False
 #----------------- BASIC SETUP AND SIMULATION PARAMETERS --------------#
 
@@ -795,7 +795,7 @@ if problem_2d:
 
     # Whether the active set in FV should be connected (in order to avoid isolation of the two activation states and reduce possible problems)
     # When this is the case, the connectedness of the active set is achieved by removing the left-most obstacle in the previous-to-bottom row.
-    connected_active_set = True
+    connected_active_set = False #True
     initial_policy = None #[0.4, 0.15, 0.05, 0.4] #None   # Random walk as initial policy when None
 else:
     # 1D gridworld: the interesting dimension is the vertical dimension, with terminal state at the top (this is to unify the structure of 2D labyrinth and 1D gridworld)
@@ -950,13 +950,13 @@ dict_nsteps = dict()
 dict_KL = dict()
 dict_alpha = dict()
 dict_time_elapsed = dict()
-# Statistics about the results across replications
-dict_stats_R = dict()
 #------------------ RESULTS COLLECTION AND PLOTS SETUP ----------------#
 
 
 # Number of replications to run on each method
 nrep = 5 #10
+# Logging
+log = True #False #learning_method_type == "values_fv"
 
 # Learning method (of the value functions and the policy)
 # Both value functions and policy are learned online using the same simulation
@@ -999,7 +999,7 @@ policy_learning_mode = "online"     # Whether the policy is learned online or OF
 allow_deterministic_policy = True #False
 use_average_reward_from_previous_step = True #learning_method_type == "values_fv" #False #True            # Under the AVERAGE reward crtierion, whether to use the average reward estimated from the previous policy learning step as correction of the value functions (whenever it is not 0), at least as an initial estimate
 use_advantage = not (learning_method == "values_fvos") # Set this to True if we want to use the advantage function learned as the TD error, instead of using the advantage function as the difference between the estimated Q(s,a) and the estimated V(s) (where the average reward cancels out)
-optimizer_learning_rate = 0.01 #0.01 #0.1
+optimizer_learning_rate = 0.05 #0.01 if policy_learning_mode == "online" else 0.05 #0.01 #0.1
 reset_value_functions_at_every_learning_step = False #(learning_method == "values_fv")     # Reset the value functions when learning with FV, o.w. the learning can become too unstable due to the oversampling of the states with high value... (or something like that)
 
 # Parameters about value function learning (Critic)
@@ -1013,9 +1013,8 @@ verbose_period = max_time_steps_fv_for_all_particles // 10
 plot = False         # Whether to plot the evolution of value function and average reward estimation
 colormap = "seismic"  # "Reds"  # Colormap to use in the plot of the estimated state value function V(s)
 
-# Results saving and logging, with filename prefix and suffix
+# Results saving, with filename prefix and suffix
 save = True
-log = True #False #learning_method_type == "values_fv"
 prefix = f"ActorCritic_labyrinth_{size_str}_"
 suffix = f"_{learning_method}"
 
@@ -1026,9 +1025,6 @@ print("******")
 print(f"Running {learning_method.upper()} method for value functions estimation.")
 print(f"A NOMINAL MAXIMUM of {max_time_steps_benchmark} steps will be allowed during the simulation.")
 print("******")
-
-time_start = timer()
-dt_start_filename = get_current_datetime_as_string(format="filename")
 
 # A few further parameters for the policy learning process
 break_when_no_change = False    # Whether to stop the learning process when the average reward doesn't change from one step to the next
@@ -1047,6 +1043,8 @@ nsteps_all = np.nan * np.ones((nrep, n_learning_steps))  # Number of value funct
 KL_all = np.nan * np.ones((nrep, n_learning_steps))      # K-L divergence between two consecutive policies
 alpha_all = alpha_initial * np.ones((nrep, n_learning_steps))   # Initial alpha used at each policy learning step
 time_elapsed_all = np.nan * np.ones(nrep)   # Execution time for each replication
+
+# Prepare the Actor learner
 if learning_method_type == "values_fv":
     # Define the object where we will store the number of steps used by the FV learner of value functions at each policy learning step
     # so that we use the same number for the TD learner of value functions when the TDAC policy learning process is run afterwards.
@@ -1070,6 +1068,9 @@ else:
     learner_ac = LeaActorCriticNN(test_ac.env2d, simulator_value_functions.getAgent().getPolicy(), simulator_value_functions.getAgent().getLearner(),
                                   allow_deterministic_policy=allow_deterministic_policy,
                                   reset_value_functions=reset_value_functions_at_every_learning_step, initial_policy=initial_policy, optimizer_learning_rate=optimizer_learning_rate, seed=test_ac.seed, debug=True)
+
+time_start = timer()
+dt_start_filename = get_current_datetime_as_string(format="filename")
 
 seed_base = test_ac.seed
 for rep in range(nrep):
@@ -1103,7 +1104,8 @@ for rep in range(nrep):
     time_start_rep = timer()
     if learning_method == "all_online":
         for t_learn in range(n_learning_steps):
-            print(f"\n\n*** Running learning step {t_learn+1} of {n_learning_steps} (AVERAGE REWARD at previous step = {R_all[rep, max(0, t_learn-1)]}) of MAX={max_avg_reward_episodic} using {nsteps_all[rep, max(0, t_learn-1)]} time steps for Critic estimation)... (seed={seed_learn}) @{get_current_datetime_as_string()}")
+            print(f"\n\n*** Running learning step {t_learn+1} of {n_learning_steps} (AVERAGE REWARD at previous step = {R_all[rep, max(0, t_learn-1)]}) of "
+                  f"MAX={max_avg_reward_episodic if policy_learning_mode == 'online' else max_avg_reward_continuing} using {nsteps_all[rep, max(0, t_learn-1)]} time steps for Critic estimation)... (seed={seed_learn}) @{get_current_datetime_as_string()}")
             print("Learning the VALUE FUNCTIONS and POLICY simultaneously...")
             loss_all[rep, t_learn] = learner_ac.learn(n_episodes_per_learning_step, start_state=entry_state, max_time_steps_per_episode=max_time_steps_per_policy_learning_episode, prob_include_in_train=1.0) # prob_include_in_train=0.5)
                 ## Note that we make sure that the start state when learning the policy is the entrance state to the labyrinth, `entry_state`, because the environment may have defined
@@ -1190,10 +1192,9 @@ for rep in range(nrep):
                 average_reward = expected_reward
                 nsteps_all[rep, t_learn] = n_events_et + n_events_fv
                 max_time_steps_benchmark_all[rep, t_learn] = n_events_et + n_events_fv  # Number of steps to use when running TDAC at the respective learning step
-                print(f"Learning step {t_learn+1}: Learning of value functions COMPLETED using {learning_method} method on {nsteps_all[rep, t_learn]} time steps")
             else:
                 # TD learners
-                if 'max_time_steps_benchmark_all' in locals() and max_time_steps_benchmark_all[rep, t_learn] != np.nan:
+                if 'max_time_steps_benchmark_all' in locals() and rep < len(max_time_steps_benchmark_all) and t_learn < len(max_time_steps_benchmark_all[rep, :]) and max_time_steps_benchmark_all[rep, t_learn] != np.nan:
                     # The FV learner was run before running this TD learner
                     if use_average_max_time_steps_in_td_learner:
                         _max_time_steps = int( np.mean(max_time_steps_benchmark_all[rep, :]) )
@@ -1233,8 +1234,9 @@ for rep in range(nrep):
                                                       verbose=True, verbose_period=verbose_period)
                 average_reward = simulator_value_functions.getAgent().getLearner().getAverageReward()
                 nsteps_all[rep, t_learn] = learning_info['nsteps']
-                print(f"Learning step {t_learn+1}: Learning of value functions COMPLETED using {learning_method} method on {nsteps_all[rep, t_learn]} time steps")
 
+            print(f"Learning step #{t_learn+1}: Learning of value functions COMPLETED using {learning_method} method on {nsteps_all[rep, t_learn]} time steps")
+            print(f"Estimated average reward: {average_reward}")
             state_counts_all[rep, t_learn, :] = state_counts
             V_all[rep, t_learn, :] = V
             Q_all[rep, t_learn, :, :] = Q.reshape(test_ac.env2d.getNumStates(), test_ac.env2d.getNumActions())
@@ -1546,7 +1548,7 @@ plt.suptitle(f"{learning_method.upper()}\n{learning_task.name} learning task - {
 ############## SAVE ALL RESULTS TOGETHER
 if save:
     _env2d = test_ac.env2d
-    objects_to_save = ["_env2d", "wind_dict", "learning_task", "learning_criterion", "gamma",
+    objects_to_save = ["_env2d", "wind_dict", "learning_task", "learning_criterion", "gamma", "exit_state", "policy_learning_mode",
                        "dict_loss", "dict_R", "dict_R_long", "dict_R_long_true", "dict_V", "dict_Q", "dict_A", "dict_state_counts", "dict_nsteps", "dict_KL", "dict_alpha", "dict_time_elapsed",
                        "max_time_steps_benchmark"]
     if "max_time_steps_benchmark_all" in locals():
@@ -1561,13 +1563,15 @@ if save:
     # HOWEVER, when reading the saved data, make sure that any object with the original name (without the suffix) has been copied to another object
     # (e.g. loss_all_td could be a copy of loss_all before reading the data previously saved for the FV learning method)
     object_names_to_save = objects_to_save + [f"{obj_name}" for obj_name in objects_to_save]
-    save_objects_to_pickle(object_names_to_save, _filepath, locals())
+    save_objects_to_pickle(object_names_to_save, _filepath, locals(), lib="pickle")
     print(f"Results for ALL Actor-Critic methods: {[str.replace(meth, 'values_', '').upper() for meth in dict_loss.keys()]} saved to '{_filepath}'")
 ############## SAVE ALL RESULTS TOGETHER
 
 
 
 ############## LOAD RESULTS
+# FIRST, need to load the necessary modules at the top of this Section and compile the auxiliary functions
+
 #_datetime = "20240428_092427" #"20240428_205959" #"20240421_140558" #"20240405_094608" #"20240322_095848" #"20240219_230301" #"20240219_142206"          # Use format yyymmdd_hhmmss
 #_size_str = "6x8" #"21x1" #"10x14" #"3x4" #"10x14"
 

@@ -462,7 +462,8 @@ class Learner(GenericLearner):
                 ## NOTE: (2024/04/17) Explanation of the use of `len(self.times_at_episode_end)` which I haven't explained so far, but needs an explanation:
                 ## it is due to what is explained above about the sample size behind the EPISODIC average reward (which is T)
                 ## and the sample size behind the CONTINUING average reward (T+1), i.e. each episode length stored in self.times_at_episode_end contains the EPISODIC sample size
-                ## and therefore we need to sum +1 to EACH of thus we obtain the len(self.times_at_episode_end) as the +1 summed len(self.times_at_episode_end) times.
+                ## (as opposed to the CONTINUING sample size).
+                ## Therefore we need to sum +1 to EACH episode, thus we obtain `len(self.times_at_episode_end)` resulting from summing +1 `len(self.times_at_episode_end)` times.
             updated_average = self.getAverageReward() + int(T>0) * (self._average_reward_in_episode * T / (T+1) - self.getAverageReward()) \
                                                                  * (T + 1) / (sample_size_for_current_estimated_average + (T + 1))
             # (2023/12/18) The following is a check that the updated average is equal to the regular average computed on all the rewards seen so far over ALL episodes
