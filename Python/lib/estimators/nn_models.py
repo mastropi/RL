@@ -55,7 +55,7 @@ class NNBackprop(nn.Module):
 
         # Additional hidden layers (if any)
         for h in range(1, len(hidden_sizes_extended)):
-            self.hidden_layers.append( nn.Linear(hidden_sizes_extended[h-1], hidden_sizes_extended[h], dtype=torch.float) )
+            self.hidden_layers.append( nn.Linear(hidden_sizes_extended[h-1], hidden_sizes_extended[h]) ) #, dtype=torch.float) ) # DM-2024/06/11: Commented out `dtype` because it fails in IRIT cluster with torch-1.8 installed
 
         # If we want to initialize weights and bias leading to a layer, use the nn.init functions
         # Here an example of setting the weights and bias reaching the first hidden layer
@@ -75,7 +75,7 @@ class NNBackprop(nn.Module):
         #   param.data = nn.parameter.Parameter(torch.tensor(param_values[p]))
 
         # Output layer
-        self.output_layer = nn.Linear(hidden_sizes_extended[-1], output_size, dtype=torch.float)
+        self.output_layer = nn.Linear(hidden_sizes_extended[-1], output_size) #, dtype=torch.float) # DM-2024/06/11: Commented out `dtype` because it fails in IRIT cluster with torch-1.8 installed
         # If we want to initialize the weights and bias leading to the output layer neurons
         # Also see init.uniform_(), init.xavier_uniform_(), etc.
         #nn.init.ones_(self.output_layer.weight)

@@ -1123,6 +1123,10 @@ class LeaActorCriticNN(GenericLearner):
 
         # Loss function to minimize when learning the optimum policy parameter
         loss = 0.0
+        # Length over all episodes which is needed to compute (normalize) the final loss function, which is equal to MINUS the average reward observed over all episodes,
+        # as the goal of the problem is to maximize the average reward, and episodes most likely have different lengths... so we cannot simply SUM the terms making up
+        # the loss function, we need to normalize that sum.
+        all_episodes_length = 0
         variance_average_reward = 0.0
         nepisodes_max_steps_reached = 0
         for episode in range(1, nepisodes+1):
@@ -1220,6 +1224,7 @@ class LeaActorCriticNN(GenericLearner):
                     loss += -advantage * logprob
 
             episode_length = t + 1  # `+1` because t goes from 0 to (T-1), where T is the episode's length
+            all_episodes_length += episode_length
             average_reward_current_episode /= episode_length
             if False and self.debug:
                 print(f"{state}]")
@@ -1234,6 +1239,10 @@ class LeaActorCriticNN(GenericLearner):
                       f"Average reward over episodes: {self.average_reward_over_episodes}, " +
                       "Average episode length: {:.1f}".format(self.average_episode_length))
 
+        # Normalize the loss by computing the weighted average of the average reward observed at each episode, where the length of the episode is used as weight.
+        # The average process just described is equivalent to dividing the loss computed in the above loop by the sum of the episode lengths, as:
+        # 1 / \sum{ T_e } \sum_1^E T_e * avg.reward(e) = 1 / \sum{ T_e } \sum_1^E T_e * 1 / T_e * \sum_n^{T_e} advantage(n) * logprob(n) = 1 / \sum{ T_e } \sum_1^E \sum_n^{T_e} advantage(n) * logprob(n)
+        loss /= all_episodes_length
         self.se_average_reward_over_episodes = np.sqrt(variance_average_reward / max(1, (episode - 1)))
         print("---> FINAL AVERAGE REWARD AT LEARNING STEP {:d}: {:.3f} (+/- {:.3f}, {:.1f}%) on episodes of {:.1f} steps on average (max number of time steps was reached at {:.1f}% of episodes) --> loss = {}\n" \
               .format(self.t_learn, self.average_reward_over_episodes, self.se_average_reward_over_episodes, self.se_average_reward_over_episodes / self.average_reward_over_episodes * 100,
@@ -1241,7 +1250,7 @@ class LeaActorCriticNN(GenericLearner):
 
         # Learn
         self.optimizer.zero_grad()
-        loss.backward()
+        loss.backward()     # Regarding the use of retain_graph=True (not used here but it is a parameter that may come up indiscussions), this StackOverflow post might be useful (see the Illustrative Example in the accepted answer): https://stackoverflow.com/questions/46774641/what-does-the-parameter-retain-graph-mean-in-the-variables-backward-method
         self.optimizer.step()
         # We can easily look at the neural network parameters by printing self.optimizer.param_groups
         #print(f"New network parameters:\n{self.optimizer.param_groups}")
