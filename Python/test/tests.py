@@ -734,7 +734,7 @@ def compute_max_avg_rewards_in_labyrinth_with_corridor(env, wind_dict, learning_
             max_avg_reward_episodic = 1 / (env_shape[1] - 1)    # In this case the start state does not count (we subtract 2 because, besides not counting twice the bottom-right state, the start state does not count in the episodic setting)
         else:
             # This is the case when the exit state is at the top-right of the labyrinth (the default)
-            assert exit_state is None
+            #assert exit_state is None
             max_avg_reward_continuing = 1 / (np.sum(env_shape) - 1)  # In this case the start state counts! (we subtract 1 because the bottom-right state must NOT count twice!)
             max_avg_reward_episodic = 1 / (np.sum(env_shape) - 2)    # In this case the start state does not count (we subtract 2 because, besides not counting twice the bottom-right state, the start state does not count in the episodic setting)
     else:
@@ -775,9 +775,9 @@ learning_criterion = LearningCriterion.AVERAGE; gamma = 1.0    # gamma could be 
 
 seed = 1317
 problem_2d = True
-exit_state_at_bottom = True
-estimate_absorption_set = True
-estimate_absorption_set_at_every_step = True
+exit_state_at_bottom = False
+estimate_absorption_set = True; threshold_absorption_set = 0.04
+estimate_absorption_set_at_every_step = False
 entry_state_in_absorption_set = True   #False #True     # Only used when estimate_absorption_set = False
 #----------------- BASIC SETUP AND SIMULATION PARAMETERS --------------#
 
@@ -787,10 +787,10 @@ if problem_2d:
     # 2D labyrinth
     size_vertical = 3; size_horizontal = 4
     size_vertical = 4; size_horizontal = 5
-    #size_vertical = 6; size_horizontal = 8
-    #size_vertical = 8; size_horizontal = 12
-    #size_vertical = 9; size_horizontal = 13
-    #size_vertical = 10; size_horizontal = 14
+    size_vertical = 6; size_horizontal = 8
+    size_vertical = 8; size_horizontal = 12
+    size_vertical = 9; size_horizontal = 13
+    size_vertical = 10; size_horizontal = 14
     #size_vertical = 10; size_horizontal = 30
 
     # Whether the active set in FV should be connected (in order to avoid isolation of the two activation states and reduce possible problems)
@@ -813,9 +813,10 @@ exit_state = entry_state + env_shape[1] - 1 if exit_state_at_bottom else None   
 # Presence of wind: direction and probability of deviation in that direction when moving
 if problem_2d:
     wind_dict = None
-    wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.6})
-    wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.7})
-    wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.8})
+    #wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.5})
+    #wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.6})
+    #wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.7})
+    #wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.8})
 else:
     # WIND is currently not allowed in 1D gridworlds
     wind_dict = None
@@ -880,7 +881,7 @@ if entry_state_in_absorption_set:
 
 #-------------------------------- TEST SETUP --------------------------#
 test_ac = Test_EstPolicy_EnvGridworldsWithObstacles()
-test_ac.setUpClass(shape=env_shape, obstacles_set=obstacles_set, wind_dict=wind_dict,
+test_ac.setUpClass(shape=env_shape, obstacles_set=None, wind_dict=wind_dict,
                    define_start_state_from_absorption_set=False, start_states_set={entry_state},  #{nS-1}, #None,
                    exit_state=exit_state,
                    # Policy model
@@ -895,9 +896,9 @@ test_ac.setUpClass(shape=env_shape, obstacles_set=obstacles_set, wind_dict=wind_
                    # Small N and T are N=50, T=1000 for the 8x12 labyrinth with corridor
                    N=20,  #50, #200, #200 if problem_2d else 100, #50 #20 #100
                    T=500,  #1000, #100, #10000 if problem_2d else 1000, #1000, #1000, #3000,  # np.prod(env_shape) * 10  #100 #1000
-                   estimate_absorption_set=estimate_absorption_set, absorption_set=default_absorption_set,
+                   estimate_absorption_set=estimate_absorption_set, threshold_absorption_set=threshold_absorption_set, absorption_set=default_absorption_set,
                    estimate_on_fixed_sample_size=True,
-                   seed=seed, debug=False)
+                   seed=seed, debug=False, seed_labyrinth=42)
 test_ac.setUp()
 print(test_ac.policy_nn.nn_model)
 test_ac.env2d._render()
@@ -956,7 +957,7 @@ dict_stats_R = dict()
 
 
 # Number of replications to run on each method
-nrep = 5 #10
+nrep = 5 #5 #10
 
 # Learning method (of the value functions and the policy)
 # Both value functions and policy are learned online using the same simulation
@@ -1007,7 +1008,7 @@ alpha_initial = simulator_value_functions.getAgent().getLearner().getInitialLear
 adjust_alpha_initial_by_learning_step = False; t_learn_min_to_adjust_alpha = 30 # based at 1 (regardless of the base value used for t_learn)
 #max_time_steps_per_episode = test_ac.env2d.getNumStates()*10  # (2024/05/02) NO LONGER USED!  # This parameter is just set as a SAFEGUARD against being blocked in an episode at some state of which the agent could be liberated by restarting to a new episode (when this max number of steps is reached)
 epsilon_random_action = 0.1 #0.1 #0.05 #0.0 #0.01
-use_average_max_time_steps_in_td_learner = False #learning_method == "values_td2" #True #False
+use_average_max_time_steps_in_td_learner = True #learning_method == "values_td2" #True #False
 learning_steps_observe = [50, 90] #[2, 30, 48] #[2, 10, 11, 30, 31, 49, 50] #[7, 20, 30, 40]  # base at 1, regardless of the base value used for t_learn
 verbose_period = max_time_steps_fv_for_all_particles // 10
 plot = False         # Whether to plot the evolution of value function and average reward estimation
@@ -1298,20 +1299,20 @@ dict_time_elapsed[learning_method] = time_elapsed_all.copy()
 # Plot loss and average reward for the currently analyzed learner
 print("\nPlotting...")
 ax_loss = plt.figure(figsize=figsize).subplots(1, 1)
-ax_loss.plot(range(1, n_learning_steps+1), loss_all[rep, :n_learning_steps], marker='.', color="red")
-ax_loss.plot(range(1, n_learning_steps+1), alpha_all[rep, :n_learning_steps], '--', color="cyan")
+ax_loss.plot(range(1, n_learning_steps+1), dict_loss[learning_method][rep, :n_learning_steps], marker='.', color="red")
+#ax_loss.plot(range(1, n_learning_steps+1), dict_alpha[learning_method][rep, :n_learning_steps], '--', color="cyan")
 ax_loss.set_xlabel("Learning step")
 ax_loss.set_ylabel("Loss")
-ax_loss.axhline(0, color="red", linewidth=1, linestyle='dashed')
+#ax_loss.axhline(0, color="red", linewidth=1, linestyle='dashed')
 ax_loss.xaxis.set_major_locator(MaxNLocator(integer=True))
 ax_loss.legend(["Loss", "alpha0"], loc='upper left')
 ax_R = ax_loss.twinx()
-ax_R.plot(range(1, n_learning_steps+1), R_all[rep, :n_learning_steps], marker='.', color="green")
+ax_R.plot(range(1, n_learning_steps+1), dict_R[learning_method][rep, :n_learning_steps], marker='.', color="green")
 ax_R.axhline(max_avg_reward_episodic, color="green", linewidth=1)
-ax_R.plot(range(1, n_learning_steps+1), R_long_all[rep, :n_learning_steps], marker='.', color="greenyellow")
+ax_R.plot(range(1, n_learning_steps+1), dict_R_long[learning_method][rep, :n_learning_steps], marker='.', color="greenyellow")
 ax_R.axhline(max_avg_reward_continuing, color="greenyellow", linewidth=1)
 ax_R.set_ylabel("Average reward")
-ax_R.plot(range(1, n_learning_steps+1), KL_all[rep, :n_learning_steps], color="blue", linewidth=1)
+ax_R.plot(range(1, n_learning_steps+1), dict_KL[learning_method][rep, :n_learning_steps], color="blue", linewidth=1)
 ax_R.axhline(KL_THRESHOLD, color="blue", linestyle="dashed")
 ax_R.axhline(0, color="green", linewidth=1, linestyle='dashed')
 ax_R.legend(["Average reward (episodic)", "Max. average reward (episodic)",
@@ -1430,7 +1431,7 @@ ylim = (None, None)     # Use this for unequal Y-axis limits
 marker = ''
 for i, ax in enumerate(axes.reshape(-1)):
     # Value functions on the left axis
-    ax.plot(np.arange(1+first_learning_step, n_learning_steps + 1), A_all[rep, first_learning_step:n_learning_steps, i, :], marker=marker)
+    ax.plot(np.arange(1+first_learning_step, n_learning_steps + 1), dict_A['values_fv'][rep, first_learning_step:n_learning_steps, i], marker=marker)
     ax.xaxis.set_major_locator(MaxNLocator(integer=True))
     ax.set_ylim(ylim)
 
@@ -1575,7 +1576,9 @@ resultsdir = "./RL-003-Classic/results"
 
 _filename = "ActorCritic_labyrinth_4x5_20240512_232944_ALL_WindyLabyrinth0.7FinishAtBottomAbsorptionSetEstimated0_TDAC,FVAC,N=20,T=500,LimitedTime=5x,epsilon=0.10,Budget4Loss=5x_FVisBetter.pkl"
 #_filename = "ActorCritic_labyrinth_4x5_20240513_070501_ALL_WindyLabyrinth0.7FinishAtBottomAbsorptionSetEstimated_TDAC,FVAC,N=20,T=500,LimitedTime=5x,epsilon=0.10,Budget4Loss=5x_FVisBetter.pkl"
-
+_filename = "ActorCritic_labyrinth_10x14_20240621_140308_ALL.pkl"
+_N = 20
+_T = 500
 # Compare two FVAC learnings
 # 4x5
 #_filename = "ActorCritic_labyrinth_4x5_20240512_232944_ALL_WindyLabyrinth0.7FinishAtBottomAbsorptionSetEstimated0_TDAC,FVAC,N=20,T=500,LimitedTime=5x,epsilon=0.10,Budget4Loss=5x_FVisBetter.pkl"
@@ -1670,8 +1673,8 @@ plt.suptitle(f"ALL LEARNING METHODS: Labyrinth {env_shape} - {learning_task.name
 
 # Plot results on several replications
 if nrep > 1:
-    plot_bands = False #False
-    plot_mean = True #True
+    plot_bands = True #False
+    plot_mean = False #True
     dict_stats_R = dict.fromkeys(dict_loss.keys())
     ax = plt.figure(figsize=figsize).subplots(1, 1)
     lines = []
