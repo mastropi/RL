@@ -37,7 +37,7 @@ class Test_Class_LeaFV_discretetime(unittest.TestCase):
         absorption_set = set(range(2))
         absorption_boundary = max(absorption_set)
         activation_set = {absorption_boundary + 1}
-        learner_fv = LeaFV(self.env, N=N, T=10, absorption_set=absorption_set, activation_set=activation_set) #, TIME_RESOLUTION=1) # This was commented out because the default value of TIME_RESOLUTION is supposed to be 1 and by omitting its value here we want to stress this out, as normally when creating the LeaFV object, we will forget about setting this parameter... This value of TIME_RESOLUTION=1 should we set for discrete-time Markov chains.
+        learner_fv = LeaFV(self.env, N=N, T=10, absorption_set=absorption_set, activation_set=activation_set, states_of_interest=self.env.getTerminalStates()) #, TIME_RESOLUTION=1) # This was commented out because the default value of TIME_RESOLUTION is supposed to be 1 and by omitting its value here we want to stress this out, as normally when creating the LeaFV object, we will forget about setting this parameter... This value of TIME_RESOLUTION=1 should we set for discrete-time Markov chains.
 
         # Create the particles and mock where they are so that we can have a Phi estimate
         envs = [copy.deepcopy(self.env) for _ in range(learner_fv.N)]
@@ -169,7 +169,7 @@ class Test_Class_LeaFV_discretetime(unittest.TestCase):
         absorption_set = {0}
         absorption_boundary = max(absorption_set)
         activation_set = {absorption_boundary + 1}
-        learner_fv = LeaFV(self.env, N=3, T=10, absorption_set=absorption_set, activation_set=activation_set, criterion=LearningCriterion.DISCOUNTED, gamma=0.9)
+        learner_fv = LeaFV(self.env, N=3, T=10, absorption_set=absorption_set, activation_set=activation_set, states_of_interest=self.env.getTerminalStates(), criterion=LearningCriterion.DISCOUNTED, gamma=0.9)
 
         # Now we mock the evolution of the particles in the FV system
         # We do so by creating a data frame index by each time the particle system is updated, i.e. indexed by the FV system's clock
@@ -239,7 +239,7 @@ class Test_Class_LeaFV_discretetime(unittest.TestCase):
         assert learner_fv.dict_phi_for_state.keys() == learner_fv.active_set
         assert learner_fv.dict_phi_for_state.keys() == expected_dict_phi_for_state.keys()
         for s in learner_fv.active_set:
-            assert list(learner_fv.dict_phi_for_state[s].keys()) == learner_fv.states_of_interest
+            assert learner_fv.dict_phi_for_state[s].keys() == learner_fv.states_of_interest
             for x in learner_fv.states_of_interest:
                 # Note: For a reason I don't understand, I have to convert the data frame values of learner_fv.dict_phi_for_state[s][x] to float...
                 # otherwise I get the error message "unfunc `isfinite()`..." or similar.
@@ -249,7 +249,7 @@ class Test_Class_LeaFV_discretetime(unittest.TestCase):
         for s in learner_fv.active_set:
             assert learner_fv.dict_phi_for_state_action[s].keys() == set(np.arange(self.env.getNumActions()))
             for a in range(self.env.getNumActions()):
-                assert list(learner_fv.dict_phi_for_state_action[s][a].keys()) == learner_fv.states_of_interest
+                assert learner_fv.dict_phi_for_state_action[s][a].keys() == learner_fv.states_of_interest
                 for x in learner_fv.states_of_interest:
                     # Note: For a reason I don't understand, I have to convert the data frame values of learner_fv.dict_phi_for_state[s][x] to float...
                     # otherwise I get the error message "unfunc `isfinite()`..." or similar.

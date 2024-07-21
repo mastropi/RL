@@ -65,6 +65,7 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
                         # Characteristics of the Fleming-Viot implementation
                         N=100, T=100,   # N is the number of particles, T is the max number of time steps allowed over ALL episodes in the single Markov chain simulation that estimates E(T_A)
                         estimate_absorption_set=True, absorption_set: Union[list, set]=None,
+                        states_of_interest_fv: Union[list, set]=None,
                         estimate_on_fixed_sample_size=False,
                         seed=1717, debug=False):
         env_shape = shape
@@ -170,7 +171,7 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
 
             learner = sim_for_initial_exploration.run_exploration(t_learn=0, max_time_steps=T, seed=cls.seed, verbose=cls.debug, verbose_period=1)
             absorption_set = compute_set_of_frequent_states_with_zero_reward(learner.getStates(), learner.getRewards(), threshold=threshold_absorption_set)
-            print(f"Distribution of state frequency:\n{pd.Series(learner.getStates()).value_counts(normalize=True)}")
+            print(f"Distribution of state frequency on n={learner.getNumSteps()} steps:\n{pd.Series(learner.getStates()).value_counts(normalize=True)}")
             print(f"Selected absorption set (2D):\n{[str(s) + ': ' + str(np.unravel_index(s, env_shape)) for s in absorption_set]}")
         elif absorption_set is None:
             # We choose the first column, i.e. the column above the labyrinth's start state, of the 2D-grid as the set A of uninteresting states
@@ -221,6 +222,8 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
 
         assert start_states_set.issubset(cls.env2d.getAllValidStates()), \
             f"The start states set is invalid: all states in the set must be valid states of the environment:\nvalid states = {cls.env2d.getAllValidStates()}\nstart state set = {start_states_set}"
+        # Reset the state of the environment (this is just for rendering purposes, so that we see a cross (`x`) at the start state when there is only one start state)
+        cls.env2d.reset()
 
         print("Environment characteristics (2D-labyrinth): (row, col)")
         print(f"Start states set: {[np.unravel_index(start_state, env_shape) for start_state in start_states_set]}")
@@ -292,6 +295,7 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
         activation_set = cls.B
         learner_fv = fv.LeaFV(  cls.env2d,
                                 N, T, absorption_set, activation_set,
+                                states_of_interest=states_of_interest_fv,
                                 probas_stationary_start_state_et=None,
                                 probas_stationary_start_state_fv=None,
                                 criterion=learning_criterion,

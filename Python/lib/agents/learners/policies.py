@@ -1274,11 +1274,17 @@ class LeaActorCriticNN(GenericLearner):
             State visit frequency observed during the estimation of the given value functions.
             This is used to compute the state distribution probability that is used as weight in the loss function calculation.
 
+        prob_states: (opt) np.ndarray
+            Probability of each state in the environment.
+            This is used instead of the state_counts as state distribution probability used as weight in the loss function calculation.
+            default: None
+
         use_advantage: (opt) bool
             Whether to use the advantage function directly, instead of computing it as a difference between the action value and the state value.
             default: True
         """
-        prob_states = state_counts / np.sum(state_counts)
+        if prob_states is None:
+            prob_states = state_counts / np.sum(state_counts)
 
         # Iterate on all possible states and actions and compute the loss function
         # as the product of the advantage function times the log-policy.
