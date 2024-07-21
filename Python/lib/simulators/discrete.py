@@ -1223,7 +1223,7 @@ class Simulator:
 
         # Phi(t, x): Empirical probability of the states of interest (x)
         # at each time t when a variation in Phi(t, x) is observed.
-        dict_phi = initialize_phi(envs, t=event_times[0], states_of_interest=learner.getStatesOfInterest())
+        learner.dict_phi = initialize_phi(envs, t=event_times[0], states_of_interest=learner.getStatesOfInterest())
 
         # Initialize the list of observed survival times to be filled during the simulation below
         survival_times = [0]    # We set the first element of the survival times list to 0 so that we can "estimate" the survival probability at 0 (which is always equal to 1 actually)
@@ -1361,6 +1361,9 @@ class Simulator:
                     has_particle_been_absorbed_once[idx_particle] = True
                     n_particles_absorbed_once += 1
 
+                    # NOTE: The iterative update of the average reward (Which involves an iterative update of the FV integral) has to be done BEFORE reactivating the particle,
+                    # because the state of the particle AFTER reactivation is the state the particle takes STARTING at the current time; however, the FV integral at time t is
+                    # the integral of P(T>t) Phi(t,x) UNTIL time t (excluded).
                     if expected_absorption_time is not None:
                         # Iterative update of the components of the FV estimator, when survival times happen in increasing order, and update of the average reward
                         # This is only done when an estimate of the expected re-absorption time is provided, as this piece of information is needed to compute
@@ -1411,10 +1414,13 @@ class Simulator:
             # Update Phi based on the new state of the changed (and possibly also reactivated) particle
             if expected_absorption_time is not None:
                 # Iterative update of Phi
+                # TODO: (2024/07/21) Fixed the following, based on the comment I wrote on 2024/05/22 written here
+                # (2024/05/22) ACTUALLY, this also calls update_phi() as done below in the ELSE block... the only difference is that alpha is None in this case,
+                # so I don't know why I separate these two cases. In fact, they are exactly the same if alpha0 = +np.Inf, which is often a good choice.
                 learner.update_phi(t, state, next_state)
             else:
                 # One-shot update of Phi
-                dict_phi = update_phi(envs[0], len(envs), t, dict_phi, state, next_state, alpha=alpha0 / (t + alpha0))
+                learner.dict_phi = update_phi(envs[0], len(envs), t, learner.dict_phi, state, next_state, alpha=alpha0 / (t + alpha0))
 
             if DEBUG_TRAJECTORIES:
                 print("[FV] Moved P={}, t={}: state={}, action={} -> next_state={}, reward={}" \
@@ -1463,9 +1469,6 @@ class Simulator:
             #done = t >= max_time_steps
 
         # DONE
-        if expected_absorption_time is not None:
-            # Assign the Phi learned iteratively to the dict_phi returned by this method, so that the outside world receives the correct estimate of Phi
-            dict_phi = learner.dict_phi
         if n_particles_absorbed_once < N:
             # There are still particles that have not been absorbed at least once
             # => Add the last observed time step to the list of survival times as many times as the number of particles left to absorb,
@@ -1489,7 +1492,7 @@ class Simulator:
         # (as opposed to the simulation being stopped just by the condition of reaching the max_time_steps number of simulation steps (which implies that the simulation can go on
         # even if the largest FIRST-time survival time has been stored in the `survival_times` list, making the times stored in Phi(t, x) possibly be LARGER than the maximum
         # observed FIRST-time survival time.
-        assert np.max([np.max(dict_phi[x]['t']) for x in dict_phi.keys()]) <= np.max(survival_times), \
+        assert np.max([np.max(learner.dict_phi[x]['t']) for x in learner.dict_phi.keys()]) <= np.max(survival_times), \
                 "The maximum time stored in Phi(t,x) must be at most the maximum observed survival time"
         if show_messages(verbose, verbose_period, t):
             print("==> FV agent ENDS at state {} at discrete time t = {} ({:.1f}% of max_time_steps_for_absorbed_particles_check={} of max_time_steps={}, {:.1f}% of particles were absorbed once),"
@@ -1506,21 +1509,21 @@ class Simulator:
             max_rows = pd.get_option('display.max_rows')
             pd.set_option('display.max_rows', None)
             print("Survival probability:\n{}".format(df_proba_surv))
-            print("Phi:\n{}".format(dict_phi))
+            print("Phi:\n{}".format(learner.dict_phi))
             pd.set_option('display.max_rows', max_rows)
 
             # Make a plot
             plt.figure()
             plt.step(df_proba_surv['t'], df_proba_surv['P(T>t)'], color="blue", where='post')
-            for x in dict_phi.keys():
-                plt.step(dict_phi[x]['t'], dict_phi[x]['Phi'], color="red", where='post')
+            for x in learner.dict_phi.keys():
+                plt.step(learner.dict_phi[x]['t'], learner.dict_phi[x]['Phi'], color="red", where='post')
                 plt.title(f"[_run_simulation_fv, Learning step {t_learn+1}]\nP(T>t) (blue) and Phi(t,x) (red) for state x = {x}")
 
         if plot:
             self._update_plots_at_episode_end(0, 1, learner, t_learn, fig_V, fig_V2, None, colors_V, None, 0.0, pause=pause, method_name="_run_simulation_fv, ")
             self._final_plots(learner, t_learn, fig_V, fig_C, method_name="_run_simulation_fv, ")
 
-        return t, learner.getV().getValues(), learner.getQ().getValues(), learner.getA().getValues(), learner._state_counts, dict_phi, df_proba_surv, expected_absorption_time, max_survival_time
+        return t, learner.getV().getValues(), learner.getQ().getValues(), learner.getA().getValues(), learner._state_counts, learner.dict_phi, df_proba_surv, expected_absorption_time, max_survival_time
 
     @measure_exec_time
     def _run_simulation_fv_fraiman( self, t_learn, envs, absorption_set: set, start_set: set,
@@ -3020,7 +3023,7 @@ class Simulator:
                 self.env.setState(start_state_first_episode)
             if show_messages(verbose, verbose_period, episode) or episode == nepisodes - 1:  # Note that we ALWAYS show the message at the LAST episode
                 print("@{}".format(get_current_datetime_as_string()))
-                print("Episode {} of {} running...".format(episode+1, nepisodes), end=" ")
+                print("[t_learn={}] Episode {} of {} running...".format(t_learn, episode+1, nepisodes), end=" ")
                 print("(agent starts at state: {}".format(self.env.getState()), end=" ")
             if self.debug:
                 print("\n[DEBUG] Episode {} of {}:".format(episode+1, nepisodes))
@@ -3522,7 +3525,7 @@ class Simulator:
                 self.env.setState(start_state_first_episode)
             if show_messages(verbose, verbose_period, episode) or episode == nepisodes - 1:  # Note that we ALWAYS show the message at the LAST episode
                 print("@{}".format(get_current_datetime_as_string()))
-                print("Episode {} of {} running...".format(episode+1, nepisodes), end=" ")
+                print("[t_learn={}] Episode {} of {} running...".format(t_learn, episode+1, nepisodes), end=" ")
                 print("(agent starts at state: {}".format(self.env.getState()), end=" ")
             if self.debug:
                 print("\n[DEBUG] Episode {} of {}:".format(episode+1, nepisodes))
