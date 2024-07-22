@@ -15,12 +15,15 @@ import os
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import re
 
 from run_FV import plot_results_fv_mc
 
 
 #=================================== SINGLE SERVER ==================================
 queue_system = "single-server"
+if re.search("projects$", os.getcwd()) is not None:
+    os.chdir("./Python/lib")
 resultsdir = "../../RL-002-QueueBlocking/results/FV/" + queue_system
 
 
@@ -34,6 +37,7 @@ resultsdir = "../../RL-002-QueueBlocking/results/FV/" + queue_system
 # (do NOT use NaN because that makes all the values in the data frame be interpreted as float (adding a `.0` at the end (e.g. 20.0)
 # and this breaks reading the results file --because values are shown with no decimals in the file names)
 # Entries `saveN` and `saveT` indicate whether the corresponding results for fixed N and for fixed T should be saved to a png file, respectively.
+# Entry 'ymax' defines the maximum value on the Y-axis in order to make plots visually comparable for the same K value.
 df_params = pd.DataFrame.from_dict({'K': [20, 20,
                                           40, 40,
                                               40],
@@ -51,7 +55,10 @@ df_params = pd.DataFrame.from_dict({'K': [20, 20,
                                                      False],
                                     'saveT': [False, False,
                                               False, False,
-                                                     False]})
+                                                     False],
+                                    'ymax': [ None, None,
+                                              None, None,
+                                                    None]})
 # Plots for the QUESTA paper (2023)
 # We would like to show convergence results against one parameter (N or T) for different % error levels of the OTHER parameter (T or N)
 df_params = pd.DataFrame.from_dict({'K': [20, 20, 20, 20,
@@ -62,17 +69,19 @@ df_params = pd.DataFrame.from_dict({'K': [20, 20, 20, 20,
                                           3051, 1356, 489],
                                     'T': [4157, 462, 167, 0,
                                           4157, 462, 167],
-                                    'saveN': [False, False, False, False,
-                                              False, False, False],
+                                    'saveN': [False, True, False, False,
+                                              False, True, False],
                                     'saveT': [True, False, False, False,
-                                              True, False, False]})
+                                              True, False, False],
+                                    'ymax': [0.0040*1.1,   0.0040*1.1,   None, None,
+                                             0.000002*1.1, 0.000002*1.1, None]})
 
 
 # Minimum number of particles N and of arrival steps T to plot (to avoid clogging of the plot)
 Nmin = 100
 Tmin = 500
 show_title = False
-fontsize = 20
+fontsize = 26 #24 #20
 figsize = (10, 10)  # Figure size as if only the FV results were plotted. When we include the MC results in the plot as well, the first dimension (width) is multiplied by 2
 
 # We store the results in a list of dictionaries of data frames
@@ -88,7 +97,7 @@ for row in df_params.iterrows():
     N = params['N']
     T = params['T']
 
-    print("Plotting case {} of {}...".format(row[0]+1, df_params.shape[0]))
+    print("Reading case {} of {}...".format(row[0]+1, df_params.shape[0]))
     print("\tK={}, J={} (J/K={:.2f}), N={}, T={}".format(K, J, J/K, N, T))
     # Read the results
     if T > 0:
@@ -113,13 +122,12 @@ for row in df_params.iterrows():
     # - The columns defined in parameters `x` and `x2` are grouping variables that define each violin plot
     # - If violins are NOT always shown it's because the probability could not be estimated for some replications
 
-xmax = xmax * 1.1
-ymax = ymax * 1.1 * 100     # Recall the vertical axis is shown in percentage!!
-xmax = None
-# If needed, override the ymax value in order to make the plots comparable across different analyses (e.g. vs. N and vs. T)
-ymax = None
-#ymax = 0.40 * 1.1
-#ymax = 0.0002 * 1.1
+#xmax = xmax * 1.1  # If a common X-axis is wished, allow some more space to the right of the axis
+xmax = None         # No common X-axis
+#plt.rcParams['text.usetex'] = True     # In principle we should set this parameter to True to use Latex in labels,
+                                        # HOWEVER, when doing so, it doesn't work in my case because the type1cm.sty file is not found...
+                                        # AND IN ANY CASE, I CAN USE \mathbb{} and \mathcal{} COMMANDS EVEN IF THIS PARAMETER 'text.usetex' is False!!!! (amazingly ridiculous)
+                                        # Ref for Latex use: https://matplotlib.org/stable/gallery/text_labels_and_annotations/tex_demo.html
 for row in df_params.iterrows():
     case = row[0]
     params = row[1]
@@ -129,6 +137,7 @@ for row in df_params.iterrows():
     T = params['T']
     saveN = params['saveN']
     saveT = params['saveT']
+    ymax = params['ymax'] * 100 if not np.isnan(params['ymax']) else None     # Recall that the vertical axis shows percentages!
     if show_title:
         titleByT = "nservers={}, K={}, J={} (J/K={:.0f}%), N={}, # Burn-in Steps={}, Min # Cycles for expectations={}" \
                     .format(nservers, K, J, J / K * 100, N, burnin_time_steps, min_num_cycles_for_expectations)
@@ -138,6 +147,8 @@ for row in df_params.iterrows():
         titleByT = titleByN = ""
 
     #-- Plot results as a function of N (for which we need a positive fixed value of T)
+    print("Plotting case {} of {}...".format(row[0]+1, df_params.shape[0]))
+    print("\tK={}, J={} (J/K={:.2f}), N={}, T={}".format(K, J, J/K, N, T))
     if T > 0:
         mask = results[case]['analysisByN']['N'] >= Nmin
         nservers = results[case]['analysisByN'].iloc[0]['nservers']
@@ -149,7 +160,7 @@ for row in df_params.iterrows():
         else:
             figfile = None
         axes = plot_results_fv_mc(results[case]['analysisByN'][mask], x="N", x2="#Cycles(MC)_mean",
-                                  xlabel="# particles", xlabel2="# Return Cycles to state x=J-1",
+                                  xlabel="N: # particles", xlabel2="M: # Return Cycles to state x=J-1",
                                   xmax=xmax,
                                   ymin=0.0, ymax=ymax, plot_mc=True, splines=False,
                                   fontsize=fontsize,
@@ -158,7 +169,8 @@ for row in df_params.iterrows():
                                   title=titleByN,
                                   figsize=figsize,
                                   figmaximize=True,
-                                  figfile=figfile)
+                                  figfile=figfile,
+                                  figdpi=300)
 
     #-- Plot results as a function of T (for which we need a non-NaN positive fixed value of N)
     if N > 0:
@@ -172,7 +184,7 @@ for row in df_params.iterrows():
         else:
             figfile = None
         axes = plot_results_fv_mc(results[case]['analysisByT'][mask], x="T", x2="#Cycles(MC)_mean",
-                                  xlabel="# arrival events", xlabel2="# Return Cycles to state x=J-1",
+                                  xlabel=r"T: # arrival events for $\mathbb{E}(T_A)$ estimation", xlabel2="M: # Return Cycles to state x=J-1",
                                   xmax=xmax,
                                   ymin=0.0, ymax=ymax, plot_mc=True, splines=False,
                                   fontsize=fontsize,
@@ -181,7 +193,8 @@ for row in df_params.iterrows():
                                   title=titleByT,
                                   figsize=figsize,
                                   figmaximize=True,
-                                  figfile=figfile)
+                                  figfile=figfile,
+                                  figdpi=300)
 
 # If we need to save the plot in a figure that is already opened, we can reference the figure number
 # where the plot to be saved has been created and then use plt.savefig().
@@ -591,13 +604,17 @@ import os
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import re
 
 from run_FV import plot_results_fv_mc
 
 
 queue_system = "loss-network"
+if re.search("projects$", os.getcwd()) is not None:
+    os.chdir("./Python/lib")
 resultsdir = "../../RL-002-QueueBlocking/results/FV/" + queue_system
-resultsdir = "C:/users/lundinmatlab/Desktop"
+# Use the following location when the above gives too long of path name (Windows limitation!)
+#resultsdir = "C:/users/lundinmatlab/Desktop"
 
 #resultsfile = "estimates_vs_N_20230316_014100_K=6,block=[4, 6],costs=[180, 600],lambdas=[1, 5],rho=[0.8, 0.6],J=[0.1, 0.6],T=[500],N_values=[80, 160, 320, 640],ProbStart=True_results.csv"
 
@@ -613,6 +630,9 @@ resultsfile = "estimates_vs_T_20230330_232952_K=6,block=[4, 6],costs=[180, 600],
 #resultsfile = "estimates_vs_N_20230315_201909_K=6,block=[4, 6],rho=[0.8, 0.8],J=[0.5, 0.5],T=[500],N_values=[20, 40, 80],ProbStart=False_results.csv"
 ## Does NOT have the expected cost variable!
 
+# Results
+resultsfile = "estimates_vs_T_20230413_225712_K=6,block=[4,6],costs=[2000,20000],lambdas=[1,5],rhos=[0.5,0.3],J=[0.2,0.4],N=[300],T=[160,320,640],Prob=True_results.csv"
+resultsfile = "estimates_vs_T_20240712_095143_K=6,block=[4,6],costs=[2000.0,200000.0],lambdas=[1,5],rhos=[0.3,0.1],J=[0.5,0.5],N=[50],T=[640,1280,2560],Prob=True_results.csv"
 
 #--------- Read and Plot
 results = pd.read_csv(os.path.join(resultsdir, resultsfile))
@@ -623,6 +643,7 @@ if "ExpCost" in results.columns:
     true_cost_var = "ExpCost"
 elif "ExpCost(K)" in results.columns:
     true_cost_var = "ExpCost(K)"
+true_proba_var = "Pr(True)"
 
 # Plot results
 plot_mc = True
@@ -636,8 +657,16 @@ else:
 if resultsfile[:14] == "estimates_vs_N":
     xvar = "N"; xlabel = "# particles"
 elif resultsfile[:14] == "estimates_vs_T":
-    xvar = "T"; xlabel = "# arrival events"
-axes = plot_results_fv_mc(  results, x=xvar, x2="#Cycles(MC)_mean",
+    xvar = "T"; xlabel = r"T: # arrival events for $\mathbb{E}(T_A)$ estimation"
+axes_proba = plot_results_fv_mc(  results, x=xvar, x2="#Cycles(MC)_mean",
+                            prob_mc="Pr(MC)", prob_fv="Pr(FV)", prob_true=true_proba_var, multiplier=1,
+                            xlabel=xlabel, xlabel2="# Return Cycles to absorption set",
+                            ylabel="Blocking probability (%)",
+                            ymin=0.0, plot_mc=plot_mc, splines=False,
+                            fontsize=fontsize,
+                            figmaximize=True,
+                            title=title)
+axes_cost = plot_results_fv_mc(  results, x=xvar, x2="#Cycles(MC)_mean",
                             prob_mc="ExpCost(MC)", prob_fv="ExpCost(FV)", prob_true=true_cost_var, multiplier=1,
                             xlabel=xlabel, xlabel2="# Return Cycles to absorption set",
                             ylabel="Expected cost",
@@ -645,5 +674,86 @@ axes = plot_results_fv_mc(  results, x=xvar, x2="#Cycles(MC)_mean",
                             fontsize=fontsize,
                             figmaximize=True,
                             title=title)
+
+
+# TODO: (2024/07/15) Move this step to a function or method so that the function can be called both from here and from run_FV_LossNetwork.py
+#--- Plot the results by blocking state for one particular instance (e.g. N=50, T=1200)
+# NOTE: (2024/07/15) This piece of code was adapted from run_FV_LossNetwork.py, and the idea is that we put it into a function so that we do not repeat the same code.
+# In addition, since here we are reading the results from a file, we need to do a string-to-array conversion below of the columns
+# that contain arrays (e.g. "BlockingStates") which is not necessary when generating the plot directly in run_FV_LossNetwork.py
+# because those data are already stored in the correct array format, as they are generated by the process itself, as opposed to being read from a CSV file.
+analysis_type = "T"
+other_variable = "N"
+value_parameter_not_analyzed = results[other_variable].iloc[0]
+
+# Split relevant columns that are stored as lists into separate columns
+# NOTE: 'ExpectedCosts' contains the TRUE expected cost by blocking state, and all estimated expected costs (MC and FV) are computed by multiplying this 'ExpectedCosts'
+# by the probability estimate ratio (e.g. ProbasRatio(MC), which is equal to Probas(MC) / Probas(True))
+columns_to_convert = ['BlockingStates', 'Probas(MC)', 'ProbasRatio(MC)', 'Probas(FV)', 'ProbasRatio(FV)', 'Probas(True)', 'ExpectedCosts']
+all_columns_converted = []
+for col in columns_to_convert:
+    # If the results are read from a file, any array stored in a cell will be read as string, hence we need to convert the string to the list that it actually represents
+    if isinstance(results[col].iloc[0], str):
+        # Convert the string to what it really contains in each row
+        for i in results[col].index:
+            results[col].iloc[i] = eval(results[col].iloc[i])
+    n_blocking_states = len(results[col].iloc[0])
+    column_names = [col + '_' + str(j) for j in range(1, n_blocking_states + 1)]
+    results[column_names] = pd.DataFrame(results[col].tolist(), index=results.index)
+    all_columns_converted += column_names
+# Compute statistics on the results associated to the largest parameter value (which is more reliable) (e.g. max T value if analysis by T)
+msk = results.index == min(results.index)
+msk = results.index == max(results.index)
+param_value = results[analysis_type][msk].iloc[0]
+results_n = results[all_columns_converted][msk].agg(['count'])
+results_mean = results[all_columns_converted][msk].agg(['mean'])
+results_std = results[all_columns_converted][msk].agg(['std'])
+results_n['id'] = 1  # Needed for the transposition
+results_mean['id'] = 1  # Needed for the transposition
+results_std['id'] = 1  # Needed for the transposition
+results_toplot_n = pd.wide_to_long(results_n, columns_to_convert, i='id', j='idx', sep="_")
+results_toplot_n.reset_index(inplace=True)
+results_toplot_n['BlockingStates'] = results['BlockingStates'].iloc[0]
+results_toplot_mean = pd.wide_to_long(results_mean, columns_to_convert, i='id', j='idx', sep="_")
+results_toplot_mean.reset_index(inplace=True)
+results_toplot_mean['BlockingStates'] = results['BlockingStates'].iloc[0]
+results_toplot_std = pd.wide_to_long(results_std, columns_to_convert, i='id', j='idx', sep="_")
+results_toplot_std.reset_index(inplace=True)
+results_toplot_std['BlockingStates'] = results['BlockingStates'].iloc[0]
+# Sort the values by decreasing true contribution to the expected cost
+results_toplot_mean['ExpectedCostsRel'] = results_toplot_mean['ExpectedCosts'] / results['ExpCost'].iloc[0]
+results_toplot_mean['ExpectedCosts(MC)'] = results_toplot_mean['ExpectedCosts'] * results_toplot_mean['ProbasRatio(MC)']
+results_toplot_mean['ExpectedCostsRel(MC)'] = results_toplot_mean['ExpectedCosts(MC)'] / results['ExpCost'].iloc[0]
+results_toplot_mean['ExpectedCosts(FV)'] = results_toplot_mean['ExpectedCosts'] * results_toplot_mean['ProbasRatio(FV)']
+results_toplot_mean['ExpectedCostsRel(FV)'] = results_toplot_mean['ExpectedCosts(FV)'] / results['ExpCost'].iloc[0]
+results_toplot_std['ExpectedCosts(FV)'] = results_toplot_mean['ExpectedCosts'] * results_toplot_std['ProbasRatio(FV)']
+results_toplot_std['ExpectedCostsRel(FV)'] = results_toplot_std['ExpectedCosts(FV)'] / results['ExpCost'].iloc[0]
+results_toplot_std['ExpectedCosts(MC)'] = results_toplot_mean['ExpectedCosts'] * results_toplot_std['ProbasRatio(MC)']
+results_toplot_std['ExpectedCostsRel(MC)'] = results_toplot_std['ExpectedCosts(MC)'] / results['ExpCost'].iloc[0]
+
+# If sorting directly on the data frame, use the following sort_values() method
+# results_toplot_mean.sort_values(['ExpectedCosts'], ascending=False, inplace=True)
+# results_toplot_mean.reset_index(inplace=True)
+ord = np.argsort(results_toplot_mean['ExpectedCosts'])[::-1]
+ax_probas, ax_costs = plt.figure().subplots(1, 2)
+blocking_state_indices = np.arange(len(results_toplot_mean))
+ax_probas.plot(blocking_state_indices, results_toplot_mean['Probas(True)'][ord], 'b.--')
+ax_probas.errorbar(blocking_state_indices, results_toplot_mean['Probas(FV)'][ord], yerr=results_toplot_std['Probas(FV)'][ord], capsize=4, marker='x', color='green', markersize=10)
+ax_probas.errorbar(blocking_state_indices + 0.05, results_toplot_mean['Probas(MC)'][ord], yerr=results_toplot_std['Probas(MC)'][ord], capsize=4, marker='x', color='red', markersize=10)
+ax_costs.plot(blocking_state_indices, results_toplot_mean['ExpectedCostsRel'][ord], 'b.--')
+ax_costs.errorbar(blocking_state_indices, results_toplot_mean['ExpectedCostsRel(FV)'][ord], yerr=results_toplot_std['ExpectedCostsRel(FV)'][ord], capsize=4, marker='x', color='green', markersize=10)
+ax_costs.errorbar(blocking_state_indices + 0.05, results_toplot_mean['ExpectedCostsRel(MC)'][ord], yerr=results_toplot_std['ExpectedCostsRel(MC)'][ord], capsize=4, marker='x', color='red', markersize=10)
+# ax_probas.set_yscale('log')    # Use log-scale when probabilities have very different scales
+# ax_costs.set_yscale('log')     # Use log-scale when expected costs have very different scales
+for ax in [ax_probas, ax_costs]:
+    ax.set_xlabel("Blocking state (sorted by decreasing True Expected Cost)")
+    ax.xaxis.set_ticklabels([ax.xaxis.get_ticklabels()[0]] + list(results_toplot_mean['BlockingStates'][ord]) + [ax.xaxis.get_ticklabels()[-1]])
+ax_probas.set_ylabel("Probability")
+ax_costs.set_ylabel("Proportion of expected cost")
+ax_probas.set_title("Probability by blocking state")
+ax_costs.set_title("Proportion of Expected Cost by blocking state over Total Expected Cost")
+ax_probas.legend(["Pr(True)", "Pr(FV)", "Pr(MC)"])
+ax_costs.legend(["True proportion", "Estimated proportion (FV)", "Estimated proportion (MC)"])
+plt.suptitle(f"Probabilities and Expected Cost by blocking state for largest analysis variable value ({analysis_type}={param_value}, {other_variable}={value_parameter_not_analyzed})\n(sorted by decreasing True Expected Cost, over {results_toplot_n['ExpectedCosts'].iloc[0]} replications)")
 #=================================== LOSS NETWORK ==================================
 

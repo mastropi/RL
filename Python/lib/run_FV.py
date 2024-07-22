@@ -862,7 +862,8 @@ def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None, y2=Non
                        plot_violin_only=True,
                        figsize=(4, 4),
                        figmaximize=False,
-                       figfile=None):
+                       figfile=None,
+                       figdpi=300):
     """
     Plots the estimated blocking probability by number of particles (FV) and average #Cycles (MC)
 
@@ -872,7 +873,7 @@ def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None, y2=Non
     Arguments:
     df_results: pandas DataFrame
         Data frame containing the results of the FV estimation analysis, such as convergence as the number of particles N increases
-        or as the number of arrival events T increases.
+        or as the number T of arrival events for estimating E(T_A) increases.
         This data frame should contain the columns whose names are indicated in parameters `prob_fv`, `prob_mc`, `prob_true`,
         `nevents_fv`, nevents_mc`.
 
@@ -933,6 +934,10 @@ def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None, y2=Non
     figfile: str
         Name of the file where the plots should be saved, if requested by a non None value.
         default: None
+
+    figdpi: (opt) int
+        DPI (dots per inch) value to use when saving the figure.
+        default: 300
 
     Example: This example uses a secondary axis on the last variability plot (#6) to show the complexity of the algorithm
     [Aug-2021]
@@ -1235,8 +1240,9 @@ def plot_results_fv_mc(df_results, x, x2=None, xlabel=None, xlabel2=None, y2=Non
         # Maximize the figure before saving so that we leverage the maximum space and what is shown in the plot does not get clogged (specially if using large fontsizes for paper publication!)
         # Apparently this only works for the Qt backend
         # Ref: https://stackoverflow.com/questions/12439588/how-to-maximize-a-plt-show-window-using-python
+        format = figfile_extension = figfile[-3:]
         plt.gcf().subplots_adjust(left=0.15, top=0.75)
-        plt.savefig(figfile)
+        plt.savefig(figfile, format=format, dpi=figdpi, bbox_inches="tight")   # Ref for `bbox_hinches="tight"`: https://stackoverflow.com/questions/16183462/saving-images-in-python-at-a-very-high-quality
 
     if not plot_violin_only:
         return df2plot, axes_error[0], axes_violin[0], axes_variability[0], axes_bias[0], axes_mse[0]
@@ -1615,7 +1621,7 @@ if __name__ == "__main__":
                 for T in T_values:
                     # Note: the columns defined in parameters `x` and `x2` are grouping variables that define each violin plot
                     axes = plot_results_fv_mc(results, x="N", x2="#Cycles(MC)_mean",
-                                              xlabel="# particles", xlabel2="# Return Cycles to {}".format(J-1),
+                                              xlabel="N: # particles", xlabel2="# Return Cycles to {}".format(J-1),
                                               ymin=0.0, plot_mc=run_mc, splines=False,
                                               title="nservers={}, K={}, J={}, T={}, BITS={}, MINCE={}" \
                                                     .format(nservers, K, J, T, burnin_time_steps, min_num_cycles_for_expectations))
@@ -1623,7 +1629,7 @@ if __name__ == "__main__":
                 for N in N_values:
                     # Note: the columns defined in parameters `x` and `x2` are grouping variables that define each violin plot
                     axes = plot_results_fv_mc(results, x="T", x2="#Cycles(MC)_mean",
-                                              xlabel="# arrival events", xlabel2="# Return Cycles to {}".format(J-1),
+                                              xlabel=r"T: # arrival events for $\mathbb{E}(T_A)$ estimation", xlabel2="# Return Cycles to {}".format(J-1),
                                               ymin=0.0, plot_mc=run_mc, splines=False,
                                               title="nservers={}, K={}, J={}, N={}, BITS={}, MINCE={}" \
                                                     .format(nservers, K, J, N, burnin_time_steps, min_num_cycles_for_expectations))
