@@ -58,11 +58,13 @@ def run_simulation_policy_learning(simul, replications, dict_params_simul, dict_
                                    params_read_from_benchmark_file=False, benchmark=None,
                                    seed=None, verbose=False):
     """
+    Runs the simulation that learns an optimal policy on the environment and agent stored in the simulator object
 
     Arguments:
     simul: simulator object (e.g. of class SimulatorQueue)
-        Simulator object used to run the simulation.
-        It should have the run() method defined.
+        Simulator object used to run the simulation which must contain an environment on which the simulation is run and an agent with a policy
+        that interacts with it.
+        The method that runs the simulation is called  run().
 
     replications: int
         Number of replications to run.
@@ -103,7 +105,7 @@ def run_simulation_policy_learning(simul, replications, dict_params_simul, dict_
         default: False
 
     Return: Tuple
-    Duple with the following elements:
+    Tuple with the following elements:
     - theta_opt_values: list containing the optimum theta values found for each replication run on the analyzed case.
     - K_opt_values: list containing the optimum deterministic blocking sizes.
     - cost_opt: optimum expected cost associated to the optimum theta values found (this does NOT need to be the actual optimum expected cost!)
@@ -232,7 +234,7 @@ def run_simulation_policy_learning(simul, replications, dict_params_simul, dict_
         theta_opt_values = [theta_opt_values]
     # Compute the optimum blocking sizes (using the ROUND function instead of the CEIL function so that we take into account to what integer value is theta closest
     # (e.g. theta = 3.1 => K = 4 instead of K = 5 (which is too large for theta very close to 3, as when theta = 3, K is 4)
-    K_opt_values =  [get_deterministic_blocking_boundaries(simul.agent, t, exact=False) for t in theta_opt_values]
+    K_opt_values = [get_deterministic_blocking_boundaries(simul.agent, t, exact=False) for t in theta_opt_values]
     # Optimum expected cost.
     # NOTE: This is NOT the expected cost at 'theta_next' just retrieved above but the expected cost at 'theta' i.e. before the update of theta
     # (but still the two values are expected to be similar)
@@ -269,11 +271,13 @@ def compute_optimum_blocking_sizes_and_expected_cost(simul: SimulatorQueue, dict
             - 'reward_func_params': dictionary of reward function parameters, which should have the following entries:
                 - 'reward_at_rejection': list containing the reward (negative) for rejecting an incoming job of class i, i = 0, 1, ..., len(job_class_rates)-1.
 
-    func_optimum: callable
+    func_optimum: (opt) callable
         Callable stating the function on which the optimum is computed. This is only used in no-buffer/loss-network systems.
+        Default: min
 
     Return: tuple
     Tuple with the following two elements:
+    - expected costs: a dictionary containing the expected cost (value) for each tuple corresponding to the blocking states (key)
     - optimum blocking sizes: list of integers or list of lists containing the optimum blocking sizes based on the dict_params_environment['reward_func']
     (for single-buffer queue systems, in which we have a list of integers --e.g. [8]) or on the parameters defined in `dict_params_environment`
     (for systems with no buffer, i.e. loss networks, in which we have a list of lists -- e.g. [[4, 7, 10]]).
@@ -336,7 +340,7 @@ def compute_optimum_blocking_sizes_and_expected_cost(simul: SimulatorQueue, dict
         average_expected_cost = np.nan
         maximum_expected_cost = np.nan
 
-    return optimum_blocking_sizes, optimum_expected_cost, average_expected_cost, maximum_expected_cost
+    return expected_costs, optimum_blocking_sizes, optimum_expected_cost, average_expected_cost, maximum_expected_cost
 #---------------------------- Auxiliary functions ---------------------------#
 
 
@@ -511,7 +515,7 @@ def parse_input_parameters(argv):
     default_queue_system = "loss-network" #"single-server" #"loss-network"
     default_create_output_files = True
     parser.set_defaults(queue_system=default_queue_system,
-                        method="MC",
+                        method="FV",
                         t_learn=30,
                         replications=20,
                         benchmark_filename="benchmark_fv.csv", # Not used when benchmark_datetime is given (i.e. not empty or None)
@@ -657,7 +661,7 @@ if __name__ == "__main__":
         np.random.seed(1)
         multiplicative_noise_values = [0.5, 2]
         blocking_costs = [int(round(c*n)) if c*n > 1 else c*n for c, n in zip(blocking_costs, multiplicative_noise_values)]
-        blocking_costs = [2000, 20000] #[2000, 20000] ([0.5, 0.3]) #[180, 600] ([0.8. 0.6]) # Costs computed in run_FVRL.py from p(x), lambdas and rhos
+        blocking_costs = [2000, 20000] #[2.5E3, 4.9E6] #[2000, 20000] ([0.5, 0.3]) #[180, 600] ([0.8. 0.6]) # Costs computed in run_FVRL.py from p(x), lambdas and rhos
         #************ BLOCKING COSTS ************
     rhos = [l / m for l, m in zip(job_class_rates, service_rates)]
     nservers = len(service_rates)
@@ -857,7 +861,7 @@ if __name__ == "__main__":
                 dict_params['environment']['reward_func_params']['buffer_size_ref'] = theta_ref
 
             # Compute the optimum blocking sizes and its respective expected cost, i.e. the one this optimization process optimizes
-            K_true, cost_true, cost_mean, cost_max = compute_optimum_blocking_sizes_and_expected_cost(simul, dict_params['environment'])
+            expected_costs, K_true, cost_true, cost_mean, cost_max = compute_optimum_blocking_sizes_and_expected_cost(simul, dict_params['environment'])
             # Update the theta_true value based on the K_true just computed.
             # We pick ONE of the K-values as in general, although NOT commonly, the optimum K-values (i.e. the array of optimum K)
             # may be more than one array, which is the case when the optimum expected cost is achieved at several different values.
@@ -986,7 +990,7 @@ if __name__ == "__main__":
             burnin_time_steps = benchmark_groups['burnin_time_steps'].iloc[i]
             min_num_cycles_for_expectations = benchmark_groups['min_n_cycles'].iloc[i]
 
-            K_true, cost_true, cost_mean, cost_max = compute_optimum_blocking_sizes_and_expected_cost(simul, dict_params['environment'])
+            expected_costs, K_true, cost_true, cost_mean, cost_max = compute_optimum_blocking_sizes_and_expected_cost(simul, dict_params['environment'])
             K = get_deterministic_blocking_boundaries(simul.agent, theta_start)
 
             dict_params_simul = {
