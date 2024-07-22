@@ -184,6 +184,7 @@ def analyze_convergence(capacity=10, job_class_rates=[0.7], service_rates=[1.0],
                         blocking_sizes=[5], blocking_costs=None,
                         N=[20, 40, 80],
                         T=500,
+                        J=None,
                         J_factor=[0.3],
                         use_stationary_probability_for_start_state=False,
                         burnin_time_steps=20, min_num_cycles_for_expectations=5,
@@ -217,9 +218,16 @@ def analyze_convergence(capacity=10, job_class_rates=[0.7], service_rates=[1.0],
         the same number of elements as the number of particles that are tried in this simulation.
         default: 500
 
+    J: (opt) list
+        List of J values to consider for the different job classes that define the absorption size for each class
+        in the Fleming-Viot simulation.
+        If given, it has priority over J_factor.
+        default: None
+
     J_factor: (opt) list
         List of J factors to consider for the different job classes that define the absorption size for each class
         in the Fleming-Viot simulation.
+        This value is not used if J is given.
         default: [0.3]
 
     burnin_time_steps: (opt) int
@@ -325,7 +333,11 @@ def analyze_convergence(capacity=10, job_class_rates=[0.7], service_rates=[1.0],
     # This is why also an convergence analysis on increasing number of arrival events (T) is sensible.
 
     #--------------------------- Parse input parameters -----------------------
-    Js = [max(1, int( round(JF * K) )) for JF, K in zip(J_factor, blocking_sizes)]
+    if J is None:
+        Js = [max(1, int( round(JF * K) )) for JF, K in zip(J_factor, blocking_sizes)]
+    else:
+        Js = J
+    absorption_set, activation_set = define_absorption_and_activation_sets(Js)
 
     if is_scalar(N):
         if is_scalar(T):
@@ -562,7 +574,7 @@ def analyze_convergence(capacity=10, job_class_rates=[0.7], service_rates=[1.0],
 
                 exec_time_mc = timer() - time_start_mc
             else:
-                proba_blocking_mc, expected_return_time_mc, n_return_observations, dict_stats_mc = np.nan, None, None, {}
+                proba_blocking_mc, expected_reward_mc, expected_return_time_mc, n_return_observations, dict_stats_mc = np.nan, None, None, {}
                 time_mc = 0.0
                 n_events_mc = 0
                 exec_time_mc = 0.0
@@ -714,12 +726,15 @@ def parse_input_parameters(argv):
                                          "[--analysis_type] "
                                          "[--values_parameter_analyzed] "
                                          "[--value_parameter_not_analyzed] "
+                                         "[--J] "
                                          "[--J_factor] "
+                                         "[--use_stationary_probability_for_start_states] "
                                          "[--burnin_time_steps] "
                                          "[--min_num_cycles_for_expectations] "
                                          "[--replications] "
                                          "[--seed] "
                                          "[--save_results] "
+                                         "[--save_with_dt] "
                                          "[--plot] "
                                          )
     parser.add_option("--queue_system",
@@ -735,20 +750,27 @@ def parse_input_parameters(argv):
                       metavar="Type of analysis",
                       help="Type of analysis, either 'N' (#particles is increased) or 'T' (#arrival events is increased) [default: %default]")
     parser.add_option("--values_parameter_analyzed", dest="values_parameter_analyzed",
+                      type="str",
                       action="callback",
                       callback=convert_str_argument_to_list_of_type,
                       metavar="Values of the analysis parameter",
                       help="List of values of the parameter against which the convergence of the method is analyzed [default: %default]")
-    parser.add_option("--parameter_not_analyzed",
+    parser.add_option("--value_parameter_not_analyzed",
                       type="int",
                       metavar="Parameter not analyzed",
                       help="Fixed value of the parameter against which the convergence of the method is NOT analyzed (i.e. parameter 'T' if analysis_type='N' or 'N' if analysis_type='T') [default: %default]")
+    parser.add_option("--J", dest="J",
+                      type="str",
+                      action="callback",
+                      callback=convert_str_argument_to_list_of_type,
+                      metavar="J values for the different job classes",
+                      help="Absorption set sizes J for each class [default: %default]")
     parser.add_option("--J_factor", dest="J_factor",
                       type="str",
                       action="callback",
                       callback=convert_str_argument_to_list_of_type,
                       metavar="J/K factors",
-                      help="Factors that define the absorption set size J [default: %default]")
+                      help="Factors that define the absorption set size J (only used when J is not given) [default: %default]")
     parser.add_option("--use_stationary_probability_for_start_states",
                       action="store_true",
                       help="Whether to use the stationary probability distribution for the start states in Fleming-Viot simulation [default: %default]")
@@ -765,8 +787,7 @@ def parse_input_parameters(argv):
                       metavar="# Replications",
                       help="Number of replications to run [default: %default]")
     parser.add_option("--run_mc",
-                      type="int",
-                      metavar="Whether to run the Monte-Carlo estimation",
+                      action="store_true",
                       help="Whether to run the Monte-Carlo estimation against which the FV estimator is compared [default: %default]")
     parser.add_option("--seed",
                       type="int",
@@ -789,13 +810,24 @@ def parse_input_parameters(argv):
                           action="store_true",
                           help="verbose: show relevant messages in the log")
 
-    # NOTE: The default values of parameters processed by callbacks should define the value in the type of the `dest` option of the callback!
+    # IMPORTANT: The default values of parameters processed by callbacks should define the value using the type of the input argument of the callback (e.g. str)
+    # E.g. `--values_parameter_analyzed "[64, 128, 256]"` --> Note that there is NO equal sign following the parameter name as is the case with the other numeric or str parameters
+    # as in `--analysis_type=T` (str type) or `--burnin_time_steps=10` (int type).
+    # Also, boolean parameters are EITHER included or NOT included among the arguments. If included, the action defined in the `action` argument of parser.add_option() above
+    # defines what value is assigned to the variable given in the `dest=` argument of said add_option() method.
+    # When action="store_true", the default action set for the argument just below should be `False`, o.w. the parameter will always be set to True,
+    # as there is no way to set it to False (since False is set when the argument is NOT included among the script arguments...!)
+    # The contrary is true if action="store_false", i.e. the parameter's default value should be set to True.
+    # NOTE however that this may not always be the case, if e.g. the script is called from PyCharm where the easy way
+    # to pass parameter values is to set their default with parser.defaults(). If this is the case, WHENEVER we use
+    # the script to run a process on the server is by setting the default value of boolean variables to False.
     parser.set_defaults(queue_system="loss-network",
                         method="FV",
                         analysis_type="T",
-                        values_parameter_analyzed=[64, 128, 256], #[160, 320, 640], #[640, 1280, 2560], #[80, 160, 320, 640], #[1280, 2560], #[80, 160, 320, 640],
-                        value_parameter_not_analyzed=50, #400 #500 #100
-                        J_factor=[0.2, 0.4],    # [0.1, 0.6]
+                        values_parameter_analyzed=[400, 2000, 4000], #[640, 1280, 2560], #[400, 4000], #[640, 1280, 2560], #[400, 800, 1600], #[64, 128, 256], #[160, 320, 640], #[640, 1280, 2560], #[80, 160, 320, 640], #[1280, 2560], #[80, 160, 320, 640],
+                        value_parameter_not_analyzed=200, #200, #50, #400 #500 #100
+                        J=[2, 3], #[2, 3], #[1, 2], #[1, 1], #None,
+                        J_factor=None, #[0.5, 0.5], #[0.2, 0.4],    # [0.1, 0.6]
                         use_stationary_probability_for_start_states=False,
                         burnin_time_steps=10,
                         min_num_cycles_for_expectations=5,
@@ -824,9 +856,10 @@ def show_execution_parameters(options):
     print("blocking sizes={}".format(blocking_sizes))
     print("Type of analysis: '{}'".format(options.analysis_type))
     print("Capacity K={}".format(capacity))
+    print("Activation sizes J={}".format(options.J))
     print("Activation size factors J/K={}".format(options.J_factor))
     print("# particles N={}".format(N_values))
-    print("# arrival events T={}".format(T_values))
+    print("# arrival events for E(T_A) estimation T={}".format(T_values))
     print("use_stationary_probability_for_start_states={}".format(options.use_stationary_probability_for_start_states))
     print("Burn-in time steps BITS={}".format(options.burnin_time_steps))
     print("Min #cycles to estimate expectations MINCE={}".format(options.min_num_cycles_for_expectations))
@@ -851,7 +884,7 @@ if __name__ == "__main__":
     if options.queue_system == "loss-network":
         capacity = 6 #7 #6 #10
         job_class_rates = [1, 5]
-        rhos = [0.3, 0.1] #[0.8, 0.6] #[0.2, 0.1] #[0.5, 0.3]
+        rhos = [0.5, 0.3] #[0.3, 0.1] #[0.8, 0.6] #[0.3, 0.1] #[0.8, 0.6] #[0.2, 0.1] #[0.5, 0.3]
         service_rates = [l / r for l, r in zip(job_class_rates, rhos)]
         blocking_sizes = [4, 6] #[1, 2] #[4, 6] #[5, 7] #[4, 6]
 
@@ -863,30 +896,32 @@ if __name__ == "__main__":
         np.random.seed(1)
         multiplicative_noise_values = [0.5, 2]
         #blocking_costs = [int(round(c*n)) if c*n > 1 else c*n for c, n in zip(blocking_costs, multiplicative_noise_values)]
-        blocking_costs = [2.5E3, 4.9E6] #[2000, 20000] ([0.5, 0.3]) #[180, 600] ([0.8. 0.6]) # Costs computed in run_FVRL.py from p(x), lambdas and rhos
+        blocking_costs = [2E3, 2E4] #[1, 1] #[2.5E3, 4.9E6] #[2000, 20000] ([0.5, 0.3]) #[180, 600] ([0.8. 0.6]) # Costs computed in run_FVRL.py from p(x), lambdas and rhos
         #************ BLOCKING COSTS ************
     else:
         raise ValueError(f"The queue system ({options.queue_system}) is invalid. Valid queue systems are: 'loss-network'")
 
     nservers = len(service_rates)
+    J = options.J
     J_factor = options.J_factor
-    #J = int(np.round(options.J_factor * K))    # We need the float() because the input arguments are read as strings when running the program from the command line
 
     # Set the values of N and T
     if not options.analysis_type in ["N", "T"]:
         raise ValueError("Parameter 'analysis_type' must be either 'N' or 'T'")
     if options.analysis_type == "N":
+        other_variable = "T"
         N_values = options.values_parameter_analyzed
         T_values = [options.value_parameter_not_analyzed]
         resultsfile_prefix = "estimates_vs_N"
         params_str = "K={},block={},costs={},lambdas={},rho={},J={},T={},N={},Prob={}" \
-            .format(capacity, blocking_sizes, 1 if blocking_costs is None else blocking_costs, job_class_rates, rhos, J_factor, T_values, N_values, options.use_stationary_probability_for_start_states)
+            .format(capacity, blocking_sizes, 1 if blocking_costs is None else blocking_costs, job_class_rates, rhos, J if J is not None else J_factor, T_values, N_values, options.use_stationary_probability_for_start_states)
     else:
+        other_variable = "N"
         N_values = [options.value_parameter_not_analyzed]
         T_values = options.values_parameter_analyzed
         resultsfile_prefix = "estimates_vs_T"
         params_str = "K={},block={},costs={},lambdas={},rhos={},J={},N={},T={},Prob={}" \
-                .format(capacity, blocking_sizes, 1 if blocking_costs is None else blocking_costs, job_class_rates, rhos, J_factor, N_values, T_values, options.use_stationary_probability_for_start_states) \
+                .format(capacity, blocking_sizes, 1 if blocking_costs is None else blocking_costs, job_class_rates, rhos, J if J is not None else J_factor, N_values, T_values, options.use_stationary_probability_for_start_states) \
                 .replace(" ", "")
 
     show_execution_parameters(options)
@@ -905,6 +940,7 @@ if __name__ == "__main__":
                                                 blocking_sizes=blocking_sizes, blocking_costs=blocking_costs,
                                                 N=N_values, #[N, 2*N, 4*N, 8*N, 16*N],  # [800, 1600, 3200], #[10, 20, 40], #[24, 66, 179],
                                                 T=T_values, #50, #[170, 463, 1259],
+                                                J=J,
                                                 J_factor=J_factor,
                                                 use_stationary_probability_for_start_state=options.use_stationary_probability_for_start_states,
                                                 burnin_time_steps=options.burnin_time_steps, min_num_cycles_for_expectations=options.min_num_cycles_for_expectations,
@@ -976,7 +1012,11 @@ if __name__ == "__main__":
         closeLogFile(fh_log, stdout_sys, dt_start)
 
     if True:
+        # Plot the estimated probability and expected cost by blocking state, so that we can analyze how well each blocking state contributing to the expected cost is estimated
+
         # Split relevant columns that are stored as lists into separate columns
+        # NOTE: 'ExpectedCosts' contains the TRUE expected cost by blocking state, and all estimated expected costs (MC and FV) are computed by multiplying this 'ExpectedCosts'
+        # by the probability estimate ratio (e.g. ProbasRatio(MC), which is equal to Probas(MC) / Probas(True))
         columns_to_convert = ['BlockingStates', 'Probas(MC)', 'ProbasRatio(MC)', 'Probas(FV)', 'ProbasRatio(FV)', 'Probas(True)', 'ExpectedCosts']
         all_columns_converted = []
         for col in columns_to_convert:
@@ -984,31 +1024,57 @@ if __name__ == "__main__":
             column_names = [col + '_' + str(j) for j in range(1, n_blocking_states+1)]
             results[column_names] = pd.DataFrame(results[col].tolist(), index=results.index)
             all_columns_converted += column_names
-        # Compute statistics on the results associated to the largest parameter value (which is more reliable)
+        # Compute statistics on the results associated to the largest parameter value (which is more reliable) (e.g. max T value if analysis by T)
+        msk = results.index == min(results.index)
         msk = results.index == max(results.index)
+        param_value = results[options.analysis_type][msk].iloc[0]
+        results_n = results[all_columns_converted][msk].agg(['count'])
         results_mean = results[all_columns_converted][msk].agg(['mean'])
-        results_std = results[all_columns_converted][msk].agg(['mad'])
+        results_std = results[all_columns_converted][msk].agg(['std'])
+        results_n['id'] = 1  # Needed for the transposition
         results_mean['id'] = 1  # Needed for the transposition
         results_std['id'] = 1  # Needed for the transposition
-        results_toplot = pd.wide_to_long(results_mean, columns_to_convert, i='id', j='idx', sep="_")
-        results_toplot.reset_index(inplace=True)
-        results_toplot['BlockingStates'] = results['BlockingStates'].iloc[0]
+        results_toplot_n = pd.wide_to_long(results_n, columns_to_convert, i='id', j='idx', sep="_")
+        results_toplot_n.reset_index(inplace=True)
+        results_toplot_n['BlockingStates'] = results['BlockingStates'].iloc[0]
+        results_toplot_mean = pd.wide_to_long(results_mean, columns_to_convert, i='id', j='idx', sep="_")
+        results_toplot_mean.reset_index(inplace=True)
+        results_toplot_mean['BlockingStates'] = results['BlockingStates'].iloc[0]
         results_toplot_std = pd.wide_to_long(results_std, columns_to_convert, i='id', j='idx', sep="_")
         results_toplot_std.reset_index(inplace=True)
         results_toplot_std['BlockingStates'] = results['BlockingStates'].iloc[0]
         # Sort the values by decreasing true contribution to the expected cost
-        results_toplot['ExpectedCostsRel'] = results_toplot['ExpectedCosts'] / results['ExpCost'].iloc[0]
-        results_toplot['ExpectedCosts(MC)'] = results_toplot['ExpectedCosts'] * results_toplot['ProbasRatio(MC)']
-        results_toplot['ExpectedCostsRel(MC)'] = results_toplot['ExpectedCosts(MC)'] / results['ExpCost'].iloc[0]
-        results_toplot['ExpectedCosts(FV)'] = results_toplot['ExpectedCosts'] * results_toplot['ProbasRatio(FV)']
-        results_toplot['ExpectedCostsRel(FV)'] = results_toplot['ExpectedCosts(FV)'] / results['ExpCost'].iloc[0]
-        results_toplot_std['ExpectedCosts(FV)'] = results_toplot['ExpectedCosts'] * results_toplot_std['ProbasRatio(FV)']
+        results_toplot_mean['ExpectedCostsRel'] = results_toplot_mean['ExpectedCosts'] / results['ExpCost'].iloc[0]
+        results_toplot_mean['ExpectedCosts(MC)'] = results_toplot_mean['ExpectedCosts'] * results_toplot_mean['ProbasRatio(MC)']
+        results_toplot_mean['ExpectedCostsRel(MC)'] = results_toplot_mean['ExpectedCosts(MC)'] / results['ExpCost'].iloc[0]
+        results_toplot_mean['ExpectedCosts(FV)'] = results_toplot_mean['ExpectedCosts'] * results_toplot_mean['ProbasRatio(FV)']
+        results_toplot_mean['ExpectedCostsRel(FV)'] = results_toplot_mean['ExpectedCosts(FV)'] / results['ExpCost'].iloc[0]
+        results_toplot_std['ExpectedCosts(FV)'] = results_toplot_mean['ExpectedCosts'] * results_toplot_std['ProbasRatio(FV)']
         results_toplot_std['ExpectedCostsRel(FV)'] = results_toplot_std['ExpectedCosts(FV)'] / results['ExpCost'].iloc[0]
+        results_toplot_std['ExpectedCosts(MC)'] = results_toplot_mean['ExpectedCosts'] * results_toplot_std['ProbasRatio(MC)']
+        results_toplot_std['ExpectedCostsRel(MC)'] = results_toplot_std['ExpectedCosts(MC)'] / results['ExpCost'].iloc[0]
 
-        results_toplot.sort_values(['ExpectedCosts'], ascending=False, inplace=True)
-        results_toplot.reset_index(inplace=True)
-        plt.figure()
-        plt.plot(results_toplot['ExpectedCostsRel'], 'b.--')
-        plt.plot(results_toplot['ExpectedCostsRel(FV)'], 'gx-', markersize=10)
-        plt.plot(results_toplot['ExpectedCostsRel(MC)'], 'rx-', markersize=10)
-        plt.gca().set_yscale('log')
+        # If sorting directly on the data frame, use the following sort_values() method
+        #results_toplot_mean.sort_values(['ExpectedCosts'], ascending=False, inplace=True)
+        #results_toplot_mean.reset_index(inplace=True)
+        ord = np.argsort(results_toplot_mean['ExpectedCosts'])[::-1]
+        ax_probas, ax_costs = plt.figure().subplots(1, 2)
+        blocking_state_indices = np.arange(len(results_toplot_mean))
+        ax_probas.plot(blocking_state_indices, results_toplot_mean['Probas(True)'][ord], 'b.--')
+        ax_probas.errorbar(blocking_state_indices, results_toplot_mean['Probas(FV)'][ord], yerr=results_toplot_std['Probas(FV)'][ord], capsize=4, marker='x', color='green', markersize=10)
+        ax_probas.errorbar(blocking_state_indices+0.05, results_toplot_mean['Probas(MC)'][ord], yerr=results_toplot_std['Probas(MC)'][ord], capsize=4, marker='x', color='red', markersize=10)
+        ax_costs.plot(blocking_state_indices, results_toplot_mean['ExpectedCostsRel'][ord], 'b.--')
+        ax_costs.errorbar(blocking_state_indices, results_toplot_mean['ExpectedCostsRel(FV)'][ord], yerr=results_toplot_std['ExpectedCostsRel(FV)'][ord], capsize=4, marker='x', color='green', markersize=10)
+        ax_costs.errorbar(blocking_state_indices+0.05, results_toplot_mean['ExpectedCostsRel(MC)'][ord], yerr=results_toplot_std['ExpectedCostsRel(MC)'][ord], capsize=4, marker='x', color='red', markersize=10)
+        #ax_probas.set_yscale('log')    # Use log-scale when probabilities have very different scales
+        #ax_costs.set_yscale('log')     # Use log-scale when expected costs have very different scales
+        for ax in [ax_probas, ax_costs]:
+            ax.set_xlabel("Blocking state (sorted by decreasing True Expected Cost)")
+            ax.xaxis.set_ticklabels([ax.xaxis.get_ticklabels()[0]] + list(results_toplot_mean['BlockingStates'][ord]) + [ax.xaxis.get_ticklabels()[-1]])
+        ax_probas.set_ylabel("Probability")
+        ax_costs.set_ylabel("Proportion of expected cost")
+        ax_probas.set_title("Probability by blocking state")
+        ax_costs.set_title("Proportion of Expected Cost by blocking state over Total Expected Cost")
+        ax_probas.legend(["Pr(True)", "Pr(FV)", "Pr(MC)"])
+        ax_costs.legend(["True proportion", "Estimated proportion (FV)", "Estimated proportion (MC)"])
+        plt.suptitle(f"Probabilities and Expected Cost by blocking state for largest analysis variable value ({options.analysis_type}={param_value}, {other_variable}={options.value_parameter_not_analyzed})\n(sorted by decreasing True Expected Cost, over {results_toplot_n['ExpectedCosts'].iloc[0]} replications)")

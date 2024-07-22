@@ -371,6 +371,8 @@ class Test_EstAverageValueV_EnvQueueLossNetworkWithJobClasses(unittest.TestCase)
         assert T == 2000, "Number of arrival events is 2000"
         assert K == [4, 2, 5], "Blocking sizes are [4, 2, 5]"
         assert J == [2, 1, 3], "Activation sizes are [1, 1, 1]"
+        assert burnin_time_steps == 20, "The burn-in time is 20 time steps (discrete value)"
+        assert min_num_cycles_for_expectations == 5, "The min # cycles for expectation calculations is 5"
 
     def test_EnvQueueLossNetwork_MetFV_SingleCapacity(self):
         blocking_occupancies_by_jobclass = [4, 2, 5]
@@ -463,9 +465,11 @@ class Test_EstAverageValueV_EnvQueueLossNetworkWithJobClasses(unittest.TestCase)
         assert list(self.env_queue_mm_loss.getJobClassRates()) == [0.1, 0.5, 0.8], "Job arrival rates are [0.1, 0.5, 0.8]"
         assert list(self.env_queue_mm_loss.getServiceRates()) == [1.0, 1.0, 1.0], "Service rates are [1.0, 1.0, 1.0]"
         assert N == 100, "Number of particles is 100"
-        assert T == 200, "Number of arrival events is 200"
+        assert T == 200, "Number of arrival events for E(T_A) estimation is 200"
         assert K == [4, 2, 5], "Blocking sizes are [4, 2, 5]"
         assert J == [2, 1, 3], "Activation sizes are [2, 1, 3]"
+        assert burnin_time_steps == 20, "The burn-in time is 20 time steps (discrete value)"
+        assert min_num_cycles_for_expectations == 5, "The min # cycles for expectation calculations is 5"
 
 
 if __name__ == '__main__':
