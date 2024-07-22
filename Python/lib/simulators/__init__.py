@@ -289,25 +289,6 @@ def choose_state_from_setofstates_based_on_distribution(set_of_states: SetOfStat
     return chosen_state
 
 
-def is_state_in_setofstates(state, set_of_interest: SetOfStates):
-    "Check whether the QUEUE state of the system is in the set of queue states of interest"
-    assert set_of_interest is not None
-    if set_of_interest.getStorageFormat() == "states":
-        states_of_interest = set_of_interest.getStates()
-        return state in states_of_interest
-    else:
-        # The set is assumed to be defined by its boundaries in each dimension and include all states whose dimension value is smaller than or equal to the respective boundary
-        set_of_interest_boundaries = set_of_interest.getSetBoundaries()
-        # Note: we convert lists to arrays in order to perform an element-wise comparison of their elements
-        particle_state = np.array([state]) if is_scalar(state) else np.array(state)
-        set_boundaries = np.array([set_of_interest_boundaries]) if is_scalar(set_of_interest_boundaries) else np.array(set_of_interest_boundaries)
-        if  any(particle_state == set_boundaries) and \
-            all(particle_state <= set_boundaries):
-            return True
-        else:
-            return False
-
-
 def choose_state_from_set(_set, dist_proba: dict=None):
     """
     Chooses a state from a set, optionally following a given distribution
@@ -505,7 +486,11 @@ def analyze_event_times(rates: Union[list, tuple, np.ndarray], times, groups, gr
 
 def parse_simulation_parameters(dict_params_simul, env):
     """
-    Parses input parameters received by the estimate_blocking_*() functions
+    Parses input parameters for simulation
+
+    The function was originally created to parse the parameters received by the estimate_blocking_*() functions in the queueing and network systems
+    but then it was extended to also be use dto parse simulation parameters in general, e.g. of discrete-time simulations that require parameters
+    to run a Monte-Carlo simulation or a Fleming-Viot simulation.
 
     Arguments:
     dict_params_simul: dict
@@ -569,9 +554,11 @@ def parse_simulation_parameters(dict_params_simul, env):
 
     if isinstance(env, GenericEnvQueueWithJobClasses):
         if 'buffer_size_activation' in dict_params_simul.keys():
+            # We are in the 1D accept/reject case, where the condition for acceptance and rejection depend on only ONE dimension
+            # (in this case, the buffer size, regardless of the number of servers in the system or regardless of the number of jobs by class).
             if dict_params_simul['buffer_size_activation'] < 1:
                 raise ValueError("The activation buffer size must be at least 1: {}".format(dict_params_simul['buffer_size_activation']))
-            # Define the simulation parameters that will be used from now on below in a unified estimation process that
+            # Define the simulation parameters that will be used from now on in a unified estimation process that
             # encompasses both the case where blocking occurs at a single buffer size (e.g. single-server system or
             # multi-server system with single buffer) or when it occurs at a set of states (e.g. loss network with multi-class jobs).
             dict_params_simul['absorption_set'] = SetOfStates(set_boundaries=dict_params_simul['buffer_size_activation'] - 1)

@@ -3,7 +3,21 @@
 Created on Sat Mar 11 20:17:48 2023
 
 @author: Daniel Mastropietro
-@description: Runs the FV estimation of the blocking probability in a Loss Network system receiving multi-class jobs.
+@description:   Runs the FV estimation of the blocking probability in a Loss Network system receiving multi-class jobs.
+                Can be used to run the process in batch mode.
+                In batch mode execution, parameters should be defined using equal sign `=` ONLY when the parameter is str or numeric, but NOT when the
+                parameter is expecting a boolean value or something else that requires special parsing (e.g. a "list", which is the case with a couple
+                of parameters in this script --see example below).
+                In case of boolean arguments, they are EITHER included among the script arguments or NOT, which defines whether their value is set to True
+                (if INCLUDED and option action="store_true" when defining the parameter by the script) or False
+                (if not included or INCLUDED and option action="store_false" when defining the parameter by the script). See parse_input_parameters() below.
+                Ex:
+                --analysis_type=T
+                --burnin_time_steps=10
+                --save_results
+                --values_parameter_analyzed "[64, 128, 256]"    --> This parameter is expecting a list which is parsed by calling
+                                                                    the `convert_str_argument_to_list_of_type()` function and thus must receive a str type.
+                For more info see the documentation of the optparse module used to parse input arguments: https://docs.python.org/3/library/optparse.html
 """
 
 if __name__ == "__main__":
@@ -46,12 +60,44 @@ from Python.lib.run_FV import closeLogFile, createLogFileHandleAndResultsFileNam
 
 
 #------------------- Functions --------------------
+def define_absorption_and_activation_sets(Js):
+    """
+    Defines the absorption and the activation set for a multi-class loss network system
+
+    Arguments:
+    Js: list or array-like
+        Size of the absorption set A of the Fleming-Viot process in each dimension, where each dimension represents a different arriving job class.
+
+    Return: Tuple
+    Duple with the following two elements:
+    - absorption_set: SetOfStates object defining the absorption set, defined as the hyper-rectangle [0, Js[0] - 1] x [0, Js[1] - 1] x ... x [0, Js[I-1] - 1]
+    where I is the number of job classes of the loss network.
+    - activation_set: SetOfStates object defining the activation set defined as the set of states from where the Markov chain representing the system
+    can transition to the multidimensional absorption set A just described in ONE step.
+    Note that, if e.g. Js = [2, 5, 3], the activation set contains those states that are at a distance of 1 in EXACTLY ONE dimension.
+    E.g. the state (3, 4, 2) is part of the activation set but (3, 5, 2) (where the first TWO dimensions are one value larger than the original tuple)
+    is NOT part of the activation set, because we cannot transition in ONE step from (3, 5, 2) to (2, 4, 2), which is the closest state to (3, 5, 2)
+    that is part of the absorption set.
+    """
+    absorption_set = SetOfStates(set_boundaries=tuple([J - 1 for J in Js]))
+    activation_set = SetOfStates(set_boundaries=tuple(Js))
+    # TODO: (2024/07/16) Define the activation_set using the following line because it is much more clear
+    # In this way, the activation_set is the CORRECT activation set, o.w. in the currently implemented approach, the `activation_set` set includes also the absorption set and
+    # the selection of a state from the ACTUAL activation set is done ad-hoc by e.g. the SetOfStates.random_choice() method or by choosing a state that satisfies the condition
+    # of having exactly one dimension at the boundary (see such implementations in run_simulation_fv() in simulators/queues.py, when particles (`envs`) are initialized).
+    #activation_set = SetOfStates(states=SetOfStates(set_boundaries=tuple(Js)).getStates(exactly_one_dimension_at_boundary=True))
+    return absorption_set, activation_set
+
+
 @measure_exec_time
 def run_mc_estimation_loss_network( env_queue, Ks, Js, K, T,
                                     burnin_time_steps, min_num_cycles_for_expectations,
                                     seed=1717):
     """
-    Test the Monte-Carlo estimation of the blocking probability of a loss network system
+    Runs the Monte-Carlo estimation of the blocking probability of a loss network system (usually used for testing)
+
+    This function essentially sets up the loss-network environment, the agent, the admission control policy (accept/reject) and learners
+    and calls estimate_blocking_mc().
 
     Arguments:
     env_queue: EnvQueueLossNetworkWithJobClasses
@@ -97,8 +143,9 @@ def run_mc_estimation_loss_network( env_queue, Ks, Js, K, T,
     agent_accept_reject = AgeQueue(env_queue, policies, learners)
 
     # Simulation parameters
-    dict_params_simul = dict({'absorption_set': SetOfStates(set_boundaries=tuple([J - 1 for J in Js])),
-                              'activation_set': SetOfStates(set_boundaries=tuple(Js)),
+    absorption_set, activation_set = define_absorption_and_activation_sets(Js)
+    dict_params_simul = dict({'absorption_set': absorption_set,
+                              'activation_set': activation_set,
                               'T': T,  # number of arrivals at which the simulation stops
                               'burnin_time_steps': burnin_time_steps,
                               'min_num_cycles_for_expectations': min_num_cycles_for_expectations,
@@ -115,7 +162,10 @@ def run_fv_estimation_loss_network( env_queue, Ks, Js, K, N, T,
                                     burnin_time_steps, min_num_cycles_for_expectations, method_survival_probability_estimation,
                                     seed=1717):
     """
-    Test the Fleming-Viot estimation of the blocking probability of a loss network system
+    Runs the Fleming-Viot estimation of the blocking probability of a loss network system (usually used for testing)
+
+    This function essentially sets up the loss-network environment, the agent, the admission control policy (accept/reject) and learners
+    and calls estimate_blocking_fv().
 
     Arguments:
     env_queue: EnvQueueLossNetworkWithJobClasses
@@ -165,8 +215,9 @@ def run_fv_estimation_loss_network( env_queue, Ks, Js, K, N, T,
     agent_accept_reject = AgeQueue(env_queue, policies, learners)
 
     # Simulation parameters
-    dict_params_simul = dict({'absorption_set': SetOfStates(set_boundaries=tuple([J - 1 for J in Js])),
-                              'activation_set': SetOfStates(set_boundaries=tuple(Js)),
+    absorption_set, activation_set = define_absorption_and_activation_sets(Js)
+    dict_params_simul = dict({'absorption_set': absorption_set,
+                              'activation_set': activation_set,
                               'T': T,  # number of arrivals at which the simulation stops
                               'burnin_time_steps': burnin_time_steps,
                               'min_num_cycles_for_expectations': min_num_cycles_for_expectations,
@@ -492,8 +543,8 @@ def analyze_convergence(capacity=10, job_class_rates=[0.7], service_rates=[1.0],
 
         dict_params_simul = {
             'T': T,
-            'absorption_set': SetOfStates(set_boundaries=tuple([J - 1 for J in Js])),
-            'activation_set': SetOfStates(set_boundaries=tuple(Js)),
+            'absorption_set': absorption_set,
+            'activation_set': activation_set,
             'burnin_time_steps': burnin_time_steps,
             'min_num_cycles_for_expectations': min_num_cycles_for_expectations,
             'method_survival_probability_estimation': method_proba_surv,

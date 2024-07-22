@@ -29,7 +29,7 @@ from Python.lib.estimators import DEBUG_ESTIMATORS, estimate_expected_cycle_time
 from Python.lib.estimators.fv import initialize_phi, update_phi, estimate_stationary_probabilities, SurvivalProbabilityEstimation
 
 from Python.lib.simulators import BURNIN_TIME_STEPS, MIN_NUM_CYCLES_FOR_EXPECTATIONS, DEBUG_TRAJECTORIES, \
-    analyze_event_times, check_done, choose_state_from_setofstates_based_on_distribution, is_state_in_setofstates, parse_simulation_parameters, \
+    analyze_event_times, check_done, choose_state_from_setofstates_based_on_distribution, parse_simulation_parameters, \
     show_messages, step, update_trajectory, SetOfStates
 from Python.lib.simulators.discrete import Simulator
 from Python.lib.simulators.fv import ReactivateMethod, reactivate_particle
@@ -591,6 +591,8 @@ class SimulatorQueue(Simulator):
                         print("\n--> Estimated stationary probability of blocking state: Pr(x={}) = {} vs. True Pr(x={}) = {}, error = {:.3f}%" \
                             .format(x, probas_stationary_blocking[x], x, probas_stationary_true[x], (probas_stationary_blocking[x] / probas_stationary_true[x] - 1) * 100))
                     ### TEMPORARY ###
+                    # Comment the condition on `p` and uncomment the condition on `probas_stationary_true` if we want to run the learning using the TRUE stationary probability
+                    # instead of the estimated ones, so that we have a benchmark of what is the best we can do. In that case, only the Q differences are estimated.
                     if p > 0.0:
                     #if probas_stationary_true[x] > 0:
                     ### TEMPORARY ###
@@ -686,6 +688,9 @@ class SimulatorQueue(Simulator):
                 err_phi, err_et = np.nan, np.nan
                 self.learn(self.agent, t,
                            ### TEMPORARY ###
+                           # Pass either `probas_stationary_blocking` in the regular learning case or `dict([(x, probas_stationary_true[x]) for x in probas_stationary_blocking])`
+                           # in the benchmark case where the only thing we do is estimate the Q difference, so that we know what is the best we can do, as in that case
+                           # we do not need to estimate the stationary probabilities, which is the target of the FV estimator.
                            probas_stationary=probas_stationary_blocking,
                            #probas_stationary=dict([(x, probas_stationary_true[x]) for x in probas_stationary_blocking]),
                            ### TEMPORARY ###
@@ -2689,11 +2694,11 @@ def run_simulation_mc(env, agent, t_learn, start_state, t_sim_max,
             #   is already at the boundary of the activation set (first and third components).
             # Note that the state of the environment has been updated by the manage_service() function, that's why env.getQueueState() returns the value of `next_state` above
             assert env.getQueueStateFromState(next_state) == env.getQueueState()
-            if is_state_in_setofstates(env.getQueueStateFromState(state), absorption_set) and is_state_in_setofstates(env.getQueueState(), activation_set):
+            if is_state_in_boundary_of_setofstates(env.getQueueStateFromState(state), absorption_set) and is_state_in_boundary_of_setofstates(env.getQueueState(), activation_set):
                 # Record the exit times, i.e. time elapsed since the latest absorption
                 n_exit_times += 1
                 exit_times += [time_abs - time_last_absorption]
-                if False and DEBUG_ESTIMATORS:
+                if DEBUG_TRAJECTORIES or DEBUG_ESTIMATORS:
                     print("[MC] --> EXIT time = {:.3f} (total={})".format(exit_times[-1], n_exit_times))
                 if track_survival:
                     time_last_activation = time_abs
@@ -2722,10 +2727,10 @@ def run_simulation_mc(env, agent, t_learn, start_state, t_sim_max,
             # Check ABSORPTION
             # Note that the state of the environment has been updated by the manage_service() function, that's why env.getQueueState() returns the value of `next_state` above
             assert env.getQueueStateFromState(next_state) == env.getQueueState()
-            if is_state_in_setofstates(env.getQueueStateFromState(state), activation_set) and is_state_in_setofstates(env.getQueueState(), absorption_set):
+            if is_state_in_boundary_of_setofstates(env.getQueueStateFromState(state), activation_set) and is_state_in_boundary_of_setofstates(env.getQueueState(), absorption_set):
                 n_cycles_absorption += 1
                 absorption_times += [time_abs - time_last_absorption]
-                if False and DEBUG_ESTIMATORS:
+                if DEBUG_TRAJECTORIES or DEBUG_ESTIMATORS:
                     print("[MC] --> ABSORPTION time = {:.3f} (total={})".format(absorption_times[-1], n_cycles_absorption))
                 time_last_absorption = time_abs
                 if track_survival and time_last_activation is not None:
@@ -3383,8 +3388,8 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info, proba
             print("E(T) = {:.1f} ({} cycles, last absorption at {:.3f}), Max observed survival time = {:.1f}" \
                   .format(expected_absorption_time, n_cycles_absorption_used, time_last_absorption, df_proba_surv['t'].iloc[-1]))
 
-    if DEBUG_TRAJECTORIES:
-        assert envs[0].getBufferType() == BufferType.SINGLE, "The problem must have a single buffer when plotting trajectories"
+    if DEBUG_TRAJECTORIES and envs[0].getBufferType() == BufferType.SINGLE:
+        # The problem must have a single buffer when plotting trajectories, because that is the case for which the code is prepared
         ax0 = plot_trajectory(envs[0], agent, dict_params_simul['activation_set'].getSetBoundaries())
         xticks = range(int(ax0.get_xlim()[1]))
         ax0.set_xticks(xticks)
@@ -3662,8 +3667,8 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
         times_inter_arrival = array_of_objects((N,), [])
         # List of service times for each particle (used to estimate mu for each particle)
         times_service = array_of_objects((N,), [])
-    if plot:
-        assert envs[0].getBufferType() == BufferType.SINGLE, "The problem must have a single buffer when plotting trajectories"
+    if plot and envs[0].getBufferType() == BufferType.SINGLE:
+        # The problem must have a single buffer when plotting trajectories, as the code is only prepared for that case
         # Initialize the plot
         ax = plt.figure().subplots(1,1)
         K = get_deterministic_blocking_boundaries(agent)
@@ -3716,7 +3721,7 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
             # It's IMPORTANT to check that the previous state is part of the activation set
             # Note that the state of the environment has been updated by the manage_service() function, that's why env.getQueueState() returns the value of `next_state` above
             assert envs[idx_particle].getQueueStateFromState(next_state) == envs[idx_particle].getQueueState()
-            if is_state_in_setofstates(env.getQueueStateFromState(state), activation_set) and is_state_in_setofstates(envs[idx_particle].getQueueState(), absorption_set):
+            if is_state_in_boundary_of_setofstates(env.getQueueStateFromState(state), activation_set) and is_state_in_boundary_of_setofstates(envs[idx_particle].getQueueState(), absorption_set):
                 # The particle has been absorbed
                 # => Reactivate it to any of the other particles
                 # => If the survival probability function is not given as input parameter,
@@ -3736,12 +3741,12 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
                         print("Survival times observed so far: {}".format(sum(has_particle_been_absorbed_once)))
                         print(survival_times)
 
-                if plot:
-                    assert envs[0].getBufferType() == BufferType.SINGLE, "The problem must have a single buffer when plotting trajectories"
+                if plot and envs[0].getBufferType() == BufferType.SINGLE:
+                    # The problem must have a single buffer when plotting trajectories, as the code is only prepared for that case
                     # Show the absorption before reactivation takes place
                     y = envs[idx_particle].getBufferSize()
                     activation_state = activation_set.getSetBoundaries()
-                    assert is_scalar(activation_state), "The activation state must be scalar (i.e. the system must be a single-server system)"
+                    assert is_scalar(activation_state), "The activation state must be scalar, which is the case when the system is a single-server system"
                     J = envs[0].getBufferSizeFromState((activation_state, None))
                     print("* Particle {} ABSORBED! (at time = {:.3f}, buffer size = {})".format(idx_particle, time_abs, y))
                     plot_update_trajectory( ax, idx_particle, N, K, J,
@@ -3756,7 +3761,7 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
                 if envs[idx_particle].getBufferType() == BufferType.SINGLE:
                     assert envs[idx_particle].getBufferSize() > absorption_set.getSetBoundaries()
                 if DEBUG_TRAJECTORIES:
-                    print("*** Particle {} REACTIVATED to particle {} at position {}".format(idx_particle, idx_reactivate, envs[idx_reactivate].getBufferSize()))
+                    print("*** Particle {} REACTIVATED to particle {} at state {}".format(idx_particle, idx_reactivate, envs[idx_reactivate].getQueueState()))
 
             # This should come AFTER the possible reactivation, because the next state will never be 0
             # when reactivation takes place.
@@ -3778,11 +3783,12 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
         # Update Phi based on the new state of the changed particle
         dict_phi = update_phi(envs[0], len(envs), time_abs, dict_phi, state, next_state)
 
-        if plot:
+        if plot and envs[0].getBufferType() == BufferType.SINGLE:
+            # The problem must have a single buffer when plotting trajectories, as the code is only prepared for that case
             y = envs[0].getBufferSizeFromState(next_state)
             K = get_deterministic_blocking_boundaries(agent)
             activation_state = activation_set.getSetBoundaries()
-            assert is_scalar(activation_state), "The activation state must be scalar (i.e. the system must be a single-server system)"
+            assert is_scalar(activation_state), "The activation state must be scalar, which is the case when the system is a single-server system"
             J = envs[0].getBufferSizeFromState((activation_state, None))
             plot_update_trajectory( ax, idx_particle, N, K, J,
                                     time0[idx_particle], y0[idx_particle], time_abs, y,
@@ -3791,10 +3797,6 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
             y0[idx_particle] = y
 
         idx_reactivate = None
-
-        if DEBUG_TRAJECTORIES:
-            # New line to separate from next iteration
-            print("")
 
         # Stop when we reached the maxtime (this is the case when the survival probability is given as input parameter,
         # as its value comes from the maximum observed survival time, since going beyond does not contribute to
@@ -3840,6 +3842,35 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
                                                                      expected_absorption_time)
 
     return t, event_times, dict_phi, probas_stationary, expected_absorption_time, max_survival_time
+
+
+def is_state_in_boundary_of_setofstates(state, set_of_interest: SetOfStates):
+    """
+    Checks whether the QUEUE state of the system is at the boundary of the set of the given queue states of interest
+
+    The set of interest is typically the absorption set and the activation set of the FV process, and this is the reason why we check that the state
+    is at the BOUNDARY of those sets, because this function is used to check whether a particle (either an FV particle or an MC particle) has been absorbed
+    (i.e. moved from the (boundary of) activation set to the absorption set) or has exited the absorption set (i.e. moved from the BOUNDARY of the absorption set
+    to the (boundary of) activation set). Note that I write "boundary of the activation set" because this function assumes that the activation set is also,
+    like the absorption set, defined using the compact boundary set definition provided by the SetOfStates class. If in the future we change the definition
+    of the activation set to the PROPER definition as the exit BOUNDARY of the absorption set (i.e. boundary of the *complement* of the absorption set),
+    then we should NOT call this function to check if a state is part of the activation set.
+    """
+    assert set_of_interest is not None
+    if set_of_interest.getStorageFormat() == "states":
+        states_of_interest = set_of_interest.getStates()
+        return state in states_of_interest
+    else:
+        # The set is assumed to be defined by its boundaries in each dimension and include all states whose dimension value is smaller than or equal to the respective boundary
+        set_of_interest_boundaries = set_of_interest.getSetBoundaries()
+        # Note: we convert lists to arrays in order to perform an element-wise comparison of their elements
+        particle_state = np.array([state]) if is_scalar(state) else np.array(state)
+        set_boundaries = np.array([set_of_interest_boundaries]) if is_scalar(set_of_interest_boundaries) else np.array(set_of_interest_boundaries)
+        if  any(particle_state == set_boundaries) and \
+            all(particle_state <= set_boundaries):
+            return True
+        else:
+            return False
 
 
 def plot_update_trajectory(ax, p, N, K, J, x0, y0, x1, y1, marker='-', r=None):
