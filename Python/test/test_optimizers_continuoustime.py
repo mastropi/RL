@@ -259,9 +259,9 @@ class Test_EstPolicy_EnvQueueSingleServer(unittest.TestCase):
          'alpha_start': 10.0, 'adjust_alpha': True, 'func_adjust_alpha': np.float, 'min_time_to_update_alpha': 0, 'alpha_min': 0.01,
          'mode': LearningMode.REINFORCE_TRUE, 't_learn': 5},
          # In the following "expected" dictionary we should include the value of columns in the df_learning output yielded by self.runSimulation() that we would like to test
-         {'theta_next': [1.938283, 8.873832, -0.90, -0.90, -0.90],
-          'proba_blocking': [0.139052, 0.014933, 0.002926, 0.0, 0.0],
-          'n_events_fv': [620, 591, 3467, 728, 477]}),
+         {'theta_next': [1.938283, 8.873832, 0.100, 2.657005, 3.36032835],
+          'proba_blocking': [0.139052, 0.014933, 0.002926, 0.367573, 0.032917],
+          'n_events_fv': [620, 591, 3467, 354, 1111]}),
 
         (2, DEFAULT_EXECUTION, '1D-theta as list',
          {'seed': 1313, 'theta_true': [5.0], 'theta_start': [2.1], 'nparticles': 50, 't_sim': 100,
@@ -269,13 +269,12 @@ class Test_EstPolicy_EnvQueueSingleServer(unittest.TestCase):
           'burnin_time_steps': 20, 'min_num_cycles_for_expectations': 5,
           'method_survival_probability_estimation': SurvivalProbabilityEstimation.FROM_N_PARTICLES},
          {'method': LearningMethod.FV,
-          'alpha_start': 10.0, 'adjust_alpha': True, 'func_adjust_alpha': np.float, 'min_time_to_update_alpha': 0,
-          'alpha_min': 0.01,
+          'alpha_start': 10.0, 'adjust_alpha': True, 'func_adjust_alpha': np.float, 'min_time_to_update_alpha': 0, 'alpha_min': 0.01,
           'mode': LearningMode.REINFORCE_TRUE, 't_learn': 5},
          # In the following "expected" dictionary we should include the value of columns in the df_learning output yielded by self.runSimulation() that we would like to test
-         {'theta_next': [np.array([1.938283]), np.array([8.873832]), np.array([-0.90]), np.array([-0.90]), np.array([-0.90])],
-          'proba_blocking': [0.139052, 0.014933, 0.002926, 0.0, 0.0],
-          'n_events_fv': [620, 591, 3467, 728, 477]}),
+         {'theta_next': [np.array([1.938283]), np.array([8.873832]), np.array([0.100]), np.array([2.657005]), np.array([3.36032835])],
+          'proba_blocking': [0.139052, 0.014933, 0.002926, 0.367573, 0.032917],
+          'n_events_fv': [620, 591, 3467, 354, 1111]}),
     )
     # -------- DATA -------
 

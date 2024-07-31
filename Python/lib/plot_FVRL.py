@@ -93,7 +93,7 @@ def plot_two_bands(fig, ax, df_agg, percentiles_low, percentiles_upp, alphas, li
 
     return line_median, line_mean, fill_between_1, fill_between_2, legend_obj_fill2, ref_line, legend_obj
 
-def finalize_plot(fig, ax, method, ymin=-1.1, ymax=None, ref=None, ylabel="theta(s)", title="", show_title=True, fontsize=15):
+def finalize_plot(fig, ax, method, ymin=-1.1, ymax=None, ref=None, ylabel=r"$\theta$(s)", title="", show_title=True, fontsize=15):
     ax.set_xlabel("Learning step", fontsize=fontsize)
     ax.set_ylabel(ylabel, fontsize=fontsize)
 
@@ -153,8 +153,10 @@ def plot_expected_costs_2d(expected_costs, colormap="jet", type="img", axes_cont
     assert np.array(list(zip(*expected_costs.keys()))).shape[0] == 2, "The input space must be 2D"
     x1, x2 = zip(*expected_costs.keys())
     if axes_content == "theta":
+        # We want to show theta in the axes, not the blocking sizes K
         df = pd.DataFrame({'x1': np.array(x1) - 1, 'x2': np.array(x2) - 1, 'cost': list(expected_costs.values())}, columns=['x1', 'x2', 'cost'])
     else:
+        # We want to show the blocking sizes K in the axes, not theta (the policy parameter)
         df = pd.DataFrame({'x1': x1, 'x2': x2, 'cost': list(expected_costs.values())}, columns=['x1', 'x2', 'cost'])
     df['logcost'] = np.log10(1 + df['cost'])
 
@@ -176,8 +178,12 @@ def plot_expected_costs_2d(expected_costs, colormap="jet", type="img", axes_cont
         xx, yy = np.meshgrid(toplot.index, toplot.columns)
         ax = plt.axes(projection='3d')
         handle = ax.plot_surface(xx, yy, toplot.T, cmap=cmap, edgecolors="black", shade=True)
-    ax.set_xlabel("Blocking size K1")
-    ax.set_ylabel("Blocking size K2")
+    if axes_content == "theta":
+        ax.set_xlabel("theta_1")
+        ax.set_ylabel("theta_2")
+    else:
+        ax.set_xlabel("Blocking size K1")
+        ax.set_ylabel("Blocking size K2")
     plt.title("Expected blocking cost (log10(1 + .))")
 
     return handle, ax
@@ -374,12 +380,13 @@ figuresdir = resultsdir
 
 # Parameters of the simulation to plot
 K = 6
-blocking_costs = [2E3, 2E5] #[1920, 19753] #[183, 617]
+blocking_costs = [int(2E3), int(2E5)] #[2E3, 2E5] #[1920, 19753] #[183, 617]
 rhos = [0.3, 0.1] #[0.8, 0.6] #[0.5, 0.3] #[0.8, 0.6]
 lambdas = [1, 5]
 theta_start = [0.1, 0.1]
+theta_min = 0.0 #-1     # This is used to define the lower limit of the Y-axis in the plots and is defined by the THETA_MIN value used when learning (see THETA_MIN global variable defined in policies.py)
 J_factors = [0.5, 0.5] #[0.3, 0.5] #[0.5, 0.5]
-NT_values = [50, 500] #[200, 400] #[200, 500] #[100, 500]
+NT_values = [100, 500] #[200, 400] #[200, 500] #[100, 500]
 use_stationary_probability_for_start_states = True
 
 # Compute the optimum theta and K
@@ -408,13 +415,14 @@ for method in results.keys():
     results[method]['theta_next'] = [convert_str_to_list_of_type(v, sep=" ") for v in results[method]['theta_next']]
 
 
-#----- 1) Plot the evolution of theta and of the expected cost
+#-- Plots
 fontsize = 20
 symbols = dict({'1-true': 'b-', '2-fv': 'g-', '3-mc': 'r-'})
-theta_plotted_separately = True     # Make a separate plot for each theta dimension (for clearer visualization)
+theta_plotted_separately = False #True     # Make a separate plot for each theta dimension (for clearer visualization)
 savefig = False
 show_title = False #not savefig
 
+#----- 1) Plot the evolution of theta and of the expected cost
 # We plot FV and MC side by side
 fig = plt.figure()
 if theta_plotted_separately:
@@ -450,23 +458,23 @@ for m, method in enumerate(sorted(results.keys())):
             else:
                 ax_params = axes[m]
             linestyle_t = linestyles[t % len(linestyles)]
-            lines_t = ax_params.plot([theta[t] for theta in thetas], symbols[method], linestyle=linestyle_t)
+            lines_t = ax_params.plot([theta[t] for theta in thetas], symbols[method], linestyle=linestyle_t, linewidth=0.5)
             if r == 1:
                 refline_t = ax_params.axhline(theta_true[t], color='black', linestyle=linestyle_t)
                 lines += lines_t
                 reflines += [refline_t]
-                legend_lines += ["Theta_" + str(t + 1)]
-                legend_reflines += ["True Optimum Theta_" + str(t + 1)]
+                legend_lines += [rf"$\theta_{t+1}$"]
+                legend_reflines += [rf"True Optimum $\theta_{t+1}$"]
 
     if theta_plotted_separately:
         for t in range(len(theta_true)):
             ax_params = axes[t][m]
-            finalize_plot(fig, ax_params, method, ylabel=f"theta_{t+1}", ymin=-1.1, ymax=np.max(np.squeeze(K_true)), fontsize=fontsize, show_title=show_title)
+            finalize_plot(fig, ax_params, method, ylabel=rf"$\theta_{t+1}$", ymin=theta_min - 0.1, ymax=np.max(np.squeeze(K_true)), fontsize=fontsize, show_title=show_title)
                 ## lower limit = -1.1 because -1 is the minimum possible theta value that is allowed for the linear step parameterized policy
             ax_params.legend(lines + reflines, legend_lines + legend_reflines, fontsize=fontsize)
     else:
         ax_params = axes[m]
-        finalize_plot(fig, ax_params, method, ymin=-1.1, ymax=np.max(np.squeeze(K_true)), fontsize=fontsize, show_title=show_title)
+        finalize_plot(fig, ax_params, method, ymin=theta_min - 0.1, ymax=np.max(np.squeeze(K_true)), fontsize=fontsize, show_title=show_title)
             ## lower limit = -1.1 because -1 is the minimum possible theta value that is allowed for the linear step parameterized policy
         ax_params.legend(lines + reflines, legend_lines + legend_reflines, fontsize=fontsize)
 
@@ -479,7 +487,7 @@ for m, method in enumerate(sorted(results.keys())):
 
 if savefig:
     plt.get_current_fig_manager().window.showMaximized()
-    fig.subplots_adjust(top=0.88, bottom=0.11, left=0.11, right=0.9, hspace=0.2, wspace=0.2)
+    fig.subplots_adjust(top=0.972, bottom=0.093, left=0.052, right=0.990, hspace=0.2, wspace=0.2)
     ## Note: the adjustment values were taken by maximizing the space use in the graph via the figure window (generated by Pycharm Qt5Agg) and selecting "tight layout" from the adjustable knobs icon)
     fig.savefig(os.path.join(resultsdir, f"LossNetwork-K={K},costs={blocking_costs},rhos={rhos},lambdas={lambdas},JF={J_factors},NT_values={NT_values}-Spaghetti.png"))
     ## Note: the name of the file has spaces between the different values of the list parameters (e.g. "[0.8, 0.6]" instead of "[0.8,0.6]" which may not be the most convenient...)
@@ -522,8 +530,10 @@ for m, method in enumerate(sorted(results.keys())):
         # Axis associated to the method where the parameters evolution is plotted and the theta that is being plotted (if plotted separately)
         if theta_plotted_separately:
             ax_params = axes[t][m]
+            ylabel = rf"$\theta_{t+1}$"
         else:
             ax_params = axes[m]
+            ylabel = r"$\theta$(s)"
         df_learning['param'] = [theta[t] for theta in df_learning['theta']]
         results_grp = df_learning.groupby(['t_learn'])
         results_grp_hist = results_grp.apply( lambda df: np.histogram(df['param']) )
@@ -531,7 +541,7 @@ for m, method in enumerate(sorted(results.keys())):
                                                                     [percentile(p) for p in percentiles_low] + [percentile(p) for p in percentiles_upp])
 
         plot_two_bands(fig, ax_params, results_grp_agg, percentiles_low, percentiles_upp, alphas, linecolor,
-                       param_var='param', ymin=-1.1, ymax=np.max(np.squeeze(K_true)), plot_median=plot_median, plot_mean=plot_mean, show_title=show_title)
+                       param_var='param', ylabel=ylabel, ymin=theta_min - 0.1, ymax=np.max(np.squeeze(K_true)), plot_median=plot_median, plot_mean=plot_mean, show_title=show_title, fontsize=fontsize)
 
     # Linestyles are sorted so that more continuous line means larger rho
     linestyles_ref = ['-', '--', '-.', ':']
@@ -550,15 +560,15 @@ for m, method in enumerate(sorted(results.keys())):
         linestyle_t = linestyles[t]
         refline_t = ax_params.axhline(theta_true[t], color='black', linestyle=linestyle_t)
         reflines += [refline_t]
-        legend_lines += ["Theta_" + str(t + 1)]
-        legend_reflines += ["True Optimum Theta_" + str(t + 1)]
+        legend_lines += [rf"$\theta_{t+1}$"]
+        legend_reflines += [rf"True Optimum $\theta_{t+1}"]
 
         # Finalize plot
         ax_params.set_xlim((0, n_learning_steps))
 
 if savefig:
     plt.get_current_fig_manager().window.showMaximized()
-    fig.subplots_adjust(top=0.88, bottom=0.11, left=0.11, right=0.9, hspace=0.2, wspace=0.2)
+    fig.subplots_adjust(top=0.972, bottom=0.093, left=0.052, right=0.990, hspace=0.2, wspace=0.2)
     ## Note: the adjustment values were taken by maximizing the space use in the graph via the figure window (generated by Pycharm Qt5Agg) and selecting "tight layout" from the adjustable knobs icon)
     fig.savefig(os.path.join(resultsdir, f"LossNetwork-K={K},costs={blocking_costs},rhos={rhos},lambdas={lambdas},JF={J_factors},NT_values={NT_values}-Bands.png"))
     ## Note: the name of the file has spaces between the different values of the list parameters (e.g. "[0.8, 0.6]" instead of "[0.8,0.6]" which may not be the most convenient...)

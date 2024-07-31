@@ -256,49 +256,66 @@ def rewardOnJobRejection_ExponentialCost(env, state, action, next_state, dict_pa
         # => No reward
         return 0.0
 
-def costBlockingExponential(buffer_size: int, buffer_size_ref :int):
+def costBlockingExponential(buffer_size: int, buffer_size_ref :int, debug=False):
     """
-    Cost of blocking a job from entering a queue, modelled as exponentially increasing on the queue's buffer size
-    with respect to a minimum buffer size, below which the cost is constant.
+    Cost of blocking a job from entering a queue, modelled as exponentially increasing on the queue's buffer size, defined as:
+        C(s, a=block) = B (1 + b^(buffer_size - buffer_size_ref))
+    with B = 5.0, b = 3.0.
+
+    The minimum of the expected cost in the M/M/1/K queue is near `buffer_size_ref`, more specifically at `buffer_size_ref - shift`, where
+    shift = log( -log(rho) / (log(b) + log(rho)) ) / log(b)
+
+    where rho is the system's load = lambda / mu, where lambda is the job arrival rate and mu is the service rate.
     """
-    # C(s, a=block)
-    # The expected cost function is:
-    #   E(C(s,a)) = E( C(S(t), a=block) * I{A(t)=block} ) = ( B I{s<=sref} + B*b**(s-sref) I{s>sref} ) * Pr(A(t)=block)
+    # C(s, a=block): Cost function when action = "block"
+    # Two options were considered during development of this function:
+    # 1) Piecewise cost function (i.e. constant until sref, then exponentially increasing):
+    #       C(s, a=block) = B I{s<=sref} + B*b**(s-sref) I{s>sref}
     #
-    # *****************************************************************************************************************
-    # NOTE: (2022/01/24) WE COULD HAVE CONSIDERED A COST FUNCTION THAT IS AN EXPONENTIALLY INCREASING FUNCTION WITH s!!
-    # (as proposed originally by Matt), i.e.:
-    #   C(s,a) = B + B*b**(s-sref)
-    # i.e. without indicator functions and which is equal to B*(1+b**(-sref)) at s=0, and is equal to 2B at s=sref
-    # and sref controls the location of the minimum!
-    # In fact, in that case we would get the following expected cost:
-    #   E(C(s,a)) = B * (1 + b**(s-sref)) * Pr(A(t)=block)
-    # which has a minimum near sref, more precisely, if sref is large (making 1 - rho**(sref+1) ~= 1), the minimum is @:
-    #   sref - shift
-    # where the shift is a positive shift equal to:
+    # 2) Exponential cost function:
+    #       C(s, a=block) = B + B*b**(s-sref)
+    #
+    # In both cases the expected cost is given by (recall that there is only cost when action = "block"):
+    #       E(C(s,a)) = E( C(S(t), a=block) * I{A(t)=block} ) = C(s, a=block) * Pr(A(t)=block)
+    #
+    # Note that the buffer size at which the minimum of the expected cost is attained is different, as follows:
+    # 1) The minimum is at sref.
+    # 2) The minimum is *near* sref, more precisely, if sref is large (making 1 - rho**(sref+1) ~= 1), the minimum is at:
+    #       sref - shift
+    #   where `shift` is a positive shift equal to:
     #   shift = log( -log(rho) / (log(b) + log(rho)) ) / log(b)
-    # which is a controlled shift (i.e. it doesn't go to infinity, as long as b is chosen larger away from 1/rho.
-    # (e.g. b = 3.0 for rho = 0.7 suffices to get the shift equal to 0.666667)
-    # (I wrote this in my orange Carrefour tiny notebook)
-    # *****************************************************************************************************************
+    #   which is a controlled shift (i.e. it doesn't go to infinity, as long as b is chosen larger away from 1/rho.
+    #   (e.g. b = 3.0 for rho = 0.7 suffices to get the shift equal to 0.666667)
+    #   (I wrote this in my orange Carrefour tiny notebook)
     #
-    # Going to the originally defined cost function, we have the following graph for the expected cost:
+    # Code to generate the plot of the expected cost in both cases:
     #   B = 1; b = 3.0; sref = 3;
     #   rho = 0.7
     #   s = np.linspace(0, 12, 100)
     #   indicator = 1.0 * ( s > sref )
     #   p = rho**s * (1 - rho) / (1 - rho**(s+1))
+    #   # 1) Piecewise cost function
     #   f = (B * (1 - indicator) + B*b**(s - sref) * indicator) * p
-    #   plt.plot(s, f, 'b-');
-    #   ax = plt.gca(); ax.set_ylim((0,2))
-    B = 5.0      # Blocking associated just to the fact the queue is blocked
+    #   # 2) Exponential cost function
+    #   g = B (1 + b**(s - sref)) * p
+    #   plt.figure()
+    #   plt.plot(s, f, 'b-')
+    #   plt.plot(s, g, 'r-')
+    #   ax = plt.gca(); ax.set_ylim((0,2)); ax.set_xlabel("Blocking buffer size"); ax.set_ylabel("Expected cost")
+    B = 5.0     # Blocking associated just to the fact the queue is blocked
     b = 3.0     # Base of the exponential function
+
+    # Option 1: Exponential cost ONLY when the buffer size is larger than `buffer_size_ref`, o.w. it is constant
     #cost = B if buffer_size <= buffer_size_ref else B * b**(buffer_size - buffer_size_ref)
+    #if debug and cost != B:
+    #    print("The cost is in the exponential part (increasing with `buffer size - REF buffer size`): buffer={}, ref={}".format(buffer_size, buffer_size_ref))
+
+    # Option 2: Exponential cost
     cost = B * (1 + b**(buffer_size - buffer_size_ref))
-    if False:
-        print("Computing cost for buffer size = {} with sref = {} --> Cost = {:.3f}".format(buffer_size, buffer_size_ref, cost))
-    if False and cost != B:
-        print("The cost is in the exponential part (increasing with `buffer size - REF buffer size`): buffer={}, ref={}".format(buffer_size, buffer_size_ref))
+
+    if debug:
+        print("Computed cost for buffer size = {} with sref = {} --> Cost = {:.3f}".format(buffer_size, buffer_size_ref, cost))
+
     return cost
 #---------------------------- Reward functions that can be used in different environments -----------------------------#
 
@@ -475,7 +492,7 @@ class GenericEnvQueueWithJobClasses(gym.Env):
         return self.queue.getBufferSize()
 
     def getBufferSizeFromState(self, state: tuple):
-        queue_state = state[0]
+        queue_state = state[0]  # Note: This is a list or array in multidimensional systems such as a loss network. This is why we sum next to return a value.
         return np.sum(queue_state)
 
     def getJobClass(self):

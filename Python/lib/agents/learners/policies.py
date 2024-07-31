@@ -21,13 +21,16 @@ from Python.lib.utils.basic import find, is_scalar
 #from Python.lib.agents.policies.parameterized import AcceptPolicyType   # NEW: TO IMPLEMENT IN ORDER TO DECIDE WHETHER THE ACCEPTANCE POLICY IS OF THRESHOLD TYPE OR TRUNK-RESERVATION
 
 # Minimum value allowed for the theta parameter of a parameterized policy
-# NOTE: Avoid an integer value as lower bound of theta because the estimated gradient of the average state value
+# NOTE 1: Avoid an integer value as lower bound of theta because the estimated gradient of the average state value
 # may be zero at integer values of theta (depending on the method used to compute it ).
 # We use a negative theta close to -1.0 (and not a theta that is close to 0, such as 0.1)
 # so that the deterministic blocking size of the linear step policy can be K=0 (as K = ceiling(theta + 1) in that case)
+# NOTE 2: (2024/07/31) THETA_MIN should be > 0, as we should NOT allow theta to go below , o.w. the gradient in the FVRL process
+# to learn the optimum blocking size K for an M/M/1 queue or the blocking sizes K(i) of a threshold-type policy in a Loss Network
+# will be always zero because the only contribution to the gradient comes from state K-1 which is equal to J-1 (as J is e.g. 0.5*K),
+# making K-1 a state in the absorption set A, hence NOT estimated by the FV process (as Phi(x) = 0 for all x in the absorption set A).
 # TODO: (2023/03/02) Probably this definition should go in parameterized.py and should be defined for each parameterized policy defined there.
-#THETA_MIN = 0.1
-THETA_MIN = -1.0 + 0.1
+THETA_MIN = 0.1  #-1.0 + 0.1
 
 
 # TODO: (2023/02/27) Create a subclass of LeaPolicyGradient called LeaPolicyGradientOnQueues that should be used for policy gradient learners applied on queues
