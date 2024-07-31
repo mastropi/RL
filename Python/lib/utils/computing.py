@@ -773,9 +773,9 @@ def stationary_distribution_product_form(capacity: int, rhos: list, func_prod):
         last_case += ncases_expected
     dist /= const
     assert ncases_total == ncases_total_expected, \
-        "The number of TOTAL generated combinations for R={}, C<={} ({}) is equal to the expected number of combinations ({})" \
+        "The number of TOTAL generated combinations for R={}, C<={} ({}) must be equal to the expected number of combinations ({})" \
         .format(R, C, ncases_total, ncases_total_expected)
-    assert abs(sum(dist) - 1.0) < 1E-6, "The sum of the distribution function is 1 ({:.6f})".format(sum(dist))
+    assert abs(sum(dist) - 1.0) < 1E-6, "The sum of the distribution function must be equal to 1 ({:.6f})".format(sum(dist))
 
     return x, dist
 
@@ -814,7 +814,7 @@ def stationary_distribution_product_form_fixed_occupancy_unnormalized(occupancy:
 
     Return: tuple
     The tuple contains the following elements:
-    - a list of each possible state n = (n1, n2, ..., nR) such that the sum of the n(j)'s is equal to the given occupancy.
+    - a list containing each possible state n = (n1, n2, ..., nR) such that the sum of the n(j)'s is equal to the given occupancy.
     - a list with the unnormalized probability of occurrence of each state given in the first list.
     In order to normalize it to a distribution, each value should be divided by the sum of all the values in the list.
     """

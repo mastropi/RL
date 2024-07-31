@@ -36,10 +36,10 @@ from Python.lib.simulators.fv import ReactivateMethod, reactivate_particle
 from Python.lib.queues import Event, QueueMM
 
 from Python.lib.utils.basic import array_of_objects, get_current_datetime_as_string, \
-    get_datetime_from_string, is_scalar, index_linear2multi, measure_exec_time, merge_values_in_time
-from Python.lib.utils.computing import compute_job_rates_by_server, compute_number_of_burnin_cycles_from_burnin_time, \
-    compute_blocking_probability_birth_death_process, compute_survival_probability, generate_min_exponential_time, \
-    all_combos_with_sum, compute_stationary_probability_knapsack_when_blocking_by_class
+    get_datetime_from_string, is_scalar, index_linear2multi, measure_exec_time
+from Python.lib.utils.computing import all_combos_with_sum, compute_job_rates_by_server, \
+    compute_blocking_probability_birth_death_process, compute_stationary_probability_knapsack_when_blocking_by_class, compute_survival_probability, \
+    func_prod_birthdeath, generate_min_exponential_time, stationary_distribution_product_form
 
 @unique
 class LearningMode(Enum):
@@ -426,14 +426,14 @@ class SimulatorQueue(Simulator):
                 # Compute the true blocking probabilities, so that we know how much error we have in the estimation of Pr(K-1) and Pr(K)
                 Ks = get_deterministic_blocking_boundaries(self.agent, return_int_when_single_policy=True)  # The second parameter is because we want the returned blocking size to be a scalar
                 assert is_scalar(Ks)
-                probas_stationary_true = dict({Ks-1: compute_blocking_probability_birth_death_process(self.rhos, Ks-1),
-                                               Ks:   compute_blocking_probability_birth_death_process(self.rhos, Ks)})
+                _x, _dist = stationary_distribution_product_form(Ks, self.rhos, func_prod_birthdeath)
+                probas_stationary_true = dict([[xx[0], dd] for xx, dd in zip(_x, _dist) if xx[0] >= Ks-1])  # We use `xx[0]` instead of simply `xx` in order to have a scalar as key as opposed to a list (which is "not hashable") or a tuple (which is not needed)
             else:
                 Ks = get_deterministic_blocking_boundaries(self.agent, return_int_when_single_policy=False) # The second parameter is because we want the returned blocking size to be ALWAYS a list
                 # True stationary probability of a loss network system for ALL possible states
                 # (further down, we will use the true probabilities that are actually checked, i.e. for those states for which an estimated probability is computed)
-                env_effective_capacity, x, dist = compute_stationary_probability_knapsack_when_blocking_by_class(env_original_capacity, self.rhos, Ks)
-                probas_stationary_true = dict([[tuple(xx), dd] for xx, dd in zip(x, dist)])
+                env_effective_capacity, _x, _dist = compute_stationary_probability_knapsack_when_blocking_by_class(env_original_capacity, self.rhos, Ks)
+                probas_stationary_true = dict([[tuple(xx), dd] for xx, dd in zip(_x, _dist)])
 
                 # *** IMPORTANT ***
                 # Set the capacity of each environment used for the simulation to the EFFECTIVE capacity computed above
@@ -1314,7 +1314,7 @@ class SimulatorQueue(Simulator):
             - 'n_Q': average number of trajectory pairs used to estimate each of the Q values given in the Q_values dict.
             default: None
         """
-        # TODO: (2021/11/03) Think if we can separate the learning of the value function and return G(t) from the learning of the policy (theta)
+        # TODO: (2021/11/03) Think if we can separate the learning of the value function and of the return, G(t), from the learning of the policy (theta)
         # Goal: avoid computing G(t) twice, one at learnerV.learn() and one at learnerP.learn()
 
         assert 'mode' in self.dict_params_learning.keys() and self.dict_params_learning['mode'] in LearningMode
@@ -1335,9 +1335,10 @@ class SimulatorQueue(Simulator):
         expected_reward = estimate_expected_reward(self.env, agent, probas_stationary)
         if probas_stationary_true is not None:
             proba_blocking_true = compute_proba_blocking(self.env, agent, probas_stationary_true)
+            assert proba_blocking_true <= 1.0, f"The true blocking probability must be at most 1.0 ({proba_blocking_true})"
             expected_reward_true = estimate_expected_reward(self.env, agent, probas_stationary_true)
             error_proba_blocking = proba_blocking / proba_blocking_true - 1
-            error_expected_reward = expected_reward / abs(expected_reward_true) - 1 if expected_reward_true != 0.0 else 0.0 if expected_reward == 0.0 else np.nan
+            error_expected_reward = (expected_reward - expected_reward_true) / abs(expected_reward_true) if expected_reward_true != 0.0 else 0.0 if expected_reward == 0.0 else np.nan
         else:
             proba_blocking_true = np.nan
             expected_reward_true = np.nan
