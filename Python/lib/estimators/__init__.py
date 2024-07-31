@@ -138,3 +138,60 @@ def estimate_expected_stopping_time_in_cycle(stopping_times, cycle_times, burnin
               .format(len(stopping_times[burnin_cycles:]), len(stopping_times), burnin_time, burnin_cycles))
 
     return expected_stopping_time, n_stopping_times_after_burnin
+
+
+def estimate_state_distribution_based_on_observed_times(dict_states_and_times, burnin_time: float=0.0):
+    """
+    Computes the state distribution based on times observed for each state which are compared to a burn-in time to qualify for counting
+
+    This function is typically used to estimate the stationary exit state distribution from the absorption set A in Fleming-Viot simulation.
+
+    Arguments:
+    dict_states_and_times: dict
+        Dictionary where keys are states and values are observed times associated to those states stored in a list.
+        Typically these times are absolute exit times from the absorption set A used in the Fleming-Viot estimation process.
+
+    burnin_time: (opt) float
+        Continuous time to allow as burn-in at the beginning of the simulation.
+        Only times in `dict_states_and_times` that are larger than or equal to `burnin_time` are considered when computing the state distribution.
+        default: 0.0
+
+    Return: tuple
+    A tuple with the following two elements:
+    - Dictionary containing the empirical distribution of the states given in input parameter `dict_states_and_times` from contributions of times observed
+    for each state that are larger than or equal to the burn-in time.
+    - the sample size behind the estimation of the state distribution.
+    """
+    dict_dist_states = dict.fromkeys(dict_states_and_times.keys())
+
+    # Frequency of each state from state observed times larger than or equal to the burn-in time (if the given burn-in time > 0)
+    total_freq = 0
+    for state, times in dict_states_and_times.items():
+        if burnin_time == 0:
+            # Avoid filtering the times list when the burn-in time is 0
+            dict_dist_states[state] = len(times)
+        else:
+            dict_dist_states[state] = np.sum(np.array(times) >= burnin_time)
+        total_freq += dict_dist_states[state]
+
+    # Compute the distribution (relative frequency of each state)
+    for state in dict_dist_states:
+        dict_dist_states[state] = dict_dist_states[state] / total_freq
+    # Check sum-to-1
+    assert np.isclose(np.sum(list(dict_dist_states.values())), 1.0)
+
+    return dict_dist_states, total_freq
+
+
+if __name__ == "__main__":
+    # Test of estimate_state_distribution_based_on_observed_times() which is used in the process to estimate the stationary exit state distribution for the FV process
+    # (see run_simulation_fv() in simulators/queues.py)
+    dict_states_and_times = dict({(0, 2): [0.8, 1.1, 1.9, 2.8],         # Some times are smaller and some times are at least equal to the burn-in time
+                                  (1, 2): [0.5, 0.7, 0.9],              # None of the times is at least equal to the burn-in time
+                                  (2, 2): [],                           # Empty list of times
+                                  (2, 0): [1.5, 1.9, 13.4, 15.8, 0.7]   # One value is exactly equal to the burn-in and values are NOT sorted (although this will usually not be the case)
+                                  })
+    dist, sample_size = estimate_state_distribution_based_on_observed_times(dict_states_and_times, burnin_time=1.5)
+    assert sample_size == 6
+    assert sorted(dist.keys()) == sorted(dict_states_and_times.keys())
+    assert np.allclose(np.array([dist[k] for k in sorted(dist.keys())]), np.array([0.33333333, 0.0, 0.666666666666, 0.0]))

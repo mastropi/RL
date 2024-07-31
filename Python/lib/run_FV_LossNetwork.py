@@ -875,11 +875,11 @@ def parse_input_parameters(argv):
     parser.set_defaults(queue_system="loss-network",
                         method="FV",
                         analysis_type="T",
-                        values_parameter_analyzed=[400, 2000, 4000], #[640, 1280, 2560], #[400, 4000], #[640, 1280, 2560], #[400, 800, 1600], #[64, 128, 256], #[160, 320, 640], #[640, 1280, 2560], #[80, 160, 320, 640], #[1280, 2560], #[80, 160, 320, 640],
-                        value_parameter_not_analyzed=200, #200, #50, #400 #500 #100
-                        J=[2, 3], #[2, 3], #[1, 2], #[1, 1], #None,
+                        values_parameter_analyzed=[400, 2000, 4000], #[4000, 6000, 8000], #[400, 2000, 4000], #[640, 1280, 2560], #[400, 4000], #[640, 1280, 2560], #[400, 800, 1600], #[64, 128, 256], #[160, 320, 640], #[640, 1280, 2560], #[80, 160, 320, 640], #[1280, 2560], #[80, 160, 320, 640],
+                        value_parameter_not_analyzed=400, #200, #50, #400 #500 #100
+                        J=[2, 3], #[2, 3], #[1, 2], #[1, 1], #None,x
                         J_factor=None, #[0.5, 0.5], #[0.2, 0.4],    # [0.1, 0.6]
-                        use_stationary_probability_for_start_states=False,
+                        use_stationary_probability_for_start_states=True,
                         burnin_time_steps=10,
                         min_num_cycles_for_expectations=5,
                         replications=10,
@@ -935,19 +935,19 @@ if __name__ == "__main__":
     if options.queue_system == "loss-network":
         capacity = 6 #7 #6 #10
         job_class_rates = [1, 5]
-        rhos = [0.5, 0.3] #[0.3, 0.1] #[0.8, 0.6] #[0.3, 0.1] #[0.8, 0.6] #[0.2, 0.1] #[0.5, 0.3]
+        rhos = [0.3, 0.1] #[0.8, 0.6] #[0.3, 0.1] #[0.8, 0.6] #[0.2, 0.1] #[0.5, 0.3]
         service_rates = [l / r for l, r in zip(job_class_rates, rhos)]
         blocking_sizes = [4, 6] #[1, 2] #[4, 6] #[5, 7] #[4, 6]
 
         #************ BLOCKING COSTS ************
-        # See explanation details in run_FVRL.py
+        # See justification for these calculations in run_FVRL.py
         adjustment_constant_for_large_enough_cost = 20 # This constant is normally > 1 and is adjusted by eye-ball as a function of rhos (e.g. 20 for rhos = [0.5, 0.3], 2 for rhos = [0.2, 0.1]), based on NOT obtaining costs that are too large (but the final decision comes from observing the magnitude of the obtained gradient, which should not be too large nor too small)
         blocking_costs = [adjustment_constant_for_large_enough_cost * sum(job_class_rates) * 1/r**(capacity - 1) / l for l, r in zip(job_class_rates, rhos)] #[5000, 1000, 100] (for rho_average = 0.8) #[2E5, 1.5E5, 1E5] #[2E5, 1E2, 1E0] #[1E1, 1E2, 1E4] #[20.0, 10.0, 5.0]
         # Perturb the costs so that we don't get the trivial optimum at e.g. [6, 6, 6]
         np.random.seed(1)
         multiplicative_noise_values = [0.5, 2]
         #blocking_costs = [int(round(c*n)) if c*n > 1 else c*n for c, n in zip(blocking_costs, multiplicative_noise_values)]
-        blocking_costs = [2E3, 2E4] #[1, 1] #[2.5E3, 4.9E6] #[2000, 20000] ([0.5, 0.3]) #[180, 600] ([0.8. 0.6]) # Costs computed in run_FVRL.py from p(x), lambdas and rhos
+        blocking_costs = [2E3, 2E5] #[2E3, 2E4] #[1, 1] #[2.5E3, 4.9E6] #[2000, 20000] ([0.5, 0.3]) #[180, 600] ([0.8. 0.6]) # Costs computed in run_FVRL.py from p(x), lambdas and rhos
         #************ BLOCKING COSTS ************
     else:
         raise ValueError(f"The queue system ({options.queue_system}) is invalid. Valid queue systems are: 'loss-network'")
@@ -1007,7 +1007,7 @@ if __name__ == "__main__":
                      {'df': results_agg, 'file': resultsfile_agg}])
 
     # Plot results
-    fontsize = 20
+    fontsize = 24 #20
     show_title = False
     savefig = False
     figmaximize = True
@@ -1041,7 +1041,7 @@ if __name__ == "__main__":
                 figfile = os.path.join(resultsdir, f"FV-Conv{options.analysis_type}-{params_str}-Proba-Violin-2Xaxis.png") if savefig else None
                 axes1 = plot_results_fv_mc( results, x="T", x2="#Cycles(MC)_mean",
                                             prob_true="Pr(True)",
-                                            xlabel="# arrival events", xlabel2="# Return Cycles to absorption set",
+                                            xlabel=r"T: # arrival events for $\mathbb{E}(T_A)$ estimation", xlabel2="# Return Cycles to absorption set",
                                             ymin=0.0, plot_mc=options.run_mc, splines=False,
                                             fontsize=fontsize,
                                             figfile=figfile,
@@ -1051,7 +1051,7 @@ if __name__ == "__main__":
                 axes2 = plot_results_fv_mc( results, x="T", x2="#Cycles(MC)_mean",
                                             prob_mc="ExpCost(MC)", prob_fv="ExpCost(FV)", prob_true="ExpCost",
                                             multiplier=1,
-                                            xlabel="# arrival events", xlabel2="# Return Cycles to absorption set", ylabel="Expected cost",
+                                            xlabel=r"T: # arrival events for $\mathbb{E}(T_A)$ estimation", xlabel2="# Return Cycles to absorption set", ylabel="Expected cost",
                                             ymin=0.0, plot_mc=options.run_mc, splines=False,
                                             fontsize=fontsize,
                                             figfile=figfile,

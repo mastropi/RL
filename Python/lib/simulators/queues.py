@@ -25,7 +25,7 @@ from Python.lib.agents.policies.parameterized import PolQueueTwoActionsLinearSte
 from Python.lib.agents.queues import AgeQueue
 import Python.lib.environments.queues as env_queues
 from Python.lib.environments.queues import Actions, BufferType
-from Python.lib.estimators import DEBUG_ESTIMATORS, estimate_expected_cycle_time, estimate_expected_stopping_time_in_cycle
+from Python.lib.estimators import DEBUG_ESTIMATORS, estimate_expected_cycle_time, estimate_expected_stopping_time_in_cycle, estimate_state_distribution_based_on_observed_times
 from Python.lib.estimators.fv import initialize_phi, update_phi, estimate_stationary_probabilities, SurvivalProbabilityEstimation
 
 from Python.lib.simulators import BURNIN_TIME_STEPS, MIN_NUM_CYCLES_FOR_EXPECTATIONS, DEBUG_TRAJECTORIES, \
@@ -1955,7 +1955,8 @@ def choose_state_for_buffer_size(env, buffer_size: int):
 def get_blocking_boundaries(agent):
     """
     Returns all the blocking values for each dimension of a multidimensional state system where blocking may occur at
-    arrival of the corresponding job class
+    arrival of the corresponding job class (typically the values K(i)-1 and K(i) for job class i when the acceptance policy is a linear step
+    such as policies.parameterized.PolQueueTwoActionsLinearStepOnJobClasses where K(i)-1 and K(i) have positive rejection probability).
 
     The agent is assumed to store one or more acceptance policies where the getDeterministicBlockingValue()
     method is defined. Normally each of these policies are parameterized by a real-valued parameter theta
@@ -1998,7 +1999,8 @@ def get_blocking_boundaries(agent):
 def get_deterministic_blocking_boundaries(agent, thresholds: Union[float, list]=None, return_int_when_single_policy=True, exact=True):
     """
     Returns all the deterministic blocking thresholds for each dimension of a multidimensional state system
-    where blocking may occur at arrival of the corresponding job class.
+    where blocking may occur at arrival of the corresponding job class (typically the values K(i) for job class i when the acceptance policy is a linear step
+    such as policies.parameterized.PolQueueTwoActionsLinearStepOnJobClasses where K(i) is the threshold with rejection probability 1 (deterministic)).
 
     The agent is assumed to store one or more acceptance policies where the getDeterministicBlockingValue()
     method is defined (when thresholds=None) or the getDeterministicBlockingValueFromTheta() is defined
@@ -2363,7 +2365,10 @@ def manage_service(env, agent, state, server):
 
 def estimate_blocking_mc(env, agent, dict_params_simul, dict_params_info, start_queue_state=None):
     """
-    Estimates the blocking probability using Monte-Carlo
+    Estimates the blocking probability using Monte-Carlo and the renewal theory characterization of stationary probabilities,
+    which is based on return cycles to a given state
+    
+    For more details of the estimation process, see the documentation for estimate_stationary_probabilities_mc().
 
     Arguments:
     env: Queue environment
@@ -2500,7 +2505,8 @@ def run_simulation_mc(env, agent, t_learn, start_state, t_sim_max,
                       track_absorptions=False, track_survival=False,
                       seed=None, verbose=False, verbose_period=1):
     """
-    Runs the continuous-time simulation using Monte-Carlo
+    Runs the continuous-time simulation using Monte-Carlo while keeping track of entry times to an absorption set A and
+    exit times from A into an activation set
 
     Arguments:
     agent: Agent
@@ -2528,10 +2534,10 @@ def run_simulation_mc(env, agent, t_learn, start_state, t_sim_max,
         the absorption set A) (for further details, see calculations in my green small notebok written on 06-Nov-2022).
 
     absorption_set: SetOfStates
-        Set with the entrance states to the zero-reward set of states A.
+        Absorption set whose boundary defines the entry events whose times are tracked.
 
     activation_set: SetOfStates
-        Set with the entrance states to the complement of the zero-reward set of states A.
+        Activation set whose boundary defines the exit events whose times and states are tracked.
 
     track_return_cycles: (opt) bool
         Whether to track the return cycle times to the initial state/buffer-size (defined by parameter `start_state`),
@@ -2543,9 +2549,10 @@ def run_simulation_mc(env, agent, t_learn, start_state, t_sim_max,
         Whether to track the absorption times, i.e. the times spent on the reabsorption cycles defined by the
         interval between two consecutive times in which the queue returns to the initial state/buffer-size
         (defined by parameter `start_state`), coming from the activation set of states.
-        In addition, the exit times from the absorption set are also tracked, i.e. the times spent between an entry to
-        and an exit from the absorption set, i.e. when the queue system visits a state in the activation set
-        coming from the absorption set of states.
+        In addition, the exit states and times from the absorption set are also tracked, where:
+        - the exit state is the state at which the queue system ENTERS the activation set.
+        - the exit time is the time spent between an entry to and an exit from the absorption set,
+        i.e. when the queue system visits a state in the activation set coming from the absorption set of states.
         The exit times information is handy when running this function for the FV estimator, where we need to estimate
         E(T_A) as E(T_E) + E(T_K) where T_E is the exit time and T_K is the killing time since exit, which is estimated
         from a separate simulation run on the N particles used for the FV simulation. That is, estimating E(T_E) instead
@@ -2594,6 +2601,8 @@ def run_simulation_mc(env, agent, t_learn, start_state, t_sim_max,
     See the note below about precedence order between track_return_cycles and track_absorptions.
     - exit_times: list with the observed exit times from the absorption set since the latest reabsorption.
     - absorption_times: list with the observed reabsorption times.
+    - dict_exit_states_and_times: dictionary containing the exit states (entrance to the activation set) as keys and the ABSOLUTE
+    exit times as values (which are lists of times).
 
     If track_absorptions = True and track_survival = True, in addition:
     - survival_times: list with the observed survival times, sorted increasingly.
@@ -2634,6 +2643,16 @@ def run_simulation_mc(env, agent, t_learn, start_state, t_sim_max,
     return_times = []
     # Information about the exit times (from the absorption set A)
     exit_times = []
+    # Information about the exit states and absolute exit times
+    # The goal is to use this information to estimate the stationary exit state distribution, for which we need the ABSOLUTE exit time in order to filter them with
+    # a burn-in time that makes the system closer to stationarity.
+    # Recall that the exit state is the state at which the queue system visits the activation set when exiting the absorption set A
+    # IMPORTANT: We need to initialize each dictionary entry as an empty list SEPARATELY to prevent all entries from having the same memory address!!
+    # Note also that we convert scalar states to tuple in order to make things work for all queue systems, either unidimensional systems such as the M/M/1 queue or
+    # multidimensional systems such as a loss network receiving multi-class jobs. If we do not do this, the update of the dictionary keys done below fails in the M/M/1 case.
+    dict_exit_states_and_times = dict.fromkeys([tuple([s]) if is_scalar(s) else s for s in activation_set.getStates(exactly_one_dimension_at_boundary=True)])
+    for key in dict_exit_states_and_times.keys():
+        dict_exit_states_and_times[key] = []
     # Information about the reabsorption times
     absorption_times = []
     # Information about the survival times
@@ -2698,6 +2717,8 @@ def run_simulation_mc(env, agent, t_learn, start_state, t_sim_max,
                 # Record the exit times, i.e. time elapsed since the latest absorption
                 n_exit_times += 1
                 exit_times += [time_abs - time_last_absorption]
+                # Record the ABSOLUTE exit time so that we can filter the exit state distribution by the absolute time being large enough to be closer to stationarity
+                dict_exit_states_and_times[env.getQueueState()] += [time_abs]
                 if DEBUG_TRAJECTORIES or DEBUG_ESTIMATORS:
                     print("[MC] --> EXIT time = {:.3f} (total={})".format(exit_times[-1], n_exit_times))
                 if track_survival:
@@ -2840,13 +2861,15 @@ def run_simulation_mc(env, agent, t_learn, start_state, t_sim_max,
         #axes[0].set_xscale('log')      # Use this in case we want to see a potential outlier at low values
         axes[0].set_title(results_str)
 
+    # Return statement
+    # Recall that EITHER track_return_cycles or track_absorptions can be True, and precedence is given to track_return_cycles
     if track_return_cycles:
         return t, time_abs, n_cycles_return, time_last_return, return_times
     if track_absorptions:
         if not track_survival:
-            return t, time_abs, n_cycles_absorption, time_last_absorption, exit_times, absorption_times
+            return t, time_abs, n_cycles_absorption, time_last_absorption, exit_times, absorption_times, dict_exit_states_and_times
         else:
-            return t, time_abs, n_cycles_absorption, time_last_absorption, exit_times, absorption_times, sorted(survival_times)
+            return t, time_abs, n_cycles_absorption, time_last_absorption, exit_times, absorption_times, dict_exit_states_and_times, sorted(survival_times)
     return t, time_abs
 
 
@@ -3246,9 +3269,14 @@ def get_blocking_states_or_buffer_sizes(env, agent):
         return states_of_interest
 
 
+# TODO: (2024/07/25) Change the name of the `probas_stationary` parameter so that it represents the distribution of the FV particles but NOT of the single Markov chain simulation, which could choose the start state as uniform as we wait for a burn-in time and in any case is only ONE Markov chain, not N
+# For this change, take a look at how I implemented the two distributions in discrete.py --> Simulator class.
 def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info, probas_stationary: dict=None):
     """
     Estimates the blocking probability using the Fleming-Viot approach
+
+    The start states of the FV particles are chosen using the estimated stationary EXIT distribution from the absorption set A
+    whenever `probas_stationary` is not None.
 
     Arguments:
     envs: List
@@ -3269,8 +3297,9 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info, proba
         - t_learn: the number of learning steps, when FV is used in the context of FVRL, i.e. to learn an optimum policy.
 
     probas_stationary: dict
-        Stationary distribution that should be used to select the start state of each FV particle.
-        default: None, in which case a uniform random distribution is used.
+        Stationary distribution to use to select the start state of the single Markov chain distribution.
+        It should contain AT LEAST the states at the boundary of the absorption set A.
+        default: None, in which case a uniform random distribution is used for the single Markov chain simulation and also for the start state of the FV particles!
 
     Return: tuple
     Tuple with the following elements:
@@ -3316,7 +3345,7 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info, proba
     # The start state is chosen among a set of absorption states
     # Note that the set of absorption states is easy to define in the single-server context but in a multi-server context
     # the set may be very large... I don't think there is an alternative for a concise definition of the absorption set
-    # in such multi-server situation.
+    # in such multi-server situations.
     # In a loss network context, e.g. a buffer-less server system that accepts jobs of different classes,
     # this absorption set can concisely be defined by the set of unidimensional blocking sizes, one for each job class,
     # and this is one of the options given by the constructor of the SetOfStates class used to define this set.
@@ -3329,7 +3358,7 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info, proba
                                                                                            at_least_one_dimension_at_boundary=True)
     if dict_params_simul['method_survival_probability_estimation'] == SurvivalProbabilityEstimation.FROM_M_CYCLES:
         track_survival_in_single_particle_simulation = True
-        t, time_end_simulation, n_cycles_absorption, time_last_absorption, exit_times, absorption_times, survival_times = \
+        t, time_end_simulation, n_cycles_absorption, time_last_absorption, exit_times, absorption_times, dict_exit_states_and_times, survival_times = \
             run_simulation_mc(envs[0], agent, dict_params_info.get('t_learn', 0), (start_queue_state_boundary_A, None),
                               dict_params_simul['T'],
                               absorption_set=dict_params_simul['absorption_set'],
@@ -3340,7 +3369,7 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info, proba
                               verbose_period=dict_params_info.get('verbose_period', 1))
     else:
         track_survival_in_single_particle_simulation = False
-        t, time_end_simulation, n_cycles_absorption, time_last_absorption, exit_times, absorption_times = \
+        t, time_end_simulation, n_cycles_absorption, time_last_absorption, exit_times, absorption_times, dict_exit_states_and_times = \
             run_simulation_mc(envs[0], agent, dict_params_info.get('t_learn', 0), (start_queue_state_boundary_A, None),
                               dict_params_simul['T'],
                               absorption_set=dict_params_simul['absorption_set'],
@@ -3419,6 +3448,10 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info, proba
     else:
         N = len(envs)
         assert N > 1, "The simulation system has more than one particle in Fleming-Viot mode ({})".format(N)
+
+        # Estimate the stationary exit state distribution from the initial Markov chain excursion
+        probas_stationary_exit_state, _sample_size = estimate_state_distribution_based_on_observed_times(dict_exit_states_and_times, burnin_time=dict_params_simul['burnin_time'])
+
         if DEBUG_ESTIMATORS or show_messages(dict_params_info.get('verbose', False), dict_params_info.get('verbose_period', 1), dict_params_info.get('t_learn', 0)):
             print("Running Fleming-Viot simulation on {} particles with absorption and activation sets defined as follows:"
                   "\nabsorption set: {}".format(N, dict_params_simul['absorption_set'].getSetBoundaries()) + \
@@ -3427,7 +3460,7 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info, proba
             run_simulation_fv(  dict_params_info.get('t_learn', 0), envs, agent,
                                 dict_params_simul['absorption_set'],
                                 dict_params_simul['activation_set'],
-                                dist_proba_for_start_state=probas_stationary,
+                                dist_proba_for_start_state=probas_stationary_exit_state if probas_stationary is not None else None, #probas_stationary,
                                 expected_absorption_time=expected_absorption_time,
                                 expected_exit_time=expected_exit_time,
                                 df_proba_surv=df_proba_surv,
@@ -3489,9 +3522,8 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
         Probability distribution from which the start state for each FV particle is chosen.
         The dictionary can contain more states than those in the activation set (that are also part of the boundary
         of the complement of the set of absorbed states A), but it MUST contain all the states that are at the boundary
-        of Ac.
-        The actual distribution to use here is the entrance distribution to Ac, but a reasonable approximation
-        (that beats the uniformly random selection of the start state is the stationary distribution of the entrance states.
+        of the complement of A, Ac.
+        The actual distribution to use here is the entrance distribution to Ac, but a reasonable approximation.
         default: None, in which case a uniform random distribution is used.
 
     expected_absorption_time: (opt) positive float

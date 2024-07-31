@@ -515,10 +515,10 @@ def parse_input_parameters(argv):
     default_queue_system = "loss-network" #"single-server" #"loss-network"
     default_create_output_files = True
     parser.set_defaults(queue_system=default_queue_system,
-                        method="FV",
+                        method="FV", #"MC", #"FV",
                         t_learn=30,
-                        replications=20,
-                        benchmark_filename="benchmark_fv.csv", # Not used when benchmark_datetime is given (i.e. not empty or None)
+                        replications=20, #7, #20,
+                        benchmark_filename="benchmark_fv.csv",  # Not used when benchmark_datetime is given (i.e. not empty or None)
                         benchmark_datetime=None, #"20230410_102003", #"20230409_163723",  # Format: "<yymmdd>_<hhmmss>". Use this parameter ONLY when method = "MC" and we want to automatically generate the benchmark filename to read the benchmark data from
                         clipping=False,
                         clipping_value=1.0,
@@ -526,15 +526,15 @@ def parse_input_parameters(argv):
                         theta_true=[3, 5], #17,          # Use this parameter ONLY when method = "MC" and we want to automatically generate the benchmark filename to read the benchmark data from
                         # TODO: (2023/03/19) Make the process work on a SINGLE-CLASS loss network
                         theta_start=[0.1, 0.1], #28.1, #[0.1, 0.1],  # For loss-network: [4.1, 4.1] #[7.1, 7.1] #[3.1, 3.1] #[0.1, 0.1]
-                        J_factor=[0.3, 0.5], #0.3, #[0.5, 0.5], #[0.3, 0.5]
+                        J_factor=[0.5, 0.5], #[0.3, 0.5], #0.3, #[0.5, 0.5], #[0.3, 0.5]
                         use_stationary_probability_for_start_states=True,
-                        N=np.nan if default_queue_system == "single-server" else 200,   #100 #500
-                        T=np.nan if default_queue_system == "single-server" else 400,  #500 #1000
+                        N=np.nan if default_queue_system == "single-server" else 100, #400, #50, #200, #100, #500,
+                        T=np.nan if default_queue_system == "single-server" else 500, #400, #500, #1000,
                         error_rel_et=0.5 if default_queue_system == "single-server" else np.nan,
                         error_rel_phi=0.5 if default_queue_system == "single-server" else np.nan,
                         burnin_time_steps=10,   #10 #20
                         min_num_cycles_for_expectations=5,
-                        seed=1313,  # 1317 #1717 #1313
+                        seed=1317, #1313,  # 1317 #1717 #1313
                         create_log=default_create_output_files,
                         save_results=default_create_output_files,
                         save_with_dt=True,
@@ -627,7 +627,7 @@ if __name__ == "__main__":
     elif options.queue_system == "loss-network":
         capacity = 6 #9 #6 #10
         job_class_rates = [1, 5] #[1, 5, 8] # When lambda = rho: #[0.8, 0.8, 0.8] #[0.1, 0.5, 0.8] #[2, 8, 15] #[20, 80, 150]
-        rhos = [0.5, 0.3] #[0.8, 0.6] #[0.5, 0.3] #[0.6, 0.4]#[0.5]*len(job_class_rates) #[0.8]*len(job_class_rates)
+        rhos = [0.3, 0.1] #[0.5, 0.3] #[0.8, 0.6] #[0.5, 0.3] #[0.6, 0.4]#[0.5]*len(job_class_rates) #[0.8]*len(job_class_rates)
         service_rates = [l/r for l, r in zip(job_class_rates, rhos)] #[1.0, 1.0, 1.0]
         #************ BLOCKING COSTS ************
         # We should consider the following two conditions to define the blocking cost values:
@@ -661,7 +661,7 @@ if __name__ == "__main__":
         np.random.seed(1)
         multiplicative_noise_values = [0.5, 2]
         blocking_costs = [int(round(c*n)) if c*n > 1 else c*n for c, n in zip(blocking_costs, multiplicative_noise_values)]
-        blocking_costs = [2000, 20000] #[2.5E3, 4.9E6] #[2000, 20000] ([0.5, 0.3]) #[180, 600] ([0.8. 0.6]) # Costs computed in run_FVRL.py from p(x), lambdas and rhos
+        blocking_costs = [2E3, 2E5] #[2E3, 2E4] #[2.5E3, 4.9E6] #[2000, 20000] ([0.5, 0.3]) #[180, 600] ([0.8. 0.6]) # Costs computed in run_FVRL.py from p(x), lambdas and rhos
         #************ BLOCKING COSTS ************
     rhos = [l / m for l, m in zip(job_class_rates, service_rates)]
     nservers = len(service_rates)
@@ -1275,7 +1275,7 @@ if __name__ == "__main__":
             ax_objective.set_xlabel("Learning step")
             ax_objective.set_ylabel("Expected cost")
             ax_objective.set_title("Expected cost range: [{:.1f}, {:.1f}], average = {:.1f}".format(cost_true, cost_max, cost_mean))
-            # ax_objective.set_yscale('log')
+            ax_objective.set_yscale('log')
             ax_objective.xaxis.set_major_locator(MaxNLocator(integer=True))
             # ax_objective.set_aspect(1 / ax_objective.get_data_ratio())
             ax_objective.legend(expected_lines + expected_reflines, ["Expected cost for the estimated optimum theta(s)", "Optimum expected cost"])

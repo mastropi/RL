@@ -26,6 +26,7 @@ from Python.lib.utils.basic import find, is_scalar
 # We use a negative theta close to -1.0 (and not a theta that is close to 0, such as 0.1)
 # so that the deterministic blocking size of the linear step policy can be K=0 (as K = ceiling(theta + 1) in that case)
 # TODO: (2023/03/02) Probably this definition should go in parameterized.py and should be defined for each parameterized policy defined there.
+#THETA_MIN = 0.1
 THETA_MIN = -1.0 + 0.1
 
 
@@ -725,7 +726,8 @@ class LeaPolicyGradient(GenericLearner):
                     # Note that we bound theta by K-1 MINUS epsilon, instead of PLUS epsilon so that the deterministic blocking size,
                     # that is equal to ceiling(theta+1), is equal to K.
                     theta[i] = min(theta_i, K - 1 - 0.1)
-                print("[LeaPolicyGradient.learn_linear_theoretical_from_estimated_values] theta BOUNDED by system's capacity K={}: {} -> {}".format(K, _theta_orig, theta))
+                print("[LeaPolicyGradient.learn_linear_theoretical_from_estimated_values] theta BOUNDED by system's capacity K={} to interval [{:.1f}, {:.1f}]: {} -> {}" \
+                      .format(K, THETA_MIN, K - 1 - 0.1, _theta_orig, theta))
 
                 self.setThetaParameter(theta)
 
