@@ -387,7 +387,7 @@ theta_start = [0.1, 0.1]
 theta_min = 0.0 #-1     # This is used to define the lower limit of the Y-axis in the plots and is defined by the THETA_MIN value used when learning (see THETA_MIN global variable defined in policies.py)
 J_factors = [0.5, 0.5] #[0.3, 0.5] #[0.5, 0.5]
 NT_values = [100, 500] #[200, 400] #[200, 500] #[100, 500]
-use_stationary_probability_for_start_states = True
+use_exit_state_distribution_for_start_states = True
 
 # Compute the optimum theta and K
 expected_costs = compute_expected_cost_knapsack(blocking_costs, K, rhos, lambdas)
@@ -402,7 +402,7 @@ theta_true = [k-1 for k in K_true]
 # - Each filename pointing to the results has a datetime prefix which is different for each method
 # - The filenames might be TOO LONG and they may not be found by Python...
 # Example of an ORIGINAL filename containing the results:
-# results_file_fv = os.path.join(resultsdir, f"SimulatorQueue_20230319_154817_FV-K={K}-costs={blocking_costs}-rhos={rhos},theta0={theta_true},theta=[{theta_start}]-J=[{J_factors}]-NT=[{NT_values}]-ProbStart={use_stationary_probability_for_start_states}.csv")
+# results_file_fv = os.path.join(resultsdir, f"SimulatorQueue_20230319_154817_FV-K={K}-costs={blocking_costs}-rhos={rhos},theta0={theta_true},theta=[{theta_start}]-J=[{J_factors}]-NT=[{NT_values}]-ProbStart={'EXIT' if use_exit_state_distribution_for_start_states else 'UNIFORM'}.csv")
 results_file_true = os.path.join(resultsdir, "results_true.csv")
 results_file_fv = os.path.join(resultsdir, "results_fv.csv")
 results_file_mc = os.path.join(resultsdir, "results_mc.csv")

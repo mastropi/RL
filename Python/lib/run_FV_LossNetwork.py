@@ -228,7 +228,7 @@ def run_fv_estimation_loss_network( env_queue, Ks, Js, K, N, T,
     # Run the simulation!
     return estimate_blocking_fv(envs_queue, agent_accept_reject,
                                 dict_params_simul, dict_params_info,
-                                probas_stationary=None)
+                                use_exit_state_distribution=False)
 
 
 def analyze_convergence(capacity=10, job_class_rates=[0.7], service_rates=[1.0],
@@ -237,7 +237,7 @@ def analyze_convergence(capacity=10, job_class_rates=[0.7], service_rates=[1.0],
                         T=500,
                         J=None,
                         J_factor=[0.3],
-                        use_stationary_probability_for_start_state=False,
+                        use_exit_state_distribution_for_start_states=True,
                         burnin_time_steps=20, min_num_cycles_for_expectations=5,
                         method_proba_surv=SurvivalProbabilityEstimation.FROM_N_PARTICLES,
                         replications=5,
@@ -280,6 +280,11 @@ def analyze_convergence(capacity=10, job_class_rates=[0.7], service_rates=[1.0],
         in the Fleming-Viot simulation.
         This value is not used if J is given.
         default: [0.3]
+
+    use_exit_state_distribution_for_start_states: (opt) bool
+        Whether to use the estimated EXIT state distribution from A to choose the start state of the FV particles or
+        choose the start state uniformly at random.
+        default: True
 
     burnin_time_steps: (opt) int
         Number of burn-in time steps to consider before a return cycle and a reabsorption cycle qualifies for
@@ -499,9 +504,9 @@ def analyze_convergence(capacity=10, job_class_rates=[0.7], service_rates=[1.0],
     print("Computing stationary probability of blocking states and TRUE blocking probability for capacity={}, rhos={}...".format(capacity, rhos))
     proba_blocking_true = compute_blocking_probability_knapsack(capacity, rhos, job_class_rates, blocking_sizes=blocking_sizes)
 
-    # True stationary probability (this is used to:
-    # - choose the start state in the FV simulation when use_stationary_probability_for_start_state = True
-    # - compute the probability-weighted coverage of blocking states:
+    # True stationary probability, which is used to:
+    # - compute true quantities against which estimated quantities are compared.
+    # - compute the probability-weighted coverage of blocking states
     effective_capacity, x, dist = compute_stationary_probability_knapsack_when_blocking_by_class(capacity, rhos, blocking_sizes)
     probas_stationary_true = dict([(tuple(xx), dd) for xx, dd in zip(x, dist)])
     assert proba_blocking_true == compute_blocking_probability_knapsack_from_probabilities_and_job_arrival_rates(probas_stationary_true, effective_capacity, job_class_rates, blocking_sizes)
@@ -569,7 +574,7 @@ def analyze_convergence(capacity=10, job_class_rates=[0.7], service_rates=[1.0],
                     time_last_absorption, time_end_simulation_et, max_survival_time, time_end_simulation_fv, \
                         n_events_et, n_events_fv_only = estimate_blocking_fv(envs_queue, agent,
                                                                              dict_params_simul, dict_params_info,
-                                                                             probas_stationary=probas_stationary_true if use_stationary_probability_for_start_state else None)
+                                                                             use_exit_state_distribution=use_exit_state_distribution_for_start_states)
             # If we need to check the calculation of the blocking probability done by the above estimate_blocking_*() call
             if False:
                 proba_blocking_from_stationary_probabilities = compute_blocking_probability_knapsack_from_probabilities_and_job_arrival_rates(
@@ -779,7 +784,7 @@ def parse_input_parameters(argv):
                                          "[--value_parameter_not_analyzed] "
                                          "[--J] "
                                          "[--J_factor] "
-                                         "[--use_stationary_probability_for_start_states] "
+                                         "[--use_exit_state_distribution_for_start_states] "
                                          "[--burnin_time_steps] "
                                          "[--min_num_cycles_for_expectations] "
                                          "[--replications] "
@@ -822,9 +827,9 @@ def parse_input_parameters(argv):
                       callback=convert_str_argument_to_list_of_type,
                       metavar="J/K factors",
                       help="Factors that define the absorption set size J (only used when J is not given) [default: %default]")
-    parser.add_option("--use_stationary_probability_for_start_states",
+    parser.add_option("--use_exit_state_distribution_for_start_states",
                       action="store_true",
-                      help="Whether to use the stationary probability distribution for the start states in Fleming-Viot simulation [default: %default]")
+                      help="Whether to use the estimated EXIT stationary distribution or the UNIFORM distribution for the start state of the Fleming-Viot particles [default: %default]")
     parser.add_option("--burnin_time_steps",
                       type="int",
                       metavar="Burn-in time steps",
@@ -879,7 +884,7 @@ def parse_input_parameters(argv):
                         value_parameter_not_analyzed=400, #200, #50, #400 #500 #100
                         J=[2, 3], #[2, 3], #[1, 2], #[1, 1], #None,x
                         J_factor=None, #[0.5, 0.5], #[0.2, 0.4],    # [0.1, 0.6]
-                        use_stationary_probability_for_start_states=True,
+                        use_exit_state_distribution_for_start_states=True,
                         burnin_time_steps=10,
                         min_num_cycles_for_expectations=5,
                         replications=10,
@@ -911,7 +916,7 @@ def show_execution_parameters(options):
     print("Activation size factors J/K={}".format(options.J_factor))
     print("# particles N={}".format(N_values))
     print("# arrival events for E(T_A) estimation T={}".format(T_values))
-    print("use_stationary_probability_for_start_states={}".format(options.use_stationary_probability_for_start_states))
+    print("use_exit_state_distribution_for_start_states={}".format(options.use_exit_state_distribution_for_start_states))
     print("Burn-in time steps BITS={}".format(options.burnin_time_steps))
     print("Min #cycles to estimate expectations MINCE={}".format(options.min_num_cycles_for_expectations))
     print("Replications={}".format(options.replications))
@@ -965,14 +970,14 @@ if __name__ == "__main__":
         T_values = [options.value_parameter_not_analyzed]
         resultsfile_prefix = "estimates_vs_N"
         params_str = "K={},block={},costs={},lambdas={},rho={},J={},T={},N={},Prob={}" \
-            .format(capacity, blocking_sizes, 1 if blocking_costs is None else blocking_costs, job_class_rates, rhos, J if J is not None else J_factor, T_values, N_values, options.use_stationary_probability_for_start_states)
+            .format(capacity, blocking_sizes, 1 if blocking_costs is None else blocking_costs, job_class_rates, rhos, J if J is not None else J_factor, T_values, N_values, options.use_exit_state_distribution_for_start_states)
     else:
         other_variable = "N"
         N_values = [options.value_parameter_not_analyzed]
         T_values = options.values_parameter_analyzed
         resultsfile_prefix = "estimates_vs_T"
         params_str = "K={},block={},costs={},lambdas={},rhos={},J={},N={},T={},Prob={}" \
-                .format(capacity, blocking_sizes, 1 if blocking_costs is None else blocking_costs, job_class_rates, rhos, J if J is not None else J_factor, N_values, T_values, options.use_stationary_probability_for_start_states) \
+                .format(capacity, blocking_sizes, 1 if blocking_costs is None else blocking_costs, job_class_rates, rhos, J if J is not None else J_factor, N_values, T_values, options.use_exit_state_distribution_for_start_states) \
                 .replace(" ", "")
 
     show_execution_parameters(options)
@@ -993,7 +998,7 @@ if __name__ == "__main__":
                                                 T=T_values, #50, #[170, 463, 1259],
                                                 J=J,
                                                 J_factor=J_factor,
-                                                use_stationary_probability_for_start_state=options.use_stationary_probability_for_start_states,
+                                                use_exit_state_distribution_for_start_states=options.use_exit_state_distribution_for_start_states,
                                                 burnin_time_steps=options.burnin_time_steps, min_num_cycles_for_expectations=options.min_num_cycles_for_expectations,
                                                 method_proba_surv=SurvivalProbabilityEstimation.FROM_N_PARTICLES,
                                                 replications=options.replications, run_mc=options.run_mc,

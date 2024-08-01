@@ -393,7 +393,7 @@ def parse_input_parameters(argv):
                                          "[--theta_true] "
                                          "[--theta_start] "
                                          "[--J_factor] "
-                                         "[--use_stationary_probability_for_start_states "
+                                         "[--use_exit_state_distribution_for_start_states "
                                          "[-N] "
                                          "[-T] "
                                          "[--error_rel_et] "
@@ -455,9 +455,9 @@ def parse_input_parameters(argv):
                       callback=convert_str_argument_to_list_of_type,
                       metavar="J/K factors", default="0.3, 0.3, 0.3",
                       help="Factors that define the absorption set size J [default: %default]")
-    parser.add_option("--use_stationary_probability_for_start_states",
+    parser.add_option("--use_exit_state_distribution_for_start_states",
                       action="store_true",
-                      help="Whether to use the stationary probability distribution for the start states in Fleming-Viot simulation [default: %default]")
+                      help="Whether to use the estimated EXIT stationary distribution or the UNIFORM distribution for the start state of the Fleming-Viot particles [default: %default]")
     parser.add_option("-N",
                       type="int",
                       metavar="# particles",
@@ -527,7 +527,7 @@ def parse_input_parameters(argv):
                         # TODO: (2023/03/19) Make the process work on a SINGLE-CLASS loss network
                         theta_start=[0.1, 0.1], #28.1, #[0.1, 0.1],  # For loss-network: [4.1, 4.1] #[7.1, 7.1] #[3.1, 3.1] #[0.1, 0.1]
                         J_factor=[0.5, 0.5], #[0.3, 0.5], #0.3, #[0.5, 0.5], #[0.3, 0.5]
-                        use_stationary_probability_for_start_states=True,
+                        use_exit_state_distribution_for_start_states=True,
                         N=np.nan if default_queue_system == "single-server" else 100, #400, #50, #200, #100, #500,
                         T=np.nan if default_queue_system == "single-server" else 500, #400, #500, #1000,
                         error_rel_et=0.5 if default_queue_system == "single-server" else np.nan,
@@ -559,11 +559,12 @@ def generate_parameter_string_for_filename(queue_system,
                                            NT_values,
                                            error_rel_phi,
                                            error_rel_et,
-                                           use_stationary_probability_for_start_states):
+                                           use_exit_state_distribution_for_start_states):
     if queue_system == "loss-network":
         params_str = learning_method.name + \
                      "-K={}-costs={}-rhos={},theta0={}-theta={}-J={}-NT={}-ProbStart={}" \
-                         .format(capacity, [int(c) for c in blocking_costs], rhos, theta_true, theta_start, J_factor, NT_values, use_stationary_probability_for_start_states)
+                         .format(capacity, [int(c) for c in blocking_costs], rhos, theta_true, theta_start, J_factor, NT_values,
+                                 "None" if use_exit_state_distribution_for_start_states is None else "EXIT" if use_exit_state_distribution_for_start_states else "UNIFORM")
     else:
         params_str = learning_method.name + \
                      "-theta_ref={}-theta={}-J={}-E={},{}".format(theta_ref, theta_start, J_factor, error_rel_phi, error_rel_et)
@@ -582,7 +583,7 @@ def show_execution_parameters(options):
     print("theta_ref={}".format(theta_ref))
     print("theta_start={}".format(options.theta_start))
     print("J_factor={}".format(options.J_factor))
-    print("use_stationary_probability_for_start_states={}".format(use_stationary_probability_for_start_states))
+    print("use_exit_state_distribution_for_start_states={}".format(use_exit_state_distribution_for_start_states))
     print("#particles(N)= {}".format(N))
     print("#learning_steps(T)={}".format(T))
     print("error_rel_phi={} (only used when N and T are not defined)".format(error_rel_phi))
@@ -677,7 +678,7 @@ if __name__ == "__main__":
         N = np.nan; T = np.nan
         error_rel_phi = options.error_rel_phi
         error_rel_et = options.error_rel_et
-        use_stationary_probability_for_start_states = None
+        use_exit_state_distribution_for_start_states = None
     elif options.queue_system == "loss-network":
         theta_ref = [np.nan]*len(job_class_rates)
         # Values of N (#particles) and T (#arrival events) to use for the simulation used to estimate stationary probabilities
@@ -685,10 +686,10 @@ if __name__ == "__main__":
             # This is ONLY used when there is no benchmark file or if it does not exist
             # (in order to run an ad-hoc MC learning that is not linked to a previously run FV learning)
             N = 1; T = options.T #200 * 1000 #50 * 100 #30 * 50 #500 * 100 #1000 * 100
-            use_stationary_probability_for_start_states = None
+            use_exit_state_distribution_for_start_states = None
         else:
             N = options.N; T = options.T #N = 100; T = 100, N = 500; T = 100
-            use_stationary_probability_for_start_states = options.use_stationary_probability_for_start_states
+            use_exit_state_distribution_for_start_states = options.use_exit_state_distribution_for_start_states
         error_rel_phi = np.nan
         error_rel_et = np.nan
 
@@ -744,7 +745,8 @@ if __name__ == "__main__":
                                                                 # Policy parameters
                                                                 [theta_ref], options.theta_true, [options.theta_start],
                                                                 # Learning parameters
-                                                                [options.J_factor], [[options.N, options.T]], error_rel_phi, error_rel_et, options.use_stationary_probability_for_start_states)
+                                                                [options.J_factor], [[options.N, options.T]], error_rel_phi, error_rel_et,
+                                                                use_exit_state_distribution_for_start_states)
             if options.benchmark_datetime != "":
                 sep = "_" + options.benchmark_datetime + "_"
             else:
@@ -920,7 +922,7 @@ if __name__ == "__main__":
                             't_sim': T,     # This is the number of arrival events, NOT the number of time steps to use in the estimation of E(T_A) in FV
                                             # In fact, the calculation of T on the basis of the expected relative error in the estimation of E(T_A) gives
                                             # us the number of arrival events (see details in my small dark green notebook in entry dated 06-Nov-2022).
-                            'use_stationary_probability_for_start_states': use_stationary_probability_for_start_states,
+                            'use_exit_state_distribution_for_start_states': use_exit_state_distribution_for_start_states,
                             'burnin_time_steps': options.burnin_time_steps,
                             'min_num_cycles_for_expectations': options.min_num_cycles_for_expectations,
                         }
@@ -1063,7 +1065,7 @@ if __name__ == "__main__":
                                                             NT_values,
                                                             error_rel_phi,
                                                             error_rel_et,
-                                                            use_stationary_probability_for_start_states)
+                                                            use_exit_state_distribution_for_start_states)
         # Now rename the results file to include the parameter settings so that it's easier to identify when analyzing results.
         results_dir = os.path.dirname(simul.results_file)
         results_filename = os.path.basename(simul.results_file)
@@ -1180,10 +1182,10 @@ if __name__ == "__main__":
 
         # Plot evolution of theta (for the last analyzed case)
         title = "{}".format(params_str) + "\nMethod: {}, Optimum Theta = {}, Theta start = {}, Theta final = {}, K_final = {}, Expected cost = {}" \
-                                          "\nN = {}, T = {:.0f} J = {} Stat.Prob.StartStates = {}" \
+                                          "\nN = {}, T = {:.0f} J = {} Prob.StartStates = {}" \
                                           "\nK = {}, Blocking Costs = {}, lambdas = {}, rhos = {}" \
                     .format(learning_method.name, theta_true, theta_start, np.mean(theta_opt_values[-1]), np.mean(K_opt_values[-1]), np.mean(cost_opt_values[-1]),
-                            N, t_sim, J_factor_values, use_stationary_probability_for_start_states,
+                            N, t_sim, J_factor_values, "None" if use_exit_state_distribution_for_start_states is None else "EXIT" if use_exit_state_distribution_for_start_states else "UNIFORM",
                             capacity, [int(c) for c in blocking_costs], job_class_rates, rhos)
         if options.plot and plot_trajectories:
             "In the case of the MC learner, plot the theta-learning trajectory as well as rewards received during learning"
@@ -1252,8 +1254,8 @@ if __name__ == "__main__":
                         refline_i = ax_params.axhline(theta_true[i], color='black', linestyle=linestyle_i)
                         lines += lines_i
                         reflines += [refline_i]
-                        legend_lines += ["Theta_" + str(i+1)]
-                        legend_reflines += ["True Optimum Theta_" + str(i + 1)]
+                        legend_lines += [rf"$\theta_{i+1}$"]
+                        legend_reflines += [rf"True Optimum $\theta_{i+1}$"]
 
                 # Plot of objective function evolution (i.e. the expected cost)
                 expected_line = ax_objective.plot(-np.array(expected_rewards), symbol, linestyle='-')

@@ -471,7 +471,7 @@ class SimulatorQueue(Simulator):
                 proba_blocking_fv, expected_reward, probas_stationary_blocking, \
                     expected_cycle_time, n_cycles, time_last_absorption, time_end_simulation_et, max_survival_time, time_end_simulation_fv, \
                         n_events_mc, n_events_fv = estimate_blocking_fv(self.envs, self.agent, dict_params_simul, dict_params_info,
-                                                        probas_stationary=probas_stationary_true if dict_params_simul.get('use_stationary_probability_for_start_states', False) else None)
+                                                                        use_exit_state_distribution=dict_params_simul.get('use_exit_state_distribution_for_start_states', False))
                 print("Estimated stationary probabilities of states of interest:\n{}".format(probas_stationary_blocking))
                 # Now we compute the equivalent (discrete) simulation time, as if it were a Monte-Carlo simulation
                 # Note that this measures the # simulation steps which does NOT coincide with parameter 't_sim'
@@ -3272,7 +3272,7 @@ def get_blocking_states_or_buffer_sizes(env, agent):
 
 # TODO: (2024/07/25) Change the name of the `probas_stationary` parameter so that it represents the distribution of the FV particles but NOT of the single Markov chain simulation, which could choose the start state as uniform as we wait for a burn-in time and in any case is only ONE Markov chain, not N
 # For this change, take a look at how I implemented the two distributions in discrete.py --> Simulator class.
-def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info, probas_stationary: dict=None):
+def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info, use_exit_state_distribution: bool=True):
     """
     Estimates the blocking probability using the Fleming-Viot approach
 
@@ -3297,10 +3297,12 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info, proba
         - verbose_period: the number of iterations (of what?) at which to be verbose.
         - t_learn: the number of learning steps, when FV is used in the context of FVRL, i.e. to learn an optimum policy.
 
-    probas_stationary: dict
-        Stationary distribution to use to select the start state of the single Markov chain distribution.
-        It should contain AT LEAST the states at the boundary of the absorption set A.
-        default: None, in which case a uniform random distribution is used for the single Markov chain simulation and also for the start state of the FV particles!
+    use_exit_state_distribution: (opt) bool
+        Whether to use the distribution of the EXIT state from absorption set A estimated from the initial single Markov chain excursion
+        as distribution law behind the choice of the start state of the FV particles.
+        Note that the start state of the single Markov chain excursion used to estimated E(T_A) is chosen uniformly at random
+        at the internal boundary of A, as a burn-in period is allowed before collecting data for the estimation of E(T_A).
+        default: True
 
     Return: tuple
     Tuple with the following elements:
@@ -3343,20 +3345,16 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info, proba
     # -- Parse input parameters
 
     # -- Step 1: Simulate a single queue to estimate P(T>t) and E(T_A)
-    # The start state is chosen among a set of absorption states
+    # The start state is chosen among the internal boundary of the absorption set (this is what the random_choice() method called below does).
     # Note that the set of absorption states is easy to define in the single-server context but in a multi-server context
     # the set may be very large... I don't think there is an alternative for a concise definition of the absorption set
-    # in such multi-server situations.
+    # in such multi-server situations, other than the SetOfStates class I have defined in simulators/__init__.py where I define just the boundary of the set.
     # In a loss network context, e.g. a buffer-less server system that accepts jobs of different classes,
     # this absorption set can concisely be defined by the set of unidimensional blocking sizes, one for each job class,
     # and this is one of the options given by the constructor of the SetOfStates class used to define this set.
-    if probas_stationary is None:
-        start_queue_state_boundary_A = dict_params_simul['absorption_set'].random_choice()
-    else:
-        # Sample the start state using the given distribution of the states
-        start_queue_state_boundary_A = choose_state_from_setofstates_based_on_distribution(dict_params_simul['absorption_set'],
-                                                                                           probas_stationary,
-                                                                                           at_least_one_dimension_at_boundary=True)
+    # Note also that it is ok to select the start state uniformly at random because we allow for a burn-in time before collecting data to estimate E(T_A).
+    start_queue_state_boundary_A = dict_params_simul['absorption_set'].random_choice()
+
     if dict_params_simul['method_survival_probability_estimation'] == SurvivalProbabilityEstimation.FROM_M_CYCLES:
         track_survival_in_single_particle_simulation = True
         t, time_end_simulation, n_cycles_absorption, time_last_absorption, exit_times, absorption_times, dict_exit_states_and_times, survival_times = \
@@ -3451,7 +3449,13 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info, proba
         assert N > 1, "The simulation system has more than one particle in Fleming-Viot mode ({})".format(N)
 
         # Estimate the stationary exit state distribution from the initial Markov chain excursion
-        probas_stationary_exit_state, _sample_size = estimate_state_distribution_based_on_observed_times(dict_exit_states_and_times, burnin_time=dict_params_simul['burnin_time'])
+        if envs[0].getBufferType() == BufferType.SINGLE:
+            # For single buffer, the exit state from A is only one (J-1), therefore there is no need to select a state with a particular distribution
+            # This is important because o.w. some functions that rely on scalar states will fail, such as choose_state_from_setofstates_based_on_distribution().
+            probas_stationary_exit_state = None
+        else:
+            probas_stationary_exit_state, _sample_size = estimate_state_distribution_based_on_observed_times(dict_exit_states_and_times, burnin_time=dict_params_simul['burnin_time'])
+
 
         if DEBUG_ESTIMATORS or show_messages(dict_params_info.get('verbose', False), dict_params_info.get('verbose_period', 1), dict_params_info.get('t_learn', 0)):
             print("Running Fleming-Viot simulation on {} particles with absorption and activation sets defined as follows:"
@@ -3461,7 +3465,7 @@ def estimate_blocking_fv(envs, agent, dict_params_simul, dict_params_info, proba
             run_simulation_fv(  dict_params_info.get('t_learn', 0), envs, agent,
                                 dict_params_simul['absorption_set'],
                                 dict_params_simul['activation_set'],
-                                dist_proba_for_start_state=probas_stationary_exit_state if probas_stationary is not None else None, #probas_stationary,
+                                dist_proba_for_start_state=probas_stationary_exit_state if use_exit_state_distribution else None,
                                 expected_absorption_time=expected_absorption_time,
                                 expected_exit_time=expected_exit_time,
                                 df_proba_surv=df_proba_surv,
