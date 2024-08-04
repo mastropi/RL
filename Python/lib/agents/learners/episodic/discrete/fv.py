@@ -48,7 +48,7 @@ class LeaFV(LeaTDLambda):
 
     states_of_interest: (opt) set or array-like
         Set of indices representing the states of the environment on which the FV estimation is of interest.
-        If `None`, all the states in the active set (i.e. outside the absorption set) is defined as states of interest.
+        If `None`, all the states in the active set (i.e. outside the absorption set) are defined as states of interest.
         default: None
 
     probas_stationary_start_state_et: (opt) dict

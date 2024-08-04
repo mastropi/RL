@@ -25,6 +25,8 @@ import sys
 import warnings
 
 from enum import Enum, unique
+import matplotlib.pyplot as plt
+import random
 
 # Imports a class defined in __init__.py
 from . import EnvironmentDiscrete
@@ -663,3 +665,71 @@ class EnvGridworld2D(EnvironmentDiscrete):
     def getObstacleStates(self):
         "Returns the list of obstacle states"
         return list(self.set_obstacle_states)
+
+
+class EnvGridworld2D_Random(EnvGridworld2D):
+    def __init__(self, shape=[5, 5], terminal_states=None, seed=None , rewards_dict=None, wind_dict=None, initial_state_distribution=None):
+        nRows, nColumns = shape
+        nObstacles = int(nRows*nColumns*0.4)
+        start = nColumns*(nRows-1)
+        end = nColumns-1
+
+        list_of_possible_obstacles = [*range(nColumns*nRows)]
+        list_of_possible_obstacles.pop(start)
+        list_of_possible_obstacles.pop(end)
+
+        random.seed(seed)
+        no_path = True
+        directions = [-nColumns, 1, nColumns, -1]
+        obstacle_list = []
+        while no_path:
+            queue = [start]
+            visited = set()
+            obstacle_list = random.sample(list_of_possible_obstacles, nObstacles)
+            while queue:
+                state = queue.pop()
+
+                if state == end:
+                    no_path = False
+
+                for direction in directions:
+                    new_state = state + direction
+                    out_of_bounds = False
+                    if new_state not in obstacle_list and new_state not in visited:
+                        #Checking if we don't go out of bounds
+                        if not 0 <= new_state <= nColumns*nRows - 1:
+                            out_of_bounds = True
+                        if direction == 1 and new_state%nColumns == 0:
+                            out_of_bounds = True
+                        if direction == -1 and new_state%nColumns == -1%nColumns:
+                            out_of_bounds = True
+
+                        if not out_of_bounds:
+                            visited.add(new_state)
+                            queue = queue + [new_state]
+
+        super().__init__(shape=shape, terminal_states=terminal_states, obstacle_states=obstacle_list , rewards_dict=rewards_dict, wind_dict=wind_dict, initial_state_distribution=initial_state_distribution)
+
+    def plot_labyrinth(self):
+        nRows, nColumns = self.shape
+        grid = np.zeros((nRows, nColumns))
+
+        for obs in self.set_obstacle_states:
+            raw, column = divmod(obs, nColumns)
+            grid[raw][column] = 1
+
+        start = nColumns * (nRows - 1)
+        end = nColumns - 1
+        start_row, start_column = divmod(start, nColumns)
+        end_row, end_column = divmod(end, nColumns)
+
+        grid[start_row][start_column] = 0.5
+        grid[end_row][end_column] = 0.5
+
+        plt.figure(figsize=(10, 10))
+        plt.imshow(grid, cmap='Greys')
+        plt.text(start_column, start_row, 'Start', ha='center', va='center', fontsize=15)
+        plt.text(end_column, end_row, 'Finish', ha='center', va='center', fontsize=15)
+        plt.title('Generated Labyrinth')
+        plt.tight_layout()
+        plt.show()

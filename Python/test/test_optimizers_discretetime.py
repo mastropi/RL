@@ -64,10 +64,10 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
                         reset_method_value_functions=ResetMethod.ALLZEROS,
                         # Characteristics of the Fleming-Viot implementation
                         N=100, T=100,   # N is the number of particles, T is the max number of time steps allowed over ALL episodes in the single Markov chain simulation that estimates E(T_A)
-                        estimate_absorption_set=True, absorption_set: Union[list, set]=None,
+                        estimate_absorption_set=True, threshold_absorption_set=0.05, absorption_set: Union[list, set]=None,
                         states_of_interest_fv: Union[list, set]=None,
                         estimate_on_fixed_sample_size=False,
-                        seed=1717, debug=False):
+                        seed=1717, debug=False, seed_obstacles=4217):
         env_shape = shape
         cls.debug = debug
         cls.seed = seed
@@ -97,26 +97,35 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
         for state in start_states_set:
             isd[state] = 1.0 / len(start_states_set)
 
+        # Reward at terminal states and at obstacle states
+        reward_terminal = +1
+        reward_obstacles = 0
+
         # Obstacles
         if obstacles_set is None:
-            # Set just ONE obstacle in the gridworld, at the second column of the previous to last row
-            state = np.ravel_multi_index((env_shape[0] - 2, 1), env_shape)
-            obstacles_set = set({state})
+            # [OLD-2024/06/20] Set just ONE obstacle in the gridworld, at the second column of the previous to last row
+            #state = np.ravel_multi_index((env_shape[0] - 2, 1), env_shape)
+            #obstacles_set = set({state})
+            # We create a gridworld with random obstacles
+            dict_rewards = dict([(s, reward_terminal if s in terminal_states else reward_obstacles) for s in set.union(set(terminal_states), set({}))])
+            cls.env2d = gridworlds.EnvGridworld2D_Random(shape=env_shape,
+                                                         terminal_states=terminal_states,
+                                                         rewards_dict=dict_rewards,
+                                                         seed=seed_obstacles,
+                                                         wind_dict=wind_dict,
+                                                         initial_state_distribution=isd)
         else:
             obstacles_set = set(obstacles_set)  # Convert to a set if not given as such
             for state in obstacles_set:
                 if not 0 <= state < cls.nS:
-                    raise ValueError(f"All states in the obstacles set must be between 0 and {cls.nS-1}: {state}")
-
-        reward_terminal = +1
-        reward_obstacles = 0
-        dict_rewards = dict([(s, reward_terminal if s in terminal_states else reward_obstacles) for s in set.union(set(terminal_states), obstacles_set)])
-        cls.env2d = gridworlds.EnvGridworld2D(  shape=env_shape,
-                                                terminal_states=terminal_states,
-                                                obstacle_states=obstacles_set,
-                                                rewards_dict=dict_rewards,
-                                                wind_dict=wind_dict,
-                                                initial_state_distribution=isd)
+                    raise ValueError(f"All states in the obstacles set must be between 0 and {cls.nS - 1}: {state}")
+            dict_rewards = dict([(s, reward_terminal if s in terminal_states else reward_obstacles) for s in set.union(set(terminal_states), obstacles_set)])
+            cls.env2d = gridworlds.EnvGridworld2D(shape=env_shape,
+                                                  terminal_states=terminal_states,
+                                                  obstacle_states=obstacles_set,
+                                                  rewards_dict=dict_rewards,
+                                                  wind_dict=wind_dict,
+                                                  initial_state_distribution=isd)
         print("Gridworld environment:")
         cls.env2d._render()
         #-- Environment characteristics
@@ -153,7 +162,6 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
         if estimate_absorption_set:
             # Perform an initial exploration of the environment in order to define the absorption set based on visit frequency and observed non-zero rewards
             # In this excursion, the start state is defined by the environment's initial state distribution.
-            threshold_absorption_set = 0.05
             print(f"\nEstimating the absorption set based on visit frequency (> {threshold_absorption_set}) of states with no reward from an initial exploration of the environment...")
             cls.learner_for_initial_exploration = td.LeaTDLambda(cls.env2d,
                                                                  criterion=learning_criterion,
@@ -191,7 +199,7 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
         activation_set = set()
         for s in absorption_set:
             for sadj, dir in get_adjacent_states(env_shape, s):
-                if sadj is not None and sadj not in set.union(absorption_set, obstacles_set):
+                if sadj is not None and sadj not in set.union(absorption_set, cls.env2d.getObstacleStates()):
                     activation_set.add(sadj)
 
         #-- Possibly update the set of start states of the environment (by updating its Initial State Distribution)
@@ -212,7 +220,7 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
             else:
                 # The start state is defined as any state in the complement of the absorption set (minus obstacles + terminal state),
                 # which is where the FV learning of the value functions start in the DISCOUNTED reward criterion.
-                start_states_set = set(np.arange(cls.nS)).difference(absorption_set.union(obstacles_set).union(terminal_states))
+                start_states_set = set(np.arange(cls.nS)).difference(absorption_set.union(cls.env2d.getObstacleStates()).union(terminal_states))
 
             # Redefine the initial state distribution stored in the environment
             isd = np.zeros(cls.nS)
@@ -228,7 +236,7 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
         print("Environment characteristics (2D-labyrinth): (row, col)")
         print(f"Start states set: {[np.unravel_index(start_state, env_shape) for start_state in start_states_set]}")
         print(f"Exit state:  {np.unravel_index(exit_state, env_shape)}")
-        print(f"Obstacles set:  {[np.unravel_index(s, env_shape) for s in sorted(obstacles_set)]}")
+        print(f"Obstacles set:  {[np.unravel_index(s, env_shape) for s in sorted(cls.env2d.getObstacleStates())]}")
         print("")
         print("Fleming-Viot characteristics: (row, col)")
         print(f"Absorption set:  {[np.unravel_index(s, env_shape) for s in sorted(absorption_set)]}")

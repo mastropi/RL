@@ -727,6 +727,8 @@ def compute_max_avg_rewards_in_labyrinth_with_corridor(env, wind_dict, learning_
     entry_state = np.argmax(env.getInitialStateDistribution())
     exit_state = env.getTerminalStates()[0]
 
+    max_avg_reward_continuing = np.nan
+    max_avg_reward_episodic = np.nan
     if wind_dict is None:
         # The average rewards are computed as the inverse of the shortest path from Start to Exit in Manhattan-like movements,
         # - INCLUDING THE START STATE for continuing learning tasks (just think about it, we restart every time we reach the terminal state with reward = 0)
@@ -737,7 +739,7 @@ def compute_max_avg_rewards_in_labyrinth_with_corridor(env, wind_dict, learning_
             # This is the case when the exit state is at the bottom-right of the labyrinth
             max_avg_reward_continuing = 1 / env_shape[1]        # In this case the start state counts! (we subtract 1 because the bottom-right state must NOT count twice!)
             max_avg_reward_episodic = 1 / (env_shape[1] - 1)    # In this case the start state does not count (we subtract 2 because, besides not counting twice the bottom-right state, the start state does not count in the episodic setting)
-        else:
+        elif exit_state == env_shape[1] - 1:
             # This is the case when the exit state is at the top-right of the labyrinth (the default)
             max_avg_reward_continuing = 1 / (np.sum(env_shape) - 1)  # In this case the start state counts! (we subtract 1 because the bottom-right state must NOT count twice!)
             max_avg_reward_episodic = 1 / (np.sum(env_shape) - 2)    # In this case the start state does not count (we subtract 2 because, besides not counting twice the bottom-right state, the start state does not count in the episodic setting)
@@ -754,7 +756,7 @@ def compute_max_avg_rewards_in_labyrinth_with_corridor(env, wind_dict, learning_
             # In order to compute the exact episodic average reward, we need to think more.
             # Here, we use the formula that relates the continuing average reward with the episodic one in the deterministic environment case.
             max_avg_reward_episodic = avg_reward_true * env_shape[1] / (env_shape[1] - 1)
-        else:
+        elif exit_state == env_shape[1] - 1:
             # This is the case when the exit state is at the top-right of the labyrinth (the default)
             rightmost_states = [np.ravel_multi_index((r, env_shape[1] - 1), env_shape) for r in np.arange(env_shape[0])]
             policy_optimal = probabilistic.PolGenericDiscrete(env, policy=dict(zip(rightmost_states, [[1.0, 0.0, 0.0, 0.0]] * len(rightmost_states))),
@@ -813,8 +815,9 @@ learning_criterion = LearningCriterion.AVERAGE; gamma = 1.0    # gamma could be 
 
 seed = 1317
 problem_2d = True
+use_random_obstacles_set = True; seed_obstacles = 4217
 exit_state_at_bottom = False
-estimate_absorption_set = True
+estimate_absorption_set = True; threshold_absorption_set = 0.05
 estimate_absorption_set_at_every_step = False
 entry_state_in_absorption_set = True   #False #True     # Only used when estimate_absorption_set = False
 #----------------- BASIC SETUP AND SIMULATION PARAMETERS --------------#
@@ -825,7 +828,7 @@ if problem_2d:
     # 2D labyrinth
     size_vertical = 3; size_horizontal = 4
     size_vertical = 4; size_horizontal = 5
-    #size_vertical = 6; size_horizontal = 8
+    size_vertical = 6; size_horizontal = 8
     #size_vertical = 8; size_horizontal = 12
     #size_vertical = 9; size_horizontal = 13
     #size_vertical = 10; size_horizontal = 14
@@ -851,10 +854,10 @@ exit_state = entry_state + env_shape[1] - 1 if exit_state_at_bottom else None   
 # Presence of wind: direction and probability of deviation in that direction when moving
 if problem_2d:
     wind_dict = None
-    wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.5})
-    wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.6})
-    wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.7})
-    wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.8})
+    #wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.5})
+    #wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.6})
+    #wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.7})
+    #wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.8})
 else:
     # WIND is currently not allowed in 1D gridworlds
     wind_dict = None
@@ -862,16 +865,19 @@ else:
 # Obstacles
 if problem_2d:
     #-- 2D labyrinth
-    # The path to the terminal state is just a corridor through the last row right and then the last column up
-    # So at the upper left corner there is a rectangle that brings to nowhere
-    rectangle_to_nowhere_width = size_horizontal - 2
-    rectangle_to_nowhere_height = size_vertical - 2
-    states_previous_to_last_row = np.ravel_multi_index([np.repeat(rectangle_to_nowhere_height, rectangle_to_nowhere_width), [y for y in range(1, rectangle_to_nowhere_width+1)]], env_shape)
-    states_previous_to_last_column = np.ravel_multi_index([[x for x in range(0, rectangle_to_nowhere_height+1)], np.repeat(rectangle_to_nowhere_width, rectangle_to_nowhere_height+1)], env_shape)
-    obstacles_set = set(np.concatenate([list(states_previous_to_last_row) + list(states_previous_to_last_column)]))
+    if use_random_obstacles_set:
+        obstacles_set = None
+    else:
+        # The path to the terminal state is just a corridor through the last row right and then the last column up
+        # So at the upper left corner there is a rectangle that brings to nowhere
+        rectangle_to_nowhere_width = size_horizontal - 2
+        rectangle_to_nowhere_height = size_vertical - 2
+        states_previous_to_last_row = np.ravel_multi_index([np.repeat(rectangle_to_nowhere_height, rectangle_to_nowhere_width), [y for y in range(1, rectangle_to_nowhere_width+1)]], env_shape)
+        states_previous_to_last_column = np.ravel_multi_index([[x for x in range(0, rectangle_to_nowhere_height+1)], np.repeat(rectangle_to_nowhere_width, rectangle_to_nowhere_height+1)], env_shape)
+        obstacles_set = set(np.concatenate([list(states_previous_to_last_row) + list(states_previous_to_last_column)]))
 
-    if connected_active_set:
-        obstacles_set = obstacles_set.difference({min(states_previous_to_last_row)})
+        if connected_active_set:
+            obstacles_set = obstacles_set.difference({min(states_previous_to_last_row)})
 else:
     #-- 1D gridworld
     obstacles_set = set()
@@ -899,7 +905,7 @@ print(f"Neural Network architecture:\n{len(nn_hidden_layer_sizes)} hidden layers
 
 #----------------------------- FV ABSORPTION SET ----------------------#
 # DEFAULT absorption set used when estimate_absorption_set = False
-if problem_2d:
+if problem_2d and not use_random_obstacles_set:
     # The absorption set is a rectangular area at the upper left corner of the grid + (possibly) the lower left corner
     #lower_left_state = (size_vertical-1) * size_horizontal
     #default_absorption_set = set(np.concatenate([list(range(x*size_horizontal, x*size_horizontal + size_horizontal-2)) for x in range(size_vertical-2)]))
@@ -934,10 +940,10 @@ test_ac.setUpClass(shape=env_shape, obstacles_set=obstacles_set, wind_dict=wind_
                    # Small N and T are N=50, T=1000 for the 8x12 labyrinth with corridor
                    N=20,  #50, #200, #200 if problem_2d else 100, #50 #20 #100
                    T=500,  #1000, #100, #10000 if problem_2d else 1000, #1000, #1000, #3000,  # np.prod(env_shape) * 10  #100 #1000
-                   estimate_absorption_set=estimate_absorption_set, absorption_set=default_absorption_set,
+                   estimate_absorption_set=estimate_absorption_set, threshold_absorption_set=threshold_absorption_set, absorption_set=default_absorption_set,
                    states_of_interest_fv=None, #exit_state,
                    estimate_on_fixed_sample_size=True,
-                   seed=seed, debug=False)  # CAREFUL! If we set debug=True, LOTS OF PLOTS (~ 900! for 25 policy learning steps on the 4x5 labyrinth) will be generated showing the eligibility traces of the TD(lambda) learner!
+                   seed=seed, debug=False, seed_obstacles=seed_obstacles)   # CAREFUL! If we set debug=True, LOTS OF PLOTS (~ 900! for 25 policy learning steps on the 4x5 labyrinth) will be generated showing the eligibility traces of the TD(lambda) learner!
 test_ac.setUp()
 print(test_ac.policy_nn.nn_model)
 test_ac.env2d._render()
@@ -1400,7 +1406,11 @@ ax_R.set_ylabel("Average reward")
 ax_R.plot(range(1, n_learning_steps+1), dict_KL[learning_method][rep, :n_learning_steps], color="blue", linewidth=1)
 ax_R.axhline(KL_THRESHOLD, color="blue", linestyle="dashed")
 ax_R.axhline(0, color="green", linewidth=1, linestyle='dashed')
-ax_R.set_ylim((-max_avg_reward_episodic/50, max_avg_reward_episodic*1.1))   # This is particularly useful when the policy is learned fast within each Actor-Critic excursion (because the large KL values make the vertical axis go wildly large), which is achieved when computing the loss and updating parameters by AC episode
+# Set the Y-axis limits so that we can see better the learning curve despite possible large K-L values that could make the curve look very tiny
+# This is particularly useful when the policy is learned fast within each Actor-Critic excursion,
+# which for instance is achieved when computing the loss and updating parameters after each Actor-Critic episode (mini-batch)
+# or when learning the policy with NPG.
+ax_R.set_ylim((-np.max(dict_R_long[learning_method][rep, :n_learning_steps])/50, np.max(dict_R_long[learning_method][rep, :n_learning_steps])*1.1))
 ax_R.legend(["Average reward (episodic)", "Max. average reward (episodic)",
             "Long-run average reward estimated by value functions learner", "Max. average reward (continuing)",
             "K-L divergence with previous policy", "K-L threshold for reduced alpha0", "K-L divergence between consecutive policies"],
@@ -1726,6 +1736,8 @@ if is_NPG or policy_learning_mode != "online":
 else:
     dict_R_toplot = dict_R
     max_avg_reward = max_avg_reward_episodic
+# Check that the max avg. reward is defined, if not set it to 1.0 so that we plot the unnormalized observed average reward
+max_avg_reward = 1.0 if np.isnan(max_avg_reward) else max_avg_reward
 
 _exit_state_str = 'TOP' if exit_state is None else 'BOTTOM'
 _learning_characteristics = f"\nN={'test_ac' in locals() and test_ac.agent_nn_fv.getLearner().getNumParticles() or _N}, " + \
@@ -1747,7 +1759,7 @@ for meth in dict_loss.keys():
     #ax_R_true.set_ylim((0, None))
     #ax_R_true.set_ylabel("Expected reward under current policy (log scale)")
     legend += [f"{dict_legends[meth]} (average reward)"]
-    ax_R.plot(np.arange(1, n_learning_steps+1), dict_R_toplot[meth][nrep-1, :n_learning_steps] / max_avg_reward_continuing, '-', marker='.', color=dict_colors[meth])
+    ax_R.plot(np.arange(1, n_learning_steps+1), dict_R_toplot[meth][nrep-1, :n_learning_steps] / max_avg_reward, '-', marker='.', color=dict_colors[meth])
     # True average reward (it should give a good fit of the average reward points just plotted
     ax_R.plot(np.arange(1, n_learning_steps + 1), dict_R_long_true[meth][nrep-1, :n_learning_steps] / max_avg_reward_continuing, '-', color=dict_colors[meth], linestyle="dashed")
     legend += [f"{dict_legends[meth]} (expected reward)"]
@@ -1762,7 +1774,7 @@ ax_R.set_ylabel("Average reward (normalized by the MAX average reward = {:.2g})"
 ax_R.axhline(1, color="gray")
 ax_R.axhline(0, color="gray")
 ax_R.set_title(f"Evolution of NORMALIZED Average Reward")
-ax_R.legend(legend, loc="center left")
+ax_R.legend(legend, loc="lower left")
 plt.suptitle(f"ALL LEARNING METHODS: Labyrinth {env_shape} - {learning_task.name} learning task - {learning_criterion.name} reward criterion (gamma={gamma})" +
              _learning_characteristics +
              f"\n(last replication #{nrep})")
@@ -1774,7 +1786,7 @@ if "values_td" in dict_nsteps.keys() and "values_fv" in dict_nsteps.keys():
     ax_R_nsamples.plot(range(1, n_learning_steps+1), df_ratio_nsamples['ratio_fv_td'][:n_learning_steps], color="blue", linewidth=0.5)
     ax_R_nsamples.axhline(1.0, color="blue", linewidth=0.5, linestyle="dashed")
     ax_R_nsamples.set_ylim((ax_R.get_ylim()[0], None))
-    ax_R_nsamples.legend(["Sample size ratio (FV/TD)", "Reference line showing equal sample size ratio"], loc="center right")
+    ax_R_nsamples.legend(["Sample size ratio (FV/TD)", "Reference line showing equal sample size ratio"], loc="lower right")
 
 # Plot all replications individually
 ax = plt.figure(figsize=figsize).subplots(1, 1)
