@@ -13,5 +13,6 @@ Python/lib/GitHub/
 *.bbl
 *.blg
 *results/
+Alphonse/
 Yao/
 toulouse-rl-commits.txt
