@@ -1022,6 +1022,7 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
                                 probas_stationary_start_state_et=None,
                                 probas_stationary_start_state_fv=None,
                                 criterion=self.learning_criterion,
+                                states_of_interest=self.env1d.getTerminalStates(),
                                 alpha=params['alpha'], gamma=params['gamma'], lmbda=params['lambda'],
                                 alpha_update_type=AlphaUpdateType.EVERY_STATE_VISIT,
                                 adjust_alpha=True, adjust_alpha_by_episode=False,
@@ -1035,7 +1036,7 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
         self.env1d.setV(self.V_true_optimal)
 
         sim = DiscreteSimulator(self.env1d, agent_fv_optimal, debug=False)
-        state_values, action_values, advantage_values, state_counts, probas_stationary, average_reward, average_absorption_time, n_cycles_absorption_used, n_events_et, n_events_fv  = \
+        state_values, action_values, advantage_values, state_counts, state_counts_et, probas_stationary, average_reward, average_absorption_time, n_cycles_absorption_used, n_events_et, n_events_fv  = \
             sim.run(max_time_steps=max_time_steps_fv,
                     max_time_steps_for_absorbed_particles_check=max_time_steps_fv,
                     min_prop_absorbed_particles=min_prop_absorbed_particles,
@@ -1122,6 +1123,7 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
                               probas_stationary_start_state_et=None,
                               probas_stationary_start_state_fv=None,
                               criterion=self.learning_criterion,
+                              states_of_interest=self.env1d.getTerminalStates(),
                               alpha=params['alpha'], gamma=params['gamma'], lmbda=params['lambda'],
                               alpha_update_type=AlphaUpdateType.EVERY_STATE_VISIT,
                               adjust_alpha=True, adjust_alpha_by_episode=False,
@@ -1135,7 +1137,7 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
         self.env1d.setV(self.V_true_random)
 
         sim = DiscreteSimulator(self.env1d, agent_fv_random, debug=False)
-        state_values, action_values, advantage_values, state_counts, probas_stationary, average_reward, average_absorption_time, n_cycles_absorption_used, n_events_et, n_events_fv  = \
+        state_values, action_values, advantage_values, state_counts, state_counts_et, probas_stationary, average_reward, average_absorption_time, n_cycles_absorption_used, n_events_et, n_events_fv  = \
             sim.run(max_time_steps=max_time_steps_fv,
                     max_time_steps_for_absorbed_particles_check=max_time_steps_fv,
                     min_prop_absorbed_particles=min_prop_absorbed_particles,
@@ -1275,6 +1277,7 @@ class Test_EstValueFunctions_EnvGridworld2DWithObstacles(unittest.TestCase, test
                                 probas_stationary_start_state_et=None,
                                 probas_stationary_start_state_fv=None,
                                 criterion=LearningCriterion.DISCOUNTED,
+                                states_of_interest=cls.env2d.getTerminalStates(),
                                 estimate_on_fixed_sample_size=True,         # This means that the estimation is done on a fixed number of particles N(s) grouped by starting state s
                                 alpha=1.0,
                                 gamma=cls.gamma,
@@ -1389,7 +1392,7 @@ class Test_EstValueFunctions_EnvGridworld2DWithObstacles(unittest.TestCase, test
         # (2024/02/19) Note that parameter max_time_steps_fv is by default set to None,
         # which means that it is automatically computed by the _run_simulation_fv() method called by run()
         # and as of the writing of this, it is set to N*100, where N is the number of particles in the FV system.
-        state_values, action_values, advantage_values, state_counts, probas_stationary, average_reward, average_cycle_time, n_cycles, n_events_et, n_events_fv = \
+        state_values, action_values, advantage_values, state_counts, state_counts_et, probas_stationary, average_reward, average_cycle_time, n_cycles, n_events_et, n_events_fv = \
            self.sim_fv.run(max_time_steps=500,
                            max_time_steps_for_absorbed_particles_check=500,
                            seed=self.seed, verbose=True, verbose_period=100)
@@ -1813,7 +1816,7 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
         # which means that it is automatically computed by the _run_simulation_fv() method called by run()
         # and as of the writing of this, it is set to N*100, where N is the number of particles in the FV system.
         min_prop_absorbed_particles = 1.0
-        state_values, action_values, advantage_values, state_counts, probas_stationary, average_reward, average_cycle_time, n_cycles, n_events_et, n_events_fv = \
+        state_values, action_values, advantage_values, state_counts, state_counts_et, probas_stationary, average_reward, average_cycle_time, n_cycles, n_events_et, n_events_fv = \
            self.sim_fv.run(min_prop_absorbed_particles=min_prop_absorbed_particles, seed=self.seed, verbose=True, verbose_period=100)
 
         # The following are the state values (value function) calculated using the average reward observed during the single Markov chain excursion used to estimate E(T_A)

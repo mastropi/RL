@@ -161,6 +161,8 @@ def update_phi(env, N: int, t: float, dict_phi: dict, env_state_prev, env_state_
         Learning parameter to use in the update of Phi for each state present in its keys, as follows:
             Phi(t, z) = (1 - alpha) * Phi(t_prev, z) + alpha * empirical_mean(t, z)
         where t_prev is the latest time value at which Phi was estimated for state z, and empirical_mean(t, z) is the occupation frequency of state z.
+        This is used in the Fraiman-type estimation approach where many particles could be absorbed at the same (discrete) time
+        (see paper by Fraiman et al. 2020, "Approximating the QSD with interacting reinforced random walks")
         default: 1
 
     Return: dict

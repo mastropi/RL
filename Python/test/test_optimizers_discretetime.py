@@ -65,8 +65,9 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
                         # Characteristics of the Fleming-Viot implementation
                         N=100, T=100,   # N is the number of particles, T is the max number of time steps allowed over ALL episodes in the single Markov chain simulation that estimates E(T_A)
                         estimate_absorption_set=True, threshold_absorption_set=0.05, absorption_set: Union[list, set]=None,
+                        states_of_interest_fv: Union[list, set]=None,
                         estimate_on_fixed_sample_size=False,
-                        seed=1717, debug=False, seed_labyrinth=1616):
+                        seed=1717, debug=False, seed_obstacles=4217):
         env_shape = shape
         cls.debug = debug
         cls.seed = seed
@@ -96,29 +97,29 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
         for state in start_states_set:
             isd[state] = 1.0 / len(start_states_set)
 
+        # Reward at terminal states and at obstacle states
+        reward_terminal = +1
+        reward_obstacles = 0
+
         # Obstacles
         if obstacles_set is None:
-            pass
+            # [OLD-2024/06/20] Set just ONE obstacle in the gridworld, at the second column of the previous to last row
+            #state = np.ravel_multi_index((env_shape[0] - 2, 1), env_shape)
+            #obstacles_set = set({state})
+            # We create a gridworld with random obstacles
+            dict_rewards = dict([(s, reward_terminal if s in terminal_states else reward_obstacles) for s in set.union(set(terminal_states), set({}))])
+            cls.env2d = gridworlds.EnvGridworld2D_Random(shape=env_shape,
+                                                         terminal_states=terminal_states,
+                                                         rewards_dict=dict_rewards,
+                                                         seed=seed_obstacles,
+                                                         wind_dict=wind_dict,
+                                                         initial_state_distribution=isd)
         else:
             obstacles_set = set(obstacles_set)  # Convert to a set if not given as such
             for state in obstacles_set:
                 if not 0 <= state < cls.nS:
-                    raise ValueError(f"All states in the obstacles set must be between 0 and {cls.nS-1}: {state}")
-
-        reward_terminal = +1
-        reward_obstacles = 0
-        if obstacles_set is None :
-            dict_rewards = dict([(s, reward_terminal if s in terminal_states else reward_obstacles) for s in set.union(set(terminal_states), set({}))])
-        else :
+                    raise ValueError(f"All states in the obstacles set must be between 0 and {cls.nS - 1}: {state}")
             dict_rewards = dict([(s, reward_terminal if s in terminal_states else reward_obstacles) for s in set.union(set(terminal_states), obstacles_set)])
-        if obstacles_set is None :
-            cls.env2d = gridworlds.EnvGridworld2D_Random(shape=env_shape,
-                                                         terminal_states=terminal_states,
-                                                         rewards_dict=dict_rewards,
-                                                         seed=seed_labyrinth,
-                                                         wind_dict=wind_dict,
-                                                         initial_state_distribution=isd)
-        else:
             cls.env2d = gridworlds.EnvGridworld2D(shape=env_shape,
                                                   terminal_states=terminal_states,
                                                   obstacle_states=obstacles_set,
@@ -127,8 +128,6 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
                                                   initial_state_distribution=isd)
         print("Gridworld environment:")
         cls.env2d._render()
-        if obstacles_set is None :
-            obstacles_set = set({})
         #-- Environment characteristics
 
         #-- Policy characteristics
@@ -180,11 +179,8 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
 
             learner = sim_for_initial_exploration.run_exploration(t_learn=0, max_time_steps=T, seed=cls.seed, verbose=cls.debug, verbose_period=1)
             absorption_set = compute_set_of_frequent_states_with_zero_reward(learner.getStates(), learner.getRewards(), threshold=threshold_absorption_set)
-            print(f"Distribution of state frequency:\n{pd.Series(learner.getStates()).value_counts(normalize=True)}")
+            print(f"Distribution of state frequency on n={learner.getNumSteps()} steps:\n{pd.Series(learner.getStates()).value_counts(normalize=True)}")
             print(f"Selected absorption set (2D):\n{[str(s) + ': ' + str(np.unravel_index(s, env_shape)) for s in absorption_set]}")
-
-            # Reset state of environment to a start state
-            cls.env2d.reset()
         elif absorption_set is None:
             # We choose the first column, i.e. the column above the labyrinth's start state, of the 2D-grid as the set A of uninteresting states
             absorption_set = set()
@@ -234,6 +230,8 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
 
         assert start_states_set.issubset(cls.env2d.getAllValidStates()), \
             f"The start states set is invalid: all states in the set must be valid states of the environment:\nvalid states = {cls.env2d.getAllValidStates()}\nstart state set = {start_states_set}"
+        # Reset the state of the environment (this is just for rendering purposes, so that we see a cross (`x`) at the start state when there is only one start state)
+        cls.env2d.reset()
 
         print("Environment characteristics (2D-labyrinth): (row, col)")
         print(f"Start states set: {[np.unravel_index(start_state, env_shape) for start_state in start_states_set]}")
@@ -305,6 +303,7 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
         activation_set = cls.B
         learner_fv = fv.LeaFV(  cls.env2d,
                                 N, T, absorption_set, activation_set,
+                                states_of_interest=states_of_interest_fv,
                                 probas_stationary_start_state_et=None,
                                 probas_stationary_start_state_fv=None,
                                 criterion=learning_criterion,

@@ -46,9 +46,9 @@ class LeaFV(LeaTDLambda):
     activation_set: set
         Set of activation states, out of which the start states for the N-particle FV process are selected.
 
-    states_of_interest: (opt) set
+    states_of_interest: (opt) set or array-like
         Set of indices representing the states of the environment on which the FV estimation is of interest.
-        If `None`, the environment terminal states are defined as states of interest.
+        If `None`, all the states in the active set (i.e. outside the absorption set) are defined as states of interest.
         default: None
 
     probas_stationary_start_state_et: (opt) dict
@@ -134,7 +134,9 @@ class LeaFV(LeaTDLambda):
         self.activation_set = activation_set
         # The complement of the absorption set A
         self.active_set = self._compute_active_set()
-        self.states_of_interest = self.env.getTerminalStates() if states_of_interest is None else states_of_interest
+        self.states_of_interest = self.active_set if states_of_interest is None else set(states_of_interest)
+        # Store whether the state of interest was given by the user so that we don't update it should the absorption set (and hence the active set) be updated
+        self.fixed_states_of_interest = states_of_interest is not None
         # Dictionary that stores the optional stationary probability of the start states of the single chain simulation
         # and of the N-particle Fleming-Viot process.
         # If None, uniformly random distributions are used.
@@ -1296,3 +1298,6 @@ class LeaFV(LeaTDLambda):
         self.absorption_set = absorption_set
         self.activation_set = activation_set
         self.active_set = self._compute_active_set()
+        if not self.fixed_states_of_interest:
+            # Update the set containing the states of interest based on the new active set
+            self.states_of_interest = self.active_set
