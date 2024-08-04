@@ -1052,7 +1052,7 @@ class LeaActorCriticNN(GenericLearner):
 
     def learn(self, nepisodes, start_state=None, max_time_steps_per_episode=+np.Inf, prob_include_in_train=0.5, use_advantage=True, advantage_values=None, action_values=None):
         """
-        Perform a one step learning of the policy parameter
+        Performs a one step learning of the policy parameter
 
         This one step learning is based on using the current policy to learn the state and action value functions
         that are used as a critic in the loss function that feeds the neural network defining the theta parameter of the policy.
@@ -1094,7 +1094,7 @@ class LeaActorCriticNN(GenericLearner):
             in the computation of the loss.
             default: True
 
-        advantage_Values: (opt) array-like
+        advantage_values: (opt) array-like
             Advantage function values previously estimated for all states and actions in the environment.
             These are used as a critic with the hope of smoothing the learning process (lower variance)
             because these values do NOT change during the learning of the policy performed here.
@@ -1106,6 +1106,9 @@ class LeaActorCriticNN(GenericLearner):
             smoothing the learning process (lower variance) because these values do NOT change during
             the learning of the policy performed here.
             This parameter is relevant only when use_advantage=False.
+
+        Return: float
+        The loss value that gave rise to the policy gradient responsible for updating the policy once the method's execution finalized.
         """
         self.t_learn += 1
         seed = self.seed + self.t_learn - 1
@@ -1262,7 +1265,35 @@ class LeaActorCriticNN(GenericLearner):
 
         return loss.float()
 
-    def learn_offline_from_estimated_value_functions(self, state_values, advantage_values, action_values, state_counts, use_advantage=True):
+    def learn_natural(self, advantage_values):
+        """
+        Updates the policy stored in the object using the natural policy gradient (NPG) update, which assumes a softmax policy
+
+        Ref: https://www.jmlr.org/papers/volume22/19-736/19-736.pdf
+        "On the theory of policy gradient methods: optimality, approximation, and distribution shift", Agarwal et al. 2021
+
+        Arguments:
+        advantage_values: array-like
+            Advantage function values previously estimated for all states and actions in the environment.
+        """
+        nS = np.prod(self.env.getShape())
+        nA = self.env.getNumActions()
+
+        old_policy = self.policy.get_policy_values()
+        new_policy = np.zeros((nS, nA))  #, dtype=np.float32)    # Note: (2024/08/03) using dtype=np.float32 (which was done with Alphonse in order to avoid the weird error by torch that it was expecting Double but got Float or viceversa) gives the following error down the line when working with tensors in torch: "Could not infer dtype of numpy.float32", and apparently the reason is that the default type in numpy if float64, whereas the default type in torch is float32. More info: https://stackoverflow.com/questions/61226042/pytorch-infer-dtype-from-device-capability-not-input-data
+        for state in range(nS):
+            for action in range(nA):
+                advantage = advantage_values[state * self.env.getActionSpace().n + action]
+                # TODO: (2024/08/04) Consider reducing the learning rate as learning happens (maybe based on the KL distance between the new and old policy?) in order to reduce the oscillation observed in the objective function value as the policy is learned
+                new_policy[state, action] = old_policy[state, action] * (np.exp(self.optimizer_learning_rate * advantage))
+            new_policy[state, :] = new_policy[state, :] / sum(new_policy[state, :])
+
+        self.policy.set_policy_values(new_policy)
+
+        # In case we want to return the K-L divergence between the new and the old policy
+        #return np.sum(rel_entr(new_policy, old_policy))
+
+    def learn_offline_from_estimated_value_functions(self, state_values, advantage_values, action_values, state_counts, prob_states=None, use_advantage=True):
         """
         Performs a one step learning of the policy parameter OFFLINE, i.e. by sweeping all possible
         states and actions and using the given (state and) action value functions to compute the advantage function

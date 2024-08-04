@@ -443,7 +443,7 @@ class PolNN:
 
     nn_model: Neural network inheriting from torch.nn.Module
         Neural network model typically defined in nn_models.py.
-        The network should have one input neuron representing the environment state
+        The network should have as input either one neuron representing the state or as many neurons as states (i.e. dummy or one-hot coding of states)
         and as many output neurons as the number of possible actions over all possible states in the environment.
         Note: The parameters of the model can be retrieved with nn_model.parameters(), which is a generator.
     """
@@ -458,18 +458,39 @@ class PolNN:
                              f"\n# environment actions = {self.env.getNumActions()}"
                              f"\n# model actions = {self.nn_model.getNumOutputs()}")
 
+        if self.nn_model.getNumHiddenLayers() == 0:
+            # Set `requires_grad=False` for neural network models with no hidden layer
+            # because that means that we are using the NN model simply as an implementation of action preferences via the softmax function,
+            # i.e. no backpropagation will be carried out on the network, instead the policy will be set proportional to exp(advantage-function).
+            # This is important, o.w. the neural network parameters will not be able to be set without triggering the error message
+            # "RuntimeError: a view of a leaf Variable that requires grad is being used in an in-place operation".
+            self.nn_model.getOutputLayer().bias.requires_grad = False
+            self.nn_model.getOutputLayer().weight.requires_grad = False
+
     def reset(self, initial_values=None, seed=None):
         "Resets the policy to the random walk or to the given initial values, optionally using a seed for the random initialization of the neural network weights"
         self.init_policy(values=initial_values, seed=seed)
 
-    def init_policy(self, eps=1E-2, values=None, seed=None):
+    def init_policy(self, values=None, eps=1E-2, seed=None):
         """
         Initializes the parameters of the neural network so that the output policy is either almost constant over all actions for all input states
-        or is almost equal to the `values` given (which are indexed by all possible actions)
+        or is almost equal to the `values` given (which are indexed by all possible actions), also for all input states.
 
-        The parameters (weights and biases) are initialized using a zero-mean normal distribution with a small standard deviation
-        (compared to 1) given by `eps`, except for the biases of the neurons in the output layer which are initialized so that the policy
-        is almost equal to the given `values` or to a constant value for all actions, if no `values` are given
+        In the particular case of a neural network model with NO hidden layer, the model is actually assumed to be just an implementation
+        of action preferences via the softmax function applied when retrieving the policy values with the get_policy_values() method,
+        i.e. it is assumed that NO backpropagation will be performed on the neural network to update its parameters.
+        Instead, parameters are always SET by calling either the set_policy_values() method or the set_model_params() method.
+        Therefore, the policy values can be (easily) set differently for each state (o.w. in the general neural network model with hidden layers,
+        it is difficult to define a parameter set that gives the desired output as a function of the input state), in which case the `values` argument
+        should be a 2D array-like object of size #states x #actions.
+        But, as in the full neural network case with hidden layers, it can also be a 1D array-like object giving the policy values to use for ALL states.
+        In this case of the neural network being used just as an implementation of action preferences, NO noise is added to the parameter values
+        when calling this init_policy() method because they are not needed, as no backpropagation will be run on the neural network, therefore the problem
+        of not having the model parameters updated because of all weights being equal to 0, described in the next paragraphs, does not happen.
+
+        In the regular neural network model with hidden layers, parameters (weights and biases) are initialized using a zero-mean normal distribution
+        with a small standard deviation (compared to 1) given by `eps`, except for the biases of the neurons in the output layer which are initialized
+        so that the policy is almost equal to the given `values` or to a constant value for all actions, if no `values` are given
         (we write "almost" because there is noise in the output policy induced by the almost zero values
         to which the other weights and biases are initialized to, but this is perfectly ok for most purposes).
 
@@ -479,17 +500,31 @@ class PolNN:
         IMPORTANT: for reproducibility, the torch seed should be set prior to calling this method, for instance through the torch.manual_seed() method.
 
         Arguments:
+        values: (opt) array-like
+            Values defining the policy, i.e. conceptually the probability of each possible action for each possible state in the `self.env` environment.
+            The admitted values depend on whether the neural network has a hidden layer or not:
+            - if the NN has hidden layers, the values can be any real number because they are converted to probabilities using the softmax function by
+            the self.get_policy_values() method.
+            - if the NN does NOT have hidden layers, the values should be NON-NEGATIVE because they are transformed by the log() function
+            in order to set the NN weight values, which are then converted back to probabilities using the softmax function when the self.get_policy_values()
+            method is called.
+            In terms of shape, it can be either:
+            - a 1D list or array-like of values indexed by the possible actions to which the policy should be initialized for all states or
+            - a 2D list or array-like of values indexed by state (across rows) and action (across columns) of the policy to be set for each state.
+            The 2D option is ONLY valid when there is no hidden layer in the neural network.
+            default: None, in which case the policy is initialized to (almost) a uniform policy
+
         eps: (opt) positive float
             Small value defining the standard deviation of the normal distribution used to define the weights and biases of all layers except for
             the biases of the neurons in the output layer.
             default: 1E-2
 
-        values: (opt) array-like
-            List of values indexed by the possible actions to which the policy should be initialized.
-            default: None, in which case the policy is initialized to almost a uniform policy
-
         seed: (opt) int
             Seed to use in the random initialization of the neural network weights as described above.
+            Only used when the neural network has at least ONE hidden layer. Otherwise, the neural network used to model the policy
+            is assumed to be used simply as an implementation of action preferences, meaning that NO backpropagation is performed to learn its parameters,
+            but simply to set the policy values using the softmax function on the weights connecting the input neurons to the output neurons
+            (whose biases are set to zero).
             default: None
         """
         # Inspired by the weights_init() function in this code:
@@ -501,31 +536,57 @@ class PolNN:
 
         if self.nn_model.getNumHiddenLayers() == 0:
             # The neural network is assumed to be used simply as an implementation of action preferences
+            # (e.g. as in a Natural Policy Gradient context, where the policy is proportional to the exponential of the advantage function)
             # which is materialized by using one-hot encoding of the environment states as input layer, and connecting each input neuron directly to each output neuron.
-            # => Set the weights of the input-to-output layer (for EACH input state) as `log(values)` (so that they become `values` when applying the softmax function) and set the output biases to zero
+            # => Set the weights of the input-to-output layer (for EACH input state) as `log(values)` (so that they become `values` when applying the softmax function)
+            # and set the biases of the output layer to zero (because no biases should appear in the softmax function in this case).
             assert self.nn_model.getNumInputs() == self.env.getNumStates(), f"The number of neurons in the input layer ({self.nn_model.getNumInputs()} " \
                                                                             f"must be equal to the number of environment states ({self.env.getNumStates()}) " \
                                                                             "when the neural network does not have any hidden layer, because the network is assumed to be simply " \
                                                                             "a transmitter of action preferences from the input (states) to the output (actions)."
             # Bias
-            self.nn_model.getOutputLayer().bias = nn.Parameter(tensor(np.zeros(self.nn_model.getNumOutputs())))
+            self.nn_model.getOutputLayer().bias = nn.Parameter(tensor(np.zeros(self.nn_model.getNumOutputs())), requires_grad=False)
             # Weights
             if values is None:
-                nn.init.ones_(self.nn_model.getOutputLayer().weight)
+                nn.init.zeros_(self.nn_model.getOutputLayer().weight)
+                # Set the requires_grad option to False to the weights so that we can update them freely as needed because we are NOT using the neural network for backpropagation
+                # when there is no hidden layer.
+                self.nn_model.getOutputLayer().weight.requires_grad = False
             else:
-                # The weights connecting the input to the output layer are set to the `values` array arranged as a column repeated on all columns of the .weight 2D array
-                # Note that we use the broadcast method (i.e. multiplying the `values` array by an array of 1's instead of np.repeat() because broadcasting seems to be faster
-                # than np.repeat() as mentioned here: https://stackoverflow.com/questions/65795393/create-a-numpy-array-with-all-rows-identical
+                # Initial weight values are given by the user, so we set them here as described in the above comment "Set the weights..."
+                # The weights connecting the input to the output layer are set to the `values` array arranged as a column repeated on all columns of the `.weight` 2D array
+                # which is of size <# output neurons> x <# input neurons>.
+                # Note that we use the broadcast method (i.e. multiplying the `values` array by an array of 1's (`matrix_of_ones`) instead of np.repeat() because broadcasting seems to be faster
+                # than np.repeat() as mentioned here: https://stackoverflow.com/questions/65795393/create-a-numpy-array-with-all-rows-identical)
 
-                # We first compute the log(values) because the policy is computed as the softmax function applied to the preferences,
+                # Check that the given values are between 0 and 1
+                values = np.array(values)
+                if np.min(values) < 0:
+                    raise ValueError(f"The values in parameter `values` must be non-negative: {values}")
+                # We first compute the log(values) because the policy is computed as the softmax function applied to the preferences (i.e. softmax(h) ~ exp(h), where h=preference),
                 # and therefore the preferences (which here are the weights) are defined as log(values)
+                # Note that we use the maximum() function to avoid log(0) in case any value in `values` contains zeros.
                 log_values = np.log(np.maximum(1E-9, np.array(values)))
-                matrix_of_ones = np.ones((self.nn_model.getNumOutputs(), self.nn_model.getNumInputs()))
-                weights = np.array(log_values, ndmin=2).T * matrix_of_ones
-                self.nn_model.getOutputLayer().weight = nn.Parameter(tensor(weights))
+                if np.array(values).ndim == 1:
+                    # The `values` array is 1D, in which case we assume that the same policy should be applied to all states
+                    if len(values) != self.env.getNumActions():
+                        raise ValueError(f"The number of policy values to set ({len(values)}) must match the number of possible actions ({self.env.getNumActions()})")
+                    matrix_of_ones = np.ones((self.nn_model.getNumOutputs(), self.nn_model.getNumInputs()))
+                    weights = np.array(log_values, ndmin=2).T * matrix_of_ones
+                    self.nn_model.getOutputLayer().weight = nn.Parameter(tensor(weights), requires_grad=False)  # We are NOT going to compute the gradient because we don't do backpropagation in neural networks with no hidden layer (see assumption above)
+                else:
+                    # The `values` array is 2D, in which case the policy may change with the state
+                    if len(np.array(values).shape) != 2:
+                        raise ValueError(f"The policy values to set must be 2D: {np.array(values).shape}\n{values}")
+                    if len(values) != self.env.getNumStates():
+                        raise ValueError(f"The first dimension of the policy values to set ({len(values)}) must match the number of states in the environment ({self.env.getNumStates()})")
+                    for s in range(self.env.getNumStates()):
+                        weights = log_values[s]
+                        self.nn_model.getOutputLayer().weight[:, s] = nn.Parameter(tensor(weights), requires_grad=False)
         else:
-            # The neural network is assumed to be used as an actual neural network model
-            # => The initial policy is set approximately by setting small random weights around 0 and the bias of the output layer needed for the initial policy
+            # The neural network is assumed to be used as an actual neural network model (it has hidden layers)
+            # => The initial policy is set approximately by setting small random weights around 0 and
+            # the bias of the output layer that are required to get the policy values in the output layer.
             for i, component in enumerate(self.nn_model.modules()):
                 # Use the following if we want to filter out specific module types. But the problem is that this is not an exhaustive list!
                 # So, I think using `try` is better (as done below)
@@ -556,8 +617,15 @@ class PolNN:
                     raise ValueError(f"The length of parameter `values` ({len(values)}) must be the same as the number of neurons in the output layer ({len(component.bias)})")
                 component.bias = nn.Parameter(tensor(np.log( np.maximum(1E-9, np.array(values)) )))
 
+    def set_policy_values(self, values=None, eps=1E-2, seed=None):
+        self.init_policy(values, eps, seed)
+
     def set_model_params(self, param_values):
-        "Sets the model parameters to the given values if the model is of type `nn_models.NNBackprop`. See the documentation of NNBackprop.set_params() for details of the structure of parameter `param_values`"
+        """
+        Sets the model parameters to the given values if the model is of type `nn_models.NNBackprop`
+
+        See the documentation of NNBackprop.set_params() for details of the structure of parameter `param_values`,
+        """
         if not isinstance(self.nn_model, nn_models.NNBackprop):
             raise NotImplementedError(f"The model stored in the policy must be of type `nn_models.NNBackprop` in order to set its parameter values: {type(self.nn_model)}")
         self.nn_model.set_params(param_values)

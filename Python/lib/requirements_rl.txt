@@ -11,7 +11,7 @@ numpy==1.18.3	# --> Use version 1.14 if running the process at IRIT's cluster, s
                 # using v1.14 we need to adapt the code to the older way of changing the print options (already done in my code as of Jul-2021)
                 # (Ref: https://numpy.org/doc/1.14/reference/generated/numpy.printoptions.html --> but now (~ Oct-2021) gives Error 404)
 pandas==0.22.0
-pytorch==1.10.2 # To fit neural network models (this is the latest version available via the pytorch channel in anaconda.org that is compatible with Python-3.6
+torch==1.10.2   # To fit neural network models (this is the latest version available via the pytorch channel in anaconda.org that is compatible with Python-3.6
                 # Installed on 04-Oct-2023 with `conda install pytorch==1.10.2 cpuonly -c pytorch` run from an Anaconda prompt with ADMINISTRATION privileges.
 
 # Suggested packages listed in alphabetical order

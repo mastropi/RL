@@ -10,3 +10,4 @@ dependencies:
   - numpy==1.18.3
   - pandas==0.22.0
   - pytest==3.3.2
+  - torch==1.10.2

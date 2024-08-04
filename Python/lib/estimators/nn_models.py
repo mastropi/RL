@@ -112,6 +112,12 @@ class NNBackprop(nn.Module):
         or list of size <# output neurons> x <# input neurons>, and then the biases which should be a 1D array or list of length <# output neurons>.
 
         Both the weights and biases are converted to tensors when setting the respective parameter value.
+
+        Ex: In a neural network with 3 inputs and 4 outputs and ONE hidden layer with 2 neurons, parameter `values` could be the following,
+        where weights are initialized from a uniform distribution in [0, 1] and all biases are initialized to 1.0:
+        values = [  [np.random.uniform(size=(2, 3)), [1.0, 1.0]],
+                    [np.random.uniform(size=(4, 2)), [1.0, 1.0, 1.0, 1.0]]
+                ]
         """
         for p, param in enumerate(self.parameters()):
            param.data = nn.parameter.Parameter(torch.tensor(values[p]))

@@ -99,7 +99,7 @@ class SetOfStates:
         is "states" (where the states in the set are explicitly given --see also method `states_are_given_explicitly()`)
         or "set_boundaries" (where the states in the set are defined implicitly by the integer upper limits in each
         dimension of a state), in which case all states made up of integer values, of which at least ONE is equal to
-        one of those upper limits, belong to the set.
+        one of those upper limits, belong to the set. This makes the state be selected from the BOUNDARY of the set.
         Example of the latter: if the set_boundaries are [4, 2, 5], then the following are examples of states belonging
         to the set:
         [4, 0, 0] (the first element is at the boundary)
@@ -261,13 +261,13 @@ def choose_state_from_setofstates_based_on_distribution(set_of_states: SetOfStat
     if exactly_one_dimension_at_boundary and at_least_one_dimension_at_boundary:
         raise ValueError("Parameters exactly_one_dimension_at_boundary and at_least_one_dimension_at_boundary cannot be both True")
 
-    all_states = set_of_states.getStates(   exactly_one_dimension_at_boundary=exactly_one_dimension_at_boundary,
-                                            at_least_one_dimension_at_boundary=at_least_one_dimension_at_boundary)
-    if not all_states.issubset(set(dist_proba.keys())):
-        raise ValueError("All states to select from must be present in the dictionary containing their probability distribution: {}".format(all_states))
+    all_qualifying_states = set_of_states.getStates(exactly_one_dimension_at_boundary=exactly_one_dimension_at_boundary,
+                                                    at_least_one_dimension_at_boundary=at_least_one_dimension_at_boundary)
+    if not all_qualifying_states.issubset(set(dist_proba.keys())):
+        raise ValueError("All states to select from must be present in the dictionary containing their probability distribution: {}".format(all_qualifying_states))
 
     # Truncate the given distribution to the given set of states
-    states, dist_states = zip(*filter(lambda state_proba_pair: state_proba_pair[0] in all_states, dist_proba.items()))
+    states, dist_states = zip(*filter(lambda state_proba_pair: state_proba_pair[0] in all_qualifying_states, dist_proba.items()))
     dist = dist_states / np.sum(dist_states)
     assert np.isclose(np.sum(dist), 1.0), \
         "The probabilities in the distribution on which start states in the activation set are sampled sums up to 1: {}" \
