@@ -599,7 +599,6 @@ if __name__ == "__main__":
                        T=500,  # 1000, #100, #10000 if problem_2d else 1000, #1000, #1000, #3000,  # np.prod(env_shape) * 10  #100 #1000
                        estimate_absorption_set=estimate_absorption_set, absorption_set=default_absorption_set,
                        states_of_interest_fv=None,  # exit_state,
-                       estimate_on_fixed_sample_size=True,
                        seed=seed,
                        debug=False)  # CAREFUL! If we set debug=True, LOTS OF PLOTS (~ 900! for 25 policy learning steps on the 4x5 labyrinth) will be generated showing the eligibility traces of the TD(lambda) learner!
     test_ac.setUp()

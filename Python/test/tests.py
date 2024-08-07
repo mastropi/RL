@@ -245,7 +245,6 @@ T = 2000 #200 #500                                   # Number of time steps of t
                                                     #   obtain an initial estimation of the value functions of the states in the absorption set A
                                                     #   (which is needed by the FV simulation to bootstrap the state and action values for the states
                                                     #   at the boundary of A).
-estimate_on_fixed_sample_size = True                # This is only used for the DISCOUNTED reward criterion
 max_time_steps_fv_per_particle = 100 #50 #10 #50         # Max average number of steps allowed for each particle in the FV simulation
 max_time_steps_fv_for_expectation = T
 max_time_steps_fv_for_all_particles = max_time_steps_fv_per_particle * N
@@ -315,7 +314,6 @@ for rep in range(R):
                           adjust_alpha=adjust_alpha, adjust_alpha_by_episode=False, func_adjust_alpha=None, #np.sqrt,
                           #reset_method=ResetMethod.RANDOM_UNIFORM, reset_params={'min': -1, 'max': +1}, reset_seed=1713,
                           alpha_min=params['alpha_min'],
-                          estimate_on_fixed_sample_size=estimate_on_fixed_sample_size,
                           debug=False)
     if False:
         learner_fv.setAverageReward(avg_reward_true)
@@ -942,7 +940,6 @@ test_ac.setUpClass(shape=env_shape, obstacles_set=obstacles_set, wind_dict=wind_
                    T=500,  #1000, #100, #10000 if problem_2d else 1000, #1000, #1000, #3000,  # np.prod(env_shape) * 10  #100 #1000
                    estimate_absorption_set=estimate_absorption_set, threshold_absorption_set=threshold_absorption_set, absorption_set=default_absorption_set,
                    states_of_interest_fv=None, #exit_state,
-                   estimate_on_fixed_sample_size=True,
                    seed=seed, debug=False, seed_obstacles=seed_obstacles)   # CAREFUL! If we set debug=True, LOTS OF PLOTS (~ 900! for 25 policy learning steps on the 4x5 labyrinth) will be generated showing the eligibility traces of the TD(lambda) learner!
 test_ac.setUp()
 print(test_ac.policy_nn.nn_model)

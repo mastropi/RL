@@ -595,7 +595,7 @@ class Simulator:
                 # - A few replications (less than 10%) estimate V(s) = 0 for some states s, which does NOT happen when starting the particles uniformly distributed outside A.
                 # Parameters: N=50 particles, R=20 replications.
                 # See meeting minutes in entry dated 17-Jan-2024 for more details.
-                method_fv = self._run_simulation_fv_discounted; uniform_jump_rate = 1
+                method_fv = self._deprecated_run_simulation_fv_discounted; uniform_jump_rate = 1
                 start_set = self.agent.getLearner().active_set.difference(self.env.getTerminalStates())
             n_events_fv, state_values, action_values, advantage_values, state_counts_fv, phi, df_proba_surv, expected_absorption_time, max_survival_time = \
                 method_fv(  dict_params_info.get('t_learn', 0), envs,
@@ -2161,7 +2161,7 @@ class Simulator:
         return n_events_fv, learner.getV().getValues(), learner.getQ().getValues(), learner.getA().getValues(), learner._state_counts, dict_phi, df_proba_surv, expected_absorption_time, max_survival_time
 
     @measure_exec_time
-    def _run_simulation_fv_discounted(  self, t_learn, envs, absorption_set: set, start_set: set,
+    def _deprecated_run_simulation_fv_discounted(  self, t_learn, envs, absorption_set: set, start_set: set,
                                         max_time_steps=None,
                                         max_time_steps_for_absorbed_particles_check=+np.Inf, min_prop_absorbed_particles=0.90,
                                         number_free_particles=1,

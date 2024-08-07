@@ -75,12 +75,6 @@ class LeaFV(LeaTDLambda):
         in order to tackle the case of non-ergodic Markov chain induced by a deterministic policies).
         default: LearningCriterion.AVERAGE
 
-    estimate_on_fixed_sample_size: (opt) bool
-        Whether to compute the FV estimation of value functions based on groups of particles of fixed size
-        determined by their start states and state-actions.
-        This is only used when FV is run to learn value functions for the DISCOUNTED reward criterion. It is NOT used for the AVERAGE reward criterion.
-        default: False
-
     burnin_time: (opt) int or None
         Burn-in time to wait until the empirical mean estimation of Phi(t,x) is considered to have reached
         stationarity, and thus be independent of the initial state and action.
@@ -103,7 +97,6 @@ class LeaFV(LeaTDLambda):
                  probas_stationary_start_state_et: dict=None,
                  probas_stationary_start_state_fv: dict=None,
                  criterion=LearningCriterion.AVERAGE,
-                 estimate_on_fixed_sample_size=False,
                  alpha=0.1, gamma=1.0, lmbda=0.0,
                  adjust_alpha=False, alpha_update_type=AlphaUpdateType.EVERY_STATE_VISIT,
                  adjust_alpha_by_episode=False, alpha_min=0., func_adjust_alpha=None,
@@ -196,7 +189,7 @@ class LeaFV(LeaTDLambda):
         self.n_expected_discounted_state_value_at_absorption = 0    # Sample size associated to the estimated expected discounted state value at absorption
 
         # Whether to use fixed group of particles to estimate the value functions (based on the particle's start state and start state-actions)
-        self.estimate_on_fixed_sample_size = estimate_on_fixed_sample_size
+        self.is_criterion_discounted = criterion == LearningCriterion.DISCOUNTED
 
         # Burn-in time that should be waited to consider that Phi(t,x) has achieved stationarity,
         # and thus independent of the starting state and action where the particles contributing to its estimation
@@ -229,40 +222,47 @@ class LeaFV(LeaTDLambda):
             self.dict_phi_sum[x] = pd.DataFrame([[0.0, 0.0]], columns=['t', 'Phi'])
             self.dict_integral[x] = 0.0
 
-        #-- Reset attributes related to the estimation of the FV integral for each start state and start state-action
-        self.start_states = [-1]*self.N                 # -1 means "missing"
-        self.start_actions = [-1]*self.N                # -1 means "missing"
-        self.start_state_actions = [(-1, -1)]*self.N    # Note: I checked that modifying one element of this list does NOT modify the other elements!
+        if self.is_criterion_discounted:
+            # (2024/08/06) This is the case when FV is used in the DISCOUNTED setting, which requires particles to start at different states and actions
+            # in order to estimate the state and action value functions.
+            # It is NOT used in the AVERAGE reward setting.
+            # Note that this initialization process takes a lot of time if the number of states and actions is large, e.g. > 100,
+            # so it's good to disable it under the AVERAGE reward criterion.
 
-        # Survival probability functions are defined for each state in the set of active states (i.e. all the states that are NOT in the absorption set A)
-        self.dict_survival_times_for_state = dict()
-        self.dict_survival_times_for_state_action = dict()
-        self.dict_phi_for_state = dict()
-        self.dict_phi_for_state_action = dict()
-        self.dict_integral_for_state = dict()
-        self.dict_integral_for_state_action = dict()
-        for s in self.active_set:
-            # Survival functions and empirical mean estimate of Phi(t,x) as functions of each state and of each state-action
-            self.dict_survival_times_for_state[s] = [0.0]
-            self.dict_survival_times_for_state_action[s] = dict()
-            self.dict_phi_for_state[s] = dict()
-            self.dict_phi_for_state_action[s] = dict()
-            self.dict_integral_for_state[s] = dict()
-            self.dict_integral_for_state_action[s] = dict()
-            for x in self.states_of_interest:
-                self.dict_phi_for_state[s][x] = pd.DataFrame([[0, float(s in self.env.getTerminalStates())]], columns=['t', 'Phi'])
-                # TODO: (2024/01/27) Case before the estimate_on_fixed_sample_size mode... Do we need to use this when self.estimate_on_fixed_sample_size = False?
-                #self.dict_phi_for_state[s][x] = pd.DataFrame(columns=['t', 'Phi'])
-                self.dict_integral_for_state[s][x] = 0.0
-            for a in range(self.env.getNumActions()):
-                self.dict_survival_times_for_state_action[s][a] = [0.0]
-                self.dict_phi_for_state_action[s][a] = dict()
-                self.dict_integral_for_state_action[s][a] = dict()
+            #-- Reset attributes related to the estimation of the FV integral for each start state and start state-action
+            self.start_states = [-1]*self.N                 # -1 means "missing"
+            self.start_actions = [-1]*self.N                # -1 means "missing"
+            self.start_state_actions = [(-1, -1)]*self.N    # Note: I checked that modifying one element of this list does NOT modify the other elements!
+
+            # Survival probability functions are defined for each state in the set of active states (i.e. all the states that are NOT in the absorption set A)
+            self.dict_survival_times_for_state = dict()
+            self.dict_survival_times_for_state_action = dict()
+            self.dict_phi_for_state = dict()
+            self.dict_phi_for_state_action = dict()
+            self.dict_integral_for_state = dict()
+            self.dict_integral_for_state_action = dict()
+            for s in self.active_set:
+                # Survival functions and empirical mean estimate of Phi(t,x) as functions of each state and of each state-action
+                self.dict_survival_times_for_state[s] = [0.0]
+                self.dict_survival_times_for_state_action[s] = dict()
+                self.dict_phi_for_state[s] = dict()
+                self.dict_phi_for_state_action[s] = dict()
+                self.dict_integral_for_state[s] = dict()
+                self.dict_integral_for_state_action[s] = dict()
                 for x in self.states_of_interest:
-                    self.dict_phi_for_state_action[s][a][x] = pd.DataFrame([[0, float(s in self.env.getTerminalStates())]], columns=['t', 'Phi'])
-                    # TODO: (2024/01/27) Case before the estimate_on_fixed_sample_size mode... Do we need to use this when self.estimate_on_fixed_sample_size = False?
-                    #self.dict_phi_for_state_action[s][a][x] = pd.DataFrame(columns=['t', 'Phi'])
-                    self.dict_integral_for_state_action[s][a][x] = 0.0
+                    self.dict_phi_for_state[s][x] = pd.DataFrame([[0, float(s in self.env.getTerminalStates())]], columns=['t', 'Phi'])
+                    # TODO: (2024/01/27) Case before the is_criterion_discounted mode... Do we need to use this when self.is_criterion_discounted = False?
+                    #self.dict_phi_for_state[s][x] = pd.DataFrame(columns=['t', 'Phi'])
+                    self.dict_integral_for_state[s][x] = 0.0
+                for a in range(self.env.getNumActions()):
+                    self.dict_survival_times_for_state_action[s][a] = [0.0]
+                    self.dict_phi_for_state_action[s][a] = dict()
+                    self.dict_integral_for_state_action[s][a] = dict()
+                    for x in self.states_of_interest:
+                        self.dict_phi_for_state_action[s][a][x] = pd.DataFrame([[0, float(s in self.env.getTerminalStates())]], columns=['t', 'Phi'])
+                        # TODO: (2024/01/27) Case before the is_criterion_discounted mode... Do we need to use this when self.is_criterion_discounted = False?
+                        #self.dict_phi_for_state_action[s][a][x] = pd.DataFrame(columns=['t', 'Phi'])
+                        self.dict_integral_for_state_action[s][a][x] = 0.0
 
     def deprecated_store_start_states(self, envs):
         "Stores the start states of the particles as stored in the CURRENT state of the input environments"
@@ -319,9 +319,9 @@ class LeaFV(LeaTDLambda):
                 # Note however that at the moment of computing the FV integral, there will be an alignment between the
                 # survival time associated to the survival probability of a particle starting at state s and action `a`
                 # and the time t stored in the Phi(t,x) function considered on the state of interest x.
-                if self.estimate_on_fixed_sample_size:
+                if self.is_criterion_discounted:
                     assert self.getStartAction(idx_particle) >= 0, f"The start action must be a valid start action, i.e. there must be at least one particle that started at that action (s={self.getStartState(idx_particle)}, a={self.getStartAction(idx_particle)})"
-                    self._update_phi_function_fixed_sample_size(self.getStartState(idx_particle), self.getStartAction(idx_particle), t, state, next_state)
+                    self._update_phi_function_by_start_state_action(self.getStartState(idx_particle), self.getStartAction(idx_particle), t, state, next_state)
                     #print(f"[learn] Updated Phi(t,x; s={self.start_states[idx_particle]}):\n{self.dict_phi_for_state[self.start_states[idx_particle]]}")
                 else:
                     self.update_phi(t, state, next_state)
@@ -462,7 +462,7 @@ class LeaFV(LeaTDLambda):
         # Reset the trajectory of the absorbed particle for the next absorption event to the next state which is the reactivated state
         envs[idx_particle].reset_trajectory(next_state)
 
-    def learn_at_absorption_fixed_sample_size(self, envs, idx_particle, t_surv, t_phi, state_absorption, next_state):
+    def learn_at_absorption_by_start_state_action(self, envs, idx_particle, t_surv, t_phi, state_absorption, next_state):
         """
         Learns the value functions at the time of the particle's absorption for the state and action at which the particle STARTED,
         an information that is retrieved by the methods self.getStartState() and self.getStartAction().
@@ -485,7 +485,7 @@ class LeaFV(LeaTDLambda):
         # as this implies that the occupation frequency of x changed when the particle was absorbed.
         start_state = self.getStartState(idx_particle)
         start_action = self.getStartAction(idx_particle)
-        self._update_phi_function_fixed_sample_size(start_state, start_action, t_phi, state_absorption, next_state)
+        self._update_phi_function_by_start_state_action(start_state, start_action, t_phi, state_absorption, next_state)
         # Check if the Phi function was REALLY updated by the above call (i.e. if a new entry with time `t_phi` was added to Phi --which doesn't happen when the value of Phi
         # at x doesn't change due to the reactivation of the particle from state `state_absorption` to `next_state` just because no state tracked by Phi is either one of those states).
         # If Phi was NOT updated by the above call, we add `t_phi` to the data frame of Phi(t,x) values below because we need it for:
@@ -504,7 +504,7 @@ class LeaFV(LeaTDLambda):
                                                                                         axis=0)
 
         #-- Learn the value function using the FV estimator on the group of particles that started at the same state at which the absorbed particle started
-        delta_V, delta_Q, state_value_killed_process, action_value_killed_process = self._compute_fv_deltas_fixed_sample_size(t_surv, state_absorption, start_state, start_action)
+        delta_V, delta_Q, state_value_killed_process, action_value_killed_process = self._compute_fv_deltas_by_start_state_action(t_surv, state_absorption, start_state, start_action)
 
         #print("episode {}, state {}: count = {}, alpha = {}".format(self.episode, state, self._state_counts_over_all_episodes[start_state], self.getAlphaForState(start_state)))
         # Store the learning rates to be used in the value functions update
@@ -760,8 +760,12 @@ class LeaFV(LeaTDLambda):
                                     empirical_mean_actions[a] /= n_particles_tt_after_state_s_actions[a]
                                     last_tt_inserted_in_phi_actions[s][a][x] = update_phi_internal(self.dict_phi_for_state_action[s][a], tt, x, empirical_mean_actions[a], last_tt_inserted_in_phi_actions[s][a][x])
 
-    def _update_phi_function_fixed_sample_size(self, start_state, start_action, t, state, next_state):
-        "Updates the empirical mean phi(t, x; s) at the given time t, for x in intersection({state, next_state}, states_of_interest) for the given state s"
+    def _update_phi_function_by_start_state_action(self, start_state, start_action, t, state, next_state):
+        """
+        Updates the empirical mean phi(t, x; s) and phi(t, x; s, a) at the given time t, for x in intersection({state, next_state}, states_of_interest)
+        for the given start state s = `start_state` and given start action a = `start_action`, i.e. using only the FV particles that have started a
+        states `start_state` and action `start_action`.
+        """
         self.dict_phi_for_state[start_state] = update_phi(self.env, self.N_for_start_state[start_state], t, self.dict_phi_for_state[start_state], state, next_state)
         self.dict_phi_for_state_action[start_state][start_action] = update_phi(self.env, self.N_for_start_state_action[start_state][start_action], t, self.dict_phi_for_state_action[start_state][start_action], state, next_state)
 
@@ -894,7 +898,7 @@ class LeaFV(LeaTDLambda):
 
         return delta_V, delta_Q, state_value_killed_process, action_value_killed_process
 
-    def _compute_fv_deltas_fixed_sample_size(self, t_surv, state_absorption, state, action):
+    def _compute_fv_deltas_by_start_state_action(self, t_surv, state_absorption, state, action):
         """
         Updates the FV contribution to the V(s) and Q(s,a) value functions based on the FV particles group that started at (s,a).
         This update normally happens when an absorption is observed
@@ -921,28 +925,28 @@ class LeaFV(LeaTDLambda):
         - delta_Q for the given state and action to use in the update of the action value function at the given state and action.
         """
         # Store the newly observed survival time in the dictionary where they are stored for the currently updated state and action
-        #  (this is used when updating the FV integral, normally by _update_integral_fixed_sample_size())
+        #  (this is used when updating the FV integral, normally by _update_integral_by_start_state_action())
         # NOTE that, if the survival times are integer-valued, the newly observed survival time may already be present in the list.
-        #print(f"[debug-compute_fv_deltas_fixed_sample_size] s={state}, a={action}:")
-        #print(f"[debug-compute_fv_deltas_fixed_sample_size] Processing survival time {t_surv}...")
+        #print(f"[debug-compute_fv_deltas_by_start_state_action] s={state}, a={action}:")
+        #print(f"[debug-compute_fv_deltas_by_start_state_action] Processing survival time {t_surv}...")
         self.dict_survival_times_for_state[state] += [t_surv]
         self.dict_survival_times_for_state_action[state][action] += [t_surv]
-        state_value_killed_process = self._update_integral_fixed_sample_size(state)
+        state_value_killed_process = self._update_integral_by_start_state(state)
         if state not in self.env.getTerminalStates():
             assert action >= 0, f"The start action must be a valid start action, i.e. there must be at least one particle that started at that action (s={state}, a={action})"
             # Note: for terminal states, the Q values are the same for all actions and equal to V(s)
-            action_value_killed_process = self._update_integral_fixed_sample_size_action(state, action)
+            action_value_killed_process = self._update_integral_by_start_state_action(state, action)
         else:
             action_value_killed_process = state_value_killed_process
 
         if False:
-            print(f"[debug-compute_fv_deltas_fixed_sample_size] s={state}, a={action}:")
+            print(f"[debug-compute_fv_deltas_by_start_state_action] s={state}, a={action}:")
             # Showing the values of P(T>t) and Phi may be generate too long lines
-            print(f"[debug-compute_fv_deltas_fixed_sample_size] Survival times:\n{self.dict_survival_times_for_state[state]}")
+            print(f"[debug-compute_fv_deltas_by_start_state_action] Survival times:\n{self.dict_survival_times_for_state[state]}")
             for x in self.states_of_interest:
-                print(f"[debug-compute_fv_deltas_fixed_sample_size] Phi(t,x={x}):\n{self.dict_phi_for_state[state][x]}")
-                print( "[debug-compute_fv_deltas_fixed_sample_size] Integral(x={}) = {:.3f}".format(x, state_value_killed_process))
-            print(f"[debug-compute_fv_deltas_fixed_sample_size] alpha[s={state}] = {self.getAlphaForState(state)}")
+                print(f"[debug-compute_fv_deltas_by_start_state_action] Phi(t,x={x}):\n{self.dict_phi_for_state[state][x]}")
+                print( "[debug-compute_fv_deltas_by_start_state_action] Integral(x={}) = {:.3f}".format(x, state_value_killed_process))
+            print(f"[debug-compute_fv_deltas_by_start_state_action] alpha[s={state}] = {self.getAlphaForState(state)}")
             print("")
 
         #-- Compute the delta values to be used for the state value and action value functions update
@@ -1100,7 +1104,7 @@ class LeaFV(LeaTDLambda):
                 phi_contribution_from_interval_n = 1/n * self.dict_phi_sum[x]['Phi'].iloc[-1]
                 self.dict_integral[x] += phi_contribution_up_to_n_minus_1 + phi_contribution_from_interval_n
 
-    def _update_integral_fixed_sample_size(self, state):
+    def _update_integral_by_start_state(self, state):
         """
         Updates, for each x in the states of interest, the FV integral by adding the new area below the curve P(T>t) * Phi(t,x) that contributes
         to the integral after the observation of a new survival time, which is assumed to have already been stored in attribute self.absorption_times.
@@ -1190,8 +1194,8 @@ class LeaFV(LeaTDLambda):
 
         return fv_integral_over_all_states_of_interest
 
-    def _update_integral_fixed_sample_size_action(self, state, action):
-        "Same as _update_integral_fixed_sample_size() but for the given start state and action"
+    def _update_integral_by_start_state_action(self, state, action):
+        "Same as _update_integral_by_start_state() but for the given start state and action"
         # Number of absorption times observed so far (assumed observed in increasing order)
         n = len(self.dict_survival_times_for_state_action[state][action]) - 1  # -1 because the first survival time stored in the list of survival times is dummy, and is set to 0
         interval_size = 1 #1 / self.N_for_start_state_action[state][action] # This would be the adjustment to the FV integral because the observed times come from several Markov chains (partilces), as opposed to from just one Markov chain

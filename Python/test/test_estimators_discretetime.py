@@ -1278,7 +1278,6 @@ class Test_EstValueFunctions_EnvGridworld2DWithObstacles(unittest.TestCase, test
                                 probas_stationary_start_state_fv=None,
                                 criterion=LearningCriterion.DISCOUNTED,
                                 states_of_interest=cls.env2d.getTerminalStates(),
-                                estimate_on_fixed_sample_size=True,         # This means that the estimation is done on a fixed number of particles N(s) grouped by starting state s
                                 alpha=1.0,
                                 gamma=cls.gamma,
                                 lmbda=0.0,
