@@ -147,6 +147,7 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
         return self.store_trajectory
 
     def getState(self):
+        "Returns the 1D index representing the environment state"
         return self.s
 
     def getStateSpace(self):
@@ -233,6 +234,7 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
         return self.seed(seed)
 
     def setState(self, s):
+        "Sets the value of the 1D index representing the environment state"
         self.s = s
 
     def setV(self, state_values: np.ndarray(1)):

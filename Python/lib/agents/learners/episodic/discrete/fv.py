@@ -1289,15 +1289,18 @@ class LeaFV(LeaTDLambda):
 
     def setAbsorptionSet(self, absorption_set):
         "Sets the absorption set and updates the activation and active sets so that they are consistent with the absorption set"
-        # TEMPORARY: This calculation of the activation set is ONLY valid for gridworld environments.
+        # TEMPORARY: This calculation of the activation set is ONLY valid for GRIDWORLD environments.
         # In the general case, the activation set should be computed from the transition matrix P associated to the environment.
         # TODO: (2024/05/12) Compute the activation set from the transition matrix of the environment
-        from Python.lib.environments.gridworlds import get_adjacent_states
-        activation_set = set()
-        for s in absorption_set:
-            for sadj, dir in get_adjacent_states(self.env.getShape(), s):
-                if sadj is not None and sadj not in set.union(absorption_set, self.env.getObstacleStates()):
-                    activation_set.add(sadj)
+        try:
+            from Python.lib.environments.gridworlds import get_adjacent_states
+            activation_set = set()
+            for s in absorption_set:
+                for sadj, dir in get_adjacent_states(self.env.getShape(), s):
+                    if sadj is not None and sadj not in set.union(absorption_set, self.env.getObstacleStates()):
+                        activation_set.add(sadj)
+        except:
+            activation_set = None
 
         self.absorption_set = absorption_set
         self.activation_set = activation_set

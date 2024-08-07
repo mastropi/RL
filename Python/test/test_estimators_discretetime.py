@@ -2115,21 +2115,18 @@ class Test_EstValueFunctionV_MetMCLambda_EnvMountainCar(unittest.TestCase, test_
         exec_time = time_end - time_start
         print("[Lambda-Return] Execution time: {:.1f} sec, {:.1f} min".format(exec_time, exec_time / 60))
 
-        print("Observed estimataed value functions (MC / Lambda-Return):")
-        print(np.c_[
-                  agent_rw_mc.getLearner().getV().getValues(), agent_rw_lambda_return.getLearner().getV().getValues(),
-                  agent_rw_lambda_return.getLearner().getV().getValues() - agent_rw_mc.getLearner().getV().getValues()])
+        print("Observed estimated value functions (MC / Lambda-Return / Difference Lambda-Return - MC):")
+        print(np.c_[agent_rw_mc.getLearner().getV().getValues(), agent_rw_lambda_return.getLearner().getV().getValues(),
+                    agent_rw_lambda_return.getLearner().getV().getValues() - agent_rw_mc.getLearner().getV().getValues()])
 
         # Plots
         plt.figure()
-        plt.hist(np.c_[
-                     agent_rw_mc.getLearner().getV().getValues(), agent_rw_lambda_return.getLearner().getV().getValues()])
+        plt.hist(np.c_[agent_rw_mc.getLearner().getV().getValues(), agent_rw_lambda_return.getLearner().getV().getValues()])
         plt.title("V(s) by each method")
         plt.legend(["MC", "Lambda-Return"])
 
         plt.figure()
-        plt.hist(
-            agent_rw_lambda_return.getLearner().getV().getValues() - agent_rw_mc.getLearner().getV().getValues())
+        plt.hist(agent_rw_lambda_return.getLearner().getV().getValues() - agent_rw_mc.getLearner().getV().getValues())
         plt.title("Difference in V(s) between the two methods (Lambda-Return - MC)")
 
         assert np.allclose(agent_rw_mc.getLearner().getV().getValues(),

@@ -31,13 +31,14 @@ from Python.lib.agents.policies.parameterized import PolNN
 
 from Python.lib.environments import gridworlds
 from Python.lib.environments.gridworlds import get_adjacent_states
+from Python.lib.environments.mountaincars import MountainCarDiscrete
 
 from Python.lib.estimators.nn_models import NNBackprop
 
 from Python.lib.simulators.discrete import Simulator as DiscreteSimulator
 
 from Python.lib.utils.basic import assert_equal_data_frames, show_exec_params
-from Python.lib.utils.computing import compute_set_of_frequent_states_with_zero_reward, compute_transition_matrices, compute_state_value_function_from_transition_matrix
+from Python.lib.utils.computing import compute_set_of_frequent_states, compute_set_of_frequent_states_with_zero_reward, compute_transition_matrices, compute_state_value_function_from_transition_matrix
 
 @unique
 class InputLayer(Enum):
@@ -57,8 +58,8 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
                         # Characteristics of the neural network for the Actor Critic policy learner
                         nn_input: InputLayer=InputLayer.ONEHOT, nn_hidden_layer_sizes: list=[8], initial_policy=None,
                         # Characteristics of all learners
-                        learning_task=LearningTask.EPISODIC,
-                        learning_criterion=LearningCriterion.DISCOUNTED,
+                        learning_task=LearningTask.CONTINUING,
+                        learning_criterion=LearningCriterion.AVERAGE,
                         alpha=1.0, gamma=1.0, lmbda=0.0,      # Lambda parameter in non-adaptive TD(lambda) learners
                         alpha_min=0.0,
                         reset_method_value_functions=ResetMethod.ALLZEROS,
@@ -206,15 +207,15 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
         if define_start_state_from_absorption_set:
             # Redefine the set of start states as a SUBSET of the active set of the FV learner
             # The precise subset used depends on the learning criterion:
-            # - for AVERAGE learning criterion: it is defined as the activation set, i.e. the outside boundary of the absorption set A.
+            # - for AVERAGE learning criterion: it is defined as the activation set, i.e. the outer boundary of the absorption set A.
             #   NOTE that, in this case, this set of start states is used to start the single Markov chain excursion used to estimate the expected reabsorption time E(T_A).
             #   And this is OK (as opposed to e.g. start such excursion INSIDE the absorption set A), because we first need to enter the absorption set A in order to measure the
             #   reabsorption cycle time. What is questionable, however, is whether we should start the single Markov chain excursion at a state chosen UNIFORMLY at random in the
-            #   outside boundary of A or, instead, the state should be chosen following the exit state distribution.
+            #   outer boundary of A or, instead, the state should be chosen following the exit state distribution.
             # - for all other learning criteria (e.g. DISCOUNTED learning criterion): it is defined as ALL states in the FV ACTIVE set
             #   (N.B. *not* "activATION" set, which is usually much smaller than the ACTIVE set).
             if learning_criterion == LearningCriterion.AVERAGE:
-                # The start state is defined as any state in the activation set of the FV learning process (i.e. the outside boundary of the absorption set)
+                # The start state is defined as any state in the activation set of the FV learning process (i.e. the outer boundary of the absorption set)
                 start_states_set = set(activation_set)
             else:
                 # The start state is defined as any state in the complement of the absorption set (minus obstacles + terminal state),
@@ -318,6 +319,9 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
         #cls.agent_nn_fv = agents.GenericAgent(cls.policy_nn, dict({'value': learner_fv, 'policy': actor_critic}))
         cls.agent_nn_fv = agents.GenericAgent(cls.policy_nn.copy(), learner_fv)
         cls.sim_fv = DiscreteSimulator(cls.env2d, cls.agent_nn_fv, debug=cls.debug)
+
+    def getEnv(self):
+        return self.env2d
 
     def getAbsorptionSet(self):
         return self.A
@@ -477,6 +481,188 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
 
         # Check results
         assert_equal_data_frames(df_learning, df_learning_expected, df_learning_expected.columns, atol=1E-6)
+
+
+class Test_EstPolicy_EnvMountainCar(unittest.TestCase):
+    # Note: nice explanation about the three types of methods that can be defined in Python: instance, class, static
+    # https://stackoverflow.com/questions/54264073/what-is-the-use-and-when-to-use-classmethod-in-python
+    # See the only answer by Navy Cheng.
+
+    @classmethod
+    def setUpClass(cls, nv=5,
+                   nn_input: InputLayer=InputLayer.ONEHOT,
+                   nn_hidden_layer_sizes: list=[8],
+                   initial_policy=[1/3, 1/3, 1/3],
+                   learning_task=LearningTask.CONTINUING,
+                   learning_criterion=LearningCriterion.AVERAGE,
+                   alpha=1.0, gamma=1.0, lmbda=0.0,  # Lambda parameter in non-adaptive TD(lambda) learners
+                   alpha_min=0.0,
+                   reset_method_value_functions=ResetMethod.ALLZEROS,
+                   N=100, T=100,
+                   threshold_absorption_set=0.05,
+                   seed=1717, debug=False):
+        cls.debug = debug
+        cls.seed = seed
+
+        #-- Value function learning parameters
+        cls.gamma = gamma
+        cls.alpha = alpha
+        cls.alpha_min = alpha_min
+        cls.reset_method = reset_method_value_functions
+        cls.reset_params = dict({'min': -1, 'max': +1})  # Only used when reset_method = ResetMethod.RANDOM_UNIFORM
+
+        #-- Environment characteristics
+        cls.env_mc = MountainCarDiscrete(nv, debug=cls.debug)
+        cls.nS = cls.env_mc.getNumStates()
+
+        #-- Policy characteristics
+        # Policy model
+        if nn_input == InputLayer.SINGLE:
+            cls.nn_model = NNBackprop(1, nn_hidden_layer_sizes, 3, dict_activation_functions=dict({'hidden': [nn.ReLU]*len(nn_hidden_layer_sizes)}))
+        else:
+            cls.nn_model = NNBackprop(cls.nS, nn_hidden_layer_sizes, 3, dict_activation_functions=dict({'hidden': [nn.ReLU] * len(nn_hidden_layer_sizes)}))
+        cls.policy_nn = PolNN(cls.env_mc, cls.nn_model)
+        print(f"Neural network to model the policy:\n{cls.nn_model}")
+
+        # Initialize the policy to the given initial policy
+        cls.policy_nn.reset(initial_values=initial_policy, seed=cls.seed)
+        print(f"Network parameters initialized as follows:\n{list(cls.policy_nn.getThetaParameter())}")
+        print("Initial policy for all states (states x actions):")
+        policy_probabilities = cls.policy_nn.get_policy_values()
+        print(policy_probabilities)
+
+
+        #-- FV learning characteristics
+        # Absorption set
+        cls.learner_for_initial_exploration = None
+        # Perform an initial exploration of the environment in order to define the absorption set based on visit frequency and observed non-zero rewards
+        # In this excursion, the start state is defined by the environment's initial state distribution.
+        print(f"\nEstimating the absorption set based on relative visit frequency (> {threshold_absorption_set}) from an initial exploration of the environment...")
+        cls.learner_for_initial_exploration = td.LeaTDLambda(cls.env_mc,
+                                                             criterion=learning_criterion,
+                                                             task=learning_task,
+                                                             gamma=cls.gamma,
+                                                             lmbda=0.0,
+                                                             alpha=cls.alpha,
+                                                             adjust_alpha=True,
+                                                             adjust_alpha_by_episode=False,
+                                                             alpha_min=cls.alpha_min,
+                                                             reset_method=cls.reset_method, reset_params=cls.reset_params, reset_seed=cls.seed,
+                                                             debug=cls.debug)
+        agent_for_initial_exploration = agents.GenericAgent(cls.policy_nn.copy(), cls.learner_for_initial_exploration)
+        sim_for_initial_exploration = DiscreteSimulator(cls.env_mc, agent_for_initial_exploration, debug=cls.debug)
+
+        learner = sim_for_initial_exploration.run_exploration(t_learn=0, max_time_steps=T, seed=cls.seed, verbose=cls.debug, verbose_period=1)
+        absorption_set = compute_set_of_frequent_states(learner.getStates(), threshold=threshold_absorption_set)
+        print(f"Distribution of state frequency on n={learner.getNumSteps()} steps:\n{pd.Series(learner.getStates()).value_counts(normalize=True)}")
+        print(f"\nSelected absorption set (1D-index, 2D-index, 2D-discrete) ({len(absorption_set)} states):")
+        for s in absorption_set:
+            print(str(s) + ': ' + str(cls.env_mc.get_state_discrete_from_index(s)) + ', ' + str(cls.env_mc.get_state_from_index(s)))
+
+        # Reset state of environment to a start state
+        cls.env_mc.reset()
+
+        # Check if absorption set is valid
+        for state in absorption_set:
+            if not 0 <= state < cls.nS:
+                raise ValueError(f"All states in the absorption set must be between 0 and {cls.nS - 1}: {state}")
+
+        # Activation set
+        print("Computing the Activation Set, i.e. the outer boundary of the absorption set...")
+        activation_set = set()
+        for i, s in enumerate(absorption_set):
+            print(f"Processing state {s} ({i+1} of {len(absorption_set)})...")
+            for state_adj in cls.env_mc.get_from_adjacent_states(cls.env_mc.get_state_discrete_from_index(s)):
+                idx_state_adj = cls.env_mc.get_index_from_state(state_adj)
+                if idx_state_adj is not None and idx_state_adj not in absorption_set:
+                    activation_set.add(idx_state_adj)
+        print(f"\nIdentified activation set (1D-index, 2D-index, 2D-discrete) ({len(activation_set)} states):")
+        for s in activation_set:
+            print(str(s) + ': ' + str(cls.env_mc.get_state_discrete_from_index(s)) + ', ' + str(cls.env_mc.get_state_from_index(s)))
+
+        #-- Possibly update the set of start states of the environment (by updating its Initial State Distribution)
+        # Goal: fair comparison among learners, by having all learners start at the same state (or a state chosen with the same distribution) as the FV learner, when an episode is completed.
+
+
+        #-- Cycle characteristics
+        # Set of absorbing states, used to define a cycle as re-entrance into the set
+        # which is used to estimate the average reward using renewal theory
+        cls.A = absorption_set
+
+        #-- Set where a particle activates in the FV context, used in the AVERAGE reward criterion (it should be touching A)
+        cls.B = activation_set
+
+        #-- Plotting parameters
+        cls.colormap = cm.get_cmap("jet")
+
+        #-- Possible value function learners to consider
+        # TD(0) learner
+        learner_td0 = td.LeaTDLambda( cls.env_mc,
+                                      criterion=learning_criterion,
+                                      task=learning_task,
+                                      gamma=cls.gamma,
+                                      lmbda=0.0,
+                                      alpha=cls.alpha,
+                                      adjust_alpha=True,
+                                      adjust_alpha_by_episode=False,
+                                      alpha_min=cls.alpha_min,
+                                      reset_method=cls.reset_method, reset_params=cls.reset_params, reset_seed=cls.seed,
+                                      debug=cls.debug)
+        cls.agent_nn_td0 = agents.GenericAgent(cls.policy_nn.copy(), learner_td0)
+        cls.sim_td0 = DiscreteSimulator(cls.env_mc, cls.agent_nn_td0, debug=cls.debug)
+
+        # TD(lambda) learner
+        learner_tdlambda = td.LeaTDLambda(cls.env_mc,
+                                          criterion=learning_criterion,
+                                          task=learning_task,
+                                          gamma=cls.gamma,
+                                          lmbda=lmbda,
+                                          alpha=cls.alpha,
+                                          adjust_alpha=True,
+                                          adjust_alpha_by_episode=False,
+                                          alpha_min=cls.alpha_min,
+                                          reset_method=cls.reset_method, reset_params=cls.reset_params, reset_seed=cls.seed,
+                                          debug=cls.debug)
+        cls.agent_nn_td = agents.GenericAgent(cls.policy_nn.copy(), learner_tdlambda)
+        cls.sim_td = DiscreteSimulator(cls.env_mc, cls.agent_nn_td, debug=cls.debug)
+
+        # Adaptive TD(lambda) learner
+        learner_tdlambda_adap = td.LeaTDLambdaAdaptive( cls.env_mc,
+                                                        criterion=learning_criterion,
+                                                        task=learning_task,
+                                                        gamma=cls.gamma,
+                                                        alpha=cls.alpha,
+                                                        adjust_alpha=True,
+                                                        adjust_alpha_by_episode=False,
+                                                        alpha_min=cls.alpha_min,
+                                                        reset_method=cls.reset_method, reset_params=cls.reset_params, reset_seed=cls.seed,
+                                                        debug=cls.debug)
+        cls.agent_nn_tda = agents.GenericAgent(cls.policy_nn.copy(), learner_tdlambda_adap)
+        cls.sim_tda = DiscreteSimulator(cls.env_mc, cls.agent_nn_tda, debug=cls.debug)
+
+        # Fleming-Viot learner
+        absorption_set = cls.A
+        activation_set = cls.B
+        learner_fv = fv.LeaFV(  cls.env_mc,
+                                N, T, absorption_set, activation_set,
+                                probas_stationary_start_state_et=None,
+                                probas_stationary_start_state_fv=None,
+                                criterion=learning_criterion,
+                                gamma=cls.gamma,
+                                lmbda=0.0,
+                                alpha=cls.alpha,
+                                adjust_alpha=True,
+                                adjust_alpha_by_episode=False,
+                                alpha_min=cls.alpha_min,
+                                reset_method=cls.reset_method, reset_params=cls.reset_params, reset_seed=cls.seed,
+                                debug=cls.debug)
+        #actor_critic = LeaActorCriticNN(cls.env_mc, cls.policy_nn, learner_fv, optimizer_learning_rate=0.1, seed=cls.seed, debug=True)
+        #cls.agent_nn_fv = agents.GenericAgent(cls.policy_nn, dict({'value': learner_fv, 'policy': actor_critic}))
+        cls.agent_nn_fv = agents.GenericAgent(cls.policy_nn.copy(), learner_fv)
+        cls.sim_fv = DiscreteSimulator(cls.env_mc, cls.agent_nn_fv, debug=cls.debug)
+
+    def getEnv(self):
+        return self.env_mc
 
 
 if __name__ == "__main__":

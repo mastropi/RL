@@ -621,6 +621,7 @@ raise KeyboardInterrupt
 #-------------------- IMPORT AND AUXILIARY FUNCTIONS ------------------#
 from timeit import default_timer as timer
 import os
+from enum import Enum, unique
 import numpy as np
 import pandas as pd
 from  matplotlib import pyplot as plt, cm
@@ -638,12 +639,19 @@ from Python.lib.estimators.fv import estimate_expected_reward
 from Python.lib.utils.basic import get_current_datetime_as_string, load_objects_from_pickle, log_file_open, log_file_close, save_objects_to_pickle
 from Python.lib.utils.computing import compute_transition_matrices, compute_state_value_function_from_transition_matrix
 
-from Python.test.test_optimizers_discretetime import InputLayer, Test_EstPolicy_EnvGridworldsWithObstacles
+from Python.test.test_optimizers_discretetime import InputLayer, Test_EstPolicy_EnvGridworldsWithObstacles, Test_EstPolicy_EnvMountainCar
 
 # When saving results or reading previously saved results
 rootdir = "./RL-003-Classic"
 resultsdir = f"./{rootdir}/results"
 logsdir = f"./{rootdir}/logs"
+
+# Types of environments that can be defined
+@unique
+class Environment(Enum):
+    Gridworld = 1
+    MountainCar = 2
+
 
 #--- Auxiliary functions
 KL_THRESHOLD = 0.005
@@ -812,6 +820,8 @@ learning_task = LearningTask.CONTINUING
 learning_criterion = LearningCriterion.AVERAGE; gamma = 1.0    # gamma could be < 1 in the average reward criterion in order to take the limit as gamma -> 1 as presented in Sutton, pag. 251/252.
 
 seed = 1317
+env_type = Environment.Gridworld
+#env_type = Environment.MountainCar
 problem_2d = True
 use_random_obstacles_set = True; seed_obstacles = 4217
 exit_state_at_bottom = False
@@ -822,63 +832,65 @@ entry_state_in_absorption_set = True   #False #True     # Only used when estimat
 
 
 #-------------------------------- ENVIRONMENT -------------------------#
-if problem_2d:
-    # 2D labyrinth
-    size_vertical = 3; size_horizontal = 4
-    size_vertical = 4; size_horizontal = 5
-    size_vertical = 6; size_horizontal = 8
-    #size_vertical = 8; size_horizontal = 12
-    #size_vertical = 9; size_horizontal = 13
-    #size_vertical = 10; size_horizontal = 14
-    #size_vertical = 10; size_horizontal = 30
+if env_type == Environment.Gridworld:
+    if problem_2d:
+        # 2D labyrinth
+        size_vertical = 3; size_horizontal = 4
+        size_vertical = 4; size_horizontal = 5
+        size_vertical = 6; size_horizontal = 8
+        #size_vertical = 8; size_horizontal = 12
+        #size_vertical = 9; size_horizontal = 13
+        #size_vertical = 10; size_horizontal = 14
+        #size_vertical = 10; size_horizontal = 30
 
-    # Whether the active set in FV should be connected (in order to avoid isolation of the two activation states and reduce possible problems)
-    # When this is the case, the connectedness of the active set is achieved by removing the left-most obstacle in the previous-to-bottom row.
-    connected_active_set = False #True
-    initial_policy = None #[0.4, 0.15, 0.05, 0.4] #None   # Random walk as initial policy when None
-else:
-    # 1D gridworld: the interesting dimension is the vertical dimension, with terminal state at the top (this is to unify the structure of 2D labyrinth and 1D gridworld)
-    size_vertical = 21; size_horizontal = 1     # We choose a value like K = 20 or 40 in the M/M/1/K queue system
-    initial_policy = [0.4, 0.0, 0.6, 0.0]       # We choose a probability of going down which is similar to mu/(lambda + mu) in the queue system where lambda/mu = 0.7, i.e. a value close to 1 / 1.7 = 0.588
-env_shape = (size_vertical, size_horizontal)
-nS = size_vertical * size_horizontal
-size_str = f"{size_vertical}x{size_horizontal}"
-
-
-# Environment's entry and exit states
-entry_state = np.ravel_multi_index((size_vertical - 1, 0), env_shape)
-exit_state = entry_state + env_shape[1] - 1 if exit_state_at_bottom else None   # None means that the EXIT state is set at the top-right of the labyrinth
-
-# Presence of wind: direction and probability of deviation in that direction when moving
-if problem_2d:
-    wind_dict = None
-    #wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.5})
-    #wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.6})
-    #wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.7})
-    #wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.8})
-else:
-    # WIND is currently not allowed in 1D gridworlds
-    wind_dict = None
-
-# Obstacles
-if problem_2d:
-    #-- 2D labyrinth
-    if use_random_obstacles_set:
-        obstacles_set = None
+        # Whether the active set in FV should be connected (in order to avoid isolation of the two activation states and reduce possible problems)
+        # When this is the case, the connectedness of the active set is achieved by removing the left-most obstacle in the previous-to-bottom row.
+        connected_active_set = True
+        initial_policy = None #[0.4, 0.15, 0.05, 0.4] #None   # Random walk as initial policy when None
     else:
-        # The path to the terminal state is just a corridor through the last row right and then the last column up
-        # So at the upper left corner there is a rectangle that brings to nowhere
-        rectangle_to_nowhere_width = size_horizontal - 2
-        rectangle_to_nowhere_height = size_vertical - 2
-        states_previous_to_last_row = np.ravel_multi_index([np.repeat(rectangle_to_nowhere_height, rectangle_to_nowhere_width), [y for y in range(1, rectangle_to_nowhere_width+1)]], env_shape)
-        states_previous_to_last_column = np.ravel_multi_index([[x for x in range(0, rectangle_to_nowhere_height+1)], np.repeat(rectangle_to_nowhere_width, rectangle_to_nowhere_height+1)], env_shape)
-        obstacles_set = set(np.concatenate([list(states_previous_to_last_row) + list(states_previous_to_last_column)]))
+        # 1D gridworld: the interesting dimension is the vertical dimension, with terminal state at the top (this is to unify the structure of 2D labyrinth and 1D gridworld)
+        size_vertical = 21; size_horizontal = 1     # We choose a value like K = 20 or 40 in the M/M/1/K queue system
+        initial_policy = [0.4, 0.0, 0.6, 0.0]       # We choose a probability of going down which is similar to mu/(lambda + mu) in the queue system where lambda/mu = 0.7, i.e. a value close to 1 / 1.7 = 0.588
+    env_shape = (size_vertical, size_horizontal)
+    nS = size_vertical * size_horizontal
+    size_str = f"{size_vertical}x{size_horizontal}"
 
-        if connected_active_set:
-            obstacles_set = obstacles_set.difference({min(states_previous_to_last_row)})
+    # Environment's entry and exit states
+    entry_state = np.ravel_multi_index((size_vertical - 1, 0), env_shape)
+    exit_state = entry_state + env_shape[1] - 1 if exit_state_at_bottom else None   # None means that the EXIT state is set at the top-right of the labyrinth
+
+    # Presence of wind: direction and probability of deviation in that direction when moving
+    if problem_2d:
+        wind_dict = None
+        wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.5})
+        #wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.6})
+        #wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.7})
+        #wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.8})
+    else:
+        # WIND is currently not allowed in 1D gridworlds
+        wind_dict = None
+
+    # Obstacles
+    if problem_2d:
+        #-- 2D labyrinth
+        if use_random_obstacles_set:
+            obstacles_set = None
+        else:
+            # The path to the terminal state is just a corridor through the last row right and then the last column up
+            # So at the upper left corner there is a rectangle that brings to nowhere
+            rectangle_to_nowhere_width = size_horizontal - 2
+            rectangle_to_nowhere_height = size_vertical - 2
+            states_previous_to_last_row = np.ravel_multi_index([np.repeat(rectangle_to_nowhere_height, rectangle_to_nowhere_width), [y for y in range(1, rectangle_to_nowhere_width+1)]], env_shape)
+            states_previous_to_last_column = np.ravel_multi_index([[x for x in range(0, rectangle_to_nowhere_height+1)], np.repeat(rectangle_to_nowhere_width, rectangle_to_nowhere_height+1)], env_shape)
+            obstacles_set = set(np.concatenate([list(states_previous_to_last_row) + list(states_previous_to_last_column)]))
+
+            if connected_active_set:
+                obstacles_set = obstacles_set.difference({min(states_previous_to_last_row)})
+    else:
+        #-- 1D gridworld
+        obstacles_set = set()
 else:
-    #-- 1D gridworld
-    obstacles_set = set()
+    entry_state = None #None so that the start state is defined by the reset method of the environment
 #-------------------------------- ENVIRONMENT -------------------------#
 
 
@@ -896,83 +908,117 @@ nn_input = InputLayer.ONEHOT
 # with adaptive TD(lambda), where the hidden layer sizes were set to [38, 19].
 #nn_hidden_layer_sizes = [int( 0.8*np.prod(env_shape) ), int( 0.4*np.prod(env_shape) )]
 # Keep the neural network rather small or do NOT use any hidden layer for Natural Policy Gradient (NPG)
-nn_hidden_layer_sizes = []  #[] #[12]
+nn_hidden_layer_sizes = [12]  #[] #[12]
 print(f"Neural Network architecture:\n{len(nn_hidden_layer_sizes)} hidden layers of sizes {nn_hidden_layer_sizes}")
 #----------------------------- MODEL FOR POLICY -----------------------#
 
 
 #----------------------------- FV ABSORPTION SET ----------------------#
-# DEFAULT absorption set used when estimate_absorption_set = False
-if problem_2d and not use_random_obstacles_set:
-    # The absorption set is a rectangular area at the upper left corner of the grid + (possibly) the lower left corner
-    #lower_left_state = (size_vertical-1) * size_horizontal
-    #default_absorption_set = set(np.concatenate([list(range(x*size_horizontal, x*size_horizontal + size_horizontal-2)) for x in range(size_vertical-2)]))
-    # The absorption set is a rectangular area that touches the right and bottom walls of the big rectangular area that leads to nowhere
-    left_margin = 0 #int(rectangle_to_nowhere_width/2)
-    top_margin = max(1, int(rectangle_to_nowhere_width/2) - 1) #rectangle_to_nowhere_height #rectangle_to_nowhere_height - 2
-    default_absorption_set = set(np.concatenate([list(range(x * size_horizontal + left_margin, x * size_horizontal + rectangle_to_nowhere_width)) for x in range(0, top_margin)]))
-else:
-    # We choose an absorption set size J ~ K/3, like in the M/M/1/K queue system (recall that numbering of states here is the opposite than in M/M/1/K
-    default_absorption_set = set(np.arange(np.prod(env_shape) * 2 // 3 + 1, env_shape[0] - 1))
+if env_type == Environment.Gridworld:
+    # DEFAULT absorption set used when estimate_absorption_set = False
+    if problem_2d and not use_random_obstacles_set:
+        # The absorption set is a rectangular area at the upper left corner of the grid + (possibly) the lower left corner
+        #lower_left_state = (size_vertical-1) * size_horizontal
+        #default_absorption_set = set(np.concatenate([list(range(x*size_horizontal, x*size_horizontal + size_horizontal-2)) for x in range(size_vertical-2)]))
+        # The absorption set is a rectangular area that touches the right and bottom walls of the big rectangular area that leads to nowhere
+        left_margin = 0 #int(rectangle_to_nowhere_width/2)
+        top_margin = max(1, int(rectangle_to_nowhere_width/2) - 1) #rectangle_to_nowhere_height #rectangle_to_nowhere_height - 2
+        default_absorption_set = set(np.concatenate([list(range(x * size_horizontal + left_margin, x * size_horizontal + rectangle_to_nowhere_width)) for x in range(0, top_margin)]))
+    else:
+        # We choose an absorption set size J ~ K/3, like in the M/M/1/K queue system (recall that numbering of states here is the opposite than in M/M/1/K
+        default_absorption_set = set(np.arange(np.prod(env_shape) * 2 // 3 + 1, env_shape[0] - 1))
 
-# Add the environment's start state to the absorption set
-if entry_state_in_absorption_set:
-    default_absorption_set.add(entry_state)
+    # Add the environment's start state to the absorption set
+    if entry_state_in_absorption_set:
+        default_absorption_set.add(entry_state)
 #----------------------------- FV ABSORPTION SET ----------------------#
 
 
 #-------------------------------- TEST SETUP --------------------------#
-test_ac = Test_EstPolicy_EnvGridworldsWithObstacles()
-test_ac.setUpClass(shape=env_shape, obstacles_set=obstacles_set, wind_dict=wind_dict,
-                   define_start_state_from_absorption_set=False, start_states_set={entry_state},  #{nS-1}, #None,
-                   exit_state=exit_state,
-                   # Policy model
-                   nn_input=nn_input, nn_hidden_layer_sizes=nn_hidden_layer_sizes, initial_policy=initial_policy,
-                   # General learning parameters
-                   learning_task=learning_task,
-                   learning_criterion=learning_criterion,
-                   alpha=1.0, gamma=gamma, lmbda=0.7,  # lmbda parameter is ONLY used for TD(lambda), NOT for TD(0), which is created separately nor for FV (for which lambda > 0 does not make sense)
-                   alpha_min=0.1,
-                   reset_method_value_functions=ResetMethod.ALLZEROS,
-                   # Fleming-Viot parameters
-                   # Small N and T are N=50, T=1000 for the 8x12 labyrinth with corridor
-                   N=20,  #50, #200, #200 if problem_2d else 100, #50 #20 #100
-                   T=500,  #1000, #100, #10000 if problem_2d else 1000, #1000, #1000, #3000,  # np.prod(env_shape) * 10  #100 #1000
-                   estimate_absorption_set=estimate_absorption_set, threshold_absorption_set=threshold_absorption_set, absorption_set=default_absorption_set,
-                   states_of_interest_fv=None, #exit_state,
-                   seed=seed, debug=False, seed_obstacles=seed_obstacles)   # CAREFUL! If we set debug=True, LOTS OF PLOTS (~ 900! for 25 policy learning steps on the 4x5 labyrinth) will be generated showing the eligibility traces of the TD(lambda) learner!
-test_ac.setUp()
-print(test_ac.policy_nn.nn_model)
-test_ac.env2d._render()
-print(f"Absorption set (1D):\n{test_ac.agent_nn_fv.getLearner().getAbsorptionSet()}")
-print(f"Absorption set (2D):\n{[np.unravel_index(s, env_shape) for s in test_ac.agent_nn_fv.getLearner().getAbsorptionSet()]}")
-print(f"Activation set (1D):\n{test_ac.agent_nn_fv.getLearner().getActivationSet()}")
-print(f"Activation set (2D):\n{[np.unravel_index(s, env_shape) for s in test_ac.agent_nn_fv.getLearner().getActivationSet()]}")
+if env_type == Environment.Gridworld:
+    test_ac = Test_EstPolicy_EnvGridworldsWithObstacles()
+    test_ac.setUpClass(shape=env_shape, obstacles_set=obstacles_set, wind_dict=wind_dict,
+                       define_start_state_from_absorption_set=False, start_states_set={entry_state},  #{nS-1}, #None,
+                       exit_state=exit_state,
+                       # Policy model
+                       nn_input=nn_input, nn_hidden_layer_sizes=nn_hidden_layer_sizes, initial_policy=initial_policy,
+                       # General learning parameters
+                       learning_task=learning_task,
+                       learning_criterion=learning_criterion,
+                       alpha=1.0, gamma=gamma, lmbda=0.7,  # lmbda parameter is ONLY used for TD(lambda), NOT for TD(0), which is created separately nor for FV (for which lambda > 0 does not make sense)
+                       alpha_min=0.1,
+                       reset_method_value_functions=ResetMethod.ALLZEROS,
+                       # Fleming-Viot parameters
+                       # Small N and T are N=50, T=1000 for the 8x12 labyrinth with corridor
+                       N=20,  #50, #200, #200 if problem_2d else 100, #50 #20 #100
+                       T=500,  #1000, #100, #10000 if problem_2d else 1000, #1000, #1000, #3000,  # np.prod(env_shape) * 10  #100 #1000
+                       estimate_absorption_set=estimate_absorption_set, threshold_absorption_set=threshold_absorption_set, absorption_set=default_absorption_set,
+                       states_of_interest_fv=None,  # exit_state,
+                       seed=seed, debug=False, seed_obstacles=seed_obstacles)
+    test_ac.setUp()
+    print(test_ac.policy_nn.nn_model)
+    test_ac.getEnv()._render()
+    if use_random_obstacles_set:
+        test_ac.getEnv().plot_labyrinth()
+        plt.pause(0.1)
+        plt.draw()
+    print(f"Absorption set (1D):\n{test_ac.agent_nn_fv.getLearner().getAbsorptionSet()}")
+    print(f"Absorption set (2D):\n{[np.unravel_index(s, env_shape) for s in test_ac.agent_nn_fv.getLearner().getAbsorptionSet()]}")
+    print(f"Activation set (1D):\n{test_ac.agent_nn_fv.getLearner().getActivationSet()}")
+    print(f"Activation set (2D):\n{[np.unravel_index(s, env_shape) for s in test_ac.agent_nn_fv.getLearner().getActivationSet()]}")
+elif env_type == Environment.MountainCar:
+    initial_policy = [1/3, 1/3, 1/3]
+    test_ac = Test_EstPolicy_EnvMountainCar()
+    test_ac.setUpClass(nv=10,   # Number of points in the discretization of the velocities
+                       # Policy model
+                       nn_input=nn_input, nn_hidden_layer_sizes=nn_hidden_layer_sizes, initial_policy=initial_policy,
+                       # General learning parameters
+                       learning_task=learning_task,
+                       learning_criterion=learning_criterion,
+                       alpha=1.0, gamma=gamma, lmbda=0.7, # lmbda parameter is ONLY used for TD(lambda), NOT for TD(0), which is created separately nor for FV (for which lambda > 0 does not make sense)
+                       alpha_min=0.1,
+                       reset_method_value_functions=ResetMethod.ALLZEROS,
+                       N=10, T=500,
+                       threshold_absorption_set=0.01,
+                       seed=seed, debug=False)
+    test_ac.setUp()
+    print(test_ac.policy_nn.nn_model)
 #-------------------------------- TEST SETUP --------------------------#
 
 
 #------------------ INITIAL AND MAXIMUM AVERAGE REWARDS ---------------#
-print(f"\nTrue state value function under initial policy:\n{test_ac.env2d.getV()}")
+print(f"\nTrue state value function under initial policy:\n{test_ac.getEnv().getV()}")
 
 # Average reward of random policy
-policy_random = probabilistic.PolGenericDiscrete(test_ac.env2d, policy=dict(), policy_default=[0.25, 0.25, 0.25, 0.25])
-V_true, avg_reward_true, mu = compute_true_state_value_function(test_ac.env2d, policy_random, learning_task, learning_criterion)
-print(f"\nAverage reward under RANDOM policy: {avg_reward_true}")
-if initial_policy is not None:
-    policy_initial = probabilistic.PolGenericDiscrete(test_ac.env2d, policy=dict(), policy_default=initial_policy)
-    V_true, avg_reward_true, mu = compute_true_state_value_function(test_ac.env2d, policy_random, learning_task, learning_criterion)
-    print(f"\nAverage reward under INITIAL policy: {avg_reward_true}")
+if env_type == Environment.Gridworld:
+    policy_random = probabilistic.PolGenericDiscrete(test_ac.getEnv(), policy=dict(), policy_default=[0.25, 0.25, 0.25, 0.25])
+    V_true, avg_reward_true, mu = compute_true_state_value_function(test_ac.getEnv(), policy_random, learning_task, learning_criterion)
+    print(f"Average reward under RANDOM policy: {avg_reward_true}")
+    if initial_policy is not None:
+        policy_initial = probabilistic.PolGenericDiscrete(test_ac.getEnv(), policy=dict(), policy_default=initial_policy)
+        V_true, avg_reward_true, mu = compute_true_state_value_function(test_ac.getEnv(), policy_random, learning_task, learning_criterion)
+        print(f"Average reward under INITIAL policy: {avg_reward_true}")
 
-# Maximum average reward (to use as reference in information and plots)
-max_avg_reward_continuing, max_avg_reward_episodic = compute_max_avg_rewards_in_labyrinth_with_corridor(test_ac.env2d, wind_dict, learning_task, learning_criterion)
-print(f"MAX CONTINUING average reward: {max_avg_reward_continuing}")
-print(f"MAX EPISODIC average reward (approximate when wind present): {max_avg_reward_episodic}")
+    print(f"True state value function under initial policy:\n{test_ac.getEnv().getV()}")
 
-# State to observe and e.g. plot Q values, etc
-if exit_state == entry_state + env_shape[1] - 1:
-    state_observe = np.ravel_multi_index((env_shape[0] - 1, env_shape[1] - 2), env_shape)
+    # Maximum average reward (to use as reference in information and plots)
+    if not use_random_obstacles_set:
+        max_avg_reward_continuing, max_avg_reward_episodic = compute_max_avg_rewards_in_labyrinth_with_corridor(test_ac.getEnv(), wind_dict, learning_task, learning_criterion)
+    else:
+        max_avg_reward_continuing = np.nan
+        max_avg_reward_episodic = np.nan
+    print(f"MAX CONTINUING average reward: {max_avg_reward_continuing}")
+    print(f"MAX EPISODIC average reward (approximate when wind present): {max_avg_reward_episodic}")
+
+    # State to observe and e.g. plot Q values, etc
+    if exit_state == entry_state + env_shape[1] - 1:
+        state_observe = np.ravel_multi_index((env_shape[0] - 1, env_shape[1] - 2), env_shape)
+    else:
+        state_observe = np.ravel_multi_index((1, env_shape[1] - 1), env_shape)
 else:
-    state_observe = np.ravel_multi_index((1, env_shape[1] - 1), env_shape)
+    state_observe = None
+    max_avg_reward_continuing = np.nan
+    max_avg_reward_episodic = np.nan
 #------------------ INITIAL AND MAXIMUM AVERAGE REWARDS ---------------#
 
 
@@ -1028,7 +1074,7 @@ max_time_steps_fv_overall = 3*max_time_steps_fv_for_all_particles #max(5000, max
 # - the number of steps used to estimate the absorption set A (as long as this exploration ALSO estimates value functions!)
 # - the max number of time steps allowed to estimate E(T_A)
 # - the max number of time steps allowed over all the FV particles
-# Values previously used: #2000 #test_ac.env2d.getNumStates()*10
+# Values previously used: #2000 #test_ac.getEnv().getNumStates()*10
 # Number of steps used to estimate the absorption set A
 time_steps_fv_for_absorption_set = test_ac.learner_for_initial_exploration.getNumSteps() if test_ac.learner_for_initial_exploration is not None else 0
 assert time_steps_fv_for_absorption_set > 0 if estimate_absorption_set else None
@@ -1039,7 +1085,7 @@ max_time_steps_benchmark = time_steps_fv_for_absorption_set + max_time_steps_fv_
 is_NPG = len(nn_hidden_layer_sizes) == 0
 n_learning_steps = 50 #200 #50 #100 #30
 n_episodes_per_learning_step = 50   #100 #30   # This parameter is used as the number of episodes to run the policy learning process for and, if the learning task is EPISODIC, also as the number of episodes to run the simulators that estimate the value functions
-max_time_steps_per_policy_learning_episode = 5*test_ac.env2d.getNumStates() if problem_2d else 2*test_ac.env2d.getNumStates() #np.prod(env_shape) * 10 #max_time_steps_benchmark // n_episodes_per_learning_step   # Maximum number of steps per episode while LEARNING THE *POLICY* ONLINE (NOT used for the value functions (critic) learning)
+max_time_steps_per_policy_learning_episode = 5*test_ac.getEnv().getNumStates() if problem_2d else 2*test_ac.getEnv().getNumStates() #np.prod(env_shape) * 10 #max_time_steps_benchmark // n_episodes_per_learning_step   # Maximum number of steps per episode while LEARNING THE *POLICY* ONLINE (NOT used for the value functions (critic) learning)
 policy_learning_mode = "online" #"offline" #"online"     # Whether the policy is learned online or OFFLINE (only used when value functions are learned separately from the policy)
 allow_deterministic_policy = True #False
 use_average_reward_from_previous_step = True #learning_method_type == "values_fv" #False #True            # Under the AVERAGE reward crtierion, whether to use the average reward estimated from the previous policy learning step as correction of the value functions (whenever it is not 0), at least as an initial estimate
@@ -1050,7 +1096,7 @@ reset_value_functions_at_every_learning_step = False #(learning_method == "value
 # Parameters about value function learning (Critic)
 alpha_initial = simulator_value_functions.getAgent().getLearner().getInitialLearningRate()
 adjust_alpha_initial_by_learning_step = False; t_learn_min_to_adjust_alpha = 30 # based at 1 (regardless of the base value used for t_learn)
-#max_time_steps_per_episode = test_ac.env2d.getNumStates()*10  # (2024/05/02) NO LONGER USED!  # This parameter is just set as a SAFEGUARD against being blocked in an episode at some state of which the agent could be liberated by restarting to a new episode (when this max number of steps is reached)
+#max_time_steps_per_episode = test_ac.getEnv().getNumStates()*10  # (2024/05/02) NO LONGER USED!  # This parameter is just set as a SAFEGUARD against being blocked in an episode at some state of which the agent could be liberated by restarting to a new episode (when this max number of steps is reached)
 epsilon_random_action = 0.1 #if policy_learning_mode == "online" else 0.0 #0.1 #0.05 #0.0 #0.01
 use_average_max_time_steps_in_td_learner = True #learning_method == "values_td2" #True #False
 learning_steps_observe = [50, 90] #[2, 30, 48] #[2, 10, 11, 30, 31, 49, 50] #[7, 20, 30, 40]  # base at 1, regardless of the base value used for t_learn
@@ -1060,7 +1106,10 @@ colormap = "seismic"  # "Reds"  # Colormap to use in the plot of the estimated s
 
 # Results saving, with filename prefix and suffix
 save = True
-prefix = f"ActorCritic_labyrinth_{size_str}_"
+if env_type == Environment.Gridworld:
+    prefix = f"ActorCritic_labyrinth_{size_str}_"
+else:
+    prefix = f"ActorCritic_mountainCar_"
 suffix = f"_{learning_method}"
 
 # Open log file if one requested and show method being run
@@ -1076,10 +1125,10 @@ break_when_no_change = False    # Whether to stop the learning process when the 
 break_when_goal_reached = False  # Whether to stop the learning process when the average reward is close enough to the maximum average reward (by a relative tolerance of 0.1%)
 
 # Initialize objects that will contain the results by learning step
-state_counts_all = np.zeros((nrep, n_learning_steps, test_ac.env2d.getNumStates()))
-V_all = np.zeros((nrep, n_learning_steps, test_ac.env2d.getNumStates()))
-Q_all = np.zeros((nrep, n_learning_steps, test_ac.env2d.getNumStates(), test_ac.env2d.getNumActions()))
-A_all = np.zeros((nrep, n_learning_steps, test_ac.env2d.getNumStates(), test_ac.env2d.getNumActions()))
+state_counts_all = np.zeros((nrep, n_learning_steps, test_ac.getEnv().getNumStates()))
+V_all = np.zeros((nrep, n_learning_steps, test_ac.getEnv().getNumStates()))
+Q_all = np.zeros((nrep, n_learning_steps, test_ac.getEnv().getNumStates(), test_ac.getEnv().getNumActions()))
+A_all = np.zeros((nrep, n_learning_steps, test_ac.getEnv().getNumStates(), test_ac.getEnv().getNumActions()))
 R_all = np.nan * np.ones((nrep, n_learning_steps))       # Average reward (EPISODIC learning task)
 R_long_all = np.nan * np.ones((nrep, n_learning_steps))  # Long-run Average reward (CONTINUING learning task). It does NOT converge to the same value as the episodic average reward because there is one more reward value per episode!! (namely the reward going from the terminal state to the start state)
 R_long_true_all = np.nan * np.ones((nrep, n_learning_steps))  # True Long-run Average reward (CONTINUING learning task) under the policy at the start of each policy learning step
@@ -1102,7 +1151,7 @@ if learning_method_type == "values_fv":
     probas_stationary_start_state_fv = test_ac.agent_nn_fv.getLearner().getProbasStationaryStartStateFV()
 if learning_method == "all_online":
     # Online Actor-Critic policy learner with TD as value functions learner and value functions learning happens at the same time as policy learning
-    learner_ac = LeaActorCriticNN(test_ac.env2d, simulator_value_functions.getAgent().getPolicy(), simulator_value_functions.getAgent().getLearner(),
+    learner_ac = LeaActorCriticNN(test_ac.getEnv(), simulator_value_functions.getAgent().getPolicy(), simulator_value_functions.getAgent().getLearner(),
                                   allow_deterministic_policy=allow_deterministic_policy,
                                   reset_value_functions=reset_value_functions_at_every_learning_step, initial_policy=initial_policy, optimizer_learning_rate=optimizer_learning_rate, seed=test_ac.seed, debug=True)
 else:
@@ -1110,7 +1159,7 @@ else:
     # IMPORTANT: We pass the policy of the agent stored in the value functions simulator as policy for the Actor-Critic learner so that when the Actor-Critic learner
     # updates the policy, the policy of the agent stored in the value functions simulator is ALSO updated. This is crucial for using the updated policy
     # when learning the value functions at the next policy learning step.
-    learner_ac = LeaActorCriticNN(test_ac.env2d, simulator_value_functions.getAgent().getPolicy(), simulator_value_functions.getAgent().getLearner(),
+    learner_ac = LeaActorCriticNN(test_ac.getEnv(), simulator_value_functions.getAgent().getPolicy(), simulator_value_functions.getAgent().getLearner(),
                                   allow_deterministic_policy=allow_deterministic_policy,
                                   reset_value_functions=reset_value_functions_at_every_learning_step, initial_policy=initial_policy, optimizer_learning_rate=optimizer_learning_rate, seed=test_ac.seed, debug=True)
 
@@ -1158,8 +1207,8 @@ for rep in range(nrep):
 
             state_counts_all[rep, t_learn, :] = learner_ac.learner_value_functions.getStateCounts()
             V_all[rep, t_learn, :] = learner_ac.learner_value_functions.getV().getValues()
-            Q_all[rep, t_learn, :, :] = learner_ac.learner_value_functions.getQ().getValues().reshape(test_ac.env2d.getNumStates(), test_ac.env2d.getNumActions())
-            A_all[rep, t_learn, :, :] = learner_ac.learner_value_functions.getA().getValues().reshape(test_ac.env2d.getNumStates(), test_ac.env2d.getNumActions())
+            Q_all[rep, t_learn, :, :] = learner_ac.learner_value_functions.getQ().getValues().reshape(test_ac.getEnv().getNumStates(), test_ac.getEnv().getNumActions())
+            A_all[rep, t_learn, :, :] = learner_ac.learner_value_functions.getA().getValues().reshape(test_ac.getEnv().getNumStates(), test_ac.getEnv().getNumActions())
             R_all[rep, t_learn] = learner_ac.learner_value_functions.getAverageReward()
             # Could also retrieve the average reward from the Actor-Critic learner (if store_trajectory_history=False in the constructor of the value functions learner)
             #R_all[rep, t_learn] = learner_ac.average_reward_over_episodes
@@ -1167,14 +1216,18 @@ for rep in range(nrep):
         # Keep track of the policy learned so that we can analyze how much it changes after each learning step w.r.t. the previous learning step
         policy_prev = None
         for t_learn in range(n_learning_steps):
-            # Compute or update the true state value function stored in the environment for the current policy
-            # (used as reference when plotting the evolution of the estimated state value function V(s) when plot=True)
-            V_true, avg_reward_true, mu = compute_true_state_value_function(test_ac.env2d, learner_ac.getPolicy(), learning_task, learning_criterion)
-            R_long_true_all[rep, t_learn] = avg_reward_true
+            if env_type == Environment.Gridworld:
+                # Compute or update the true state value function stored in the environment for the current policy
+                # (used as reference when plotting the evolution of the estimated state value function V(s) when plot=True)
+                V_true, avg_reward_true, mu = compute_true_state_value_function(test_ac.getEnv(), learner_ac.getPolicy(), learning_task, learning_criterion)
+                R_long_true_all[rep, t_learn] = avg_reward_true
 
             # Pass a different seed (for the simulator) for each learning step... o.w. we will be using the same seed for them at every learning step!!
             seed_learn = seed_rep + t_learn
-            print(f"\n\n*** Running learning step {t_learn+1} of {n_learning_steps} (True average reward under current policy = {avg_reward_true}) (AVERAGE REWARD at previous step = {R_all[rep, max(0, t_learn-1)]} of MAX={max_avg_reward_episodic})... (seed={seed_learn}) @{get_current_datetime_as_string()}")
+            if env_type == Environment.Gridworld:
+                print(f"\n\n*** Running learning step {t_learn+1} of {n_learning_steps} (True average reward under current policy = {avg_reward_true}) (AVERAGE REWARD at previous step = {R_all[rep, max(0, t_learn-1)]} of MAX={max_avg_reward_episodic})... (seed={seed_learn}) @{get_current_datetime_as_string()}")
+            else:
+                print(f"\n\n*** Running learning step {t_learn+1} of {n_learning_steps}  (AVERAGE REWARD at previous step = {R_all[rep, max(0, t_learn-1)]} of MAX={max_avg_reward_episodic})... (seed={seed_learn}) @{get_current_datetime_as_string()}")
             reset_value_functions_at_this_step = reset_value_functions_at_every_learning_step if t_learn > 0 else True  # ALWAYS RESET THE VALUE FUNCTIONS WHEN IT'S THE VERY FIRST LEARNING STEP (becaue we don't want to keep histroy from a earlier learning process on the same learner!)
             # Update the initial learning rate for the value functions at each learning step to a smaller value than the previous learning step
             # SHOULD WE SET IT TO THE AVERAGE LEARNING RATE FROM THE PREVIOUS LEARNING STEP?? (so that we start off where we left at the last learning moment)
@@ -1203,7 +1256,7 @@ for rep in range(nrep):
                 # - the policy did NOT change significantly from the previous learning step
                 #   (because in that case we can consider the current estimate to be a reliable estimator of the value functions)
                 if t_learn + 1 >= t_learn_min_to_adjust_alpha:
-                    if policy_changed_from_previous_learning_step(KL_distance, test_ac.env2d.getNumStates()): #np.abs(loss_all[rep, t_learn-1]) > 1.0
+                    if policy_changed_from_previous_learning_step(KL_distance, test_ac.getEnv().getNumStates()): #np.abs(loss_all[rep, t_learn-1]) > 1.0
                         simulator_value_functions.getAgent().getLearner().setInitialLearningRate(alpha_initial)
                     else:
                         simulator_value_functions.getAgent().getLearner().setInitialLearningRate(alpha_initial / 10)
@@ -1285,8 +1338,8 @@ for rep in range(nrep):
             print(f"Estimated average reward: {average_reward}")
             state_counts_all[rep, t_learn, :] = state_counts
             V_all[rep, t_learn, :] = V
-            Q_all[rep, t_learn, :, :] = Q.reshape(test_ac.env2d.getNumStates(), test_ac.env2d.getNumActions())
-            A_all[rep, t_learn, :, :] = A.reshape(test_ac.env2d.getNumStates(), test_ac.env2d.getNumActions())
+            Q_all[rep, t_learn, :, :] = Q.reshape(test_ac.getEnv().getNumStates(), test_ac.getEnv().getNumActions())
+            A_all[rep, t_learn, :, :] = A.reshape(test_ac.getEnv().getNumStates(), test_ac.getEnv().getNumActions())
 
             #--- 2) ACTOR
             print(f"\nLearning the POLICY {policy_learning_mode.upper()} using estimated {use_advantage and 'ADVANTAGE A(s,a) values' or 'ACTION Q(s,a) values'} ", end=" ")
@@ -1381,6 +1434,11 @@ dict_time_elapsed[learning_method] = time_elapsed_all.copy()
 
 
 #------------------ Plots -----------------
+if env_type == Environment.MountainCar:
+    # Plot the trajectory of the last replication
+    # (we limit the trajectory to the first 100 steps because o.w. the GIF may be never generated because too many steps to draw apparently...
+    # Note that With 100 steps the size of the GIF is 1 MB already!)
+    test_ac.env_mc.plot([test_ac.env_mc.get_state_from_index(s) for s in test_ac.agent_nn_td0.getLearner().getStates()[0]][:100])
 # Plot loss and average reward for the currently analyzed learner
 print("\nPlotting...")
 ax_loss = plt.figure(figsize=figsize).subplots(1, 1)
@@ -1421,7 +1479,7 @@ plt.title(f"{learning_method.upper()}\n{learning_task.name} learning task - {lea
 #-- Plot the value functions for the state next to the terminal state
 # ONLY VALID WHEN THE EXIT STATE IS AT THE TOP RIGHT OF THE LABYRINTH
 marker = ''
-Q_all_baseline = dict_Q[learning_method][rep, :n_learning_steps, :, :] - np.tile(dict_V[learning_method][rep, :n_learning_steps, :].T, (test_ac.env2d.getNumActions(), 1, 1)).T
+Q_all_baseline = dict_Q[learning_method][rep, :n_learning_steps, :, :] - np.tile(dict_V[learning_method][rep, :n_learning_steps, :].T, (test_ac.getEnv().getNumActions(), 1, 1)).T
 ax_Q, ax_Q_baseline = plt.figure().subplots(1, 2)
 ax_Q.plot(range(1, n_learning_steps + 1), dict_V[learning_method][rep, :n_learning_steps, state_observe], marker=marker, color="black")
 ax_Q.plot(range(1, n_learning_steps + 1), dict_Q[learning_method][rep, :n_learning_steps, state_observe, :], marker=marker)
@@ -1444,9 +1502,9 @@ else:   # DISCOUNTED reward criterion
     reward_at_terminal = 1
     # State value V(s):
     # - Under the optimal policy we go always up and observe the terminal reward right-away
-    # - If the learning task is continuing, we still keep observing the terminal reward discounted by the length of the optimal path (= np.sum(test_ac.env2d.shape) - 1)
+    # - If the learning task is continuing, we still keep observing the terminal reward discounted by the length of the optimal path (= np.sum(test_ac.getEnv().shape) - 1)
     # (the `-1` at the end of the parenthesis cancels the `1+` at the beginning of the parenthesis when the learning task is CONTINUING)
-    svalue  = reward_at_terminal * (1 + int(learning_task == LearningTask.CONTINUING) * (1 / (1 - gamma**(np.sum(test_ac.env2d.shape)-1))) - 1)
+    svalue  = reward_at_terminal * (1 + int(learning_task == LearningTask.CONTINUING) * (1 / (1 - gamma**(np.sum(test_ac.getEnv().shape)-1))) - 1)
     qvalue0 = svalue
     qvalue1 = gamma * svalue
     qvalue2 = gamma**2 * svalue
@@ -1469,12 +1527,12 @@ plt.suptitle(f"{learning_method.upper()}\n{learning_task.name} learning task - {
 
 
 # Same plot for all states
-axes = plt.figure(figsize=(10, 9)).subplots(test_ac.env2d.shape[0], test_ac.env2d.shape[1])
+axes = plt.figure(figsize=(10, 9)).subplots(test_ac.getEnv().shape[0], test_ac.getEnv().shape[1])
 first_learning_step = 0 #n_learning_steps * 3 // 4  #0
 y2max = int(round(np.max(dict_state_counts[learning_method])*1.1)) # For a common Y2-axis showing the state counts
 min_V, max_V = np.min(dict_V[learning_method]), np.max(dict_V[learning_method])      # For a common Y-axis showing the value functions
 min_Q, max_Q = np.min(dict_Q[learning_method]), np.max(dict_Q[learning_method])      # For a common Y-axis showing the value functions
-Q_all_baseline = dict_Q[learning_method][rep, first_learning_step:n_learning_steps, :, :] - np.tile(dict_V[learning_method][rep, first_learning_step:n_learning_steps, :].T, (test_ac.env2d.getNumActions(), 1, 1)).T
+Q_all_baseline = dict_Q[learning_method][rep, first_learning_step:n_learning_steps, :, :] - np.tile(dict_V[learning_method][rep, first_learning_step:n_learning_steps, :].T, (test_ac.getEnv().getNumActions(), 1, 1)).T
 min_Q_baseline, max_Q_baseline = np.min(Q_all_baseline), np.max(Q_all_baseline)      # For a common Y-axis showing the value functions
 ymin, ymax = min(min_V, min_Q), max(max_V, max_Q)
 ymin_baseline, ymax_baseline = min(0, min_Q_baseline), max(0, max_Q_baseline)
@@ -1513,7 +1571,7 @@ plt.suptitle(f"{learning_method.upper()}\n{learning_task.name} learning task - {
 
 
 # Plot the ADVANTAGE function
-axes = plt.figure(figsize=(10, 9)).subplots(test_ac.env2d.shape[0], test_ac.env2d.shape[1])
+axes = plt.figure(figsize=(10, 9)).subplots(test_ac.getEnv().shape[0], test_ac.getEnv().shape[1])
 first_learning_step = 0 #n_learning_steps * 3 // 4  #0
 y2max = int(round(np.max(dict_state_counts[learning_method])*1.1)) # For a common Y2-axis showing the state counts
 min_A, max_A = np.min(dict_A[learning_method]), np.max(dict_A[learning_method])      # For a common Y-axis showing the value functions
@@ -1568,7 +1626,7 @@ if problem_2d:
         for j in range(axes.shape[1]):
             state_1d = np.ravel_multi_index((i, j), env_shape)
             print("")
-            for action in range(test_ac.env2d.getNumActions()):
+            for action in range(test_ac.getEnv().getNumActions()):
                 print(f"Computing policy Pr(a={action}|s={(i,j)})...", end= " ")
                 idx_2d = (0, 1) if action == 0 else (1, 2) if action == 1 else (2, 1) if action == 2 else (1, 0)
                 proba_actions_toplot[idx_2d] = policy.getPolicyForAction(action, state_1d)
@@ -1577,7 +1635,7 @@ if problem_2d:
             # Remove the axes ticks as they do not convey any information
             axes[i, j].set_xticks([])
             axes[i, j].set_yticks([])
-            for action in range(test_ac.env2d.getNumActions()):
+            for action in range(test_ac.getEnv().getNumActions()):
                 idx_2d = (0, 1) if action == 0 else (1, 2) if action == 1 else (2, 1) if action == 2 else (1, 0)
                 axes[i, j].text(idx_2d[1], idx_2d[0], "{:02d}".format(int(round(proba_actions_toplot[idx_2d]*100))),
                                 color="white", fontsize=fontsize*factor_fs,
@@ -1586,7 +1644,7 @@ else:
     factor_fs = factor_fontsize * 5 / axes.shape[0]
     for i in range(len(axes)):
         state = i
-        for action in range(test_ac.env2d.getNumActions()):
+        for action in range(test_ac.getEnv().getNumActions()):
             print(f"Computing policy Pr(a={action}|s={state})...", end=" ")
             idx_2d = (0, 1) if action == 0 else (1, 2) if action == 1 else (2, 1) if action == 2 else (1, 0)
             proba_actions_toplot[idx_2d] = policy.getPolicyForAction(action, state)
@@ -1595,7 +1653,7 @@ else:
         # Remove the axes ticks as they do not convey any information
         axes[i].set_xticks([])
         axes[i].set_yticks([])
-        for action in range(test_ac.env2d.getNumActions()):
+        for action in range(test_ac.getEnv().getNumActions()):
             axes[i].text(0, action, "{:02d}".format(int(round(proba_actions_toplot[0, action] * 100))),
                          color="white", fontsize=fontsize*factor_fs,
                          horizontalalignment="center", verticalalignment="center")
@@ -1652,15 +1710,17 @@ plt.suptitle(f"{learning_method.upper()}\n{learning_task.name} learning task - {
 
 ############## SAVE ALL RESULTS TOGETHER
 if save:
-    _env2d = test_ac.env2d
-    objects_to_save = ["_env2d", "wind_dict", "learning_task", "learning_criterion", "gamma", "exit_state", "nn_hidden_layer_sizes", "is_NPG", "policy_learning_mode", "simulator_value_functions",
+    _env = test_ac.getEnv()
+    wind_dict = None if "wind_dict" not in locals() else wind_dict
+    exit_state = None if "exit_state" not in locals() else exit_state
+    objects_to_save = ["_env", "env_type", "wind_dict", "learning_task", "learning_criterion", "gamma", "exit_state", "nn_hidden_layer_sizes", "is_NPG", "policy_learning_mode", "simulator_value_functions",
                        "dict_loss", "dict_R", "dict_R_long", "dict_R_long_true", "dict_V", "dict_Q", "dict_A", "dict_state_counts", "dict_nsteps", "dict_KL", "dict_alpha", "dict_time_elapsed",
                        "max_time_steps_benchmark"]
     if "max_time_steps_benchmark_all" in locals():
         objects_to_save += ["max_time_steps_benchmark_all"]
     else:
         objects_to_save += ["max_time_steps_benchmark"]
-    _size_str = f"{env_shape[0]}x{env_shape[1]}"
+    _size_str = f"{env_shape[0]}x{env_shape[1]}" if "env_shape" in locals() else ""
     _filename = f"{prefix}{dt_start_filename}_ALL.pkl"
     _filepath = os.path.join(resultsdir, _filename)
     # Save the original object names plus those with the prefix so that, when loading the data back,
@@ -1705,13 +1765,13 @@ _size_str = _filename[len("ActorCritic_labyrinth_"):len("ActorCritic_labyrinth_"
 _N = int(_filename[_filename.index("N=") + len("N="):_filename.index(",", _filename.index("N="))])
 _T = int(_filename[_filename.index("T=") + len("T="):_filename.index(",", _filename.index("T="))])
 _filepath = os.path.join(resultsdir, _filename)
-object_names = load_objects_from_pickle(_filepath, globals(), lib="pickle")
+object_names = load_objects_from_pickle(_filepath, globals())
 print(f"The following objects were loaded from '{_filepath}':\n{object_names}")
 
 # The following reward values are used in the ALTOGETHER plots below
 _methods = list(dict_loss.keys())
 env_shape = (int(_size_str[:_size_str.index("x")]), int(_size_str[_size_str.index("x")+1:]))
-max_avg_reward_continuing, max_avg_reward_episodic = compute_max_avg_rewards_in_labyrinth_with_corridor(_env2d, wind_dict, learning_task, learning_criterion)
+max_avg_reward_continuing, max_avg_reward_episodic = compute_max_avg_rewards_in_labyrinth_with_corridor(_env, wind_dict, learning_task, learning_criterion)
 nrep = len(dict_loss[_methods[0]])
 n_learning_steps = len(dict_loss[_methods[0]][0])
 # (2024/08/04) The following objects are now read from the pickle file
