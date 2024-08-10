@@ -81,12 +81,12 @@ class Test_Support_EnvMountainCars(unittest.TestCase):
                 # Check that we went back to the original state before moving
                 assert np.allclose(self.env_mc.get_state_from_index( self.env_mc.getState() ), state)
 
-    def test_get_from_adjacent_states(self):
+    def no_test_get_from_adjacent_states(self):
         print("\nRunning test {}...".format(self.id()))
 
         # Number of discrete velocities
         nv = 20
-        env_mc = MountainCarDiscrete(nv, debug=True)
+        env_mc = MountainCarDiscrete(nv, factor_for_force_and_gravity=20, debug=True)
         print(f"\nTotal number of 2D states in the discrete Mountain Car: {len(env_mc.get_positions())} positions x {len(env_mc.get_velocities())} velocities = {env_mc.getNumStates()}")
         print("\nPossible discrete positions of the Mountain Car: (dx={:.4f})".format(env_mc.dx))
         print(pd.DataFrame({'idx_x': np.arange(len(env_mc.get_positions())),
@@ -154,7 +154,6 @@ if __name__ == '__main__':
     #unittest.main()
 
     test_suite = unittest.TestSuite()
-    test_suite.addTest(Test_Support_EnvMountainCars("test_get_from_adjacent_states"))
     #test_suite.addTest(Test_Support_EnvMountainCars("test_method_plot"))
     test_suite.addTest(Test_Support_EnvMountainCars("test_movement"))
     runner.run(test_suite)

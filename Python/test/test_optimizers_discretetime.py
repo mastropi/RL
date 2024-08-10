@@ -512,7 +512,7 @@ class Test_EstPolicy_EnvMountainCar(unittest.TestCase):
         cls.reset_params = dict({'min': -1, 'max': +1})  # Only used when reset_method = ResetMethod.RANDOM_UNIFORM
 
         #-- Environment characteristics
-        cls.env_mc = MountainCarDiscrete(nv, seed_reset=cls.seed, debug=cls.debug)
+        cls.env_mc = MountainCarDiscrete(nv, factor_for_force_and_gravity=factor_for_force_and_gravity, seed_reset=cls.seed, debug=cls.debug)
         cls.nS = cls.env_mc.getNumStates()
 
         #-- Policy characteristics

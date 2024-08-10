@@ -27,6 +27,10 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
     """
     Discrete Mountain Car environment defining the methods used by my learners, such as LeaTDLambda.
 
+    Discrete here means: discrete actions (-1, 0, +1) and discrete states! (this may not be the most sensible way to approach this problem,
+    as the dynamics are affected by this discretization, as some tuning on the force, gravity and max_speed needs to be done in order to
+    guarantee transitioning to other states when an action is applied for every or most of the states!)
+
     The constructor receives the number of points in which we would like to discretize the possible velocity values,
     which are in the range [-max_speed, +max_speed]. The max_speed value is defined in the MountainCarEnv environment
     from which this class derives and is normally equal to max_speed = 0.07.
@@ -49,17 +53,28 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
     of the super class MountainCarEnv are x = 0.4 and v = -0.035.
     Note that the state (x, v) = (0.8, 0.07) represents the cell with x values in [0.8, 1.2) and v values in [0.007, 0.105).
 
-    The `force` and `gravity` values are multiplied 20 fold in this class from their original values defined in the
-    super class MountainCarEnv, so that we don't require so many discretized intervals to guarantee the aforementioned
+    The original `force` and `gravity` values defined in the MountainCarEnv super class are multiplied by parameter `factor_for_force_and_gravity`
+    so that we don't require so many discretized intervals of the position to guarantee the aforementioned
     condition on the position intervals, which would make the learning process very slow.
     For instance, the above logic of defining the number of discretized intervals for position would give about 1000
     intervals when we use the original `force` and `gravity` values defined in the super class MountainCarEnv,
-    respectively 0.001 and 0.0025. In our class, their values become 0.02 and 0.05 respectively.
+    respectively 0.001 and 0.0025.
+    For instance, with the default value of factor_for_force_and_gravity of:
+    - 20 => "new force" = 0.02, "new gravity" = 0.05 => 107 discretized position intervals
+    - 100 => "new force" = 0.1, "new gravity" = 0.25 => 21 discretized position intervals
 
     Arguments:
     nv: int
         Number of discretization intervals for velocity.
         An odd number is enforced by adding 1 when even, so that v = 0.0 is always part of the velocity grid.
+
+    factor_for_force_and_gravity: positive float
+        Multiplier of the original `force` and `gravity` values defined in the MountainCarEnv super class
+        affecting the number of discretized intervals for the car's position, as described above.
+        Increase this value to decrease the number of discrete positions in the environment.
+        20 => 107 discrete positions
+        100 => 21 discrete positions
+        default: 20, which gives 107 discretized position intervals
 
     seed_reset: (opt) int
         Seed to use when choosing the start state when resetting the environment.
@@ -85,7 +100,7 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
     # to indicate that those methods cannot be implemented in such class (EnvironmentDiscrete) because we need information
     # about the environment itself, namely about how the index state self.s defined in discrete.DiscreteEnv translates
     # into the human-understandable state.
-    def __init__(self, nv, seed_reset=None, debug=False):
+    def __init__(self, nv, factor_for_force_and_gravity=20, seed_reset=None, debug=False):
         MountainCarEnv.__init__(self)
         self.debug = debug
         self.setSeed(seed_reset)
@@ -96,10 +111,19 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
         # and we get symmetric values for v.
         self.nv = self.nv + 1 if self.nv % 2 == 0 else self.nv
 
+        # Adjust the the force, the gravity and the max speed based on the given factor
+        # This is done to reduce the number of discrete positions (and thus make the state space smaller)
+        # Note that max_speed is defined in the original mountain car environment to clip the velocity which is a direct function of "force - gravity" (because the time step is t=1)
+        factor_for_max_speed = 0.25*factor_for_force_and_gravity
+        self.max_speed = factor_for_max_speed * self.max_speed
+        self.force = factor_for_force_and_gravity * self.force
+        self.gravity = factor_for_force_and_gravity * self.gravity
+
         # Minimum and maximum values for position and velocity
         # Note: In the documentation of the source code in GitHub (mentioned above) it says that:
         # -1.2 <= x <= 0.5 (which is the goal position): note that we do not need to allow x to go past the goal position because we discretize the value of x using the left bound of each interval
         # -0.07 <= v <= 0.07
+        # and these are ranges for force = 0.001 and gravity = 0.0025.
         self.xmin, self.xmax = self.min_position, self.goal_position #self.max_position
         self.vmin, self.vmax = -self.max_speed, self.max_speed
 
@@ -117,7 +141,7 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
         # In other positions, the new velocity will have also the help from gravity, therefore we are in business if
         # we satisfy the above condition for dx, i.e. the mesh grid density for the positions.
         # Note that gravity is largest at two positions, cos(3*x) = cos(-pi) and cos(0),
-        # which happens when x = -pi/3 ~ 1.05 and x = 0.0
+        # which happens when x = -pi/3 ~ -1.05 and x = 0.0
         #
         # b) The car can reach the goal on the right. This implies that the maximum velocity that can be used by the car
         # when it is at the rightmost position interval before reaching the goal should be enough to take the car to
@@ -128,14 +152,13 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
         # which means that the rightmost position should be no less than at:
         #   self.goal_position - self.dv
         # (assuming that 0.0 is a possible velocity, which is guaranteed by calling np.linspace() below with an odd
-        # number of points and endpoint=True (the default)
-        # Note that the number of points returned by linspace is the number of points specified as third argument,
+        # number of points and endpoint=True (the default))
+        # Note that the number of points returned by np.linspace() is the number of points specified as third argument,
         # regardless of the value of endpoint.
-        self.force = 20*self.force
-        self.gravity = 20*self.gravity
+
         velocity_achieved_from_zero_speed_at_zero_gravity = self.force
-        position_max_leftmost = self.xmin + 0.8*velocity_achieved_from_zero_speed_at_zero_gravity
-        position_min_rightmost = self.goal_position - self.vmax # This is not used but computed for informational purposes if needed
+        position_max_leftmost = self.xmin + 0.8*velocity_achieved_from_zero_speed_at_zero_gravity   # NOTE: (2024/08/09) I don't recall what the 0.8 factor means...
+        position_min_rightmost = self.goal_position - self.vmax  # This is not used but computed for informational purposes if needed
         position_rightmost = self.goal_position - self.dv
         self.dx = position_max_leftmost - self.xmin
         self.nx = int((self.xmax - self.xmin) / self.dx) + 1
@@ -171,6 +194,8 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
         self.nS = self.nx * self.nv
         self.nA = self.action_space.n
         self.all_states = list(np.arange(self.nS))
+        # In case we need to store the 2D states, we can use this
+        #self.all_states_2d = [(x, v) for x in self.get_positions() for v in self.get_velocities()]
 
         # In case we need to have all possible (x, v) indices indexing the discrete position and velocity
         # We can go from 2D indices to 1D indices and viceversa using respectively the following functions
@@ -352,14 +377,17 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
         # the intervals each time we need to discretize a value. Instead we store these intervals as part of the object.
         # IMPORTANT: np.digitize() returns a value between 1 and the length of bins (second parameter),
         # NOT between 0 and len-1 as one would have expected (considering how Python defines indices)!!!!!!
-        state_discrete[dim_x] = np.digitize(x, self.positions) - 1
-        state_discrete[dim_v] = np.digitize(v, self.velocities) - 1
+        # Note that, to each x and to each v, we assign the value that is the results of ROUNDing to the grid, NOT of TRUNCating
+        # so that we assign the bin that is closest to the respective continuous value
+        # (rounding is accomplished by summing self.dx/2 and self.dv/2 to the continuous-valued x and v values, respectively)
+        state_discrete[dim_x] = np.digitize(x + self.dx/2, self.positions) - 1
+        state_discrete[dim_v] = np.digitize(v + self.dv/2, self.velocities) - 1
         assert 0 <= state_discrete[dim_x] <= self.nx - 1, "{}, {}".format(state_discrete[dim_x], self.nx-1)
         assert 0 <= state_discrete[dim_v] <= self.nv - 1, "{}, {}".format(state_discrete[dim_v], self.nv-1)
         #state_discrete[dim_x] = discretize(x, self.nx, self.xmin, self.xmax)
         #state_discrete[dim_v] = discretize(v, self.nv, self.vmin, self.vmax)
 
-        return state_discrete
+        return state_discrete.astype(int)   # Convert the values to integer because they represent indices (NOT position and velocity values)
 
     def undiscretize(self, state_discrete):
         """
@@ -445,8 +473,7 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
 
         # Save animation
         ani.save('./mountain_car.gif', writer='pillow', fps=10)
-
-        print("GIF saved in: ./mountain_car.gif")
+        print("GIF saved to: ./mountain_car.gif")
 
     def get_from_adjacent_states(self, state):
         " Returns the set of 2D-discrete-states adjacent to the given continuous-valued state (x, v) whose probability of transitioning to (x, v) is > 0"
