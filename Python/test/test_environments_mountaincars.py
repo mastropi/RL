@@ -19,6 +19,68 @@ from Python.lib.environments.mountaincars import MountainCarDiscrete
 
 class Test_Support_EnvMountainCars(unittest.TestCase):
 
+    @classmethod
+    def setUpClass(cls):
+        nv = 20
+        cls.env_mc = MountainCarDiscrete(nv, factor_for_force_and_gravity=100, debug=True)
+        print(f"\nPosition grid values ({len(cls.env_mc.get_positions())} points): {cls.env_mc.get_positions()}")
+        print(f"\nVelocity grid values ({len(cls.env_mc.get_velocities())} points): {cls.env_mc.get_velocities()}")
+
+    def test_states(self):
+        "Tests the consistency of the different states stored in the object: 2D continuous-valued state (x, v), 1D index, 2D index"
+        positions = self.env_mc.get_positions()
+        velocities = self.env_mc.get_velocities()
+        dict_cases = {# Near-valley state (this is a continuous-valued state and is most likely NOT a point of the discretized grid
+                      1: {'state': (-0.5, 0.0), 'idx_state_expected': 118},
+                      # Goal state
+                      2: {'state': (0.5, 0.0) , 'idx_state_expected': 131},
+                      # The state with the smallest 1D index
+                      3: {'state': (positions[0], velocities[0]), 'idx_state_expected': 0},
+                      # The state with the largest 1D index
+                      4: {'state': (positions[-1], velocities[-1]), 'idx_state_expected': self.env_mc.nS - 1}}
+        for item in enumerate(dict_cases.items()):
+            i = item[0]
+            case = item[1][1]
+            print(f"\nTesting case {i+1} of {len(dict_cases)}...")
+            print(case)
+            state = case['state']
+            idx_state_expected = case['idx_state_expected']
+            idx_state = self.env_mc.get_index_from_state(state)
+            state_discrete = self.env_mc.discretize(state)
+            idx_state_discrete = self.env_mc.get_index_from_state_discrete(state_discrete)
+            print(f"State = {state}:")
+            print(f"--> 1D index: {idx_state}")
+            print(f"--> 2D index: {state_discrete}")
+            print(f"--> 1D index of 2D index: {idx_state_discrete}")
+            print(f"--> (x, v) of the 1D index: {self.env_mc.get_state_from_index(idx_state)}")
+            #print(f"--> (x, v) of the 2D index: {self.env_mc.get_state_from_discrete_state(state_discrete)}")
+
+            assert idx_state == idx_state_expected
+            assert idx_state == idx_state_discrete
+
+    def test_movement(self):
+        "Tests the movement of the car, based on the discretization used"
+        for position in self.env_mc.get_positions():
+            state = (position, 0.0)
+            idx_state = self.env_mc.get_index_from_state(state)
+            print("\nMoving from state=({:.4f}, {:.4f}) on different accelerations".format(state[0], state[1]))
+            self.env_mc.setState(idx_state)
+
+            # Different accelerations
+            for action in np.arange(self.env_mc.getNumActions()):
+                #idx_next_state, reward, done, info = self.env_mc.step(action)
+                #next_state = self.env_mc.get_state_from_index(idx_next_state)
+                #print("Moving from state=({:.4f}, {:.4f}) with acceleration a={} => next state: {}".format(state[0], state[1], action-1, next_state))
+                next_state_cont, next_state_discrete, reward, done, info = self.env_mc.step(action, return_continuous_state=True)
+                next_state = self.env_mc.get_state_from_discrete_state(next_state_discrete)
+                print("Moving from state=({:.4f}, {:.4f}) with acceleration a={} => next state: (x, v) = {}, (xd, vd) = {}".format(state[0], state[1], action-1, next_state_cont, next_state))
+                if np.isclose(next_state[0], state[0]):
+                    print("---> WARNING: The car's position did NOT change!")
+                # Reset the state to the one before the action was taken
+                self.env_mc.setState(idx_state)
+                # Check that we went back to the original state before moving
+                assert np.allclose(self.env_mc.get_state_from_index( self.env_mc.getState() ), state)
+
     def test_get_from_adjacent_states(self):
         print("\nRunning test {}...".format(self.id()))
 
@@ -94,4 +156,5 @@ if __name__ == '__main__':
     test_suite = unittest.TestSuite()
     test_suite.addTest(Test_Support_EnvMountainCars("test_get_from_adjacent_states"))
     #test_suite.addTest(Test_Support_EnvMountainCars("test_method_plot"))
+    test_suite.addTest(Test_Support_EnvMountainCars("test_movement"))
     runner.run(test_suite)

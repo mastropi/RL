@@ -60,6 +60,10 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
     nv: int
         Number of discretization intervals for velocity.
         An odd number is enforced by adding 1 when even, so that v = 0.0 is always part of the velocity grid.
+
+    seed_reset: (opt) int
+        Seed to use when choosing the start state when resetting the environment.
+        default: None
     """
 
     # NAMING CONVENTIONS FOR ATTRIBUTES AND VARIABLES CONTAINING STATE INFORMATION:
@@ -81,9 +85,10 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
     # to indicate that those methods cannot be implemented in such class (EnvironmentDiscrete) because we need information
     # about the environment itself, namely about how the index state self.s defined in discrete.DiscreteEnv translates
     # into the human-understandable state.
-    def __init__(self, nv, debug=False):
+    def __init__(self, nv, seed_reset=None, debug=False):
         MountainCarEnv.__init__(self)
         self.debug = debug
+        self.setSeed(seed_reset)
 
         # Number of intervals  information of the 2D state information
         self.nv = nv
@@ -192,7 +197,7 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
         self.terminal_rewards = dict()  # TODO: (2022/05/06) Define the terminal rewards, as done in my EnvironmentDiscrete class, from which this class derives
 
         # Initialize the other class from which this class inherits, so that we can use its attributes (e.g. rewards, etc)
-        EnvironmentDiscrete.__init__(self, self.nS, self.nA, None, self.isd, rewards=self.terminal_rewards, terminal_states=self.terminal_states)
+        EnvironmentDiscrete.__init__(self, self.nS, self.nA, None, self.isd, dim=self.dim, rewards=self.terminal_rewards, terminal_states=self.terminal_states)
 
         # 2D discrete-valued state of the environment (self.state), which gives the LOWER LIMIT of the corresponding (x, v) cell in the discretized space
         # (e.g. state = (0.8, 0.07))
@@ -204,10 +209,17 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
         # Note that the MountainCarEnv environment does not have any getter or setter to access `state`.
         self.reset()
 
+    def setSeed(self, seed=None):
+        "Sets the seed of the environment for generating random numbers such as those performed by reset() and step()"
+        # Set the seed for the reset() method
+        self.seed_reset = seed
+        # Set the seed of the environment (e.g. used to generate the steps)
+        super().seed(seed)
+
     # NOTE: (2022/05/05) In the current version gym-0.12.1 that I have installed, the MountainCarEnv environment does not accept
     # a seed when resetting the environment. I should update the gym installation, as the newer version does accept a seed
     # (as seen in the GitHub repository of the MountainCarEnv environment)
-    def reset(self, seed=None, isd=None):
+    def reset(self, isd=None):
         """
         Resets the environment's state, optionally using the initial state distribution given in parameter `isd`,
         otherwise the reset step of the MountainCarEnv environment is used
@@ -220,7 +232,7 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
             idx_state = categorical_sample(isd, self.np_random)
         else:
             # Set an initial random state using the MountainCarEnv procedure
-            self.seed(seed)         # This method is defined in MountainCarEnv included in gym/envs/classic_control
+            self.seed(self.seed_reset)         # This method is defined in MountainCarEnv included in gym/envs/classic_control
             # Set the (x, v) state of the Mountain Car (continuous-valued 2D state)
             state_continuous_2d = super().reset() # reset() through the MountainCarEnv environment (since this is the first super class appearing in the list of super classes in the definition of this class)
             # Set the 1D index associated to the continuous-valued (x, v) state just set (this 1D index is computed using the position and velocity discretization)
@@ -228,6 +240,10 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
 
         # Set the 2D discretized state (self.state) and its 1D index version (state of the EnvironmentDiscrete environment)
         self.setState(idx_state)
+
+        # We need to return a state because the environment reset() performed by simulators assign the returned state from the reset() method to `next_state`
+        # Otherwise, next_state will be None!
+        return idx_state
 
     def step(self, action, return_continuous_state=False):
         """
@@ -267,7 +283,7 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
         # of the discretized interval corresponding to the 1D state index self.s stored in discrete.DiscreteEnv.
         self.setState(self.get_index_from_state(observation))
         if done:
-            # Fix the reward when the car reaches the goal!
+            # FIX a bug in the original Mountain Car environment about the reward when the car reaches the goal!
             # In the original implementation (see gym/envs/classic_control/mountain_car.py) the reward is ALWAYS -1.0!!
             # (although the documentation reads:
             # "The goal is to reach the flag placed on top of the right hill as quickly as possible,
@@ -289,8 +305,8 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
         # given we start at the state", whereas the original interpretation is "the expected number of steps to reach
         # the terminal state given we start at the state". Note that the random walk is a null recurrent chain, so the
         # latter should be infinite(!), but the former is a positive probability.
-        #reward = 1.0 + reward
-        #assert reward == done*1.0
+        reward = 1.0 + reward
+        assert reward == done*1.0
 
         # Discretize position and velocity
         # These are integer values in [0, nx-1] and [0, nv-1] respectively for position and velocity
@@ -302,8 +318,8 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
         # stored in each environment (our and MountainCarEnv from which we inherit) COULD be different
         # (however, normally we are storing it in the same order in the state array, so that we make our life easier).
         state_cont = np.array([np.nan, np.nan])
-        state_cont[self.getPositionDimension()] = observation[0] # Position is stored in observation's index 0 (see MountainCarEnv)
-        state_cont[self.getVelocityDimension()] = observation[1] # Position is stored in observation's index 1 (see MountainCarEnv)
+        state_cont[self.getPositionDimension()] = observation[0]  # Position is stored in observation's index 0 (see MountainCarEnv)
+        state_cont[self.getVelocityDimension()] = observation[1]  # Position is stored in observation's index 1 (see MountainCarEnv)
         state_discrete = self.discretize(state_cont)
 
         if return_continuous_state:
