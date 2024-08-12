@@ -200,10 +200,11 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
         # In case we need to have all possible (x, v) indices indexing the discrete position and velocity
         # We can go from 2D indices to 1D indices and viceversa using respectively the following functions
         # defined in the `basic` module:
-        # index_multi2linear()
-        # index_linear2multi()
+        #   index_multi2linear()
+        #   index_linear2multi()
         # Note: the reshaping is done by row (e.g. [[0, 1, 2], [3, 4, 5]] when nx = 2, nv = 3)
-        # self.all_states_2d = np.arange(self.nS).reshape(self.nx, self.nv)
+        # --OR should we do it by COLUMN? (as is done in the other reshape() calls in this method (look for order='F'))
+        #   self.all_states_2d = np.arange(self.nS).reshape(self.nx, self.nv)
         # In case we need to iterate on all possible states
         #it = np.nditer(states2d, flags=['multi_index'])             # Retrieve the original 2D layout with `x, v = it.multi_index` when iterating with `while not it.finished`.
 
@@ -217,12 +218,15 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
         self.isd = np.zeros(self.nS)
         self.isd[0] = 1
 
+        # Define other pieces of information required by processes that rely on the information stored in the EnvironmentDiscrete super class,
+        # most importantly the reward received by the terminal states, which is used when calling the EnvironmentDiscrete.getReward() method, used extensively
+        # in processes involving Fleming-Viot!!
         self.non_terminal_states = set(self.get_indices_for_non_terminal_states())
         self.terminal_states = set(self.getAllStates()).difference( set( self.non_terminal_states ) )
-        self.terminal_rewards = dict()  # TODO: (2022/05/06) Define the terminal rewards, as done in my EnvironmentDiscrete class, from which this class derives
+        self.rewards = dict([(s, 1.0) for s in self.terminal_states])
 
         # Initialize the other class from which this class inherits, so that we can use its attributes (e.g. rewards, etc)
-        EnvironmentDiscrete.__init__(self, self.nS, self.nA, None, self.isd, dim=self.dim, rewards=self.terminal_rewards, terminal_states=self.terminal_states)
+        EnvironmentDiscrete.__init__(self, self.nS, self.nA, None, self.isd, dim=self.dim, rewards=self.rewards, terminal_states=self.terminal_states)
 
         # 2D discrete-valued state of the environment (self.state), which gives the LOWER LIMIT of the corresponding (x, v) cell in the discretized space
         # (e.g. state = (0.8, 0.07))
@@ -307,6 +311,12 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
         # real-valued but can only store a discrete number of real value pairs, as they represent the left bound
         # of the discretized interval corresponding to the 1D state index self.s stored in discrete.DiscreteEnv.
         self.setState(self.get_index_from_state(observation))
+
+        # IMPORTANT: Check DONE in the DISCRETE state space!!!
+        # In fact, due to the discretization process performed by discretize() called by the get_index_from_state() method called above,
+        # the discrete state may be at the goal already even if the continuous state is not (because of the "ROUNDING" approach that is now implemented (since Aug-2024).
+        done = self.getState() in self.terminal_states
+
         if done:
             # FIX a bug in the original Mountain Car environment about the reward when the car reaches the goal!
             # In the original implementation (see gym/envs/classic_control/mountain_car.py) the reward is ALWAYS -1.0!!
@@ -359,7 +369,7 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
 
         Arguments:
         state: array, list or tuple
-            The continued-value state (x, v) to discretize in the x and in the v direction, respectively.
+            The continuous-valued state (x, v) to discretize in the x and in the v direction, respectively.
 
         Return: numpy.ndarray
         2D-array containing the discretized x and v values represented by integer values indexing the respective
@@ -545,7 +555,7 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
 
         Arguments:
         state: array, list or tuple
-            The continued-value state (x, v) for which the position is wished.
+            The state (x, v) (discrete or continuous) for which the position is wished.
 
         Return: float
         The continuous-valued position associated to the given state.
@@ -558,7 +568,7 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
 
         Arguments:
         state: array, list or tuple
-            The continued-value state (x, v) for which the velocity is wished.
+            The state (x, v) (discrete or continuous) for which the velocity is wished.
 
         Return: float
         The continuous-valued velocity associated to the given state.
@@ -630,18 +640,13 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
             # 2D continuous-valued state is mapped to the 1D state index conversion to 2D, namely the 2D continuous-valued state that is exactly at one of the
             # grid points defined by the discretization of the 2D state landscape (position, velocity) that is linearly indexed (column first) by the 1D state index.
             # Note that the assertion that is based on the 1D to 2D conversion fails soon after the environment is reset by the self.reset() method defined above
-            # become in such reset() method, the 2D state is first chosen at random and a 1D state index mapped to it: if we converted this 1D state index back to
+            # because in such reset() method, the 2D state is first chosen at random and a 1D state index mapped to it: if we converted this 1D state index back to
             # a 2D state, the result would NOT be the 2D state selected at random in the 2D continuous-valued space!
         return idx_state
 
     def getReward(self, s):
-        """
-        Returns the reward received when visiting a state
-
-        It returns always 0, as the method has been defined only to comply with the processes working with environments that require the definition of this method,
-        such as value function learners inheriting from discrete.Learner.
-        """
-        return 0.0
+        "Returns the reward received when visiting a state given as a 1D index"
+        return super().getReward(s)  # This calls the getReward() method in the EnvironmentDiscrete class (since the MountainCarEnv class does not have any getReward() method defined)
 
     def isTerminalState(self, idx_state: int):
         state = self.get_state_from_index(idx_state)
