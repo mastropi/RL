@@ -875,6 +875,7 @@ if env_type == Environment.Gridworld:
         #-- 2D labyrinth
         if use_random_obstacles_set:
             obstacles_set = None
+            n_obstacles = int(prop_obstacles * np.prod(env_shape))
         else:
             # The path to the terminal state is just a corridor through the last row right and then the last column up
             # So at the upper left corner there is a rectangle that brings to nowhere
@@ -886,6 +887,7 @@ if env_type == Environment.Gridworld:
 
             if connected_active_set:
                 obstacles_set = obstacles_set.difference({min(states_previous_to_last_row)})
+            n_obstacles = len(obstacles_set)
     else:
         #-- 1D gridworld
         obstacles_set = set()
@@ -937,7 +939,7 @@ if env_type == Environment.Gridworld:
 #-------------------------------- TEST SETUP --------------------------#
 if env_type == Environment.Gridworld:
     test_ac = Test_EstPolicy_EnvGridworldsWithObstacles()
-    test_ac.setUpClass(shape=env_shape, obstacles_set=obstacles_set, wind_dict=wind_dict,
+    test_ac.setUpClass(shape=env_shape, obstacles_set=obstacles_set, n_obstacles=n_obstacles, wind_dict=wind_dict,
                        define_start_state_from_absorption_set=False, start_states_set={entry_state},  #{nS-1}, #None,
                        exit_state=exit_state,
                        # Policy model
@@ -957,15 +959,10 @@ if env_type == Environment.Gridworld:
                        seed=seed, debug=False, seed_obstacles=seed_obstacles)
     test_ac.setUp()
     print(test_ac.policy_nn.nn_model)
-    test_ac.getEnv()._render()
-    if use_random_obstacles_set:
-        test_ac.getEnv().plot_labyrinth()
-        plt.pause(0.1)
-        plt.draw()
-    print(f"Absorption set (1D):\n{test_ac.agent_nn_fv.getLearner().getAbsorptionSet()}")
-    print(f"Absorption set (2D):\n{[np.unravel_index(s, env_shape) for s in test_ac.agent_nn_fv.getLearner().getAbsorptionSet()]}")
-    print(f"Activation set (1D):\n{test_ac.agent_nn_fv.getLearner().getActivationSet()}")
-    print(f"Activation set (2D):\n{[np.unravel_index(s, env_shape) for s in test_ac.agent_nn_fv.getLearner().getActivationSet()]}")
+    test_ac.getEnv().render()
+    test_ac.getEnv().plot()
+    plt.pause(0.1)
+    plt.draw()
 elif env_type == Environment.MountainCar:
     initial_policy = [1/3, 1/3, 1/3]
     test_ac = Test_EstPolicy_EnvMountainCar()

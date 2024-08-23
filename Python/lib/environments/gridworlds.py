@@ -6,12 +6,11 @@ Created on Wed Apr  1 18:52:18 2020
 @description: Definition of gridworld environments (used the gridworld defined by Denny Britz in
 https://github.com/dennybritz/reinforcement-learning/blob/master/lib/envs/gridworld.py as a
 starting point)
-Every environment should define the following methods:
-    - getNumActions()
-    - getNumStates()
+Each environment should define the following methods defined as abstract methods in the super class EnvironmentDiscrete:
+- render(): it should display the environment (render it).
 
-Note that the action space is defined ALWAYS as an integer action space because this is how gym defines the
-`action_space` attribute of their DiscreteEnv environment in envs/toy_text/discrete.py, i.e. by instantiating action_space
+Note that both the state space and the action space are defined as an integer space going from 0 to #states / #actions, because this is how gym defines them.
+For example, gym defines the `action_space` attribute in their DiscreteEnv environment in envs/toy_text/discrete.py, which is instantiated
 as a Discrete object of type int (the default type). If we wanted to instantiate the `action_space` of the gridworld environments
 defined here as an action space of type e.g. Direciont2D (defined below), we would need to re-write the constructor
 of DiscreteEnv (i.e. override it via a subclass) and change the instantiation of the `action_space` attribute...
@@ -237,6 +236,22 @@ class EnvGridworld1D(EnvironmentDiscrete):
                                              dim=1,
                                              terminal_states=set([i for i, s in enumerate(range(nS)) if is_terminal(s)]),
                                              rewards=rewards_dict)
+
+    def render(self, mode='humnan'):
+        outfile = io.StringIO() if mode == 'ansi' else sys.stdout
+
+        grid = np.arange(self.nS)
+        for s in grid:
+            if self.s == s:
+                output = " ({:2d}) x ".format(s)
+            elif self.isTerminalState(s):
+                output = " ({:2d}) T ".format(s)
+            else:
+                output = " ({:2d}) o ".format(s)
+
+            outfile.write(output)
+
+        return outfile
 
     def getShape(self):
         return (self.nS,)
@@ -610,6 +625,10 @@ class EnvGridworld2D(EnvironmentDiscrete):
     def is_obstacle_state(self, state):
         return self.isObstacleState(state)
 
+    # Implements the abstract method defined in the super class EnvironmentDiscrete
+    def render(self, mode='human'):
+        self._render(mode=mode)
+
     def _render(self, mode='human', close=False):
         """
         Renders the current gridworld with obstacles layout
@@ -654,6 +673,29 @@ class EnvGridworld2D(EnvironmentDiscrete):
 
         return outfile
 
+    def plot(self):
+        nrows, ncols = self.shape
+        grid = np.zeros((nrows, ncols))
+
+        for obs in self.set_obstacle_states:
+            raw, column = divmod(obs, ncols)
+            grid[raw][column] = 1
+
+        start = ncols * (nrows - 1)
+        finish = sorted(self.terminal_states)[0]
+        start_row, start_column = divmod(start, ncols)
+        finish_row, finish_column = divmod(finish, ncols)
+
+        grid[start_row][start_column] = 0.5
+        grid[finish_row][finish_column] = 0.5
+
+        plt.figure(figsize=(10, 10))
+        plt.imshow(grid, cmap='Greys')
+        plt.text(start_column, start_row, 'Start', ha='center', va='center', fontsize=15)
+        plt.text(finish_column, finish_row, 'Finish', ha='center', va='center', fontsize=15)
+        plt.tight_layout()
+        plt.show()
+
     #--- Getters
     def getShape(self):
         return self.shape
@@ -668,68 +710,93 @@ class EnvGridworld2D(EnvironmentDiscrete):
 
 
 class EnvGridworld2D_Random(EnvGridworld2D):
-    def __init__(self, shape=[5, 5], terminal_states=None, seed=None , rewards_dict=None, wind_dict=None, initial_state_distribution=None):
-        nRows, nColumns = shape
-        nObstacles = int(nRows*nColumns*0.4)
-        start = nColumns*(nRows-1)
-        end = nColumns-1
+    """
+    Gridworld with randomly generated obstacles that guarantees a path between the start state and the terminal state. Author: Alphonse Lafon
 
-        list_of_possible_obstacles = [*range(nColumns*nRows)]
-        list_of_possible_obstacles.pop(start)
-        list_of_possible_obstacles.pop(end)
+    Author: Alphonse Lafon
 
+    Arguments:
+    seed: (opt) int
+        Seed for the obstacles.
+        default: None
+
+    n_obstacles: (opt) int
+        The number of cells to set as obstacles.
+        When None, `int(0.4*#rows*#columns)` is used.
+        default: None
+    """
+    def __init__(self, shape=[5, 5], n_obstacles=None, terminal_states=None, seed=None, rewards_dict=None, wind_dict=None, initial_state_distribution=None):
+        self.seed_obstacles = seed
+
+        # Note: 1D state indices are numbered in C-like order, first row of gridworld first, then second row, etc.
+        nrows, ncols = shape
+        if n_obstacles is None:
+            self.n_obstacles = int(0.4*nrows*ncols)
+            print(f"A {shape[0]}x{shape[1]} = {np.prod(shape)}-cell labyrinth with {self.n_obstacles} will be defined.")
+        elif n_obstacles < 0:
+            raise ValueError(f"The number of obstacles to use must be non-negative: {n_obstacles}")
+        else:
+            self.n_obstacles = int(n_obstacles)
+
+        self.terminal_states = terminal_states
+        if terminal_states is None:
+            # We place the terminal state at the upper right cell
+            self.terminal_states = set(ncols-1)
+
+        # As start state we choose the lower left cell
+        start = ncols * (nrows - 1)
+        # As finish state we choose the first terminal state (normally there is only one terminal state anyway...)
+        finish = sorted(self.terminal_states)[0]
+
+        list_of_possible_obstacles = [*range(ncols*nrows)]
+        list_of_possible_obstacles.remove(start)
+        list_of_possible_obstacles.remove(finish)
+
+        np.random.seed(seed)
         random.seed(seed)
+        # Shuffle the indices out of which obstacles are selected (in an attempt to make more interesting labyrinths --it seems it has an effect)
+        np.random.shuffle(list_of_possible_obstacles)
+
+        # Generate random obstacles until there is a path from start to finish
         no_path = True
-        directions = [-nColumns, 1, nColumns, -1]
-        obstacle_list = []
+        directions = [-ncols, +1, +ncols, -1]  # -ncols means "go UP", +ncols means "go DOWN" because of the C-like numbering of 2D cells
         while no_path:
             queue = [start]
             visited = set()
-            obstacle_list = random.sample(list_of_possible_obstacles, nObstacles)
+            obstacle_set = set(random.sample(list_of_possible_obstacles, self.n_obstacles))
+            # Place an obstacle exactly in one of the cells before reaching the finish cell, so that there are less possible paths to reach the finish
+            # This assumes that the Finish is NOT at one of the leftmost column cells
+            obstacle_set.add(finish - 1)
             while queue:
+                # Analyze the last state in the queue
                 state = queue.pop()
 
-                if state == end:
+                if state == finish:
                     no_path = False
+                    break
 
+                # Explore each direction from `state` and add it to the queue if it's not an obstacle and if it was not visited before
                 for direction in directions:
                     new_state = state + direction
                     out_of_bounds = False
-                    if new_state not in obstacle_list and new_state not in visited:
-                        #Checking if we don't go out of bounds
-                        if not 0 <= new_state <= nColumns*nRows - 1:
-                            out_of_bounds = True
-                        if direction == 1 and new_state%nColumns == 0:
-                            out_of_bounds = True
-                        if direction == -1 and new_state%nColumns == -1%nColumns:
+                    if new_state not in obstacle_set and new_state not in visited:
+                        # Check if we don't go out of bounds
+                        # If we go LEFT, we should not go beyond the first column
+                        # If we go RIGHT, we should not go beyond the last column
+                        if  not 0 <= new_state <= ncols*nrows - 1 or \
+                            direction == -1 and new_state % ncols == -1 % ncols or \
+                            direction == +1 and new_state % ncols == 0:
                             out_of_bounds = True
 
                         if not out_of_bounds:
                             visited.add(new_state)
                             queue = queue + [new_state]
 
-        super().__init__(shape=shape, terminal_states=terminal_states, obstacle_states=obstacle_list , rewards_dict=rewards_dict, wind_dict=wind_dict, initial_state_distribution=initial_state_distribution)
+        super().__init__(shape=shape, terminal_states=terminal_states, obstacle_states=obstacle_set , rewards_dict=rewards_dict, wind_dict=wind_dict, initial_state_distribution=initial_state_distribution)
 
-    def plot_labyrinth(self):
-        nRows, nColumns = self.shape
-        grid = np.zeros((nRows, nColumns))
+    def plot(self):
+        super().plot()
+        plt.title(f"Generated Labyrinth (seed={self.seed_obstacles}, #obstacles={self.n_obstacles})")
 
-        for obs in self.set_obstacle_states:
-            raw, column = divmod(obs, nColumns)
-            grid[raw][column] = 1
-
-        start = nColumns * (nRows - 1)
-        end = nColumns - 1
-        start_row, start_column = divmod(start, nColumns)
-        end_row, end_column = divmod(end, nColumns)
-
-        grid[start_row][start_column] = 0.5
-        grid[end_row][end_column] = 0.5
-
-        plt.figure(figsize=(10, 10))
-        plt.imshow(grid, cmap='Greys')
-        plt.text(start_column, start_row, 'Start', ha='center', va='center', fontsize=15)
-        plt.text(end_column, end_row, 'Finish', ha='center', va='center', fontsize=15)
-        plt.title('Generated Labyrinth')
-        plt.tight_layout()
-        plt.show()
+    def getSeedObstacles(self):
+        return self.seed_obstacles

@@ -53,7 +53,7 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
     # See the only answer by Navy Cheng.
 
     @classmethod
-    def setUpClass(cls, shape=(3, 4), obstacles_set: Union[list, set]=None, wind_dict: dict=None, exit_state=None, start_states_set: set=None,
+    def setUpClass(cls, shape=(3, 4), obstacles_set: Union[list, set]=None, n_obstacles: int=None, wind_dict: dict=None, exit_state=None, start_states_set: set=None,
                         define_start_state_from_absorption_set=False,   # This parameter has priority over the value of `start_states_set` when it is True
                         # Characteristics of the neural network for the Actor Critic policy learner
                         nn_input: InputLayer=InputLayer.ONEHOT, nn_hidden_layer_sizes: list=[8], initial_policy=None,
@@ -65,7 +65,7 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
                         reset_method_value_functions=ResetMethod.ALLZEROS,
                         # Characteristics of the Fleming-Viot implementation
                         N=100, T=100,   # N is the number of particles, T is the max number of time steps allowed over ALL episodes in the single Markov chain simulation that estimates E(T_A)
-                        estimate_absorption_set=True, threshold_absorption_set=0.05, absorption_set: Union[list, set]=None,
+                        estimate_absorption_set=True, threshold_absorption_set=0.90, absorption_set: Union[list, set]=None,
                         states_of_interest_fv: Union[list, set]=None,
                         seed=1717, debug=False, seed_obstacles=4217):
         env_shape = shape
@@ -109,6 +109,7 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
             # We create a gridworld with random obstacles
             dict_rewards = dict([(s, reward_terminal if s in terminal_states else reward_obstacles) for s in set.union(set(terminal_states), set({}))])
             cls.env2d = gridworlds.EnvGridworld2D_Random(shape=env_shape,
+                                                         n_obstacles=n_obstacles,
                                                          terminal_states=terminal_states,
                                                          rewards_dict=dict_rewards,
                                                          seed=seed_obstacles,
@@ -162,7 +163,7 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
         if estimate_absorption_set:
             # Perform an initial exploration of the environment in order to define the absorption set based on visit frequency and observed non-zero rewards
             # In this excursion, the start state is defined by the environment's initial state distribution.
-            print(f"\nEstimating the absorption set based on visit frequency (> {threshold_absorption_set}) of states with no reward from an initial exploration of the environment...")
+            print(f"\nEstimating the absorption set based on cumulative relative visit frequency (>= {threshold_absorption_set}) of states with no reward from an initial exploration of the environment...")
             cls.learner_for_initial_exploration = td.LeaTDLambda(cls.env2d,
                                                                  criterion=learning_criterion,
                                                                  task=learning_task,

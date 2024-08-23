@@ -32,6 +32,9 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
     optionally having terminal states which are suitable for episodic learning tasks. Rewards are only accepted
     at terminal states.
 
+    Classes inheriting from this class should implement:
+    - render(): a method that displays the environment.
+
     Constructor parameters:
     - nS: number of possible states
     - nA: number of possible actions
@@ -135,6 +138,10 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
 
     def is_terminal_state(self, state):
         return self.isTerminalState(state)
+
+    def render(self, mode='human'):
+        "Renders the environment. See details in the Env class defined in gym/core.py"
+        raise NotImplementedError
 
     #--- Getters
     def getDimension(self):
