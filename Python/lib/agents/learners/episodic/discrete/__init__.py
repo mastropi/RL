@@ -57,6 +57,17 @@ class Learner(GenericLearner):
     because the reset method would then be called twice: once when the learner is constructed
     and once prior to the first simulation, making e.g. the episode method be equal to 2 at
     the first simulation as opposed to the correct value 1.
+
+    HOW TO RETRIEVE THE TRAJECTORY INFORMATION:
+    It is suggested to retrieve the trajectory information as follows:
+        [(t, r, s, a) for t, r, s, a in zip(learner.getTimes(), learner.getRewards(), learner.getStates(), learner.getActions()]
+    as this is how the states, actions and rewards are aligned by this Learner class, i.e. each entry in the list returned by
+    the getter methods just used (getTimes, getRewards, etc.) correspond to the same time.
+    In particular R(t) (stored in self.rewards[t]) is the reward the agent received WHEN visiting state S(t) (stored in self.states[t])
+    and A(t) (stored in self.actions[t]) is the action taken by the action AFTER visiting state S(t) (stored in self.states[t]).
+    So the above order corresponds to showing the trajectory as the sequence:
+        R(0), S(0), A(0), R(1), S(1), A(1), R(2), ...
+    making R(t) be the reward received when visiting S(t).
     """
     def __init__(self, env,
                  criterion: LearningCriterion=LearningCriterion.DISCOUNTED,
@@ -266,14 +277,20 @@ class Learner(GenericLearner):
         # We initialize the _rewards with one element so that there is an INDEX match between the
         # list of visited states during a trajectory and the list of rewards observed during that trajectory,
         # i.e. if the states in an episode are [2, 3, 2, 6, 5], where `5` is the terminal state,
-        # and rewards = [0, -1.0, 0.5, 2.0, 1.0], their values correspond to states S(t=0), S(t=1), ..., S(t=4)
-        # and R(t=0) (= 0 ALWAYS because it is defined here as such), R(t=1), ..., R(t=4),
-        # which also means that, given t, S(t+1) is the state where the system goes after which the agent
-        # receives the reward R(t+1).
+        # and rewards = [0, -1.0, 0.5, 2.0, 1.0], their values correspond to
+        # states  S(t=0), S(t=1), ..., S(t=4) and
+        # rewards R(t=0), R(t=1), ..., R(t=4), which also means that, given t,
+        # S(t+1) is the state where the system goes after which the agent receives the reward R(t+1).
         # This also means that the sequence of state, action, reward as in
         # S(0), A(0), R(1), S(1), A(1), R(2), ...
         # can be retrieved by referring to the CORRESPONDING indices in the above lists, i.e. as
         # self._states[0], self._actions[0], self._rewards[1], self._states[1], self._actions[1], self._rewards[2], ...
+        #
+        # This also means that, when we want to look at the trajectory using the super class methods getTimes(), getStates(), getActions(), getRewards(),
+        # we should retrieve the trajectory using:
+        #   [(t, r, s, a) for t, r, s, a in zip(learner.getTimes(), learner.getRewards(), learner.getStates(), learner.getActions()]
+        # because R(t) is the reward received when visiting state S(t) and A(t) is the action taken AFTER visiting S(t),
+        # as explained in the DESCRIPTION of the class above.
         #
         # Note in addition that it is expected that the length of the list of states and the length of the list of rewards
         # be EQUAL *only* at the end of the episode (unless we are learning the value functions in a

@@ -589,10 +589,11 @@ def compute_fv_integral(df_phi_proba_surv, reward: float=1.0, interval_size: flo
 
 
 # TODO: (2024/05/02) Move this function to utils.computing because it is NOT specific to the FV estimators
-def estimate_expected_reward(env, probas_stationary: dict, reward=None):
+def estimate_expected_reward(env, probas_stationary: dict, reward=None, require_all_states_with_reward_present_in_dictionary=True):
     """
     Estimates the expected reward (a.k.a. long-run average reward) of the Markov Reward Process defined in the given environment,
-    assuming a non-zero reward ONLY happens at the states stored in the probas_stationary dictionary.
+    assuming a non-zero reward ONLY happens at the environment states that are present in the probas_stationary dictionary
+    (unless require_all_states_with_reward_present_in_dictionary=False).
 
     Arguments:
     env: EnvironmentDiscrete
@@ -608,6 +609,15 @@ def estimate_expected_reward(env, probas_stationary: dict, reward=None):
         This could be useful when we are interested in computing a probability rather than the expected reward,
         and avoid having to define a reward landscape in the environment just to tell that the non-zero rewards are constant.
 
+    require_all_states_with_reward_present_in_dictionary: (opt) bool
+        Whether to require that all environment states with reward be present in the `probas_stationary` dictionary.
+        Set it to True when we want to make sure that all relevant states contributing to the expected reward are included
+        in the dictionary containing the state stationary distribution, for instance when estimating the true expected reward
+        based on the true stationary probabilities.
+        However, in estimation processes, not all states with non-zero reward may be present in the stationary distribution dictionary
+        because perhaps not all of them were observed during a trajectory collection process (such as a simulation).
+        default: True
+
     Return: float
     Estimated expected reward a.k.a. long-run average reward.
     """
@@ -617,7 +627,7 @@ def estimate_expected_reward(env, probas_stationary: dict, reward=None):
         assert isinstance(env, EnvironmentDiscrete)
         dict_rewards = env.getRewardsDict()
         dict_nonzero_rewards = dict([(s, r) for (s, r) in dict_rewards.items() if r != 0])
-        if not set(dict_nonzero_rewards.keys()).issubset(set(probas_stationary.keys())):
+        if require_all_states_with_reward_present_in_dictionary and not set(dict_nonzero_rewards.keys()).issubset(set(probas_stationary.keys())):
             raise ValueError("The states with non-zero rewards ({}) should all be present in the dictionary of estimated stationary probability ({})." \
                              .format(set(dict_nonzero_rewards.keys()), set(probas_stationary.keys())))
 

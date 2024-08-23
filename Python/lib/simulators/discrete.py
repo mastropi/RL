@@ -193,8 +193,9 @@ class Simulator:
             else:
                 return self._run_single(**kwargs)
 
-    def _run_fv(self, t_learn=0, max_time_steps=None, max_time_steps_for_absorbed_particles_check=+np.Inf, min_prop_absorbed_particles=0.90, min_num_cycles_for_expectations=None,
-                estimate_absorption_set=False, threshold_absorption_set=0.05,
+    def _run_fv(self, t_learn=0, max_time_steps=None, max_time_steps_for_absorbed_particles_check=+np.Inf, min_prop_absorbed_particles=0.90, stop_if_prop_absorbed_particles_reached_regardless_of_time_steps=False,
+                min_num_cycles_for_expectations=None,
+                estimate_absorption_set=False, threshold_absorption_set=0.90,
                 use_average_reward_stored_in_learner=False, reset_value_functions=True,
                 epsilon_random_action=0.0,
                 seed=None, verbose=True, verbose_period=100, plot=False, colormap="seismic", pause=0.1):
@@ -224,7 +225,7 @@ class Simulator:
             default: None, in which case 100*N is used, where N is the number of particles in the FV system
 
         max_time_steps_for_absorbed_particles_check: (opt) int
-            Maximum number of steps to run the simulation for before starting to check the percent of particles absorbed at least once
+            Maximum number of steps to run the simulation before starting to check the percent of particles absorbed at least once
             (using the threshold passed as `min_prop_absorbed_particles`).
             Set it to `np.Inf` in order to run the FV simulation until all the N particles are absorbed at least once or until `max_time_steps` steps
             have been taken.
@@ -241,6 +242,14 @@ class Simulator:
             after the maximum number of steps has been reached, in order to avoid spending a very long time in the FV simulation,
             because in some cases it may not be easy for all particles to be absorbed.
             default: 0.90
+
+        stop_if_prop_absorbed_particles_reached_regardless_of_time_steps: (opt) bool
+            Whether to stop the simulation when the given proportion of minimum proportion of absorbed particles `min_prop_absorbed_particles`
+            for the first time has been reached, *regardless of how much simulation time has elapsed*.
+            Useful to set it to True especially when min_prop_absorbed_particles is rather small (say < 60%) so that the FV simulation is most likely
+            to stop early on, without needing to wait until the maximum number of steps allowed, which may be too large because that parameter is normally
+            chosen as an increasing function of the number of particles.
+            deafult: False
 
         min_num_cycles_for_expectations: (opt) int
             Minimum number of reabsorption cycles that should be observed in order to estimate the expected reabsorption time, E(T_A)
@@ -322,6 +331,7 @@ class Simulator:
         dict_params_simul = dict({  'max_time_steps': max_time_steps,                         # Maximum number of time steps allowed for the N particles (comprehensively) in the FV simulation used to estimate the QSD Phi(t,x)
                                     'max_time_steps_for_absorbed_particles_check': max_time_steps_for_absorbed_particles_check,
                                     'min_prop_absorbed_particles': min_prop_absorbed_particles,
+                                    'stop_if_prop_absorbed_particles_reached_regardless_of_time_steps': stop_if_prop_absorbed_particles_reached_regardless_of_time_steps,
                                     'N': self.agent.getLearner().getNumParticles(),
                                     'T': self.agent.getLearner().getNumTimeStepsForExpectation(),   # Maximum number of time steps allowed in each episode of the single Markov chain that estimates the expected reabsorption time E(T_A)
                                     'estimate_absorption_set': estimate_absorption_set,
@@ -392,7 +402,7 @@ class Simulator:
         probas_stationary_start_state_fv: (opt) dict
             Stationary distribution to use for the selection of the start state of each FV particle used in the FV process.
             States are the dictionary keys and their probability of selection are the values.
-            default: None, in which case a uniform random distribution on the activation set is used
+            default: None, in which case the exit state distribution estimated from the initial Markov chain excursion is used
 
         use_average_reward_stored_in_learner: (opt) bool
             See the description in _run_fv().
@@ -539,11 +549,14 @@ class Simulator:
         if is_estimation_of_denominator_unreliable():
             # FV is not run because the simulation that is used to estimate E(T_A) would not generate a reliable estimation
             # (most likely it would UNDERESTIMATE E(T_A) making the probabilities be OVERESTIMATED)
-            print("Fleming-Viot process is NOT run because the estimation of the expected absorption time E(T_A) cannot be reliably performed"
-                " because of an insufficient number of observed cycles after the burn-in period of {} time steps: {} < {}" \
-                "\nThe estimated stationary probabilities and estimated expected reward will be set to NaN." \
-                .format(dict_params_simul['burnin_time_steps'], n_cycles_absorption_used,
-                        dict_params_simul['min_num_cycles_for_expectations']))
+            warning_msg = "WARNING: Fleming-Viot process is NOT run because the estimation of the expected absorption time E(T_A) cannot be reliably performed" \
+                        " because of an insufficient number of observed cycles after the burn-in period of {} time steps: {} < {}" \
+                        "\nThe dictionary with the estimated stationary probabilities will be empty (which is like estimating the state probability as 0)" \
+                          "and the estimated expected reward will be set to NaN." \
+                        .format(dict_params_simul['burnin_time_steps'], n_cycles_absorption_used, dict_params_simul['min_num_cycles_for_expectations'])
+            print(warning_msg)
+            warnings.warn(warning_msg)
+
             state_counts_all = state_counts_et
             expected_reward = np.nan
             probas_stationary = dict()
@@ -600,10 +613,11 @@ class Simulator:
             n_events_fv, state_values, action_values, advantage_values, state_counts_fv, phi, df_proba_surv, expected_absorption_time, max_survival_time = \
                 method_fv(  dict_params_info.get('t_learn', 0), envs,
                             dict_params_simul['absorption_set'],
-                            start_set,
+                            start_set=start_set,
                             max_time_steps=dict_params_simul.get('max_time_steps'),
                             max_time_steps_for_absorbed_particles_check=dict_params_simul.get('max_time_steps_for_absorbed_particles_check', +np.Inf),
                             min_prop_absorbed_particles=dict_params_simul.get('min_prop_absorbed_particles', 0.90),
+                            stop_if_prop_absorbed_particles_reached_regardless_of_time_steps=dict_params_simul.get('stop_if_prop_absorbed_particles_reached_regardless_of_time_steps', False),
                             dist_proba_for_start_state=probas_stationary_start_state_fv,
                             expected_absorption_time=expected_absorption_time,
                             estimated_average_reward=estimated_average_reward_before_single_simulation  if use_average_reward_stored_in_learner and estimated_average_reward_before_single_simulation is not None
@@ -664,7 +678,7 @@ class Simulator:
 
     def run_exploration(self, t_learn=0, max_time_steps=1000, seed=None, verbose=False, verbose_period=1):
         """
-        Perform an exploration of the environment without learning, just with the purpose of collecting state visit frequencies
+        Performs an exploration of the environment without learning, just with the purpose of collecting state visit frequencies
 
         This is typically used to estimate the absorption set A to use in FV learning.
 
@@ -720,8 +734,14 @@ class Simulator:
 
         # Initialize the rewards list to a first dummy element as if the environment came from an action taken by the agent and observed the reward of landing into the current state
         # This is important for the correct association of states and rewards in the sense that learner.states[k] is the state where the reward learner.rewards[k] is observed,
-        # and this is particularly useful when estimating the absorption set A in the FV simulation by function compute_set_of_frequent_states_with_zero_reward() where
+        # and this is particularly useful if we estimate the absorption set A in the FV simulation with function compute_set_of_frequent_states_with_zero_reward() where
         # the list of observed states and rewards is passed to the function and these should be aligned as just indicated! (because e.g. we filter on the states receiving zero reward)
+        # IMPORTANT: This learner.rewards attribute is the attribute present in the GenericLearner class, NOT in the Learner class of which the `learner` here is an instance of.
+        # The Learner class stores rewards in attribute learner._rewards which DOES already have ONE element at the beginning with the reward associated to the start state of the episode.
+        # Recall that the Learner class stores just the trajectory observed WITHIN the episode, where as the GenericLearner class stores the WHOLE trajectory, e.g. the trajectory
+        # observed along ALL the episodes run.
+        # Here we are interested in tracking the trajectory observed over ALL episodes, therefore we will look at the attributes of GenericLearner and not at the attributes of Learner.
+        # This is why we now explicitly add the first reward (received when visiting the initial state) to the learner.rewards attribute, which does NOT yet have it stored.
         learner.rewards += [self.env.getReward(self.env.getState())]
 
         t = 0               # Step counter: the first step is 1, as t represents the time at which the Markov chain transitions to the NEXT state. See more details at the @note at the beginning of the file.
@@ -872,9 +892,10 @@ class Simulator:
         return learner, t
 
     @measure_exec_time
-    def _run_simulation_fv( self, t_learn, envs, absorption_set: set, start_set: set,
+    def _run_simulation_fv( self, t_learn, envs, absorption_set: set,
+                            start_set: set=None,
                             max_time_steps=None,
-                            max_time_steps_for_absorbed_particles_check=+np.Inf, min_prop_absorbed_particles=0.90,
+                            max_time_steps_for_absorbed_particles_check=+np.Inf, min_prop_absorbed_particles=0.90, stop_if_prop_absorbed_particles_reached_regardless_of_time_steps=False,
                             dist_proba_for_start_state: dict=None,
                             expected_absorption_time=None, expected_exit_time=None,
                             estimated_average_reward=None,
@@ -906,9 +927,12 @@ class Simulator:
             Set with the entrance states to the set of uninteresting states A.
             This set is needed to measure the killing times used to estimate the survival probability P(T > t).
 
-        start_set: set
+        start_set: (opt) set
             Set of states where the FV particles can be placed at the beginning of the simulation.
             This is normally the outer boundary of the absorption set A, i.e. the entrance set of to the complement of A.
+            When None, it is assumed that the dictionary parameter `dist_proba_for_start_state` is not None so that start_set is defined
+            as the keys of such dictionary.
+            default: None
 
         max_time_steps: (opt) int
             See description in the documentation for _run_fv().
@@ -922,14 +946,26 @@ class Simulator:
             See description in the documentation for _run_fv().
             default: 0.90
 
+        stop_if_prop_absorbed_particles_reached_regardless_of_time_steps: (opt) bool
+            See description in the documentation for _run_fv().
+            default: False
+
         dist_proba_for_start_state: (opt) dict
             Probability distribution to use for the selection of the start state of each FV particle.
             According to theory, the start state should be selected from the activation set and should be selected
-            following the stationary ENTRANCE distribution to the outer boundary of the absorption set A
-            (i.e. the inner boundary of the complement of A). However, a reasonable approximation
-            (that should beat the uniformly random selection of the start state) is the stationary distribution of the outer boundary of A
-            (as opposed to the stationary *entrance* distribution).
-            default: None, in which case a uniform distribution on the activation set is used
+            following the stationary EXIT state distribution of the absorption set A
+            (i.e. the stationary ENTRY state distribution to the complement of A).
+            If this is not available, a reasonable approximation (that should beat the uniformly random selection of the start state)
+            is the stationary distribution of the outer boundary of A (as opposed to the stationary *exit* distribution).
+
+            Two situations may occur for the selection of the start state of the FV particles:
+            a) If `start_set` is given, the set of start states to select from is given by `start_set`
+            b) If `start_set` is None, the set of start states to select from is given by the keys of the `dist_proba_for_start_state` dictionary.
+
+            Note that `start_set` and `dist_proba_for_start_state` CANNOT be both None, as the set of start states for the FV particles must be defined
+            in order to select the start states!
+
+            default: None, in which case a uniform distribution on `start_set` is used
 
         expected_absorption_time: (opt) positive float
             Expected reabsorption time E(T_A) used to estimate the stationary state probability distribution.
@@ -1094,7 +1130,10 @@ class Simulator:
             learner.update_integral(t_surv, fixed_sample_size=True)
             for _state, _integral_for_state in learner.getIntegral().items():
                 probas_stationary[_state] = _integral_for_state / learner.getNumParticles() / expected_absorption_time
-            updated_average_reward = estimate_expected_reward(self.env, probas_stationary)
+            updated_average_reward = estimate_expected_reward(self.env, probas_stationary, require_all_states_with_reward_present_in_dictionary=False)
+                ## NOTE: We do NOT require that all states with reward be present in the dictionary containing the stationary probability
+                ## because some of those states may be present in the absorption set A, which should NOT be considered in the estimation of
+                ## the expected reward outside A.
             n_survival_times_observed_so_far = len(survival_times) - 1  # -1 because the first value in the survival_times list is a dummy survival time of 0
             if estimated_average_reward_at_start_of_fv_process is not None and n_survival_times_observed_so_far < N:
                 # We have a START value for the average reward (possibly provided from the FV estimate under a previously learned policy)
@@ -1130,19 +1169,39 @@ class Simulator:
         #------------------------------- Auxiliary functions ----------------------------------#
 
 
-        #---------------------------- Check input parameters ---------------------------------#
-        #-- Absorption and activation sets
-        # Class
+        #----------------------------- Parse input parameters ---------------------------------#
+        # Absorption set
         if not isinstance(absorption_set, set):
             raise ValueError("Parameter `absorption_set` must be a set: {}".format(absorption_set))
+
+        # Start set and probability distribution for the start state
+        if start_set is None:
+            if dist_proba_for_start_state is None:
+                raise ValueError("Parameters `start_set` and `dist_proba_for_start_state` cannot be both None")
+            if not isinstance(dist_proba_for_start_state, dict):
+                raise ValueError(f"Parameter `dist_proba_for_start_state` must be a dictionary:\n{dist_proba_for_start_state}")
+            print(f"Distribution of start states for FV particles:")
+            _cumprob = 0.0
+            for state in sorted(dist_proba_for_start_state, key=lambda x: -dist_proba_for_start_state[x]):  # `key=` requests sorting the values in the dictionary in decreasing order
+                _cumprob += dist_proba_for_start_state[state]
+                print("{}: {:.2f}%, [{:.1f}%]".format(state, dist_proba_for_start_state[state]*100, _cumprob*100))
+            start_set = set(dist_proba_for_start_state.keys())
+            if len(start_set) == 0:
+                _active_set = self.agent.getLearner().getActiveSet()
+                warnings.warn("WARNING: The set of start states for the FV particles  does not contain any elements "
+                              "because no particle left the absorption set during the initial excursion used to estimate the activation set."
+                              f"\nThe start state will be selected uniformly out of the {len(_active_set)} states in the active set (the complement of the absorption set).")
+                dist_proba_for_start_state = None
+                start_set = _active_set
+        # The set of start states is given directly by the user, as opposed to its distribution
         if not isinstance(start_set, set):
-            raise ValueError("Parameter `start_set` must be a set: {}".format(start_set))
+            raise ValueError("Parameter/Variable `start_set` must be a set: {}".format(start_set))
         if len(start_set) == 0:
-            raise ValueError("Parameter `start_set` must have at least one element")
+            raise ValueError("Parameter/Variable `start_set` must have at least one element")
 
         if expected_absorption_time is None and expected_exit_time is None:
             raise ValueError("Parameter `expected_exit_time` must be provided when `expected_absorption_time` is None")
-        #---------------------------- Check input parameters ---------------------------------#
+        #----------------------------- Parse input parameters ---------------------------------#
 
         N = len(envs)
         if max_time_steps is None:
@@ -1171,9 +1230,8 @@ class Simulator:
 
         # Set the start state of each environment/particle to an activation state, as this is a requirement
         # for the empirical distribution Phi(t).
-        print(f"Distribution of start states for FV particles:")
-        for state in sorted(dist_proba_for_start_state.keys()):
-            print(f"{state}: {dist_proba_for_start_state[state]}")
+        if dist_proba_for_start_state is None and len(start_set) > 1:
+            print(f"The distribution for the start state selection of the FV particles is None. A UNIFORM distribution on the states in `start_set` will be used:\n{start_set}")
         if len(start_set) == 1:
             # When there is only one set in the start set, there is no need to use a probability distribution and make the process waste time in choosing a state randomly
             # in a singleton!
@@ -1312,7 +1370,7 @@ class Simulator:
                 reward = envs[idx_particle].getReward(next_state)
                 if DEBUG_TRAJECTORIES:
                     print("___ Particle #{} in terminal state {} REINITIALIZED to environment's start state following its initial state distribution: next_state={}" \
-                          .format(state, idx_particle, next_state))
+                          .format(idx_particle, state, next_state))
 
                 # Learn the value functions for the terminal state for the continuing learning task case,
                 # because in that case the value of terminal states is NOT defined as 0.
@@ -1460,9 +1518,14 @@ class Simulator:
             # done by the call to learner.learn() inside this loop.
             # THEREFORE, if we are not interested in estimating the average reward using FV (but instead we are using FV just as a oversampling mechanism),
             # we may want to continue until we reach the maximum number of steps, regardless of the first absorption event of each particle.
-            done = n_particles_absorbed_once == N or \
-                   t >= max_time_steps_for_absorbed_particles_check and n_particles_absorbed_once >= min_prop_absorbed_particles*N or \
-                   t >= max_time_steps
+            # Use this if we want to stop simulation either when the maximum number of steps has been reached OR all N particles (or a percentage of them) have been absorbed at least once
+            if stop_if_prop_absorbed_particles_reached_regardless_of_time_steps:
+                done = n_particles_absorbed_once >= min_prop_absorbed_particles * N or \
+                       t >= max_time_steps  # max_time_steps is the LARGEST of the max times (i.e. max_time_steps >= max_time_steps_for_absorbed_particles_check)
+            else:
+                done = n_particles_absorbed_once == N or \
+                       t >= max_time_steps_for_absorbed_particles_check and n_particles_absorbed_once >= min_prop_absorbed_particles*N or \
+                       t >= max_time_steps
             # Use this if we want to stop simulation ONLY when the maximum number of steps has been reached (which implies that max_time_steps must NOT be infinite)
             # This should be the preferred way if we want to do a FAIR comparison with other benchmark methods,
             # because we guarantee that all time steps specified are used (which normally comes from the FAIR comparison setup)
@@ -1530,7 +1593,7 @@ class Simulator:
     @measure_exec_time
     def _run_simulation_fv_fraiman( self, t_learn, envs, absorption_set: set, start_set: set,
                                     max_time_steps=None,
-                                    max_time_steps_for_absorbed_particles_check=+np.Inf, min_prop_absorbed_particles=0.90,
+                                    max_time_steps_for_absorbed_particles_check=+np.Inf, min_prop_absorbed_particles=0.90, stop_if_prop_absorbed_particles_reached_regardless_of_time_steps=False,
                                     dist_proba_for_start_state: dict=None,
                                     expected_absorption_time=None, expected_exit_time=None,
                                     estimated_average_reward=None,
@@ -1598,6 +1661,7 @@ class Simulator:
 
         # Reset the learner, but WITHOUT resetting the value functions as they were possibly learned a bit during an initial exploration of the environment
         # What is most important of this reset is to reset the learning rates of all states and actions! (so that we start the FV-based learning with full intensity)
+        # Note that also the state visit COUNTS are reset, therefore we lose the information of visits observed during the initial exploration (typically run by a call to _run_single_continuing_task())
         learner.reset(reset_episode=True, reset_value_functions=False, reset_average_reward=estimated_average_reward is None)
 
         # Set the start state of each environment/particle to an activation state, as this is a requirement
@@ -1809,9 +1873,14 @@ class Simulator:
             # THEREFORE, if we are not interested in estimating the average reward using FV, we may want to continue until
             # we reach the maximum number of steps, regardless of the first absorption event of each particle.
             # Use this if we want to stop simulation either when the maximum number of steps has been reached OR all N particles (or a percentage of them) have been absorbed at least once
-            done = n_particles_absorbed_once == N or \
-                   t >= max_time_steps_for_absorbed_particles_check and n_particles_absorbed_once >= min_prop_absorbed_particles*N or \
-                   t >= max_time_steps
+            # Use this if we want to stop simulation either when the maximum number of steps has been reached OR all N particles (or a percentage of them) have been absorbed at least once
+            if stop_if_prop_absorbed_particles_reached_regardless_of_time_steps:
+                done = n_particles_absorbed_once >= min_prop_absorbed_particles * N or \
+                       t >= max_time_steps  # max_time_steps is the LARGEST of the max times (i.e. max_time_steps >= max_time_steps_for_absorbed_particles_check)
+            else:
+                done = n_particles_absorbed_once == N or \
+                       t >= max_time_steps_for_absorbed_particles_check and n_particles_absorbed_once >= min_prop_absorbed_particles*N or \
+                       t >= max_time_steps
             # Use this if we want to stop simulation ONLY when the maximum number of steps has been reached.
             # This should be the preferred way if we want to do a FAIR comparison with other benchmark methods,
             # because we guarantee that all time steps specified are used (which normally comes from the FAIR comparison setup)
@@ -1860,7 +1929,7 @@ class Simulator:
     @measure_exec_time
     def _run_simulation_fv_fraiman_modified(self, t_learn, envs, absorption_set: set, start_set: set,
                                             max_time_steps=None,
-                                            max_time_steps_for_absorbed_particles_check=+np.Inf, min_prop_absorbed_particles=0.90,
+                                            max_time_steps_for_absorbed_particles_check=+np.Inf, min_prop_absorbed_particles=0.90, stop_if_prop_absorbed_particles_reached_regardless_of_time_steps=False,
                                             dist_proba_for_start_state: dict=None,
                                             expected_absorption_time=None, expected_exit_time=None,
                                             estimated_average_reward=None,
@@ -2112,9 +2181,14 @@ class Simulator:
             # THEREFORE, if we are not interested in estimating the average reward using FV, we may want to continue until
             # we reach the maximum number of steps, regardless of the first absorption event of each particle.
             # Use this if we want to stop simulation either when the maximum number of steps has been reached OR all N particles (or a percentage of them) have been absorbed at least once
-            done = n_particles_absorbed_once == N or \
-                   t >= max_time_steps_for_absorbed_particles_check and n_particles_absorbed_once >= min_prop_absorbed_particles*N or \
-                   t >= max_time_steps
+            # Use this if we want to stop simulation either when the maximum number of steps has been reached OR all N particles (or a percentage of them) have been absorbed at least once
+            if stop_if_prop_absorbed_particles_reached_regardless_of_time_steps:
+                done = n_particles_absorbed_once >= min_prop_absorbed_particles * N or \
+                       t >= max_time_steps  # max_time_steps is the LARGEST of the max times (i.e. max_time_steps >= max_time_steps_for_absorbed_particles_check)
+            else:
+                done = n_particles_absorbed_once == N or \
+                       t >= max_time_steps_for_absorbed_particles_check and n_particles_absorbed_once >= min_prop_absorbed_particles*N or \
+                       t >= max_time_steps
             # Use this if we want to stop simulation ONLY when the maximum number of steps has been reached.
             # This should be the preferred way if we want to do a FAIR comparison with other benchmark methods,
             # because we guarantee that all time steps specified are used (which normally comes from the FAIR comparison setup)
@@ -3126,7 +3200,7 @@ class Simulator:
                 if self.debug:
                     print("{:.4f}, Q=({},{})={:.4f}, avg. reward={:.4f}".format(learner.V.getValue(state), state, action, learner.Q.getValue(state, action), learner.getAverageReward()))
                 if self.debug and done_episode:
-                    print("--> [DEBUG] Done [{} iterations of {} per episode of {} total] at state {} with reward {}" \
+                    print("--> [DEBUG] Done episode [{} iterations of {} per episode of {} total] at state {} with reward {}" \
                           .format(t_episode+1, max_time_steps_per_episode, max_time_steps, self.env.getState(), reward))
 
                 # Observation state
@@ -3528,13 +3602,13 @@ class Simulator:
             if show_messages(verbose, verbose_period, episode) or episode == nepisodes - 1:  # Note that we ALWAYS show the message at the LAST episode
                 print("@{}".format(get_current_datetime_as_string()))
                 print("[t_learn={}] Episode {} of {} running...".format(t_learn, episode+1, nepisodes), end=" ")
-                print("(agent starts at state: {}".format(self.env.getState()), end=" ")
+                print("(agent starts at state: {}".format(self.env.getState()))
             if self.debug:
                 print("\n[DEBUG] Episode {} of {}:".format(episode+1, nepisodes))
                 print("\t[DEBUG] Starts at state {}".format(self.env.getState()))
                 print("\t[DEBUG] State value function at start of episode:\n\t{}".format(learner.getV().getValues()))
 
-            # Time step within the current episode (which in this case is only ONE episode, because we are dealing with a CONTINUING learning task)
+            # Time step within the current episode (i.e. within the time period between the reset of the environment and reaching the terminal state).
             # Note that we initialize it at -1 because the time within an episode indexes the time at which the ACTION is taken,
             # (and this will happen AFTER increasing t_episode by 1, so that the first time an action is taken will be indexed by t_episode = 0)
             # as opposed to the time at which the next state is observed (which is the convention used for variable `t` defined above).
@@ -3679,16 +3753,18 @@ class Simulator:
                 # Check if the system has EXITED the set of states defining a cycle
                 dict_state_counts_exit_cycle_set = self._check_cycle_exit_and_update_exit_counts(set_cycle, state, next_state, dict_state_counts_exit_cycle_set)
 
-                # ---- UPDATE FOR CONTINUING TASK
+                #---- UPDATE FOR CONTINUING TASK
                 # Plotting step moved INSIDE the episode because there is only 1 episode!
                 if plot and show_messages(True, verbose_period, t_episode):
                     self._update_plots(learner, t_learn, fig_V, fig_C, colors_V, num_colors_in_colormap, t, max_time_steps, pause=pause, method_name="_run_single_continuing_task, ")
-                # ---- UPDATE FOR CONTINUING TASK
+                #---- UPDATE FOR CONTINUING TASK
 
-
+                if show_messages(verbose, verbose_period, t) or show_messages(True, max_time_steps // 10, t):
+                    # Inform about progress at every verbose_period or at every 10% of steps (this is what the `// 10` of the second call to show_messages() means)
+                    print("[value functions, {:.0f}%] Completed time step {} out of {}".format(t/max_time_steps*100, t, max_time_steps))
 
             #------- FICTITIOUS EPISODE FINISHED --------#
-            print(", agent ENDS at state: {} at discrete time t = {})".format(self.env.getState(), t_episode+1), end=" ")
+            print(", agent ENDS at state: {} at discrete time t = {})".format(self.env.getState(), t), end=" ")
             print("")
 
             # Change of V w.r.t. previous episode (to monitor convergence)
