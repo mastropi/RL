@@ -456,9 +456,9 @@ class Simulator:
             else:
                 # Perform an initial exploration of the environment in order to define the absorption set based on visit frequency and observed non-zero rewards
                 # In this excursion, the start state is defined by the environment's initial state distribution
-                _threshold_absorption_set = dict_params_simul.get('threshold_absorption_set', 0.05)
+                _threshold_absorption_set = dict_params_simul.get('threshold_absorption_set', 0.90)
                 print(f"\n**** ABSORPTION SET SELECTION ****")
-                print(f"Estimating the absorption set based on visit frequency (> {_threshold_absorption_set}) of states with no reward from an initial exploration of the environment...")
+                print(f"Estimating the absorption set based on cumulative relative visit frequency (<= {_threshold_absorption_set}) of states with no reward from an initial exploration of the environment...")
                 _learner = self.run_exploration(t_learn=dict_params_info.get('t_learn', 0), max_time_steps=dict_params_simul['T'], seed=dict_params_simul['seed'], verbose=dict_params_info.get('verbose', False), verbose_period=dict_params_info.get('verbose_period', 1))
                 _estimated_absorption_set = compute_set_of_frequent_states_with_zero_reward(_learner.getStates(), _learner.getRewards(), threshold=_threshold_absorption_set)
                 n_events_absorption_set_estimation = _learner.getNumSteps()
@@ -489,6 +489,10 @@ class Simulator:
                 assert len(_states_in_absorption_set_with_nonzero_reward) == 0, f"The absorption set must not contain states with non-zero reward. The following states in the absorption set have non-zero reward: {_states_in_absorption_set_with_nonzero_reward}"
 
                 # Set the absorption set in the learner, which also automatically updates the activation and active sets
+                # NOTE: (2024/08/07) The activation set is computed only when the environment is a Gridworld as it uses the get_adjacent_states() function defined in environments/gridworlds.py
+                # If the activation set is not computed, it is defined as `None` and in that case it is computed by the initial exploration of the Markov chain performed by the
+                # _run_single_continuing_task() method where a dictionary containing the exit states as keys and their observed frequency as values is returned as part of the
+                # learning_info dictionary (see `probas_stationary_exit_cycle_set` therein).
                 self.agent.getLearner().setAbsorptionSet(_estimated_absorption_set)
 
             # Update the absorption and activation sets of the simulation parameters dictionary with the sets stored in the learner and possibly just updated
@@ -496,7 +500,7 @@ class Simulator:
             dict_params_simul['activation_set'] = self.agent.getLearner().getActivationSet()
 
             print(f"Selected absorption set (2D):\n{[str(s) + ': ' + str(np.unravel_index(s, self.env.getShape())) for s in dict_params_simul['absorption_set']]}")
-            print(f"Activation set (2D):\n{[str(s) + ': ' + str(np.unravel_index(s, self.env.getShape())) for s in dict_params_simul['activation_set']]}")
+            print(f"Activation set (2D) (n={np.nan if dict_params_simul['activation_set'] is None else len(dict_params_simul['activation_set'])}):\n{dict_params_simul['activation_set'] is None and 'None' or [str(s) + ': ' + str(self.env.get_state_discrete_from_index(s)) for s in dict_params_simul['activation_set']]}")
             print("**** ABSORPTION SET SELECTION ****\n")
         else:
             n_events_absorption_set_estimation = 0

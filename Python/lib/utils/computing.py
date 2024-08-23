@@ -290,7 +290,7 @@ def all_combos_with_max_limits(L: Union[list, tuple]):
     return gen
 
 
-def compute_set_of_frequent_states(states, threshold=0.05, cumulative=False):
+def compute_set_of_frequent_states(states, threshold=0.90, cumulative=True):
     dist_state_counts = pd.Series(states).value_counts(normalize=True)
     if cumulative:
         cum_dist_state_counts = np.cumsum(dist_state_counts)
@@ -299,7 +299,7 @@ def compute_set_of_frequent_states(states, threshold=0.05, cumulative=False):
         return set(dist_state_counts.index[dist_state_counts > threshold])
 
 
-def compute_set_of_frequent_states_with_zero_reward(states, rewards, threshold=0.05, cumulative=False):
+def compute_set_of_frequent_states_with_zero_reward(states, rewards, threshold=0.90, cumulative=True):
     # Convert to series
     if len(states) != len(rewards):
         raise ValueError(f"The number of elements in `states` and the number of elements in `rewards` must be the same: {len(states)}, {len(rewards)}")

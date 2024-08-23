@@ -567,18 +567,22 @@ class Test_EstPolicy_EnvMountainCar(unittest.TestCase):
             if not 0 <= state < cls.nS:
                 raise ValueError(f"All states in the absorption set must be between 0 and {cls.nS - 1}: {state}")
 
-        # Activation set
-        print("Computing the Activation Set, i.e. the outer boundary of the absorption set...")
         activation_set = set()
-        for i, s in enumerate(absorption_set):
-            print(f"Processing state {s} ({i+1} of {len(absorption_set)})...")
-            for state_adj in cls.env_mc.get_from_adjacent_states(cls.env_mc.get_state_discrete_from_index(s)):
-                idx_state_adj = cls.env_mc.get_index_from_state(state_adj)
-                if idx_state_adj is not None and idx_state_adj not in absorption_set:
-                    activation_set.add(idx_state_adj)
-        print(f"\nIdentified activation set (1D-index, 2D-index, 2D-discrete) ({len(activation_set)} states):")
-        for s in activation_set:
-            print(str(s) + ': ' + str(cls.env_mc.get_state_discrete_from_index(s)) + ', ' + str(cls.env_mc.get_state_from_index(s)))
+        if False:
+            # DM-2024/08/09: We no longer estimate the activation set because:
+            # - it is incorrectly defined here as the set of states that can transition TO the absorption set, as actually it is the OPPOSITE: the set of states to where we can go FROM the absorption set.
+            # - the activation set will be estimated during the initial exploration of the environment in Fleming-Viot learning tasks.
+            # Activation set
+            print("Computing the Activation Set, i.e. the outer boundary of the absorption set...")
+            for i, s in enumerate(absorption_set):
+                print(f"Processing state {s} ({i+1} of {len(absorption_set)})...")
+                for state_adj in cls.env_mc.get_from_adjacent_states(cls.env_mc.get_state_discrete_from_index(s)):
+                    idx_state_adj = cls.env_mc.getIndexFromState(state_adj)
+                    if idx_state_adj is not None and idx_state_adj not in absorption_set:
+                        activation_set.add(idx_state_adj)
+            print(f"\nIdentified activation set (1D-index, 2D-index, 2D-discrete) ({len(activation_set)} states):")
+            for s in activation_set:
+                print(str(s) + ': ' + str(cls.env_mc.get_state_discrete_from_index(s)) + ', ' + str(cls.env_mc.getStateFromIndex(s)))
 
         #-- Possibly update the set of start states of the environment (by updating its Initial State Distribution)
         # Goal: fair comparison among learners, by having all learners start at the same state (or a state chosen with the same distribution) as the FV learner, when an episode is completed.
@@ -644,7 +648,8 @@ class Test_EstPolicy_EnvMountainCar(unittest.TestCase):
         absorption_set = cls.A
         activation_set = cls.B
         learner_fv = fv.LeaFV(  cls.env_mc,
-                                N, T, absorption_set, activation_set,
+                                N, T, absorption_set, activation_set=None,  # The activation set is estimated by the initial exploration of the environment
+                                states_of_interest=cls.env_mc.terminal_states,
                                 probas_stationary_start_state_et=None,
                                 probas_stationary_start_state_fv=None,
                                 criterion=learning_criterion,

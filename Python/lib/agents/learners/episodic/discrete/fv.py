@@ -92,7 +92,8 @@ class LeaFV(LeaTDLambda):
         default: 1
     """
 
-    def __init__(self, env, N: int, T: int, absorption_set: set, activation_set: set,
+    def __init__(self, env, N: int, T: int, absorption_set: set,
+                 activation_set: set=None,
                  states_of_interest: set=None,
                  probas_stationary_start_state_et: dict=None,
                  probas_stationary_start_state_fv: dict=None,
@@ -121,7 +122,7 @@ class LeaFV(LeaTDLambda):
         self.T = T
         if not isinstance(absorption_set, set):
             raise ValueError("Parameter `absorption_set` must be a set ({}).".format(type(absorption_set)))
-        if not isinstance(activation_set, set):
+        if activation_set is not None and not isinstance(activation_set, set):
             raise ValueError("Parameter `activation_set` must be a set ({}).".format(type(activation_set)))
         self.absorption_set = absorption_set
         self.activation_set = activation_set
