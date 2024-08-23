@@ -24,8 +24,18 @@ class LeaFV(LeaTDLambda):
     Learning of value functions (e.g. V(s)) are learned with TD(lambda).
 
     Arguments:
-    env: gym.envs.toy_text.discrete.DiscreteEnv
+    env: Environment (e.g. gym.envs.toy_text.discrete.DiscreteEnv)
         The environment where the learning takes place.
+        It must define the following methods:
+        - getNumActions()
+        - getNumStates()
+        - getTerminalStates()
+        - getAllValidStates() (e.g. these are the states that are not obstacles in a Labyrinth)
+        - getReward()
+        - getState()
+        - getShape()
+        and if possible:
+        - update_trajectory() (when interested in storing the particle's trajectory in the environment, as the environment represents a particle)
         
     N: int
         Number of particles to use for the FV process.
@@ -97,6 +107,7 @@ class LeaFV(LeaTDLambda):
                  states_of_interest: set=None,
                  probas_stationary_start_state_et: dict=None,
                  probas_stationary_start_state_fv: dict=None,
+                 dict_function_approximations: dict=None,
                  criterion=LearningCriterion.AVERAGE,
                  alpha=0.1, gamma=1.0, lmbda=0.0,
                  adjust_alpha=False, alpha_update_type=AlphaUpdateType.EVERY_STATE_VISIT,
@@ -104,7 +115,8 @@ class LeaFV(LeaTDLambda):
                  reset_method=ResetMethod.ALLZEROS, reset_params=None, reset_seed=None,
                  burnin_time=0, TIME_RESOLUTION=1,
                  debug=False):
-        super().__init__(env, criterion=criterion, task=LearningTask.CONTINUING, alpha=alpha,  gamma=gamma, lmbda=lmbda, adjust_alpha=adjust_alpha,
+        super().__init__(env, dict_function_approximations=dict_function_approximations,
+                         criterion=criterion, task=LearningTask.CONTINUING, alpha=alpha,  gamma=gamma, lmbda=lmbda, adjust_alpha=adjust_alpha,
                          alpha_update_type=alpha_update_type, adjust_alpha_by_episode=adjust_alpha_by_episode,
                          alpha_min=alpha_min, func_adjust_alpha=func_adjust_alpha,
                          store_history_over_all_episodes=True,  # We set this to True because FV is a CONTINUING learning task

@@ -31,6 +31,7 @@ from Python.lib.agents.policies import probabilistic
 
 from Python.lib.environments.gridworlds import Direction2D, EnvGridworld1D, EnvGridworld2D
 from Python.lib.estimators.fv import estimate_expected_reward
+from Python.lib.estimators.nn_models import InputLayer
 
 from Python.lib.utils.basic import get_current_datetime_as_string, load_objects_from_pickle, log_file_open, log_file_close, save_objects_to_pickle
 from Python.lib.utils.computing import compute_transition_matrices, compute_state_value_function_from_transition_matrix

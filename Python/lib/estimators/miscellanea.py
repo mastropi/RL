@@ -95,10 +95,8 @@ class EstValueFunctionOfflineDeterministicNextState:
                     # and it even converges faster!
                     if DEBUG_ESTIMATORS:
                         print("state: {}, action: {} => next state = {}, reward = {} (done? {})".format(s, a, ns, reward, done))
-                        # WARNING: Only valid for MountainCarDiscrete environment (because of call to self.env.get_state_from_index()
-                        #print("state: {} ({}), action: {} => next state = {} ({}), reward = {} (done? {})" \
-                        #      .format(s, self.env.get_state_from_index(s), a, ns, self.env.get_state_from_index(ns), reward, done))
-                        # WARNING: Only valid for MountainCarDiscrete environment
+                        print("state: {} ({}), action: {} => next state = {} ({}), reward = {} (done? {})" \
+                              .format(s, self.env.getStateFromIndex(s), a, ns, self.env.getStateFromIndex(ns), reward, done))
 
                     # The new V(s) value is the PLAIN AVERAGE over all possible actions (since we are considering a random walk)
                     # If the policy were not random, we should multiply the V_observed value by the probability of taken action "a" given the current state s.

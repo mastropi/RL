@@ -33,18 +33,12 @@ from Python.lib.environments import gridworlds
 from Python.lib.environments.gridworlds import get_adjacent_states
 from Python.lib.environments.mountaincars import MountainCarDiscrete
 
-from Python.lib.estimators.nn_models import NNBackprop
+from Python.lib.estimators.nn_models import InputLayer, NNBackprop
 
 from Python.lib.simulators.discrete import Simulator as DiscreteSimulator
 
 from Python.lib.utils.basic import assert_equal_data_frames, show_exec_params
 from Python.lib.utils.computing import compute_set_of_frequent_states, compute_set_of_frequent_states_with_zero_reward, compute_transition_matrices, compute_state_value_function_from_transition_matrix
-
-@unique
-class InputLayer(Enum):
-    "Input layer size: either SINGLE for a single neuron representing the state, or ONEHOT for a one-hot encoding of the state"
-    SINGLE = 1
-    ONEHOT = 2
 
 
 class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
@@ -56,7 +50,7 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
     def setUpClass(cls, shape=(3, 4), obstacles_set: Union[list, set]=None, n_obstacles: int=None, wind_dict: dict=None, exit_state=None, start_states_set: set=None,
                         define_start_state_from_absorption_set=False,   # This parameter has priority over the value of `start_states_set` when it is True
                         # Characteristics of the neural network for the Actor Critic policy learner
-                        nn_input: InputLayer=InputLayer.ONEHOT, nn_hidden_layer_sizes: list=[8], initial_policy=None,
+                        nn_input: InputLayer=InputLayer.ONEHOT, nn_hidden_layer_sizes: list=[8], initial_policy=None, dropout_policy=0.0,
                         # Characteristics of all learners
                         learning_task=LearningTask.CONTINUING,
                         learning_criterion=LearningCriterion.AVERAGE,
@@ -134,16 +128,18 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
         #-- Policy characteristics
         # Policy model
         if nn_input == InputLayer.SINGLE:
-            cls.nn_model = NNBackprop(1, nn_hidden_layer_sizes, cls.env2d.getNumActions(), dict_activation_functions=dict({'hidden': [nn.ReLU]*len(nn_hidden_layer_sizes)}))
+            cls.nn_model = NNBackprop(1, nn_hidden_layer_sizes, cls.env2d.getNumActions(), dict_activation_functions=dict({'hidden': [nn.ReLU]*len(nn_hidden_layer_sizes)}), dropout=dropout_policy)
         else:
-            cls.nn_model = NNBackprop(cls.env2d.getNumStates(), nn_hidden_layer_sizes, cls.env2d.getNumActions(), dict_activation_functions=dict({'hidden': [nn.ReLU] * len(nn_hidden_layer_sizes)}))
-        cls.policy_nn = PolNN(cls.env2d, cls.nn_model)
+            cls.nn_model = NNBackprop(cls.env2d.getNumStates(), nn_hidden_layer_sizes, cls.env2d.getNumActions(), dict_activation_functions=dict({'hidden': [nn.ReLU] * len(nn_hidden_layer_sizes)}), dropout=dropout_policy)
+        cls.policy_nn = PolNN(cls.env2d, cls.nn_model, seed=cls.seed)
         print(f"Neural network to model the policy:\n{cls.nn_model}")
 
         # Initialize the policy to the given initial policy
-        cls.policy_nn.reset(initial_values=initial_policy, seed=cls.seed)
+        cls.policy_nn.reset(initial_values=initial_policy)
         print(f"Network parameters initialized as follows:\n{list(cls.policy_nn.getThetaParameter())}")
-        print("Initial policy for all states (states x actions):")
+        # Put the policy in evaluation mode (this is important in case the neural network model has dropout layers! o.w. the policy could be distorted)
+        cls.policy_nn.getModel().eval()
+        print(f"Initial policy for all states (states x actions = {env_shape}:")
         policy_probabilities = cls.policy_nn.get_policy_values()
         print(policy_probabilities)
 
@@ -491,8 +487,10 @@ class Test_EstPolicy_EnvMountainCar(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls, nv=5,
-                   nn_input: InputLayer=InputLayer.ONEHOT,
+                   dict_function_approximations=None,
+                   nn_input: Union[InputLayer, int]=InputLayer.ONEHOT,
                    nn_hidden_layer_sizes: list=[8],
+                   dropout_policy: float=0.0,
                    initial_policy=[1/3, 1/3, 1/3],
                    learning_task=LearningTask.CONTINUING,
                    learning_criterion=LearningCriterion.AVERAGE,
@@ -519,18 +517,26 @@ class Test_EstPolicy_EnvMountainCar(unittest.TestCase):
         #-- Policy characteristics
         # Policy model
         if nn_input == InputLayer.SINGLE:
-            cls.nn_model = NNBackprop(1, nn_hidden_layer_sizes, 3, dict_activation_functions=dict({'hidden': [nn.ReLU]*len(nn_hidden_layer_sizes)}))
+            cls.nn_model = NNBackprop(1, nn_hidden_layer_sizes, 3, dict_activation_functions=dict({'hidden': [nn.ReLU]*len(nn_hidden_layer_sizes)}), dropout=dropout_policy)
+        elif nn_input == InputLayer.ONEHOT or len(nn_hidden_layer_sizes) == 0:  # The case with no hidden layers corresponds to the NPG case (Natural Policy Gradient) and this requires that there is one neuron per state
+            cls.nn_model = NNBackprop(cls.nS, nn_hidden_layer_sizes, 3, dict_activation_functions=dict({'hidden': [nn.ReLU] * len(nn_hidden_layer_sizes)}), dropout=dropout_policy)
         else:
-            cls.nn_model = NNBackprop(cls.nS, nn_hidden_layer_sizes, 3, dict_activation_functions=dict({'hidden': [nn.ReLU] * len(nn_hidden_layer_sizes)}))
-        cls.policy_nn = PolNN(cls.env_mc, cls.nn_model)
+            cls.nn_model = NNBackprop(nn_input, nn_hidden_layer_sizes, 3, dict_activation_functions=dict({'hidden': [nn.ReLU] * len(nn_hidden_layer_sizes)}), dropout=dropout_policy)
+
+        cls.policy_nn = PolNN(cls.env_mc, cls.nn_model, seed=cls.seed)
         print(f"Neural network to model the policy:\n{cls.nn_model}")
 
         # Initialize the policy to the given initial policy
-        cls.policy_nn.reset(initial_values=initial_policy, seed=cls.seed)
+        cls.policy_nn.reset(initial_values=initial_policy)
         print(f"Network parameters initialized as follows:\n{list(cls.policy_nn.getThetaParameter())}")
-        print("Initial policy for all states (states x actions):")
-        policy_probabilities = cls.policy_nn.get_policy_values()
-        print(policy_probabilities)
+        # Put the policy in evaluation mode (this is important in case the neural network model has dropout layers! o.w. the policy could be distorted)
+        cls.policy_nn.getModel().eval()
+        if not cls.env_mc.isStateContinuous():
+            # The states are assumed to be countable
+            # => Show the policy for each countable state
+            print(f"Initial policy for all states (states x actions) ({len(cls.env_mc.getPositions())} x {len(cls.env_mc.getVelocities())}):")
+            policy_probabilities = cls.policy_nn.get_policy_values()
+            print(policy_probabilities)
 
 
         #-- FV learning characteristics
@@ -540,6 +546,7 @@ class Test_EstPolicy_EnvMountainCar(unittest.TestCase):
         # In this excursion, the start state is defined by the environment's initial state distribution.
         print(f"\nEstimating the absorption set based on relative visit frequency (> {threshold_absorption_set}) from an initial exploration of the environment...")
         cls.learner_for_initial_exploration = td.LeaTDLambda(cls.env_mc,
+                                                             dict_function_approximations=dict_function_approximations,
                                                              criterion=learning_criterion,
                                                              task=learning_task,
                                                              gamma=cls.gamma,
@@ -603,6 +610,7 @@ class Test_EstPolicy_EnvMountainCar(unittest.TestCase):
         #-- Possible value function learners to consider
         # TD(0) learner
         learner_td0 = td.LeaTDLambda( cls.env_mc,
+                                      dict_function_approximations=dict_function_approximations,
                                       criterion=learning_criterion,
                                       task=learning_task,
                                       gamma=cls.gamma,
@@ -618,6 +626,7 @@ class Test_EstPolicy_EnvMountainCar(unittest.TestCase):
 
         # TD(lambda) learner
         learner_tdlambda = td.LeaTDLambda(cls.env_mc,
+                                          dict_function_approximations=dict_function_approximations,
                                           criterion=learning_criterion,
                                           task=learning_task,
                                           gamma=cls.gamma,
@@ -633,6 +642,7 @@ class Test_EstPolicy_EnvMountainCar(unittest.TestCase):
 
         # Adaptive TD(lambda) learner
         learner_tdlambda_adap = td.LeaTDLambdaAdaptive( cls.env_mc,
+                                                        dict_function_approximations=dict_function_approximations,
                                                         criterion=learning_criterion,
                                                         task=learning_task,
                                                         gamma=cls.gamma,
@@ -653,6 +663,7 @@ class Test_EstPolicy_EnvMountainCar(unittest.TestCase):
                                 states_of_interest=cls.env_mc.terminal_states,
                                 probas_stationary_start_state_et=None,
                                 probas_stationary_start_state_fv=None,
+                                dict_function_approximations=dict_function_approximations,
                                 criterion=learning_criterion,
                                 gamma=cls.gamma,
                                 lmbda=0.0,

@@ -21,10 +21,17 @@ b) Have the following methods defined:
 """
 
 import warnings
+from typing import Union
 
 import numpy as np
 
+import torch
+
 from Python.lib.agents.learners import ResetMethod
+
+from Python.lib.estimators.nn_models import InputLayer, NNBackprop
+
+from Python.lib.utils.basic import is_scalar
 
 
 class LinearValueFunctionApprox:
@@ -132,6 +139,10 @@ class LinearValueFunctionApprox:
                 break
 
         return is_weight_set
+
+    def isTabular(self):
+        return True
+
 
 # TODO: (2020/04/10) This class should cover ALL state value functions whose estimation is done via approximation (linear or non-linear)
 # (i.e. using a parameterized expression whose parameters are materialized as a vector of weights)
@@ -363,3 +374,326 @@ class ActionValueFunctionApprox(LinearValueFunctionApprox):
             warnings.warn("Invalid action ({}). It should be between 0 and {}. Nothing to do.".format(action, self.nA-1))
             return False
         return True
+
+
+class ValueFunctionApproxNN:
+    """
+    Class that can be used to approximate a value function, e.g. V(s) or Q(s,a), using a neural network
+
+    Arguments:
+    nn_input: int
+        Number of input neurons.
+
+    nn_hidden_layer_sizes: (opt) list
+        List with the number of neurons in each hidden layer.
+        default: []
+
+    optimizer: (opt) torch.optim
+        Torch optimizer to use.
+        default: AdamW
+
+    lr: (opt) float
+        Learning rate for the optimizer.
+        default: 0.001 (Adam's default)
+    """
+    def __init__(self, nn_input: Union[InputLayer, int], nn_hidden_layer_sizes: list=[], dropout=0.0, optimizer=torch.optim.AdamW, lr=0.001):
+        # Neural network model
+        self.nn_model = NNBackprop(nn_input, nn_hidden_layer_sizes, 1, dict_activation_functions=dict({'hidden': [torch.nn.ReLU] * len(nn_hidden_layer_sizes)}), dropout=dropout)
+        self.loss = torch.nn.MSELoss()
+        self.optimizer = optimizer(self.nn_model.parameters(), lr=lr)
+
+    def reset(self, method=ResetMethod.ALLZEROS, params_random=None, seed=None):
+        "Resets the value function to random values for every state or to the given initial values, optionally using a seed for the random initialization of the neural network weights"
+        self.init_value(value=params_random, seed=seed)
+
+    def init_value(self, value=None, eps=1E-2, seed=None):
+        """
+        Initializes the parameters of the neural network so that the output value is either almost the same for all input states
+        or is almost equal to `value`, also for all input states.
+
+        Neural network parameters (weights and biases) are initialized using a zero-mean normal distribution
+        with a small standard deviation (compared to 1) given by `eps`, except for the bias of the neuron in the output layer which is initialized
+        so that the output value is almost equal to the given `value`
+        (we write "almost" because there is noise in the output value induced by the almost zero values
+        to which the other weights and biases are initialized to, but this is perfectly ok for most purposes).
+
+        We need to initialize parameters randomly because, if all parameters were initialized to 0, their values would never change during the learning process(!)
+        as the gradient would be always 0 due to the chain rule (easy to prove).
+
+        Arguments:
+        value: (opt) float
+            Value defining the output of the neural network for each state being modeled.
+            default: None, in which case the output value is initialized using a standard normal distribution
+
+        eps: (opt) positive float
+            Small value defining the standard deviation of the normal distribution used to define the weights and biases of all layers except for
+            the biases of the neurons in the output layer.
+            default: 1E-2
+
+        seed: (opt) int
+            Seed to use in the random initialization of the neural network weights as described above.
+            default: None
+        """
+        # Inspired by the weights_init() function in this code:
+        # https://github.com/pytorch/examples/blob/main/dcgan/main.py
+        # Note also the use of Module.apply() method which calls a function on each submodule of a module (e.g. of a neural network).
+
+        if seed is not None:
+            torch.nn.init.torch.manual_seed(seed)  # manual_seed() does not accept `None`
+
+        # The initial parameters are set from a standard normal distribution around 0 with small variance so that all weights are about 0
+        for p in self.nn_model.parameters():
+            torch.nn.init.normal_(p, 0, eps)
+        # Store in a variable the last parameter which is the bias of the output neuron
+        bias_output_layer = p
+
+        # If a specific output value is requested, it is set via the bias of the output neuron (which is the last parameter in nn_model.parameters() retrieved above)
+        if value is not None:
+            # Initialize the bias of the output neuron to `value`
+            if not (is_scalar(value) or len(value) != 1):
+                raise ValueError(f"Parameter `value` must be a scalar or have length 1: {value}")
+            torch.nn.init.constant_(bias_output_layer, 0.1)
+
+    def getModel(self):
+        return self.nn_model
+
+    def getValues(self):
+        """
+        Returns this object
+
+        This method is defined so that we can still use this function approximation in simulators that work with discrete states,
+        so that when the simulators call getValues(), instead of returning the state value for each possible state,
+        it receives the object that enables them to compute the state value for any continuous-valued state.
+        """
+        return self
+
+    def isTabular(self):
+        return False
+
+
+class StateValueFunctionApproxNN(ValueFunctionApproxNN):
+    """
+    Class that can be used to approximate a state value function V(s) using a neural network
+
+    Arguments:
+    nn_input: int
+        Number of input neurons which represents the dimension of the environment state (e.g. 2 for 2D states (x, v)).
+
+    nn_hidden_layer_sizes: (opt) list
+        List with the number of neurons in each hidden layer.
+        default: []
+    """
+    def __init__(self, nn_input: Union[InputLayer, int], nn_hidden_layer_sizes: list=[],  dropout=0.0, optimizer=torch.optim.AdamW, lr=0.001):
+        super().__init__(nn_input, nn_hidden_layer_sizes, dropout=dropout, optimizer=optimizer, lr=lr)
+
+    def _compute_loss(self, state, delta):
+        """
+        Computes the loss for a given state and a given delta value, an estimate of the error to minimize
+
+        That is, the error to minimize is:
+            error = target - pred(target)
+        where target = v(s), the true state value function at state `s`.
+
+        However, the target value is NOT known, therefore we estimate it using an estimate of the return, e.g. a one-step estimate of the return, G(t),
+        as done by TD(0). So, in TD(0), "estimated target" = R(n+1) + gamma*V(S(n+1))
+        which is used in the computation of the estimated error value, delta, i.e.:
+            delta = "estimated error" = "estimated target" - pred(target)
+        =>  "estimated target" = delta + pred(target)
+        where pred(target) = V(s) = the value of the given (start) state before taking the action that gave rise to `delta`.
+
+        We have to do the above calculation simply because the loss function being used is an error function that receives the target value and the predicted
+        value as input, which are used to compute the error incurred by the predicted value in predicting the target, which is then used to compute the loss.
+        If the loss function used received the error as input argument, we wouldn't need to do the above computation.
+
+        Ref: Sutton, Chapter 9, pag. 201 "Stochastic gradient and Semi-gradient Methods"
+        """
+        pred_value = self._getValue(state)
+        estimated_target_value = delta + pred_value
+        loss = self.loss(estimated_target_value, pred_value)
+        return loss
+
+    def update_weights(self, state, delta):
+        "Given the state, updates the weights of the neural network as alpha*delta*grad(V) (gradient ascent corresponding to the mean squared error loss function)"
+        loss = self._compute_loss(state, delta)
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
+    def _getValue(self, state):
+        "Returns the value of a state"
+        state_value = self.nn_model(torch.tensor(state))
+        return state_value
+
+    def getValue(self, state):
+        return self._getValue(state).item()
+
+    def getGradient(self, state, delta):
+        loss = self._compute_loss(state, delta)
+        # TODO: (2024/08/12) This does not return the gradient, need to iterate on all the layers of the network and compute the gradient on each the weights connecting it with the next layer
+        # Ref: https://discuss.pytorch.org/t/how-to-print-the-computed-gradient-values-for-a-network/34179/8
+        gradient = loss.grad
+        return gradient
+
+
+class ActionValueFunctionApproxNN(ValueFunctionApproxNN):
+    """
+    Class that can be used to approximate an action value function Q(s,a) using a neural network
+
+    Arguments:
+    nn_input: int
+        Number of input neurons which represents the dimension of the environment state (e.g. 2 for 2D states (x, v)) + 1 for the action.
+
+    nn_hidden_layer_sizes: (opt) list
+        List with the number of neurons in each hidden layer.
+        default: []
+    """
+    def __init__(self, nn_input: Union[InputLayer, int], nn_hidden_layer_sizes: list=[],  dropout=0.0, optimizer=torch.optim.AdamW, lr=0.001):
+        super().__init__(nn_input, nn_hidden_layer_sizes, dropout=dropout, optimizer=optimizer, lr=lr)
+
+    def _compute_loss(self, state, action, delta):
+        """
+        Computes the loss for a given state and action, and a given delta value, an estimation of the error to minimize.
+
+        See the details in the documentation for StateValueFunctionApproxNN._compute_loss().
+        """
+        pred_value = self._getValue(state, action)
+        estimated_target_value = delta + pred_value
+        loss = self.loss(estimated_target_value, pred_value)
+        return loss
+
+    def update_weights(self, state, action, delta):
+        "Given the state, updates the weights of the neural network as alpha*delta*grad(V) (gradient ascent corresponding to the mean squared error loss function)"
+        loss = self._compute_loss(state, action, delta)
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
+    def _getValue(self, state, action):
+        "Returns the value of a state and action"
+        action_value = self.nn_model(torch.tensor(np.concatenate([np.array(state).reshape(-1), np.array([action])])))
+        return action_value
+
+    def getValue(self, state, action):
+        return self._getValue(state, action).item()
+
+    def getGradient(self, state, action, delta):
+        loss = self._compute_loss(state, action, delta)
+        # TODO: (2024/08/12) This does not return the gradient, need to iterate on all the layers of the network and compute the gradient on each the weights connecting it with the next layer
+        # Ref: https://discuss.pytorch.org/t/how-to-print-the-computed-gradient-values-for-a-network/34179/8
+        gradient = loss.grad
+        return gradient
+
+
+if __name__ == "__main__":
+    import copy
+    import pandas as pd
+    import torch
+
+    import Python.lib.agents as agents
+    from Python.lib.agents.learners import LearningCriterion, LearningTask
+    from Python.lib.agents.learners.episodic.discrete import td, fv
+    from Python.lib.agents.policies.parameterized import PolNN
+    from Python.lib.environments.mountaincars import MountainCarDiscrete
+    from Python.lib.simulators.discrete import Simulator
+    from Python.lib.utils.computing import compute_set_of_frequent_states_with_zero_reward
+
+    #-- General settings
+    seed = 1317
+    debug = True
+
+    #-- Environment characteristics
+    env_mc = MountainCarDiscrete(nx=20, nv=20, factor_for_force_and_gravity=10, seed_reset=seed, debug=debug)
+    nS = env_mc.getNumStates()
+
+    #-- Value function learner characteristics
+    nn_hidden_layer_sizes = [4]
+    dict_function_approximations = dict({'V': StateValueFunctionApproxNN(nn_input=env_mc.dim, nn_hidden_layer_sizes=nn_hidden_layer_sizes),
+                                         'Q': ActionValueFunctionApproxNN(nn_input=env_mc.dim + 1, nn_hidden_layer_sizes=nn_hidden_layer_sizes)})   # +1 for the action
+
+    #-- Simulation characteristics
+    N = 5
+    T = max_time_steps = 50
+
+    #-- Policy characteristics
+    nn_model = NNBackprop(input_size=env_mc.dim, hidden_sizes=nn_hidden_layer_sizes, output_size=3, dict_activation_functions=dict({'hidden': [torch.nn.ReLU] * len(nn_hidden_layer_sizes)}))
+    policy_nn = PolNN(env_mc, nn_model, seed=seed)
+    print(f"Neural network to model the policy:\n{nn_model}")
+
+    # Initialize the policy to the given initial policy
+    policy_nn.reset(initial_values=None)
+    print(f"Network parameters initialized as follows:\n{list(policy_nn.getThetaParameter())}")
+
+    # Estimate the Absorption set
+    # Perform an initial exploration of the environment in order to define the absorption set based on visit frequency and observed non-zero rewards
+    # In this excursion, the start state is defined by the environment's initial state distribution.
+    threshold_absorption_set = 0.50
+    print(f"\nEstimating the absorption set based on cumulative relative visit frequency (<= {threshold_absorption_set}) from an initial exploration of the environment...")
+    learner_for_initial_exploration = td.LeaTDLambda(env_mc,
+                                                     dict_function_approximations=dict_function_approximations,
+                                                     criterion=LearningCriterion.AVERAGE,
+                                                     task=LearningTask.CONTINUING,
+                                                     gamma=1.0,
+                                                     lmbda=0.0,
+                                                     alpha=1.0,
+                                                     adjust_alpha=True,
+                                                     adjust_alpha_by_episode=False,
+                                                     alpha_min=0.1,
+                                                     debug=False)
+    agent_for_initial_exploration = agents.GenericAgent(policy_nn, learner_for_initial_exploration)
+    sim_for_initial_exploration = Simulator(env_mc, agent_for_initial_exploration, debug=debug)
+
+    learner = sim_for_initial_exploration.run_exploration(t_learn=0, max_time_steps=max_time_steps, seed=seed, verbose=debug, verbose_period=1)
+    # States visited during the exploration
+    pd.DataFrame({'state': learner.getStates(), 'index': [env_mc.getIndexFromState(state) for state in learner.getStates()]}, columns=['state', 'index'])
+
+    # Discretize the states of the environment in order to estimate the absorption set A
+    state_indices = [env_mc.getIndexFromState(state) for state in learner.getStates()]
+    absorption_set = compute_set_of_frequent_states_with_zero_reward(state_indices, learner.getRewards(), threshold=threshold_absorption_set)
+    print(f"Distribution of state frequency on n={learner.getNumSteps()} steps:\n{pd.Series(learner.getStates()).value_counts(normalize=True)}")
+    print(f"Distribution of state frequency on n={learner.getNumSteps()} steps:\n{pd.Series(state_indices).value_counts(normalize=True)}")
+    print(f"\nSelected absorption set (1D-index, 2D-discrete) ({len(absorption_set)} states):")
+    for s in absorption_set:
+        print(str(s) + ': ' + str(env_mc.get_state_discrete_from_index(s)))
+    ## OK!
+
+    # Now explore and learn the value functions
+    learner_after_learning, nsteps = sim_for_initial_exploration.run_exploration_and_learn_value_functions(max_time_steps=10, seed=seed, verbose=debug, verbose_period=1)
+
+    # Now run the single Markov chain under a continuning learning task
+    V, Q, A, state_counts_et, _, _, learning_info = sim_for_initial_exploration._run_single_continuing_task(max_time_steps=20, set_cycle=absorption_set, seed=seed, verbose=debug, verbose_period=1)
+    print(learning_info['probas_stationary_exit_cycle_set'])
+
+    # FV simulation
+    learner_fv = fv.LeaFV(env_mc,
+                          N, T, absorption_set, activation_set=None,
+                          states_of_interest=env_mc.getTerminalStates(),
+                          probas_stationary_start_state_et=None,
+                          probas_stationary_start_state_fv=None,
+                          dict_function_approximations=dict_function_approximations,
+                          criterion=LearningCriterion.AVERAGE,
+                          gamma=1.0,
+                          lmbda=0.0,
+                          alpha=1.0,
+                          adjust_alpha=True,
+                          adjust_alpha_by_episode=False,
+                          alpha_min=0.1,
+                          debug=debug)
+    agent_nn_fv = agents.GenericAgent(policy_nn.copy(), learner_fv)
+    sim_fv = Simulator(env_mc, agent_nn_fv, debug=debug)
+
+    envs = [copy.deepcopy(env_mc) for _ in range(N)]
+    n_events_fv, state_values, action_values, advantage_values, state_counts_fv, phi, df_proba_surv, expected_absorption_time, max_survival_time = \
+        sim_fv._run_simulation_fv(0, envs,
+                  absorption_set,
+                  start_set=None,
+                  max_time_steps=500,
+                  max_time_steps_for_absorbed_particles_check=500,
+                  min_prop_absorbed_particles=0.90,
+                  stop_if_prop_absorbed_particles_reached_regardless_of_time_steps=True,
+                  dist_proba_for_start_state=learning_info['probas_stationary_exit_cycle_set'],
+                  expected_absorption_time=10.3,
+                  estimated_average_reward=0.8,
+                  epsilon_random_action=0.1,
+                  seed=131713,
+                  verbose=True,
+                  verbose_period=1)

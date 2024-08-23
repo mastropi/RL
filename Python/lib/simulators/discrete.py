@@ -3,7 +3,15 @@
 Created on Sun Jul 10 12:21:54 2022
 
 @author: Daniel Mastropietro
-@description: Definition of functions and classes used for the simulation of discrete-time MDPs with discrete states and actions.
+@description: Definition of functions and classes used for the simulation of discrete-time MDPs with discrete actions, and DISCRETE or CONTINUOUS states.
+When states are discrete, a 1D index is used to represent them.
+When states are continuous, the state returned by the step() function performing a step of the MDP is the continuous-valued state. This continuous-valued
+state is converted as needed to a 1D index by the getIndexFromState() method required to be defined in the environment with which the MDP agent interacts.
+For instance, the continuous-valued state is converted to a 1D index when dealing with Fleming-Viot's absorption set and active set, as required for
+e.g. the estimation of the occupation probability conditioned on non-absorption.
+Note that this implies that every continuous-state environment must define a method to discretize the continuous-valued state which should be implemented
+in the getIndexFromState() method. More details are given in the documentation for the Simulator class.
+
 @notes: Note about the learning step counter, t: in all simulator processes (Monte-Carlo, Fleming-Viot, etc.) we use t to represent the time step counter
 at which a Markov chain transitions to the NEXT state. Therefore t is initialize at 0 (as opposed to -1), so that after the first transition,
 the time step is t = 1 (i.e. t signals precisely the time at which the particle is at the NEXT state, after the transition has taken place).
@@ -29,9 +37,9 @@ import gym
 from Python.lib.agents.learners import LearningCriterion, LearningTask
 from Python.lib.agents.learners.episodic.discrete.fv import LeaFV
 from Python.lib.agents.learners.episodic.discrete.td import LeaTDLambdaAdaptive
-from Python.lib.environments.mountaincars import MountainCarDiscrete
 from Python.lib.estimators import DEBUG_ESTIMATORS
 from Python.lib.estimators.fv import initialize_phi, estimate_expected_reward, estimate_stationary_probabilities, update_phi, update_phi_on_all_states
+from Python.lib.agents.policies.parameterized import PolNN
 from Python.lib.simulators.fv import reactivate_particle
 from Python.lib.simulators import DEBUG_TRAJECTORIES, MIN_NUM_CYCLES_FOR_EXPECTATIONS, choose_state_from_set, parse_simulation_parameters, show_messages
 
@@ -59,12 +67,15 @@ class Simulator:
     env: gym.Env
         Environment with discrete states and actions that is assumed to have the following methods, getters and setters defined:
         - seed(): to set the random generator seed
-        - reset(): to reset the environment's state
+        - reset(): to reset the environment's state (see IMPORTANT note below)
+        - isStateContinuous(): a method that returns whether the environment state is continuous.
         - getNumStates()
         - getNumActions()
         - getInitialStateDistribution() --> returns an array that is a COPY of the initial state distribution
             (responsible for defining the initial state when running the simulation)
-        - getState() --> returns the current state of the environment
+        - getState() --> returns the current state of the environment (it can be a 1D index for discrete-state environments or anything for continuous-valued states such as e.g. the Mountain Car)
+        - getIndexFromState() --> returns the 1D state index from a given environment state
+        - getStateFromIndex() --> returns the actual environment state from the 1D state index returned by getState(). Used for informational purposes, when debugging the process.
         - getDimension()
         - getShape()
         - getAllStates()
@@ -74,6 +85,7 @@ class Simulator:
         - getInitialStateDistribution()
         - getV() --> returns the true state value function (which can be None, if unknown)
         - setInitialStateDistribution()
+    IMPORTANT: The reset() method should return the index of the state to which the environment is reset.
 
     agent: Agent
         Agent object that is responsible of performing the actions on the environment and learning from them.
@@ -184,6 +196,17 @@ class Simulator:
             print("------> {}".format(self.results_file))
 
     def run(self, **kwargs):
+        # Put the learner of value functions in training mode when the value functions are approximated by a neural network (so far, done in the continuous state case)
+        # This is important in case the neural network model has dropout layers, so that the dropout is actually used
+        if self.env.isStateContinuous():
+            self.agent.getLearner().getV().getModel().train()
+            self.agent.getLearner().getQ().getModel().train()
+
+        # Set the policy in evaluation mode (e.g. this is the time to compute the Critic of a policy, where the policy is evaluated, NOT trained)
+        if isinstance(self.agent.getPolicy(), PolNN):
+            self.agent.getPolicy().nn_model.eval()
+
+        # Run the simulation and learning process
         if isinstance(self.agent.getLearner(), LeaFV):
             return self._run_fv(**kwargs)
         else:
@@ -460,9 +483,16 @@ class Simulator:
                 print(f"\n**** ABSORPTION SET SELECTION ****")
                 print(f"Estimating the absorption set based on cumulative relative visit frequency (<= {_threshold_absorption_set}) of states with no reward from an initial exploration of the environment...")
                 _learner = self.run_exploration(t_learn=dict_params_info.get('t_learn', 0), max_time_steps=dict_params_simul['T'], seed=dict_params_simul['seed'], verbose=dict_params_info.get('verbose', False), verbose_period=dict_params_info.get('verbose_period', 1))
-                _estimated_absorption_set = compute_set_of_frequent_states_with_zero_reward(_learner.getStates(), _learner.getRewards(), threshold=_threshold_absorption_set)
-                n_events_absorption_set_estimation = _learner.getNumSteps()
-                print(f"Distribution of state frequency on n={len(_learner.getStates())} steps:\n{pd.Series(_learner.getStates()).value_counts(normalize=True)}")
+
+                # Compute the absorption set, whose input data depends on whether the environment has continuous or discrete states
+                if self.env.isStateContinuous():
+                    state_indices = [self.env.getIndexFromState(state) for state in _learner.getStates()]
+                    _estimated_absorption_set = compute_set_of_frequent_states_with_zero_reward(state_indices, _learner.getRewards(), threshold=_threshold_absorption_set)
+                    print(f"Distribution of state frequency on n={_learner.getNumSteps()} steps:\n{pd.Series(state_indices).value_counts(normalize=True)}")
+                else:
+                    _estimated_absorption_set = compute_set_of_frequent_states_with_zero_reward(_learner.getStates(), _learner.getRewards(), threshold=_threshold_absorption_set)
+                    n_events_absorption_set_estimation = _learner.getNumSteps()
+                    print(f"Distribution of state frequency on n={len(_learner.getStates())} steps:\n{pd.Series(_learner.getStates()).value_counts(normalize=True)}")
 
                 # Read the absorption set stored in the learner and add any new states to it (if it's not the first learning step --as indicated by t_learn)
                 # We do this because we do NOT want to remove states already present in the absorption set because they were frequently visited under previous policies,
@@ -485,7 +515,7 @@ class Simulator:
                     _most_common_state_in_isd = np.argmax(self.env.getInitialStateDistribution())
                     _estimated_absorption_set = set({_most_common_state_in_isd})
 
-                _states_in_absorption_set_with_nonzero_reward = [s for s in _estimated_absorption_set if self.env.getReward(s) != 0.0]
+                _states_in_absorption_set_with_nonzero_reward = [s for s in _estimated_absorption_set if self.env.getReward(self.env.getStateFromIndex(s)) != 0.0]
                 assert len(_states_in_absorption_set_with_nonzero_reward) == 0, f"The absorption set must not contain states with non-zero reward. The following states in the absorption set have non-zero reward: {_states_in_absorption_set_with_nonzero_reward}"
 
                 # Set the absorption set in the learner, which also automatically updates the activation and active sets
@@ -499,7 +529,12 @@ class Simulator:
             dict_params_simul['absorption_set'] = self.agent.getLearner().getAbsorptionSet()
             dict_params_simul['activation_set'] = self.agent.getLearner().getActivationSet()
 
-            print(f"Selected absorption set (2D):\n{[str(s) + ': ' + str(np.unravel_index(s, self.env.getShape())) for s in dict_params_simul['absorption_set']]}")
+            if self.env.isStateContinuous():
+                print(f"\nAbsorption set (2D) (1D-index, 2D-discrete) (n={len(dict_params_simul['absorption_set'])} out of {self.env.getNumStates()}, {np.round(len(dict_params_simul['absorption_set']) / self.env.getNumStates() * 100, 1)}%):"
+                      f"\n{[str(s) + ': ' + str(self.env.get_state_discrete_from_index(s)) for s in dict_params_simul['absorption_set']]}")
+            else:
+                print(f"\nAbsorption set (2D) (1D-index, 2D-index, 2D-discrete) (n={len(dict_params_simul['absorption_set'])} out of {self.env.getNumStates()}, {np.round(len(dict_params_simul['absorption_set']) / self.env.getNumStates() * 100, 1)}%):"
+                      f"\n{[str(s) + ': ' + str(self.env.get_state_discrete_from_index(s)) + ', ' + str(self.env.getStateFromIndex(s)) for s in dict_params_simul['absorption_set']]}")
             print(f"Activation set (2D) (n={np.nan if dict_params_simul['activation_set'] is None else len(dict_params_simul['activation_set'])}):\n{dict_params_simul['activation_set'] is None and 'None' or [str(s) + ': ' + str(self.env.get_state_discrete_from_index(s)) for s in dict_params_simul['activation_set']]}")
             print("**** ABSORPTION SET SELECTION ****\n")
         else:
@@ -886,12 +921,15 @@ class Simulator:
 
             # Learn (and update the trajectory stored in the learner)
             learner.learn(t_episode, state, action, next_state, reward, done_episode, info)
-            if state in self.env.getTerminalStates():
-                # Copy to all possible actions the Q-value just learned for the taken (dummy) action used to reset the environment when reaching a terminal state
-                self._copy_action_values_for_terminal_state(learner.getQ(), state, action)
+            if not self.env.isStateContinuous():
+                if state in self.env.getTerminalStates():
+                    # Copy to all possible actions the Q-value just learned for the taken (dummy) action used to reset the environment when reaching a terminal state
+                    self._copy_action_values_for_terminal_state(learner.getQ(), state, action)
 
             if show_messages(verbose, verbose_period, t):
-                print(f"t: {t}, t in episode: {t_episode}, s={state}, a={action} -> ns={next_state}, r={reward}, " + "avg. reward = {:.4f}".format(learner.getAverageReward()))
+                print(f"t: {t}, t in episode: {t_episode}, s={state}, a={action} -> ns={next_state}, r={reward}, " +
+                      "avg. reward in episode = {:.4f}, avg. reward = {:.4f}".format(learner._average_reward_in_episode, learner.getAverageReward()) +
+                      "\nV={:.3f}, Q={:.3f}".format(self._get_state_value(learner, state), self._get_action_value(learner, state, action)))
 
         return learner, t
 
@@ -1057,7 +1095,7 @@ class Simulator:
             state = envs[idx_particle].getState()
             if DEBUG_TRAJECTORIES:
                 # We can add a `True` condition above in order to show the following useful piece of information of the proportion of particles at the state of interest x is useful for tracking the stabilization of Phi(t,x) around the QSD
-                flags_particle_at_terminal_state = [1 if envs[p].getState() in self.env.getTerminalStates() else 0 for p in range(len(envs))]
+                flags_particle_at_terminal_state = [1 if envs[p].getIndexFromState(envs[p].getState()) in self.env.getTerminalStates() else 0 for p in range(len(envs))]
                 print("[reactivate_particle_internal] % particles at terminal states: {:.1f}% ({} out of {})".format(np.mean(flags_particle_at_terminal_state)*100, np.sum(flags_particle_at_terminal_state), len(envs)))
             new_state = None
             while not done_reactivate:
@@ -1067,7 +1105,7 @@ class Simulator:
                 # TODO: (2023/11/15) Check whether there is any possibility that the particle to which the absorbed particle has been reactivated COULD really be in the absorption set...
                 # Note that, at the initial devise of the FV simulation/estimation method, we have considered that the set of FV particles changes with time...
                 # But this dynamic set of FV particles might no longer be the case, at the time of this writing (2023/11/15).
-                if envs[idx_particle].getState() not in absorption_set:
+                if envs[idx_particle].getIndexFromState(envs[idx_particle].getState()) not in absorption_set:
                     done_reactivate = True
                     new_state = envs[idx_particle].getState()
                     if DEBUG_TRAJECTORIES:
@@ -1327,10 +1365,16 @@ class Simulator:
                                         WINDOW_WIDTH,
                                         WINDOW_HEIGHT)
 
-        if True or DEBUG_ESTIMATORS:
+        if DEBUG_ESTIMATORS: #True or DEBUG_ESTIMATORS:
+            if self.env.isStateContinuous():
+                V = np.repeat(0.0, self.env.getNumStates())
+                Q = np.repeat(0.0, self.env.getNumStates() * self.env.getNumActions())
+            else:
+                V = learner.getV().getValues()
+                Q = learner.getQ().getValues().reshape(self.env.getNumStates(), self.env.getNumActions())
             print("[DEBUG] @{}".format(get_current_datetime_as_string()))
-            print("[DEBUG] State value function at start of simulation:\n\t{}".format(learner.getV().getValues()))
-            print("[DEBUG] Action value function at start of simulation:\n\t{}".format(learner.getQ().getValues().reshape(self.env.getNumStates(), self.env.getNumActions())))
+            print("[DEBUG] State value function at start of simulation:\n\t{}".format(V))
+            print("[DEBUG] Action value function at start of simulation:\n\t{}".format(Q))
 
         idx_particle = -1
         done = False
@@ -1365,7 +1409,7 @@ class Simulator:
             # This is required by FV because FV is used to estimate an expectation of a process running for unlimited time.
             # If the selected state is part of the absorption set, the time to absorption contributes to the estimation of the survival probability P(T>t)
             # --as long as the particle has never been absorbed before-- and the particle is reactivated right-away.
-            if state in self.env.getTerminalStates():
+            if self.env.getIndexFromState(state) in self.env.getTerminalStates():
                 # Note: The following reset of the environment is typically carried out by the gym module,
                 # e.g. by the toy_text.discrete.DiscreteEnv environment's reset() method where the initial state
                 # is chosen based on the isd attribute of the object, i.e. of the Initial State Distribution defining the initial state.
@@ -1400,8 +1444,10 @@ class Simulator:
                 #if estimated_average_reward is not None:
                 #    info['average_reward'] = estimated_average_reward
                 learner.learn(t, state, action, next_state, reward, done, info)
+            if reward != 0.0:
+                print(f"*** NON ZERO REWARD!! (t={t}, P={idx_particle}, state={state} ({self.env.getStateFromIndex(state) if not self.env.isStateContinuous() else state}), action={action}, next_state={next_state} ({self.env.getStateFromIndex(next_state) if not self.env.isStateContinuous() else next_state}), reward={reward})")
 
-            if next_state in absorption_set:
+            if self.env.getIndexFromState(next_state) in absorption_set:
                 # The particle has been absorbed.
                 # => Add the time to absorption to the set of times used to estimate the survival probability P(T>t) if it's the first absorption of the particle
                 # => Reactivate the particle to the position of any of the other particles
@@ -1468,10 +1514,13 @@ class Simulator:
                         print(survival_times)
 
                 # Reactivate the particle
+                _absorbed_state = next_state
                 next_state = reactivate_particle_internal(idx_particle)
                 reward = envs[idx_particle].getReward(next_state)
+                if reward != 0.0:
+                    print(f"*** [reactivation] NON ZERO REWARD!! (t={t}, P={idx_particle}, state={state} ({self.env.getIndexFromState(state)}), action='REACTIVATION', next_state={next_state} ({self.env.getIndexFromState(next_state)}), reward={reward})")
                 if DEBUG_TRAJECTORIES:
-                    print(f"--> Reactivated particle {idx_particle} from state {state} to state {next_state}")
+                    print(f"--> Reactivated particle {idx_particle} from state {_absorbed_state} ({self.env.getIndexFromState(_absorbed_state)}) to state {next_state} ({self.env.getIndexFromState(next_state)}) (reward={reward} received)")
                 assert next_state not in absorption_set, \
                     f"The state of a reactivated particle must NOT be a state in the absorption set ({next_state})"
 
@@ -1499,7 +1548,7 @@ class Simulator:
             # Check whether the system state has changed after updating the selected particle
             # Goal: Detect a possible "get stuck" situation that could arise when the absorption set A is not connected
             # (e.g. 2D labyrinth with corridor where the start state is part of the absorption set)
-            if next_state == state:
+            if np.allclose(next_state, state):  # We use np.allclose() and NOT an equality because the state can be multidimensional and continuous-valued (e.g. Mountain Car)
                 n_consecutive_steps_at_same_system_state += 1
             else:
                 n_consecutive_steps_at_same_system_state = 0
@@ -2496,9 +2545,15 @@ class Simulator:
                                                         # so that we can choose the already selected start action when learning by groups
 
         if True or DEBUG_ESTIMATORS:
+            if self.env.isStateContinuous():
+                V = np.repeat(0.0, self.env.getNumStates())
+                Q = np.repeat(0.0, self.env.getNumStates() * self.env.getNumActions())
+            else:
+                V = learner.getV().getValues()
+                Q = learner.getQ().getValues().reshape(self.env.getNumStates(), self.env.getNumActions())
             print("[DEBUG] @{}".format(get_current_datetime_as_string()))
-            print("[DEBUG] State value function at start of simulation:\n\t{}".format(learner.getV().getValues()))
-            print("[DEBUG] Action value function at start of simulation:\n\t{}".format(learner.getQ().getValues().reshape(self.env.getNumStates(), self.env.getNumActions())))
+            print("[DEBUG] State value function at start of simulation:\n\t{}".format(V))
+            print("[DEBUG] Action value function at start of simulation:\n\t{}".format(Q))
 
         idx_particle = -1
         done = False
@@ -2542,7 +2597,7 @@ class Simulator:
             # and the current value of V(s) of such start state (which is the value that is updated by the FV process carried out here)
             # because these pieces of information are used in plots (regardless of the value of attribute estimate_on_fixed_sample_size).
             start_state = learner.getStartState(idx_particle)
-            V_start_prev = learner.getV().getValue(start_state)
+            V_start_prev = self._get_state_value(learner, start_state)
             if learner.estimate_on_fixed_sample_size:
                 # Update the particle's clock (used in the estimation of the survival probability P(T>t) for each start state)
                 particle_times[idx_particle] += 1
@@ -2553,7 +2608,7 @@ class Simulator:
 
             # Get the current state of the selected particle because that's the particle whose state is going to (possibly) change
             state = envs[idx_particle].getState()
-            V_state_prev = learner.getV().getValue(state)  # Store the current value of V(s) as PREVIOUS value for informative plotting purposes (title)
+            V_state_prev = self._get_state_value(learner, state)  # Store the current value of V(s) as PREVIOUS value for informative plotting purposes (title)
             #print(f"particle {idx_particle} (s={state})", end=", ")
 
             # Check if the particle that was picked for update is CURRENTLY at a terminal state,
@@ -2746,8 +2801,8 @@ class Simulator:
                             plt.sca(ax_V)  # Go back to the primary axis
                         plt.title(f"[_run_simulation_fv_discounted, Learning step {t_learn+1}] V(s) evolution (blueish: initial, reddish: final)"
                                   f"\nSystem's time t = {t}, Abs. no. = {n_absorptions} (# first abs. = {n_particles_absorbed_once} of max N = {N}), start_state = {start_state}"
-                                  f"\nfrom state = {state} --> absorption state = {state_absorption} (V(s)={np.round(learner.getV().getValue(state_absorption), 3)}) --> reactivation state = {next_state}"
-                                  f"\nV(start={start_state}) = {np.round(V_start_prev, 3)}) --> V(start={start_state}) = {np.round(learner.getV().getValue(start_state), 3)} (delta(V) = {np.round(learner.getV().getValue(start_state) - V_start_prev, 3)}, {np.round((learner.getV().getValue(start_state) - V_start_prev) / max(1, V_start_prev) * 100, 1)}%)"
+                                  f"\nfrom state = {state} --> absorption state = {state_absorption} (V(s)={np.round(self._get_state_value(learner, state_absorption), 3)}) --> reactivation state = {next_state}"
+                                  f"\nV(start={start_state}) = {np.round(V_start_prev, 3)}) --> V(start={start_state}) = {np.round(self._get_state_value(learner, start_state), 3)} (delta(V) = {np.round(self._get_state_value(learner, start_state) - V_start_prev, 3)}, {np.round((self._get_state_value(learner, start_state) - V_start_prev) / max(1, V_start_prev) * 100, 1)}%)"
                                   f"\nCount[s] = {learner.getStateCounts()}, alpha[s] = {learner.getAlphasByState()}")
                         if pause == +np.Inf:
                             input("Press ENTER to continue...")
@@ -2766,8 +2821,8 @@ class Simulator:
                     plt.sca(ax_V)  # Go back to the primary axis
                 plt.title(f"[_run_simulation_fv_discounted, Learning step {t_learn+1}] V(s) evolution (blueish: initial, reddish: final)"
                           f"\nSystem's time t = {t} of max {max_time_steps_for_absorbed_particles_check} of MAX {max_time_steps} (# first abs. = {n_particles_absorbed_once} of max N = {N}), start_state = {start_state}"
-                          f"\nfrom state = {state} --> next state = {next_state} (V(s)={np.round(learner.getV().getValue(next_state), 3)})"
-                          f"\nV(state={state}) = {np.round(V_state_prev, 3)} --> V(state={state}) = {np.round(learner.getV().getValue(state), 3)} (delta(V) = {np.round(learner.getV().getValue(state) - V_state_prev, 3)}, {np.round((learner.getV().getValue(state) - V_state_prev) / max(1, V_state_prev) * 100, 1)}%)"
+                          f"\nfrom state = {state} --> next state = {next_state} (V(s)={np.round(self._get_state_value(learner, next_state), 3)})"
+                          f"\nV(state={state}) = {np.round(V_state_prev, 3)} --> V(state={state}) = {np.round(self._get_state_value(learner, state), 3)} (delta(V) = {np.round(self._get_state_value(learner, state) - V_state_prev, 3)}, {np.round((self._get_state_value(learner, state) - V_state_prev) / max(1, V_state_prev) * 100, 1)}%)"
                           f"\nCount[s] = {learner.getStateCounts()}, alpha[s] = {learner.getAlphasByState()}")
                 if pause == +np.Inf:
                     input("Press ENTER to continue...")
@@ -3210,7 +3265,7 @@ class Simulator:
                 # Observation state
                 if state_observe is not None:
                     # Store the value function of the state just estimated
-                    V_state_observe += [learner.getV().getValue(state_observe)]
+                    V_state_observe += [self._get_state_value(learner, state_observe)]
 
             #------- EPISODE FINISHED --------#
             # Store the value of the terminal state (used in the next episode when the average reward criterion is used for learning)
@@ -3220,92 +3275,89 @@ class Simulator:
                 print(", agent ENDS at state: {} at discrete time t = {})".format(self.env.getState(), t_episode+1), end=" ")
                 print("")
 
-            # Change of V w.r.t. previous episode (to monitor convergence)
-            deltaV = (learner.getV().getValues() - V)
-            deltaV_rel = np.array([0.0  if dV == 0
-                                        else dV
-                                        for dV in deltaV]) / np.array([abs(v) if v != 0 else max(1, V_abs_mean[min(episode, nepisodes-1)]) for v in V])
-                ## Note that the denominator when computing deltaV_rel is mean|V| when V(s) = 0
-                ## This prevents division by 0 and still gives a sensible relative error value.
-                ## Note that V_abs_mean[episode] contains mean|V| for the PREVIOUS episode since
-                ## V_abs_mean is an array of length nepisodes+1 where the first value is the average
-                ## of the initial guess for the value function.
+            if not self.env.isStateContinuous():
+                # Change of V w.r.t. previous episode (to monitor convergence)
+                deltaV = (learner.getV().getValues() - V)
+                deltaV_rel = np.array([0.0  if dV == 0
+                                            else dV
+                                            for dV in deltaV]) / np.array([abs(v) if v != 0 else max(1, V_abs_mean[min(episode, nepisodes-1)]) for v in V])
+                    ## Note that the denominator when computing deltaV_rel is mean|V| when V(s) = 0
+                    ## This prevents division by 0 and still gives a sensible relative error value.
+                    ## Note that V_abs_mean[episode] contains mean|V| for the PREVIOUS episode since
+                    ## V_abs_mean is an array of length nepisodes+1 where the first value is the average
+                    ## of the initial guess for the value function.
 
-            # Update historical information
-            arr_state_counts = learner.getStateCounts()
-            states_visited_so_far = [s for s in range(self.env.getNumStates()) if arr_state_counts[s] > 0]
-            states_visited_with_positive_deltaV_rel_abs = [s for s in states_visited_so_far if np.abs(deltaV_rel[s]) > 0]
-                ## The above is used to find the minimum |V| value that plays a role in the computation of deltaV_rel
-                ## so that we can evaluate how big this relative change could be, just because of a very small |V| value.
-            max_signed_deltaV = find_signed_max_value(deltaV[states_visited_so_far])
-            max_signed_deltaV_rel = find_signed_max_value(deltaV_rel[states_visited_so_far])
-            if verbose_convergence:
-                # Check the min(|V|) because it is often 0.0 even when the count for the state > 0
-                # This minimum = 0.0 should come from the terminal states which have value 0.
-                #if episode == 1:
-                #    print(np.c_[V, arr_state_counts])
-                #if np.min(np.abs(V[states_visited_so_far])) > 0.0:
-                #    print(np.c_[V, arr_state_counts])
-                #    import sys
-                #    sys.exit()
-                if isinstance(self.env, MountainCarDiscrete):
-                    # Get the 2D state from the 1D state (for better understanding of where the agent started exploring the environment in the episode)
-                    start_state = self.env.get_state_from_index(learner.states[0])
-                else:
+                # Update historical information
+                arr_state_counts = learner.getStateCounts()
+                states_visited_so_far = [s for s in range(self.env.getNumStates()) if arr_state_counts[s] > 0]
+                states_visited_with_positive_deltaV_rel_abs = [s for s in states_visited_so_far if np.abs(deltaV_rel[s]) > 0]
+                    ## The above is used to find the minimum |V| value that plays a role in the computation of deltaV_rel
+                    ## so that we can evaluate how big this relative change could be, just because of a very small |V| value.
+                max_signed_deltaV = find_signed_max_value(deltaV[states_visited_so_far])
+                max_signed_deltaV_rel = find_signed_max_value(deltaV_rel[states_visited_so_far])
+                if verbose_convergence:
+                    # Check the min(|V|) because it is often 0.0 even when the count for the state > 0
+                    # This minimum = 0.0 should come from the terminal states which have value 0.
+                    #if episode == 1:
+                    #    print(np.c_[V, arr_state_counts])
+                    #if np.min(np.abs(V[states_visited_so_far])) > 0.0:
+                    #    print(np.c_[V, arr_state_counts])
+                    #    import sys
+                    #    sys.exit()
                     start_state = learner.states[0]
-                print("*** Episode {} (start = {}, #steps = {} of MAX={}), Convergence:".format(episode + 1, start_state, t_episode + 1, max_time_steps_per_episode), end=" ")
-                try:
-                    print("Convergence: min(|V|) with non-zero delta = {:.3g}, mean(V) PREV = {:.3g}, mean(V) NOW = {:.3g}" \
-                      .format(np.min(np.abs(V[states_visited_with_positive_deltaV_rel_abs])), np.mean(V[states_visited_so_far]), np.mean(learner.getV().getValues()[states_visited_so_far])) + \
-                                       ", mean(delta) = {:.3g}, mean(|delta_rel|) = {:.1f}%, max(|delta_rel|) = {:.1f}% +/-max(delta) = {:.3g} +/-max(delta_rel) = {:.1f}% (n={} of {})" \
-                      .format(np.mean(deltaV[states_visited_so_far]), np.mean(np.abs(deltaV_rel[states_visited_so_far]))*100,
-                              np.max(np.abs(deltaV_rel[states_visited_so_far]))*100, max_signed_deltaV, max_signed_deltaV_rel*100,
-                              len(states_visited_so_far), self.env.getNumStates()) + \
-                                       ", mean(alpha) @end = {:.3g}".format(np.mean([learner.getAlphaForState(s) for s in states_visited_so_far])) # Average alpha at the end of episode over ALL states visited so far
-                      )
-                except:
-                    print("WARNING - states_visited_with_positive_deltaV_rel_abs is empty.\n")
-                    #print("Count of states visited so far: {}, {}, {}" \
-                    #      .format(arr_state_counts, states_visited_so_far, states_visited_with_positive_deltaV_rel_abs))
-                    pass
+                    print("*** Episode {} (start = {}, #steps = {} of MAX={}), Convergence:".format(episode + 1, start_state, t_episode + 1, max_time_steps_per_episode), end=" ")
+                    try:
+                        print("Convergence: min(|V|) with non-zero delta = {:.3g}, mean(V) PREV = {:.3g}, mean(V) NOW = {:.3g}" \
+                          .format(np.min(np.abs(V[states_visited_with_positive_deltaV_rel_abs])), np.mean(V[states_visited_so_far]), np.mean(learner.getV().getValues()[states_visited_so_far])) + \
+                                           ", mean(delta) = {:.3g}, mean(|delta_rel|) = {:.1f}%, max(|delta_rel|) = {:.1f}% +/-max(delta) = {:.3g} +/-max(delta_rel) = {:.1f}% (n={} of {})" \
+                          .format(np.mean(deltaV[states_visited_so_far]), np.mean(np.abs(deltaV_rel[states_visited_so_far]))*100,
+                                  np.max(np.abs(deltaV_rel[states_visited_so_far]))*100, max_signed_deltaV, max_signed_deltaV_rel*100,
+                                  len(states_visited_so_far), self.env.getNumStates()) + \
+                                           ", mean(alpha) @end = {:.3g}".format(np.mean([learner.getAlphaForState(s) for s in states_visited_so_far])) # Average alpha at the end of episode over ALL states visited so far
+                          )
+                    except:
+                        print("WARNING - states_visited_with_positive_deltaV_rel_abs is empty.\n")
+                        #print("Count of states visited so far: {}, {}, {}" \
+                        #      .format(arr_state_counts, states_visited_so_far, states_visited_with_positive_deltaV_rel_abs))
+                        pass
 
-            V = learner.getV().getValues()
-            V_abs_mean[min(episode+1, nepisodes)] = np.mean(np.abs(V[states_visited_so_far]))
-            V_abs_mean_weighted[min(episode+1, nepisodes)] = np.sum(arr_state_counts * np.abs(V)) / np.sum(arr_state_counts)
-            if len(states_visited_with_positive_deltaV_rel_abs) > 0:
-                V_abs_min[min(episode+1, nepisodes)] = np.min(np.abs(V[states_visited_with_positive_deltaV_rel_abs]))
-            deltaV_abs_mean[min(episode+1, nepisodes)] = np.mean(np.abs(deltaV[states_visited_so_far]))
-            deltaV_max_signed[min(episode+1, nepisodes)] = max_signed_deltaV
-            deltaV_rel_abs_mean[min(episode+1, nepisodes)] = np.mean(np.abs(deltaV_rel[states_visited_so_far]))
-            deltaV_rel_abs_mean_weighted[min(episode+1, nepisodes)] = \
-                np.sum( arr_state_counts[states_visited_so_far] * np.abs(deltaV_rel[states_visited_so_far]) ) / np.sum(arr_state_counts[states_visited_so_far])
-            deltaV_rel_abs_max[min(episode+1, nepisodes)] = np.max(np.abs(deltaV_rel[states_visited_so_far]))
-            deltaV_rel_abs_max_weighted[min(episode+1, nepisodes)] = \
-                np.max( arr_state_counts[states_visited_so_far] * np.abs(deltaV_rel[states_visited_so_far]) / np.sum(arr_state_counts[states_visited_so_far]) )
-            deltaV_rel_max_signed[min(episode+1, nepisodes)] = max_signed_deltaV_rel
-            V_abs_median[min(episode+1, nepisodes)] = np.median(np.abs(V[states_visited_so_far]))
-            deltaV_abs_median[min(episode+1, nepisodes)] = np.median(np.abs(deltaV[states_visited_so_far]))
-            deltaV_rel_abs_median[min(episode+1, nepisodes)] = np.median(np.abs(deltaV_rel[states_visited_so_far]))
-            V_abs_n[min(episode+1, nepisodes)] = len(states_visited_so_far)
-            prop_states_deltaV_relevant[min(episode+1, nepisodes)] = np.sum( np.abs(deltaV_rel) > 0.01 ) / self.env.getNumStates()
+                V = learner.getV().getValues()
+                V_abs_mean[min(episode+1, nepisodes)] = np.mean(np.abs(V[states_visited_so_far]))
+                V_abs_mean_weighted[min(episode+1, nepisodes)] = np.sum(arr_state_counts * np.abs(V)) / np.sum(arr_state_counts)
+                if len(states_visited_with_positive_deltaV_rel_abs) > 0:
+                    V_abs_min[min(episode+1, nepisodes)] = np.min(np.abs(V[states_visited_with_positive_deltaV_rel_abs]))
+                deltaV_abs_mean[min(episode+1, nepisodes)] = np.mean(np.abs(deltaV[states_visited_so_far]))
+                deltaV_max_signed[min(episode+1, nepisodes)] = max_signed_deltaV
+                deltaV_rel_abs_mean[min(episode+1, nepisodes)] = np.mean(np.abs(deltaV_rel[states_visited_so_far]))
+                deltaV_rel_abs_mean_weighted[min(episode+1, nepisodes)] = \
+                    np.sum( arr_state_counts[states_visited_so_far] * np.abs(deltaV_rel[states_visited_so_far]) ) / np.sum(arr_state_counts[states_visited_so_far])
+                deltaV_rel_abs_max[min(episode+1, nepisodes)] = np.max(np.abs(deltaV_rel[states_visited_so_far]))
+                deltaV_rel_abs_max_weighted[min(episode+1, nepisodes)] = \
+                    np.max( arr_state_counts[states_visited_so_far] * np.abs(deltaV_rel[states_visited_so_far]) / np.sum(arr_state_counts[states_visited_so_far]) )
+                deltaV_rel_max_signed[min(episode+1, nepisodes)] = max_signed_deltaV_rel
+                V_abs_median[min(episode+1, nepisodes)] = np.median(np.abs(V[states_visited_so_far]))
+                deltaV_abs_median[min(episode+1, nepisodes)] = np.median(np.abs(deltaV[states_visited_so_far]))
+                deltaV_rel_abs_median[min(episode+1, nepisodes)] = np.median(np.abs(deltaV_rel[states_visited_so_far]))
+                V_abs_n[min(episode+1, nepisodes)] = len(states_visited_so_far)
+                prop_states_deltaV_relevant[min(episode+1, nepisodes)] = np.sum( np.abs(deltaV_rel) > 0.01 ) / self.env.getNumStates()
 
-            if compute_rmse:
-                if self.env.getV() is not None:
-                    if weights_rmse is not None:
-                        weights = learner.getStateCounts()
-                    # For the AVERAGE reward criterion, plot the state value function referenced to V(s=0) as in this case V(s) is NOT unique
-                    ref_V_true = ref_V = 0.0
-                    if self.agent.getLearner().getLearningCriterion() == LearningCriterion.AVERAGE:
-                        ref_V_true = self.env.getV()[0]
-                        ref_V = learner.getV().getValue(0)
-                    RMSE[min(episode+1, nepisodes)] = rmse(self.env.getV() - ref_V_true, learner.getV().getValues() - ref_V, weights=weights)
-                    MAPE[min(episode+1, nepisodes)] = mape(self.env.getV() - ref_V_true, learner.getV().getValues() - ref_V, weights=weights)
+                if compute_rmse:
+                    if self.env.getV() is not None:
+                        if weights_rmse is not None:
+                            weights = learner.getStateCounts()
+                        # For the AVERAGE reward criterion, plot the state value function referenced to V(s=0) as in this case V(s) is NOT unique
+                        ref_V_true = ref_V = 0.0
+                        if self.agent.getLearner().getLearningCriterion() == LearningCriterion.AVERAGE:
+                            ref_V_true = self.env.getV()[0]
+                            ref_V = self._get_state_value(learner, 0)
+                        RMSE[min(episode+1, nepisodes)] = rmse(self.env.getV() - ref_V_true, learner.getV().getValues() - ref_V, weights=weights)
+                        MAPE[min(episode+1, nepisodes)] = mape(self.env.getV() - ref_V_true, learner.getV().getValues() - ref_V, weights=weights)
 
-            if plot and show_messages(True, verbose_period, episode):
-                self._update_plots_at_episode_end(episode, nepisodes, learner, t_learn, fig_V, fig_V2, fig_RMSE_state, colors_V, state_observe, ntimes_rmse_inside_ci95, weights=weights, pause=pause, method_name="_run_single, ")
+                if plot and show_messages(True, verbose_period, episode):
+                    self._update_plots_at_episode_end(episode, nepisodes, learner, t_learn, fig_V, fig_V2, fig_RMSE_state, colors_V, state_observe, ntimes_rmse_inside_ci95, weights=weights, pause=pause, method_name="_run_single, ")
 
-            if plot and isinstance(learner, LeaTDLambdaAdaptive) and episode == nepisodes - 1:
-                learner.plot_info(episode, nepisodes)
+                if plot and isinstance(learner, LeaTDLambdaAdaptive) and episode == nepisodes - 1:
+                    learner.plot_info(episode, nepisodes)
 
             # Use the following IF when we want to stop the simulation EITHER when the maximum time steps (over all episodes) is reached
             # OR
@@ -3324,8 +3376,12 @@ class Simulator:
                     done = True
 
         if DEBUG_ESTIMATORS:
-            V = learner.getV().getValues()
-            Q = learner.getQ().getValues()
+            if self.env.isStateContinuous():
+                V = np.repeat(0.0, self.env.getNumStates())
+                Q = np.repeat(0.0, self.env.getNumStates() * self.env.getNumActions())
+            else:
+                V = learner.getV().getValues()
+                Q = learner.getQ().getValues()
             print(f"Estimated value functions at END of experiment (last episode run = {episode+1} of {nepisodes}):")
             print("V = {}".format(V))
             print("Q = {}".format(Q.reshape(self.env.getNumStates(), self.env.getNumActions())))
@@ -3555,9 +3611,13 @@ class Simulator:
         V_state_observe, RMSE, MAPE, ntimes_rmse_inside_ci95 = self._initialize_run_with_learner_status(nepisodes, learner, compute_rmse, weights, state_observe)
 
         # Initial state value function
-        V = learner.getV().getValues()
-        Q = learner.getQ().getValues()
-        if True or DEBUG_ESTIMATORS:
+        if self.env.isStateContinuous():
+            V = np.repeat(0.0, self.env.getNumStates())
+            Q = np.repeat(0.0, self.env.getNumStates()*self.env.getNumActions())
+        else:
+            V = learner.getV().getValues()
+            Q = learner.getQ().getValues()
+        if DEBUG_ESTIMATORS:
             print("Value functions at start of experiment:")
             print("V = {}".format(V))
             print("Q = {}".format(Q.reshape(self.env.getNumStates(), self.env.getNumActions())))
@@ -3627,7 +3687,8 @@ class Simulator:
 
                 # Current state and action on that state leading to the next state
                 state = self.env.getState()
-                V_state_prev = learner.getV().getValue(state)  # Store the current V(s) value as PREV for informational plotting purposes
+                # Store the current V(s) value as PREV for informational plotting purposes
+                V_state_prev = self._get_state_value(learner, state)
 
                 # ---- UPDATE FOR CONTINUING TASK
                 if done_episode:
@@ -3697,6 +3758,8 @@ class Simulator:
                 else:
                     action = self._choose_action(policy, state, epsilon_random_action=epsilon_random_action)
                     next_state, reward, done_episode, info = self.env.step(action)
+                if reward != 0.0:
+                    print(f"*** NON ZERO REWARD!! (t={t}, state={state} ({self.env.getStateFromIndex(state) if not self.env.isStateContinuous() else state}), action={action}, next_state={next_state} ({self.env.getStateFromIndex(next_state) if not self.env.isStateContinuous() else next_state}), reward={reward})")
 
                 # Check early end of episode when max_time_steps_per_episode is given
                 # in which case we set done_episode=True.
@@ -3722,9 +3785,9 @@ class Simulator:
                 if self.debug:
                     # We place this message BEFORE calling learner.learn() below because we want to show the state value BEFORE and after updating it (by learner.learn())
                     print("t: {}, t in episode: {}, s={}, a={} -> ns={}, r={}: state_count={:.0f}, alpha={:.3f}, V({})={:.4f}, Q({},{})={:.4f} -> V({})=" \
-                          .format(t, t_episode, state, action, next_state, reward, learner.getStateCounts()[state], learner.getAlphaForState(state),
-                                  state, learner.V.getValue(state),
-                                  state, action, learner.Q.getValue(state, action),
+                          .format(t, t_episode, state, action, next_state, reward, learner.getStateCounts()[self.env.getIndexFromState(state)], learner.getAlphaForState(self.env.getIndexFromState(state)),
+                                  state, self._get_state_value(learner, state),
+                                  state, action, self._get_action_value(learner, state, action),
                                   state), end="")
 
                 # Learn: i.e. update the value functions (stored in the learner) for the *currently visited state and action* with the new observation
@@ -3739,23 +3802,23 @@ class Simulator:
                         learner.getQ()._setWeight(state, _action, learner.getQ().getValue(state, action_anchor))
 
                 if self.debug:
-                    print("{:.4f}, Q=({},{})={:.4f}, avg. reward = {:.4f}".format(learner.V.getValue(state), state, action, learner.Q.getValue(state, action), learner.getAverageReward()))
-                if self.debug and done_episode:
-                    print("--> [DEBUG] Done [{} iterations of {} per episode of {} total] at state {} with reward {}" \
+                    print("{:.4f}, Q=({},{})={:.4f}, avg. reward = {:.4f}".format(self._get_state_value(learner, state), state, action, self._get_action_value(learner, state, action), learner.getAverageReward()))
+                if done_episode: #self.debug and done_episode:
+                    print("--> [DEBUG] Done episode [{} iterations of {} per episode of {} total steps] at state {} with reward {}" \
                           .format(t_episode+1, max_time_steps_per_episode, max_time_steps, self.env.getState(), reward))
 
                 # Observation state
                 if state_observe is not None:
                     # Store the value function of the state just estimated
-                    V_state_observe += [learner.getV().getValue(state_observe)]
+                    V_state_observe += [self._get_state_value(learner, state_observe)]
 
                 # Check if the system has ENTERED the set of states defining a cycle
                 cycle_times, state_counts_in_complete_cycles, last_cycle_entrance_time, expected_cycle_time, num_cycles = \
-                    self._check_cycle_occurrence_and_update_cycle_variables(set_cycle, t, state, next_state,
+                    self._check_cycle_occurrence_and_update_cycle_variables(set_cycle, t, self.env.getIndexFromState(state), self.env.getIndexFromState(next_state),
                                                                             cycle_times, state_counts_in_complete_cycles, last_cycle_entrance_time, expected_cycle_time, num_cycles)
 
                 # Check if the system has EXITED the set of states defining a cycle
-                dict_state_counts_exit_cycle_set = self._check_cycle_exit_and_update_exit_counts(set_cycle, state, next_state, dict_state_counts_exit_cycle_set)
+                dict_state_counts_exit_cycle_set = self._check_cycle_exit_and_update_exit_counts(set_cycle, self.env.getIndexFromState(state), self.env.getIndexFromState(next_state), dict_state_counts_exit_cycle_set)
 
                 #---- UPDATE FOR CONTINUING TASK
                 # Plotting step moved INSIDE the episode because there is only 1 episode!
@@ -3771,86 +3834,83 @@ class Simulator:
             print(", agent ENDS at state: {} at discrete time t = {})".format(self.env.getState(), t), end=" ")
             print("")
 
-            # Change of V w.r.t. previous episode (to monitor convergence)
-            deltaV = (learner.getV().getValues() - V)
-            deltaV_rel = np.array([0.0  if dV == 0
-                                        else dV
-                                        for dV in deltaV]) / np.array([abs(v) if v != 0 else max(1, V_abs_mean[min(episode, nepisodes-1)]) for v in V])
-                ## Note that the denominator when computing deltaV_rel is mean|V| when V(s) = 0
-                ## This prevents division by 0 and still gives a sensible relative error value.
-                ## Note that V_abs_mean[episode] contains mean|V| for the PREVIOUS episode since
-                ## V_abs_mean is an array of length nepisodes+1 where the first value is the average
-                ## of the initial guess for the value function.
+            if not self.env.isStateContinuous():
+                # Change of V w.r.t. previous episode (to monitor convergence)
+                deltaV = (learner.getV().getValues() - V)
+                deltaV_rel = np.array([0.0  if dV == 0
+                                            else dV
+                                            for dV in deltaV]) / np.array([abs(v) if v != 0 else max(1, V_abs_mean[min(episode, nepisodes-1)]) for v in V])
+                    ## Note that the denominator when computing deltaV_rel is mean|V| when V(s) = 0
+                    ## This prevents division by 0 and still gives a sensible relative error value.
+                    ## Note that V_abs_mean[episode] contains mean|V| for the PREVIOUS episode since
+                    ## V_abs_mean is an array of length nepisodes+1 where the first value is the average
+                    ## of the initial guess for the value function.
 
-            # Update historical information
-            arr_state_counts = learner.getStateCounts()
-            states_visited_so_far = [s for s in range(self.env.getNumStates()) if arr_state_counts[s] > 0]
-            states_visited_with_positive_deltaV_rel_abs = [s for s in states_visited_so_far if np.abs(deltaV_rel[s]) > 0]
-                ## The above is used to find the minimum |V| value that plays a role in the computation of deltaV_rel
-                ## so that we can evaluate how big this relative change could be, just because of a very small |V| value.
-            max_signed_deltaV = find_signed_max_value(deltaV[states_visited_so_far])
-            max_signed_deltaV_rel = find_signed_max_value(deltaV_rel[states_visited_so_far])
-            if verbose_convergence:
-                # Check the min(|V|) because it is often 0.0 even when the count for the state > 0
-                # This minimum = 0.0 should come from the terminal states which have value 0.
-                #if episode == 1:
-                #    print(np.c_[V, arr_state_counts])
-                #if np.min(np.abs(V[states_visited_so_far])) > 0.0:
-                #    print(np.c_[V, arr_state_counts])
-                #    import sys
-                #    sys.exit()
-                if isinstance(self.env, MountainCarDiscrete):
-                    # Get the 2D state from the 1D state (for better understanding of where the agent started exploring the environment in the episode)
-                    start_state = self.env.get_state_from_index(learner.states[0])
-                else:
+                # Update historical information
+                arr_state_counts = learner.getStateCounts()
+                states_visited_so_far = [s for s in range(self.env.getNumStates()) if arr_state_counts[s] > 0]
+                states_visited_with_positive_deltaV_rel_abs = [s for s in states_visited_so_far if np.abs(deltaV_rel[s]) > 0]
+                    ## The above is used to find the minimum |V| value that plays a role in the computation of deltaV_rel
+                    ## so that we can evaluate how big this relative change could be, just because of a very small |V| value.
+                max_signed_deltaV = find_signed_max_value(deltaV[states_visited_so_far])
+                max_signed_deltaV_rel = find_signed_max_value(deltaV_rel[states_visited_so_far])
+                if verbose_convergence:
+                    # Check the min(|V|) because it is often 0.0 even when the count for the state > 0
+                    # This minimum = 0.0 should come from the terminal states which have value 0.
+                    #if episode == 1:
+                    #    print(np.c_[V, arr_state_counts])
+                    #if np.min(np.abs(V[states_visited_so_far])) > 0.0:
+                    #    print(np.c_[V, arr_state_counts])
+                    #    import sys
+                    #    sys.exit()
                     start_state = learner.states[0]
-                print("*** Episode {} (start = {}, #steps = {} of MAX={}), Convergence:".format(episode + 1, start_state, t_episode + 1, max_time_steps_per_episode), end=" ")
-                try:
-                    print("Convergence: min(|V|) with non-zero delta = {:.3g}, mean(V) PREV = {:.3g}, mean(V) NOW = {:.3g}" \
-                      .format(np.min(np.abs(V[states_visited_with_positive_deltaV_rel_abs])), np.mean(V[states_visited_so_far]), np.mean(learner.getV().getValues()[states_visited_so_far])) + \
-                                       ", mean(delta) = {:.3g}, mean(|delta_rel|) = {:.1f}%, max(|delta_rel|) = {:.1f}% +/-max(delta) = {:.3g} +/-max(delta_rel) = {:.1f}% (n={} of {})" \
-                      .format(np.mean(deltaV[states_visited_so_far]), np.mean(np.abs(deltaV_rel[states_visited_so_far]))*100,
-                              np.max(np.abs(deltaV_rel[states_visited_so_far]))*100, max_signed_deltaV, max_signed_deltaV_rel*100,
-                              len(states_visited_so_far), self.env.getNumStates()) + \
-                                       ", mean(alpha) @end = {:.3g}".format(np.mean([learner.getAlphaForState(s) for s in states_visited_so_far])) # Average alpha at the end of episode over ALL states visited so far
-                      )
-                except:
-                    print("WARNING - states_visited_with_positive_deltaV_rel_abs is empty.\n")
-                    #print("Count of states visited so far: {}, {}, {}" \
-                    #      .format(arr_state_counts, states_visited_so_far, states_visited_with_positive_deltaV_rel_abs))
-                    pass
+                    print("*** Episode {} (start = {}, #steps = {} of MAX={}), Convergence:".format(episode + 1, start_state, t_episode + 1, max_time_steps_per_episode), end=" ")
+                    try:
+                        print("Convergence: min(|V|) with non-zero delta = {:.3g}, mean(V) PREV = {:.3g}, mean(V) NOW = {:.3g}" \
+                          .format(np.min(np.abs(V[states_visited_with_positive_deltaV_rel_abs])), np.mean(V[states_visited_so_far]), np.mean(learner.getV().getValues()[states_visited_so_far])) + \
+                                           ", mean(delta) = {:.3g}, mean(|delta_rel|) = {:.1f}%, max(|delta_rel|) = {:.1f}% +/-max(delta) = {:.3g} +/-max(delta_rel) = {:.1f}% (n={} of {})" \
+                          .format(np.mean(deltaV[states_visited_so_far]), np.mean(np.abs(deltaV_rel[states_visited_so_far]))*100,
+                                  np.max(np.abs(deltaV_rel[states_visited_so_far]))*100, max_signed_deltaV, max_signed_deltaV_rel*100,
+                                  len(states_visited_so_far), self.env.getNumStates()) + \
+                                           ", mean(alpha) @end = {:.3g}".format(np.mean([learner.getAlphaForState(s) for s in states_visited_so_far])) # Average alpha at the end of episode over ALL states visited so far
+                          )
+                    except:
+                        print("WARNING - states_visited_with_positive_deltaV_rel_abs is empty.\n")
+                        #print("Count of states visited so far: {}, {}, {}" \
+                        #      .format(arr_state_counts, states_visited_so_far, states_visited_with_positive_deltaV_rel_abs))
+                        pass
 
-            V = learner.getV().getValues()
-            V_abs_mean[min(episode+1, nepisodes)] = np.mean(np.abs(V[states_visited_so_far]))
-            V_abs_mean_weighted[min(episode+1, nepisodes)] = np.sum(arr_state_counts * np.abs(V)) / np.sum(arr_state_counts)
-            if len(states_visited_with_positive_deltaV_rel_abs) > 0:
-                V_abs_min[min(episode+1, nepisodes)] = np.min(np.abs(V[states_visited_with_positive_deltaV_rel_abs]))
-            deltaV_abs_mean[min(episode+1, nepisodes)] = np.mean(np.abs(deltaV[states_visited_so_far]))
-            deltaV_max_signed[min(episode+1, nepisodes)] = max_signed_deltaV
-            deltaV_rel_abs_mean[min(episode+1, nepisodes)] = np.mean(np.abs(deltaV_rel[states_visited_so_far]))
-            deltaV_rel_abs_mean_weighted[min(episode+1, nepisodes)] = \
-                np.sum( arr_state_counts[states_visited_so_far] * np.abs(deltaV_rel[states_visited_so_far]) ) / np.sum(arr_state_counts[states_visited_so_far])
-            deltaV_rel_abs_max[min(episode+1, nepisodes)] = np.max(np.abs(deltaV_rel[states_visited_so_far]))
-            deltaV_rel_abs_max_weighted[min(episode+1, nepisodes)] = \
-                np.max( arr_state_counts[states_visited_so_far] * np.abs(deltaV_rel[states_visited_so_far]) / np.sum(arr_state_counts[states_visited_so_far]) )
-            deltaV_rel_max_signed[min(episode+1, nepisodes)] = max_signed_deltaV_rel
-            V_abs_median[min(episode+1, nepisodes)] = np.median(np.abs(V[states_visited_so_far]))
-            deltaV_abs_median[min(episode+1, nepisodes)] = np.median(np.abs(deltaV[states_visited_so_far]))
-            deltaV_rel_abs_median[min(episode+1, nepisodes)] = np.median(np.abs(deltaV_rel[states_visited_so_far]))
-            V_abs_n[min(episode+1, nepisodes)] = len(states_visited_so_far)
-            prop_states_deltaV_relevant[min(episode+1, nepisodes)] = np.sum( np.abs(deltaV_rel) > 0.01 ) / self.env.getNumStates()
+                V = learner.getV().getValues()
+                V_abs_mean[min(episode+1, nepisodes)] = np.mean(np.abs(V[states_visited_so_far]))
+                V_abs_mean_weighted[min(episode+1, nepisodes)] = np.sum(arr_state_counts * np.abs(V)) / np.sum(arr_state_counts)
+                if len(states_visited_with_positive_deltaV_rel_abs) > 0:
+                    V_abs_min[min(episode+1, nepisodes)] = np.min(np.abs(V[states_visited_with_positive_deltaV_rel_abs]))
+                deltaV_abs_mean[min(episode+1, nepisodes)] = np.mean(np.abs(deltaV[states_visited_so_far]))
+                deltaV_max_signed[min(episode+1, nepisodes)] = max_signed_deltaV
+                deltaV_rel_abs_mean[min(episode+1, nepisodes)] = np.mean(np.abs(deltaV_rel[states_visited_so_far]))
+                deltaV_rel_abs_mean_weighted[min(episode+1, nepisodes)] = \
+                    np.sum( arr_state_counts[states_visited_so_far] * np.abs(deltaV_rel[states_visited_so_far]) ) / np.sum(arr_state_counts[states_visited_so_far])
+                deltaV_rel_abs_max[min(episode+1, nepisodes)] = np.max(np.abs(deltaV_rel[states_visited_so_far]))
+                deltaV_rel_abs_max_weighted[min(episode+1, nepisodes)] = \
+                    np.max( arr_state_counts[states_visited_so_far] * np.abs(deltaV_rel[states_visited_so_far]) / np.sum(arr_state_counts[states_visited_so_far]) )
+                deltaV_rel_max_signed[min(episode+1, nepisodes)] = max_signed_deltaV_rel
+                V_abs_median[min(episode+1, nepisodes)] = np.median(np.abs(V[states_visited_so_far]))
+                deltaV_abs_median[min(episode+1, nepisodes)] = np.median(np.abs(deltaV[states_visited_so_far]))
+                deltaV_rel_abs_median[min(episode+1, nepisodes)] = np.median(np.abs(deltaV_rel[states_visited_so_far]))
+                V_abs_n[min(episode+1, nepisodes)] = len(states_visited_so_far)
+                prop_states_deltaV_relevant[min(episode+1, nepisodes)] = np.sum( np.abs(deltaV_rel) > 0.01 ) / self.env.getNumStates()
 
-            if compute_rmse:
-                if self.env.getV() is not None:
-                    # For the AVERAGE reward criterion, plot the state value function referenced to V(s=0) as in this case V(s) is NOT unique
-                    ref_V_true = ref_V = 0.0
-                    if self.agent.getLearner().getLearningCriterion() == LearningCriterion.AVERAGE:
-                        ref_V_true = self.env.getV()[0]
-                        ref_V = learner.getV().getValue(0)
-                    if weights_rmse is not None:
-                        weights = learner.getStateCounts()
-                    RMSE[min(episode+1, nepisodes)] = rmse(self.env.getV() - ref_V_true, learner.getV().getValues() - ref_V, weights=weights)
-                    MAPE[min(episode+1, nepisodes)] = mape(self.env.getV() - ref_V_true, learner.getV().getValues() - ref_V, weights=weights)
+                if compute_rmse:
+                    if self.env.getV() is not None:
+                        # For the AVERAGE reward criterion, plot the state value function referenced to V(s=0) as in this case V(s) is NOT unique
+                        ref_V_true = ref_V = 0.0
+                        if self.agent.getLearner().getLearningCriterion() == LearningCriterion.AVERAGE:
+                            ref_V_true = self.env.getV()[0]
+                            ref_V = self._get_state_value(learner, 0)
+                        if weights_rmse is not None:
+                            weights = learner.getStateCounts()
+                        RMSE[min(episode+1, nepisodes)] = rmse(self.env.getV() - ref_V_true, learner.getV().getValues() - ref_V, weights=weights)
+                        MAPE[min(episode+1, nepisodes)] = mape(self.env.getV() - ref_V_true, learner.getV().getValues() - ref_V, weights=weights)
 
             # Use the following IF when we want to stop the simulation EITHER when the maximum time steps (over all episodes) is reached
             # OR
@@ -3872,22 +3932,26 @@ class Simulator:
         # The information about the exit states set should be given in a separate parameter, as the simulation implemented in the current method knows nothing about FV.
         probas_stationary_exit_cycle_set = dict()
         if len(dict_state_counts_exit_cycle_set) > 0:
-            for state in dict_state_counts_exit_cycle_set.keys():
-                if state not in set_cycle:
-                    probas_stationary_exit_cycle_set[state] = dict_state_counts_exit_cycle_set[state]
+            for idx_state in dict_state_counts_exit_cycle_set.keys():
+                if idx_state not in set_cycle:
+                    probas_stationary_exit_cycle_set[idx_state] = dict_state_counts_exit_cycle_set[idx_state]
             _total_number_of_visits_of_exit_states = sum(probas_stationary_exit_cycle_set.values())
-            for state in probas_stationary_exit_cycle_set.keys():
-                probas_stationary_exit_cycle_set[state] /= _total_number_of_visits_of_exit_states
+            for idx_state in probas_stationary_exit_cycle_set.keys():
+                probas_stationary_exit_cycle_set[idx_state] /= _total_number_of_visits_of_exit_states
             assert np.isclose(sum(probas_stationary_exit_cycle_set.values()), 1.0)
 
         if DEBUG_ESTIMATORS:
             if set_cycle is not None and len(set_cycle) > 0:
                 print(f"Estimated distribution of EXIT states from the cycle set (on {num_cycles} cycles):")
-                for state in sorted(probas_stationary_exit_cycle_set.keys()):
-                    print(f"{state}: {probas_stationary_exit_cycle_set[state]}")
+                for idx_state in sorted(probas_stationary_exit_cycle_set.keys()):
+                    print(f"{idx_state}: {probas_stationary_exit_cycle_set[idx_state]}")
                 print("")
-            V = learner.getV().getValues()
-            Q = learner.getQ().getValues()
+            if self.env.isStateContinuous():
+                V = np.repeat(0.0, self.env.getNumStates())
+                Q = np.repeat(0.0, self.env.getNumStates() * self.env.getNumActions())
+            else:
+                V = learner.getV().getValues()
+                Q = learner.getQ().getValues()
             print(f"Estimated value functions at END of experiment (last episode run = {learner.episode}):")
             print("V = {}".format(V))
             print("Q = {}".format(Q.reshape(self.env.getNumStates(), self.env.getNumActions())))
@@ -3927,6 +3991,14 @@ class Simulator:
                     'state_counts_in_complete_cycles': state_counts_in_complete_cycles if set_cycle is not None else None,
                     'probas_stationary_exit_cycle_set': probas_stationary_exit_cycle_set,
                 }
+
+    def _get_state_value(self, learner, state):
+        "Returns the state value for the given state stored in the given learner depending on whether the function is tabular or not and on whether the state is continuous or not"
+        return learner.getV().getValue(self.env.getIndexFromState(state)) if self.env.isStateContinuous() and learner.getV().isTabular() else learner.getV().getValue(state)
+
+    def _get_action_value(self, learner, state, action):
+        "Returns the action value for the given state and action stored in the given learner depending on whether the function is tabular or not and on whether the state is continuous or not"
+        return learner.getQ().getValue(self.env.getIndexFromState(state), action) if self.env.isStateContinuous() and learner.getQ().isTabular() else learner.getQ().getValue(state, action)
 
     def _choose_action(self, policy, state, epsilon_random_action=0.0):
         """
@@ -4060,7 +4132,7 @@ class Simulator:
             ref_V_true = ref_V = 0.0
             if self.agent.getLearner().getLearningCriterion() == LearningCriterion.AVERAGE:
                 ref_V_true = self.env.getV()[0]
-                ref_V = learner.getV().getValue(0)
+                ref_V = self._get_state_value(learner, 0)
             print(f"True value function:\n{self.env.getV() - ref_V_true}")
             RMSE[0] = rmse(self.env.getV() - ref_V_true, learner.getV().getValues() - ref_V, weights=weights)
             MAPE[0] = mape(self.env.getV() - ref_V_true, learner.getV().getValues() - ref_V, weights=weights)
@@ -4068,7 +4140,7 @@ class Simulator:
             RMSE = None
             MAPE = None
         if state_observe is not None:
-            V = [learner.getV().getValue(state_observe)]
+            V = [self._get_state_value(learner, state_observe)]
         else:
             V = None
         # Keep track of the number of times the true value function of the state (assumed 0!)
@@ -4208,12 +4280,12 @@ class Simulator:
         plt.figure(fig_V.number)
         ax = plt.gca()
         # For the AVERAGE reward criterion, plot the state value function referenced to V(s=0) as in this case V(s) is NOT unique
-        ref_V = learner.getV().getValue(0) if self.agent.getLearner().getLearningCriterion() == LearningCriterion.AVERAGE else 0.0
+        ref_V = self._get_state_value(learner, 0) if self.agent.getLearner().getLearningCriterion() == LearningCriterion.AVERAGE else 0.0
         ax.plot(self.env.getAllStates(), learner.getV().getValues() - ref_V, linewidth=0.5, color=colors_V(t / colors_V_length))
         ax.xaxis.set_major_locator(MaxNLocator(integer=True))
         plt.title(f"[{method_name}UPDATE, Learning step {t_learn+1}]\nV(s) evolution (blueish: initial, reddish: final): # Steps={t} of {max_time_steps}")
-                  #f"\nSystem's time t = {t} of max {max_time_steps}, from state = {state} --> next state = {next_state} (V(s) = {np.round(learner.getV().getValue(next_state), 3)})"
-                  #f"\nV(state={state}) = {V_state_prev is not None and np.round(V_state_prev, 3) or 'N/A'} --> V(state={state}) = {np.round(learner.getV().getValue(state), 3)} (delta(V) = {V_state_prev is not None and np.round(learner.getV().getValue(state) - V_state_prev, 3) or 'N/A'}, {V_state_prev is not None and np.round((learner.getV().getValue(state) - V_state_prev) / max(1, V_state_prev) * 100, 1) or 'N/A'}%)"
+                  #f"\nSystem's time t = {t} of max {max_time_steps}, from state = {state} --> next state = {next_state} (V(s) = {np.round(self._get_state_value(learner, next_state), 3)})"
+                  #f"\nV(state={state}) = {V_state_prev is not None and np.round(V_state_prev, 3) or 'N/A'} --> V(state={state}) = {np.round(self._get_state_value(learner, state), 3)} (delta(V) = {V_state_prev is not None and np.round(self._get_state_value(learner, state) - V_state_prev, 3) or 'N/A'}, {V_state_prev is not None and np.round((self._get_state_value(learner, state) - V_state_prev) / max(1, V_state_prev) * 100, 1) or 'N/A'}%)"
                   #f"\nCount[s] = {learner.getStateCounts()}, alpha[s] = {learner.getAlphasByState()}")
         plt.pause(pause)
         plt.draw()
@@ -4264,7 +4336,7 @@ class Simulator:
         #print("episode: {} (T={}), color: {}".format(episode, t_episode+1, colors_V(episode/nepisodes)))
         plt.figure(fig_V.number)
         # For the AVERAGE reward criterion, plot the state value function referenced to V(s=0) as in this case V(s) is NOT unique
-        ref_V = learner.getV().getValue(0) if self.agent.getLearner().getLearningCriterion() == LearningCriterion.AVERAGE else 0.0
+        ref_V = self._get_state_value(learner, 0) if self.agent.getLearner().getLearningCriterion() == LearningCriterion.AVERAGE else 0.0
         plt.plot(self.env.getAllStates(), learner.getV().getValues() - ref_V, linewidth=0.5, color=colors_V(min(episode, nepisodes-1) / nepisodes))
         plt.title(f"[{method_name}UPDATE@Episode, Learning step {t_learn+1}]\nState values evolution (blueish: initial, reddish: final): Episode {episode+1} of {nepisodes}")
         plt.pause(pause)
@@ -4310,8 +4382,8 @@ class Simulator:
             ref_V_true = ref_V = 0.0
             if self.agent.getLearner().getLearningCriterion() == LearningCriterion.AVERAGE:
                 ref_V_true = self.env.getV()[0]
-                ref_V = learner.getV().getValue(0)
-            RMSE_state_observe = rmse(np.array(self.env.getV()[state_observe] - ref_V_true), np.array(learner.getV().getValue(state_observe) - ref_V), weights=weights)
+                ref_V = self._get_state_value(learner, 0)
+            RMSE_state_observe = rmse(np.array(self.env.getV()[state_observe] - ref_V_true), np.array(self._get_state_value(learner, state_observe) - ref_V), weights=weights)
             se95 = 2 * np.sqrt(0.5 * (1 - 0.5) / (episode + 1))
             # Only count falling inside the CI starting at episode 100 so that
             # the normal approximation of the SE is more correct.
@@ -4321,7 +4393,7 @@ class Simulator:
             # Plot of the estimated value of the state at the end of the episode
             # NOTE: the plot is just ONE point, the state value at the end of the episode;
             # at each new episode, a new point with this information will be added to the plot.
-            ax.plot(episode + 1, learner.getV().getValue(state_observe) - ref_V, 'r*-', markersize=7)
+            ax.plot(episode + 1, self._get_state_value(learner, state_observe) - ref_V, 'r*-', markersize=7)
             # Plot the average of the state value function over the values that it took along the episode while it was being learned.
             # plt.plot(episode, np.mean(np.array(V_state_observe)), 'r.-')
             # Plot of the estimation error and the decay of the "confidence bands" for the true value function
@@ -4551,7 +4623,11 @@ class Simulator:
             info.pop('update_counts')
 
         # Copy the Q-value just learned for the anchor action to the Q-value of the other possible actions
-        self._copy_action_values_for_terminal_state(learner.getQ(), terminal_state, action_anchor)
+        # TODO: (2024/08/23) If it becomes necessary, we could implement the copy of Q(s,a) for the case of continuous-state environments by performing all possible actions on the same continuous-valued state visited when `done` and learning from those actions (i.e. calling learner.learn())
+        # Note that in principle, this copy operation IS necessary because, when learning the action value of the state just BEFORE visiting a terminal state,
+        # the average of Q(s,a) over all actions is used in the computation of the TD error (see LeaTD._compute_deltas()).
+        if not self.env.isStateContinuous():
+            self._copy_action_values_for_terminal_state(learner.getQ(), terminal_state, action_anchor)
 
     def _copy_action_values_for_terminal_state(self, Q, state, action):
         """

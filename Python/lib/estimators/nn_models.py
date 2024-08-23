@@ -13,9 +13,16 @@ in particular the file main/tools_nn.py where he defines a Q neural network.
 """
 
 import warnings
+from enum import Enum, unique
 
 import torch
 from torch import nn
+
+@unique
+class InputLayer(Enum):
+    "Input layer size for neural networks: either SINGLE for a single neuron representing e.g. the state, or ONEHOT for a one-hot encoding of the state"
+    SINGLE = 1
+    ONEHOT = 2
 
 
 class NNBackprop(nn.Module):
@@ -36,50 +43,67 @@ class NNBackprop(nn.Module):
         When an empty dict, the default activation function for the hidden layer is nn.ReLU and the default
         activation function for the output layer is nn.Identity.
         default: empty dict
+
+    dropout: (opt) float in [0, 1]
+        Probability of dropout in dropout layers added after the input layer and each hidden layer.
+        When 0.0, no dropout layers are used.
+        default: 0.0
     """
     def __init__(self, input_size: int, hidden_sizes: list, output_size: int,
-                 dict_activation_functions: dict=dict()):
+                 dict_activation_functions: dict=dict(),
+                 dropout=0.0):
         super().__init__()
 
         # Parse input parameters
         self.list_activation_functions_hidden, self.activation_function_output = self._parse_input_parameters(hidden_sizes, dict_activation_functions)
+        self.dropout = dropout  # Dropout proportion: usually values between 0.2 and 0.5 are good (Ref: https://machinelearningmastery.com/using-dropout-regularization-in-pytorch-models)
 
         # Extend the hidden sizes so that we have a full specification of input and output of each hidden layer, including the first one
         hidden_sizes_extended = [input_size] + hidden_sizes
 
         #-- Define the network from input to output through hidden layers
-        # First hidden layer
+        # Initialize hidden layers
         # Note that we need to define the layers as a nn.ModuleList, rather than simply a list, o.w. the layers are not recognized as part of the neural network model
         self.hidden_layers = nn.ModuleList()
-        #self.hidden_layers.append( nn.Linear(input_size, hidden_sizes[0], dtype=torch.float) )
+
+        # Drop out layers in case dropout is requested
+        # One is added between any connecting layers
+        self.dropout_layers = nn.ModuleList()
 
         # Additional hidden layers (if any)
         for h in range(1, len(hidden_sizes_extended)):
+            # Add a drop out layer if requested
+            if self.dropout > 0.0:
+                self.dropout_layers.append( nn.Dropout(self.dropout) )
             self.hidden_layers.append( nn.Linear(hidden_sizes_extended[h-1], hidden_sizes_extended[h]) ) #, dtype=torch.float) ) # DM-2024/06/11: Commented out `dtype` because it fails in IRIT cluster with torch-1.8 installed
 
         # If we want to initialize weights and bias leading to a layer, use the nn.init functions
         # Here an example of setting the weights and bias reaching the first hidden layer
-        #nn.init.ones_(self.hidden_layers[0].weight)
-        #nn.init.uniform_(self.hidden_layers[0].weight, -1, 1)     # Uniform weights between -1 and 1
-        #nn.init.zeros_(self.hidden_layers[0].bias)
+        #   nn.init.ones_(self.hidden_layers[0].weight)
+        #   nn.init.uniform_(self.hidden_layers[0].weight, -1, 1)     # Uniform weights between -1 and 1
+        #   nn.init.zeros_(self.hidden_layers[0].bias)
         # Another option is to use the object returned by parameters() (a generator that returns Parameter objects, of type tensor) of a component (e.g. a hidden layer)
         # When the parameters() generator applied to a component (i.e. to just ONE layer) is viewed as a list, it contains 2 elements: (i) the weights tensor, (ii) the bias tensor
         # The weights are of size <# output neurons> x <# input neurons>. The bias is of length <# output neurons>.
         # In the following example we assume that the output layer (i.e. the first hidden layer) contains 2 neurons and the input layer contains 3 neurons.
-        #import torch
-        #weights = [[0.5, 0.2, -0.3],
-        #           [1.0, -0.5, -0.7]]
-        #bias = [0.5, -0.8]
-        #param_values = [weights, bias]
-        #for p, param in enumerate(self.hidden_layers[0].parameters()):
-        #   param.data = nn.parameter.Parameter(torch.tensor(param_values[p]))
+        #   import torch
+        #   weights = [ [0.5, 0.2, -0.3],
+        #               [1.0, -0.5, -0.7]]
+        #   bias = [0.5, -0.8]
+        #   param_values = [weights, bias]
+        #   for p, param in enumerate(self.hidden_layers[0].parameters()):
+        #       param.data = nn.parameter.Parameter(torch.tensor(param_values[p]))
+
+        # Dropout layer before the output layer
+        if self.dropout > 0.0:
+            self.dropout_layers.append( nn.Dropout(self.dropout) )
 
         # Output layer
         self.output_layer = nn.Linear(hidden_sizes_extended[-1], output_size) #, dtype=torch.float) # DM-2024/06/11: Commented out `dtype` because it fails in IRIT cluster with torch-1.8 installed
         # If we want to initialize the weights and bias leading to the output layer neurons
         # Also see init.uniform_(), init.xavier_uniform_(), etc.
-        #nn.init.ones_(self.output_layer.weight)
-        #nn.init.zeros_(self.output_layer.bias)
+        #   nn.init.ones_(self.output_layer.weight)
+        #   nn.init.zeros_(self.output_layer.bias)
 
     # The nn.Module.forward() method needs to be ALWAYS overridden by subclasses (as indicated in the PyTorch documentation)
     # There is no useful documentation on the nn.Module.forward() method. I took the signature and implementation
@@ -94,9 +118,14 @@ class NNBackprop(nn.Module):
         # Convert the input array into a tensor
         tensor = torch.tensor(x, dtype=torch.float)
 
-        # Pass through the hidden layers
+        # Pass through the hidden layers and possibly dropout layers
         for h, hidden_layer in enumerate(self.hidden_layers):
+            if self.dropout > 0.0:
+                tensor = self.dropout_layers[h](tensor)
             tensor = self.list_activation_functions_hidden[h]()( hidden_layer(tensor) )
+
+        if self.dropout > 0.0:
+            tensor = self.dropout_layers[h](tensor)
 
         # Output value
         out = self.activation_function_output()( self.output_layer(tensor) )
@@ -174,6 +203,9 @@ class NNBackprop(nn.Module):
     def getNumHiddenLayers(self):
         return len(self.hidden_layers)
 
+    def getNumDropoutLayers(self):
+        return len(self.dropout_layers)
+
     def getNumOutputs(self):
         return self.output_layer.out_features
 
@@ -182,6 +214,12 @@ class NNBackprop(nn.Module):
             warnings.warn(f"The requested hidden layer (h={h}) does not exist. None is returned")
             return None
         return self.hidden_layers[h]
+
+    def getDropoutLayer(self, d):
+        if d > len(self.dropout_layers):
+            warnings.warn(f"The requested dropout layer (d={d}) does not exist. None is returned")
+            return None
+        return self.dropout_layers[d]
 
     def getOutputLayer(self):
         return self.output_layer

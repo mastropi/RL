@@ -1082,6 +1082,7 @@ if __name__ == "__main__":
 
 
     #-------- index_multi2linear / index_linear2multi -----------------#
+    # TODO: (2024/08/13) Add a test that the output of these functions are the same as np.ravel_multi_index() and np.unravel_index()
     print("\n--- index_multi2linear() and index_linear2multi() ---")
     # 2D matrix with linear indices as its values
     M = np.arange(12).reshape([4, 3])

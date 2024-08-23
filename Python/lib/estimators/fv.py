@@ -99,14 +99,14 @@ def initialize_phi(envs: list, agent=None, t: float=0.0, states_of_interest: set
 
 
 def empirical_mean(envs: list, state: Union[list, int]):
-    "Computes the proportion of environments/particles at the given state"
+    "Computes the proportion of environments/particles at the given discrete state"
     if isinstance(envs[0], GenericEnvQueueWithJobClasses):
         if is_scalar(state):
             return np.mean([int(x == state) for x in [env.getBufferSize() for env in envs]])
         else:
             return np.mean([int(x == state) for x in [tuple(env.getQueueState()) for env in envs]])
     else:
-        return np.mean([int(x == state) for x in [env.getState() for env in envs]])
+        return np.mean([int(x == state) for x in [env.getIndexFromState(env.getState()) for env in envs]])
 
 
 def update_phi(env, N: int, t: float, dict_phi: dict, env_state_prev, env_state_cur, alpha: float=1.0):
@@ -143,14 +143,17 @@ def update_phi(env, N: int, t: float, dict_phi: dict, env_state_prev, env_state_
     env_state_prev: (environment) State
         The previous state of the particle that just changed state given as a valid state of the `env` environment.
         The value of this depends on the environment type.
-        - For `GenericEnvQueueWithJobClasses`, this is normally a tuple containing (queue_state, job_class)
+        - for `GenericEnvQueueWithJobClasses`, this is normally a tuple containing (queue_state, job_class)
         (and NOT simply the queue state, see e.g. the classes defined in environments/queues.py).
         The important thing is that the actual quantity that should be evaluated when updating Phi(t, x)
         is obtained by one of the following methods assumed defined in `env`:
             - getBufferSizeFromState(state) in 1D problems, which returns the single buffer size of the system.
             - getQueueStateFromState(state) in multidimensional problems, which returns the occupancy level of
             each job class in the queue system.
-        - For `EnvironmentDiscrete`, this is normally an integer indexing the states of the environment.
+        - for `EnvironmentDiscrete` this is normally an integer indexing the states of the environment.
+        - for any other environment, it can be anything, e.g. a discrete-valued multidimensional state, or a continuous-valued state.
+        The environment is responsible for defining a getIndexFromState() method that converts the actual environment state
+        into a 1D index state which is used as key of the Phi dictionary being updated by this function.
 
     env_state_cur: (environment) State
         The current state of the particle that just changed state, represented by an *environment* state
@@ -182,12 +185,10 @@ def update_phi(env, N: int, t: float, dict_phi: dict, env_state_prev, env_state_
         else:
             state_prev = env.getQueueStateFromState(env_state_prev)
             state_cur = env.getQueueStateFromState(env_state_cur)
-    elif isinstance(env, EnvironmentDiscrete):
-        state_prev = env_state_prev
-        state_cur = env_state_cur
     else:
-        raise ValueError("The environment type is not valid: {}".format(type(env)) +
-                         "\nValid environments are: GenericEnvQueueWithJobClasses, EnvironmentDiscrete")
+        # Convert the states to an index (because the environment could have continuous-valued states (e.g. Mountain Car)
+        state_prev = env.getIndexFromState(env_state_prev)
+        state_cur = env.getIndexFromState(env_state_cur)
 
     # Go over the states of interest that intersect with the previous and current states
     # (in fact, these two are the only states whose Phi value can change now)
@@ -624,7 +625,6 @@ def estimate_expected_reward(env, probas_stationary: dict, reward=None, require_
     expected_reward = 0.0
 
     if reward is None:
-        assert isinstance(env, EnvironmentDiscrete)
         dict_rewards = env.getRewardsDict()
         dict_nonzero_rewards = dict([(s, r) for (s, r) in dict_rewards.items() if r != 0])
         if require_all_states_with_reward_present_in_dictionary and not set(dict_nonzero_rewards.keys()).issubset(set(probas_stationary.keys())):

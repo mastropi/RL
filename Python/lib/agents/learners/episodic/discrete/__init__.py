@@ -361,6 +361,10 @@ class Learner(GenericLearner):
 
     def _update_state_counts(self, t, state):
         "Updates the count that keeps track of the state's first visit within the CURRENT episode"
+        if self.env.isStateContinuous():
+            # Discretize the state so that we can update the count of a visited state
+            state = self.env.getIndexFromState(state)
+
         #print("t: {}, visit to state: {}".format(t, state))
         if np.isnan(self._states_first_visit_time[state]):
             self._state_counts_first_visit_over_all_episodes[state] += 1
@@ -383,6 +387,9 @@ class Learner(GenericLearner):
         # with np.printoptions(precision=4):
         #    print("Before updating alpha: episode {}, state {}: state_count={:.0f}, alpha>={}: alpha={}\n{}" \
         #          .format(self.episode, state, self._state_counts_over_all_episodes[state], self.alpha_min, self.getAlphaForState(state), np.array(self._alphas)))
+        if self.env.isStateContinuous():
+            # Discretize the state so that we can update the count of a visited state
+            state = self.env.getIndexFromState(state)
 
         # NOTE that we store the alpha value BEFORE its update, as this is the value that was used to learn prior to
         # updating alpha!

@@ -634,12 +634,12 @@ from Python.lib.agents.learners.policies import LeaActorCriticNN
 from Python.lib.agents.policies import probabilistic
 
 from Python.lib.environments.gridworlds import Direction2D
-from Python.lib.estimators.fv import estimate_expected_reward
+from Python.lib.estimators.nn_models import InputLayer
 
 from Python.lib.utils.basic import get_current_datetime_as_string, load_objects_from_pickle, log_file_open, log_file_close, save_objects_to_pickle
 from Python.lib.utils.computing import compute_transition_matrices, compute_state_value_function_from_transition_matrix
 
-from Python.test.test_optimizers_discretetime import InputLayer, Test_EstPolicy_EnvGridworldsWithObstacles, Test_EstPolicy_EnvMountainCar
+from Python.test.test_optimizers_discretetime import Test_EstPolicy_EnvGridworldsWithObstacles, Test_EstPolicy_EnvMountainCar
 
 # When saving results or reading previously saved results
 rootdir = "./RL-003-Classic"
@@ -1213,6 +1213,12 @@ for rep in range(nrep):
         # Keep track of the policy learned so that we can analyze how much it changes after each learning step w.r.t. the previous learning step
         policy_prev = None
         for t_learn in range(n_learning_steps):
+            # Set the policy in evaluation mode
+            # This is important if we are using dropout layers in the neural network, o.w. the policy output by the model may be incorrect because some connections might be missing
+            # when evaluating the policy(a|s) by calling policy.getPolicyForState()!! (this is not the case in evaluation mode because ALL the connections are back during evaluation,
+            # even if the connection had been dropped during training).
+            learner_ac.getPolicy().getModel().eval()
+
             if env_type == Environment.Gridworld:
                 # Compute or update the true state value function stored in the environment for the current policy
                 # (used as reference when plotting the evolution of the estimated state value function V(s) when plot=True)
@@ -1602,6 +1608,7 @@ plt.suptitle(f"{learning_method.upper()}\n{learning_task.name} learning task - {
 
 #-- Final policy parameters and policy distribution by state
 policy = simulator_value_functions.getAgent().getPolicy()
+policy.getModel().eval()
 print("Final network parameters:")
 print(list(policy.getThetaParameter()))
 

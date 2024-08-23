@@ -144,6 +144,9 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
         raise NotImplementedError
 
     #--- Getters
+    def isStateContinuous(self):
+        return False
+
     def getDimension(self):
         return self.dim
 
@@ -156,6 +159,24 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
     def getState(self):
         "Returns the 1D index representing the environment state"
         return self.s
+
+    def getStateFromIndex(self, s):
+        "Returns the environment state from the given 1D state index. See more details in documentation for getIndexFromState()"
+        return s
+
+    def getIndexFromState(self, state):
+        """
+        Returns the 1D index representation of the given environment state
+
+        In this class the two state representations coincide
+        because states in the EnvironmentDiscrete class are defined by their 1D index representation
+
+        This method must be defined because it is used by simulators in order to go from the actual representation of the environment
+        (which could be a physical continuous-valued state, as in the Mountain Car) to the index representation of a discretized version of the environment,
+        which is needed for instance to run Fleming-Viot simulations (which requires the definition of an absorption set A that is based on
+        an environment with a countable state space.
+        """
+        return state
 
     def getStateSpace(self):
         return self.state_space

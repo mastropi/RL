@@ -18,9 +18,9 @@ if __name__ == "__main__":
 import copy
 import numpy as np
 
-from gym.envs.toy_text.discrete import categorical_sample, DiscreteEnv
-
 from torch import nn, tensor
+from torch.distributions import Categorical
+from torch.functional import F
 
 import Python.lib.queues as queues
 from Python.lib.agents.policies import AcceptPolicyType, GenericParameterizedPolicyTwoActions
@@ -438,21 +438,32 @@ class PolNN:
     Parameterized policy that is the output of a neural network model fitted with PyTorch
     which is assumed to output one preference for each possible action in the environment.
 
-    env: EnvironmentDiscrete
-        Discrete-state/action environment on which the agent acts.
+    env: Environment (e.g. EnvironmentDiscrete or class inheriting from it)
+        Discrete-action environment with either discrete or continuous states on which the agent acts.
+        It must define the following methods:
+        - getNumActions()
+        - getNumStates()
+        - getStateFromIndex(): returns the actual state of the environment from the 1D state index (in EnvironmentDiscrete the two values are the same)
+        - seed()
 
     nn_model: Neural network inheriting from torch.nn.Module
         Neural network model typically defined in nn_models.py.
         The network should have as input either one neuron representing the state or as many neurons as states (i.e. dummy or one-hot coding of states)
         and as many output neurons as the number of possible actions over all possible states in the environment.
         Note: The parameters of the model can be retrieved with nn_model.parameters(), which is a generator.
+
+    seed: (opt) int
+        Seed to use for the generation of random numbers, including:
+        - the environment's seed (for its reset)
+        - torch's seed (with torch.manual_seed())
+        In particular the `torch` seed is set during initialization of the neural network weights by method init_policy().
+        default: None
     """
-    def __init__(self, env: EnvironmentDiscrete, nn_model: nn.Module):
+    def __init__(self, env: EnvironmentDiscrete, nn_model: nn.Module, seed=None):
         self.env = env
         self.nn_model = nn_model
+        self.seed = seed
 
-        if self.nn_model.getNumInputs() != 1 and self.nn_model.getNumInputs() != self.env.getNumStates():
-            raise ValueError(f"The number of input values to the neural network model must be either 1 or as many as the number of states in the environment ({self.env.getNumStates()}): {self.nn_model.getNumInputs()}")
         if self.nn_model.getNumOutputs() != self.env.getNumActions():
             raise ValueError("The environment where the model is to be applied and the model itself are incompatible in the number of actions they deal with."
                              f"\n# environment actions = {self.env.getNumActions()}"
@@ -467,11 +478,16 @@ class PolNN:
             self.nn_model.getOutputLayer().bias.requires_grad = False
             self.nn_model.getOutputLayer().weight.requires_grad = False
 
-    def reset(self, initial_values=None, seed=None):
-        "Resets the policy to the random walk or to the given initial values, optionally using a seed for the random initialization of the neural network weights"
-        self.init_policy(values=initial_values, seed=seed)
+        # Set seeds in every object concerned by this class
+        self.env.seed(self.seed)
+        if seed is not None:
+            nn.init.torch.manual_seed(self.seed)
 
-    def init_policy(self, values=None, eps=1E-2, seed=None):
+    def reset(self, initial_values=None):
+        "Resets the policy to the random walk or to the given initial values"
+        self.init_policy(values=initial_values)
+
+    def init_policy(self, values=None, eps=1E-2):
         """
         Initializes the parameters of the neural network so that the output policy is either almost constant over all actions for all input states
         or is almost equal to the `values` given (which are indexed by all possible actions), also for all input states.
@@ -497,8 +513,6 @@ class PolNN:
         We need to initialize parameters randomly because, if all parameters were initialized to 0, their values would never change during the learning process(!)
         as the gradient would be always 0 due to the chain rule (easy to prove).
 
-        IMPORTANT: for reproducibility, the torch seed should be set prior to calling this method, for instance through the torch.manual_seed() method.
-
         Arguments:
         values: (opt) array-like
             Values defining the policy, i.e. conceptually the probability of each possible action for each possible state in the `self.env` environment.
@@ -518,21 +532,13 @@ class PolNN:
             Small value defining the standard deviation of the normal distribution used to define the weights and biases of all layers except for
             the biases of the neurons in the output layer.
             default: 1E-2
-
-        seed: (opt) int
-            Seed to use in the random initialization of the neural network weights as described above.
-            Only used when the neural network has at least ONE hidden layer. Otherwise, the neural network used to model the policy
-            is assumed to be used simply as an implementation of action preferences, meaning that NO backpropagation is performed to learn its parameters,
-            but simply to set the policy values using the softmax function on the weights connecting the input neurons to the output neurons
-            (whose biases are set to zero).
-            default: None
         """
         # Inspired by the weights_init() function in this code:
         # https://github.com/pytorch/examples/blob/main/dcgan/main.py
         # Note also the use of Module.apply() method which calls a function on each submodule of a module (e.g. of a neural network).
 
-        if seed is not None:
-            nn.init.torch.manual_seed(seed)
+        if self.seed is not None:
+            nn.init.torch.manual_seed(self.seed)  # manual_seed() does not accept `None`
 
         if self.nn_model.getNumHiddenLayers() == 0:
             # The neural network is assumed to be used simply as an implementation of action preferences
@@ -587,6 +593,11 @@ class PolNN:
             # The neural network is assumed to be used as an actual neural network model (it has hidden layers)
             # => The initial policy is set approximately by setting small random weights around 0 and
             # the bias of the output layer that are required to get the policy values in the output layer.
+            # NOTE: (2024/08/05) A simpler way to set model parameters following a given distribution (e.g. normal) is to iterate on the self.nn_model.parameters()
+            # In that case we wouldn't need to enclose the parameter setting in a `try` block as below.
+            # Ex:
+            # for p in self.nn_model.parameters():
+            #     nn.init.normal_(p, 0, eps)
             for i, component in enumerate(self.nn_model.modules()):
                 # Use the following if we want to filter out specific module types. But the problem is that this is not an exhaustive list!
                 # So, I think using `try` is better (as done below)
@@ -617,8 +628,8 @@ class PolNN:
                     raise ValueError(f"The length of parameter `values` ({len(values)}) must be the same as the number of neurons in the output layer ({len(component.bias)})")
                 component.bias = nn.Parameter(tensor(np.log( np.maximum(1E-9, np.array(values)) )))
 
-    def set_policy_values(self, values=None, eps=1E-2, seed=None):
-        self.init_policy(values, eps, seed)
+    def set_policy_values(self, values=None, eps=1E-2):
+        self.init_policy(values, eps)
 
     def set_model_params(self, param_values):
         """
@@ -641,45 +652,73 @@ class PolNN:
         Index of the action chosen by the policy.
         """
         proba_actions = self.getPolicyForState(state)
-
-        # Choose the action
-        if isinstance(self.env, DiscreteEnv):
-            # Use the random number generator defined in the environment (using the function defined in gym.envs.discrete.toy_text.discrete)
-            # to choose an action, so that we use the same generator that has been used elsewhere.
-            action = categorical_sample(proba_actions, self.env.np_random)
-        else:
-            # Use np.random.choice to choose an action
-            action = np.random.choice(range(self.env.getNumActions()), p=proba_actions)
+        action_distribution = Categorical(proba_actions)
+        action = action_distribution.sample().item()
 
         return action
 
     def get_policy_values(self):
-        "Returns the policy values in a 2D array indexed by each state and each action of the environment"
+        """
+        Returns the policy values in a 2D array indexed by each state and each action of the environment
+
+        It is ASSUMED that the state space is discrete!
+        """
         policy = np.nan * np.ones((self.env.getNumStates(), self.env.getNumActions()))
         for s in self.env.getAllStates():
+            # In case the environment has non-index states (e.g. continuous-valued states such as the Mountain Car) here we convert the index to the actual environment state
+            # on which the policy depends and thus can be evaluated
+            state = s
+            if self.env.isStateContinuous():
+                state = self.env.getStateFromIndex(s)
             for a in range(self.env.getNumActions()):
-                policy[s][a] = self.getPolicyForAction(a, s)
+                policy[s][a] = self.getPolicyForAction(a, state)
 
         return policy
 
     def getPolicyForState(self, state):
-        "Returns the probability of choosing each possible action for the given state"
+        "Returns a tensor containing the probability of choosing each possible action for the given state"
         # Compute the action preferences output by the neural network (each output node represents a possible action)
-        if self.nn_model.getNumInputs() == 1:
-            exp_preferences = np.exp(self.nn_model([state]).tolist())  # We use tolist() to avoid the error message "Numpy not found"
-        elif self.nn_model.getNumInputs() == self.env.getNumStates():
+        # NOTE: when the number of inputs of the neural network is either 1 or the number of (discrete) states in the environment,
+        # parameter `state` is assumed to be a 1D state index.
+        # Otherwise, when the number of inputs in the neural network is any integer number (i.e. not related to the number of (discrete) states in the environment,
+        # parameter `state` is assumed to contain a not-necessarily index state and possibly continuous-valued state (e.g. Mountain Car).
+        if self.nn_model.getNumInputs() == self.env.getNumStates():
             input = np.zeros(self.env.getNumStates(), dtype=int)
-            input[state] = 1
-            exp_preferences = np.exp(self.nn_model(input).tolist())
+            input[self.env.getIndexFromState(state)] = 1
+            proba_actions = F.softmax(self.nn_model(input), dim=0)
+        elif self.nn_model.getNumInputs() == 1:
+            proba_actions = F.softmax(self.nn_model([state]), dim=0)
         else:
-            raise ValueError(f"The number of inputs in the neural network ({self.nn_model.getNumInputs()}) cannot be handled by the policy learner. It must be either 1 or as many as the number of states in the environment.")
+            state_multidim = state
+            if not self.env.isStateContinuous():
+                # Convert the state to the input size of the model which is assumed to be defined by the environment state structure (e.g. state = (x, v) in Mountain Car)
+                # NOTE: if the environment handles continuous-valued states, `state` is assumed to be a real-valued (possibly multi-dimensional) state.
+                # Otherwise, `state` is assumed to be a state index
+                state_multidim = self.env.getStateFromIndex(state)
+            proba_actions = F.softmax(self.nn_model(state_multidim), dim=0)
 
+        # DM-2024/08/09: Previous version that does not use F.softmax() because of problem with sum-to-1 of the probabilities generated by F.softmax()... which apparently went away!
+        # if self.nn_model.getNumInputs() == self.env.getNumStates():
+        #     # The input layer is a one-hot (dummy) encoding of the states
+        #     input = np.zeros(self.env.getNumStates(), dtype=int)
+        #     input[state] = 1
+        #     exp_preferences = np.exp(self.nn_model(input).tolist())
+        # elif self.nn_model.getNumInputs() == 1:
+        #     exp_preferences = np.exp(self.nn_model([state]).tolist())  # We use tolist() to avoid the error message "Numpy not found"
+        # else:
+        #     # Convert the state to the input size of the model which is assumed to be defined by the environment state structure (e.g. state = (x, v) in Mountain Car)
+        #     state_multidim = self.env.getStateFromIndex(state)
+        #     exp_preferences = np.exp(self.nn_model(state_multidim).tolist())  # We use tolist() to avoid the error message "Numpy not found"
+        #
         # Compute the action probabilities from the action preferences using the soft-max function
-        proba_actions = exp_preferences / np.sum( exp_preferences )
+        # proba_actions = exp_preferences / np.sum( exp_preferences )
             ## Note: we could compute the probability of the different actions using the torch function `F.softmax(self.nn_model([state]), dim=0).tolist()`
             ## but astonishingly this gives probabilities that do not sum up to 1!!!
             ## (not exactly at least, they sum up to e.g. 0.999999723, but this makes the call np.random.choice() fail)
         #print(f"State: {state}, Prob. Actions = {proba_actions}")
+
+        # Note: we do NOT use np.isclose() nor np.sum() to avoid the error "numpy is not available" which happens if numpy's version is not so recent w.r.t. torch's version
+        assert nn.init.torch.isclose(nn.init.torch.sum(proba_actions), tensor(1.0), atol=1E-4)
 
         return proba_actions
 
@@ -700,6 +739,9 @@ class PolNN:
         policy_value_for_action = proba_actions[action]
 
         return policy_value_for_action
+
+    def getModel(self):
+        return self.nn_model
 
     def getThetaParameter(self):
         "Returns the parameters of the neural network"

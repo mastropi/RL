@@ -32,8 +32,19 @@ class LeaTDLambda(Learner):
     applied to a discrete environment defined with the DiscreteEnv class of openAI's gym module.
 
     Arguments:
-    env: gym.envs.toy_text.discrete.DiscreteEnv
+    env: Environment (e.g. gym.envs.toy_text.discrete.DiscreteEnv)
         The environment where the learning takes place.
+        It must have the following methods defined:
+        - getNumActions()
+        - getNumStates()
+        - getAllStates()
+        - getTerminalStates()
+        - isStateContinuous(): returns whether is a continuous-state environment.
+
+    dict_function_approximations: (opt) dict
+        Dictionary containing one or all of the following keys: 'V', 'Q', 'A' defining objects representing value function approximations
+        for the state value function, the action value function, and the advantage function respectively.
+        default: None, in which case a tabular representation of the value functions is used
 
     store_history_over_all_episodes: (opt) bool
         Whether to store in the attributes of the generic super class storing the trajectory
@@ -48,7 +59,9 @@ class LeaTDLambda(Learner):
         default: False
     """
 
-    def __init__(self, env, criterion=LearningCriterion.DISCOUNTED, task=LearningTask.EPISODIC, alpha=0.1, gamma=1.0, lmbda=0.8,
+    def __init__(self, env,
+                 dict_function_approximations: dict=None,
+                 criterion=LearningCriterion.DISCOUNTED, task=LearningTask.EPISODIC, alpha=0.1, gamma=1.0, lmbda=0.8,
                  adjust_alpha=False, alpha_update_type=AlphaUpdateType.EVERY_STATE_VISIT,
                  adjust_alpha_by_episode=False, alpha_min=0., func_adjust_alpha=None,
                  reset_method=ResetMethod.ALLZEROS, reset_params=None, reset_seed=None,
@@ -74,16 +87,19 @@ class LeaTDLambda(Learner):
             raise ValueError("The EPISODIC learning task in TD learning requires the DISCOUNTED reward criterion, however the AVERAGE reward criterion was specified)")
 
         # Attributes that MUST be present for all TD methods
+        dict_function_approximations = dict() if dict_function_approximations is None else dict_function_approximations
         if task == LearningTask.CONTINUING:
             # For continuing learning tasks, there are NO terminal states, i.e. their value should NOT be set to 0 by the learner,
             # as they have their own value too!
-            self.V = StateValueFunctionApprox(self.env.getNumStates(), {})
-            self.Q = ActionValueFunctionApprox(self.env.getNumStates(), self.env.getNumActions(), {})
-            self.A = ActionValueFunctionApprox(self.env.getNumStates(), self.env.getNumActions(), {})
+            # IMPORTANT: We should NOT use e.g. `dict_function_approximations.get('V', StateValueFunctionApprox(self.env.getNumStates(), {}))`
+            # because this STILL CALLS the default argument and if the state space is too large, we get a memory error!!
+            self.V = dict_function_approximations['V'] if 'V' in dict_function_approximations.keys() else StateValueFunctionApprox(self.env.getNumStates(), {})
+            self.Q = dict_function_approximations['Q'] if 'Q' in dict_function_approximations.keys() else ActionValueFunctionApprox(self.env.getNumStates(), self.env.getNumActions(), {})
+            self.A = dict_function_approximations['A'] if 'A' in dict_function_approximations.keys() else ActionValueFunctionApprox(self.env.getNumStates(), self.env.getNumActions(), {})
         else:
-            self.V = StateValueFunctionApprox(self.env.getNumStates(), self.env.getTerminalStates())
-            self.Q = ActionValueFunctionApprox(self.env.getNumStates(), self.env.getNumActions(), self.env.getTerminalStates())
-            self.A = ActionValueFunctionApprox(self.env.getNumStates(), self.env.getNumActions(), self.env.getTerminalStates())
+            self.V = dict_function_approximations['V'] if 'V' in dict_function_approximations.keys() else StateValueFunctionApprox(self.env.getNumStates(), self.env.getTerminalStates())
+            self.Q = dict_function_approximations['Q'] if 'Q' in dict_function_approximations.keys() else ActionValueFunctionApprox(self.env.getNumStates(), self.env.getNumActions(), self.env.getTerminalStates())
+            self.A = dict_function_approximations['A'] if 'A' in dict_function_approximations.keys() else ActionValueFunctionApprox(self.env.getNumStates(), self.env.getNumActions(), self.env.getTerminalStates())
         self.gamma = gamma
         
         # Attributes specific to the current TD method
@@ -143,10 +159,15 @@ class LeaTDLambda(Learner):
         # Store the learning rates to be used in the value functions update
         self.store_learning_rate(self.getAlphasByState())
         # Update the eligibility trace
-        self._updateZ(state, action, self.lmbda)
+        self._updateZ(state, action, self.lmbda, delta_V=delta_V, delta_Q=delta_Q)
         # Update the value functions
-        self._updateV(delta_V)
-        self._updateQ(delta_Q)
+        # IMPORTANT: (2024/08/12) For the continuous state case, we need to update Q first and then V o.w. we get the error that I do NOT understand:
+        # "RuntimeError: one of the variables needed for gradient computation has been modified by an inplace operation?"
+        # More info:
+        # - https://github.com/pytorch/pytorch/issues/39141
+        # - https://stackoverflow.com/questions/57631705/runtimeerror-one-of-the-variables-needed-for-gradient-computation-has-been-modi
+        self._updateQ(delta_Q, state=state, action=action)
+        self._updateV(delta_V, state=state)
         self._updateA(state, action, delta_V)
 
         # We store the effective learning rates alpha
@@ -242,45 +263,57 @@ class LeaTDLambda(Learner):
 
         return delta_V, delta_Q
 
-    def _updateZ(self, state, action, lmbda):
+    def _updateZ(self, state, action, lmbda, delta_V=None, delta_Q=None):
         "Updates the eligibility traces used for learning V and those used for learning Q"
-        # The gradients of V and Q are computed assuming the function approximation is linear, where
-        # the gradient is equal to the feature associated to state s or state-action (s,a),
-        # stored at the corresponding column of the feature matrix X.
-        gradient_V = self.V.X[:, state]
-        gradient_Q = self.Q.X[:, self.Q.getLinearIndex(state, action)]
+        if self.env.isStateContinuous():
+            # TODO: (2024/08/12) We still need to implement the gradient computation and adapt the definition of _z_V at the constructor to have the same dimension as the parameter of the neural network that models each value function
+            #gradient_V = self.V.getGradient(state, delta_V)
+            #gradient_Q = self.Q.getGradient(state, action, delta_Q)
+            pass
+        else:
+            # The gradients of V and Q are computed assuming the function approximation is linear, where
+            # the gradient is equal to the feature associated to state s or state-action (s,a),
+            # stored at the corresponding column of the feature matrix X.
+            gradient_V = self.V.X[:, state]
+            gradient_Q = self.Q.X[:, self.Q.getLinearIndex(state, action)]
 
-        self._z_V = self.gamma * lmbda * self._z_V + \
-                    gradient_V                                    # For every-visit TD(lambda)
-                    #gradient_V * (self._state_counts[state] == 1)  # For first-visit TD(lambda)
-        self._z_V_all = np.r_[self._z_V_all, self._z_V.reshape(1, len(self._z_V))]
+            self._z_V = self.gamma * lmbda * self._z_V + \
+                        gradient_V                                    # For every-visit TD(lambda)
+                        #gradient_V * (self._state_counts[state] == 1)  # For first-visit TD(lambda)
+            self._z_V_all = np.r_[self._z_V_all, self._z_V.reshape(1, len(self._z_V))]
 
-        self._z_Q = self.gamma * lmbda * self._z_Q + \
-                    gradient_Q
-        self._z_Q_all = np.r_[self._z_Q_all, self._z_Q.reshape(1, len(self._z_Q))]
+            self._z_Q = self.gamma * lmbda * self._z_Q + \
+                        gradient_Q
+            self._z_Q_all = np.r_[self._z_Q_all, self._z_Q.reshape(1, len(self._z_Q))]
 
-    def _updateV(self, delta):
+    def _updateV(self, delta, state=None):
         if delta != 0.0:
-            # IMPORTANT: (2020/11/11) if we use _alphas[state] as the learning rate alpha in the following update,
-            # we are using the SAME learning rate alpha for the update of ALL states, namely the
-            # learning rate value associated to the state that is being visited now.
-            # This is NOT how the alpha value should be updated for each state
-            # (as we should apply the alpha associated to the state that decreases with the number of visits
-            # to EACH state --which happens differently). However, this seems to give slightly faster convergence
-            # than the theoretical alpha strategy just mentioned, at least in the gridworld environment!
-            # If we wanted to use the strategy that should be applied in theory, we should simply
-            # replace `self.getAlphaForState(state)` with `self.getAlphasByState()` in the below expression.
-            #self.V.setWeights( self.V.getWeights() + self.getAlphaForState(state) * delta * self._z_V )
-            self.V.setWeights( self.V.getWeights() + self.getAlphasByState() * delta * self._z_V )
+            if self.env.isStateContinuous():
+                self.V.update_weights(state, delta)
+            else:
+                # IMPORTANT: (2020/11/11) if we use _alphas[state] as the learning rate alpha in the following update,
+                # we are using the SAME learning rate alpha for the update of ALL states, namely the
+                # learning rate value associated to the state that is being visited now.
+                # This is NOT how the alpha value should be updated for each state
+                # (as we should apply the alpha associated to the state that decreases with the number of visits
+                # to EACH state --which happens differently). However, this seems to give slightly faster convergence
+                # than the theoretical alpha strategy just mentioned, at least in the gridworld environment!
+                # If we wanted to use the strategy that should be applied in theory, we should simply
+                # replace `self.getAlphaForState(state)` with `self.getAlphasByState()` in the below expression.
+                #self.V.setWeights( self.V.getWeights() + self.getAlphaForState(state) * delta * self._z_V )
+                self.V.setWeights( self.V.getWeights() + self.getAlphasByState() * delta * self._z_V )
 
-    def _updateQ(self, delta):
+    def _updateQ(self, delta, state=None, action=None):
         if delta != 0.0:
-            # Repeat the alpha for each state as many times as the number of possible actions in the environment
-            # Note that this repeat each value as we need it based on how state and actions are stored in the feature matrix used in self.Q,
-            # namely grouped by state (e.g. if alphas = [2.5, 4.1, 3.0], the repeat by 2 generates [2.5, 2.5, 4.1, 4.1, 3.0, 3.0]
-            # i.e. the same alpha for all actions associated to the same state (which is what we want, i.e. alphas on different actions grouped by state).
-            _alphas = np.repeat(self.getAlphasByState(), self.env.getNumActions())
-            self.Q.setWeights( self.Q.getWeights() + _alphas * delta * self._z_Q )
+            if self.env.isStateContinuous():
+                self.Q.update_weights(state, action, delta)
+            else:
+                # Repeat the alpha for each state as many times as the number of possible actions in the environment
+                # Note that this repeat each value as we need it based on how state and actions are stored in the feature matrix used in self.Q,
+                # namely grouped by state (e.g. if alphas = [2.5, 4.1, 3.0], the repeat by 2 generates [2.5, 2.5, 4.1, 4.1, 3.0, 3.0]
+                # i.e. the same alpha for all actions associated to the same state (which is what we want, i.e. alphas on different actions grouped by state).
+                _alphas = np.repeat(self.getAlphasByState(), self.env.getNumActions())
+                self.Q.setWeights( self.Q.getWeights() + _alphas * delta * self._z_Q )
 
     def _expected_next_Q(self, next_state):
         """
@@ -297,8 +330,12 @@ class LeaTDLambda(Learner):
         Sets the value of the Advantage function to the given value for the given state and action.
         An unbiased estimation of the advantage is the delta(V) observed when taking the given action at the given state.
         """
-        # Recall that _setWeight() assumes that the features are dummy features (so, at some point this would need to be updated)
-        self.A._setWeight(state, action, advantage)
+        if self.env.isStateContinuous():
+            # IMPORTANT: The advantage function is assumed to be TABULAR
+            self.A.setValue(self.env.getIndexFromState(state), action, advantage)
+        else:
+            # Recall that _setWeight() assumes that the features are dummy features (so, at some point this would need to be updated)
+            self.A._setWeight(state, action, advantage)
 
     def _plotZ(self):
         states2plot = self._choose_states2plot()
@@ -354,14 +391,17 @@ class LeaTDLambda(Learner):
 
 class LeaTDLambdaAdaptive(LeaTDLambda):
     
-    def __init__(self, env, criterion=LearningCriterion.DISCOUNTED, task=LearningTask.EPISODIC, alpha=0.1, gamma=1.0, lmbda=0.8,
+    def __init__(self, env,
+                 dict_function_approximations=None,
+                 criterion=LearningCriterion.DISCOUNTED, task=LearningTask.EPISODIC, alpha=0.1, gamma=1.0, lmbda=0.8,
                  adjust_alpha=False, alpha_update_type=AlphaUpdateType.EVERY_STATE_VISIT,
                  adjust_alpha_by_episode=True, alpha_min=0., func_adjust_alpha=None,
                  lambda_min=0., lambda_max=0.99, adaptive_type=AdaptiveLambdaType.ATD,
                  reset_method=ResetMethod.ALLZEROS, reset_params=None, reset_seed=None,
                  store_history_over_all_episodes=False,
                  burnin=False, plotwhat="boxplots", fontsize=15, debug=False):
-        super().__init__(env, criterion=criterion, task=task, alpha=alpha, gamma=gamma, lmbda=lmbda, adjust_alpha=adjust_alpha, alpha_update_type=alpha_update_type,
+        super().__init__(env, dict_function_approximations=dict_function_approximations,
+                         criterion=criterion, task=task, alpha=alpha, gamma=gamma, lmbda=lmbda, adjust_alpha=adjust_alpha, alpha_update_type=alpha_update_type,
                          adjust_alpha_by_episode=adjust_alpha_by_episode, alpha_min=alpha_min, func_adjust_alpha=func_adjust_alpha,
                          reset_method=reset_method, reset_params=reset_params, reset_seed=reset_seed,
                          store_history_over_all_episodes=True if task == LearningTask.CONTINUING else store_history_over_all_episodes,
@@ -496,8 +536,8 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
         # Update the eligibility trace
         self._updateZ(state, action, lambda_adaptive)
         # Update the value functions
-        self._updateV(delta_V)
-        self._updateQ(delta_Q)
+        self._updateV(delta_V, state=state)
+        self._updateQ(delta_Q, state=state, action=action)
         self._updateA(state, action, delta_V)
 
         # The effective alphas are only computed for the learning of V, not of Q
