@@ -196,7 +196,7 @@ print("True value function read from '{}'".format(filename))
 # w.r.t. to the MountainCarDiscrete environment saved in the pickle file, e.g. there are new methods defined such as setV().
 # If the definition of the saved environment (in dict_benchmark['env']) is the same as the current definition of the
 # MountainCarDiscrete environment, then we can just use the saved environment as environment on which test are run.
-env_mountain = mountaincars.MountainCarDiscrete(dict_benchmark['env'].nv)       # Note: the initial state is chosen at random at the start of each episode
+env_mountain = mountaincars.MountainCarDiscrete(dict_benchmark['env'].nv, discrete_state=True)       # Note: the initial state is chosen at random at the start of each episode
 max_time_steps_per_episode = dict_benchmark['params_test']['max_time_steps']    # Use this when the test_obj is saved as part of the pickle file read above
 nstates = np.prod(env_mountain.shape)
 # Use the state counts when estimating the true value function as weights to compute the RMSE and MAPE as they give
@@ -216,13 +216,13 @@ plt.title("gamma = {:.2f}".format(gamma_benchmark))
 
 # Define the uniform distribution on which the intitial state is chosen
 # We must EXCLUDE terminal states (i.e. those with positions >= 0.5)
-idx_states_non_terminal = env_mountain.get_indices_for_non_terminal_states()
+idx_states_non_terminal = env_mountain.get_indices_non_terminal_states()
 env_mountain.isd = np.array([1.0 / len(idx_states_non_terminal) if idx in idx_states_non_terminal else 0.0
                          for idx in range(env_mountain.getNumStates())])
 #print("ISD:", env_mountain.isd)
 print("Steps: dx = {:.3f}, dv = {:.3f}".format(env_mountain.dx, env_mountain.dv))
-print("Positions: {}".format(env_mountain.get_positions()))
-print("Velocities: {}".format(env_mountain.get_velocities()))
+print("Positions: {}".format(env_mountain.getPositions()))
+print("Velocities: {}".format(env_mountain.getVelocities()))
 #------------------ Possible environments ------------------#
 
 

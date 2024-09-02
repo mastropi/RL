@@ -602,7 +602,7 @@ if __name__ == "__main__":
     debug = True
 
     #-- Environment characteristics
-    env_mc = MountainCarDiscrete(nx=20, nv=20, factor_for_force_and_gravity=10, seed_reset=seed, debug=debug)
+    env_mc = MountainCarDiscrete(nx=20, nv=20, factor_for_force_and_gravity=10, seed_reset=seed)
     nS = env_mc.getNumStates()
 
     #-- Value function learner characteristics

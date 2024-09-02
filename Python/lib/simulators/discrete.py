@@ -75,7 +75,7 @@ class Simulator:
             (responsible for defining the initial state when running the simulation)
         - getState() --> returns the current state of the environment (it can be a 1D index for discrete-state environments or anything for continuous-valued states such as e.g. the Mountain Car)
         - getIndexFromState() --> returns the 1D state index from a given environment state
-        - getStateFromIndex() --> returns the actual environment state from the 1D state index returned by getState(). Used for informational purposes, when debugging the process.
+        - getStateFromIndex() --> returns either the simulation state (used by the simulation process) or the actual physical environment state (used for informational purposes) from the 1D state index returned by getState()
         - getDimension()
         - getShape()
         - getAllStates()
@@ -515,7 +515,7 @@ class Simulator:
                     _most_common_state_in_isd = np.argmax(self.env.getInitialStateDistribution())
                     _estimated_absorption_set = set({_most_common_state_in_isd})
 
-                _states_in_absorption_set_with_nonzero_reward = [s for s in _estimated_absorption_set if self.env.getReward(self.env.getStateFromIndex(s)) != 0.0]
+                _states_in_absorption_set_with_nonzero_reward = [s for s in _estimated_absorption_set if self.env.getReward(self.env.getStateFromIndex(s, simulation=True)) != 0.0]
                 assert len(_states_in_absorption_set_with_nonzero_reward) == 0, f"The absorption set must not contain states with non-zero reward. The following states in the absorption set have non-zero reward: {_states_in_absorption_set_with_nonzero_reward}"
 
                 # Set the absorption set in the learner, which also automatically updates the activation and active sets
@@ -534,8 +534,8 @@ class Simulator:
                       f"\n{[str(s) + ': ' + str(self.env.get_state_discrete_from_index(s)) for s in dict_params_simul['absorption_set']]}")
             else:
                 print(f"\nAbsorption set (2D) (1D-index, 2D-index, 2D-discrete) (n={len(dict_params_simul['absorption_set'])} out of {self.env.getNumStates()}, {np.round(len(dict_params_simul['absorption_set']) / self.env.getNumStates() * 100, 1)}%):"
-                      f"\n{[str(s) + ': ' + str(self.env.get_state_discrete_from_index(s)) + ', ' + str(self.env.getStateFromIndex(s)) for s in dict_params_simul['absorption_set']]}")
-            print(f"Activation set (2D) (n={np.nan if dict_params_simul['activation_set'] is None else len(dict_params_simul['activation_set'])}):\n{dict_params_simul['activation_set'] is None and 'None' or [str(s) + ': ' + str(self.env.get_state_discrete_from_index(s)) for s in dict_params_simul['activation_set']]}")
+                      f"\n{[str(s) + ': ' + str(self.env.get_index_2d_from_index(s)) + ', ' + str(self.env.getStateFromIndex(s, simulation=False)) for s in dict_params_simul['absorption_set']]}")
+            print(f"Activation set (2D) (n={np.nan if dict_params_simul['activation_set'] is None else len(dict_params_simul['activation_set'])}):\n{dict_params_simul['activation_set'] is None and 'None' or [str(s) + ': ' + str(self.env.get_index_2d_from_index(s)) for s in dict_params_simul['activation_set']]}")
             print("**** ABSORPTION SET SELECTION ****\n")
         else:
             n_events_absorption_set_estimation = 0
@@ -1445,7 +1445,7 @@ class Simulator:
                 #    info['average_reward'] = estimated_average_reward
                 learner.learn(t, state, action, next_state, reward, done, info)
             if reward != 0.0:
-                print(f"*** NON ZERO REWARD!! (t={t}, P={idx_particle}, state={state} ({self.env.getStateFromIndex(state) if not self.env.isStateContinuous() else state}), action={action}, next_state={next_state} ({self.env.getStateFromIndex(next_state) if not self.env.isStateContinuous() else next_state}), reward={reward})")
+                print(f"*** NON ZERO REWARD!! (t={t}, P={idx_particle}, state={state} ({self.env.getStateFromIndex(state, simulation=False) if not self.env.isStateContinuous() else state}), action={action}, next_state={next_state} ({self.env.getStateFromIndex(next_state) if not self.env.isStateContinuous() else next_state}), reward={reward})")
 
             if self.env.getIndexFromState(next_state) in absorption_set:
                 # The particle has been absorbed.
@@ -3759,7 +3759,7 @@ class Simulator:
                     action = self._choose_action(policy, state, epsilon_random_action=epsilon_random_action)
                     next_state, reward, done_episode, info = self.env.step(action)
                 if reward != 0.0:
-                    print(f"*** NON ZERO REWARD!! (t={t}, state={state} ({self.env.getStateFromIndex(state) if not self.env.isStateContinuous() else state}), action={action}, next_state={next_state} ({self.env.getStateFromIndex(next_state) if not self.env.isStateContinuous() else next_state}), reward={reward})")
+                    print(f"*** NON ZERO REWARD!! (t={t}, state={state} ({self.env.getStateFromIndex(state, simulation=False) if not self.env.isStateContinuous() else state}), action={action}, next_state={next_state} ({self.env.getStateFromIndex(next_state) if not self.env.isStateContinuous() else next_state}), reward={reward})")
 
                 # Check early end of episode when max_time_steps_per_episode is given
                 # in which case we set done_episode=True.

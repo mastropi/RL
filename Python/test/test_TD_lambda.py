@@ -719,7 +719,7 @@ class Test_TD_Lambda_MountainCar(unittest.TestCase, test_utils.EpisodeSimulation
         # Environment with discretized position and velocity with nx and nv points respectively
         #nx = 100
         nv = 10
-        cls.env = mountaincars.MountainCarDiscrete(nv)
+        cls.env = mountaincars.MountainCarDiscrete(nv, discrete_state=True)
 
         # Using the environment:
         # Ref: https://gym.openai.com/docs/
@@ -741,8 +741,8 @@ class Test_TD_Lambda_MountainCar(unittest.TestCase, test_utils.EpisodeSimulation
         values_2d_toplot[idx_not_enough_counts_x, idx_not_enough_counts_v] = np.nan
 
         import matplotlib.pyplot as plt
-        x, dim_x, color_x = self.env.get_positions(), self.env.getPositionDimension(), self.env.getPositionColor()  # normally x is on the rows of `values_2d`
-        v, dim_v, color_v = self.env.get_velocities(), self.env.getVelocityDimension(), self.env.getVelocityColor() # normally v is on the cols of `values_2d`
+        x, dim_x, color_x = self.env.getPositions(), self.env.getPositionDimension(), self.env.getPositionColor()  # normally x is on the rows of `values_2d`
+        v, dim_v, color_v = self.env.getVelocities(), self.env.getVelocityDimension(), self.env.getVelocityColor() # normally v is on the cols of `values_2d`
         assert len(x) == values_2d_toplot.shape[0]
         assert len(v) == values_2d_toplot.shape[1]
         title_params = "(lambda={:.2f}, alpha={:.1f}, adj={}, episodes={}, max_time={}, density=(x:{}, v:{}) points)" \
@@ -779,62 +779,126 @@ class Test_TD_Lambda_MountainCar(unittest.TestCase, test_utils.EpisodeSimulation
     def test_environment(self):
         print("\nTesting " + self.id())
 
-        env = mountaincars.MountainCarDiscrete(10)
-        state = env.reset(seed=1717)
+        env = mountaincars.MountainCarDiscrete(10, discrete_state=True, seed_reset=1717)
+        print(f"Environment discrete positions:\n{env.getPositions()}")
+        print(f"Environment discrete velocities:\n{env.getVelocities()}")
+        assert np.allclose(np.array(env.getPositions()), np.array([-1.2,        -1.18447619, -1.16895238, -1.15342857, -1.13790476, -1.12238095
+                                                                    , -1.10685714, -1.09133333, -1.07580952, -1.06028571, -1.0447619 , -1.0292381
+                                                                    , -1.01371429, -0.99819048, -0.98266667, -0.96714286, -0.95161905, -0.93609524
+                                                                    , -0.92057143, -0.90504762, -0.88952381, -0.874     , -0.85847619, -0.84295238
+                                                                    , -0.82742857, -0.81190476, -0.79638095, -0.78085714, -0.76533333, -0.74980952
+                                                                    , -0.73428571, -0.7187619 , -0.7032381 , -0.68771429, -0.67219048, -0.65666667
+                                                                    , -0.64114286, -0.62561905, -0.61009524, -0.59457143, -0.57904762, -0.56352381
+                                                                    , -0.548     , -0.53247619, -0.51695238, -0.50142857, -0.48590476, -0.47038095
+                                                                    , -0.45485714, -0.43933333, -0.42380952, -0.40828571, -0.3927619 , -0.3772381
+                                                                    , -0.36171429, -0.34619048, -0.33066667, -0.31514286, -0.29961905, -0.28409524
+                                                                    , -0.26857143, -0.25304762, -0.23752381, -0.222     , -0.20647619, -0.19095238
+                                                                    , -0.17542857, -0.15990476, -0.14438095, -0.12885714, -0.11333333, -0.09780952
+                                                                    , -0.08228571, -0.0667619 , -0.0512381 , -0.03571429, -0.02019048, -0.00466667
+                                                                    , 0.01085714, 0.02638095, 0.04190476, 0.05742857, 0.07295238, 0.08847619
+                                                                    , 0.104     , 0.11952381, 0.13504762, 0.15057143, 0.16609524, 0.18161905
+                                                                    , 0.19714286, 0.21266667, 0.22819048, 0.24371429, 0.2592381 , 0.2747619
+                                                                    , 0.29028571, 0.30580952, 0.32133333, 0.33685714, 0.35238095, 0.36790476
+                                                                    , 0.38342857, 0.39895238, 0.41447619, 0.43      , 0.5       ]))
+        assert np.allclose(np.array(env.getVelocities()), np.array([-0.35, -0.28, -0.21, -0.14, -0.07,  0.,    0.07,  0.14,  0.21,  0.28,  0.35]))
+        env.reset()
+        state = env.state
         print("Environment reset to state: {}".format(state))
-        assert np.allclose(state, np.array([-0.54806077, 0.0]))
+        assert np.allclose(state, np.array([-0.56352381, 0.0]))
 
         # Accelerate left several times
-        observation_real, observation, reward, done, info = env.step(0, return_continuous_state=True)
-        print(observation_real, observation, reward, info)
+        #observation_real, observation, reward, done, info = env.step(0, return_continuous_state=True)
+        #print(observation_real, observation, reward, info)
+        # when using the new MountainCarDiscrete environment that reduced the return possibilities of the step() method
+        observation, reward, done, info = env.step(0, simulation=False)
+        print(observation, reward, info)
         # when force and gravity are the original ones
         #assert np.allclose(observation_real, np.array([-0.54887747, -0.0008167]))
         #assert all(observation == np.array([3, 4]))
         # when force and gravity are 20-times the original ones
-        assert np.allclose(observation_real, np.array([-0.56439476, -0.01633399]))
-        assert all(observation == np.array([39, 3]))
-        
-        observation_real, observation, reward, done, info = env.step(0, return_continuous_state=True)
-        print(observation_real, observation, reward, info)
+        #assert np.allclose(observation_real, np.array([-0.56439476, -0.01633399]))
+        #assert all(observation == np.array([39, 3]))
+        # when using new MountainCarDiscrete environment that reduced the return possibilities of the step() method
+        # and when force and gravity are 20-times the original ones and max_speed is 0.25*20 (i.e. 0.25*factor_for_force_and_gravity)
+        assert np.allclose(observation, np.array([-0.5790476, -0.07]))
+
+        #observation_real, observation, reward, done, info = env.step(0, return_continuous_state=True)
+        #print(observation_real, observation, reward, info)
+        # when using the new MountainCarDiscrete environment that reduced the return possibilities of the step() method
+        observation, reward, done, info = env.step(0, simulation=False)
+        print(observation, reward, info)
         # when force and gravity are the original ones
         #assert np.allclose(observation_real, np.array([-0.55050476, -0.00162729]))
         #assert all(observation == np.array([3, 4]))
-        assert np.allclose(observation_real, np.array([-0.61427392, -0.04050249]))
-        assert all(observation == np.array([36, 2]))
+        # when force and gravity are 20-times the original ones
+        #assert np.allclose(observation_real, np.array([-0.61427392, -0.04050249]))
+        #assert all(observation == np.array([36, 2]))
+        # when using new MountainCarDiscrete environment that reduced the return possibilities of the step() method
+        # and when force and gravity are 20-times the original ones and max_speed is 0.25*20 (i.e. 0.25*factor_for_force_and_gravity)
+        assert np.allclose(observation, np.array([-0.672190, -0.14]))
 
-        observation_real, observation, reward, done, info = env.step(0, return_continuous_state=True)
-        print(observation_real, observation, reward, info)
+        #observation_real, observation, reward, done, info = env.step(0, return_continuous_state=True)
+        #print(observation_real, observation, reward, info)
+        # when using the new MountainCarDiscrete environment that reduced the return possibilities of the step() method
+        observation, reward, done, info = env.step(0, simulation=False)
+        print(observation, reward, info)
         # when force and gravity are the original ones
         #assert np.allclose(observation_real, np.array([-0.55293047, -0.00242572]))
         #assert all(observation == np.array([3, 4]))
-        assert np.allclose(observation_real, np.array([-0.66940432, -0.04746146]))
-        assert all(observation == np.array([33, 1]))
+        # when force and gravity are 20-times the original ones
+        #assert np.allclose(observation_real, np.array([-0.66940432, -0.04746146]))
+        #assert all(observation == np.array([33, 1]))
+        # when using new MountainCarDiscrete environment that reduced the return possibilities of the step() method
+        # and when force and gravity are 20-times the original ones and max_speed is 0.25*20 (i.e. 0.25*factor_for_force_and_gravity)
+        assert np.allclose(observation, np.array([-0.811905, -0.14]))
 
-        observation_real, observation, reward, done, info = env.step(0, return_continuous_state=True)
-        print(observation_real, observation, reward, info)
+        #observation_real, observation, reward, done, info = env.step(0, return_continuous_state=True)
+        #print(observation_real, observation, reward, info)
+        # when using the new MountainCarDiscrete environment that reduced the return possibilities of the step() method
+        observation, reward, done, info = env.step(0, simulation=False)
+        print(observation, reward, info)
         # when force and gravity are the original ones
         #assert np.allclose(observation_real, np.array([-0.55613648, -0.00320601]))
         #assert all(observation == np.array([3, 4]))
-        assert np.allclose(observation_real, np.array([-0.72483783, -0.05472354]))
-        assert all(observation == np.array([29, 1]))
+        # when force and gravity are 20-times the original ones
+        #assert np.allclose(observation_real, np.array([-0.72483783, -0.05472354]))
+        #assert all(observation == np.array([29, 1]))
+        # when using new MountainCarDiscrete environment that reduced the return possibilities of the step() method
+        # and when force and gravity are 20-times the original ones and max_speed is 0.25*20 (i.e. 0.25*factor_for_force_and_gravity)
+        assert np.allclose(observation, np.array([-0.936095, -0.14]))
 
         # Do not accelerate
-        observation_real, observation, reward, done, info = env.step(1, return_continuous_state=True)
-        print(observation_real, observation, reward, info)
+        #observation_real, observation, reward, done, info = env.step(1, return_continuous_state=True)
+        #print(observation_real, observation, reward, info)
+        # when using the new MountainCarDiscrete environment that reduced the return possibilities of the step() method
+        observation, reward, done, info = env.step(0, simulation=False)
+        print(observation, reward, info)
         # when force and gravity are the original ones
         #assert np.allclose(observation_real, np.array([-0.55909885, -0.00296237]))
         #assert all(observation == np.array([3, 4]))
-        assert np.allclose(observation_real, np.array([-0.76079551, -0.02645265]))
-        assert all(observation == np.array([27, 3]))
+        # when force and gravity are 20-times the original ones
+        #assert np.allclose(observation_real, np.array([-0.76079551, -0.02645265]))
+        #assert all(observation == np.array([27, 3]))
+        # when force and gravity are 20-times the original ones and max_speed is 0.25*20 (i.e. 0.25*factor_for_force_and_gravity)
+        # when using new MountainCarDiscrete environment that reduced the return possibilities of the step() method
+        # and when force and gravity are 20-times the original ones and max_speed is 0.25*20 (i.e. 0.25*factor_for_force_and_gravity)
+        assert np.allclose(observation, np.array([-1.0602857, -0.14]))
 
         # Accelerate right
-        observation_real, observation, reward, done, info = env.step(2, return_continuous_state=True)
-        print(observation_real, observation, reward, info)
+        #observation_real, observation, reward, done, info = env.step(2, return_continuous_state=True)
+        #print(observation_real, observation, reward, info)
+        # when using the new MountainCarDiscrete environment that reduced the return possibilities of the step() method
+        observation, reward, done, info = env.step(0, simulation=False)
+        print(observation, reward, info)
         # when force and gravity are the original ones
         #assert np.allclose(observation_real, np.array([-0.56079547, -0.00169662]))
         #assert all(observation == np.array([3, 4]))
-        assert np.allclose(observation_real, np.array([-0.74116678, 0.02529036]))
-        assert all(observation == np.array([28, 6]))
+        # when force and gravity are 20-times the original ones
+        #assert np.allclose(observation_real, np.array([-0.74116678, 0.02529036]))
+        #assert all(observation == np.array([28, 6]))
+        # when using new MountainCarDiscrete environment that reduced the return possibilities of the step() method
+        # and when force and gravity are 20-times the original ones and max_speed is 0.25*20 (i.e. 0.25*factor_for_force_and_gravity)
+        assert np.allclose(observation, np.array([-1.1844762, -0.14]))
 
     def run_random_walk_onecase(self, params=None, adaptive=False, verbose_convergence=False):
         print("\nTesting " + self.id())
@@ -874,13 +938,13 @@ class Test_TD_Lambda_MountainCar(unittest.TestCase, test_utils.EpisodeSimulation
         # in MountainCar.reset(). The Initial State Distribution (ISD) is an attribute of toy_text.discrete environment.
 
         # First find all the terminal states which should be excluded from the possible initial states!
-        idx_states_non_terminal = self.env.get_indices_for_non_terminal_states()
+        idx_states_non_terminal = self.env.get_indices_non_terminal_states()
         self.env.isd = np.array([1.0 / len(idx_states_non_terminal) if idx in idx_states_non_terminal else 0.0
                                  for idx in range(self.env.getNumStates())])
         #print("ISD:", self.env.isd)
         print("Steps: dx = {:.3f}, dv = {:.3f}".format(self.env.dx, self.env.dv))
-        print("Positions: {}".format(self.env.get_positions()))
-        print("Velocities: {}".format(self.env.get_velocities()))
+        print("Positions: {}".format(self.env.getPositions()))
+        print("Velocities: {}".format(self.env.getVelocities()))
         sim = DiscreteSimulator(self.env, agent_rw_tdlambda, debug=False)
 
         time_start = timer()
@@ -977,7 +1041,7 @@ if __name__ == "__main__":
         test_obj = Test_TD_Lambda_MountainCar(seed=1717, normalizer=normalizer, plot=plot)
         #nx = 20
         nv = 10
-        test_obj.env = mountaincars.MountainCarDiscrete(nv)
+        test_obj.env = mountaincars.MountainCarDiscrete(nv, discrete_state=True)
         test_obj.policy_rw = random_walks.PolRandomWalkDiscrete(test_obj.env)
 
         # Prepare agent's learner
@@ -1078,7 +1142,7 @@ if __name__ == "__main__":
                 # w.r.t. to the MountainCarDiscrete environment saved in the pickle file, e.g. there are new methods defined such as setV().
                 # If the definition of the saved environment (in dict_benchmark['env']) is the same as the current definition of the
                 # MountainCarDiscrete environment, then we can just use the saved environment as environment on which test are run.
-                env_mountain = mountaincars.MountainCarDiscrete(dict_benchmark['env'].nv)
+                env_mountain = mountaincars.MountainCarDiscrete(dict_benchmark['env'].nv, discrete_state=True)
                 max_time_steps_per_episode = test_obj.max_time_steps_per_episode
                 state_counts_benchmark = dict_benchmark['counts']
 
@@ -1098,8 +1162,8 @@ if __name__ == "__main__":
                 # Plot
                 zlim = None
                 #zlim = (-0.5, 0.5)
-                x = test_obj.env.get_positions()
-                v = test_obj.env.get_velocities()
+                x = test_obj.env.getPositions()
+                v = test_obj.env.getVelocities()
                 xx, vv = np.meshgrid(x, v)
                 fig = plt.figure()
                 # When there is only one subplot we can use plt.axes() to create the 3D axes

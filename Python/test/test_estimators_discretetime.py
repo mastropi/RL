@@ -60,7 +60,7 @@ class Test_EstStateValueV_MetOffline_EnvDeterministicNextState(unittest.TestCase
     def setUpClass(cls):
         cls.env_grid_classic = gridworlds.EnvGridworld1D_Classic(length=19+2)
         cls.env_grid_oneterminal = gridworlds.EnvGridworld1D(length=20, rewards_dict={19: +1}, reward_default=0.0)
-        cls.env_mountain = mountaincars.MountainCarDiscrete(5)
+        cls.env_mountain = mountaincars.MountainCarDiscrete(5, discrete_state=True)
             ## Note: we use more density to discretize the positions because we need to make sure that the car reaches the terminal state
             ## and this is not given if the discretization on the right side of the ramp is not dense enough because
             ## the new position is determined by x + v and vmax = 0.07, so the closest non-terminal x should 0.5 - 0.07 = 0.43
@@ -127,7 +127,7 @@ class Test_EstStateValueV_MetOffline_EnvDeterministicNextState(unittest.TestCase
         assert np.isclose(max_deltaV_abs, 9.126598E-07)
         assert np.allclose(observed_values, expected_values, atol=1E-6)
 
-    def test_EnvMountainCarDiscreteActions_PolRandomWalk_Met_TestOneCase(self):
+    def test_EnvMountainCarDiscreteStateAndActions_PolRandomWalk_Met_TestOneCase_NoAssertions(self):
         max_iter = 100
         estimator = estimators_miscellanea.EstValueFunctionOfflineDeterministicNextState(self.env_mountain, gamma=1.0)
         niter, mean_deltaV_abs, max_deltaV_abs, max_deltaV_rel_abs = \
@@ -143,22 +143,22 @@ class Test_EstStateValueV_MetOffline_EnvDeterministicNextState(unittest.TestCase
                 "mean|delta(V)| = {}, max|delta(V)| = {}, max|delta_rel(V)| = {} (mean(V) = {:.6f}, mean|V| = {:.6f}):\n{}" \
               .format(self.env_mountain.getNumStates(), niter, max_iter, mean_deltaV_abs, max_deltaV_abs, max_deltaV_rel_abs, np.mean(state_values), np.mean(np.abs(state_values)), state_values))
 
-        plt.figure(figsize=(20,10))
+        plt.figure(figsize=(20, 10))
         plt.plot(state_values, 'r.-')
         plt.title("Estimated value function (mean|V| = {})".format(np.mean(np.abs(state_values))))
 
-        fig = plt.figure(figsize=(20,10))
+        fig = plt.figure(figsize=(20, 10))
         ax = fig.subplots(1,1)
         ax.plot(state_values, 'r.-')
         for x in range(0, np.prod(self.env_mountain.shape), self.env_mountain.shape[0]):
             plt.axvline(x, color="gray")
         ax.set_ylim((min_state_value_non_terminal, max_state_value_non_terminal))
-        ax.set_xlabel("linear state index (grouped by {})".format(self.env_mountain.getShapeNames()[1]))
-        ax.set_title("Estimated value function (scaled to non-terminal states")
+        ax.set_xlabel("Linear state index (grouped by {})".format(self.env_mountain.getShapeDisplayNames()[1]))
+        ax.set_title("Estimated value function (scaled to non-terminal states)")
 
-        positions, velocities = self.env_mountain.get_positions(), self.env_mountain.get_velocities()
-        fig = plt.figure(figsize=(20,10))
-        ax = fig.subplots(1,1)
+        positions, velocities = self.env_mountain.getPositions(), self.env_mountain.getVelocities()
+        fig = plt.figure(figsize=(20, 10))
+        ax = fig.subplots(1, 1)
         ax.plot(positions, np.mean(state_values_2d,
                 axis=self.env_mountain.getVelocityDimension()), '.-', color=self.env_mountain.getPositionColor()) # Sum along the different velocities
         ax.plot(velocities, np.mean(state_values_2d,
@@ -1900,10 +1900,11 @@ class Test_EstValueFunctionV_MetMCLambda_EnvMountainCar(unittest.TestCase, test_
         # cls.env = gym.make('MountainCar-v0')   # Here we create in principle a MountainCarEnv environment because this environment is registered with gym.register() or similar.
         # See also this implementation of the Mountain Car: https://github.com/JJonahJson/MountainCar-v313/blob/master/code/main.py
 
-        # Environment with discretized position and velocity with nx and nv points respectively
-        # nx = 20  #20
+        # Environment with discretized velocity: nv is the number of distinct discrete velocity values
+        # The number of distinct discrete position values is determined automatically by the discrete-state mountain car environment in order to guarantee
+        # that the car changes discrete state most of the time an action is taken.
         nv = 5  # 20
-        cls.env = mountaincars.MountainCarDiscrete(nv)
+        cls.env = mountaincars.MountainCarDiscrete(nv, discrete_state=True)
 
         cls.policy_rw = random_walks.PolRandomWalkDiscrete(cls.env)
 
@@ -1940,13 +1941,13 @@ class Test_EstValueFunctionV_MetMCLambda_EnvMountainCar(unittest.TestCase, test_
         # in MountainCar.reset(). The Initial State Distribution (ISD) is an attribute of toy_text.discrete environment.
 
         # First find all the terminal states which should be excluded from the possible initial states!
-        idx_states_non_terminal = self.env.get_indices_for_non_terminal_states()
+        idx_states_non_terminal = self.env.get_indices_non_terminal_states()
         self.env.isd = np.array([1.0 / len(idx_states_non_terminal) if idx in idx_states_non_terminal else 0.0
                                  for idx in range(self.env.getNumStates())])
         # print("ISD:", self.env.isd)
         print("Steps: dx = {:.3f}, dv = {:.3f}".format(self.env.dx, self.env.dv))
-        print("Positions ({}): {}".format(len(self.env.get_positions()), self.env.get_positions()))
-        print("Velocities ({}): {}".format(len(self.env.get_velocities()), self.env.get_velocities()))
+        print("Positions ({}): {}".format(len(self.env.getPositions()), self.env.getPositions()))
+        print("Velocities ({}): {}".format(len(self.env.getVelocities()), self.env.getVelocities()))
         print("Goal is reached at position: {}".format(self.env.goal_position))
         sim = DiscreteSimulator(self.env, agent_rw_mc, debug=False)
 
@@ -1987,10 +1988,8 @@ class Test_EstValueFunctionV_MetMCLambda_EnvMountainCar(unittest.TestCase, test_
             ax2 = ax.twinx()
             legend_ax2 = []
             ax2.plot(np.arange(self.nepisodes + 1), deltaV_rel_max_smooth * 100, 'r-', linewidth=1)
-            ax2.plot(np.arange(self.nepisodes + 1), learning_info['deltaV_rel_abs_mean'] * 100, 'r--',
-                     linewidth=0.5)
-            ax2.plot(np.arange(self.nepisodes + 1), learning_info['prop_states_deltaV_relevant'] * 100, 'k--',
-                     linewidth=0.5)
+            ax2.plot(np.arange(self.nepisodes + 1), learning_info['deltaV_rel_abs_mean'] * 100, 'r--', linewidth=0.5)
+            ax2.plot(np.arange(self.nepisodes + 1), learning_info['prop_states_deltaV_relevant'] * 100, 'k--', linewidth=0.5)
             legend_ax2 += ["max|relative change| with sign ({}-tap-smoothed)".format(window_size),
                            "mean|relative change|",
                            "proportion states with |rel change| > 1%"]
@@ -2006,23 +2005,13 @@ class Test_EstValueFunctionV_MetMCLambda_EnvMountainCar(unittest.TestCase, test_
             ax_n.set_ylabel("% states")
             ax_n.set_ylim((0, 100))
             ax_n.legend(["% states"], loc='upper left')
-            ax_n.set_title(
-                "% states used for summary statistics (num states = {}) (average is computed on states with visit count > 0)".format(
-                    self.env.getNumStates()))
+            ax_n.set_title("% states used for summary statistics (num states = {}) (average is computed on states with visit count > 0)".format(self.env.getNumStates()))
 
             fig.suptitle("Convergence of the estimated value function V (gamma={:.2f}, lambda={:.2f}, alpha={:.2f}, {}, max #steps = {})" \
                         .format(params['gamma'], params['lambda'], params['alpha'], params['alpha_update_type'].name, self.max_time_steps_per_episode))
 
             fig = plt.figure(figsize=(20, 10))
             ax, ax2 = fig.subplots(1, 2)
-
-            # ax.plot(self.env.reshape_from_2d_to_1d(state_counts))
-            # for x in range(0, np.prod(self.env.shape), self.env.shape[0]):
-            #    ax.axvline(x, color="gray")
-            # ax.axhline(0, color="gray")
-            # ax.set_xlabel("linear state index (grouped by {})".format(self.env.getShapeNames()[1]))
-            # ax.set_ylabel("Visit count")
-            # ax.set_title("State visit count (grouped by {})".format(self.env.getShapeNames()[1]))
 
             values = agent_rw_mc.getLearner().getV().getValues()
             ax.hist(values, bins=30, weights=np.repeat(1 / len(values), len(values)) * 100)
@@ -2031,11 +2020,9 @@ class Test_EstValueFunctionV_MetMCLambda_EnvMountainCar(unittest.TestCase, test_
             ax.set_ylabel("Percent count")
             ax.set_title("Distribution of V(s) values")
 
-            positions, velocities = self.env.get_positions(), self.env.get_velocities()
-            ax2.plot(positions, np.sum(state_counts, axis=self.env.getVelocityDimension()), '.-',
-                     color=self.env.getPositionColor())  # Sum along the different velocities
-            ax2.plot(velocities, np.sum(state_counts, axis=self.env.getPositionDimension()), '.-',
-                     color=self.env.getVelocityColor())  # Sum along the different positions
+            positions, velocities = self.env.getPositions(), self.env.getVelocities()
+            ax2.plot(positions, np.sum(state_counts, axis=self.env.getVelocityDimension()), '.-', color=self.env.getPositionColor())  # Sum along the different velocities
+            ax2.plot(velocities, np.sum(state_counts, axis=self.env.getPositionDimension()), '.-', color=self.env.getVelocityColor())  # Sum along the different positions
             ax2.legend(["Visit count on positions", "Visit count on velocities"])
             ax2.set_xlabel("Position / Velocity")
             ax2.set_ylabel("Visit count")
@@ -2079,13 +2066,13 @@ class Test_EstValueFunctionV_MetMCLambda_EnvMountainCar(unittest.TestCase, test_
         # in MountainCar.reset(). The Initial State Distribution (ISD) is an attribute of toy_text.discrete environment.
 
         # First find all the terminal states which should be excluded from the possible initial states!
-        idx_states_non_terminal = self.env.get_indices_for_non_terminal_states()
+        idx_states_non_terminal = self.env.get_indices_non_terminal_states()
         self.env.isd = np.array([1.0 / len(idx_states_non_terminal) if idx in idx_states_non_terminal else 0.0
                                  for idx in range(self.env.getNumStates())])
         # print("ISD:", self.env.isd)
         print("Steps: dx = {:.3f}, dv = {:.3f}".format(self.env.dx, self.env.dv))
-        print("Positions: {}".format(self.env.get_positions()))
-        print("Velocities: {}".format(self.env.get_velocities()))
+        print("Positions: {}".format(self.env.getPositions()))
+        print("Velocities: {}".format(self.env.getVelocities()))
         sim_mc = DiscreteSimulator(self.env, agent_rw_mc, debug=False)
         sim_lambda_return = DiscreteSimulator(self.env, agent_rw_lambda_return, debug=False)
 
@@ -2152,10 +2139,7 @@ if __name__ == '__main__':
         test_suite_offline = unittest.TestSuite()
         test_suite_offline.addTest(Test_EstStateValueV_MetOffline_EnvDeterministicNextState("test_EnvGridworld1DClassic_PolRandomWalk_Met_TestOneCase"))
         test_suite_offline.addTest(Test_EstStateValueV_MetOffline_EnvDeterministicNextState("test_EnvGridworld1DOneTerminal_PolRandomWalk_Met_TestOneCase"))
-        # DM-2022/06: For now we skip the test on the Mountain Car because the estimation takes too long to converge because
-        # we are using a random policy and reaching the reward under this policy is very rare...
-        # We will reactivate this test when we find the optimum policy and then we estimate the value function under the optimum policy.
-        #test_suite_offline.addTest(Test_EstStateValueV_MetOffline_EnvDeterministicNextState("test_EnvMountainCarDiscreteActions_PolRandomWalk_Met_TestOneCase"))
+        test_suite_offline.addTest(Test_EstStateValueV_MetOffline_EnvDeterministicNextState("test_EnvMountainCarDiscreteStateAndActions_PolRandomWalk_Met_TestOneCase_NoAssertions"))
 
         # --- Gridworld tests
         test_suite_gw1d = unittest.TestSuite()

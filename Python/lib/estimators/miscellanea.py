@@ -57,8 +57,8 @@ class EstValueFunctionOfflineDeterministicNextState:
 
         print("\n\nTerminal states ({} out of {}): {}".format(len(self.env.getTerminalStates()), self.env.getNumStates(), self.env.getTerminalStates()))
         # WARNING: Only valid for MountainCarDiscrete environment
-        #print("Positions: {}".format(self.env.get_positions()))
-        #print("Velocities: {}".format(self.env.get_velocities()))
+        #print("Positions: {}".format(self.env.getPositions()))
+        #print("Velocities: {}".format(self.env.getVelocities()))
         # WARNING: Only valid for MountainCarDiscrete environment
         print("Initial V(s) estimate: {}".format(self.V.getValues()))
 
@@ -96,7 +96,7 @@ class EstValueFunctionOfflineDeterministicNextState:
                     if DEBUG_ESTIMATORS:
                         print("state: {}, action: {} => next state = {}, reward = {} (done? {})".format(s, a, ns, reward, done))
                         print("state: {} ({}), action: {} => next state = {} ({}), reward = {} (done? {})" \
-                              .format(s, self.env.getStateFromIndex(s), a, ns, self.env.getStateFromIndex(ns), reward, done))
+                              .format(s, self.env.getStateFromIndex(s, simulation=False), a, ns, self.env.getStateFromIndex(ns, simulation=False), reward, done))
 
                     # The new V(s) value is the PLAIN AVERAGE over all possible actions (since we are considering a random walk)
                     # If the policy were not random, we should multiply the V_observed value by the probability of taken action "a" given the current state s.

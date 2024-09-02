@@ -443,7 +443,9 @@ class PolNN:
         It must define the following methods:
         - getNumActions()
         - getNumStates()
-        - getStateFromIndex(): returns the actual state of the environment from the 1D state index (in EnvironmentDiscrete the two values are the same)
+        - getIndexFromState(): returns the 1D state index from the state of the environment used in simulations.
+        - getStateFromIndex(): returns the actual (physical) state of the environment from the 1D state index
+        (i.e. the continuous-valued state (x, v) in the Mountain Car environment from the 1D state index in the EnvironmentDiscrete environment).
         - seed()
 
     nn_model: Neural network inheriting from torch.nn.Module
@@ -641,7 +643,7 @@ class PolNN:
             raise NotImplementedError(f"The model stored in the policy must be of type `nn_models.NNBackprop` in order to set its parameter values: {type(self.nn_model)}")
         self.nn_model.set_params(param_values)
 
-    def choose_action(self, state):
+    def choose_action(self, state) -> int:
         """
         Choose an action given the state
 
@@ -661,7 +663,8 @@ class PolNN:
         """
         Returns the policy values in a 2D array indexed by each state and each action of the environment
 
-        It is ASSUMED that the state space is discrete!
+        It is ASSUMED that the state space is finite! (as the states on which the policy is evaluated
+        is given by all the states of the environment --i.e. they are a finite number).
         """
         policy = np.nan * np.ones((self.env.getNumStates(), self.env.getNumActions()))
         for s in self.env.getAllStates():
@@ -669,60 +672,44 @@ class PolNN:
             # on which the policy depends and thus can be evaluated
             state = s
             if self.env.isStateContinuous():
-                state = self.env.getStateFromIndex(s)
+                state = self.env.getStateFromIndex(s, simulation=False)  # simulation=False => get the actual physical state of the environment, not the state used in simulations (which may not be the same, for instance in the discrete-state mountain car where the state used in simulations is the 1D state index). We need the actual physical state because this is the state that is used as input of the neural network model used as policy model implemented here.
             for a in range(self.env.getNumActions()):
                 policy[s][a] = self.getPolicyForAction(a, state)
 
         return policy
 
-    def getPolicyForState(self, state):
-        "Returns a tensor containing the probability of choosing each possible action for the given state"
+    def getPolicyForState(self, state_simulation) -> tensor:
+        "Returns a tensor containing the probability of choosing each possible action for the given simulation state"
         # Compute the action preferences output by the neural network (each output node represents a possible action)
-        # NOTE: when the number of inputs of the neural network is either 1 or the number of (discrete) states in the environment,
-        # parameter `state` is assumed to be a 1D state index.
-        # Otherwise, when the number of inputs in the neural network is any integer number (i.e. not related to the number of (discrete) states in the environment,
-        # parameter `state` is assumed to contain a not-necessarily index state and possibly continuous-valued state (e.g. Mountain Car).
         if self.nn_model.getNumInputs() == self.env.getNumStates():
+            # Get the 1D index associated to the simulation state, which is needed to define which input neuron is activated
+            idx_state = self.env.getIndexFromState(state_simulation)
             input = np.zeros(self.env.getNumStates(), dtype=int)
-            input[self.env.getIndexFromState(state)] = 1
+            input[idx_state] = 1
             proba_actions = F.softmax(self.nn_model(input), dim=0)
         elif self.nn_model.getNumInputs() == 1:
-            proba_actions = F.softmax(self.nn_model([state]), dim=0)
+            proba_actions = F.softmax(self.nn_model([state_simulation]), dim=0)
         else:
-            state_multidim = state
+            # The simulation state can be ANYTHING, so we need to distinguish between the case in which the state is the physical state
+            # (e.g. a continuous-valued state (x, v) in the continuous-state Mountain Car) or an index representing the state (e.g. the state used when simulating the discrete-state Mountain Car)
+            state_multidim = state_simulation
             if not self.env.isStateContinuous():
-                # Convert the state to the input size of the model which is assumed to be defined by the environment state structure (e.g. state = (x, v) in Mountain Car)
-                # NOTE: if the environment handles continuous-valued states, `state` is assumed to be a real-valued (possibly multi-dimensional) state.
-                # Otherwise, `state` is assumed to be a state index
-                state_multidim = self.env.getStateFromIndex(state)
+                # `state_simulation` is assumed to be a 1D state index
+                # => Convert the 1D state index into a multidimensional (physical) state that feeds the neural network used to model the policy
+                idx_state = state_simulation
+                state_multidim = self.env.getStateFromIndex(idx_state, simulation=False)
+                    ## Note: we use simulation=False in order to get the actual physical state of the environment,
+                    ## not the state used in simulations, returned when simulation=True, which may not be the same...
+                    ## for instance in the discrete-state Mountain Car, the state used in simulations is the 1D state index
+                    ## because the environment is a discrete-state environment (i.e. where the dynamics is determined by the discrete state, NOT by the continuous state).
             proba_actions = F.softmax(self.nn_model(state_multidim), dim=0)
-
-        # DM-2024/08/09: Previous version that does not use F.softmax() because of problem with sum-to-1 of the probabilities generated by F.softmax()... which apparently went away!
-        # if self.nn_model.getNumInputs() == self.env.getNumStates():
-        #     # The input layer is a one-hot (dummy) encoding of the states
-        #     input = np.zeros(self.env.getNumStates(), dtype=int)
-        #     input[state] = 1
-        #     exp_preferences = np.exp(self.nn_model(input).tolist())
-        # elif self.nn_model.getNumInputs() == 1:
-        #     exp_preferences = np.exp(self.nn_model([state]).tolist())  # We use tolist() to avoid the error message "Numpy not found"
-        # else:
-        #     # Convert the state to the input size of the model which is assumed to be defined by the environment state structure (e.g. state = (x, v) in Mountain Car)
-        #     state_multidim = self.env.getStateFromIndex(state)
-        #     exp_preferences = np.exp(self.nn_model(state_multidim).tolist())  # We use tolist() to avoid the error message "Numpy not found"
-        #
-        # Compute the action probabilities from the action preferences using the soft-max function
-        # proba_actions = exp_preferences / np.sum( exp_preferences )
-            ## Note: we could compute the probability of the different actions using the torch function `F.softmax(self.nn_model([state]), dim=0).tolist()`
-            ## but astonishingly this gives probabilities that do not sum up to 1!!!
-            ## (not exactly at least, they sum up to e.g. 0.999999723, but this makes the call np.random.choice() fail)
-        #print(f"State: {state}, Prob. Actions = {proba_actions}")
 
         # Note: we do NOT use np.isclose() nor np.sum() to avoid the error "numpy is not available" which happens if numpy's version is not so recent w.r.t. torch's version
         assert nn.init.torch.isclose(nn.init.torch.sum(proba_actions), tensor(1.0), atol=1E-4)
 
         return proba_actions
 
-    def getPolicyForAction(self, action, state):
+    def getPolicyForAction(self, action, state) -> float:
         """
         Returns the value of the policy for the given action when the environment is at the given state
 
@@ -738,7 +725,7 @@ class PolNN:
         proba_actions = self.getPolicyForState(state)
         policy_value_for_action = proba_actions[action]
 
-        return policy_value_for_action
+        return policy_value_for_action.item()   # Calls item() to return a value and NOT a tensor
 
     def getModel(self):
         return self.nn_model

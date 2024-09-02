@@ -11,8 +11,6 @@ if __name__ == "__main__":
     import runpy
     runpy.run_path('../../setup.py')
 
-from enum import Enum, unique
-
 import unittest
 from typing import Union
 
@@ -486,7 +484,7 @@ class Test_EstPolicy_EnvMountainCar(unittest.TestCase):
     # See the only answer by Navy Cheng.
 
     @classmethod
-    def setUpClass(cls, nv=5,
+    def setUpClass(cls, env_discrete=True, nx=20, nv=21, factor_for_force_and_gravity=20, factor_force=1.0, factor_max_speed=1.0,
                    dict_function_approximations=None,
                    nn_input: Union[InputLayer, int]=InputLayer.ONEHOT,
                    nn_hidden_layer_sizes: list=[8],
@@ -511,7 +509,8 @@ class Test_EstPolicy_EnvMountainCar(unittest.TestCase):
         cls.reset_params = dict({'min': -1, 'max': +1})  # Only used when reset_method = ResetMethod.RANDOM_UNIFORM
 
         #-- Environment characteristics
-        cls.env_mc = MountainCarDiscrete(nv, factor_for_force_and_gravity=factor_for_force_and_gravity, seed_reset=cls.seed, debug=cls.debug)
+        cls.env_mc = MountainCarDiscrete(nx=nx, nv=nv, factor_for_force_and_gravity=factor_for_force_and_gravity, factor_force=factor_force, factor_max_speed=factor_max_speed,
+                                         discrete_state=env_discrete, seed_reset=cls.seed)
         cls.nS = cls.env_mc.getNumStates()
 
         #-- Policy characteristics
@@ -561,11 +560,22 @@ class Test_EstPolicy_EnvMountainCar(unittest.TestCase):
         sim_for_initial_exploration = DiscreteSimulator(cls.env_mc, agent_for_initial_exploration, debug=cls.debug)
 
         learner = sim_for_initial_exploration.run_exploration(t_learn=0, max_time_steps=T, seed=cls.seed, verbose=cls.debug, verbose_period=1)
-        absorption_set = compute_set_of_frequent_states(learner.getStates(), threshold=threshold_absorption_set)
-        print(f"Distribution of state frequency on n={learner.getNumSteps()} steps:\n{pd.Series(learner.getStates()).value_counts(normalize=True)}")
-        print(f"\nSelected absorption set (1D-index, 2D-index, 2D-discrete) ({len(absorption_set)} states):")
-        for s in absorption_set:
-            print(str(s) + ': ' + str(cls.env_mc.get_state_discrete_from_index(s)) + ', ' + str(cls.env_mc.get_state_from_index(s)))
+
+        # Compute the absorption set
+        if cls.env_mc.isStateContinuous():
+            state_indices = [cls.env_mc.getIndexFromState(state) for state in learner.getStates()]
+            absorption_set = compute_set_of_frequent_states_with_zero_reward(state_indices, learner.getRewards(), threshold=threshold_absorption_set)
+            print(f"Distribution of state frequency on n={learner.getNumSteps()} steps:\n{pd.Series(learner.getStates()).value_counts(normalize=True)}")
+            print(f"Distribution of state frequency on n={learner.getNumSteps()} steps:\n{pd.Series(state_indices).value_counts(normalize=True)}")
+            print(f"\nSelected absorption set (1D-index, 2D-discrete) ({len(absorption_set)} states):")
+            for s in absorption_set:
+                print(str(s) + ': ' + str(cls.env_mc.get_state_discrete_from_index(s)))
+        else:
+            absorption_set = compute_set_of_frequent_states_with_zero_reward(learner.getStates(), learner.getRewards(), threshold=threshold_absorption_set)
+            print(f"Distribution of state frequency on n={learner.getNumSteps()} steps:\n{pd.Series(learner.getStates()).value_counts(normalize=True)}")
+            print(f"\nSelected absorption set (1D-index, 2D-index, 2D-discrete) ({len(absorption_set)} states):")
+            for s in absorption_set:
+                print(str(s) + ': ' + str(cls.env_mc.get_index_2d_from_index(s)) + ', ' + str(cls.env_mc.getStateFromIndex(s, simulation=False)))
 
         # Reset state of environment to a start state
         cls.env_mc.reset()
@@ -576,25 +586,6 @@ class Test_EstPolicy_EnvMountainCar(unittest.TestCase):
                 raise ValueError(f"All states in the absorption set must be between 0 and {cls.nS - 1}: {state}")
 
         activation_set = set()
-        if False:
-            # DM-2024/08/09: We no longer estimate the activation set because:
-            # - it is incorrectly defined here as the set of states that can transition TO the absorption set, as actually it is the OPPOSITE: the set of states to where we can go FROM the absorption set.
-            # - the activation set will be estimated during the initial exploration of the environment in Fleming-Viot learning tasks.
-            # Activation set
-            print("Computing the Activation Set, i.e. the outer boundary of the absorption set...")
-            for i, s in enumerate(absorption_set):
-                print(f"Processing state {s} ({i+1} of {len(absorption_set)})...")
-                for state_adj in cls.env_mc.get_from_adjacent_states(cls.env_mc.get_state_discrete_from_index(s)):
-                    idx_state_adj = cls.env_mc.getIndexFromState(state_adj)
-                    if idx_state_adj is not None and idx_state_adj not in absorption_set:
-                        activation_set.add(idx_state_adj)
-            print(f"\nIdentified activation set (1D-index, 2D-index, 2D-discrete) ({len(activation_set)} states):")
-            for s in activation_set:
-                print(str(s) + ': ' + str(cls.env_mc.get_state_discrete_from_index(s)) + ', ' + str(cls.env_mc.getStateFromIndex(s)))
-
-        #-- Possibly update the set of start states of the environment (by updating its Initial State Distribution)
-        # Goal: fair comparison among learners, by having all learners start at the same state (or a state chosen with the same distribution) as the FV learner, when an episode is completed.
-
 
         #-- Cycle characteristics
         # Set of absorbing states, used to define a cycle as re-entrance into the set
@@ -657,7 +648,6 @@ class Test_EstPolicy_EnvMountainCar(unittest.TestCase):
 
         # Fleming-Viot learner
         absorption_set = cls.A
-        activation_set = cls.B
         learner_fv = fv.LeaFV(  cls.env_mc,
                                 N, T, absorption_set, activation_set=None,  # The activation set is estimated by the initial exploration of the environment
                                 states_of_interest=cls.env_mc.terminal_states,
@@ -680,6 +670,12 @@ class Test_EstPolicy_EnvMountainCar(unittest.TestCase):
 
     def getEnv(self):
         return self.env_mc
+
+    def getAbsorptionSet(self):
+        return self.A
+
+    def getActivationSet(self):
+        return self.B
 
 
 if __name__ == "__main__":

@@ -160,7 +160,7 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
         "Returns the 1D index representing the environment state"
         return self.s
 
-    def getStateFromIndex(self, s):
+    def getStateFromIndex(self, s, simulation=True):
         "Returns the environment state from the given 1D state index. See more details in documentation for getIndexFromState()"
         return s
 
