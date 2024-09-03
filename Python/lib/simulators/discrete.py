@@ -565,7 +565,8 @@ class Simulator:
         else:
             start_state = choose_state_from_set(set(probas_stationary_start_state_et.keys()), probas_stationary_start_state_et)
         print(f"SINGLE simulation for the estimation of the expected reabsorption time E(T_A) starts at state s={start_state} "
-              f"(when None, the simulation starts following the Initial State Distribution of the environment: {self.env.getInitialStateDistribution()}")
+              f"(when None, the simulation starts following the Initial State Distribution of the environment: "
+              f"\n{self.env.getInitialStateDistribution() if len(self.env.getInitialStateDistribution()) <= 20 else 'Not printed because too large (' + str(len(self.env.getInitialStateDistribution())) + ' elements)'}")
         state_values, action_values, advantage_values, state_counts_et, _, _, learning_info = \
             self._run_single_continuing_task(
                             t_learn=dict_params_info.get('t_learn', 0),
@@ -617,6 +618,8 @@ class Simulator:
             # we do NOT need to estimate the average reward because it is cancelled out in the Advantage function Q(s,a) - V(s)
             # which is the term that weights the log-policy value contributing to the loss function that is minimized
             # to estimate the optimal theta parameters of the policy.
+            # However, we would need the average reward if we estimate the advantage function in a better way,
+            # namely as R(n+1) - avg.R(n) + V(S(n+1)) - V(S(n)) at each simulation step n.
             expected_absorption_time = learning_info['expected_cycle_time'] if learning_info['expected_cycle_time'] > 0.0 else learning_info['nsteps']
             print(f"FV simulation on N={N} particles starts...")
             # TEMPORARY (2023/12/05) To test whether FV learns the optimal policy when the values of the states and actions taken in set A are NOT estimated at all
@@ -662,6 +665,10 @@ class Simulator:
                             stop_if_prop_absorbed_particles_reached_regardless_of_time_steps=dict_params_simul.get('stop_if_prop_absorbed_particles_reached_regardless_of_time_steps', False),
                             dist_proba_for_start_state=probas_stationary_start_state_fv,
                             expected_absorption_time=expected_absorption_time,
+                            # IMPORTANT: (2024/08/11) Using a previously estimated average reward as initial estimate of the average reward estimation by FV
+                            # ASSUMES that that initial estimate only contains reward information from OUTSIDE the absorption set A!
+                            # This may not be the case if the absorption set A contains states with non-zero reward...
+                            # TODO: (2024/08/11) Pass to the FV estimator of the average reward an initial estimation of the average reward that includes ONLY contributions from rewards observed OUTSIDE A (as explained above)
                             estimated_average_reward=estimated_average_reward_before_single_simulation  if use_average_reward_stored_in_learner and estimated_average_reward_before_single_simulation is not None
                                                                                                         else average_reward_from_single_simulation,
                             epsilon_random_action=dict_params_simul.get('epsilon_random_action', 0.0),
@@ -675,8 +682,12 @@ class Simulator:
             #print(f"Shape of proba surv and phi: {df_proba_surv.shape}")
             print("Expected reabsorption time E(T_A): {:.3f} ({} cycles)".format(expected_absorption_time, learning_info['num_cycles']))
             print(f"proba_surv P(T>t):\n{df_proba_surv}")
-            average_phi_values = dict([(x, np.mean(phi[x]['Phi'])) for x in phi.keys()])
-            print(f"Time-average Phi value per state of interest:\n{average_phi_values}")
+            print(f"Time-average Phi value per state of interest:")
+            if len(phi) <= 20:
+                _average_phi_values = dict([(x, np.mean(phi[x]['Phi'])) for x in phi.keys()])
+                print(_average_phi_values)
+            else:
+                print(f"(not printed because too many states of interest x in Phi(t, x) ({len(phi)})")
             print(f"Max survival time: {max_survival_time}")
 
             assert expected_absorption_time is not None
@@ -687,6 +698,16 @@ class Simulator:
                 probas_stationary = dict.fromkeys(integrals, 0.0)
                 for _state, _integral_for_state in integrals.items():
                     probas_stationary[_state] = _integral_for_state / uniform_jump_rate / expected_absorption_time
+                # Note that the expected reward retrieved below may or may not contain information about the rewards in A.
+                # This depends on what the _run_simulation_fv.update_average_reward() function does at the end of the simulation,
+                # i.e. when calculating the FINAL average reward computed by the FV excursion:
+                # - If the function only considers the rewards observed outside A to compute the FINAL average reward, then clearly no reward from A is included in the
+                # expected reward retrieved below.
+                # - If the function blends the average reward estimated from the initial exploration into the FINAL average reward, then the rewards observed in A are included.
+                #
+                # PERHAPS a better approach for an estimation of the expected reward that takes into account both the rewards received in A and those outside A is
+                # to split the rewards observed during the initial exploration into "inside A" and "outside A" and then use "outside A" part to blend it into the FV
+                # estimation of the expected reward outside A, and finally SUM the two rewards (possibly weighted sum): "inside A" and "outside A"
                 expected_reward = self.agent.getLearner().getAverageReward()
             else:
                 # The expected reward and stationary probabilities have NOT yet been computed (e.g. iteratively by the FV simulation)
@@ -704,6 +725,15 @@ class Simulator:
                 # so that we can retrieve the average reward estimated by FV by using the method GenericLearner.getAverageReward()
                 self.agent.getLearner().setAverageReward(expected_reward)
 
+            ##### TEMPORARY PATCH (WORKED!) (TO TRY TO FIX THE UNLEARNING OF THE POLICY IN THE MOUNTAIN CAR PROBLEM) #########
+            # If the expected reward estimated by FV is 0.0, DISCARD IT and SET IT TO the expected reward estimated by the single simulation
+            # if expected_reward == 0.0:
+            #     expected_reward_to_restore = average_reward_from_single_simulation
+            #     self.agent.getLearner().setAverageReward(expected_reward_to_restore)
+            #     print(f"***** ESTIMATED EXPECTED REWARD BY FV (solely w.o. info from previously estimated avg. reward) IS ZERO!"
+            #           f"\n***** => The previously estimated expected reward has been restored in the learner! (restored reward = {expected_reward_to_restore})")
+            ##### TEMPORARY PATCH (WORKED!) (TO TRY TO FIX THE UNLEARNING OF THE POLICY IN THE MOUNTAIN CAR PROBLEM) #########
+
             if True or DEBUG_ESTIMATORS or show_messages(dict_params_info.get('verbose', False),
                                                  dict_params_info.get('verbose_period', 1),
                                                  dict_params_info.get('t_learn', 0)):
@@ -711,13 +741,19 @@ class Simulator:
                 #pd.set_option('display.max_rows', None)
                 #print("Phi(t):\n{}".format(phi))
                 #pd.set_option('display.max_rows', max_rows)
-                print("Integrals: {}".format(integrals))
+                print("Integrals:")
+                if len(integrals) <= 20:
+                    print(integrals)
+                else:
+                    print(f"(not printed because too many states of interest x in Integral(x): {len(integrals)})")
                 print("Expected reabsorption time (on {} cycles): {}".format(learning_info['num_cycles'], expected_absorption_time))
                 print("Stationary probabilities: {}".format(probas_stationary))
                 print("Expected reward = {}".format(expected_reward))
                 print("Average reward stored in learner = {}".format(self.agent.getLearner().getAverageReward()))
-                assert np.isclose(expected_reward, self.agent.getLearner().getAverageReward()), \
-                    f"The average reward estimated by FV ({expected_reward}) must be equal to the average reward stored in the FV learner ({self.agent.getLearner().getAverageReward()})"
+                ##### TEMPORARY PATCH (comment assertion when applying patch) #####
+                #assert np.isclose(expected_reward, self.agent.getLearner().getAverageReward()), \
+                #    f"The average reward estimated by FV ({expected_reward}) must be equal to the average reward stored in the FV learner ({self.agent.getLearner().getAverageReward()})"
+                ##### TEMPORARY PATCH (comment assertion when applying patch) #####
 
         return state_values, action_values, advantage_values, state_counts_all, state_counts_et, probas_stationary, expected_reward, expected_absorption_time, n_cycles_absorption_used, \
                time_last_absorption, max_survival_time, n_events_et, n_events_fv
@@ -1357,7 +1393,7 @@ class Simulator:
             dict_lines = dict({'average_reward': [dict_axes['average_reward'].plot(0, learner.getAverageReward(), '.-', color="red", linestyle="dashed")[0],
                                                   dict_axes['average_reward'].plot(0, learner.getAverageReward(), '.-', color="green")[0]]})
             # Set the maximum X axis value if the number simulation steps to run in advance is known
-            dict_axes['average_reward'].set_xlim((None, max_time_steps_for_absorbed_particles_check)) if max_time_steps_for_absorbed_particles_check < +np.Inf else None
+            dict_axes['average_reward'].set_xlim((None, max_time_steps))
             dict_axes['average_reward'].set_xlabel("Survival time contributing to P(T>t)")
             dict_axes['average_reward'].set_ylabel("Estimated average reward")
             dict_axes['average_reward'].legend(["FV-based average reward", "Weighted initial + FV-based average reward"])
@@ -1448,8 +1484,10 @@ class Simulator:
                 # we want a stable estimate of the average reward over all episodes.
                 # TODO: (2024/01/29) Revise the correct use of the `done` variable here, instead of `done_episode`, because actually when we are done by `done`, this line will NEVER be executed because we will NOT enter again the `while done` loop...
                 # DM-2024/04/22: Uncomment the following set of info['average_reward'] if we want to use a fixed value for the average reward as correction at every learning step
-                #if estimated_average_reward is not None:
-                #    info['average_reward'] = estimated_average_reward
+                ##### TEMPORARY PATCH (WORKED!) (TO TRY TO FIX THE UNLEARNING OF THE POLICY IN THE MOUNTAIN CAR PROBLEM) #########
+                # if estimated_average_reward is not None:
+                #     info['average_reward'] = estimated_average_reward
+                ##### TEMPORARY PATCH (WORKED!) (TO TRY TO FIX THE UNLEARNING OF THE POLICY IN THE MOUNTAIN CAR PROBLEM) #########
                 learner.learn(t, state, action, next_state, reward, done, info)
             if reward != 0.0:
                 print(f"*** NON ZERO REWARD!! (t={t}, P={idx_particle}, state={state} ({self.env.getStateFromIndex(state, simulation=False) if not self.env.isStateContinuous() else state}), action={action}, next_state={next_state} ({self.env.getStateFromIndex(next_state) if not self.env.isStateContinuous() else next_state}), reward={reward})")
