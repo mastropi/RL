@@ -164,6 +164,10 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
         "Returns the environment state from the given 1D state index. See more details in documentation for getIndexFromState()"
         return s
 
+    def getStateIndicesFromIndex(self, s):
+        "Returns the multidimensional state indices representing the actual environment state associated to the 1D state index"
+        raise NotImplementedError
+
     def getIndexFromState(self, state):
         """
         Returns the 1D index representation of the given environment state

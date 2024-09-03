@@ -85,6 +85,8 @@ class Simulator:
         - getInitialStateDistribution()
         - getV() --> returns the true state value function (which can be None, if unknown)
         - setInitialStateDistribution()
+        - plot_values()
+        - plot_points()
     IMPORTANT: The reset() method should return the index of the state to which the environment is reset.
 
     agent: Agent
@@ -1480,8 +1482,9 @@ class Simulator:
                         # the iterative update of the stationary probabilities, which in turn is used to compute the updated average reward.
                         updated_average_reward = update_average_reward(learner, survival_times, expected_absorption_time, estimated_average_reward_at_start_of_fv_process=estimated_average_reward)
                         if plot:
+                            # Compute the points to plot for the absorption set
                             self._update_plots(learner, t_learn, fig_V, fig_C, colors_V, len(colors_V.colors) if num_colors_in_colormap is None else num_colors_in_colormap,
-                                               t, max_time_steps_for_absorbed_particles_check, pause=pause, method_name="_run_simulation_fv, ")
+                                               t, max_time_steps, points_to_add_in_counts_plot=list(absorption_set), pause=pause, method_name="_run_simulation_fv, ")
                                 ## Notes:
                                 ## - We might pass `None` to `fig_C`, the parameter after `fig_V` if we want a new figure to be generated (so that we see the evolution of the state counts)
                                 ## - The parameter after `colors_V` defining the number of colors in the colormap is extracted from the length of attribute colors_V.colors
@@ -1634,8 +1637,10 @@ class Simulator:
             plt.figure()
             plt.step(df_proba_surv['t'], df_proba_surv['P(T>t)'], color="blue", where='post')
             for x in learner.dict_phi.keys():
-                plt.step(learner.dict_phi[x]['t'], learner.dict_phi[x]['Phi'], color="red", where='post')
-                plt.title(f"[_run_simulation_fv, Learning step {t_learn+1}]\nP(T>t) (blue) and Phi(t,x) (red) for state x = {x}")
+                # Choose a particular state to plot if needed
+                if True or x == 410:
+                    plt.step(learner.dict_phi[x]['t'], learner.dict_phi[x]['Phi'], color="red", where='post')
+                    plt.title(f"[_run_simulation_fv, Learning step {t_learn+1}]\nP(T>t) (blue) and Phi(t,x) (red) for state x = {x}")
 
         if plot:
             self._update_plots_at_episode_end(0, 1, learner, t_learn, fig_V, fig_V2, None, colors_V, None, 0.0, pause=pause, method_name="_run_simulation_fv, ")
@@ -4272,6 +4277,7 @@ class Simulator:
         return fig_V, fig_V2, fig_C, fig_RMSE_state, colors_V, fig_P
 
     def _update_plots(self, learner, t_learn, fig_V, fig_C, colors_V, colors_V_length, t, max_time_steps,
+                      points_to_add_in_counts_plot=None,    # These are points to add to the fig_C plot given as 1D state index format (e.g. the 1D state indices of the absorption set
                       pause=0.1, method_name="", fontsize_labels=LABELS_FONTSIZE, color_labels=LABELS_COLOR):
         # NOTE: If fig_C is None and a state counts plot should be generated SEPARATE from the state value function plot (because e.g. the environment is 2D),
         # a new figure is created by this method. This is useful when we want to see how the state counts evolve.
@@ -4282,8 +4288,10 @@ class Simulator:
         # For the AVERAGE reward criterion, plot the state value function referenced to V(s=0) as in this case V(s) is NOT unique
         ref_V = self._get_state_value(learner, 0) if self.agent.getLearner().getLearningCriterion() == LearningCriterion.AVERAGE else 0.0
         ax.plot(self.env.getAllStates(), learner.getV().getValues() - ref_V, linewidth=0.5, color=colors_V(t / colors_V_length))
+        ax.set_xlabel(f"1D state index (0 - {self.env.getNumStates()-1})")
+        ax.set_ylabel(f"V(s) - {ref_V}")
         ax.xaxis.set_major_locator(MaxNLocator(integer=True))
-        plt.title(f"[{method_name}UPDATE, Learning step {t_learn+1}]\nV(s) evolution (blueish: initial, reddish: final): # Steps={t} of {max_time_steps}")
+        plt.title(f"[{method_name}UPDATE, Learning step {t_learn+1}]\nV(s) evolution (blue: true, blueish: initial, reddish: final): # Steps={t} of {max_time_steps}", fontsize=10)
                   #f"\nSystem's time t = {t} of max {max_time_steps}, from state = {state} --> next state = {next_state} (V(s) = {np.round(self._get_state_value(learner, next_state), 3)})"
                   #f"\nV(state={state}) = {V_state_prev is not None and np.round(V_state_prev, 3) or 'N/A'} --> V(state={state}) = {np.round(self._get_state_value(learner, state), 3)} (delta(V) = {V_state_prev is not None and np.round(self._get_state_value(learner, state) - V_state_prev, 3) or 'N/A'}, {V_state_prev is not None and np.round((self._get_state_value(learner, state) - V_state_prev) / max(1, V_state_prev) * 100, 1) or 'N/A'}%)"
                   #f"\nCount[s] = {learner.getStateCounts()}, alpha[s] = {learner.getAlphasByState()}")
@@ -4316,16 +4324,13 @@ class Simulator:
             state_counts_mean = np.mean(learner.getStateCounts())
             state_counts_max = np.max(learner.getStateCounts())
 
-            shape = self.env.getShape()
-            arr_state_counts = learner.getStateCounts().reshape(shape)
-            colors_count = cm.get_cmap("Blues")
-            colornorm = plt.Normalize(vmin=0, vmax=np.max(arr_state_counts))
-            ax_C.imshow(arr_state_counts, cmap=colors_count, norm=colornorm)
-            ax_C.xaxis.set_major_locator(MaxNLocator(integer=True))
-            ax_C.yaxis.set_major_locator(MaxNLocator(integer=True))
+            arr_state_counts = learner.getStateCounts()
+            self.env.plot_values(arr_state_counts, ax=ax_C, cmap="Blues", vmin=0, vmax=np.max(arr_state_counts))
+            if points_to_add_in_counts_plot is not None:
+                self.env.plot_points(points_to_add_in_counts_plot, ax=ax_C, style='x', markersize=5, color="red")
             self._add_count_labels(ax_C, arr_state_counts, fontsize=fontsize_labels, color=color_labels)
 
-            plt.title("[{}UPDATE, Learning step {}]\nState counts by state: # visits: (min, mean, max) = ({:.0f}, {:.1f}, {:.0f})" \
+            plt.title("[{}UPDATE, Learning step {}]\nState visit counts: # visits: (min, mean, max) = ({:.0f}, {:.1f}, {:.0f})" \
                       .format(method_name, t_learn+1, state_counts_min, state_counts_mean, state_counts_max))
             plt.pause(pause)
             plt.draw()
@@ -4338,7 +4343,9 @@ class Simulator:
         # For the AVERAGE reward criterion, plot the state value function referenced to V(s=0) as in this case V(s) is NOT unique
         ref_V = self._get_state_value(learner, 0) if self.agent.getLearner().getLearningCriterion() == LearningCriterion.AVERAGE else 0.0
         plt.plot(self.env.getAllStates(), learner.getV().getValues() - ref_V, linewidth=0.5, color=colors_V(min(episode, nepisodes-1) / nepisodes))
-        plt.title(f"[{method_name}UPDATE@Episode, Learning step {t_learn+1}]\nState values evolution (blueish: initial, reddish: final): Episode {episode+1} of {nepisodes}")
+        plt.gca().set_xlabel(f"1D state index (0 - {self.env.getNumStates()-1})")
+        plt.gca().set_ylabel(f"V(s) - {ref_V}")
+        plt.title(f"[{method_name}UPDATE@Episode end, Learning step {t_learn+1}]\nV(s) evolution (blue: true, blueish: initial, reddish: final): Episode {episode+1} of {nepisodes}", fontsize=10)
         plt.pause(pause)
         plt.draw()
         # fig_V.canvas.draw()    # This should be equivalent to plt.draw()
@@ -4346,29 +4353,18 @@ class Simulator:
             # Update the 2D plots
             plt.figure(fig_V2.number)
             (ax_V2, ax_C) = fig_V2.subplots(1, 2)   # Layout is LEFT: state value function, RIGHT: state counts
-            shape = self.env.getShape()
-            rewards = self.env.getRewards()
 
-            state_values = np.asarray(learner.getV().getValues()).reshape(shape)
-            if len(rewards) > 0:
-                colornorm = plt.Normalize(vmin=np.min(list(rewards)), vmax=np.max(list(rewards)))
-            else:
-                colornorm = None
-            ax_V2.cla()
-            ax_V2.imshow(state_values, cmap=colors_V)  #, norm=colornorm) # (2023/11/23) If we use norm=colornorm we might see all blue colors... even if the V values vary from 0 to 1... why??
-            ax_V2.xaxis.set_major_locator(MaxNLocator(integer=True))
-            ax_V2.yaxis.set_major_locator(MaxNLocator(integer=True))
+            arr_state_values = np.asarray(learner.getV().getValues())
+            self.env.plot_values(arr_state_values, ax=ax_V2, cmap=colors_V)
+            ax_V2.set_title("State values, V(s)")
 
-            arr_state_counts = learner.getStateCounts().reshape(shape)
-            colors_count = cm.get_cmap("Blues")
-            colornorm = plt.Normalize(vmin=0, vmax=np.max(arr_state_counts))
+            arr_state_counts = learner.getStateCounts()
             ax_C.cla()
-            ax_C.imshow(arr_state_counts, cmap=colors_count, norm=colornorm)
-            ax_C.xaxis.set_major_locator(MaxNLocator(integer=True))
-            ax_C.yaxis.set_major_locator(MaxNLocator(integer=True))
+            self.env.plot_values(arr_state_counts, ax=ax_C, cmap="Blues", vmin=0, vmax=np.max(arr_state_counts))
             self._add_count_labels(ax_C, arr_state_counts, fontsize=fontsize_labels, color=color_labels, factor_fontsize=0.8)
+            ax_C.set_title("State visit count")
 
-            fig_V2.suptitle(f"[{method_name}UPDATE@Episode, Learning step {t_learn+1}]\nState values (left) and state counts (right): Episode {episode+1} of {nepisodes}")
+            fig_V2.suptitle(f"[{method_name}UPDATE@Episode, Learning step {t_learn+1}]\nEpisode {episode+1} of {nepisodes}")
             plt.pause(pause)
             plt.draw()
 
@@ -4438,16 +4434,11 @@ class Simulator:
             state_counts_mean = np.mean(learner.getStateCounts())
             state_counts_max = np.max(learner.getStateCounts())
 
-            shape = self.env.getShape()
-            arr_state_counts = learner.getStateCounts().reshape(shape)
-            colors_count = cm.get_cmap("Blues")
-            colornorm = plt.Normalize(vmin=0, vmax=np.max(arr_state_counts))
-            ax_C.imshow(arr_state_counts, cmap=colors_count, norm=colornorm)
-            ax_C.xaxis.set_major_locator(MaxNLocator(integer=True))
-            ax_C.yaxis.set_major_locator(MaxNLocator(integer=True))
+            arr_state_counts = learner.getStateCounts()
+            self.env.plot_values(arr_state_counts, ax=ax_C, cmap="Blues", vmin=0, vmax=np.max(arr_state_counts))
             self._add_count_labels(ax_C, arr_state_counts, fontsize=fontsize_labels, color=color_labels)
 
-            plt.title("[{}FINAL, Learning step {}]\nState counts by state: # visits: (min, mean, max) = ({:.0f}, {:.1f}, {:.0f})" \
+            plt.title("[{}FINAL, Learning step {}]\nState visit counts: # visits: (min, mean, max) = ({:.0f}, {:.1f}, {:.0f})" \
                       .format(method_name, t_learn+1, state_counts_min, state_counts_mean, state_counts_max))
         else:
             # Add the state counts to the plot of the state value function
@@ -4544,18 +4535,12 @@ class Simulator:
         "Adds the counts in `state_counts` as labels of each cell in the given `ax` axis which is assumed to contain a 2D image"
         # Read the environment's shape and convert it to a 2D array if the environment is 1D in order to facilitate all the processes below that use shape[1]
         # Note that the 1D environment is laid out horizontally (we use e.g. (1, 20) instead of (20, 1))
-        assert len(self.env.getShape()) <= 2, "The environment must be at most 2D"
-        assert len(self.env.getShape()) == self.env.getDimension()
-        shape = self.env.getShape() if self.env.getDimension() == 2 else (1, self.env.getShape()[0])
+        assert len(self.env.getShape()) == 2, "The environment must be 2D"
+        shape = self.env.getShape()
 
         # Factor to multiply the given fontsize depending on the image (environment) size
         factor_fs = factor_fontsize * np.min((5 / shape[0], 5 / shape[1]))
-        for x in range(shape[0]):
-            for y in range(shape[1]):
-                # Recall the x value indexes the row of the matrix shown in the image (vertical axis of the plot)
-                # and the y value indexes the column of the matrix shown in the image (horizontal axis of the plot)
-                # That's why the text is placed at coordinate (y, x).
-                ax.text(y, x, "{:.0f}".format(state_counts[x, y]), color=color, fontsize=fontsize*factor_fs, horizontalalignment="center", verticalalignment="center")
+        self.env.add_labels(ax, state_counts, fontsize=fontsize*factor_fs, color=color)
 
     def learn_terminal_state_values(self, t, terminal_state, next_state, reward, info, done_episode=False, envs=None, idx_particle=None, update_phi=False):
         """

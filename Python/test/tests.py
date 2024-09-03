@@ -823,9 +823,9 @@ seed = 1317
 env_type = Environment.Gridworld
 #env_type = Environment.MountainCar
 problem_2d = True
-use_random_obstacles_set = True; seed_obstacles = 4217
+use_random_obstacles_set = False; prop_obstacles = 0.5; seed_obstacles = 4217 #4215    # Seed 4217 with 50% of obstacles gives good results in the 6x8 labyrinth
 exit_state_at_bottom = False
-estimate_absorption_set = True; threshold_absorption_set = 0.05
+estimate_absorption_set = True; threshold_absorption_set = 0.90 #0.90  # Cumulative relative visit threshold
 estimate_absorption_set_at_every_step = False
 entry_state_in_absorption_set = True   #False #True     # Only used when estimate_absorption_set = False
 #----------------- BASIC SETUP AND SIMULATION PARAMETERS --------------#
@@ -853,7 +853,6 @@ if env_type == Environment.Gridworld:
         initial_policy = [0.4, 0.0, 0.6, 0.0]       # We choose a probability of going down which is similar to mu/(lambda + mu) in the queue system where lambda/mu = 0.7, i.e. a value close to 1 / 1.7 = 0.588
     env_shape = (size_vertical, size_horizontal)
     nS = size_vertical * size_horizontal
-    size_str = f"{size_vertical}x{size_horizontal}"
 
     # Environment's entry and exit states
     entry_state = np.ravel_multi_index((size_vertical - 1, 0), env_shape)
@@ -892,7 +891,8 @@ if env_type == Environment.Gridworld:
         #-- 1D gridworld
         obstacles_set = set()
 else:
-    entry_state = None #None so that the start state is defined by the reset method of the environment
+    entry_state = None  # `None` so that the start state is defined by the reset method of the environment
+    wind_dict = None    # Just for information purposes in titles, etc.
 #-------------------------------- ENVIRONMENT -------------------------#
 
 
@@ -956,13 +956,9 @@ if env_type == Environment.Gridworld:
                        T=500,  #1000, #100, #10000 if problem_2d else 1000, #1000, #1000, #3000,  # np.prod(env_shape) * 10  #100 #1000
                        estimate_absorption_set=estimate_absorption_set, threshold_absorption_set=threshold_absorption_set, absorption_set=default_absorption_set,
                        states_of_interest_fv=None,  # exit_state,
-                       seed=seed, debug=False, seed_obstacles=seed_obstacles)
+                       seed=seed, plot=True, debug=False, seed_obstacles=seed_obstacles)
     test_ac.setUp()
     print(test_ac.policy_nn.nn_model)
-    test_ac.getEnv().render()
-    test_ac.getEnv().plot()
-    plt.pause(0.1)
-    plt.draw()
 elif env_type == Environment.MountainCar:
     initial_policy = [1/3, 1/3, 1/3]
     test_ac = Test_EstPolicy_EnvMountainCar()
@@ -980,12 +976,42 @@ elif env_type == Environment.MountainCar:
                        seed=seed, debug=False)
     test_ac.setUp()
     print(test_ac.policy_nn.nn_model)
+    env_shape = test_ac.getEnv().getShape()
+    print(f"Mountain Car environment with shape {env_shape}:")
+    print(f"- Interval for the {len(test_ac.getEnv().getPositions())} positions: [{test_ac.getEnv().getPositions()[0]}, {test_ac.getEnv().getPositions()[-1]}]")
+    print(f"- Interval for the {len(test_ac.getEnv().getVelocities())} velocities: [{test_ac.getEnv().getVelocities()[0]}, {test_ac.getEnv().getVelocities()[-1]}]")
+    print(f"- Positions: {test_ac.getEnv().getPositions()} ({len(test_ac.getEnv().getPositions())})")
+    print(f"- Velocities: {test_ac.getEnv().getVelocities()} ({len(test_ac.getEnv().getVelocities())})")
+# Shape as string, used for filenames
+shape_str = f"{env_shape[0]}x{env_shape[1]}"
+
+# List the states in the absorption and activation sets
+absorption_set = set([tuple(test_ac.getEnv().getStateIndicesFromIndex(s)) for s in test_ac.getAbsorptionSet()])
+activation_set = set([tuple(test_ac.getEnv().getStateIndicesFromIndex(s)) for s in test_ac.getActivationSet()])
+print(f"Absorption set (1D) (n={len(test_ac.getAbsorptionSet())}):\n{test_ac.getAbsorptionSet()}")
+print(f"Absorption set (2D) (n={len(absorption_set)}):\n{absorption_set}")
+print(f"Activation set (1D) (n={len(test_ac.getActivationSet())}):\n{test_ac.agent_nn_fv.getLearner().getActivationSet()}")
+print(f"Activation set (2D) (n={len(activation_set)}):\n{activation_set}")
+
+# Check that NO state in the absorption set receives rewards
+# THIS IS IMPORTANT AT THIS POINT because the estimation of the average reward currently implemented in discrete.Simulator._run_simulation_fv()
+# is NOT prepared for absorption sets A that contain states with rewards. It still needs to be implemented and it is not so straightforward
+# as the computation of the average reward should be changed in several places (e.g. discrete.Learner._update_average_reward() which should receive the information
+# of the cycle set parameter (`set_cycle`) received by _run_single_continuing_task() in order to split the average reward into two pieces:
+# one for the states in the cycle set (which is the absorption set A in the FV simulation) and one for the states OUTSIDE the cycle set,
+# so that we can use the average reward of the states OUTSIDE the cycle set as initial estimation of the FV average reward on one side,
+# and the average reward of the states in the cycle set as contribution to the FINAL average reward estimated by the whole FV process,
+# which has a contribution from the rewards received by the states in A and the rewards received by the states OUTSIDE A.
+#
+# NOTE: (2024/08/27) This may fail for MountainCarDiscrete environment because the discretized states may contain *continuous* states that are part of the goal,
+# therefore they have rewards. Note that the reward assigned to such discretize states is proportional to the overlap of the discretized cell in the position direction
+# with continuous-valued terminal states (see definition of self.rewards in the MountainCarDiscrete class).
+assert np.sum([state for state in absorption_set if test_ac.getEnv().getReward(state) != 0]) == 0, \
+        "No state in the absorption set A must receive rewards! (at least until we prepare the FV estimation process to take into account rewards observed in A)"
 #-------------------------------- TEST SETUP --------------------------#
 
 
 #------------------ INITIAL AND MAXIMUM AVERAGE REWARDS ---------------#
-print(f"\nTrue state value function under initial policy:\n{test_ac.getEnv().getV()}")
-
 # Average reward of random policy
 if env_type == Environment.Gridworld:
     policy_random = probabilistic.PolGenericDiscrete(test_ac.getEnv(), policy=dict(), policy_default=[0.25, 0.25, 0.25, 0.25])
@@ -1103,10 +1129,7 @@ colormap = "seismic"  # "Reds"  # Colormap to use in the plot of the estimated s
 
 # Results saving, with filename prefix and suffix
 save = True
-if env_type == Environment.Gridworld:
-    prefix = f"ActorCritic_labyrinth_{size_str}_"
-else:
-    prefix = f"ActorCritic_mountainCar_"
+prefix = f"ActorCritic_{env_type.name.lower()}_{shape_str}_"
 suffix = f"_{learning_method}"
 
 # Open log file if one requested and show method being run
@@ -1284,7 +1307,7 @@ for rep in range(nrep):
                                                   min_num_cycles_for_expectations=0,
                                                       ## Note: We set the minimum number of cycles for the estimation of E(T_A) to 0 because we do NOT need
                                                       ## the estimation of the average reward to learn the optimal policy, as it cancels out in the advantage function Q(s,a) - V(s)!!
-                                                  estimate_absorption_set=estimate_absorption_set_at_every_step,
+                                                  estimate_absorption_set=estimate_absorption_set_at_every_step, threshold_absorption_set=threshold_absorption_set,
                                                   use_average_reward_stored_in_learner=use_average_reward_from_previous_step,
                                                   reset_value_functions=reset_value_functions_at_this_step,
                                                   plot=plot if t_learn+1 in learning_steps_observe else False, colormap=colormap,
@@ -1437,11 +1460,6 @@ dict_time_elapsed[learning_method] = time_elapsed_all.copy()
 
 
 #------------------ Plots -----------------
-if env_type == Environment.MountainCar:
-    # Plot the trajectory of the last replication
-    # (we limit the trajectory to the first 100 steps because o.w. the GIF may be never generated because too many steps to draw apparently...
-    # Note that With 100 steps the size of the GIF is 1 MB already!)
-    test_ac.env_mc.plot([test_ac.env_mc.get_state_from_index(s) for s in test_ac.agent_nn_td0.getLearner().getStates()[0]][:100])
 # Plot loss and average reward for the currently analyzed learner
 print("\nPlotting...")
 ax_loss = plt.figure(figsize=figsize).subplots(1, 1)
@@ -1524,7 +1542,7 @@ ax_Q_baseline.axhline(qvalue2 - svalue, linestyle='dashed', color="green")
 ax_Q_baseline.axhline(qvalue3 - svalue, linestyle='dashed', color="red")
 ax_Q_baseline.set_xlabel("Learning step")
 ax_Q_baseline.set_ylabel("Q values w.r.t. baseline")
-plt.suptitle(f"{learning_method.upper()}\n{learning_task.name} learning task - {learning_criterion.name} reward criterion (gamma={simulator_value_functions.getAgent().getLearner().gamma}) - Labyrinth {env_shape}"
+plt.suptitle(f"{learning_method.upper()}\n{learning_task.name} learning task - {learning_criterion.name} reward criterion (gamma={simulator_value_functions.getAgent().getLearner().gamma}) - {env_type.name} {env_shape}"
              f"\nN={test_ac.agent_nn_fv.getLearner().getNumParticles()}, T={test_ac.agent_nn_fv.getLearner().getNumTimeStepsForExpectation()}, MAX budget={max_time_steps_benchmark} steps per policy learning step"
              f"\nQ(s,a) and V(s) for state previous to the terminal state under the optimal policy, i.e. s={state_observe}\nMax average reward (continuing) = {max_avg_reward_continuing}")
 
@@ -1568,7 +1586,7 @@ ax.set_xlabel("Learning step")
 ax2.set_ylabel("State count")
 ax.legend(["V(s)"] + ["Q(s," + str(a) + ")" for a in range(dict_Q[learning_method].shape[2])], loc='upper left')
 ax2.legend(["State count"], loc='upper right')
-plt.suptitle(f"{learning_method.upper()}\n{learning_task.name} learning task - {learning_criterion.name} reward criterion - Labyrinth {env_shape}"
+plt.suptitle(f"{learning_method.upper()}\n{learning_task.name} learning task - {learning_criterion.name} reward criterion - {env_type.name} {env_shape}"
              f"\nN={test_ac.agent_nn_fv.getLearner().getNumParticles()}, T={test_ac.agent_nn_fv.getLearner().getNumTimeStepsForExpectation()}, MAX budget={max_time_steps_benchmark} steps per policy learning step"
              f"\nEvolution of the value functions V(s) and Q(s,a) with the learning step by state\nMaximum average reward (continuing): {max_avg_reward_continuing}")
 
@@ -1601,12 +1619,12 @@ ax.set_xlabel("Learning step")
 ax2.set_ylabel("State count")
 ax.legend(["A(s," + str(a) + ")" for a in range(dict_A[learning_method].shape[2])], loc='upper left')
 ax2.legend(["State count"], loc='upper right')
-plt.suptitle(f"{learning_method.upper()}\n{learning_task.name} learning task - {learning_criterion.name} reward criterion - Labyrinth {env_shape}"
+plt.suptitle(f"{learning_method.upper()}\n{learning_task.name} learning task - {learning_criterion.name} reward criterion - {env_type.name} {env_shape}"
              f"\nN={test_ac.agent_nn_fv.getLearner().getNumParticles()}, T={test_ac.agent_nn_fv.getLearner().getNumTimeStepsForExpectation()}, MAX budget={max_time_steps_benchmark} steps per policy learning step"
              f"\nEvolution of the Advantage function A(s,a) with the learning step by state\nMaximum average reward (continuing): {max_avg_reward_continuing}")
 
 
-#-- Final policy parameters and policy distribution by state
+#-- Final policy parameters and policy distribution by state (for the last replication)
 policy = simulator_value_functions.getAgent().getPolicy()
 policy.getModel().eval()
 print("Final network parameters:")
@@ -1617,67 +1635,118 @@ print(list(policy.getThetaParameter()))
 
 colormap = cm.get_cmap("rainbow")  # useful colormaps are "jet", "rainbow", seismic"
 colornorm = None
+aspect_ratio = "auto" if env_type == Environment.MountainCar else "equal"
 fontsize = 14
 factor_fontsize = 1.0   # Scaling factor when computing the final fontsize to use for labels showing the policy values of the different actions
 
 # Policy for each action at each state
-axes = plt.figure().subplots(*env_shape)
-proba_actions_toplot = np.nan*np.ones((3, 3))
-if problem_2d:
-    # Factor for the fontsize that depends on the environment size
-    factor_fs = factor_fontsize * np.min((5 / axes.shape[0], 5 / axes.shape[1]))
-    for i in range(axes.shape[0]):
-        for j in range(axes.shape[1]):
-            state_1d = np.ravel_multi_index((i, j), env_shape)
-            print("")
-            for action in range(test_ac.getEnv().getNumActions()):
-                print(f"Computing policy Pr(a={action}|s={(i,j)})...", end= " ")
-                idx_2d = (0, 1) if action == 0 else (1, 2) if action == 1 else (2, 1) if action == 2 else (1, 0)
-                proba_actions_toplot[idx_2d] = policy.getPolicyForAction(action, state_1d)
-                print("p = {:.3f}".format(proba_actions_toplot[idx_2d]))
-            img = axes[i, j].imshow(proba_actions_toplot, cmap=colormap, vmin=0, vmax=1)
-            # Remove the axes ticks as they do not convey any information
-            axes[i, j].set_xticks([])
-            axes[i, j].set_yticks([])
-            for action in range(test_ac.getEnv().getNumActions()):
-                idx_2d = (0, 1) if action == 0 else (1, 2) if action == 1 else (2, 1) if action == 2 else (1, 0)
-                axes[i, j].text(idx_2d[1], idx_2d[0], "{:02d}".format(int(round(proba_actions_toplot[idx_2d]*100))),
-                                color="white", fontsize=fontsize*factor_fs,
-                                horizontalalignment="center", verticalalignment="center")
+if env_type == Environment.MountainCar:
+    # Plot the best action and their probability at each state, as an image
+    # We initialize these arrays as NaN so that we can decide not to show anything for a state that hasn't been visited at all during the policy learning process (in one replication)
+    best_action = np.nan*np.ones(test_ac.getEnv().getNumStates())
+    highest_probability = np.nan * np.ones_like(best_action)
+    states_with_at_least_one_visit_during_policy_learning = np.where( np.sum(state_counts_all[rep, :, :], axis=0) )[0]
+
+    # Find the action with highest probability for each discrete state
+    policy_values = policy.get_policy_values()
+    for s in range(test_ac.getEnv().getNumStates()):
+        if s in states_with_at_least_one_visit_during_policy_learning:
+            action_highest_probability = np.argmax(policy_values[s])
+            best_action[s] = action_highest_probability  #(action_highest_probability + 1) / 3.0
+        highest_probability[s] = np.max(policy_values[s])
+    print(f"Policy values for each discrete state:\n{policy_values}")
+
+    # Show the best action map as an image plot whose intensity is proportional to the probability of the best action, distinguishing the action by color as indicated in variable `colormaps`
+    ax = plt.figure().subplots(1, 1)
+    colormaps = ["Blues", "Greens", "Reds"]  # Colormaps for actions LEFT, STAY, RIGHT
+    for a in np.arange(test_ac.getEnv().getNumActions()-1, -1, -1):   # We go in reverse order so that the colomaps appear from left to right to represent LEFT, ZERO, RIGHT
+        msk = best_action == a
+        highest_probability_toplot = np.nan*np.ones_like(highest_probability)
+        highest_probability_toplot[msk] = highest_probability[msk]
+        ax, img = test_ac.getEnv().plot_values(highest_probability_toplot, ax=ax, cmap=colormaps[a], vmin=0, vmax=1)
+    test_ac.getEnv()._finalize_plot(ax)
+    axes = [ax]
+    plt.subplots_adjust(top=0.80, wspace=0, hspace=0)
+    plt.suptitle(f"{learning_method.upper()}\nPolicy at each state:\nShowing the highest probability of:\nBlue = Acc. LEFT, Green: = Do NOT acc., Red = Acc. RIGHT")
 else:
-    factor_fs = factor_fontsize * 5 / axes.shape[0]
-    for i in range(len(axes)):
-        state = i
-        for action in range(test_ac.getEnv().getNumActions()):
-            print(f"Computing policy Pr(a={action}|s={state})...", end=" ")
-            idx_2d = (0, 1) if action == 0 else (1, 2) if action == 1 else (2, 1) if action == 2 else (1, 0)
-            proba_actions_toplot[idx_2d] = policy.getPolicyForAction(action, state)
-            print("p = {:.3f}".format(proba_actions_toplot[idx_2d]))
-        img = axes[i].imshow(proba_actions_toplot, cmap=colormap, vmin=0, vmax=1)
-        # Remove the axes ticks as they do not convey any information
-        axes[i].set_xticks([])
-        axes[i].set_yticks([])
-        for action in range(test_ac.getEnv().getNumActions()):
-            axes[i].text(0, action, "{:02d}".format(int(round(proba_actions_toplot[0, action] * 100))),
-                         color="white", fontsize=fontsize*factor_fs,
-                         horizontalalignment="center", verticalalignment="center")
-plt.colorbar(img, ax=axes)  # This adds a colorbar to the right of the FIGURE. However, the mapping from colors to values is taken from the last generated image! (which is ok because all images have the same range of values.
+    # Plot suitable for Gridworlds
+    axes = plt.figure().subplots(*env_shape, sharex=True, sharey=True, gridspec_kw=dict(hspace=0, wspace=0))  # See also help(plt.subplots); help(matplotlib.gridspec.GridSpec)
+    proba_actions_toplot = np.nan*np.ones((3, 3))
+    if problem_2d:
+        # Factor for the fontsize that depends on the environment size
+        factor_fs = factor_fontsize * np.min((4 / axes.shape[0], 4 / axes.shape[1]))
+        for i in range(axes.shape[0]):
+            for j in range(axes.shape[1]):
+                state_1d = np.ravel_multi_index((i, j), env_shape)
+                print("")
+                for action in range(test_ac.getEnv().getNumActions()):
+                    print(f"Computing policy Pr(a={action}|s={(i,j)})...", end= " ")
+                    idx_2d = (0, 1) if action == 0 else (1, 2) if action == 1 else (2, 1) if action == 2 else (1, 0)
+                    proba_actions_toplot[idx_2d] = policy.getPolicyForAction(action, state_1d)
+                    print("p = {:.3f}".format(proba_actions_toplot[idx_2d]))
+                img = axes[i, j].imshow(proba_actions_toplot, cmap=colormap, vmin=0, vmax=1, aspect=aspect_ratio)  # aspect="auto" means use the same aspect ratio as the axes
+                # Remove the axes ticks as they do not convey any information
+                axes[i, j].set_xticks([])
+                axes[i, j].set_yticks([])
+                for action in range(test_ac.getEnv().getNumActions()):
+                    idx_2d = (0, 1) if action == 0 else (1, 2) if action == 1 else (2, 1) if action == 2 else (1, 0)
+                    axes[i, j].text(idx_2d[1], idx_2d[0], "{:02d}".format(int(round(proba_actions_toplot[idx_2d]*100))),
+                                    color="white", fontsize=fontsize*factor_fs,
+                                    horizontalalignment="center", verticalalignment="center")
+    else:
+        factor_fs = factor_fontsize * 4 / axes.shape[0]
+        for i in range(len(axes)):
+            state = i
+            for action in range(test_ac.getEnv().getNumActions()):
+                print(f"Computing policy Pr(a={action}|s={state})...", end=" ")
+                idx_2d = (0, 1) if action == 0 else (1, 2) if action == 1 else (2, 1) if action == 2 else (1, 0)
+                proba_actions_toplot[idx_2d] = policy.getPolicyForAction(action, state)
+                print("p = {:.3f}".format(proba_actions_toplot[idx_2d]))
+            img = axes[i].imshow(proba_actions_toplot, cmap=colormap, vmin=0, vmax=1, aspect="auto")  # aspect="auto" means use the same aspect ratio as the axes
+            # Remove the axes ticks as they do not convey any information
+            axes[i].set_xticks([])
+            axes[i].set_yticks([])
+            for action in range(test_ac.getEnv().getNumActions()):
+                axes[i].text(0, action, "{:02d}".format(int(round(proba_actions_toplot[0, action] * 100))),
+                             color="white", fontsize=fontsize*factor_fs,
+                             horizontalalignment="center", verticalalignment="center")
+    plt.colorbar(img, ax=axes)  # This adds a colorbar to the right of the FIGURE. However, the mapping from colors to values is taken from the last generated image! (which is ok because all images have the same range of values.
                             # Otherwise see answer by user10121139 in https://stackoverflow.com/questions/13784201/how-to-have-one-colorbar-for-all-subplots
-plt.suptitle(f"{learning_method.upper()}\nPolicy at each state")
+    plt.suptitle(f"{learning_method.upper()}\nPolicy at each state")
 
-print("{} learning process took {:.1f} minutes ({:.1f} hours)".format(learning_method.upper(), time_elapsed / 60, time_elapsed / 3600))
+print("{} learning process took {:.1f} minutes ({:.1f} hours)".format(learning_method.upper(), dict_time_elapsed[learning_method][rep] / 60, dict_time_elapsed[learning_method][rep] / 3600))
 
 
-# Distribution of state counts at last learning step run
+# Distribution of state counts at last learning step run of the last replication
+# IMPORTANT: For FV, recall that the state counts only contain information about the states visited during the FV simulation as the counts are reset after the initial exploration
 state_counts = simulator_value_functions.getAgent().getLearner().getStateCounts()
-state_counts_2d = np.array(state_counts).reshape(*env_shape)
-print(state_counts_2d)
-print(state_counts_2d / np.sum(state_counts_2d.reshape(-1)))
-ax = plt.figure(figsize=(8, 7)).subplots(1, 1)
-img = ax.imshow(state_counts_2d, cmap="Blues")
-plt.colorbar(img)
-simulator_value_functions._add_count_labels(ax, state_counts_2d)
-plt.suptitle(f"{learning_method.upper()}\n{learning_task.name} learning task - {learning_criterion.name} reward criterion - Labyrinth {env_shape}"
+ax, img = test_ac.getEnv().plot_values(state_counts, cmap="Blues")
+if learning_method_type == "values_fv" and not estimate_absorption_set_at_every_step:
+    # Check that no visit was done to the absorption set
+    print("Intersection between absorption set and state visit count > 0 in FV (IT SHOULD BE EMPTY! --recall that the state counts in FV are reset after the initial exploration):")
+    _visited_states = set(np.where(state_counts > 0)[0])
+    print(_visited_states.intersection(test_ac.getAbsorptionSet()))
+    assert len(_visited_states.intersection(test_ac.getAbsorptionSet())) == 0, "The visited states during the FV excursion must NOT be in the absorption set"
+if env_type == Environment.MountainCar:
+    # Add the trajectory of the last replication
+    # Note: Since no trajectory information is currently stored by the online policy learner, we use the value functions learner to extract the trajectory to plot.
+    # Make the trajectories comparable between FV and TD, i.e. show the same number of steps (we show the steps generated by the T steps of the initial exploration by FV)
+    T = max_time_steps_fv_for_expectation
+    if learning_method_type == "values_fv":
+        # Take the state distribution from the initial exploration in the FV case because the particle trajectories are NOT stored in the FV learner
+        trajectory = np.array(test_ac.learner_for_initial_exploration.getStates())
+    else:
+        trajectory = np.concatenate(simulator_value_functions.agent.getLearner().getStates())
+    assert T <= len(trajectory)
+    trajectory2plot = trajectory[:T]
+    test_ac.getEnv().plot_points(trajectory2plot, ax=ax, cmap="coolwarm", style=".-")
+    states_absorption_set = np.nan*np.ones(test_ac.getEnv().getNumStates())
+    states_absorption_set[list(test_ac.getAbsorptionSet())] = 1.0
+    test_ac.getEnv().plot_values(states_absorption_set, ax=ax, cmap="Oranges", alpha=0.5)
+    #test_ac.getEnv().plot_points(list(test_ac.getAbsorptionSet()), ax=ax, color="red", markersize=7, style="x")
+
+simulator_value_functions._add_count_labels(ax, state_counts, factor_fontsize=2.0)
+plt.suptitle(f"{learning_method.upper()}\n{learning_task.name} learning task - {learning_criterion.name} reward criterion - {env_type.name} {test_ac.getEnv().getShape()}"
              f"\nN={test_ac.agent_nn_fv.getLearner().getNumParticles()}, T={test_ac.agent_nn_fv.getLearner().getNumTimeStepsForExpectation()}, MAX budget={max_time_steps_benchmark} steps per policy learning step"
              f"\nDistribution of state counts at end of policy learning process")
 
@@ -1706,7 +1775,7 @@ if plot_average_nsteps:
 else:
     ax_n.bar(np.arange(1, n_learning_steps+1), dict_nsteps[learning_method][rep2plot, :], color=colors[rep2plot % len(colors)], alpha=0.5)
 ax_n.set_ylabel("Number of simulation steps")
-plt.suptitle(f"{learning_method.upper()}\n{learning_task.name} learning task - {learning_criterion.name} reward criterion - Labyrinth {env_shape}"
+plt.suptitle(f"{learning_method.upper()}\n{learning_task.name} learning task - {learning_criterion.name} reward criterion - {env_type.name} {env_shape}"
              f"\nN={test_ac.agent_nn_fv.getLearner().getNumParticles()}, T={test_ac.agent_nn_fv.getLearner().getNumTimeStepsForExpectation()}, MAX budget={max_time_steps_benchmark} steps per policy learning step"
              f"\nAverage number of steps used to learn the value functions at each policy learning step ({nrep} replications)")
 
@@ -1724,7 +1793,7 @@ if save:
         objects_to_save += ["max_time_steps_benchmark_all"]
     else:
         objects_to_save += ["max_time_steps_benchmark"]
-    _size_str = f"{env_shape[0]}x{env_shape[1]}" if "env_shape" in locals() else ""
+    _shape_str = f"{env_shape[0]}x{env_shape[1]}" if "env_shape" in locals() else ""
     _filename = f"{prefix}{dt_start_filename}_ALL.pkl"
     _filepath = os.path.join(resultsdir, _filename)
     # Save the original object names plus those with the prefix so that, when loading the data back,
@@ -1742,7 +1811,7 @@ if save:
 # FIRST, need to load the necessary modules at the top of this Section and compile the auxiliary functions
 
 #_datetime = "20240428_092427" #"20240428_205959" #"20240421_140558" #"20240405_094608" #"20240322_095848" #"20240219_230301" #"20240219_142206"          # Use format yyymmdd_hhmmss
-#_size_str = "6x8" #"21x1" #"10x14" #"3x4" #"10x14"
+#_shape_str = "6x8" #"21x1" #"10x14" #"3x4" #"10x14"
 
 resultsdir = "./RL-003-Classic/results"
 
@@ -1765,7 +1834,7 @@ _filename = "ActorCritic_labyrinth_4x5_20240513_124235_ALL_WindyLabyrinth0.8Fini
 _filename = "ActorCritic_labyrinth_6x8_20240515_111830_ALL_WindyLabyrinth0.8FinishAtBottomAbsorptionSetEstimated0_TDAC,FVAC,N=20,T=500,LimitedTime=5x,epsilon=0.10,Budget4Loss=5x_FVisBetter.pkl"
 _filename = "ActorCritic_labyrinth_6x8_20240515_102102_ALL_WindyLabyrinth0.6FinishAtBottomAbsorptionSetEstimated_TDAC,FVAC,N=20,T=500,LimitedTime=5x,epsilon=0.10,Budget4Loss=5x_FVisBetter.pkl"
 
-_size_str = _filename[len("ActorCritic_labyrinth_"):len("ActorCritic_labyrinth_")+3]
+_shape_str = _filename[len("ActorCritic_labyrinth_"):len("ActorCritic_labyrinth_")+3]
 _N = int(_filename[_filename.index("N=") + len("N="):_filename.index(",", _filename.index("N="))])
 _T = int(_filename[_filename.index("T=") + len("T="):_filename.index(",", _filename.index("T="))])
 _filepath = os.path.join(resultsdir, _filename)
@@ -1774,8 +1843,13 @@ print(f"The following objects were loaded from '{_filepath}':\n{object_names}")
 
 # The following reward values are used in the ALTOGETHER plots below
 _methods = list(dict_loss.keys())
-env_shape = (int(_size_str[:_size_str.index("x")]), int(_size_str[_size_str.index("x")+1:]))
-max_avg_reward_continuing, max_avg_reward_episodic = compute_max_avg_rewards_in_labyrinth_with_corridor(_env, wind_dict, learning_task, learning_criterion)
+env_shape = (int(_shape_str[:_shape_str.index("x")]), int(_shape_str[_shape_str.index("x")+1:]))
+if _filename.lower().find("random") >= 0:
+    # Do NOT compute the max average rewards in RANDOM labyrinths, because we don't know how to compute them
+    max_avg_reward_continuing = np.nan
+    max_avg_reward_episodic = np.nan
+else:
+    max_avg_reward_continuing, max_avg_reward_episodic = compute_max_avg_rewards_in_labyrinth_with_corridor(_env, wind_dict, learning_task, learning_criterion)
 nrep = len(dict_loss[_methods[0]])
 n_learning_steps = len(dict_loss[_methods[0]][0])
 # (2024/08/04) The following objects are now read from the pickle file
@@ -1800,7 +1874,7 @@ else:
 # Check that the max avg. reward is defined, if not set it to 1.0 so that we plot the unnormalized observed average reward
 max_avg_reward = 1.0 if np.isnan(max_avg_reward) else max_avg_reward
 
-_exit_state_str = 'TOP' if exit_state is None else 'BOTTOM'
+_exit_state_str = 'TOP' if "exit_state" in locals() and exit_state is None else 'BOTTOM' if "exit_state" in locals() else "RIGHT"
 _learning_characteristics = f"\nN={'test_ac' in locals() and test_ac.agent_nn_fv.getLearner().getNumParticles() or _N}, " + \
                             f"T={'test_ac' in locals() and test_ac.agent_nn_fv.getLearner().getNumTimeStepsForExpectation() or _T}, " + \
                             f"MAX budget={'max_time_steps_benchmark' in locals() and max_time_steps_benchmark or 'N/A'} steps - NN hidden layer: {nn_hidden_layer_sizes}, " + \
@@ -1836,13 +1910,13 @@ ax_R.axhline(1, color="gray")
 ax_R.axhline(0, color="gray")
 ax_R.set_title(f"Evolution of NORMALIZED Average Reward")
 ax_R.legend(legend, loc="lower left")
-plt.suptitle(f"ALL LEARNING METHODS: Labyrinth {env_shape} - {learning_task.name} learning task - {learning_criterion.name} reward criterion (gamma={gamma})" +
+plt.suptitle(f"ALL LEARNING METHODS: {env_type.name} {env_shape} - {learning_task.name} learning task - {learning_criterion.name} reward criterion (gamma={gamma})" +
              _learning_characteristics +
              f"\n(last replication #{nrep})")
 
 # If we want to add the ratio between number of steps used by two methods compared
 if "values_td" in dict_nsteps.keys() and "values_fv" in dict_nsteps.keys():
-    df_ratio_nsamples = pd.DataFrame({'td': dict_nsteps['values_td'][nrep-1,:], 'fv': dict_nsteps['values_fv'][nrep-1,:], 'ratio_fv_td': dict_nsteps['values_fv'][nrep-1,:] / dict_nsteps['values_td'][nrep-1,:]})
+    df_ratio_nsamples = pd.DataFrame({'td': dict_nsteps['values_td'][nrep-1, :n_learning_steps], 'fv': dict_nsteps['values_fv'][nrep-1, :n_learning_steps], 'ratio_fv_td': dict_nsteps['values_fv'][nrep-1, :n_learning_steps] / dict_nsteps['values_td'][nrep-1, :n_learning_steps]})
     ax_R_nsamples = ax_R.twinx()
     ax_R_nsamples.plot(range(1, n_learning_steps+1), df_ratio_nsamples['ratio_fv_td'][:n_learning_steps], color="blue", linewidth=0.5)
     ax_R_nsamples.axhline(1.0, color="blue", linewidth=0.5, linestyle="dashed")
@@ -1866,7 +1940,7 @@ line = ax.axhline(max_avg_reward_continuing, color="lightgreen") if policy_learn
 lines += [line]
 legend += ["Max. average reward" + (policy_learning_mode == "online" and " (episodic)" or " (continuing)")]
 ax.legend(lines, legend, loc="center right")
-plt.suptitle(f"ALL LEARNING METHODS: Labyrinth {env_shape} - {learning_task.name} learning task - {learning_criterion.name} reward criterion (gamma={gamma})"
+plt.suptitle(f"ALL LEARNING METHODS: {env_type.name} {env_shape} - {learning_task.name} learning task - {learning_criterion.name} reward criterion (gamma={gamma})"
              f"\nWIND: {wind_dict}, EXIT: {_exit_state_str}, ALL {nrep} replications" +
              _learning_characteristics)
 

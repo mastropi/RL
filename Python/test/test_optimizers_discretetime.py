@@ -16,7 +16,7 @@ from typing import Union
 
 import numpy as np
 import pandas as pd
-from matplotlib import cm
+from matplotlib import pyplot as plt, cm
 
 from torch import nn
 
@@ -36,7 +36,7 @@ from Python.lib.estimators.nn_models import InputLayer, NNBackprop
 from Python.lib.simulators.discrete import Simulator as DiscreteSimulator
 
 from Python.lib.utils.basic import assert_equal_data_frames, show_exec_params
-from Python.lib.utils.computing import compute_set_of_frequent_states, compute_set_of_frequent_states_with_zero_reward, compute_transition_matrices, compute_state_value_function_from_transition_matrix
+from Python.lib.utils.computing import compute_set_of_frequent_states_with_zero_reward, compute_transition_matrices, compute_state_value_function_from_transition_matrix
 
 
 class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
@@ -59,7 +59,26 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
                         N=100, T=100,   # N is the number of particles, T is the max number of time steps allowed over ALL episodes in the single Markov chain simulation that estimates E(T_A)
                         estimate_absorption_set=True, threshold_absorption_set=0.90, absorption_set: Union[list, set]=None,
                         states_of_interest_fv: Union[list, set]=None,
-                        seed=1717, debug=False, seed_obstacles=4217):
+                        seed=1717, plot=False, debug=False, seed_obstacles=4217):
+        """
+        Prepares the necessary objects to perform Actor-Critic policy learning
+
+        Arguments:
+        obstacles_set: (opt) set
+            Set containing the cells to define as obstacles of the labyrinth.
+            When None, the obstacles are selected randomly with as many as `n_obstacles`.
+            default: None
+
+        n_obstacles: (opt) int
+            When `obstacles_set=None`, the number of cells to choose as obstacles.
+            If None, the number of obstacles is defined by class gridworlds.EnvGridworld2D_Random.
+            default: None
+
+        dropout_policy: (opt) float
+            Proportion of dropout in dropout layers between input and hidden layers and between the last hidden layer and output layer.
+            Use 0.0 if no dropout layers are requested.
+            default: 0.0
+        """
         env_shape = shape
         cls.debug = debug
         cls.seed = seed
@@ -121,6 +140,9 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
                                                   initial_state_distribution=isd)
         print("Gridworld environment:")
         cls.env2d._render()
+        if plot:
+            # Plot the labyrinth
+            ax_labyrinth = cls.env2d.plot()
         #-- Environment characteristics
 
         #-- Policy characteristics
@@ -174,8 +196,23 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
 
             learner = sim_for_initial_exploration.run_exploration(t_learn=0, max_time_steps=T, seed=cls.seed, verbose=cls.debug, verbose_period=1)
             absorption_set = compute_set_of_frequent_states_with_zero_reward(learner.getStates(), learner.getRewards(), threshold=threshold_absorption_set)
-            print(f"Distribution of state frequency on n={learner.getNumSteps()} steps:\n{pd.Series(learner.getStates()).value_counts(normalize=True)}")
-            print(f"Selected absorption set (2D):\n{[str(s) + ': ' + str(np.unravel_index(s, env_shape)) for s in absorption_set]}")
+            visit_relative_frequency = pd.Series(learner.getStates()).value_counts(normalize=True)
+            print(f"Distribution of state frequency on n={learner.getNumSteps()} steps:\n{visit_relative_frequency}")
+            print(f"Selected absorption set (2D):\n{[str(s) + ': ' + str(cls.env2d.getStateIndicesFromIndex(s)) for s in absorption_set]}")
+
+            if plot:
+                # Plot the absorption set showing the relative visit count of each state as color intensity
+                state_counts = np.nan*np.ones(cls.nS)
+                state_counts[list(absorption_set)] = visit_relative_frequency[list(absorption_set)]
+                cls.env2d.plot_values(state_counts, ax=ax_labyrinth, cmap="Oranges", vmin=0)
+                # Add labels showing the relative frequency
+                for s in absorption_set:
+                    cell = cls.env2d.getStateIndicesFromIndex(s)
+                    # WARNING: cell = (VERTICAL position from top, HORIZONTAL position from left) and the (0, 0) of the image is at the top-left by default
+                    plt.text(cell[1], cell[0], "{:.1f}%".format(visit_relative_frequency[s]*100), horizontalalignment="center", verticalalignment="center")
+                plt.suptitle("Labyrinth with obstacles in black", fontsize=20)
+                plt.title("Identified absorption set A in orange\n(intensity proportional to relative visit frequency)")
+                plt.show()
         elif absorption_set is None:
             # We choose the first column, i.e. the column above the labyrinth's start state, of the 2D-grid as the set A of uninteresting states
             absorption_set = set()
@@ -496,8 +533,22 @@ class Test_EstPolicy_EnvMountainCar(unittest.TestCase):
                    alpha_min=0.0,
                    reset_method_value_functions=ResetMethod.ALLZEROS,
                    N=100, T=100,
-                   threshold_absorption_set=0.05,
-                   seed=1717, debug=False):
+                   threshold_absorption_set=0.90,
+                   seed=1717, plot=False, debug=False):
+        """
+        Prepares the necessary objects to perform Actor-Critic policy learning on the discrete Mountain Car environment
+
+        Arguments:
+        nn_input: InputLayer or int
+            Type of input layer as defined by the InputLayer enum or the number of input neurons.
+            default: 2 (one for the position x and one for the velocity v of the car)
+
+        seed: (opt) int
+            Seed to be used for:
+            - reset of the environment
+            - reset of the policy
+            - reset of the value functions estimated by the learners
+        """
         cls.debug = debug
         cls.seed = seed
 
@@ -543,7 +594,7 @@ class Test_EstPolicy_EnvMountainCar(unittest.TestCase):
         cls.learner_for_initial_exploration = None
         # Perform an initial exploration of the environment in order to define the absorption set based on visit frequency and observed non-zero rewards
         # In this excursion, the start state is defined by the environment's initial state distribution.
-        print(f"\nEstimating the absorption set based on relative visit frequency (> {threshold_absorption_set}) from an initial exploration of the environment...")
+        print(f"\nEstimating the absorption set based on cumulative relative visit frequency (<= {threshold_absorption_set}) from an initial exploration of the environment...")
         cls.learner_for_initial_exploration = td.LeaTDLambda(cls.env_mc,
                                                              dict_function_approximations=dict_function_approximations,
                                                              criterion=learning_criterion,
@@ -579,6 +630,33 @@ class Test_EstPolicy_EnvMountainCar(unittest.TestCase):
 
         # Reset state of environment to a start state
         cls.env_mc.reset()
+
+        if plot:
+            # Plot the absorption set showing the relative visit count of each state as color intensity
+            state_counts = np.nan * np.ones(cls.nS)
+            visit_frequency = pd.Series([cls.env_mc.getIndexFromState(state) for state in learner.getStates()]).value_counts(sort=False)
+            visit_relative_frequency = visit_frequency / np.sum(visit_frequency)
+            state_counts[list(absorption_set)] = visit_relative_frequency[list(absorption_set)]
+            cls.env_mc.plot_values(state_counts, cmap="Oranges", vmin=0)
+            plt.suptitle("Mountain Car discretized state space\n(dx={:.3g}, dv={:.3g})".format(cls.env_mc.dx, cls.env_mc.dv))
+            plt.title("Identified absorption set A in orange\n(intensity proportional to relative visit frequency)")
+
+            # Plot the state count and the trajectory observed during the initial exploration to estimate the absorption set A
+            # Note that we compute the visit frequency because learner.getStateCounts() returns all zeros because the state count is not tracked
+            # by the DiscreteSimulator.run_exploration() method called above
+            state_counts = np.zeros(cls.nS)
+            state_counts[visit_frequency.index] = visit_frequency
+            ax, _ = cls.env_mc.plot_values(state_counts)
+            # Add the trajectory
+            trajectory = learner.getStates()
+            cls.env_mc.plot_points(trajectory, ax=ax, cmap="coolwarm", style=".-")
+            # Add the absorption set
+            absorption_set_as_simulation_states = [cls.env_mc.getStateFromIndex(s, simulation=True) for s in absorption_set]
+            cls.env_mc.plot_points(absorption_set_as_simulation_states, ax=ax, color="red", markersize=5, style="x")
+            plt.suptitle(f"{cls.env_mc.__class__.__name__} {cls.env_mc.getShape()}, T={T} steps taken" +
+                         "\nDistribution of state counts and trajectory\n(dx={:.3g}, dv={:.3g})".format(cls.env_mc.dx, cls.env_mc.dv))
+            plt.pause(0.1)
+            plt.draw()
 
         # Check if absorption set is valid
         for state in absorption_set:
