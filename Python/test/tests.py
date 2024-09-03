@@ -27,6 +27,7 @@ from scipy.special import rel_entr
 from Python.lib.agents.learners import ResetMethod
 from Python.lib.agents.learners import LearningCriterion, LearningTask
 from Python.lib.agents.learners.policies import LeaActorCriticNN
+from Python.lib.agents.learners.value_functions import ActionValueFunctionApproxNN, StateValueFunctionApproxNN
 from Python.lib.agents.policies import probabilistic
 
 from Python.lib.environments.gridworlds import Direction2D
@@ -56,12 +57,12 @@ policy_changed_from_previous_learning_step = lambda KL_distance, num_states: np.
 def define_plotting_parameters():
     dict_colors = dict(); dict_linestyles = dict(); dict_legends = dict()
     dict_colors['all_online'] = "darkred"; dict_linestyles['all_online'] = "solid"; dict_legends['all_online'] = "ALL Online"
-    dict_colors['values_td'] = "red"; dict_linestyles['values_td'] = "solid"; dict_legends['values_td'] = "TD"      # For a second trial of TDAC (which sometimes is useful --e.g. to compare "using the same budget as FV for every policy learning step" vs. "using an average budget at each policy learning step")
-    dict_colors['values_td2'] = "darkorange"; dict_linestyles['values_td2'] = "solid"; dict_legends['values_td2'] = "TD2"
-    dict_colors['values_tdl'] = "orange"; dict_linestyles['values_tdl'] = "dashed"; dict_legends['values_tdl'] = "TD(lambda)"
-    dict_colors['values_fv'] = "green"; dict_linestyles['values_fv'] = "solid"; dict_legends['values_fv'] = "FV"    # For a second trial of FVAC (which sometimes is useful --e.g. to compare "allowing infinite budget for FV" vs. "limited budget")
-    dict_colors['values_fv2'] = "cyan"; dict_linestyles['values_fv2'] = "solid"; dict_legends['values_fv2'] = "FV2"
-    dict_colors['values_fvos'] = "lightgreen"; dict_linestyles['values_fvos'] = "solid"; dict_legends['values_fvos'] = "FV OverSampling"
+    dict_colors['values_td'] = "red"; dict_linestyles['values_td'] = "solid"; dict_legends['values_td'] = "TDAC"      # For a second trial of TDAC (which sometimes is useful --e.g. to compare "using the same budget as FV for every policy learning step" vs. "using an average budget at each policy learning step")
+    dict_colors['values_td2'] = "darkorange"; dict_linestyles['values_td2'] = "solid"; dict_legends['values_td2'] = "TDAC2"
+    dict_colors['values_tdl'] = "orange"; dict_linestyles['values_tdl'] = "dashed"; dict_legends['values_tdl'] = "TDAC(lambda)"
+    dict_colors['values_fv'] = "green"; dict_linestyles['values_fv'] = "solid"; dict_legends['values_fv'] = "FVAC"    # For a second trial of FVAC (which sometimes is useful --e.g. to compare "allowing infinite budget for FV" vs. "limited budget")
+    dict_colors['values_fv2'] = "cyan"; dict_linestyles['values_fv2'] = "solid"; dict_legends['values_fv2'] = "FVAC2"
+    dict_colors['values_fvos'] = "lightgreen"; dict_linestyles['values_fvos'] = "solid"; dict_legends['values_fvos'] = "FVAC OverSampling"
 
     figsize = (10, 8)
 
@@ -216,8 +217,8 @@ learning_task = LearningTask.CONTINUING
 learning_criterion = LearningCriterion.AVERAGE; gamma = 1.0    # gamma could be < 1 in the average reward criterion in order to take the limit as gamma -> 1 as presented in Sutton, pag. 251/252.
 
 seed = 1317
-env_type = Environment.Gridworld
-#env_type = Environment.MountainCar
+#env_type = Environment.Gridworld
+env_type = Environment.MountainCar
 problem_2d = True
 use_random_obstacles_set = False; prop_obstacles = 0.5; seed_obstacles = 4217 #4215    # Seed 4217 with 50% of obstacles gives good results in the 6x8 labyrinth
 exit_state_at_bottom = False
@@ -233,7 +234,7 @@ if env_type == Environment.Gridworld:
         # 2D labyrinth
         size_vertical = 3; size_horizontal = 4
         size_vertical = 4; size_horizontal = 5
-        size_vertical = 6; size_horizontal = 8
+        #size_vertical = 6; size_horizontal = 8
         #size_vertical = 8; size_horizontal = 12
         #size_vertical = 9; size_horizontal = 13
         #size_vertical = 10; size_horizontal = 14
@@ -257,7 +258,7 @@ if env_type == Environment.Gridworld:
     # Presence of wind: direction and probability of deviation in that direction when moving
     if problem_2d:
         wind_dict = None
-        wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.5})
+        #wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.5})
         #wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.6})
         #wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.7})
         #wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.8})
@@ -334,12 +335,13 @@ if env_type == Environment.Gridworld:
 
 #-------------------------------- TEST SETUP --------------------------#
 if env_type == Environment.Gridworld:
+    dropout_policy = 0.0  #0.5 #0.5  # Set it to 0.0 if we do not want any dropout layer in the network
     test_ac = Test_EstPolicy_EnvGridworldsWithObstacles()
     test_ac.setUpClass(shape=env_shape, obstacles_set=obstacles_set, n_obstacles=n_obstacles, wind_dict=wind_dict,
                        define_start_state_from_absorption_set=False, start_states_set={entry_state},  #{nS-1}, #None,
                        exit_state=exit_state,
                        # Policy model
-                       nn_input=nn_input, nn_hidden_layer_sizes=nn_hidden_layer_sizes, initial_policy=initial_policy,
+                       nn_input=nn_input, nn_hidden_layer_sizes=nn_hidden_layer_sizes, initial_policy=initial_policy, dropout_policy=dropout_policy,
                        # General learning parameters
                        learning_task=learning_task,
                        learning_criterion=learning_criterion,
@@ -356,20 +358,42 @@ if env_type == Environment.Gridworld:
     test_ac.setUp()
     print(test_ac.policy_nn.nn_model)
 elif env_type == Environment.MountainCar:
+    env_discrete = True
+    if env_discrete:
+        dict_function_approximations = None
+    else:
+        dropout_value_functions = 0.0  #0.5           # Set it to 0.0 if we do not want any dropout layer in the network
+        learning_rate_value_functions = 0.001 if dropout_value_functions == 0.0 else 0.01  # We increase the learning rate when there is dropout. Ref: https://machinelearningmastery.com/using-dropout-regularization-in-pytorch-models/ (conclusions)
+        nn_hidden_layer_sizes_value_functions = nn_hidden_layer_sizes if len(nn_hidden_layer_sizes) > 0 else [12]
+        dict_function_approximations = dict({'V': StateValueFunctionApproxNN(nn_input=2, nn_hidden_layer_sizes=nn_hidden_layer_sizes_value_functions, dropout=dropout_value_functions, lr=learning_rate_value_functions),
+                                             'Q': ActionValueFunctionApproxNN(nn_input=2 + 1, nn_hidden_layer_sizes=nn_hidden_layer_sizes_value_functions, dropout=dropout_value_functions, lr=learning_rate_value_functions)})
+                                                ## Number of inputs for Q: (x, v, a)
+    dropout_policy = 0.0  #0.5
     initial_policy = [1/3, 1/3, 1/3]
     test_ac = Test_EstPolicy_EnvMountainCar()
-    test_ac.setUpClass(nv=10,   # Number of points in the discretization of the velocities
+    test_ac.setUpClass(# Environment characteristics
+                       env_discrete=env_discrete,
+                       nx=40,                            # Number of points in the discretization of the positions (only used in the continuous-state-dynamic Mountain Car, in which case the "factor for force" parameter is not used)
+                       nv=21,                            # Number of points in the discretization of the velocities
+                       factor_for_force_and_gravity=10 if not env_discrete else 100, #100, #20, #15,   # Factor controlling the number of discrete positions in the discretized problem --> NOTE: Using `1` is TOO SMALL! (as the number of points in the grid are too many)
+                       factor_force=1.0,
+                       factor_max_speed=3.0,    # Only used in MountainCarDiscrete (with continuous states)
+                       # Value function approximations model
+                       dict_function_approximations=dict_function_approximations,
                        # Policy model
-                       nn_input=nn_input, nn_hidden_layer_sizes=nn_hidden_layer_sizes, initial_policy=initial_policy,
+                       nn_input=2, nn_hidden_layer_sizes=nn_hidden_layer_sizes, dropout_policy=dropout_policy,
+                       initial_policy=initial_policy,
                        # General learning parameters
                        learning_task=learning_task,
                        learning_criterion=learning_criterion,
                        alpha=1.0, gamma=gamma, lmbda=0.7, # lmbda parameter is ONLY used for TD(lambda), NOT for TD(0), which is created separately nor for FV (for which lambda > 0 does not make sense)
                        alpha_min=0.1,
                        reset_method_value_functions=ResetMethod.ALLZEROS,
-                       N=10, T=500,
-                       threshold_absorption_set=0.01,
-                       seed=seed, debug=False)
+                       reset_value=0.0, #-1.0,
+                       N=30,  #50,
+                       T=300,  #500,
+                       threshold_absorption_set=threshold_absorption_set,
+                       seed=seed, plot=True, debug=False)
     test_ac.setUp()
     print(test_ac.policy_nn.nn_model)
     env_shape = test_ac.getEnv().getShape()
@@ -513,7 +537,7 @@ optimizer_learning_rate = 10 if is_NPG else 0.05 #0.05 if policy_learning_mode =
 reset_value_functions_at_every_learning_step = False #(learning_method == "values_fv")     # Reset the value functions when learning with FV, o.w. the learning can become too unstable due to the oversampling of the states with high value... (or something like that)
 
 # Parameters about value function learning (Critic)
-alpha_initial = simulator_value_functions.getAgent().getLearner().getInitialLearningRate()
+alpha_initial = simulator_value_functions.getAgent().getLearner().getInitialLearningRate()      # NOTE: alpha_initial is NOT used when learning the value functions by function approximation, as this is set by the default learning rate of the Adam optimizer
 adjust_alpha_initial_by_learning_step = False; t_learn_min_to_adjust_alpha = 30 # based at 1 (regardless of the base value used for t_learn)
 #max_time_steps_per_episode = test_ac.getEnv().getNumStates()*10  # (2024/05/02) NO LONGER USED!  # This parameter is just set as a SAFEGUARD against being blocked in an episode at some state of which the agent could be liberated by restarting to a new episode (when this max number of steps is reached)
 epsilon_random_action = 0.1 #if policy_learning_mode == "online" else 0.0 #0.1 #0.05 #0.0 #0.01
@@ -541,7 +565,7 @@ break_when_no_change = False    # Whether to stop the learning process when the 
 break_when_goal_reached = False  # Whether to stop the learning process when the average reward is close enough to the maximum average reward (by a relative tolerance of 0.1%)
 
 # Initialize objects that will contain the results by learning step
-state_counts_all = np.zeros((nrep, n_learning_steps, test_ac.getEnv().getNumStates()))
+state_counts_all = np.zeros((nrep, n_learning_steps, test_ac.getEnv().getNumStates()), dtype=int)
 V_all = np.zeros((nrep, n_learning_steps, test_ac.getEnv().getNumStates()))
 Q_all = np.zeros((nrep, n_learning_steps, test_ac.getEnv().getNumStates(), test_ac.getEnv().getNumActions()))
 A_all = np.zeros((nrep, n_learning_steps, test_ac.getEnv().getNumStates(), test_ac.getEnv().getNumActions()))
@@ -549,7 +573,7 @@ R_all = np.nan * np.ones((nrep, n_learning_steps))       # Average reward (EPISO
 R_long_all = np.nan * np.ones((nrep, n_learning_steps))  # Long-run Average reward (CONTINUING learning task). It does NOT converge to the same value as the episodic average reward because there is one more reward value per episode!! (namely the reward going from the terminal state to the start state)
 R_long_true_all = np.nan * np.ones((nrep, n_learning_steps))  # True Long-run Average reward (CONTINUING learning task) under the policy at the start of each policy learning step
 loss_all = np.nan * np.ones((nrep, n_learning_steps))
-nsteps_all = np.nan * np.ones((nrep, n_learning_steps))  # Number of value function time steps run per every policy learning step
+nsteps_all = np.nan * np.ones((nrep, n_learning_steps), dtype=int)  # Number of value function time steps run per every policy learning step
 KL_all = np.nan * np.ones((nrep, n_learning_steps))      # K-L divergence between two consecutive policies
 alpha_all = alpha_initial * np.ones((nrep, n_learning_steps))   # Initial alpha used at each policy learning step
 time_elapsed_all = np.nan * np.ones(nrep)   # Execution time for each replication
@@ -592,7 +616,8 @@ for rep in range(nrep):
     # and thus resets the policy to ANOTHER slightly different policy (because of the normally distributed random values around 0 that are set as neural network weights)
     print("Resetting the policy learner and the critic (if any)...")
     learner_ac.reset(reset_value_functions=True, reset_policy=True, initial_policy=initial_policy)
-    print(f"Initial policy (states x actions):\n{learner_ac.getPolicy().get_policy_values()}")
+    if not test_ac.getEnv().isStateContinuous():
+        print(f"Initial policy (states x actions):\n{learner_ac.getPolicy().get_policy_values()}")
 
     if simulator_value_functions is not None:
         # Whenever there is a critic, do a couple of resets
@@ -666,11 +691,14 @@ for rep in range(nrep):
             # in the probability from q(x) at the values of x having a large "new" probability p(x) value.
             # Ref: https://docs.scipy.org/doc/scipy/reference/generated/scipy.special.rel_entr.html
             # Note that we could also use the function scipy.stats.entropy() to compute directly the K-L divergence (i.e. without summing over the rel_entr() values, as done here)
-            policy = learner_ac.getPolicy().get_policy_values()
-            KL_distance = np.sum(rel_entr(policy, policy_prev)) if t_learn > 0 else 0.0
-            print(f"K-L distance with previous policy: {KL_distance} (should be < {KL_THRESHOLD} to reduce initial alpha)")
-            KL_all[rep, t_learn] = KL_distance
-            policy_prev = policy.copy()
+            if not test_ac.getEnv().isStateContinuous():
+                policy = learner_ac.getPolicy().get_policy_values()
+                KL_distance = np.sum(rel_entr(policy, policy_prev)) if t_learn > 0 else 0.0
+                print(f"K-L distance with previous policy: {KL_distance} (should be < {KL_THRESHOLD} to reduce initial alpha)")
+                KL_all[rep, t_learn] = KL_distance
+                policy_prev = policy.copy()
+            else:
+                KL_all[rep, t_learn] = np.nan
 
             if adjust_alpha_initial_by_learning_step:
                 # Update the initial learning rate alpha ONLY when:
@@ -759,9 +787,12 @@ for rep in range(nrep):
             print(f"Learning step #{t_learn+1}: Learning of value functions COMPLETED using {learning_method} method on {nsteps_all[rep, t_learn]} time steps")
             print(f"Estimated average reward: {average_reward}")
             state_counts_all[rep, t_learn, :] = state_counts
-            V_all[rep, t_learn, :] = V
-            Q_all[rep, t_learn, :, :] = Q.reshape(test_ac.getEnv().getNumStates(), test_ac.getEnv().getNumActions())
-            A_all[rep, t_learn, :, :] = A.reshape(test_ac.getEnv().getNumStates(), test_ac.getEnv().getNumActions())
+            if simulator_value_functions.getAgent().getLearner().getV().isTabular():
+                V_all[rep, t_learn, :] = V
+            if simulator_value_functions.getAgent().getLearner().getV().isTabular():
+                Q_all[rep, t_learn, :, :] = Q.reshape(test_ac.getEnv().getNumStates(), test_ac.getEnv().getNumActions())
+            if simulator_value_functions.getAgent().getLearner().getA().isTabular():
+                A_all[rep, t_learn, :, :] = A.reshape(test_ac.getEnv().getNumStates(), test_ac.getEnv().getNumActions())
 
             #--- 2) ACTOR
             print(f"\nLearning the POLICY {policy_learning_mode.upper()} using estimated {use_advantage and 'ADVANTAGE A(s,a) values' or 'ACTION Q(s,a) values'} ", end=" ")
@@ -770,16 +801,22 @@ for rep in range(nrep):
                 # Learn using NPG (Natural Policy Gradient)
                 print("\n(Natural Policy Gradient learning)")
                 learner_ac.learn_natural(A)
-                print(f"NEW policy (states x actions):\n{learner_ac.getPolicy().get_policy_values()}")
+                if not test_ac.getEnv().isStateContinuous():
+                    print(f"NEW policy (states x actions):\n{learner_ac.getPolicy().get_policy_values()}")
             else:
                 # The policy is modeled with a regular neural network (with hidden layer)
                 if policy_learning_mode == "online":
                     # ONLINE with critic provided by the action values learned above
                     print(f"on {n_episodes_per_learning_step} episodes starting at state s={entry_state}, using MAX {max_time_steps_per_policy_learning_episode} steps per episode...")
                     loss_all[rep, t_learn] = learner_ac.learn(n_episodes_per_learning_step, start_state=entry_state, max_time_steps_per_episode=max_time_steps_per_policy_learning_episode, prob_include_in_train=1.0,
-                                                             use_advantage=use_advantage,
-                                                             advantage_values=A,
-                                                             action_values=Q)       # This parameter is not used when use_advantage=False
+                                                              # (2024/08/15) This learner is used when the state is continuous (e.g. Mountain Car) and in LeaActorCriticNN.learn() the advantage is computed using
+                                                              # the model for V(s), instead of using the tabular values of the advantage function passed here as `advantage_values`.
+                                                              # CHECK THE learn() CODE TO SEE IF THE ABOVE IS THE CASE!
+                                                              learner_value_functions_critic=simulator_value_functions.getAgent().getLearner(),
+                                                              use_advantage=use_advantage,
+                                                              advantage_values=A,
+                                                              action_values=Q,       # This parameter is not used when use_advantage=False
+                                                              expected_reward=average_reward)
                         ## Note that we make sure that the start state when learning the policy is the entrance state to the labyrinth, `entry_state`,
                         ## because the environment may have defined a different initial state distribution, which is used during the learning of the value functions,
                         ## for instance, any randomly selected state outside the absorption set A used by the FV learner.
@@ -861,7 +898,7 @@ ax_loss = plt.figure(figsize=figsize).subplots(1, 1)
 ax_loss.plot(range(1, n_learning_steps+1), dict_loss[learning_method][rep, :n_learning_steps], marker='.', color="red")
 #ax_loss.plot(range(1, n_learning_steps+1), dict_alpha[learning_method][rep, :n_learning_steps], '--', color="cyan")
 ax_loss.set_xlabel("Learning step")
-ax_loss.set_ylabel("Loss")
+ax_loss.set_ylabel("Loss", color="red")
 #ax_loss.axhline(0, color="red", linewidth=1, linestyle='dashed')
 ax_loss.xaxis.set_major_locator(MaxNLocator(integer=True))
 #ax_loss.legend(["Loss", "alpha0"], loc='upper left')
@@ -873,7 +910,7 @@ if policy_learning_mode == "online":
     ax_R.axhline(max_avg_reward_episodic, color="green", linewidth=1)
 ax_R.plot(range(1, n_learning_steps+1), dict_R_long[learning_method][rep, :n_learning_steps], marker='.', color="greenyellow")
 ax_R.axhline(max_avg_reward_continuing, color="greenyellow", linewidth=1)
-ax_R.set_ylabel("Average reward")
+ax_R.set_ylabel("Average reward", color="green")
 ax_R.plot(range(1, n_learning_steps+1), dict_KL[learning_method][rep, :n_learning_steps], color="blue", linewidth=1)
 ax_R.axhline(KL_THRESHOLD, color="blue", linestyle="dashed")
 ax_R.axhline(0, color="green", linewidth=1, linestyle='dashed')
@@ -881,7 +918,10 @@ ax_R.axhline(0, color="green", linewidth=1, linestyle='dashed')
 # This is particularly useful when the policy is learned fast within each Actor-Critic excursion,
 # which for instance is achieved when computing the loss and updating parameters after each Actor-Critic episode (mini-batch)
 # or when learning the policy with NPG.
-ax_R.set_ylim((-np.max(dict_R_long[learning_method][rep, :n_learning_steps])/50, np.max(dict_R_long[learning_method][rep, :n_learning_steps])*1.1))
+if policy_learning_mode == "online" and not is_NPG:
+    ax_R.set_ylim((-np.max(dict_R[learning_method][rep, :n_learning_steps])/50, np.max(dict_R[learning_method][rep, :n_learning_steps])*1.1))
+else:
+    ax_R.set_ylim((-np.max(dict_R_long[learning_method][rep, :n_learning_steps])/50, np.max(dict_R_long[learning_method][rep, :n_learning_steps])*1.1))
 ax_R.legend(["Average reward (episodic)", "Max. average reward (episodic)",
             "Long-run average reward estimated by value functions learner", "Max. average reward (continuing)",
             "K-L divergence with previous policy", "K-L threshold for reduced alpha0", "K-L divergence between consecutive policies"],
@@ -890,6 +930,34 @@ plt.title(f"{learning_method.upper()}\n{learning_task.name} learning task - {lea
           f"\nN={test_ac.agent_nn_fv.getLearner().getNumParticles()}, T={test_ac.agent_nn_fv.getLearner().getNumTimeStepsForExpectation()}, MAX budget={max_time_steps_benchmark} steps per policy learning step"
           f"\nEvolution of the LOSS (left, red) and Average Reward (right, green) with the learning step")
 
+
+#-- Plot the trajectory as a GIF
+if env_type == Environment.MountainCar:
+    # Plot the trajectory of the last replication
+    # Notes:
+    # - Since no trajectory information is currently stored by the online policy learner, we use the value functions learner to extract the trajectory to plot.
+    # - We limit the trajectory to the first 100 steps because o.w. the GIF would take too long to generate...
+    #   For instance, with 100 steps, the GIF takes ~2 minutes to generate and is 1 MB in size already!
+    if learning_method_type == "values_fv":
+        # Take the state distribution from the initial exploration in the FV case because the particle trajectories are NOT stored in the FV learner
+        trajectory = np.array(test_ac.learner_for_initial_exploration.getStates())
+    else:
+        trajectory = np.array(simulator_value_functions.agent.getLearner().getStates()[0])
+    T = max_time_steps_fv_for_expectation
+    _npoints2plot = min(T, 100)
+    assert _npoints2plot < len(trajectory)
+
+    # If we want to make comparable plots (i.e. the same first T steps for both FVAC and TDAC)
+    trajectory2plot = trajectory[:_npoints2plot]
+    # If we want to plot the beginning and end of the trajectory
+    # if _npoints2plot < _npoints:
+    #     # We repeat 10 times the last point in the first half of the points to plot so that we visually understand that there is a jump in time
+    #     _indices2plot = np.r_[np.arange(_npoints2plot // 2), np.repeat(_npoints2plot // 2, 10), np.arange(_npoints - _npoints2plot // 2, _npoints)]
+    # else:
+    #     _indices2plot = np.arange(_npoints)
+    # trajectory2plot = trajectory[_indices2plot]
+
+    test_ac.getEnv().plot_trajectory_gif([test_ac.getEnv().getStateFromIndex(s, simulation=False) for s in trajectory2plot])
 
 
 #-- Plot the value functions for the state next to the terminal state
@@ -987,15 +1055,34 @@ plt.suptitle(f"{learning_method.upper()}\n{learning_task.name} learning task - {
 
 
 # Plot the ADVANTAGE function
-axes = plt.figure(figsize=(10, 9)).subplots(test_ac.getEnv().shape[0], test_ac.getEnv().shape[1])
 first_learning_step = 0 #n_learning_steps * 3 // 4  #0
 y2max = int(round(np.max(dict_state_counts[learning_method])*1.1)) # For a common Y2-axis showing the state counts
 min_A, max_A = np.min(dict_A[learning_method]), np.max(dict_A[learning_method])      # For a common Y-axis showing the value functions
 ymin, ymax = min_A, max_A
 
-#ylim = (ymin, ymax)     # Use this for common Y-axis limits
-ylim = (None, None)     # Use this for unequal Y-axis limits
+#-----------------
+# Plot just ONE advantage function
+s_observe = test_ac.getEnv().getNumStates() // 2
+ax = plt.figure(figsize=(10, 9)).subplots(1, 1)
+i = s_observe
+for i in range(test_ac.getEnv().getNumStates()):
+    ax.plot(np.arange(1 + first_learning_step, n_learning_steps + 1), dict_A[learning_method][rep, first_learning_step:n_learning_steps, i, :], marker=marker)
+ax.set_yscale("log")
+
+# Distribution of advantage values (analyzed for the continuous-state mountain car)
+if False:
+    ind = np.where(A < 0.5)
+    plt.figure()
+    plt.hist(A[ind].reshape(-1), bins=30, alpha=0.3)
+    plt.gca().set_xscale("log")
+    plt.hist(A.reshape(-1), bins=30, alpha=0.3)
+    pd.Series(A.reshape(-1)).describe()
+#-----------------
+
+common_axes = True
+ylim = (ymin, ymax) if common_axes else (None, None)
 marker = ''
+axes = plt.figure(figsize=(10, 9)).subplots(test_ac.getEnv().shape[0], test_ac.getEnv().shape[1], sharex=common_axes, sharey=common_axes, gridspec_kw=dict(hspace=0.1, wspace=0.1))  # See also help(plt.subplots); help(matplotlib.gridspec.GridSpec)
 for i, ax in enumerate(axes.reshape(-1)):
     # Value functions on the left axis
     ax.plot(np.arange(1+first_learning_step, n_learning_steps + 1), dict_A[learning_method][rep, first_learning_step:n_learning_steps, i, :], marker=marker)
@@ -1301,7 +1388,9 @@ ax_loss.set_title(f"Evolution of LOSS")
 ax_loss.legend(legend)
 ax_R.set_xlabel("Learning step")
 ax_R.set_ylabel("Average reward (normalized by the MAX average reward = {:.2g})".format(max_avg_reward))
-ax_R.axhline(1, color="gray")
+if max_avg_reward != 1.0:
+    # This is the case when the max average reward is not known, so we are NOT plotting the *normalized* average reward and showing the 1.0 line is not informative and goes out of scale
+    ax_R.axhline(1, color="gray")
 ax_R.axhline(0, color="gray")
 ax_R.set_title(f"Evolution of NORMALIZED Average Reward")
 ax_R.legend(legend, loc="lower left")
@@ -1341,8 +1430,8 @@ plt.suptitle(f"ALL LEARNING METHODS: {env_type.name} {env_shape} - {learning_tas
 
 # Plot results on several replications
 if nrep > 1:
-    plot_bands = False #False
-    plot_mean = True #True
+    plot_bands = plot_for_paper #True #False
+    plot_mean = not plot_for_paper #False #True
     dict_stats_R = dict.fromkeys(dict_loss.keys())
     ax = plt.figure(figsize=figsize).subplots(1, 1)
     lines = []
@@ -1350,7 +1439,7 @@ if nrep > 1:
     _xshift = -0.1 # shift on the X axis to avoid overlap of vertical error bars
     for meth in dict_loss.keys():
         # Adapt the following filter if we want to exclude a particular method from the comparison plot
-        #if meth in ["values_td", "values_fv"]:
+        #if meth in ["values_fv"]:
         #    continue
         _xshift += 0.1
         # Compute distribution of values to plot
@@ -1410,6 +1499,14 @@ if nrep > 1:
         ax_nsamples.plot(range(1, n_learning_steps+1), df_ratio_nsamples['ratio_fv_td'], color="blue", linewidth=0.5)
         ref_line = ax_nsamples.axhline(1.0, color="blue", linewidth=0.5, linestyle="dashed")
         legend_nsamples += ["Sample size ratio (FV/TD)", "Reference line showing equal sample size ratio"]
+    if "values_td" in dict_nsteps.keys() and "values_fv2" in dict_nsteps.keys():
+        df_ratio_nsamples = pd.DataFrame({'td': np.mean(dict_nsteps['values_td'], axis=0)[:n_learning_steps],
+                                          'fv': np.mean(dict_nsteps['values_fv2'], axis=0)[:n_learning_steps]})
+        df_ratio_nsamples['ratio_fv_td'] = df_ratio_nsamples['fv'] / df_ratio_nsamples['td']
+        ax_nsamples = ax.twinx()
+        ax_nsamples.plot(range(1, n_learning_steps+1), df_ratio_nsamples['ratio_fv_td'], color="orange", linewidth=0.5)
+        ref_line = ax_nsamples.axhline(1.0, color="orange", linewidth=0.5, linestyle="dashed")
+        legend_nsamples += ["Sample size ratio (FV2/TD)", "Reference line showing equal sample size ratio"]
     if "values_td2" in dict_nsteps.keys() and "values_fv" in dict_nsteps.keys():
         df_ratio_nsamples = pd.DataFrame({'td': np.mean(dict_nsteps['values_td2'], axis=0)[:n_learning_steps],
                                           'fv': np.mean(dict_nsteps['values_fv'], axis=0)[:n_learning_steps]})
@@ -1421,14 +1518,14 @@ if nrep > 1:
         if "ref_line" not in locals():
             ref_line = ax_nsamples.axhline(1.0, color="cyan", linewidth=0.5, linestyle="dashed")
             legend_nsamples += ["Reference line showing equal sample size ratio"]
-    if "values_td" in dict_nsteps.keys() and "values_fvos" in dict_nsteps.keys():
-        df_ratio_nsamples = pd.DataFrame({'td': np.mean(dict_nsteps['values_td'], axis=0)[:n_learning_steps],
-                                          'fv': np.mean(dict_nsteps['values_fvos'], axis=0)[:n_learning_steps]})
+    if "values_td2" in dict_nsteps.keys() and "values_fv2" in dict_nsteps.keys():
+        df_ratio_nsamples = pd.DataFrame({'td': np.mean(dict_nsteps['values_td2'], axis=0)[:n_learning_steps],
+                                          'fv': np.mean(dict_nsteps['values_fv2'], axis=0)[:n_learning_steps]})
         df_ratio_nsamples['ratio_fv_td'] = df_ratio_nsamples['fv'] / df_ratio_nsamples['td']
         if "ax_nsamples" not in locals():
             ax_nsamples = ax.twinx()
         ax_nsamples.plot(range(1, n_learning_steps + 1), df_ratio_nsamples['ratio_fv_td'], color="magenta", linewidth=0.5)
-        legend_nsamples += ["Sample size ratio (FVOS/TD)"]
+        legend_nsamples += ["Sample size ratio (FV2/TD2)"]
         if "ref_line" not in locals():
             ax_nsamples.axhline(1.0 - 1E-6, color="magenta", linewidth=0.5, linestyle="dashed")
             legend_nsamples += ["Reference line showing equal sample size ratio"]

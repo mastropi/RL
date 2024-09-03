@@ -465,6 +465,9 @@ class ValueFunctionApproxNN:
         so that when the simulators call getValues(), instead of returning the state value for each possible state,
         it receives the object that enables them to compute the state value for any continuous-valued state.
         """
+        # TODO: (2024/08/26) Implement the return of the values (state or action values) of the function evaluated at the states discretized by the environment
+        # Goal: Be able to plot the value functions and get an idea of how they are behaving, for example to do iterative plots while doing simulations in discrete.Simulator (see _update_plots(), etc.)
+        # NOTE: In order to implement this, we NEED TO CHANGE THE SIGNATURE of the constructor and receive the environment as argument which should be stored as class attribute.
         return self
 
     def isTabular(self):
