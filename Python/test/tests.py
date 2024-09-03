@@ -486,9 +486,9 @@ dict_time_elapsed = dict()
 
 
 # Number of replications to run on each method
-nrep = 10 #5 #10
+nrep = 1 #10
 # Logging
-log = True #True #False #learning_method_type == "values_fv"
+log = False #True #False #learning_method_type == "values_fv"
 
 # Learning method (of the value functions and the policy)
 # Both value functions and policy are learned online using the same simulation
@@ -501,15 +501,32 @@ learning_method = "values_td"; simulator_value_functions = test_ac.sim_td0      
 #learning_method = "values_tda"; simulator_value_functions = test_ac.sim_tda    # Adaptive TD(lambda)
 learning_method = "values_fv"; simulator_value_functions = test_ac.sim_fv
 #learning_method = "values_fv2"; simulator_value_functions = test_ac.sim_fv
+#learning_method = "values_fv3"; simulator_value_functions = test_ac.sim_fv
 #learning_method = "values_fvos"; simulator_value_functions = test_ac.sim_fv     # FV used just as an oversampling method
 
 learning_method_type = learning_method[:9]  # This makes e.g. "values_fvos" become "values_fv"
 
 # FV learning parameters (which are used to define parameters of the other learners analyzed so that their comparison with FV is fair)
-max_time_steps_fv_per_particle = 5*len(test_ac.agent_nn_fv.getLearner().getActiveSet()) #100 #50                            # Max average number of steps allowed for each particle in the FV simulation. We set this value proportional to the size of the active set of the FV learner, in order to scale this value with the size of the labyrinth.
-max_time_steps_fv_for_expectation = test_ac.agent_nn_fv.getLearner().getNumTimeStepsForExpectation()                        # This is parameter T
-max_time_steps_fv_for_all_particles = test_ac.agent_nn_fv.getLearner().getNumParticles() * max_time_steps_fv_per_particle   # This is parameter N * max_time_steps_fv_per_particle which defines the maximum number of steps to run the FV system when learning the value functions that are used as critic of the loss function at each policy learning step
-max_time_steps_fv_overall = 3*max_time_steps_fv_for_all_particles #max(5000, max_time_steps_fv_for_all_particles)            # To avoid too large simulation times, for instance when the policy is close to optimal: ABSOLUTE maximum number of steps allowed for the FV simulation, regardless of what happens with particle absorption (i.e. if all of them are absorbed or 90% of them are absorbed at least once)
+# Max average number of steps allowed for each particle in the FV simulation
+# We set this value proportional to the size of the active set of the FV learner because the larger the active set the harder for the FV system to discover rewards
+if env_type == Environment.MountainCar:
+    max_time_steps_fv_per_particle = 30 #50 #100
+else:
+    max_time_steps_fv_per_particle = 30 #5*len(test_ac.agent_nn_fv.getLearner().getActiveSet()) #100 #50
+# Parameter T in EWRL-2024 paper
+max_time_steps_fv_for_expectation = test_ac.agent_nn_fv.getLearner().getNumTimeStepsForExpectation()
+# Parameter M1 in EWRL-2024 paper, which defines the first threshold for the maximum number of steps to run the FV system for,
+# during which the first-time absorption of 100% of the particles makes the simulation stop.
+M1 = max_time_steps_fv_for_all_particles = test_ac.agent_nn_fv.getLearner().getNumParticles() * max_time_steps_fv_per_particle  #100 (for MountainCar)
+# Parameter M2 in EWRL-2024 paper, which defines the second threshold for the maximum number of steps to run the FV system for,
+# after which the simulation stops, regardless of the number of absorbed particles
+# Use the following to avoid too large simulation times, for instance when the policy is close to optimal:
+#M2 = max_time_steps_fv_overall = max(5000, max_time_steps_fv_for_all_particles)
+M2 = max_time_steps_fv_overall = 2*max_time_steps_fv_for_all_particles
+min_prop_absorbed_particles = 1.0  #0.90 #0.70 #0.90    # WARNING: currently (2024/08/09) this ONLY has effect when M2 > M1!! So, if we want to use it just set M1 very small and M2 a value of the order of M1 usually used before
+stop_if_prop_absorbed_particles_reached_regardless_of_time_steps = True
+print(f"Thresholds for FV simulation: T={test_ac.agent_nn_fv.getLearner().getNumTimeStepsForExpectation()}, M1 = {M1}, M2 = {M2}"
+      f"\n% Absorbed particles required between M1 and M2: {min_prop_absorbed_particles*100}% (STOP when reached regardless of t? {stop_if_prop_absorbed_particles_reached_regardless_of_time_steps})")
 
 # Traditional method learning parameters
 # They are set for a fair comparison with FV learning
@@ -521,19 +538,30 @@ max_time_steps_fv_overall = 3*max_time_steps_fv_for_all_particles #max(5000, max
 # Number of steps used to estimate the absorption set A
 time_steps_fv_for_absorption_set = test_ac.learner_for_initial_exploration.getNumSteps() if test_ac.learner_for_initial_exploration is not None else 0
 assert time_steps_fv_for_absorption_set > 0 if estimate_absorption_set else None
-max_time_steps_benchmark = time_steps_fv_for_absorption_set + max_time_steps_fv_for_expectation + max_time_steps_fv_for_all_particles
+# Include the time spent for the absorption set estimation in the budget (not really appropriate because: (i) in FVAC it is only run ONCE (at t=0); (ii) there is no value function learning during that exploration)
+#max_time_steps_benchmark = time_steps_fv_for_absorption_set + max_time_steps_fv_for_expectation + max_time_steps_fv_overall
+#print(f"max_time_steps_benchmark (T + T + M2) = {max_time_steps_benchmark}")
+# Do NOT include the time spent for the absorption set estimation
+max_time_steps_benchmark = max_time_steps_fv_for_expectation + max_time_steps_fv_overall
+print(f"max_time_steps_benchmark (T + M2) = {max_time_steps_benchmark}")
 
 #-- Common learning parameters
 # Parameters about policy learning (Actor)
 is_NPG = len(nn_hidden_layer_sizes) == 0
 n_learning_steps = 50 #200 #50 #100 #30
 n_episodes_per_learning_step = 50   #100 #30   # This parameter is used as the number of episodes to run the policy learning process for and, if the learning task is EPISODIC, also as the number of episodes to run the simulators that estimate the value functions
-max_time_steps_per_policy_learning_episode = 5*test_ac.getEnv().getNumStates() if problem_2d else 2*test_ac.getEnv().getNumStates() #np.prod(env_shape) * 10 #max_time_steps_benchmark // n_episodes_per_learning_step   # Maximum number of steps per episode while LEARNING THE *POLICY* ONLINE (NOT used for the value functions (critic) learning)
+# Max time steps per episode during exploration for the online policy learning
+# In the Mountain Car problem we limit the number of steps per episode in the continuous-dynamics case because I've seen out-of-memory problems otherwise.
+if env_type == Environment.Gridworld:
+    _multiplier = 5
+else:
+    _multiplier = 1
+max_time_steps_per_policy_learning_episode = _multiplier*test_ac.getEnv().getNumStates() if problem_2d else 2*test_ac.getEnv().getNumStates() #np.prod(env_shape) * 10 #max_time_steps_benchmark // n_episodes_per_learning_step   # Maximum number of steps per episode while LEARNING THE *POLICY* ONLINE (NOT used for the value functions (critic) learning)
 policy_learning_mode = "online" #"offline" #"online"     # Whether the policy is learned online or OFFLINE (only used when value functions are learned separately from the policy)
 allow_deterministic_policy = True #False
 use_average_reward_from_previous_step = True #learning_method_type == "values_fv" #False #True            # Under the AVERAGE reward crtierion, whether to use the average reward estimated from the previous policy learning step as correction of the value functions (whenever it is not 0), at least as an initial estimate
 use_advantage = not (learning_method == "values_fvos") # Set this to True if we want to use the advantage function learned as the TD error, instead of using the advantage function as the difference between the estimated Q(s,a) and the estimated V(s) (where the average reward cancels out)
-optimizer_learning_rate = 10 if is_NPG else 0.05 #0.05 if policy_learning_mode == "online" else 0.05 #0.01 #0.1
+optimizer_learning_rate = 10 if is_NPG else 0.05 #if policy_learning_mode == "online" else 0.05 #0.01 #0.1
 reset_value_functions_at_every_learning_step = False #(learning_method == "values_fv")     # Reset the value functions when learning with FV, o.w. the learning can become too unstable due to the oversampling of the states with high value... (or something like that)
 
 # Parameters about value function learning (Critic)
@@ -542,7 +570,7 @@ adjust_alpha_initial_by_learning_step = False; t_learn_min_to_adjust_alpha = 30 
 #max_time_steps_per_episode = test_ac.getEnv().getNumStates()*10  # (2024/05/02) NO LONGER USED!  # This parameter is just set as a SAFEGUARD against being blocked in an episode at some state of which the agent could be liberated by restarting to a new episode (when this max number of steps is reached)
 epsilon_random_action = 0.1 #if policy_learning_mode == "online" else 0.0 #0.1 #0.05 #0.0 #0.01
 use_average_max_time_steps_in_td_learner = True #learning_method == "values_td2" #True #False
-learning_steps_observe = [50, 90] #[2, 30, 48] #[2, 10, 11, 30, 31, 49, 50] #[7, 20, 30, 40]  # base at 1, regardless of the base value used for t_learn
+learning_steps_observe = [1, 25, 49] #[50, 90] #[2, 30, 48] #[2, 10, 11, 30, 31, 49, 50] #[7, 20, 30, 40]  # base at 1, regardless of the base value used for t_learn
 verbose_period = max_time_steps_fv_for_all_particles // 10
 plot = False         # Whether to plot the evolution of value function and average reward estimation
 colormap = "seismic"  # "Reds"  # Colormap to use in the plot of the estimated state value function V(s)
@@ -728,6 +756,7 @@ for rep in range(nrep):
                     simulator_value_functions.run(t_learn=t_learn,
                                                   max_time_steps=max_time_steps_fv_overall,
                                                   max_time_steps_for_absorbed_particles_check=max_time_steps_fv_for_all_particles,
+                                                  min_prop_absorbed_particles=min_prop_absorbed_particles, stop_if_prop_absorbed_particles_reached_regardless_of_time_steps=stop_if_prop_absorbed_particles_reached_regardless_of_time_steps,
                                                   min_num_cycles_for_expectations=0,
                                                       ## Note: We set the minimum number of cycles for the estimation of E(T_A) to 0 because we do NOT need
                                                       ## the estimation of the average reward to learn the optimal policy, as it cancels out in the advantage function Q(s,a) - V(s)!!
@@ -1297,6 +1326,11 @@ if save:
 
 resultsdir = "./RL-003-Classic/results"
 
+#--- For AAAI-2025 paper
+# Random labyrinth 6x8 with wind 0.5
+_filename = "ActorCritic_gridworld_6x8_20240809_083136_ALL_WindyRandomLabyrinth0.5Seed4217,N=20,T=500,AlphA=0.05 (FVAC is better and takes similar time!).pkl"
+#--- For AAAI-2025 paper
+
 _filename = "ActorCritic_labyrinth_4x5_20240512_232944_ALL_WindyLabyrinth0.7FinishAtBottomAbsorptionSetEstimated0_TDAC,FVAC,N=20,T=500,LimitedTime=5x,epsilon=0.10,Budget4Loss=5x_FVisBetter.pkl"
 _filename = "ActorCritic_labyrinth_4x5_20240513_070501_ALL_WindyLabyrinth0.7FinishAtBottomAbsorptionSetEstimated_TDAC,FVAC,N=20,T=500,LimitedTime=5x,epsilon=0.10,Budget4Loss=5x_FVisBetter.pkl"
 _filename = "ActorCritic_labyrinth_4x5_20240524_011541_ALL_WindyLabyrinth0.7FinishAtTopAbsorptionSetEstimate0_TDAC,FVAC,N=50,T=500,LimitedTime=5x,epsilon=0.10,OFFLINE_FVworksTDfails.pkl"
@@ -1428,7 +1462,11 @@ plt.suptitle(f"ALL LEARNING METHODS: {env_type.name} {env_shape} - {learning_tas
              f"\nWIND: {wind_dict}, EXIT: {_exit_state_str}, ALL {nrep} replications" +
              _learning_characteristics)
 
+# --> FOR PAPER
 # Plot results on several replications
+plot_for_paper = True
+marker_for_main_line = "" if plot_for_paper else "."    # Used for mean if plotted or for median if mean is not plotted
+fontsize = 26 if plot_for_paper else 12
 if nrep > 1:
     plot_bands = plot_for_paper #True #False
     plot_mean = not plot_for_paper #False #True
@@ -1464,10 +1502,10 @@ if nrep > 1:
         _xvalues = np.arange(1, n_learning_steps+1) + _xshift
         if plot_mean:
             #line = ax.plot(_xvalues, dict_stats_R[meth]['mean'] / max_avg_reward, color=dict_colors[meth], linestyle=dict_linestyles[meth], linewidth=2)[0]
-            line = ax.errorbar(_xvalues, dict_stats_R[meth]['mean'][:n_learning_steps] / max_avg_reward, yerr=dict_stats_R[meth]['std'][:n_learning_steps] / np.sqrt(dict_stats_R[meth]['n']) / max_avg_reward, color=dict_colors[meth], linestyle=dict_linestyles[meth], linewidth=2, marker=".", markersize=12)[0]
+            line = ax.errorbar(_xvalues, dict_stats_R[meth]['mean'][:n_learning_steps] / max_avg_reward, yerr=dict_stats_R[meth]['std'][:n_learning_steps] / np.sqrt(dict_stats_R[meth]['n']) / max_avg_reward, color=dict_colors[meth], linestyle=dict_linestyles[meth], linewidth=2, marker=marker_for_main_line, markersize=12)[0]
             lines += [line]
             legend += [f"{dict_legends[meth]} (average +/- SE)"]
-        line = ax.plot(_xvalues, dict_stats_R[meth]['median'][:n_learning_steps] / max_avg_reward, color=dict_colors[meth], linestyle="dashed" if plot_mean else "solid", linewidth=2, marker="x" if plot_mean else ".", markersize=12)[0]
+        line = ax.plot(_xvalues, dict_stats_R[meth]['median'][:n_learning_steps] / max_avg_reward, color=dict_colors[meth], linestyle="dashed" if plot_mean else "solid", linewidth=2, marker="x" if plot_mean else marker_for_main_line, markersize=12)[0]
         lines += [line]
         legend += [f"{dict_legends[meth]} (median)"]
         if plot_bands:
@@ -1480,14 +1518,21 @@ if nrep > 1:
                             dict_stats_R[meth]['min'][:n_learning_steps] / max_avg_reward,
                             color=dict_colors[meth],
                             alpha=0.1)
-    ax.axhline(1, color="gray")
-    ax.legend(lines, legend, loc="center left")
-    ax.set_ylim((-0.01, 1.01))
-    ax.set_xlabel("Learning step")
-    ax.set_ylabel("Average reward (normalized by the MAX average reward = {:.2g})".format(max_avg_reward))
-    plt.suptitle(f"ALL LEARNING METHODS: Labyrinth {env_shape} - {learning_task.name} learning task - {learning_criterion.name} reward criterion (gamma={gamma})"
-                 f"\nWIND: {wind_dict}, EXIT: {_exit_state_str}, {nrep} replications" +
-                 _learning_characteristics)
+    ax.legend(lines, legend, loc="center left", fontsize=int(0.5 * fontsize))
+    if max_avg_reward != 1.0:
+        # This is the case when the max average reward is not known, so we are NOT plotting the *normalized* average reward and showing the 1.0 line is not informative and goes out of scale
+        ax.axhline(1, color="gray")
+        ax.set_ylim((-0.01, 1.01))
+    ax.set_xlabel("Learning step", fontsize=fontsize)
+    if plot_for_paper:
+        # Shorter label, larger tick labels, no title
+        ax.set_ylabel("Normalized episodic average reward".format(max_avg_reward), fontsize=fontsize)
+        ax.tick_params(axis='both', labelsize=int(0.8*fontsize))
+    else:
+        ax.set_ylabel("Average reward (normalized by the MAX average reward = {:.2g})".format(max_avg_reward), fontsize=fontsize)
+        plt.suptitle(f"ALL LEARNING METHODS: {env_type.name} {env_shape} - {learning_task.name} learning task - {learning_criterion.name} reward criterion (gamma={gamma})"
+                     f"\nWIND: {wind_dict}, EXIT: {_exit_state_str}, {nrep} replications" +
+                     _learning_characteristics)
 
     # Plot of number of samples ratios between FV learnings and TD learning
     legend_nsamples = []
@@ -1544,8 +1589,12 @@ if nrep > 1:
 
     if "ax_nsamples" in locals():
         ax_nsamples.set_ylim((ax.get_ylim()[0], None))
-        ax_nsamples.set_ylabel("Average sample Ratio FV/TD across replications")
-        ax_nsamples.legend(legend_nsamples, loc="lower right")
+        if plot_for_paper:
+            ax_nsamples.set_ylabel("Budget ratio (FVAC / TDAC)", fontsize=int(0.8*fontsize))
+            ax_nsamples.tick_params(axis='y', labelsize=int(0.8*fontsize))
+        else:
+            ax_nsamples.set_ylabel("Average sample Ratio FV/TD across replications", fontsize=int(0.8 * fontsize))
+            ax_nsamples.legend(legend_nsamples, loc="lower right")
 #-- ALTOGETHER PLOT
 #------------------ Plots -----------------
 

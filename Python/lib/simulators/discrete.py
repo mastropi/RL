@@ -250,8 +250,9 @@ class Simulator:
             default: None, in which case 100*N is used, where N is the number of particles in the FV system
 
         max_time_steps_for_absorbed_particles_check: (opt) int
-            Maximum number of steps to run the simulation before starting to check the percent of particles absorbed at least once
-            (using the threshold passed as `min_prop_absorbed_particles`).
+            When stop_if_prop_absorbed_particles_reached_regardless_of_time_steps=False,
+            maximum number of steps to run the simulation before starting to check the percent of particles absorbed at least once,
+            using the threshold passed as `min_prop_absorbed_particles`.
             Set it to `np.Inf` in order to run the FV simulation until all the N particles are absorbed at least once or until `max_time_steps` steps
             have been taken.
             This parameter is expected to be smaller than `max_time_steps` and CANNOT be None.
@@ -693,7 +694,11 @@ class Simulator:
                 probas_stationary, integrals = estimate_stationary_probabilities(phi, df_proba_surv,
                                                                                  expected_absorption_time,
                                                                                  uniform_jump_rate=uniform_jump_rate)
-                expected_reward = estimate_expected_reward(envs[0], probas_stationary)
+                # Expected reward on states outside A only, i.e. this is the expected reward estimated by FV
+                # If we want to compute the expected reward on ALL states of the environment, we should add the estimated expected reward estimated in A
+                # which is part of the expected reward estimated during the initial exploration but which is currently NOT split into "inside A" and "outside A"
+                # as is needed if we want to add the estimated expected reward on states in A to the estimated expected reward on states OUTSIDE A.
+                expected_reward = compute_expected_reward(envs[0], probas_stationary)
 
                 # Store the expected reward as average reward in the learner object
                 # so that we can retrieve the average reward estimated by FV by using the method GenericLearner.getAverageReward()
