@@ -27,7 +27,6 @@ from Python.lib.agents.learners.episodic.discrete import fv, mc, td, AlphaUpdate
 from Python.lib.agents.policies import probabilistic, random_walks
 
 from Python.lib.environments import gridworlds, mountaincars
-from Python.lib.estimators.fv import estimate_expected_reward
 from Python.lib.simulators.discrete import Simulator as DiscreteSimulator
 
 from Python.lib.utils import computing
@@ -1062,7 +1061,7 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
         expected_probas_stationary = dict({19: 0.0467760})
         # The following is NOT an expected value for the unit test, but just the expected reward under stationarity computed using its definition,
         # i.e. E(R) = sum{x} p(x)*r(x), where p(x) is the stationary probability
-        expected_reward_under_stationarity = estimate_expected_reward(self.env1d, probas_stationary)
+        expected_reward_under_stationarity = computing.compute_expected_reward(self.env1d, probas_stationary)
         print("\nObserved V(s): " + test_utils.array2str(state_values))
         print("State count: " + test_utils.array2str(state_counts))
         print(f"Number of cycles observed in E(T) estimation: {n_cycles_absorption_used}")
@@ -1166,7 +1165,7 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
         expected_probas_stationary = dict({19: 0.00222471})
         # The following is NOT an expected value for the unit test, but just the expected reward under stationarity computed using its definition,
         # i.e. E(R) = sum{x} p(x)*r(x), where p(x) is the stationary probability
-        expected_reward_under_stationarity = estimate_expected_reward(self.env1d, probas_stationary)
+        expected_reward_under_stationarity = computing.compute_expected_reward(self.env1d, probas_stationary)
         print("\nObserved V(s): " + test_utils.array2str(state_values))
         print("State count: " + test_utils.array2str(state_counts))
         print(f"Number of cycles observed in E(T) estimation: {n_cycles_absorption_used}")
@@ -1384,7 +1383,10 @@ class Test_EstValueFunctions_EnvGridworld2DWithObstacles(unittest.TestCase, test
         assert np.allclose(observed_V, self.expected_td_V, atol=1E-6)
         assert np.allclose(observed_Q, self.expected_td_Q, atol=1E-6)
 
-    def test_Env_PolRandomWalk_MetFV(self):
+    # DM-2024/08/23: Test removed because the current implementation of FV learning under the discounted criterion has been deprecated
+    # (see reason in discrete.Simulator._deprecated_run_simulation_fv_discounted())
+    # In addition, this test had always been failing, anyway.
+    def no_test_Env_PolRandomWalk_MetFV(self):
         "Tests the value functions estimation using Fleming-Viot"
         print("\n*** Running test " + self.id() + " ***")
 
@@ -2162,7 +2164,8 @@ if __name__ == '__main__':
         test_suite_gw2dobstacles = unittest.TestSuite()
         test_suite_gw2dobstacles.addTest(Test_EstValueFunctions_EnvGridworld2DWithObstacles("test_Env_PolRandomWalk_MetMC"))
         test_suite_gw2dobstacles.addTest(Test_EstValueFunctions_EnvGridworld2DWithObstacles("test_Env_PolRandomWalk_MetTDLambda"))
-        test_suite_gw2dobstacles.addTest(Test_EstValueFunctions_EnvGridworld2DWithObstacles("test_Env_PolRandomWalk_MetFV"))
+        # DM-2024/08/23: Test removed because the current implementation of FV learning under the discounted criterion has been deprecated (see discrete.py)
+        #test_suite_gw2dobstacles.addTest(Test_EstValueFunctions_EnvGridworld2DWithObstacles("test_Env_PolRandomWalk_MetFV"))
         test_suite_gw2dobstacles.addTest(Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles("test_Env_PolRandomWalk_MetMC"))
         test_suite_gw2dobstacles.addTest(Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles("test_Env_PolRandomWalk_MetMC_FromCycles"))
         test_suite_gw2dobstacles.addTest(Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles("test_Env_PolRandomWalk_MetTDLambda"))

@@ -589,55 +589,6 @@ def compute_fv_integral(df_phi_proba_surv, reward: float=1.0, interval_size: flo
     return integral
 
 
-# TODO: (2024/05/02) Move this function to utils.computing because it is NOT specific to the FV estimators
-def estimate_expected_reward(env, probas_stationary: dict, reward=None, require_all_states_with_reward_present_in_dictionary=True):
-    """
-    Estimates the expected reward (a.k.a. long-run average reward) of the Markov Reward Process defined in the given environment,
-    assuming a non-zero reward ONLY happens at the environment states that are present in the probas_stationary dictionary
-    (unless require_all_states_with_reward_present_in_dictionary=False).
-
-    Arguments:
-    env: EnvironmentDiscrete
-        Discrete-time/state/action environment where the Markov Reward Process is defined.
-
-    probas_stationary: dict
-        Dictionary with the estimated stationary probability of the states which are assumed to yield
-        non-zero rewards. These states are the dictionary keys.
-
-    reward: (opt) float
-        When given, this value is used as the constant reward associated to a state present in the dictionary containing
-        non-zero stationary probabilities, instead of the rewards stored in the environment.
-        This could be useful when we are interested in computing a probability rather than the expected reward,
-        and avoid having to define a reward landscape in the environment just to tell that the non-zero rewards are constant.
-
-    require_all_states_with_reward_present_in_dictionary: (opt) bool
-        Whether to require that all environment states with reward be present in the `probas_stationary` dictionary.
-        Set it to True when we want to make sure that all relevant states contributing to the expected reward are included
-        in the dictionary containing the state stationary distribution, for instance when estimating the true expected reward
-        based on the true stationary probabilities.
-        However, in estimation processes, not all states with non-zero reward may be present in the stationary distribution dictionary
-        because perhaps not all of them were observed during a trajectory collection process (such as a simulation).
-        default: True
-
-    Return: float
-    Estimated expected reward a.k.a. long-run average reward.
-    """
-    expected_reward = 0.0
-
-    if reward is None:
-        dict_rewards = env.getRewardsDict()
-        dict_nonzero_rewards = dict([(s, r) for (s, r) in dict_rewards.items() if r != 0])
-        if require_all_states_with_reward_present_in_dictionary and not set(dict_nonzero_rewards.keys()).issubset(set(probas_stationary.keys())):
-            raise ValueError("The states with non-zero rewards ({}) should all be present in the dictionary of estimated stationary probability ({})." \
-                             .format(set(dict_nonzero_rewards.keys()), set(probas_stationary.keys())))
-
-    for s in probas_stationary.keys():
-        if probas_stationary[s] > 0.0:  # Note that nan > 0 returns False (OK)
-            expected_reward += (dict_rewards.get(s, 0) if reward is None else reward) * probas_stationary[s]
-
-    return expected_reward
-
-
 def estimate_survival_probability(model, t, state, action):
     "Estimates the survival probability at time t, given the Markov process started at the given state and action, using the given model"
     pass

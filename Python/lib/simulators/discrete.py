@@ -38,13 +38,13 @@ from Python.lib.agents.learners import LearningCriterion, LearningTask
 from Python.lib.agents.learners.episodic.discrete.fv import LeaFV
 from Python.lib.agents.learners.episodic.discrete.td import LeaTDLambdaAdaptive
 from Python.lib.estimators import DEBUG_ESTIMATORS
-from Python.lib.estimators.fv import initialize_phi, estimate_expected_reward, estimate_stationary_probabilities, update_phi, update_phi_on_all_states
+from Python.lib.estimators.fv import initialize_phi, estimate_stationary_probabilities, update_phi, update_phi_on_all_states
 from Python.lib.agents.policies.parameterized import PolNN
 from Python.lib.simulators.fv import reactivate_particle
 from Python.lib.simulators import DEBUG_TRAJECTORIES, MIN_NUM_CYCLES_FOR_EXPECTATIONS, choose_state_from_set, parse_simulation_parameters, show_messages
 
 from Python.lib.utils.basic import find_signed_max_value, generate_datetime_string, get_current_datetime_as_string, insort, is_integer, measure_exec_time
-from Python.lib.utils.computing import compute_set_of_frequent_states_with_zero_reward, compute_survival_probability, mape, rmse
+from Python.lib.utils.computing import compute_expected_reward, compute_set_of_frequent_states_with_zero_reward, compute_survival_probability, mape, rmse
 from Python.lib.utils.plotting import update_plots
 
 #-- Constants used in the iterative plots
@@ -1174,7 +1174,7 @@ class Simulator:
             learner.update_integral(t_surv, fixed_sample_size=True)
             for _state, _integral_for_state in learner.getIntegral().items():
                 probas_stationary[_state] = _integral_for_state / learner.getNumParticles() / expected_absorption_time
-            updated_average_reward = estimate_expected_reward(self.env, probas_stationary, require_all_states_with_reward_present_in_dictionary=False)
+            updated_average_reward = compute_expected_reward(self.env, probas_stationary, require_all_states_with_reward_present_in_dictionary=False)
                 ## NOTE: We do NOT require that all states with reward be present in the dictionary containing the stationary probability
                 ## because some of those states may be present in the absorption set A, which should NOT be considered in the estimation of
                 ## the expected reward outside A.
@@ -2293,6 +2293,12 @@ class Simulator:
         return n_events_fv, learner.getV().getValues(), learner.getQ().getValues(), learner.getA().getValues(), learner._state_counts, dict_phi, df_proba_surv, expected_absorption_time, max_survival_time
 
     @measure_exec_time
+    # DEPRECATED-2024/08/07: Following the elimination of parameter `estimate_on_fixed_sample_size` from the LeaFV constructor,
+    # this method was deprecated because it still makes reference to parameter `estimate_on_fixed_sample_size`
+    # whose value does no longer coincide with the new attribute stored in the LeaFV learner, `is_criterion_discounted`,
+    # as the parameter can be set to True or False while still learning under the DISCOUNTED criterion.
+    # Another reason for deprecation is that doing FV in the discounted context as implemented here is highly computationally intensive
+    # and it therefore doesn't make sense to be used.
     def _deprecated_run_simulation_fv_discounted(  self, t_learn, envs, absorption_set: set, start_set: set,
                                         max_time_steps=None,
                                         max_time_steps_for_absorbed_particles_check=+np.Inf, min_prop_absorbed_particles=0.90,

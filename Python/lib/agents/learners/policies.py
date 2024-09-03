@@ -20,6 +20,8 @@ from Python.lib.environments import EnvironmentDiscrete
 from Python.lib.utils.basic import find, is_scalar
 #from Python.lib.agents.policies.parameterized import AcceptPolicyType   # NEW: TO IMPLEMENT IN ORDER TO DECIDE WHETHER THE ACCEPTANCE POLICY IS OF THRESHOLD TYPE OR TRUNK-RESERVATION
 
+from Python.lib.utils.basic import set_numpy_options, reset_numpy_options
+
 # Minimum value allowed for the theta parameter of a parameterized policy
 # NOTE 1: Avoid an integer value as lower bound of theta because the estimated gradient of the average state value
 # may be zero at integer values of theta (depending on the method used to compute it ).
@@ -1138,17 +1140,15 @@ class LeaActorCriticNN(GenericLearner):
 
         if self.debug:
             print("Policy for each state and action at the current parameter value:")
-            # TODO: (2024/08/15) Replace this calculation with a call to policy.get_policy_values(). The reason I am repeating that code here is that here I ROUND the values for better reading (but this can be done with np.printoptions)
-            proba_actions = np.nan * np.ones((self.env.getNumStates(), self.env.getNumActions()))
-            for s in self.env.getAllStates():
-                # In case the environment has non-index states (e.g. continuous-valued states such as the Mountain Car) here we convert the index to the actual environment state
-                # on which the policy depends and thus can be evaluated
-                state = s
-                if self.env.isStateContinuous():
-                    state = self.env.getStateFromIndex(s)
-                for a in range(self.env.getNumActions()):
-                    proba_actions[s][a] = np.round(np.float(self.policy.getPolicyForAction(a, state)), 2)
+            proba_actions = self.policy.get_policy_values()
+            if len(proba_actions) > 20:
+                # Do not print ALL the policy values if there are too many states...
+                edgeitems = None
+            else:
+                edgeitems = +np.Inf
+            _dict_numpy_options = set_numpy_options(edgeitems=edgeitems)
             print(proba_actions)
+            reset_numpy_options(_dict_numpy_options)
 
         # Reset the information that has to do with the value functions learning and with attributes stored in the object about the performance of the policy
         self.reset(reset_value_functions=self.reset_value_functions_at_every_learning_step, reset_policy=False)

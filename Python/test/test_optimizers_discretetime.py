@@ -523,7 +523,7 @@ class Test_EstPolicy_EnvMountainCar(unittest.TestCase):
     @classmethod
     def setUpClass(cls, env_discrete=True, nx=20, nv=21, factor_for_force_and_gravity=20, factor_force=1.0, factor_max_speed=1.0,
                    dict_function_approximations=None,
-                   nn_input: Union[InputLayer, int]=InputLayer.ONEHOT,
+                   nn_input: Union[InputLayer, int]=2,
                    nn_hidden_layer_sizes: list=[8],
                    dropout_policy: float=0.0,
                    initial_policy=[1/3, 1/3, 1/3],
@@ -531,7 +531,7 @@ class Test_EstPolicy_EnvMountainCar(unittest.TestCase):
                    learning_criterion=LearningCriterion.AVERAGE,
                    alpha=1.0, gamma=1.0, lmbda=0.0,  # Lambda parameter in non-adaptive TD(lambda) learners
                    alpha_min=0.0,
-                   reset_method_value_functions=ResetMethod.ALLZEROS,
+                   reset_method_value_functions=ResetMethod.ALLZEROS, reset_value=0.0,
                    N=100, T=100,
                    threshold_absorption_set=0.90,
                    seed=1717, plot=False, debug=False):
@@ -557,7 +557,7 @@ class Test_EstPolicy_EnvMountainCar(unittest.TestCase):
         cls.alpha = alpha
         cls.alpha_min = alpha_min
         cls.reset_method = reset_method_value_functions
-        cls.reset_params = dict({'min': -1, 'max': +1})  # Only used when reset_method = ResetMethod.RANDOM_UNIFORM
+        cls.reset_params = reset_value    # This is the value to assign at the start of the value function
 
         #-- Environment characteristics
         cls.env_mc = MountainCarDiscrete(nx=nx, nv=nv, factor_for_force_and_gravity=factor_for_force_and_gravity, factor_force=factor_force, factor_max_speed=factor_max_speed,

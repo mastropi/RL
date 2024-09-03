@@ -319,7 +319,7 @@ def compute_set_of_frequent_states_with_zero_reward(states, rewards, threshold=0
         return set(dist_state_counts.index[dist_state_counts > threshold])
 
 
-def compute_transition_matrices(env, policy):
+def compute_transition_matrices(env, policy, atol=1E-6):
     """
     Computes the transition probability matrices for the EPISODIC and CONTINUING learning tasks on a given discrete-state / discrete-action environment
     where an agent acts under the given policy with transition probabilities defined by the environment (i.e. the environment defines the probability
@@ -365,7 +365,13 @@ def compute_transition_matrices(env, policy):
                 prob_transition_from_s_to_ns_given_action_a = info_transition[0]
                 prob_taking_action_a_at_state_s = policy.getPolicyForAction(a, s)
                 P[s, ns] += prob_taking_action_a_at_state_s * prob_transition_from_s_to_ns_given_action_a
-
+        # Round the rows with all zeros and just a 1 to exactly 1 because this can cause instability when generalized-inverting e.g. (I - P)
+        # (it already happened for the transition matrix of labyrinth environments where the probability of staying at an obstacle cell is not stored as 1.0 but as 0.999998432
+        ind_pos = np.array(P[s, :] > 0)[0]
+        if sum(ind_pos) == 1:
+            P[s, ind_pos] = 1.0
+        # Check sum-to-one condition of the current row
+        assert np.isclose(np.sum(P[s]), 1.0, atol=atol), f"Row P[s={s}] for the EPISODIC environment must sum up to 1: sum={np.sum(P[s])}"
     # Transition matrix for the EPISODIC learning task (where the rightmost state is TERMINAL)
     P_epi = P
 
@@ -374,18 +380,23 @@ def compute_transition_matrices(env, policy):
     P_con = P.copy()
     for s in env.getTerminalStates():
         P_con[s, :] = env.getInitialStateDistribution()
-
-    # Check that P_epi and P_con are valid transition probability matrices
-    for s in range(nS):
-        assert np.isclose(np.sum(P_epi[s]), 1.0), f"Row P[s={s}] for the EPISODIC environment must sum up to 1: sum={np.sum(P_epi[s])}"
-        assert np.isclose(np.sum(P_con[s]), 1.0), f"Row P[s={s}] for the CONTINUING environment must sum up to 1: sum={np.sum(P_con[s])}"
+        # Check sum-to-one condition of the current row
+        assert np.isclose(np.sum(P_con[s]), 1.0, atol=atol), f"Row P[s={s}] for the CONTINUING environment must sum up to 1: sum={np.sum(P_con[s])}"
 
     # Stationary probability distribution of the Markov chain associated to the CONTINUING learning task, which is needed to compute the expected or average reward or bias g below
     eigenvalues, eigenvectors = np.linalg.eig(P_con.T)
-    idx_eigenvalue_one = np.where(np.abs(eigenvalues - 1.0) < 1E-6)[0][0]
-    assert np.isclose(eigenvalues[idx_eigenvalue_one], 1.0)
-    eigenvector_one = eigenvectors[:, idx_eigenvalue_one]
-    mu = np.squeeze(np.array(np.abs(eigenvector_one) / np.sum(np.abs(eigenvector_one))))
+
+    idx_eigenvalue_one = np.where(np.abs(eigenvalues - 1.0) < atol)
+    if len(idx_eigenvalue_one) == 0:
+        print("WARNING: No eigenvalue close enough to 1 was found.\nEigenvalues:\n", eigenvalues)
+        print("WARNING: The stationary distribution mu is set to a uniform distribution!")
+        mu = np.repeat(1/nS, nS)
+    else:
+        # Extract the eigenvalue as a scalar
+        idx_eigenvalue_one = idx_eigenvalue_one[0][0]
+        assert np.isclose(eigenvalues[idx_eigenvalue_one], 1.0, atol)
+        eigenvector_one = eigenvectors[:, idx_eigenvalue_one]
+        mu = np.squeeze(np.array(np.abs(eigenvector_one) / np.sum(np.abs(eigenvector_one))))
 
     # Independent terms `b` of the `(I - P)*V = b - g*1` Bellman equation, for the EPISODIC (where g = 0) and the CONTINUING learning tasks
     b_epi = np.array([np.sum([P_epi[x, y] * env.getReward(y) for y in range(nS)]) for x in range(nS)])
@@ -433,50 +444,52 @@ def compute_state_value_function_from_transition_matrix(P, expected_one_step_rew
     return V
 
 
-def generate_min_exponential_time(rates):
+def compute_expected_reward(env, probas_stationary: dict, reward=None, require_all_states_with_reward_present_in_dictionary=True):
     """
-    Generates a realization of the minimum of exponential times at the given rates
+    Computes the expected reward (a.k.a. long-run average reward) of the Markov Reward Process defined in the given environment,
+    assuming a non-zero reward ONLY happens at the environment states that are present in the probas_stationary dictionary
+    (unless require_all_states_with_reward_present_in_dictionary=False, in which case the computation of the expected reward is actually an estimation).
 
     Arguments:
-    rates: positive float or list of positive floats or numpy array of positive floats
-        Rates of the exponential distributions on which the minimum time is generated.
-        Some (but not all) of the rates may be NaN as only the non-NaN values are considered for the possible
-        exponential distributions.
+    env: EnvironmentDiscrete
+        Discrete-time/state/action environment where the Markov Reward Process is defined.
 
-    Return: tuple
-    Tuple with the following elements:
-    - time: realization of the minimum time among the exponential distributions of the given rates.
-    - idx: index indicating which exponential rate the generated time should be associated with, which is chosen
-    randomly out of all valid rates given (where a valid rate means that it's a non-negative real number).
+    probas_stationary: dict
+        Dictionary with the estimated stationary probability of the states which are assumed to yield
+        non-zero rewards. These states are the dictionary keys.
+
+    reward: (opt) float
+        When given, this value is used as the constant reward associated to a state present in the dictionary containing
+        non-zero stationary probabilities, instead of the rewards stored in the environment.
+        This could be useful when we are interested in computing a probability rather than the expected reward,
+        and avoid having to define a reward landscape in the environment just to tell that the non-zero rewards are constant.
+
+    require_all_states_with_reward_present_in_dictionary: (opt) bool
+        Whether to require that all environment states with reward be present in the `probas_stationary` dictionary.
+        Set it to True when we want to make sure that all relevant states contributing to the expected reward are included
+        in the dictionary containing the state stationary distribution, for instance when estimating the true expected reward
+        based on the true stationary probabilities.
+        However, in estimation processes, not all states with non-zero reward may be present in the stationary distribution dictionary
+        because perhaps not all of them were observed during a trajectory collection process (such as a simulation).
+        default: True
+
+    Return: float
+    Estimated expected reward a.k.a. long-run average reward.
     """
-    # Check the rates
-    rates = as_array(rates)
-    if any(rates[~np.isnan(rates)] < 0):
-        warnings.warn("Some of the rates are negative... they will be ignored for the generation of the min exponential time ({}".format(rates))
+    expected_reward = 0.0
 
-    # Find the valid rates
-    valid_rates = copy.deepcopy(rates)
-    is_valid_rate = np.array([True if r > 0 else False for r in rates])
-    valid_rates[~is_valid_rate] = np.nan
+    if reward is None:
+        dict_rewards = env.getRewardsDict()
+        dict_nonzero_rewards = dict([(s, r) for (s, r) in dict_rewards.items() if r != 0])
+        if require_all_states_with_reward_present_in_dictionary and not set(dict_nonzero_rewards.keys()).issubset(set(probas_stationary.keys())):
+            raise ValueError("The states with non-zero rewards ({}) should all be present in the dictionary of estimated stationary probability ({})." \
+                             .format(set(dict_nonzero_rewards.keys()), set(probas_stationary.keys())))
 
-    # Rate of occurrence of ANY event among the input rates
-    event_rate = np.nansum(valid_rates)
-    if event_rate <= 0:   # NOTE that, in case all valid_rates are NaN, the nansum() of all NaNs is 0.0! (so this condition still takes care of the all-NaN-rates case)
-        raise ValueError("The event rate computed from the given rates ({}) must be positive ({})".format(rates, event_rate))
+    for s in probas_stationary.keys():
+        if probas_stationary[s] > 0.0:  # Note that nan > 0 returns False (OK)
+            expected_reward += (dict_rewards.get(s, 0) if reward is None else reward) * probas_stationary[s]
 
-    # Generate the event time
-    event_time = np.random.exponential(1/event_rate)
-
-    # Probability of selection of each possible event with a valid rate
-    probs = valid_rates[is_valid_rate] / event_rate
-    indices_to_choose_from = [idx for idx, rate in enumerate(valid_rates) if not np.isnan(rate)]
-    #print("probs: {}".format(probs))   # For 5 particles with rates lambda = 0.7, mu = 1.0 each, these probabilities are 0.082353 (for each of the 5 lambda's) and 0.11765 (for each of the 5 mu's)
-    #print("indices to choose from: {}".format(indices_to_choose_from))
-
-    # Define the index on which the generated event time should be associated with
-    idx_event = np.random.choice(indices_to_choose_from, size=1, p=probs)[0]    # Need `[0]` because the value returned by random.choice() is an array
-
-    return event_time, idx_event
+    return expected_reward
 
 
 def compute_survival_probability(survival_times: Union[list, deque], colnames: list=None, right_continuous=True):
@@ -538,6 +551,52 @@ def compute_survival_probability(survival_times: Union[list, deque], colnames: l
 
     return pd.DataFrame.from_items([(colnames[0], survival_times),   # We remove the initial value already included in survival_times, t=0.0, if the survival probability is requested to be LEFT continuous.
                                     (colnames[1], [0.0] + proba_surv if not right_continuous else proba_surv)])
+
+
+def generate_min_exponential_time(rates):
+    """
+    Generates a realization of the minimum of exponential times at the given rates
+
+    Arguments:
+    rates: positive float or list of positive floats or numpy array of positive floats
+        Rates of the exponential distributions on which the minimum time is generated.
+        Some (but not all) of the rates may be NaN as only the non-NaN values are considered for the possible
+        exponential distributions.
+
+    Return: tuple
+    Tuple with the following elements:
+    - time: realization of the minimum time among the exponential distributions of the given rates.
+    - idx: index indicating which exponential rate the generated time should be associated with, which is chosen
+    randomly out of all valid rates given (where a valid rate means that it's a non-negative real number).
+    """
+    # Check the rates
+    rates = as_array(rates)
+    if any(rates[~np.isnan(rates)] < 0):
+        warnings.warn("Some of the rates are negative... they will be ignored for the generation of the min exponential time ({}".format(rates))
+
+    # Find the valid rates
+    valid_rates = copy.deepcopy(rates)
+    is_valid_rate = np.array([True if r > 0 else False for r in rates])
+    valid_rates[~is_valid_rate] = np.nan
+
+    # Rate of occurrence of ANY event among the input rates
+    event_rate = np.nansum(valid_rates)
+    if event_rate <= 0:   # NOTE that, in case all valid_rates are NaN, the nansum() of all NaNs is 0.0! (so this condition still takes care of the all-NaN-rates case)
+        raise ValueError("The event rate computed from the given rates ({}) must be positive ({})".format(rates, event_rate))
+
+    # Generate the event time
+    event_time = np.random.exponential(1/event_rate)
+
+    # Probability of selection of each possible event with a valid rate
+    probs = valid_rates[is_valid_rate] / event_rate
+    indices_to_choose_from = [idx for idx, rate in enumerate(valid_rates) if not np.isnan(rate)]
+    #print("probs: {}".format(probs))   # For 5 particles with rates lambda = 0.7, mu = 1.0 each, these probabilities are 0.082353 (for each of the 5 lambda's) and 0.11765 (for each of the 5 mu's)
+    #print("indices to choose from: {}".format(indices_to_choose_from))
+
+    # Define the index on which the generated event time should be associated with
+    idx_event = np.random.choice(indices_to_choose_from, size=1, p=probs)[0]    # Need `[0]` because the value returned by random.choice() is an array
+
+    return event_time, idx_event
 
 
 def get_server_loads(job_rates, service_rates):

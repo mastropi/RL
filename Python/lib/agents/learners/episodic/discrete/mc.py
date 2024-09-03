@@ -25,9 +25,6 @@ from Python.lib.agents.learners import LearningCriterion, LearningTask, ResetMet
 from Python.lib.agents.learners.episodic.discrete import Learner, AlphaUpdateType
 from Python.lib.agents.learners.value_functions import ActionValueFunctionApprox, StateValueFunctionApprox
 
-DEFAULT_NUMPY_PRECISION = np.get_printoptions().get('precision')
-DEFAULT_NUMPY_SUPPRESS = np.get_printoptions().get('suppress')
-
 
 @unique
 class LearnerType(Enum):
@@ -451,9 +448,7 @@ class LeaMCLambda(Learner):
                 check = [R + self.gamma * ( (1 - self.lmbda)*Vns + self.lmbda*G )
                          for (R, Vns, G) in zip(self._rewards[1:-1], self._values_next_state[1:-1], self._Glambda_list[1:])] + [np.nan]
                 diff = [c - G for (c, G) in zip(check, self._Glambda_list)]
-                np.set_printoptions(precision=3, suppress=True)
                 print(np.c_[np.arange(t+1), self._rewards[1:], self._values_next_state[1:], self._Glambda_list, check, diff])
-                np.set_printoptions(precision=DEFAULT_NUMPY_PRECISION, suppress=DEFAULT_NUMPY_SUPPRESS)
 
     def learn_lambda_return_at_episode_end(self, T, state_end):
         """

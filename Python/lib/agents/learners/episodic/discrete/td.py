@@ -15,15 +15,14 @@ from matplotlib import pyplot as plt, cm
 from Python.lib.agents.learners import LearningCriterion, LearningTask, ResetMethod
 from Python.lib.agents.learners.episodic.discrete import Learner, AlphaUpdateType
 from Python.lib.agents.learners.value_functions import ActionValueFunctionApprox, StateValueFunctionApprox
+
+from Python.lib.utils.basic import set_numpy_options, reset_numpy_options
 import Python.lib.utils.plotting as plotting
 
 @unique  # Unique enumeration values (i.e. on the RHS of the equal sign)
 class AdaptiveLambdaType(Enum):
     ATD = 1     # (full) Adaptive TD(lambda)
     HATD = 2    # Homogeneously Adaptive TD(lambda)
-
-DEFAULT_NUMPY_PRECISION = np.get_printoptions().get('precision')
-DEFAULT_NUMPY_SUPPRESS = np.get_printoptions().get('suppress')
 
 
 class LeaTDLambda(Learner):
@@ -633,9 +632,9 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
         # Store the (average) _lambdas by episode
         if self.debug:
             print("lambdas in episode {}".format(self.episode))
-            np.set_printoptions(precision=3, suppress=True)
+            _dict_numpy_options = set_numpy_options()
             print(np.c_[self.states[:-1], self._lambdas])
-            np.set_printoptions(precision=DEFAULT_NUMPY_PRECISION, suppress=DEFAULT_NUMPY_SUPPRESS)
+            reset_numpy_options(_dict_numpy_options)
         self.lambda_mean_by_episode += [np.mean(self._lambdas)]
 
     def compute_lambda_statistics_by_state(self):

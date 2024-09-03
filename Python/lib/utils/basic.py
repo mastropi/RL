@@ -396,6 +396,26 @@ def show_exec_params(dict_params):
         print("{}: {}".format(key, dict_params[key]))
     print("**************** Execution parameters ***********************")
 
+def set_numpy_options(edgeitems=+np.Inf, precision=3):
+    "Sets numpy options to e.g. display numbers with a given number of decimals. The original options are returned in the options dictionary retrieved by np.get_printoptions()"
+    dict_numpy_options = np.get_printoptions()
+    np.set_printoptions(edgeitems=edgeitems, precision=precision, suppress=True)  # `suppress=True` means "show small results as 0 (i.e. suppress them)"
+    return dict_numpy_options
+
+def reset_numpy_options(dict_numpy_options: dict):
+    """
+    Resets numpy options to the values given in the input dictionary
+
+    Arguments:
+    numpy_options: dict
+        Dictionary with at least the following entries:
+        - 'edgeitems'
+        - 'precision'
+        - 'suppress'
+        containing the values of the respective numpy options to reset.
+    """
+    np.set_printoptions(edgeitems=dict_numpy_options['edgeitems'], precision=dict_numpy_options['precision'], suppress=dict_numpy_options['suppress'])
+
 def set_pandas_options():
     "Sets pandas options to e.g. display all columns and all rows in a data frame"
     pandas_options = dict({'display.width': pd.get_option('display.width'),

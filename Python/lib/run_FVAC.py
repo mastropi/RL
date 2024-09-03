@@ -30,13 +30,12 @@ from Python.lib.agents.learners.policies import LeaActorCriticNN
 from Python.lib.agents.policies import probabilistic
 
 from Python.lib.environments.gridworlds import Direction2D, EnvGridworld1D, EnvGridworld2D
-from Python.lib.estimators.fv import estimate_expected_reward
 from Python.lib.estimators.nn_models import InputLayer
 
-from Python.lib.utils.basic import get_current_datetime_as_string, load_objects_from_pickle, log_file_open, log_file_close, save_objects_to_pickle
-from Python.lib.utils.computing import compute_transition_matrices, compute_state_value_function_from_transition_matrix
+from Python.lib.utils.basic import get_current_datetime_as_string, load_objects_from_pickle, log_file_open, log_file_close, save_objects_to_pickle, set_numpy_options, reset_numpy_options
+from Python.lib.utils.computing import compute_expected_reward, compute_transition_matrices, compute_state_value_function_from_transition_matrix
 
-from Python.test.test_optimizers_discretetime import InputLayer, Test_EstPolicy_EnvGridworldsWithObstacles
+from Python.test.test_optimizers_discretetime import Test_EstPolicy_EnvGridworldsWithObstacles
 
 # When saving results or reading previously saved results
 rootdir = "./RL-003-Classic"
@@ -103,7 +102,7 @@ def compute_true_state_value_function(env, policy, learning_task, learning_crite
     V_true = compute_state_value_function_from_transition_matrix(P, b, bias=bias, gamma=gamma)
     env.setV(V_true)
     dict_proba_stationary = dict(zip(np.arange(len(mu)), mu))
-    avg_reward_true = estimate_expected_reward(env, dict_proba_stationary)
+    avg_reward_true = compute_expected_reward(env, dict_proba_stationary)
     return V_true, avg_reward_true, mu
 
 def compute_max_avg_rewards_in_labyrinth_with_corridor(env, wind_dict, learning_task, learning_criterion):
@@ -981,11 +980,10 @@ if __name__ == "__main__":
                     loss_all[rep, t_learn] = learner_ac.learn_offline_from_estimated_value_functions(V, A, Q, state_counts, prob_states=prob_states, use_advantage=use_advantage)
                     R_all[rep, t_learn] = average_reward
                     R_long_all[rep, t_learn] = average_reward
-                    _dict_np_print_options = np.get_printoptions()
-                    np.set_printoptions(edgeitems=+np.Inf, precision=3, suppress=True)  # `suppress=True` means "show small results as 0 (i.e. suppress them)"
+                    _dict_numpy_options = set_numpy_options()
                     print(f"True stationary probabilities:\n{mu.reshape(env_shape)}")
                     print(f"Estimated stationary probabilities:\n{prob_states.reshape(env_shape)}")
-                    np.set_printoptions(edgeitems=_dict_np_print_options['edgeitems'], precision=_dict_np_print_options['precision'], suppress=_dict_np_print_options['suppress'])
+                    reset_numpy_options(_dict_numpy_options)
                     if False and (average_reward != 0.0 or t_learn + 1 in learning_steps_observe):
                         def plot_probas(ax, prob_states_2d, fontsize=14, colormap="Blues", color_text="orange"):
                             colors = cm.get_cmap(colormap)

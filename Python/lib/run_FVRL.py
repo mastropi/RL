@@ -240,7 +240,7 @@ def run_simulation_policy_learning(simul, replications, dict_params_simul, dict_
     # (but still the two values are expected to be similar)
     # I don't compute the expected cost at 'theta_next' because I don't have yet in place a function that I can easily
     # call to compute it (we would need first to compute the stationary probabilities in order to call the function that
-    # is already in place for its computation, namely `estimate_expected_reward(env, agent, probas_stationary_true)`)
+    # is already in place for its computation, namely `compute_expected_reward(env, agent, probas_stationary_true)`)
     cost_opt = -df_learning_all['expected_reward_true'].loc[simul.getNumLearningSteps()-1]
     return theta_opt_values,\
            K_opt_values, \
