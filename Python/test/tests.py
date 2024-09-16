@@ -1326,6 +1326,11 @@ if save:
 
 resultsdir = "./RL-003-Classic/results"
 
+#--- For EWRL-2024 paper
+_filename = "ActorCritic_labyrinth_4x5_20240904_160121_ALL_Alphonse_N=20,T=500,alphaA=0.05,UNnormalizedLoss_UsedInEWRL2024paper (CAN READ BECAUSE I RE-RAN IT WITH VERSION 0a55bb8e, 25-May).pkl"
+## NOTE: Because this file was generated with an earlier version of the code (21-May-2024, commit 0a55bb8ef7ecc4a4cbc12db23552b557a5679892), we need to create one variable referenced below as `_env = _env2d`.
+#--- For EWRL-2024 paper
+
 #--- For AAAI-2025 paper
 # Random labyrinth 6x8 with wind 0.5
 _filename = "ActorCritic_gridworld_6x8_20240809_083136_ALL_WindyRandomLabyrinth0.5Seed4217,N=20,T=500,AlphA=0.05 (FVAC is better and takes similar time!).pkl"
@@ -1465,11 +1470,13 @@ plt.suptitle(f"ALL LEARNING METHODS: {env_type.name} {env_shape} - {learning_tas
 # --> FOR PAPER
 # Plot results on several replications
 plot_for_paper = True
-marker_for_main_line = "" if plot_for_paper else "."    # Used for mean if plotted or for median if mean is not plotted
+marker_for_mean = "" if plot_for_paper else "."
+marker_for_median = "." if plot_for_paper else "x"
 fontsize = 26 if plot_for_paper else 12
 if nrep > 1:
-    plot_bands = plot_for_paper #True #False
-    plot_mean = not plot_for_paper #False #True
+    plot_mean = plot_for_paper #False #True
+    plot_median = True
+    plot_bands = not plot_for_paper #True #False
     dict_stats_R = dict.fromkeys(dict_loss.keys())
     ax = plt.figure(figsize=figsize).subplots(1, 1)
     lines = []
@@ -1501,14 +1508,24 @@ if nrep > 1:
         # Plot
         _xvalues = np.arange(1, n_learning_steps+1) + _xshift
         if plot_mean:
-            #line = ax.plot(_xvalues, dict_stats_R[meth]['mean'] / max_avg_reward, color=dict_colors[meth], linestyle=dict_linestyles[meth], linewidth=2)[0]
-            line = ax.errorbar(_xvalues, dict_stats_R[meth]['mean'][:n_learning_steps] / max_avg_reward, yerr=dict_stats_R[meth]['std'][:n_learning_steps] / np.sqrt(dict_stats_R[meth]['n']) / max_avg_reward, color=dict_colors[meth], linestyle=dict_linestyles[meth], linewidth=2, marker=marker_for_main_line, markersize=12)[0]
+            # MEAN plot +/- SE
+            line = ax.plot(_xvalues, dict_stats_R[meth]['mean'][:n_learning_steps] / max_avg_reward, color=dict_colors[meth], linestyle=dict_linestyles[meth], linewidth=2, marker=marker_for_mean)[0]
+            # Do NOT plot the error bars because it might be too dense for a plot...
+            #line = ax.errorbar(_xvalues, dict_stats_R[meth]['mean'][:n_learning_steps] / max_avg_reward, yerr=dict_stats_R[meth]['std'][:n_learning_steps] / np.sqrt(dict_stats_R[meth]['n']) / max_avg_reward, color=dict_colors[meth], linestyle=dict_linestyles[meth], linewidth=2, marker=marker_for_mean, markersize=12)[0]
+            ax.fill_between(_xvalues,
+                            (dict_stats_R[meth]['mean'][:n_learning_steps] + dict_stats_R[meth]['std'][:n_learning_steps] / np.sqrt(dict_stats_R[meth]['n'])) / max_avg_reward,
+                            (dict_stats_R[meth]['mean'][:n_learning_steps] - dict_stats_R[meth]['std'][:n_learning_steps] / np.sqrt(dict_stats_R[meth]['n'])) / max_avg_reward,
+                            color=dict_colors[meth],
+                            alpha=0.5)
             lines += [line]
             legend += [f"{dict_legends[meth]} (average +/- SE)"]
-        line = ax.plot(_xvalues, dict_stats_R[meth]['median'][:n_learning_steps] / max_avg_reward, color=dict_colors[meth], linestyle="dashed" if plot_mean else "solid", linewidth=2, marker="x" if plot_mean else marker_for_main_line, markersize=12)[0]
-        lines += [line]
-        legend += [f"{dict_legends[meth]} (median)"]
+        if plot_median:
+            # MEDIAN plot
+            line = ax.plot(_xvalues, dict_stats_R[meth]['median'][:n_learning_steps] / max_avg_reward, color=dict_colors[meth], linestyle="dashed" if plot_mean else "solid", linewidth=2, marker=marker_for_median, markersize=12)[0]
+            lines += [line]
+            legend += [f"{dict_legends[meth]} (median)"]
         if plot_bands:
+            # MIN/MAX plot
             line = ax.plot(_xvalues, dict_stats_R[meth]['max'][:n_learning_steps] / max_avg_reward, color=dict_colors[meth], linestyle="dashed")[0]
             lines += [line]
             legend += [f"{dict_legends[meth]} (min/max)"]
@@ -1518,15 +1535,16 @@ if nrep > 1:
                             dict_stats_R[meth]['min'][:n_learning_steps] / max_avg_reward,
                             color=dict_colors[meth],
                             alpha=0.1)
-    ax.legend(lines, legend, loc="center left", fontsize=int(0.5 * fontsize))
+    ax.legend(lines, legend, loc="upper left", fontsize=int(0.5 * fontsize))
     if max_avg_reward != 1.0:
-        # This is the case when the max average reward is not known, so we are NOT plotting the *normalized* average reward and showing the 1.0 line is not informative and goes out of scale
+        # This is the case when the max average reward is known, so we show the horizontal line corresponding to the maximum achievable NORMALIZED average reward which is equal to 1
         ax.axhline(1, color="gray")
-        ax.set_ylim((-0.01, 1.01))
+    ax.set_ylim((-ax.get_ylim()[1]/100, None))
     ax.set_xlabel("Learning step", fontsize=fontsize)
     if plot_for_paper:
         # Shorter label, larger tick labels, no title
-        ax.set_ylabel("Normalized episodic average reward".format(max_avg_reward), fontsize=fontsize)
+        _ylabel = "Normalized episodic average reward" if max_avg_reward != 1.0 else "Episodic average reward"
+        ax.set_ylabel(_ylabel, fontsize=fontsize)
         ax.tick_params(axis='both', labelsize=int(0.8*fontsize))
     else:
         ax.set_ylabel("Average reward (normalized by the MAX average reward = {:.2g})".format(max_avg_reward), fontsize=fontsize)
@@ -1590,8 +1608,8 @@ if nrep > 1:
     if "ax_nsamples" in locals():
         ax_nsamples.set_ylim((ax.get_ylim()[0], None))
         if plot_for_paper:
-            ax_nsamples.set_ylabel("Budget ratio (FVAC / TDAC)", fontsize=int(0.8*fontsize))
-            ax_nsamples.tick_params(axis='y', labelsize=int(0.8*fontsize))
+            ax_nsamples.set_ylabel("Budget ratio (FVAC / TDAC)", fontsize=int(0.8*fontsize), color="blue")
+            ax_nsamples.tick_params(axis='y', labelsize=int(0.8*fontsize), labelcolor="blue")
         else:
             ax_nsamples.set_ylabel("Average sample Ratio FV/TD across replications", fontsize=int(0.8 * fontsize))
             ax_nsamples.legend(legend_nsamples, loc="lower right")
