@@ -754,24 +754,33 @@ class EnvGridworld2D(EnvironmentDiscrete):
     def plot(self, figsize=(8, 8)):
         "Plots the gridworld as an image showing the obstacles in black. The axis on which the plot is generated is returned."
         nrows, ncols = self.shape
-        grid = np.zeros((nrows, ncols))
+        grid = np.zeros((nrows, ncols), dtype=int)
+
+        # Define an ad-hoc palette
+        # Ref: https://stackoverflow.com/questions/37719304/python-imshow-set-certain-value-to-defined-color (accepted answer)
+        palette = np.array([[255, 255, 255],    # white
+                            [255, 255, 0],      # yellow
+                            [0, 255, 0],        # green
+                            [0, 0, 0]])         # black
 
         for obs in self.set_obstacle_states:
             raw, column = divmod(obs, ncols)
-            grid[raw][column] = 1
+            grid[raw][column] = len(palette) - 1
 
         start = ncols * (nrows - 1)
         finish = sorted(self.terminal_states)[0]
         start_row, start_column = divmod(start, ncols)
         finish_row, finish_column = divmod(finish, ncols)
 
-        grid[start_row][start_column] = 0.5
-        grid[finish_row][finish_column] = 0.5
+        # Show the Start cell in Yellow and the Finish cell in Green
+        grid[start_row][start_column] = 1       # yellow
+        grid[finish_row][finish_column] = 2     # green
 
         plt.figure(figsize=figsize)
-        plt.imshow(grid, cmap='Greys')
-        plt.text(start_column, start_row, 'Start', ha='center', va='center', fontsize=15)
-        plt.text(finish_column, finish_row, 'Finish', ha='center', va='center', fontsize=15)
+        plt.imshow(palette[grid])
+        # Add labels with "Start" and "Finish"
+        #plt.text(start_column, start_row, 'Start', ha='center', va='center', fontsize=15)
+        #plt.text(finish_column, finish_row, 'Finish', ha='center', va='center', fontsize=15)
         plt.tight_layout()
         plt.show()
 
@@ -924,8 +933,9 @@ class EnvGridworld2D_Random(EnvGridworld2D):
         super().__init__(shape=shape, terminal_states=terminal_states, obstacle_states=obstacle_set , rewards_dict=rewards_dict, wind_dict=wind_dict, initial_state_distribution=initial_state_distribution)
 
     def plot(self):
-        super().plot()
+        ax = super().plot()
         plt.title(f"Generated Labyrinth (seed={self.seed_obstacles}, #obstacles={self.n_obstacles})")
+        return ax
 
     def getSeedObstacles(self):
         return self.seed_obstacles

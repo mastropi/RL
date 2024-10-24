@@ -206,13 +206,13 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
                 # Plot the absorption set showing the relative visit count of each state as color intensity
                 state_counts = np.nan*np.ones(cls.nS)
                 state_counts[list(absorption_set)] = visit_relative_frequency[list(absorption_set)]
-                cls.env2d.plot_values(state_counts, ax=ax_labyrinth, cmap="Oranges", vmin=0)
-                # Add labels showing the relative frequency
-                for s in absorption_set:
+                cls.env2d.plot_values(state_counts, ax=ax_labyrinth, cmap="Blues", vmin=0, vmax=1)  # Use cmap="Blues" to show the cells of the absorption set in the same color I use in my presentations (cyan)
+                # Add labels showing the relative frequency on ALL visited cells
+                for s in visit_relative_frequency.index:
                     cell = cls.env2d.getStateIndicesFromIndex(s)
                     # WARNING: cell = (VERTICAL position from top, HORIZONTAL position from left) and the (0, 0) of the image is at the top-left by default
-                    plt.text(cell[1], cell[0], "{:.1f}%".format(visit_relative_frequency[s]*100), horizontalalignment="center", verticalalignment="center")
-                plt.suptitle("Labyrinth with obstacles in black", fontsize=20)
+                    plt.text(cell[1], cell[0], "{:.1f}%".format(visit_relative_frequency[s]*100), horizontalalignment="center", verticalalignment="center", fontsize=15)
+                plt.suptitle(f"Labyrinth with obstacles in black (seed={seed_obstacles})", fontsize=20)
                 plt.title("Identified absorption set A in orange\n(intensity proportional to relative visit frequency)")
                 plt.show()
         elif absorption_set is None:
