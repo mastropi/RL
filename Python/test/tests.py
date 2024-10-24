@@ -217,12 +217,12 @@ learning_task = LearningTask.CONTINUING
 learning_criterion = LearningCriterion.AVERAGE; gamma = 1.0    # gamma could be < 1 in the average reward criterion in order to take the limit as gamma -> 1 as presented in Sutton, pag. 251/252.
 
 seed = 1317
-#env_type = Environment.Gridworld
-env_type = Environment.MountainCar
+env_type = Environment.Gridworld
+#env_type = Environment.MountainCar
 problem_2d = True
 use_random_obstacles_set = False; prop_obstacles = 0.5; seed_obstacles = 4217 #4215    # Seed 4217 with 50% of obstacles gives good results in the 6x8 labyrinth
 exit_state_at_bottom = False
-estimate_absorption_set = True; threshold_absorption_set = 0.90 #0.90  # Cumulative relative visit threshold
+estimate_absorption_set = True; threshold_absorption_set = 0.90 if env_type == Environment.Gridworld else 0.90  # Cumulative relative visit threshold
 estimate_absorption_set_at_every_step = False
 entry_state_in_absorption_set = True   #False #True     # Only used when estimate_absorption_set = False
 #----------------- BASIC SETUP AND SIMULATION PARAMETERS --------------#
@@ -258,10 +258,10 @@ if env_type == Environment.Gridworld:
     # Presence of wind: direction and probability of deviation in that direction when moving
     if problem_2d:
         wind_dict = None
-        #wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.5})
-        #wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.6})
-        #wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.7})
-        #wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.8})
+        wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.5})
+        wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.6})
+        wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.7})
+        wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.8})
     else:
         # WIND is currently not allowed in 1D gridworlds
         wind_dict = None
@@ -291,6 +291,15 @@ else:
     entry_state = None  # `None` so that the start state is defined by the reset method of the environment
     wind_dict = None    # Just for information purposes in titles, etc.
 #-------------------------------- ENVIRONMENT -------------------------#
+
+
+# 2024/09/22: Temporary setup of the small labyrinth for the camera-ready version of the EWRL-2024 paper, which makes reaching F a little harder,
+# and thus gives a more interesting case to show in a paper.
+# Put the obstacles more complicated when the Exit is at the bottom
+# (this is an inverted L for the 4x5 labyrinth)
+# Note:
+if size_vertical == 4 and size_horizontal == 5:
+    obstacles_set = set({7, 8, 13, 18})
 
 
 #----------------------------- MODEL FOR POLICY -----------------------#
@@ -331,6 +340,13 @@ if env_type == Environment.Gridworld:
     if entry_state_in_absorption_set:
         default_absorption_set.add(entry_state)
 #----------------------------- FV ABSORPTION SET ----------------------#
+
+
+# 2024/10/15: In case we need to define a particular absorption set to compare results (e.g. FVAC with NPG and FVAC without NPG)
+# (because I've observed that the estimated absorption set could vary a lot with different seeds within the same policy
+# and across different policy parameterizations (e.g. NPG vs. non-NPG), which lead to different actions taken!)
+#default_absorption_set = {24, 25, 33, 40, 41}
+#estimate_absorption_set = False
 
 
 #-------------------------------- TEST SETUP --------------------------#
@@ -522,7 +538,7 @@ M1 = max_time_steps_fv_for_all_particles = test_ac.agent_nn_fv.getLearner().getN
 # after which the simulation stops, regardless of the number of absorbed particles
 # Use the following to avoid too large simulation times, for instance when the policy is close to optimal:
 #M2 = max_time_steps_fv_overall = max(5000, max_time_steps_fv_for_all_particles)
-M2 = max_time_steps_fv_overall = 2*max_time_steps_fv_for_all_particles
+M2 = max_time_steps_fv_overall = max_time_steps_fv_for_all_particles #2*max_time_steps_fv_for_all_particles
 min_prop_absorbed_particles = 1.0  #0.90 #0.70 #0.90    # WARNING: currently (2024/08/09) this ONLY has effect when M2 > M1!! So, if we want to use it just set M1 very small and M2 a value of the order of M1 usually used before
 stop_if_prop_absorbed_particles_reached_regardless_of_time_steps = True
 print(f"Thresholds for FV simulation: T={test_ac.agent_nn_fv.getLearner().getNumTimeStepsForExpectation()}, M1 = {M1}, M2 = {M2}"
@@ -537,7 +553,7 @@ print(f"Thresholds for FV simulation: T={test_ac.agent_nn_fv.getLearner().getNum
 # Values previously used: #2000 #test_ac.getEnv().getNumStates()*10
 # Number of steps used to estimate the absorption set A
 time_steps_fv_for_absorption_set = test_ac.learner_for_initial_exploration.getNumSteps() if test_ac.learner_for_initial_exploration is not None else 0
-assert time_steps_fv_for_absorption_set > 0 if estimate_absorption_set else None
+assert time_steps_fv_for_absorption_set > 0 if estimate_absorption_set else True
 # Include the time spent for the absorption set estimation in the budget (not really appropriate because: (i) in FVAC it is only run ONCE (at t=0); (ii) there is no value function learning during that exploration)
 #max_time_steps_benchmark = time_steps_fv_for_absorption_set + max_time_steps_fv_for_expectation + max_time_steps_fv_overall
 #print(f"max_time_steps_benchmark (T + T + M2) = {max_time_steps_benchmark}")
@@ -548,7 +564,7 @@ print(f"max_time_steps_benchmark (T + M2) = {max_time_steps_benchmark}")
 #-- Common learning parameters
 # Parameters about policy learning (Actor)
 is_NPG = len(nn_hidden_layer_sizes) == 0
-n_learning_steps = 50 #200 #50 #100 #30
+n_learning_steps = 100 #200 #50 #100 #30
 n_episodes_per_learning_step = 50   #100 #30   # This parameter is used as the number of episodes to run the policy learning process for and, if the learning task is EPISODIC, also as the number of episodes to run the simulators that estimate the value functions
 # Max time steps per episode during exploration for the online policy learning
 # In the Mountain Car problem we limit the number of steps per episode in the continuous-dynamics case because I've seen out-of-memory problems otherwise.
@@ -752,6 +768,14 @@ for rep in range(nrep):
                 # using this same learner.
                 if t_learn == 0:
                     simulator_value_functions.getAgent().getLearner().setProbasStationaryStartStateET(None)
+                    # NEW-2024/10/23: We should estimate the absorption set at the FIRST policy learning step for EVERY replication, as estimating the absorption set is part of the FVAC process!
+                    # Otherwise, if estimate_absorption_set_at_every_step = False, FVAC will be stick to use ALWAYS the same absorption set A estimated
+                    # by the preparation of the simulation environment in test_optimizers_discretetime.py, and this is not completely fair... In fact, we already observed that
+                    # the absorption set A may strongly depend on the seed used (e.g. Labyrinth 6x8 with 50% obstacles and obstacle seed = 4217, with WIND = 0.5, where for the
+                    # initial simulation seed of 1317, the absorption set A turns out to be extremely favorable for FVAC... but only for THAT SEED!!)
+                    estimate_absorption_set_at_this_step = True
+                else:
+                    estimate_absorption_set_at_this_step = estimate_absorption_set_at_every_step
                 V, Q, A, state_counts, state_counts_et, probas_stationary, expected_reward, expected_absorption_time, n_cycles_absorption_used, n_events_et, n_events_fv = \
                     simulator_value_functions.run(t_learn=t_learn,
                                                   max_time_steps=max_time_steps_fv_overall,
@@ -760,7 +784,7 @@ for rep in range(nrep):
                                                   min_num_cycles_for_expectations=0,
                                                       ## Note: We set the minimum number of cycles for the estimation of E(T_A) to 0 because we do NOT need
                                                       ## the estimation of the average reward to learn the optimal policy, as it cancels out in the advantage function Q(s,a) - V(s)!!
-                                                  estimate_absorption_set=estimate_absorption_set_at_every_step, threshold_absorption_set=threshold_absorption_set,
+                                                  estimate_absorption_set=estimate_absorption_set_at_this_step, threshold_absorption_set=threshold_absorption_set,
                                                   use_average_reward_stored_in_learner=use_average_reward_from_previous_step,
                                                   reset_value_functions=reset_value_functions_at_this_step,
                                                   plot=plot if t_learn+1 in learning_steps_observe else False, colormap=colormap,
@@ -1084,6 +1108,7 @@ plt.suptitle(f"{learning_method.upper()}\n{learning_task.name} learning task - {
 
 
 # Plot the ADVANTAGE function
+marker = ''
 first_learning_step = 0 #n_learning_steps * 3 // 4  #0
 y2max = int(round(np.max(dict_state_counts[learning_method])*1.1)) # For a common Y2-axis showing the state counts
 min_A, max_A = np.min(dict_A[learning_method]), np.max(dict_A[learning_method])      # For a common Y-axis showing the value functions
@@ -1231,34 +1256,37 @@ print("{} learning process took {:.1f} minutes ({:.1f} hours)".format(learning_m
 # Distribution of state counts at last learning step run of the last replication
 # IMPORTANT: For FV, recall that the state counts only contain information about the states visited during the FV simulation as the counts are reset after the initial exploration
 state_counts = simulator_value_functions.getAgent().getLearner().getStateCounts()
-ax, img = test_ac.getEnv().plot_values(state_counts, cmap="Blues")
+ax, img = simulator_value_functions.getEnv().plot_values(state_counts, cmap="Blues")
 if learning_method_type == "values_fv" and not estimate_absorption_set_at_every_step:
     # Check that no visit was done to the absorption set
     print("Intersection between absorption set and state visit count > 0 in FV (IT SHOULD BE EMPTY! --recall that the state counts in FV are reset after the initial exploration):")
     _visited_states = set(np.where(state_counts > 0)[0])
-    print(_visited_states.intersection(test_ac.getAbsorptionSet()))
-    assert len(_visited_states.intersection(test_ac.getAbsorptionSet())) == 0, "The visited states during the FV excursion must NOT be in the absorption set"
+    if "test_ac" in locals():
+        print(_visited_states.intersection(test_ac.getAbsorptionSet()))
+        assert len(_visited_states.intersection(test_ac.getAbsorptionSet())) == 0, "The visited states during the FV excursion must NOT be in the absorption set"
 if env_type == Environment.MountainCar:
     # Add the trajectory of the last replication
     # Note: Since no trajectory information is currently stored by the online policy learner, we use the value functions learner to extract the trajectory to plot.
     # Make the trajectories comparable between FV and TD, i.e. show the same number of steps (we show the steps generated by the T steps of the initial exploration by FV)
     T = max_time_steps_fv_for_expectation
     if learning_method_type == "values_fv":
-        # Take the state distribution from the initial exploration in the FV case because the particle trajectories are NOT stored in the FV learner
+        # Take the trajectory from the initial exploration in the FV case because the particle trajectories are NOT stored in the FV learner
+        # This will not work if we load previously saved results... (because `test_ac` is NOT loaded because it was not saved due to the fact that it is generated by a setupClass() call NOT by a setup() call
         trajectory = np.array(test_ac.learner_for_initial_exploration.getStates())
     else:
         trajectory = np.concatenate(simulator_value_functions.agent.getLearner().getStates())
     assert T <= len(trajectory)
     trajectory2plot = trajectory[:T]
-    test_ac.getEnv().plot_points(trajectory2plot, ax=ax, cmap="coolwarm", style=".-")
+    simulator_value_functions.getEnv().plot_points(trajectory2plot, ax=ax, cmap="coolwarm", style=".-")
     states_absorption_set = np.nan*np.ones(test_ac.getEnv().getNumStates())
-    states_absorption_set[list(test_ac.getAbsorptionSet())] = 1.0
-    test_ac.getEnv().plot_values(states_absorption_set, ax=ax, cmap="Oranges", alpha=0.5)
-    #test_ac.getEnv().plot_points(list(test_ac.getAbsorptionSet()), ax=ax, color="red", markersize=7, style="x")
+    if "test_ac" in locals():
+        states_absorption_set[list(test_ac.getAbsorptionSet())] = 1.0
+        simulator_value_functions.getEnv().plot_values(states_absorption_set, ax=ax, cmap="Oranges", alpha=0.5)
+        #simulator_value_functions.getEnv().plot_points(list(test_ac.getAbsorptionSet()), ax=ax, color="red", markersize=7, style="x")
 
 simulator_value_functions._add_count_labels(ax, state_counts, factor_fontsize=2.0)
-plt.suptitle(f"{learning_method.upper()}\n{learning_task.name} learning task - {learning_criterion.name} reward criterion - {env_type.name} {test_ac.getEnv().getShape()}"
-             f"\nN={test_ac.agent_nn_fv.getLearner().getNumParticles()}, T={test_ac.agent_nn_fv.getLearner().getNumTimeStepsForExpectation()}, MAX budget={max_time_steps_benchmark} steps per policy learning step"
+plt.suptitle(f"{learning_method.upper()}\n{learning_task.name} learning task - {learning_criterion.name} reward criterion - {env_type.name} {simulator_value_functions.getEnv().getShape()}"
+             f"\nN={test_ac.agent_nn_fv.getLearner().getNumParticles() if 'test_ac' in locals() else '?'}, T={test_ac.agent_nn_fv.getLearner().getNumTimeStepsForExpectation() if test_ac in locals() else '?'}, MAX budget={max_time_steps_benchmark} steps per policy learning step"
              f"\nDistribution of state counts at end of policy learning process")
 
 
@@ -1268,7 +1296,7 @@ plt.suptitle(f"{learning_method.upper()}\n{learning_task.name} learning task - {
 
 
 # Distribution of number of steps (possibly over all replications)
-plot_average_nsteps = False
+plot_average_nsteps = True  #False
 colors = ["green", "cyan", "orange", "magenta", "black"]
 ax = plt.figure(figsize=(8, 7)).subplots(1, 1)
 rep2plot = rep
@@ -1279,16 +1307,17 @@ ax.plot(range(1, n_learning_steps+1), dict_R_long[learning_method][rep2plot, :n_
 ax.xaxis.set_major_locator(MaxNLocator(integer=True))
 ax.axhline(max_avg_reward_continuing, color="greenyellow", linewidth=1)
 ax.set_xlabel("Learning step")
-ax.set_ylabel("Average reward")
+ax.set_ylabel(f"Average reward for replication #{rep2plot} (line plot)")
 ax_n = ax.twinx()
 if plot_average_nsteps:
     ax_n.bar(np.arange(1, n_learning_steps+1), np.nanmean(dict_nsteps[learning_method], axis=0), color=colors[rep2plot % len(colors)], alpha=0.5)
 else:
     ax_n.bar(np.arange(1, n_learning_steps+1), dict_nsteps[learning_method][rep2plot, :], color=colors[rep2plot % len(colors)], alpha=0.5)
-ax_n.set_ylabel("Number of simulation steps")
+ax_n.set_ylabel(f"{'Average number' if plot_average_nsteps else 'Number'} of simulation steps (bar plot)")
 plt.suptitle(f"{learning_method.upper()}\n{learning_task.name} learning task - {learning_criterion.name} reward criterion - {env_type.name} {env_shape}"
              f"\nN={test_ac.agent_nn_fv.getLearner().getNumParticles()}, T={test_ac.agent_nn_fv.getLearner().getNumTimeStepsForExpectation()}, MAX budget={max_time_steps_benchmark} steps per policy learning step"
-             f"\nAverage number of steps used to learn the value functions at each policy learning step ({nrep} replications)")
+             f"\nContinuing and possibly episodic average reward"
+             f"\nNumber of simulation steps by learning step ({nrep} replications)")
 
 
 
@@ -1326,6 +1355,11 @@ if save:
 
 resultsdir = "./RL-003-Classic/results"
 
+# 2024/10/15: Random labyrinth WITH NPG and without NPG
+_filename = "ActorCritic_gridworld_6x8_20241015_195628_FV_WindyRandomLabyrinth0.5Seed4217,N=20,T=500,AlphaA=0.90,L=30N,iter=50.pkl"
+_filename = "ActorCritic_gridworld_6x8_20241015_234507_ALL_WindyRandomLabyrinth0.5Seed4217,N=20,T=500,AlphaA=0.90,L=30N,iter=50.pkl"
+_filename = "ActorCritic_gridworld_6x8_20241015_172914_ALL_WindyRandomLabyrinth0.5Seed4217,N=20,T=500,AlphaA=0.90,L=30N,iter=50,NPG.pkl"
+
 #--- For EWRL-2024 paper
 _filename = "ActorCritic_labyrinth_4x5_20240904_160121_ALL_Alphonse_N=20,T=500,alphaA=0.05,UNnormalizedLoss_UsedInEWRL2024paper (CAN READ BECAUSE I RE-RAN IT WITH VERSION 0a55bb8e, 25-May).pkl"
 ## NOTE: Because this file was generated with an earlier version of the code (21-May-2024, commit 0a55bb8ef7ecc4a4cbc12db23552b557a5679892), we need to create one variable referenced below as `_env = _env2d`.
@@ -1334,6 +1368,10 @@ _filename = "ActorCritic_labyrinth_4x5_20240904_160121_ALL_Alphonse_N=20,T=500,a
 #--- For AAAI-2025 paper
 # Random labyrinth 6x8 with wind 0.5
 _filename = "ActorCritic_gridworld_6x8_20240809_083136_ALL_WindyRandomLabyrinth0.5Seed4217,N=20,T=500,AlphA=0.05 (FVAC is better and takes similar time!).pkl"
+# Mountain Car
+# (2024/10/23) I don't know if any of these were shown in any paper
+#_filename = "ActorCritic_mountaincar_22x21_20240902_094357_ALL_Discrete_factor=100,force_factor=1,N=30,T=300,CumAlphaA=0.90,Ab=1.0,L=60N,rep=10,iter=50 (FVAC and TDAC are similar).pkl"
+#_filename = "ActorCritic_mountaincar_22x21_20240815_180632_FV_Discrete_factor=100,force_factor=1,N=50,T=500,CumAlphaA=0.90,Ab=0.90,rep=10,iter=100 (FVAC learns EARLIER).pkl"
 #--- For AAAI-2025 paper
 
 _filename = "ActorCritic_labyrinth_4x5_20240512_232944_ALL_WindyLabyrinth0.7FinishAtBottomAbsorptionSetEstimated0_TDAC,FVAC,N=20,T=500,LimitedTime=5x,epsilon=0.10,Budget4Loss=5x_FVisBetter.pkl"
@@ -1355,7 +1393,9 @@ _filename = "ActorCritic_labyrinth_4x5_20240513_124235_ALL_WindyLabyrinth0.8Fini
 _filename = "ActorCritic_labyrinth_6x8_20240515_111830_ALL_WindyLabyrinth0.8FinishAtBottomAbsorptionSetEstimated0_TDAC,FVAC,N=20,T=500,LimitedTime=5x,epsilon=0.10,Budget4Loss=5x_FVisBetter.pkl"
 _filename = "ActorCritic_labyrinth_6x8_20240515_102102_ALL_WindyLabyrinth0.6FinishAtBottomAbsorptionSetEstimated_TDAC,FVAC,N=20,T=500,LimitedTime=5x,epsilon=0.10,Budget4Loss=5x_FVisBetter.pkl"
 
-_shape_str = _filename[len("ActorCritic_labyrinth_"):len("ActorCritic_labyrinth_")+3]
+_env_name = "mountaincar" #"gridworld" #"labyrinth"    # For older results (before implementing also learning in Mountain Car), use "labyrinth", for new results, use "gridworld"
+_ndigits = 5  #3  # Number of digits used to define the dimension of the environment including the `x` (e.g. "4x5" => _ndigits = 3; "22x21" => _ndigits = 5)
+_shape_str = _filename[len(f"ActorCritic_{_env_name}_"):len(f"ActorCritic_{_env_name}_") + _ndigits]
 _N = int(_filename[_filename.index("N=") + len("N="):_filename.index(",", _filename.index("N="))])
 _T = int(_filename[_filename.index("T=") + len("T="):_filename.index(",", _filename.index("T="))])
 _filepath = os.path.join(resultsdir, _filename)

@@ -494,6 +494,8 @@ class Simulator:
                     print(f"Distribution of state frequency on n={_learner.getNumSteps()} steps:\n{pd.Series(state_indices).value_counts(normalize=True)}")
                 else:
                     _estimated_absorption_set = compute_set_of_frequent_states_with_zero_reward(_learner.getStates(), _learner.getRewards(), threshold=_threshold_absorption_set)
+                    # 2024/10/23: Use this for EWRL-2024 POSTER results where the absorption set is defined on NON-CUMULATIVE relative frequency
+                    #_estimated_absorption_set = compute_set_of_frequent_states_with_zero_reward(_learner.getStates(), _learner.getRewards(), threshold=_threshold_absorption_set, cumulative=False)
                     n_events_absorption_set_estimation = _learner.getNumSteps()
                     print(f"Distribution of state frequency on n={len(_learner.getStates())} steps:\n{pd.Series(_learner.getStates()).value_counts(normalize=True)}")
 
@@ -537,8 +539,8 @@ class Simulator:
                       f"\n{[str(s) + ': ' + str(self.env.get_state_discrete_from_index(s)) for s in dict_params_simul['absorption_set']]}")
             else:
                 print(f"\nAbsorption set (2D) (1D-index, 2D-index, 2D-discrete) (n={len(dict_params_simul['absorption_set'])} out of {self.env.getNumStates()}, {np.round(len(dict_params_simul['absorption_set']) / self.env.getNumStates() * 100, 1)}%):"
-                      f"\n{[str(s) + ': ' + str(self.env.get_index_2d_from_index(s)) + ', ' + str(self.env.getStateFromIndex(s, simulation=False)) for s in dict_params_simul['absorption_set']]}")
-            print(f"Activation set (2D) (n={np.nan if dict_params_simul['activation_set'] is None else len(dict_params_simul['activation_set'])}):\n{dict_params_simul['activation_set'] is None and 'None' or [str(s) + ': ' + str(self.env.get_index_2d_from_index(s)) for s in dict_params_simul['activation_set']]}")
+                      f"\n{[str(s) + ': ' + str(self.env.getStateIndicesFromIndex(s)) + ', ' + str(self.env.getStateFromIndex(s, simulation=False)) for s in dict_params_simul['absorption_set']]}")
+            print(f"Activation set (2D) (n={np.nan if dict_params_simul['activation_set'] is None else len(dict_params_simul['activation_set'])}):\n{dict_params_simul['activation_set'] is None and 'None' or [str(s) + ': ' + str(self.env.getStateIndicesFromIndex(s)) for s in dict_params_simul['activation_set']]}")
             print("**** ABSORPTION SET SELECTION ****\n")
         else:
             n_events_absorption_set_estimation = 0
@@ -1643,7 +1645,7 @@ class Simulator:
             n_particles_not_absorbed = N - n_particles_absorbed_once
             survival_times += list(np.repeat(t, n_particles_not_absorbed))
             if n_particles_not_absorbed > 0:
-                print(f"WARNING: Not all {N} particles were absorbed at least ONCE during the smaller maximum number of time steps allowed for all particles"
+                print(f"WARNING: Not all {N} particles were absorbed at least ONCE during the time allowed for the FV simulation"
                       f" ({max_time_steps_for_absorbed_particles_check} or {max_time_steps} has been reached):"
                       f" # NOT absorbed particles = {n_particles_not_absorbed} ({np.round(n_particles_not_absorbed / N * 100, 1)}%)")
 
@@ -2000,8 +2002,8 @@ class Simulator:
             for e in np.repeat(t, n_particles_not_absorbed):
                 survival_times.append(e)
             if n_particles_not_absorbed > 0:
-                print(f"WARNING: Not all {N} particles were absorbed at least ONCE during the smaller maximum number of time steps allowed for all particles"
-                      f" ({max_time_steps_for_absorbed_particles_check} or {max_time_steps} has been reached):"
+                print(f"WARNING: Not all {N} particles were absorbed at least ONCE during the time allowed for the FV simulation" +
+                      (stop_if_prop_absorbed_particles_reached_regardless_of_time_steps and f" ({max_time_steps} has been reached):" or f" ({max_time_steps_for_absorbed_particles_check} or {max_time_steps} has been reached):") +
                       f" # NOT absorbed particles = {n_particles_not_absorbed} ({np.round(n_particles_not_absorbed / N * 100, 1)}%)")
         # The following assertion should be used ONLY when the FV process stops if all N particles are absorbed at least once before reaching max_time_steps
         assert np.max([np.max(dict_phi[x]['t']) for x in dict_phi.keys()]) <= np.max(survival_times), "The maximum time stored in Phi(t,x) must be at most the maximum observed survival time"
@@ -2308,8 +2310,8 @@ class Simulator:
             for e in np.repeat(t, n_particles_not_absorbed):
                 survival_times.append(e)
             if n_particles_not_absorbed > 0:
-                print(f"WARNING: Not all {N} particles were absorbed at least ONCE during the smaller maximum number of time steps allowed for all particles"
-                      f" ({max_time_steps_for_absorbed_particles_check} or {max_time_steps} has been reached):"
+                print(f"WARNING: Not all {N} particles were absorbed at least ONCE during the time allowed for the FV simulation" +
+                      (stop_if_prop_absorbed_particles_reached_regardless_of_time_steps and f" ({max_time_steps} has been reached):" or f" ({max_time_steps_for_absorbed_particles_check} or {max_time_steps} has been reached):") +
                       f" # NOT absorbed particles = {n_particles_not_absorbed} ({np.round(n_particles_not_absorbed / N * 100, 1)}%)")
         # The following assertion should be used ONLY when the FV process stops if all N particles are absorbed at least once before reaching max_time_steps
         assert np.max([np.max(dict_phi[x]['t']) for x in dict_phi.keys()]) <= np.max(survival_times), "The maximum time stored in Phi(t,x) must be at most the maximum observed survival time"

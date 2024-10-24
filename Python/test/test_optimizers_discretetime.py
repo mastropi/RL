@@ -196,6 +196,8 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
 
             learner = sim_for_initial_exploration.run_exploration(t_learn=0, max_time_steps=T, seed=cls.seed, verbose=cls.debug, verbose_period=1)
             absorption_set = compute_set_of_frequent_states_with_zero_reward(learner.getStates(), learner.getRewards(), threshold=threshold_absorption_set)
+            # 2024/10/23: Use this for EWRL-2024 POSTER where we used NON-CUMULATIVE visit frequency to define the absorption set
+            #absorption_set = compute_set_of_frequent_states_with_zero_reward(learner.getStates(), learner.getRewards(), threshold=threshold_absorption_set, cumulative=False)
             visit_relative_frequency = pd.Series(learner.getStates()).value_counts(normalize=True)
             print(f"Distribution of state frequency on n={learner.getNumSteps()} steps:\n{visit_relative_frequency}")
             print(f"Selected absorption set (2D):\n{[str(s) + ': ' + str(cls.env2d.getStateIndicesFromIndex(s)) for s in absorption_set]}")
