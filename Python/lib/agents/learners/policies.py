@@ -1053,7 +1053,7 @@ class LeaActorCriticNN(GenericLearner):
                 ## if lr is too large (i.e. lr = 1.0, it works with lr = 0.1)!!
                 ## If we use lr=0.1, momentum=0.9, we get similar results to the Adam optimizer.
 
-    def learn(self, nepisodes, start_state=None, max_time_steps_per_episode=+np.Inf, prob_include_in_train=0.5,
+    def learn(self, nepisodes, batch_learning=False, start_state=None, max_time_steps_per_episode=+np.Inf, prob_include_in_train=0.5,
                 learner_value_functions_critic=None,
                 use_advantage=True, advantage_values=None, action_values=None, expected_reward=None):
         """
@@ -1162,6 +1162,10 @@ class LeaActorCriticNN(GenericLearner):
         variance_average_reward = 0.0
         nepisodes_max_steps_reached = 0
         for episode in range(1, nepisodes+1):
+            if batch_learning:
+                # Use the following when updating the policy parameters after EACH episode (batch update)
+                loss = 0.0
+
             if start_state is None:
                 self.env.reset()
             else:
@@ -1291,26 +1295,34 @@ class LeaActorCriticNN(GenericLearner):
                       f"Average reward over episodes: {self.average_reward_over_episodes}, " +
                       "Average episode length: {:.1f}".format(self.average_episode_length))
 
-        # Normalize the loss by computing the weighted average of the average reward observed at each episode, where the length of the episode is used as weight.
-        # The average process just described is equivalent to dividing the loss computed in the above loop by the sum of the episode lengths, as:
-        # 1 / \sum{ T_e } \sum_1^E T_e * avg.reward(e) = 1 / \sum{ T_e } \sum_1^E T_e * 1 / T_e * \sum_n^{T_e} advantage(n) * logprob(n) = 1 / \sum{ T_e } \sum_1^E \sum_n^{T_e} advantage(n) * logprob(n)
-        loss /= all_episodes_length
-        self.se_average_reward_over_episodes = np.sqrt(variance_average_reward / max(1, (episode - 1)))
-        print("---> FINAL AVERAGE REWARD AT LEARNING STEP {:d}: {:.3f} (+/- {:.3f}, {:.1f}%) on episodes of {:.1f} steps on average (max number of time steps was reached at {:.1f}% of episodes) --> loss = {}\n" \
-              .format(self.t_learn, self.average_reward_over_episodes, self.se_average_reward_over_episodes, self.se_average_reward_over_episodes / self.average_reward_over_episodes * 100,
-                      self.average_episode_length, nepisodes_max_steps_reached / nepisodes * 100, loss))
+            # Use the following when updating the policy parameters after EACH episode (batch update)
+            if batch_learning:
+                loss /= episode_length
+                self.optimizer.zero_grad()  # This is needed to avoid accumulating the gradient values (see above Stack Overflow post as well)
+                loss.backward()  # Regarding the use of retain_graph=True (not used here but it is a parameter that may come up indiscussions), this StackOverflow post might be useful (see the Illustrative Example in the accepted answer): https://stackoverflow.com/questions/46774641/what-does-the-parameter-retain-graph-mean-in-the-variables-backward-method
+                self.optimizer.step()
 
-        # Learn
-        # Note: In order to understand the connection between the loss.backward() and optimizer.step() see this post:
-        # https://stackoverflow.com/questions/53975717/pytorch-connection-between-loss-backward-and-optimizer-step
-        # in particular the answer by pseudomarvin, with a very simple example with explanations.
-        # But, essentially, the optimizer received the parameters of the neural network when it was initialized (see reset() method above)
-        # and the loss is computed by using these parameters when selecting the actions used at each visited state.
-        self.optimizer.zero_grad()  # This is needed to avoid accumulating the gradient values (see above Stack Overflow post as well)
-        loss.backward()     # Regarding the use of retain_graph=True (not used here but it is a parameter that may come up indiscussions), this StackOverflow post might be useful (see the Illustrative Example in the accepted answer): https://stackoverflow.com/questions/46774641/what-does-the-parameter-retain-graph-mean-in-the-variables-backward-method
-        self.optimizer.step()
-        # We can easily look at the neural network parameters by printing self.optimizer.param_groups
-        #print(f"New network parameters:\n{self.optimizer.param_groups}")
+        if not batch_learning:
+            # Normalize the loss by computing the weighted average of the average reward observed at each episode, where the length of the episode is used as weight.
+            # The average process just described is equivalent to dividing the loss computed in the above loop by the sum of the episode lengths, as:
+            # 1 / \sum{ T_e } \sum_1^E T_e * avg.reward(e) = 1 / \sum{ T_e } \sum_1^E T_e * 1 / T_e * \sum_n^{T_e} advantage(n) * logprob(n) = 1 / \sum{ T_e } \sum_1^E \sum_n^{T_e} advantage(n) * logprob(n)
+            loss /= all_episodes_length
+            self.se_average_reward_over_episodes = np.sqrt(variance_average_reward / max(1, (episode - 1)))
+            print("---> FINAL AVERAGE REWARD AT LEARNING STEP {:d}: {:.3f} (+/- {:.3f}, {:.1f}%) on episodes of {:.1f} steps on average (max number of time steps was reached at {:.1f}% of episodes) --> loss = {}\n" \
+                  .format(self.t_learn, self.average_reward_over_episodes, self.se_average_reward_over_episodes, self.se_average_reward_over_episodes / self.average_reward_over_episodes * 100,
+                          self.average_episode_length, nepisodes_max_steps_reached / nepisodes * 100, loss))
+
+            # Learn
+            # Note: In order to understand the connection between the loss.backward() and optimizer.step() see this post:
+            # https://stackoverflow.com/questions/53975717/pytorch-connection-between-loss-backward-and-optimizer-step
+            # in particular the answer by pseudomarvin, with a very simple example with explanations.
+            # But, essentially, the optimizer received the parameters of the neural network when it was initialized (see reset() method above)
+            # and the loss is computed by using these parameters when selecting the actions used at each visited state.
+            self.optimizer.zero_grad()  # This is needed to avoid accumulating the gradient values (see above Stack Overflow post as well)
+            loss.backward()     # Regarding the use of retain_graph=True (not used here but it is a parameter that may come up indiscussions), this StackOverflow post might be useful (see the Illustrative Example in the accepted answer): https://stackoverflow.com/questions/46774641/what-does-the-parameter-retain-graph-mean-in-the-variables-backward-method
+            self.optimizer.step()
+            # We can easily look at the neural network parameters by printing self.optimizer.param_groups
+            #print(f"New network parameters:\n{self.optimizer.param_groups}")
 
         return loss.float()
 
