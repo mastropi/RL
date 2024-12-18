@@ -1015,52 +1015,53 @@ if env_type == Environment.MountainCar:
 
 #-- Plot the value functions for the state next to the terminal state
 # ONLY VALID WHEN THE EXIT STATE IS AT THE TOP RIGHT OF THE LABYRINTH
-marker = ''
-Q_all_baseline = dict_Q[learning_method][rep, :n_learning_steps, :, :] - np.tile(dict_V[learning_method][rep, :n_learning_steps, :].T, (test_ac.getEnv().getNumActions(), 1, 1)).T
-ax_Q, ax_Q_baseline = plt.figure().subplots(1, 2)
-ax_Q.plot(range(1, n_learning_steps + 1), dict_V[learning_method][rep, :n_learning_steps, state_observe], marker=marker, color="black")
-ax_Q.plot(range(1, n_learning_steps + 1), dict_Q[learning_method][rep, :n_learning_steps, state_observe, :], marker=marker)
-ax_Q.legend(["V(s)"] + ["Q(s," + str(a) + ")" for a in range(dict_Q[learning_method].shape[2])], loc='upper left')
-ax_Q_baseline.plot(range(1, n_learning_steps + 1), dict_V[learning_method][rep, :n_learning_steps, state_observe] - dict_V[learning_method][rep, :n_learning_steps, state_observe], marker=marker, color="white") # We plot this constant value 0 so that the legend is correct
-ax_Q_baseline.plot(range(1, n_learning_steps + 1), Q_all_baseline[:n_learning_steps, state_observe, :], marker=marker)
-ax_Q_baseline.legend(["V(s) - V(s)"] + ["Q(s," + str(a) + ") - V(s)" for a in range(dict_Q[learning_method].shape[2])], loc='upper left')
+if state_observe is not None:
+    marker = ''
+    Q_all_baseline = dict_Q[learning_method][rep, :n_learning_steps, :, :] - np.tile(dict_V[learning_method][rep, :n_learning_steps, :].T, (test_ac.getEnv().getNumActions(), 1, 1)).T
+    ax_Q, ax_Q_baseline = plt.figure().subplots(1, 2)
+    ax_Q.plot(range(1, n_learning_steps + 1), dict_V[learning_method][rep, :n_learning_steps, state_observe], marker=marker, color="black")
+    ax_Q.plot(range(1, n_learning_steps + 1), dict_Q[learning_method][rep, :n_learning_steps, state_observe, :], marker=marker)
+    ax_Q.legend(["V(s)"] + ["Q(s," + str(a) + ")" for a in range(dict_Q[learning_method].shape[2])], loc='upper left')
+    ax_Q_baseline.plot(range(1, n_learning_steps + 1), dict_V[learning_method][rep, :n_learning_steps, state_observe] - dict_V[learning_method][rep, :n_learning_steps, state_observe], marker=marker, color="white") # We plot this constant value 0 so that the legend is correct
+    ax_Q_baseline.plot(range(1, n_learning_steps + 1), Q_all_baseline[:n_learning_steps, state_observe, :], marker=marker)
+    ax_Q_baseline.legend(["V(s) - V(s)"] + ["Q(s," + str(a) + ") - V(s)" for a in range(dict_Q[learning_method].shape[2])], loc='upper left')
 
-# Optimum Q-values (for the optimum deterministic policy)
-# This assumes that there is a reward of 1 at the terminal state which is one step away
-if learning_criterion == LearningCriterion.AVERAGE:
-    assert learning_task == LearningTask.CONTINUING
-    svalue  = 0.5 * (1.0 - max_avg_reward_continuing)     # Differential state value V(s) under the optimal policy (since the policy tells the agent to always go up, the agent receives reward 1.0, which is corrected (subtracted) by the max (because we are following the OPTIMAL policy) average reward; the 0.5 factor is explained by the calculations on my Mas de Canelles notebook sheet)
-    qvalue0 = 0.5 * (1.0 - max_avg_reward_continuing)     # Differential optimal action value Q(s,a) of going up (a=0) when we start at s = state_observe, one cell away from the terminal state, which gives reward 1.0 (we subtract the max average reward because we are following the OPTIMAL policy; the 0.5 factor is explained by the calculations on my Mas de Canelles notebook sheet)
-    qvalue1 = qvalue0 - max_avg_reward_continuing
-    qvalue2 = qvalue0 - 2*max_avg_reward_continuing
-    qvalue3 = qvalue0 - max_avg_reward_continuing
-else:   # DISCOUNTED reward criterion
-    gamma = test_ac.gamma
-    reward_at_terminal = 1
-    # State value V(s):
-    # - Under the optimal policy we go always up and observe the terminal reward right-away
-    # - If the learning task is continuing, we still keep observing the terminal reward discounted by the length of the optimal path (= np.sum(test_ac.getEnv().shape) - 1)
-    # (the `-1` at the end of the parenthesis cancels the `1+` at the beginning of the parenthesis when the learning task is CONTINUING)
-    svalue  = reward_at_terminal * (1 + int(learning_task == LearningTask.CONTINUING) * (1 / (1 - gamma**(np.sum(test_ac.getEnv().shape)-1))) - 1)
-    qvalue0 = svalue
-    qvalue1 = gamma * svalue
-    qvalue2 = gamma**2 * svalue
-    qvalue3 = gamma * svalue
-ax_Q.axhline(qvalue0, linestyle='dashed', color="blue")
-ax_Q.axhline(qvalue1, linestyle='dashed', color="orange")
-ax_Q.axhline(qvalue2, linestyle='dashed', color="green")
-ax_Q.axhline(qvalue3, linestyle='dashed', color="red")
-ax_Q.set_xlabel("Learning step")
-ax_Q.set_ylabel("Q values and state values")
-ax_Q_baseline.axhline(qvalue0 - svalue, linestyle='dashed', color="blue")
-ax_Q_baseline.axhline(qvalue1 - svalue, linestyle='dashed', color="orange")
-ax_Q_baseline.axhline(qvalue2 - svalue, linestyle='dashed', color="green")
-ax_Q_baseline.axhline(qvalue3 - svalue, linestyle='dashed', color="red")
-ax_Q_baseline.set_xlabel("Learning step")
-ax_Q_baseline.set_ylabel("Q values w.r.t. baseline")
-plt.suptitle(f"{learning_method.upper()}\n{learning_task.name} learning task - {learning_criterion.name} reward criterion (gamma={simulator_value_functions.getAgent().getLearner().gamma}) - {env_type.name} {env_shape}"
-             f"\nN={test_ac.agent_nn_fv.getLearner().getNumParticles()}, T={test_ac.agent_nn_fv.getLearner().getNumTimeStepsForExpectation()}, MAX budget={max_time_steps_benchmark} steps per policy learning step"
-             f"\nQ(s,a) and V(s) for state previous to the terminal state under the optimal policy, i.e. s={state_observe}\nMax average reward (continuing) = {max_avg_reward_continuing}")
+    # Optimum Q-values (for the optimum deterministic policy)
+    # This assumes that there is a reward of 1 at the terminal state which is one step away
+    if learning_criterion == LearningCriterion.AVERAGE:
+        assert learning_task == LearningTask.CONTINUING
+        svalue  = 0.5 * (1.0 - max_avg_reward_continuing)     # Differential state value V(s) under the optimal policy (since the policy tells the agent to always go up, the agent receives reward 1.0, which is corrected (subtracted) by the max (because we are following the OPTIMAL policy) average reward; the 0.5 factor is explained by the calculations on my Mas de Canelles notebook sheet)
+        qvalue0 = 0.5 * (1.0 - max_avg_reward_continuing)     # Differential optimal action value Q(s,a) of going up (a=0) when we start at s = state_observe, one cell away from the terminal state, which gives reward 1.0 (we subtract the max average reward because we are following the OPTIMAL policy; the 0.5 factor is explained by the calculations on my Mas de Canelles notebook sheet)
+        qvalue1 = qvalue0 - max_avg_reward_continuing
+        qvalue2 = qvalue0 - 2*max_avg_reward_continuing
+        qvalue3 = qvalue0 - max_avg_reward_continuing
+    else:   # DISCOUNTED reward criterion
+        gamma = test_ac.gamma
+        reward_at_terminal = 1
+        # State value V(s):
+        # - Under the optimal policy we go always up and observe the terminal reward right-away
+        # - If the learning task is continuing, we still keep observing the terminal reward discounted by the length of the optimal path (= np.sum(test_ac.getEnv().shape) - 1)
+        # (the `-1` at the end of the parenthesis cancels the `1+` at the beginning of the parenthesis when the learning task is CONTINUING)
+        svalue  = reward_at_terminal * (1 + int(learning_task == LearningTask.CONTINUING) * (1 / (1 - gamma**(np.sum(test_ac.getEnv().shape)-1))) - 1)
+        qvalue0 = svalue
+        qvalue1 = gamma * svalue
+        qvalue2 = gamma**2 * svalue
+        qvalue3 = gamma * svalue
+    ax_Q.axhline(qvalue0, linestyle='dashed', color="blue")
+    ax_Q.axhline(qvalue1, linestyle='dashed', color="orange")
+    ax_Q.axhline(qvalue2, linestyle='dashed', color="green")
+    ax_Q.axhline(qvalue3, linestyle='dashed', color="red")
+    ax_Q.set_xlabel("Learning step")
+    ax_Q.set_ylabel("Q values and state values")
+    ax_Q_baseline.axhline(qvalue0 - svalue, linestyle='dashed', color="blue")
+    ax_Q_baseline.axhline(qvalue1 - svalue, linestyle='dashed', color="orange")
+    ax_Q_baseline.axhline(qvalue2 - svalue, linestyle='dashed', color="green")
+    ax_Q_baseline.axhline(qvalue3 - svalue, linestyle='dashed', color="red")
+    ax_Q_baseline.set_xlabel("Learning step")
+    ax_Q_baseline.set_ylabel("Q values w.r.t. baseline")
+    plt.suptitle(f"{learning_method.upper()}\n{learning_task.name} learning task - {learning_criterion.name} reward criterion (gamma={simulator_value_functions.getAgent().getLearner().gamma}) - {env_type.name} {env_shape}"
+                 f"\nN={test_ac.agent_nn_fv.getLearner().getNumParticles()}, T={test_ac.agent_nn_fv.getLearner().getNumTimeStepsForExpectation()}, MAX budget={max_time_steps_benchmark} steps per policy learning step"
+                 f"\nQ(s,a) and V(s) for state previous to the terminal state under the optimal policy, i.e. s={state_observe}\nMax average reward (continuing) = {max_avg_reward_continuing}")
 
 
 # Same plot for all states
@@ -1115,25 +1116,25 @@ min_A, max_A = np.min(dict_A[learning_method]), np.max(dict_A[learning_method]) 
 ymin, ymax = min_A, max_A
 
 #-----------------
-# Plot just ONE advantage function
-s_observe = test_ac.getEnv().getNumStates() // 2
-ax = plt.figure(figsize=(10, 9)).subplots(1, 1)
-i = s_observe
-for i in range(test_ac.getEnv().getNumStates()):
+if env_type == Environment.MountainCar:
+    # Plot just ONE advantage function
+    s_observe = test_ac.getEnv().getNumStates() // 2
+    ax = plt.figure(figsize=(10, 9)).subplots(1, 1)
+    i = s_observe
     ax.plot(np.arange(1 + first_learning_step, n_learning_steps + 1), dict_A[learning_method][rep, first_learning_step:n_learning_steps, i, :], marker=marker)
-ax.set_yscale("log")
+    ax.set_yscale("log")
 
-# Distribution of advantage values (analyzed for the continuous-state mountain car)
-if False:
-    ind = np.where(A < 0.5)
-    plt.figure()
-    plt.hist(A[ind].reshape(-1), bins=30, alpha=0.3)
-    plt.gca().set_xscale("log")
-    plt.hist(A.reshape(-1), bins=30, alpha=0.3)
-    pd.Series(A.reshape(-1)).describe()
+    # Distribution of advantage values (analyzed for the continuous-state mountain car)
+    if False:
+        ind = np.where(A < 0.5)
+        plt.figure()
+        plt.hist(A[ind].reshape(-1), bins=30, alpha=0.3)
+        plt.gca().set_xscale("log")
+        plt.hist(A.reshape(-1), bins=30, alpha=0.3)
+        pd.Series(A.reshape(-1)).describe()
 #-----------------
 
-common_axes = True
+common_axes = False
 ylim = (ymin, ymax) if common_axes else (None, None)
 marker = ''
 axes = plt.figure(figsize=(10, 9)).subplots(test_ac.getEnv().shape[0], test_ac.getEnv().shape[1], sharex=common_axes, sharey=common_axes, gridspec_kw=dict(hspace=0.1, wspace=0.1))  # See also help(plt.subplots); help(matplotlib.gridspec.GridSpec)
@@ -1261,9 +1262,7 @@ if learning_method_type == "values_fv" and not estimate_absorption_set_at_every_
     # Check that no visit was done to the absorption set
     print("Intersection between absorption set and state visit count > 0 in FV (IT SHOULD BE EMPTY! --recall that the state counts in FV are reset after the initial exploration):")
     _visited_states = set(np.where(state_counts > 0)[0])
-    if "test_ac" in locals():
-        print(_visited_states.intersection(test_ac.getAbsorptionSet()))
-        assert len(_visited_states.intersection(test_ac.getAbsorptionSet())) == 0, "The visited states during the FV excursion must NOT be in the absorption set"
+    assert len(_visited_states.intersection(simulator_value_functions.getAgent().getLearner().getAbsorptionSet())) == 0, "The visited states during the FV excursion must NOT be in the absorption set"
 if env_type == Environment.MountainCar:
     # Add the trajectory of the last replication
     # Note: Since no trajectory information is currently stored by the online policy learner, we use the value functions learner to extract the trajectory to plot.
@@ -1587,7 +1586,7 @@ if nrep > 1:
         ax.set_ylabel(_ylabel, fontsize=fontsize)
         ax.tick_params(axis='both', labelsize=int(0.8*fontsize))
     else:
-        ax.set_ylabel("Average reward (normalized by the MAX average reward = {:.2g})".format(max_avg_reward), fontsize=fontsize)
+        ax.set_ylabel(f"Average reward {'(normalized by the MAX average reward = {:.2g})' if max_avg_reward != 1.0 else ''}".format(max_avg_reward), fontsize=fontsize)
         plt.suptitle(f"ALL LEARNING METHODS: {env_type.name} {env_shape} - {learning_task.name} learning task - {learning_criterion.name} reward criterion (gamma={gamma})"
                      f"\nWIND: {wind_dict}, EXIT: {_exit_state_str}, {nrep} replications" +
                      _learning_characteristics)
@@ -1606,7 +1605,8 @@ if nrep > 1:
         df_ratio_nsamples = pd.DataFrame({'td': np.mean(dict_nsteps['values_td'], axis=0)[:n_learning_steps],
                                           'fv': np.mean(dict_nsteps['values_fv2'], axis=0)[:n_learning_steps]})
         df_ratio_nsamples['ratio_fv_td'] = df_ratio_nsamples['fv'] / df_ratio_nsamples['td']
-        ax_nsamples = ax.twinx()
+        if "ax_nsamples" not in locals():
+            ax_nsamples = ax.twinx()
         ax_nsamples.plot(range(1, n_learning_steps+1), df_ratio_nsamples['ratio_fv_td'], color="orange", linewidth=0.5)
         ref_line = ax_nsamples.axhline(1.0, color="orange", linewidth=0.5, linestyle="dashed")
         legend_nsamples += ["Sample size ratio (FV2/TD)", "Reference line showing equal sample size ratio"]
@@ -1652,7 +1652,7 @@ if nrep > 1:
             ax_nsamples.tick_params(axis='y', labelsize=int(0.8*fontsize), labelcolor="blue")
         else:
             ax_nsamples.set_ylabel("Average sample Ratio FV/TD across replications", fontsize=int(0.8 * fontsize))
-            ax_nsamples.legend(legend_nsamples, loc="lower right")
+            ax_nsamples.legend(legend_nsamples, loc="center left") #"lower right")
 #-- ALTOGETHER PLOT
 #------------------ Plots -----------------
 
