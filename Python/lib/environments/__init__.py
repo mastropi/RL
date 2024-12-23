@@ -178,7 +178,7 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
         This method must be defined because it is used by simulators in order to go from the actual representation of the environment
         (which could be a physical continuous-valued state, as in the Mountain Car) to the index representation of a discretized version of the environment,
         which is needed for instance to run Fleming-Viot simulations (which requires the definition of an absorption set A that is based on
-        an environment with a countable state space.
+        an environment with a countable state space).
         """
         return state
 

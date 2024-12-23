@@ -161,7 +161,7 @@ class SetOfStates:
         Parameters `exactly_one_dimension_at_boundary` and `at_least_one_dimension_at_boundary` can be used to restrict
         the set of states returned to those satisfying the condition indicated by the parameter.
 
-        They cannot be both True and the same time.
+        They cannot be both True at the same time.
         """
         if self.getStorageFormat() == "states":
             if len(self.states) == 1:
@@ -489,7 +489,7 @@ def parse_simulation_parameters(dict_params_simul, env):
     Parses input parameters for simulation
 
     The function was originally created to parse the parameters received by the estimate_blocking_*() functions in the queueing and network systems
-    but then it was extended to also be use dto parse simulation parameters in general, e.g. of discrete-time simulations that require parameters
+    but then it was extended to also be used to parse simulation parameters in general, e.g. of discrete-time simulations that require parameters
     to run a Monte-Carlo simulation or a Fleming-Viot simulation.
 
     Arguments:

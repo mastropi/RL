@@ -1582,29 +1582,28 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
         # particles varies as time progresses (it goes up as new particles exit the absorption set A, and it goes down
         # as the particles reach a terminal state --in which case they are restarted inside A, e.g. at the START of the labyrinth).
         # The maximum number of particles in the system is N.
-        # TODO: (2024/05/07) Check these expected V(s) values because after the recent changes I did on different aspects of the FV simulation and FV-based value function estimation process, the estimated V(s) is worse than before the changes, i.e. it is farther away from the true V(s) value computed by the brand new computing.compute_state_value_function_from_transition_matrix() function, as is also farther away than the V(s) estimated by TD(0).
         cls.expected_fv_V = np.array(
-                            [ 0.034743,  0.233790, 0.489875, -0.037515,
-                             -0.039710,  0.000000, 0.298950,  0.447024,
-                             -0.020319, -0.039758, 0.095426, 0.181439])
+                            [0.034611, 0.233607, 0.489649, -0.037725,
+                             -0.039828, 0.000000, 0.298730, 0.446793,
+                             -0.020460, -0.039909, 0.095248, 0.181238])
         # (2023/12/18) The expected action value function seems reasonable in terms of what action is better at each state to reach the terminal state at the upper-right cell of the labyrinth
         cls.expected_fv_Q = np.array(
-                            [[-0.01367791,  0.11848694, -0.05318403, -0.01168208],
-                             [0.17164916,  0.45940778,  0.1586421,  -0.00842918],
-                             [0.52806234,  0.95464411,  0.24212508,  0.16495517],
-                             [-0.03751482, -0.03751482, -0.03751482, -0.03751482],
-                             [-0.01941363, -0.04611871, -0.02248051, -0.0529884],
+                            [[-0.01372256,  0.11842766, -0.05322752, -0.01172401],
+                             [ 0.17156283,  0.45928130,  0.15855929, -0.00848867],
+                             [ 0.52790925,  0.95445672,  0.24200374,  0.16486543],
+                             [-0.03772502, -0.03772502, -0.03772502, -0.03772502],
+                             [-0.01943105, -0.04612045, -0.02255808, -0.0530044],
                              [0., 0., 0., 0.],
-                             [0.5021308,   0.27621888,  0.00773258,  0.12787165],
-                             [0.84994117, 0.34307159, 0.0664185, 0.23193807],
-                             [-0.00798979, -0.00769294, -0.00754817, -0.00751653],
-                             [-0.05953017, -0.02484684, -0.04193591, -0.02717974],
-                             [0.14703614,  0.02765407, -0.01561109, -0.06454853],
-                             [0.28667113,  0.04775472,  0.04977956, -0.0088709]])
-        cls.expected_fv_average_reward = 0.023652
-        cls.expected_fv_cycle_time = 10.912
-        cls.expected_fv_n_cycles = 91
-        cls.expected_fv_state_counts = [1085, 843, 481, 224, 817, 0, 528, 383, 186, 533, 559, 513]
+                             [ 0.50198879,  0.27610796,  0.00762336,  0.12776161],
+                             [ 0.84976620,  0.34293355,  0.06632555,  0.23181229],
+                             [-0.00801942, -0.00779333, -0.00766584, -0.00763694],
+                             [-0.05960949, -0.02489578, -0.04200519, -0.02730922],
+                             [ 0.14694258,  0.02757644, -0.01567993, -0.06464362],
+                             [ 0.28655787,  0.04766436,  0.04968611, -0.00896531]])
+        cls.expected_fv_average_reward = 0.023840
+        cls.expected_fv_cycle_time = 10.8261
+        cls.expected_fv_n_cycles = 92
+        cls.expected_fv_state_counts = [1085, 843, 481, 224, 818, 0, 528, 383, 185, 533, 559, 513]
         cls.expected_fv_total_events = sum(cls.expected_fv_state_counts)
 
         #-- Expected values that do NOT depend on the estimation method (e.g. average reward, number of cycles, etc.)
@@ -1626,9 +1625,9 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
         cls.expected_p_from_cycles = [0.130022, 0.104104, 0.049244, 0.021382,
                                       0.152916, 0.000000, 0.048164, 0.039309,
                                       0.200864, 0.130022, 0.070842, 0.056371]
-        cls.expected_p_fv = [0.171830, 0.085760, 0.048607, cls.expected_fv_average_reward,
-                             0.017149,   np.nan, 0.056226, 0.036251,
-                               np.nan, 0.013654, 0.072440, 0.050885]
+        cls.expected_p_fv = [0.173195, 0.086442, 0.048993, cls.expected_fv_average_reward,
+                             0.182853,   np.nan, 0.056673, 0.036539,
+                             np.nan,   0.123786, 0.073015, 0.051289]
 
     def test_Env_PolRandomWalk_MetMC(self):
         print("\n*** Running test " + self.id() + " ***")
@@ -1791,6 +1790,8 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
         print(f"\nAverage reward (usual calculation): {observed_average_reward}")
         print(f"Average reward (using renewal theory): {observed_average_reward_from_cycles}")
         print(f"Expected average reward: {self.expected_average_reward_from_cycles}")
+
+        plot_estimated_state_value_function(self.env2d, state_values, LearningCriterion.AVERAGE)
 
         assert self.nS == 3*4 and \
                self.seed == 1717 and \

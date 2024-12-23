@@ -213,7 +213,7 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
                     # WARNING: cell = (VERTICAL position from top, HORIZONTAL position from left) and the (0, 0) of the image is at the top-left by default
                     plt.text(cell[1], cell[0], "{:.1f}%".format(visit_relative_frequency[s]*100), horizontalalignment="center", verticalalignment="center", fontsize=15)
                 plt.suptitle(f"Labyrinth with obstacles in black (seed={seed_obstacles})", fontsize=20)
-                plt.title("Identified absorption set A in orange\n(intensity proportional to relative visit frequency)")
+                plt.title("Identified absorption set A in blue\n(intensity proportional to relative visit frequency)")
                 plt.show()
         elif absorption_set is None:
             # We choose the first column, i.e. the column above the labyrinth's start state, of the 2D-grid as the set A of uninteresting states
