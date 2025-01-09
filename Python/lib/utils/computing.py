@@ -308,8 +308,8 @@ def compute_set_of_frequent_states_with_zero_reward(states, rewards, threshold=0
 
     # Filter on states with zero reward
     ind_zero_reward = rewards == 0
-    n_nonzero_rewards = sum(ind_zero_reward)
 
+    # Compute distribution
     dist_state_counts = pd.Series(states[ind_zero_reward]).value_counts(normalize=True)
 
     if cumulative:

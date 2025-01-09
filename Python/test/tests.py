@@ -561,6 +561,9 @@ assert time_steps_fv_for_absorption_set > 0 if estimate_absorption_set else True
 max_time_steps_benchmark = max_time_steps_fv_for_expectation + max_time_steps_fv_overall
 print(f"max_time_steps_benchmark (T + M2) = {max_time_steps_benchmark}")
 
+# Absorption strategy
+soft_killing = False #True
+
 #-- Common learning parameters
 # Parameters about policy learning (Actor)
 is_NPG = len(nn_hidden_layer_sizes) == 0
@@ -785,6 +788,7 @@ for rep in range(nrep):
                                                       ## Note: We set the minimum number of cycles for the estimation of E(T_A) to 0 because we do NOT need
                                                       ## the estimation of the average reward to learn the optimal policy, as it cancels out in the advantage function Q(s,a) - V(s)!!
                                                   estimate_absorption_set=estimate_absorption_set_at_this_step, threshold_absorption_set=threshold_absorption_set,
+                                                  soft_killing=soft_killing,
                                                   use_average_reward_stored_in_learner=use_average_reward_from_previous_step,
                                                   reset_value_functions=reset_value_functions_at_this_step,
                                                   plot=plot if t_learn+1 in learning_steps_observe else False, colormap=colormap,

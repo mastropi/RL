@@ -97,8 +97,11 @@ class GenericLearner:
         Parameters:
         env: gym.Env
             Environment where learning takes place.
-            The environment needs not be "discrete" in the sense the gym package uses discrete, namely that there is
+            The environment needs not be "discrete" in the sense the gym package gives to "discrete", namely that there is
             a pre-defined number of states (as is the case in the EnvironmentDiscrete environment of gym).
+            The environment must have at least the following method defined, used here:
+            - getIndexFromState(state), which returns the 1D INDEX associated to a given PHYSICAL state of the environment, such as a 2D state
+            (e.g. 2D gridworld, mountain car, etc.).
 
         criterion: (opt) LearningCriterion
             The criterion used to learn the value functions, either DISCOUNTED (for episodic tasks with discount factor gamma < 1)
@@ -230,7 +233,7 @@ class GenericLearner:
             default: True
 
         reset_average_reward: (opt) bool
-            Whether to reset the average reward its initial estimate (zero).
+            Whether to reset the average reward to its initial estimate (zero).
             default: True
 
         reset_trajectory: (opt) bool
@@ -491,6 +494,18 @@ class GenericLearner:
         # Need to convert to list because the attribute is a deque and deque do not accept slicing as lists do!
         return list(self.states)
 
+    def getStateIndices(self):
+        """
+        Returns a list with the observed state INDICES(*) during the trajectory
+
+        (*) This means that the returned values are 1D representation of the physical states.
+
+        This is useful, at least, when dealing with environments with continuous-valued state, in order to remove the responsibility from the user
+        to deal with this situation when dealing with those environments and needing to retrieve state indices (e.g. when defining states that
+        belong to the absorption set A used in the FV environment (see e.g. the discrete.Simulator class).
+        """
+        return [self.env.getIndexFromState(state) for state in self.states]
+
     def getActions(self):
         "Returns a list with the observed actions during the trajectory"
         # Need to convert to list because the attribute is a deque and deque do not accept slicing as lists do!
@@ -503,6 +518,9 @@ class GenericLearner:
 
     def getAverageReward(self):
         return self.average_reward
+
+    def getSampleSizeForAverageReward(self):
+        return self.sample_size_initial_reward_stored_in_learner
 
     def setInitialLearningRate(self, alpha):
         "Sets the initial learning rate"

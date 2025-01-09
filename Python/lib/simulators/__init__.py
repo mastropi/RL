@@ -566,7 +566,10 @@ def parse_simulation_parameters(dict_params_simul, env):
     if not set_required_simul_params.issubset(dict_params_simul.keys()):
         raise ValueError("Not all required parameters were given in `dict_params_simul`, which requires: {}\nGiven: {}".format(set_required_simul_params, dict_params_simul.keys()))
 
-    # Parse the remaining (optional) simulation parameters
+    #-- Parse the remaining (optional) simulation parameters
+    dict_params_simul['max_time_steps'] = dict_params_simul.get('max_time_steps')
+    # Probability of taking a random action (regardless of the current policy). Goal: prevent agent from getting stuck or reach a non-optimal policy which it cannot leave
+    dict_params_simul['epsilon_random_action'] = dict_params_simul.get('epsilon_random_action', 0.0)
     dict_params_simul['burnin_time_steps'] = dict_params_simul.get('burnin_time_steps', BURNIN_TIME_STEPS)
     # Continuous burn-in time used to filter the continuous-time cycle times observed during the single-particle simulation
     # that is used to estimate the expected reabsorption cycle time, E(T_A).
