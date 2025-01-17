@@ -952,11 +952,6 @@ class Simulator:
         policy = self.getAgent().getPolicy()
         learner = self.getAgent().getLearner()
 
-        # Reset the learner to reset any trajectory potentially stored in the learner
-        # Note that we reset the learner and NOT simply the trajectory stored in it because the reset() method defines a few attributes that are not defined by the constructor
-        # (THIS SHOULD BE CHANGED!)
-        learner.reset(reset_episode=True)
-
         # Set seeds of:
         # - the policy's environment --> responsible for selecting the action.
         # - the object's environment --> responsible of deciding on the next step given the action.
@@ -967,15 +962,23 @@ class Simulator:
         # Reset the environment to a state according to its initial state distribution
         self.env.reset()
 
-        # Initialize the rewards list to a first dummy element as if the environment came from an action taken by the agent and observed the reward of landing into the current state
+        # Reset the learner to reset any trajectory potentially stored in the learner
+        # Note that we reset the learner and NOT simply the trajectory stored in it because the reset() method defines a few attributes
+        # that are not defined by the `learner` constructor which should also be set before starting a simulation.
+        # (THIS SHOULD BE CHANGED PERHAPS --by defining all the attributes that are necessary during a simulation in the CONSTRUCTOR of the learner NOT only by its reset() method
+        # --but I am not really sure about this need, because a learner should be anyway RESET before starting a simulation... right?)
+        learner.reset(reset_episode=True)
+
+        # Initialize the rewards list with a dummy first element as if the environment came from an action taken by the agent and a reward of landing at the reset state is observed
         # This is important for the correct association of states and rewards in the sense that learner.states[k] is the state where the reward learner.rewards[k] is observed,
         # and this is particularly useful if we estimate the absorption set A in the FV simulation with function compute_set_of_frequent_states_with_zero_reward() where
-        # the list of observed states and rewards is passed to the function and these should be aligned as just indicated! (because e.g. we filter on the states receiving zero reward)
+        # the lists of observed states and rewards are passed to the function which are expected to be aligned as just indicated!
+        # (because e.g. we filter on the states receiving zero reward).
         # IMPORTANT: This learner.rewards attribute is the attribute present in the GenericLearner class, NOT in the Learner class of which the `learner` here is an instance of.
-        # The Learner class stores rewards in attribute learner._rewards which DOES already have ONE element at the beginning with the reward associated to the start state of the episode.
-        # Recall that the Learner class stores just the trajectory observed WITHIN the episode, where as the GenericLearner class stores the WHOLE trajectory, e.g. the trajectory
+        # The Learner class stores rewards in learner._rewards which DOES already have ONE element at the beginning with the reward associated to the start state of the episode.
+        # Recall that the Learner class stores just the trajectory observed WITHIN the episode, whereas the GenericLearner class stores the WHOLE trajectory, e.g. the trajectory
         # observed along ALL the episodes run.
-        # Here we are interested in tracking the trajectory observed over ALL episodes, therefore we will look at the attributes of GenericLearner and not at the attributes of Learner.
+        # Here we are interested in tracking the trajectory observed over ALL episodes, therefore we will look at the attributes of GenericLearner and not at the Learner attributes
         # This is why we now explicitly add the first reward (received when visiting the initial state) to the learner.rewards attribute, which does NOT yet have it stored.
         learner.rewards += [self.env.getReward(self.env.getState())]
 
@@ -1060,9 +1063,6 @@ class Simulator:
         policy = self.getAgent().getPolicy()
         learner = self.getAgent().getLearner()
 
-        # Reset the learner to reset any trajectory potentially stored in the learner
-        learner.reset(reset_episode=True, reset_value_functions=True, reset_average_reward=True)
-
         # Set seeds of:
         # - the policy's environment --> responsible for selecting the action.
         # - the object's environment --> responsible of deciding on the next step given the action.
@@ -1072,6 +1072,11 @@ class Simulator:
 
         # Reset the environment to a state according to its initial state distribution
         self.env.reset()
+
+        # Reset the learner to reset any trajectory potentially stored in the learner
+        # IMPORTANT: We must reset the learner AFTER resetting the environment so that the first reward stored in the learner is the reward associated to the reset state.
+        # (as opposed to the reward of the state that was visited at the end of a potential previous experiment!)
+        learner.reset(reset_episode=True, reset_value_functions=True, reset_average_reward=True)
 
         t = 0  # Step counter: the first step is 1, as t represents the time at which the Markov chain transitions to the NEXT state. See more details at the @note at the beginning of the file.
         t_episode = -1  # Step counter within episode: the first step is 0, as t_episode indexes the step BEFORE transition so that we can write S(0), A(0), R(1), S(1), A(1), ...
@@ -1084,21 +1089,19 @@ class Simulator:
 
             if done_episode:
                 # We have reached a terminal state
-                # => Reset the environment
+                # => Reset the environment and the trajectories stored in the learner
 
-                # TEMPORARY (2024/05/14): Needed only because of the EPISODIC view of the average reward
-                # Partially reset the learner (only trajectories are reset). See why we need this where we do so in _run_single_continuing_task()
                 t_episode = -1
-                learner.reset(reset_episode=False, reset_value_functions=False, reset_average_reward=False)
-                # TEMPORARY (2024/05/14): Needed only because of the EPISODIC view of the average reward
-
                 action = 0
                 next_state = self.env.reset()
                 reward = self.env.getReward(next_state)
                 done_episode = False
 
-                # TEMPORARY (2024/05/14): Needed only because of the EPISODIC view of the average reward
-                # See the reasons why we set these parameters where we do so in _run_single_continuing_task()
+                # TEMPORARY (2024/05/14): Needed only because of the EPISODIC view of the average reward in its iterative update formula in Learner.update_average_reward()
+                # Partially reset the learner (only trajectories are reset). See why we need to do this where we do the same thing in _run_single_continuing_task()
+                learner.reset(reset_episode=False, reset_value_functions=False, reset_average_reward=False)
+
+                # See the reasons why we set these parameters where we do the same thing in _run_single_continuing_task()
                 info = {'update_trajectory': False,
                         'update_counts': False}
                 # TEMPORARY (2024/05/14): Needed only because of the EPISODIC view of the average reward
@@ -1106,7 +1109,7 @@ class Simulator:
                 action = self._choose_action(policy, state)
                 next_state, reward, done_episode, info = self.env.step(action)
 
-            # TEMPORARY (2024/05/14): Needed only because of the EPISODIC view of the average reward
+            # TEMPORARY (2024/05/14): Needed only because of the EPISODIC view of the average reward in its iterative update formula in Learner.update_average_reward()
             # Check end of simulation before learning so that we make the learner do what it usually does at the end of an episode
             # (e.g. learn the average reward and update trajectory information over all episodes)
             if t >= max_time_steps:
@@ -3273,16 +3276,6 @@ class Simulator:
         if seed is not None:
             policy.env.seed(seed)
 
-        # Reset the learner (i.e. prepare it for a fresh new learning experience with all learning memory erased and learning rates reset to their initial values)
-        # Note that a special treatment may be granted to the reset of the value functions because we may want NOT to reset them,
-        # for instance when we are learning a policy and we use this simulator to learn the value functions...
-        # In that case, we don't want to start off at 0.0 again but to start off at the estimated values obtained
-        # under the previous policy, which normally is very close to the new policy after one step of policy learning.
-        # (In some situations --e.g. labyrinth where the policy is learned using Actor-Critic or policy gradient learning--
-        # I observed (Nov-2023) that non-optimal policies are learned that minimize the loss function if we reset the
-        # value functions to 0 at every policy learning step, while the problem does NOT happen when the value functions are NOT reset.)
-        learner.reset(reset_episode=True, reset_value_functions=reset_value_functions)
-
         # Numpy seed and Environment seed
         # (the numpy seed is needed when epsilon_random_action > 0 because in that case a random number is drawn to decide whether to choose a random action
         # --without following the policy-- and subsequently to choose a random action, if that ends up being the case)
@@ -3294,6 +3287,30 @@ class Simulator:
         if seed is not None:
             np.random.seed(seed)
             self.env.setSeed(seed)
+
+        # Reset the environment (this should be done BEFORE resetting the learner because the learner will most likely store the reward at the initial state by calling
+        # self.env.getReward() on the self.env.getState(), and if the state stored in the environment (from e.g. a previous execution/replication of the learning process),
+        # is NOT the state at which the environment will start after reset below
+        # Optional start state JUST for the very first episode
+        # (In case we want to start at a specific state and then perform the subsequent resets as per the environment initial state distribution)
+        self.env.reset()
+        if start_state_first_episode is not None:
+            self.env.setState(start_state_first_episode)
+        if show_messages(verbose, verbose_period, 0):
+            print("@{}".format(get_current_datetime_as_string()))
+            print(f"[t_learn={t_learn}] Agent starts at state {self.env.getState()} with reward {self.env.getReward(self.env.getState())}")
+        if self.debug:
+            print("\t[DEBUG] State value function at start of episode:\n\t{}".format(learner.getV().getValues()))
+
+        # Reset the learner (i.e. prepare it for a fresh new learning experience with all learning memory erased and learning rates reset to their initial values)
+        # Note that a special treatment may be granted to the reset of the value functions because we may want NOT to reset them,
+        # for instance when we are learning a policy and we use this simulator to learn the value functions...
+        # In that case, we don't want to start off at 0.0 again but to start off at the estimated values obtained
+        # under the previous policy, which normally is very close to the new policy after one step of policy learning.
+        # (In some situations --e.g. labyrinth where the policy is learned using Actor-Critic or policy gradient learning--
+        # I observed (Nov-2023) that non-optimal policies are learned that minimize the loss function if we reset the
+        # value functions to 0 at every policy learning step, while the problem does NOT happen when the value functions are NOT reset.)
+        learner.reset(reset_episode=True, reset_value_functions=reset_value_functions)
 
         # Store initial values used in the analysis of all the episodes run
         V_state_observe, RMSE, MAPE, ntimes_rmse_inside_ci95 = self._initialize_run_with_learner_status(nepisodes, learner, compute_rmse, weights, state_observe)
@@ -3343,23 +3360,6 @@ class Simulator:
         done = False
         while not done:
             episode += 1
-            # Reset the environment
-            # (this reset is typically carried out by the gym module, e.g. by the toy_text.discrete.DiscreteEnv environment's reset() method
-            # where the initial state is chosen based on the isd attribute of the object, i.e. of the Initial State Distribution defining the initial state,
-            # which is assumed to have been defined appropriately in order to have the start state the user wishes to use)
-            self.env.reset()
-            # Optional start state JUST for the very first episode
-            # (In case we want to start at a specific state and then perform the subsequent resets as per the environment initial state distribution)
-            if start_state_first_episode is not None and episode == 0:
-                self.env.setState(start_state_first_episode)
-            if show_messages(verbose, verbose_period, episode) or episode == nepisodes - 1:  # Note that we ALWAYS show the message at the LAST episode
-                print("@{}".format(get_current_datetime_as_string()))
-                print("[t_learn={}] Episode {} of {} running...".format(t_learn, episode+1, nepisodes), end=" ")
-                print("(agent starts at state: {}".format(self.env.getState()), end=" ")
-            if self.debug:
-                print("\n[DEBUG] Episode {} of {}:".format(episode+1, nepisodes))
-                print("\t[DEBUG] Starts at state {}".format(self.env.getState()))
-                print("\t[DEBUG] State value function at start of episode:\n\t{}".format(learner.getV().getValues()))
 
             # Reset variables at the start of a new episode
             done_episode = False
@@ -3370,6 +3370,10 @@ class Simulator:
                                     # This is done like that so that we have the state-action-reward sequence S(0), A(0), R(1), S(1), A(1), R(2), ...
                                     # So, t_episode indexes the state BEFORE transitioning.
             if episode > 0:
+                # Reset the environment
+                # Note that we do NOT reset the environment at the very first episode (episode = 0) because the environment has already been reset BEFORE starting the loop.
+                self.env.reset()
+
                 # Learn the value of the terminal state visited at the end of the previous episode in the CONTINUING learning task context
                 # IMPORTANT: This step must come BEFORE resetting the learner (done below) because the learner erases all history about the previous episode
                 # (e.g. observed states, actions and rewards) and these are needed, in particular the rewards, to correctly update the average reward,
@@ -3382,8 +3386,9 @@ class Simulator:
                     t += 1
                     # Check whether we should stop the simulation right after the next learning step (carried out by self.learn_terminal_state_values())
                     # We should check this because the counter of learning steps just increased by 1 and perhaps we reach the maximum number of learning steps after that!
-                    # Note that this would trigger the same situation as if parameter max_time_steps were 0:
-                    # in that case we would not even perform any learning step as the simulation would stop even before performing the first step!
+                    # Note that when the end of the simulation has been reached, we ALSO set done_episode = True because, on one side this is conceptually true
+                    # (i.e. an episode ends either when a terminal state is reached or when the maximum simulation time is reached), but ALSO because this allows
+                    # to update the trajectory information stored in the learner (Learner._states, Learner._actions, Learner._rewards).
                     if max_time_steps is not None and t >= max_time_steps:
                         max_time_steps_reached = True
                         done_episode = True
@@ -3391,8 +3396,8 @@ class Simulator:
                             print("[run_single, DEBUG] (TOTAL MAX TIME STEPS = {} REACHED at episode {}!)".format(max_time_steps, episode+1))
 
                     # For the CONTINUING learning task context, we need to update the value of the state on which the previous episode ended
-                    # (as long as it is not the first episode, which is the case at this point), because its value is not necessarily 0!
-                    # (it is 0 only in EPISODIC learning tasks, as in that case it is 0 by definition of terminal states).
+                    # because its value is not necessarily 0! (as long as this is NOT the first episode, which is the case at this point)
+                    # (the value of a terminal state is 0 only in EPISODIC learning tasks, in which case it is 0 by definition of terminal states).
                     # In fact, in the continuing learning task, the environment state goes to a start state when the episode "terminates" and the Markov process continues.
                     reward = self.env.getReward(self.env.getState())
                     self.learn_terminal_state_values(t_episode, terminal_state_previous_episode, self.env.getState(), reward, info, done_episode=done_episode)
@@ -3407,7 +3412,11 @@ class Simulator:
 
                 # Reset the learner, WITHOUT resetting the value functions nor the episode counter because we want to continue learning from where we left.
                 # Essentially this resets the trajectory information stored in the learner.
-                # IMPORTANT: We only reset the learner for subsequent episodes (episode > 0) because the reset for episode 0 had already been done before entering the episode loop)
+                # IMPORTANT:
+                # 1) We must reset the learner AFTER we reset the environment because the trajectory reset in the learner adds the first element to the learner._rewards
+                # attribute which stores the reward at the initial state where the agent is located which should be the location of the agent after environment reset
+                # (as opposed to the state where the environment was left by a potential previous replication run using the same learner)
+                # 2) We only reset the learner for subsequent episodes (episode > 0) because the reset for episode 0 had already been done before entering the episode loop)
                 # This is important because it actually affects the results of learning processes when the learning rate alpha is adjusted by the episode count,
                 # as resetting the learner here again (for the first episode = 0) incorrectly increases the episode count which then affects the alpha adjustment!
                 # (e.g. makes alpha be adjusted to alpha/3 instead of alpha/2 after the first episode was completed).
@@ -3462,8 +3471,8 @@ class Simulator:
                 if state_observe is not None:
                     # Store the value function of the state just estimated
                     V_state_observe += [self._get_state_value(learner, state_observe)]
-
             #------- EPISODE FINISHED --------#
+
             # Store the value of the terminal state (used in the next episode when the average reward criterion is used for learning)
             terminal_state_previous_episode = next_state
 
@@ -3801,47 +3810,6 @@ class Simulator:
         if seed is not None:
             policy.env.seed(seed)
 
-        # Reset the learner (i.e. prepare it for a fresh new learning experience with all learning memory erased and learning rates reset to their initial values)
-        # Note that a special treatment may be granted to the reset of the value functions because we may want NOT to reset them,
-        # for instance when we are learning a policy and we use this simulator to learn the value functions...
-        # In that case, we don't want to start off at 0.0 again but to start off at the estimated values obtained
-        # under the previous policy, which normally is very close to the new policy after one step of policy learning.
-        # (In some situations --e.g. labyrinth where the policy is learned using Actor-Critic or policy gradient learning--
-        # I observed (Nov-2023) that non-optimal policies are learned that minimize the loss function if we reset the
-        # value functions to 0 at every policy learning step, while the problem does NOT happen when the value functions are NOT reset.)
-        # Also, a separate strategy is considered for the reset (or not) of the average reward, as currently this is learned by using innovation information
-        # that is different from the one used to learn the value functions, namely the "newly-observed-average-reward-in-episode" - "current-estimate-of-average-reward",
-        # as opposed to the TD error that is used to learn the value functions.
-        # In particular, when no initially estimated average reward is given, the average reward is reset to zero and learning starts again from scratch,
-        # o.w. the given estimated average reward should be used as initial estimate of the average reward during further learning.
-        learner.reset(reset_episode=True, reset_value_functions=reset_value_functions, reset_average_reward=estimated_average_reward is None)
-
-        # Plotting setup
-        if plot:
-            # Setup the figures that will be updated at every verbose_period
-            num_colors_in_colormap = max_time_steps
-            fig_V, fig_V2, fig_C, fig_RMSE_state, colors_V, self.fig_policy = self._setup_plots(colormap=colormap, lut=num_colors_in_colormap, state_observe=state_observe)
-
-            # Setup the axes to use for the average reward evolution plot
-            dict_axes = dict({'average_reward': plt.figure().subplots(1, 1)})
-            # Initialize the average reward plot with the current estimate of the average reward stored in the learner
-            dict_lines = dict({'average_reward': dict_axes['average_reward'].plot(0, learner.getAverageReward(), '.-', color="red")})
-            # Set the maximum X axis value if the number simulation steps to run in advance is known
-            dict_axes['average_reward'].set_xlim((None, max_time_steps)) if max_time_steps < +np.Inf else None
-            dict_axes['average_reward'].set_xlabel("Step")
-            dict_axes['average_reward'].set_ylabel("Estimated average reward")
-            dict_axes['average_reward'].legend(["TD average reward"])
-            plt.suptitle(f"[_run_single_continuing_task, Learning step {t_learn+1}]")
-
-            # Reposition and resize the figure to avoid overlapping with the other figures
-            # Ref: https://stackoverflow.com/questions/7449585/how-do-you-set-the-absolute-position-of-figure-windows-with-matplotlib
-            plt.figure(dict_axes['average_reward'].get_figure().number)
-            fig_mgr = plt.get_current_fig_manager()
-            fig_mgr.window.setGeometry( WINDOW_TOP_LEFT_HORIZONTAL,
-                                        WINDOW_TOP_LEFT_VERTICAL + WINDOW_HEIGHT + 3*SPACE_BETWEEN_WINDOWS, # `3*` because we need to leave space for the WINDOW's title
-                                        WINDOW_WIDTH,
-                                        WINDOW_HEIGHT)
-
         # Numpy seed and Environment seed
         # (the numpy seed is needed when epsilon_random_action > 0 because in that case a random number is drawn to decide whether to choose a random action
         # --without following the policy-- and subsequently to choose a random action, if that ends up being the case)
@@ -3853,6 +3821,37 @@ class Simulator:
         if seed is not None:
             np.random.seed(seed)
             self.env.setSeed(seed)
+
+        # Reset the environment (this should be done BEFORE resetting the learner because the learner will most likely store the reward at the initial state by calling
+        # self.env.getReward() on the self.env.getState(), and if the state stored in the environment (from e.g. a previous execution/replication of the learning process),
+        # is NOT the state at which the environment will start after reset below
+        # Optional start state JUST for the very first episode
+        # (In case we want to start at a specific state and then perform the subsequent resets as per the environment initial state distribution)
+        self.env.reset()
+        if start_state_first_episode is not None:
+            self.env.setState(start_state_first_episode)
+        if show_messages(verbose, verbose_period, 0):
+            print("@{}".format(get_current_datetime_as_string()))
+            print(f"[t_learn={t_learn}] Agent starts at state {self.env.getState()} with reward {self.env.getReward(self.env.getState())}")
+        if self.debug:
+            print("\t[DEBUG] State value function at start of episode:\n\t{}".format(learner.getV().getValues()))
+
+        # Reset the learner (i.e. prepare it for a fresh new learning experience with all learning memory erased and learning rates reset to their initial values)
+        # Note that a special treatment may be granted to the reset of the value functions because we may NOT want to reset them,
+        # for instance when we are learning a policy and we use this simulator to learn the value functions...
+        # In that case, we don't want to start off at 0.0 again but to start off at the estimated values obtained
+        # under the previous policy, which normally is very close to the new policy after one step of policy learning.
+        # (In some situations --e.g. labyrinth where the policy is learned using Actor-Critic or policy gradient learning--
+        # I observed (Nov-2023) that non-optimal policies are learned that minimize the loss function if we reset the
+        # value functions to 0 at every policy learning step, while the problem does NOT happen when the value functions are NOT reset.)
+        # Also, a separate strategy is considered for the reset (or not) of the average reward, as currently this is learned by using innovation information
+        # that is different from the one used to learn the value functions, namely the "newly-observed-average-reward-in-episode" - "current-estimate-of-average-reward",
+        # as opposed to the TD error that is used to learn the value functions.
+        # In particular, when this is the very first policy learning step (t_learn=0 namely that a NEW experiment is run) or when no initially estimated average reward is given,
+        # the average reward is reset to zero and learning starts again from scratch, o.w. the given estimated average reward should be used as initial estimate of
+        # the average reward during further learning.
+        learner.reset(reset_episode=True, reset_value_functions=reset_value_functions, reset_average_reward=t_learn == 0 or estimated_average_reward is None)
+        print(f"[IN] The average reward stored in learner after RESET is: {learner.average_reward}, {learner._average_reward_in_episode} (EPISODE)")
 
         # Store initial values used in the analysis of all the episodes run
         V_state_observe, RMSE, MAPE, ntimes_rmse_inside_ci95 = self._initialize_run_with_learner_status(nepisodes, learner, compute_rmse, weights, state_observe)
@@ -3891,6 +3890,32 @@ class Simulator:
         V_abs_median[0] = np.median(np.abs(V))
         V_abs_n[0] = 0
 
+        # Plotting setup
+        if plot:
+            # Setup the figures that will be updated at every verbose_period
+            num_colors_in_colormap = max_time_steps
+            fig_V, fig_V2, fig_C, fig_RMSE_state, colors_V, self.fig_policy = self._setup_plots(colormap=colormap, lut=num_colors_in_colormap, state_observe=state_observe)
+
+            # Setup the axes to use for the average reward evolution plot
+            dict_axes = dict({'average_reward': plt.figure().subplots(1, 1)})
+            # Initialize the average reward plot with the current estimate of the average reward stored in the learner
+            dict_lines = dict({'average_reward': dict_axes['average_reward'].plot(0, learner.getAverageReward(), '.-', color="red")})
+            # Set the maximum X axis value if the number simulation steps to run in advance is known
+            dict_axes['average_reward'].set_xlim((None, max_time_steps)) if max_time_steps < +np.Inf else None
+            dict_axes['average_reward'].set_xlabel("Step")
+            dict_axes['average_reward'].set_ylabel("Estimated average reward")
+            dict_axes['average_reward'].legend(["TD average reward"])
+            plt.suptitle(f"[_run_single_continuing_task, Learning step {t_learn+1}]")
+
+            # Reposition and resize the figure to avoid overlapping with the other figures
+            # Ref: https://stackoverflow.com/questions/7449585/how-do-you-set-the-absolute-position-of-figure-windows-with-matplotlib
+            plt.figure(dict_axes['average_reward'].get_figure().number)
+            fig_mgr = plt.get_current_fig_manager()
+            fig_mgr.window.setGeometry( WINDOW_TOP_LEFT_HORIZONTAL,
+                                        WINDOW_TOP_LEFT_VERTICAL + WINDOW_HEIGHT + 3*SPACE_BETWEEN_WINDOWS, # `3*` because we need to leave space for the WINDOW's title
+                                        WINDOW_WIDTH,
+                                        WINDOW_HEIGHT)
+
         # Iterate on the episodes to run
         nepisodes_max_steps_reached = 0
         max_time_steps_reached = False  # Flags whether the TOTAL number of steps reaches the maximum number of steps allowed over all episodes (so that we can break the FOR loop on episodes if that happens)
@@ -3901,23 +3926,14 @@ class Simulator:
         done = False
         while not done:
             episode += 1
-            # Reset the environment
-            # (this reset is typically carried out by the gym module, e.g. by the toy_text.discrete.DiscreteEnv environment's reset() method
+
+            # Reset the environment (ONLY if it is not the very first step, because in that case, the reset has been already carried out above, before resetting the learner
+            # --for the reasons described therein).
+            # Note: This reset is typically carried out by the gym module, e.g. by the toy_text.discrete.DiscreteEnv environment's reset() method
             # where the initial state is chosen based on the isd attribute of the object, i.e. of the Initial State Distribution defining the initial state,
-            # which is assumed to have been defined appropriately in order to have the start state the user wishes to use)
-            self.env.reset()
-            # Optional start state JUST for the very first episode
-            # (In case we want to start at a specific state and then perform the subsequent resets as per the environment initial state distribution)
-            if start_state_first_episode is not None and episode == 0:
-                self.env.setState(start_state_first_episode)
-            if show_messages(verbose, verbose_period, episode) or episode == nepisodes - 1:  # Note that we ALWAYS show the message at the LAST episode
-                print("@{}".format(get_current_datetime_as_string()))
-                print("[t_learn={}] Episode {} of {} running...".format(t_learn, episode+1, nepisodes), end=" ")
-                print("(agent starts at state: {}".format(self.env.getState()))
-            if self.debug:
-                print("\n[DEBUG] Episode {} of {}:".format(episode+1, nepisodes))
-                print("\t[DEBUG] Starts at state {}".format(self.env.getState()))
-                print("\t[DEBUG] State value function at start of episode:\n\t{}".format(learner.getV().getValues()))
+            # which is assumed to have been defined appropriately in order to have the start state the user wishes to use.
+            if t > 0:
+                self.env.reset()
 
             # Time step within the current episode (i.e. within the time period between the reset of the environment and reaching the terminal state).
             # Note that we initialize it at -1 because the time within an episode indexes the time at which the ACTION is taken,
@@ -3940,8 +3956,8 @@ class Simulator:
                 # ---- UPDATE FOR CONTINUING TASK
                 if done_episode:
                     # The episode ended at the previous step
-                    # => Reset the episode-related information (needed most importantly for a correct calculation of the average reward)
                     # => Reset the environment to a start state because the process honours a CONTINUING learning task (of the value functions)
+                    # => Reset the episode-related information (needed most importantly for a correct calculation of the average reward)
 
                     if plot:
                         # Update plots that are updated at the end of an episode
@@ -3971,7 +3987,17 @@ class Simulator:
                         if isinstance(learner, LeaTDLambdaAdaptive):
                             learner.plot_info(episode, nepisodes)
 
-                    t_episode = -1      # Reset the episode counter. Note that we reset it to -1 and NOT 0 because the episode is considered to start when `state` is a START state and here state is a terminal state, whereas *`next_state`* is the start state. So t_episode = 0 should be set at the next iteration.
+                    # Reset the episode counter
+                    # Note that we reset it to -1 and NOT 0 because the episode is considered to start when `state` is a START state and here state is a terminal state,
+                    # whereas *`next_state`* is the start state. So t_episode = 0 should be set at the next iteration.
+                    t_episode = -1
+
+                    # Perform the action of going to an environment's start state
+                    action = 0
+                    next_state = self.env.reset()
+                    reward = self.env.getReward(next_state)
+                    done_episode = False
+
                     # Reset the learner as a new episode will start
                     # It is important to reset all the episode-related information, most importantly the history of rewards observed in the episode,
                     # which is used to compute the average reward. If this reset is not done, most likely the average reward will be WAY underestimated
@@ -3979,11 +4005,6 @@ class Simulator:
                     # observed in the episode when updating the within-episode average reward is WAY larger than it really was.
                     learner.reset(reset_episode=False, reset_value_functions=False, reset_average_reward=False)
 
-                    # Perform the action of going to an environment's start state
-                    action = 0
-                    next_state = self.env.reset()
-                    reward = self.env.getReward(next_state)
-                    done_episode = False
                     # TEMPORARY: (2024/02/13) Two temporary settings are done here, until the proper implementation of a CONTINUING learning task (with NO episodes) is done, as follows:
                     # 1) Non-update of trajectory: the trajectory should NOT be updated when learning from the transition "terminal state" -> "start state" because we do NOT want
                     # to have this transition contribute to the estimation of the average reward (i.e. we do not want to have the reward observed when going from a terminal state
@@ -3999,6 +4020,10 @@ class Simulator:
                     # a terminal state to a start state is 0.
                     # 2) Non-update of state counts: the count of the terminal state should not be increased by 1 now because it was ALREADY increased at the end of the "episode"
                     # when learning at the previous iteration, because the count of the final episode state is increased when done_episode = True in the call to learner.learn().
+                    #
+                    # NOTE that the `info` dictionary will be updated to its regular value (normally empty) at the next call to self.env.step() which happens at the next "regular"
+                    # step of the agent (where the agent goes from a state to a VALID next state under the original EPISODIC Markov process
+                    # --as opposed to going from a terminal state to a start state, which is what just happened above.
                     info = {'update_trajectory': False,
                             'update_counts': False}
                 # ---- UPDATE FOR CONTINUING TASK
@@ -4919,7 +4944,7 @@ class Simulator:
             # => Do not update the trajectory nor the state count because they were updated at the end of the previous episode.
             # Note that, even if the simulation ends at the given `next_state` we set these flags to False because they concern the update of the trajectory and the counts
             # of the TERMINAL state visited at the previous step, NOT of the `next_state` to which the system transitions (which may happen to be the end state when the simulation
-            # ends there). Note that the learner.learn() method takes care of updating the end state count when the episode is DONE, and this is informed by parameter done_episode.
+            # ends there).
             info['update_trajectory'] = False
             info['update_counts'] = False
         if envs is None:

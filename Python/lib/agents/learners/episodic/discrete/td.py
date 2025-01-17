@@ -182,7 +182,13 @@ class LeaTDLambda(Learner):
         if not self.adjust_alpha_by_episode and info.get('update_alphas', True):
             self._update_alphas(state)
 
-        if done:
+        if done and info.get('update_trajectory', True):
+            # TEMPORARY-2025/01/14: The condition on 'update_trajectory' was added today and is linked to the current implementation of the CONTINUING average reward
+            # as an adjustment of the EPISODIC average reward, as explained in Learner.update_average_reward(). This new condition is only False when updating the value functions
+            # at the end of a fictitious episode in CONTINUING tasks or when learning at the end of the simulation happening just after a reset of the environment due to reaching
+            # a terminal state. In any of those two situations, we should NOT call the self.learn_at_episode_end() method here because the method updates the trajectory
+            # that has already been updated by the methods calling this LeaTDLambda.learn() method: _run_single(), _run_single_continuing_task() and
+            # run_exploration_and_learn_value_functions() in discrete.Simulator. See more details in those methods.
             self.learn_at_episode_end(t+1, next_state)
 
     def learn_at_episode_end(self, T, state_end, update_counts=True):
@@ -559,7 +565,9 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
         if not self.adjust_alpha_by_episode and info.get('update_alphas', True):
             self._update_alphas(state)
 
-        if done:
+        if done and info.get('update_trajectory', True):
+            # TEMPORARY-2025/01/14: The condition on 'update_trajectory' was added today and is linked to the current implementation of the CONTINUING average reward.
+            # For more details, see the comment I wrote in LeaTDLambda.learn() of the super class.
             self.learn_at_episode_end(t+1, next_state)
             self._store_lambdas_in_episode()
 

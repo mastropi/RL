@@ -356,11 +356,11 @@ class Learner(GenericLearner):
         self._states += [state]
         self._actions += [action]
         self._rewards += [reward]
-        # TODO: (2024/05/21) It would be good to, at some point, disentangle the update of the average reward from the trajectory update because they are two different concepts. However, this change will require important chnages in Learners code (e.g. learn() method) when calling update_trajectory().
+        # TODO: (2024/05/21) It would be good to, at some point, disentangle the update of the average reward from the trajectory update because they are two different concepts. However, this change will require important changes in Learners code (e.g. learn() method) when calling update_trajectory().
         self._update_average_reward()
 
     def _update_state_counts(self, t, state):
-        "Updates the count that keeps track of the state's first visit within the CURRENT episode"
+        "Updates the count that keeps track of the state's first visit within the CURRENT episode, whose within-time step is indexed by parameter t"
         if self.env.isStateContinuous():
             # Discretize the state so that we can update the count of a visited state
             state = self.env.getIndexFromState(state)
@@ -500,7 +500,7 @@ class Learner(GenericLearner):
             # NOTE: This assumes that the store_trajectory_at_episode_end() method has not been called yet
             # (because we assume that the self.rewards attribute has not been updated with the newly observed self._rewards in the latest episode
             # TODO: (2024/01/03) Re-establish the assertion done here once I make it work again for the FV learning in the DISCOUNTED setting (using _run_simulation_fv_iterate())
-            #all_rewards_so_far = self.rewards + deque([self._rewards])     # IMPORTANT: The concatenation of the rewards should be done in the same way it is done in store_trajectory_at_episode_end() when updating self.rewards
+            #all_rewards_so_far = self.rewards + deque(self._rewards)     # IMPORTANT: The concatenation of the rewards should be done in the same way it is done in store_trajectory_at_episode_end() when updating self.rewards
             # The problem comes up because of the parallel simulations that are run together with the FV particles in order to learn the value of the states inside the absorption set A (see the envs_normal environments in discrete.Simulator._run_simulation_fv_iterate()
             #assert np.isclose(updated_average, np.mean(np.concatenate(all_rewards_so_far)))
             # Regular average (over the whole history of stored rewards, as opposed to doing an iterated update)
@@ -563,22 +563,24 @@ class Learner(GenericLearner):
         self._times += [T]
         self._states += [state_end]
         self._actions += [action]
-        # TODO: (2024/02/08) Uncomment this when we are ready to compute the average reward associated to the learning task, either EPISODIC or CONTINUING: currently the computed average reward by self.update_average_reward() is ALWAYS the CONTINUING average reward, even if the learning task is EPISODIC!
-        # When we do this change, the method self.update_average_reward() will have to be changed by removing the ratio `T / (T+1)` which is now used to adjust the would be episodic average reward to the continuing average reward.
-        # Once we implement the episodic average reward calculation (when the learning task is EPISODIC) we would not need to do any adjustment, because the original formula of the iterative update of the average reward
-        # (described in the comment above the update formula in self.update_average_reward()) will already be the correct formula. And note that this will ALSO solve the problem mentioned in
-        # self.update_average_reward that using the ratio T/(T+1) assumes that the last reward observed in the continuing context (i.e. the reward of going from a terminal state to a start state) is 0
-        # (as that reward is going to be stored in self._rewards precisely by the line that will be uncommented right here!)
-        #if self.task == LearningTask.CONTINUING:
-        #    self._rewards += [reward]
+        # DM-2025/01/14: The following IF block was uncommented today when fixing the learning process for continuing tasks.
+        # It takes into account the situation where the simulation ends just AFTER the reset of the environment from a terminal state to a start state
+        # (this is what the condition `T == 0` means, which clearly says that the end state is observed at episode time T = 0, which precisely represents the START of an episode).
+        # For now the last observed `reward` is added to the list of observed rewards in the episode ONLY in the continuing task case because in the episodic task case
+        # the reward observed at the very start of the episode will be in principle stored by another mechanism (e.g. when calling LeaTD.learn() with done_episode=True),
+        # but still to fully verify.
+        if self.task == LearningTask.CONTINUING and T == 0:
+            assert reward == 0.0, "At this point (14-Jan-2025) of the implementation of the continuing average reward calculation as an adjustment of the episodic average reward," \
+                                  " it is assumed that the reward observed when transitioning from a terminal to a start state is 0.0"
+            self._rewards += [reward]
 
         # Assign the new trajectory observed in the current episode
         # NOTE: All the following attributes on the LHS are attributes of the superclass!
         if self.store_history_over_all_episodes:
-            self.times += [self._times.copy()]
-            self.states += [self._states.copy()]
-            self.actions += [self._actions.copy()]
-            self.rewards += [self._rewards.copy()]
+            self.times += self._times.copy()
+            self.states += self._states.copy()
+            self.actions += self._actions.copy()
+            self.rewards += self._rewards.copy()
         else:
             self.times = self._times.copy()
             self.states = self._states.copy()
