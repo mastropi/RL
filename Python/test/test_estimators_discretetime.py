@@ -1527,12 +1527,12 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
 
         #-- Expected state values for all tests
         # MC learner
-        # TODO: (2023/12/18) These expected V values (which were actually obtained from an execution of the estimation process) are WRONG because the terminal state should NOT have value 0 under the average reward criterion learning --i.e. when estimating the *differential* value functions.
+        # TODO: (2023/12/18) These Monte-Carlo expected V values (which were actually obtained from an execution of the estimation process) are WRONG because the terminal state should NOT have value 0 under the average reward criterion learning --i.e. when estimating the *differential* value functions.
         # The reason for this issue is that the estimation of terminal state values has not yet been fully implemented for MC and TD(lambda) learners with lambda > 0. See more details in the entry from 17-Dec-2023 in Tasks-Projects.xlsx Excel file.
         cls.expected_mc_V = [0.30846098, 0.44259874, 0.63029386, 0.,
                              0.20527094, 0.,         0.50675541, 0.65228425,
                              0.13764317, 0.15088129, 0.32957630, 0.4950138]
-        # TODO: (2023/12/18) These expected Q values (which were actually obtained from an execution of the estimation process) look wrong... (based on what action (moving direction) is more valuable to achieve the terminal state; in addition, their values are VERY different from the expected Q values for TD(0))
+        # TODO: (2023/12/18) These Monte-Carlo expected Q values (which were actually obtained from an execution of the estimation process) look wrong... (based on what action (moving direction) is more valuable to achieve the terminal state; in addition, their values are VERY different from the expected Q values for TD(0))
         cls.expected_mc_Q = [[-0.10497926,  0.19869401,  0.17612975, 0.038616470],
                              [ 0.07399127,  0.17327522,  0.31313544, -0.11780319],
                              [ 0.00487184,  0.27108070,  0.00280095,  0.35154037],
@@ -1851,7 +1851,7 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
         print(f"(observed average cycle time on {n_cycles} cycles (expected={self.expected_fv_n_cycles}): {average_cycle_time} (expected={self.expected_fv_cycle_time}))")
         print(f"\nEstimated average reward (using FV estimator): {observed_average_reward}")
         print(f"Expected estimated average reward (using FV estimator): {self.expected_fv_average_reward}")
-        print(f"Estimated average reward (using TD estimator): {self.expected_average_reward}")
+        print(f"Expected estimated average reward (using TD estimator): {self.expected_average_reward}")
 
         plot_estimated_state_value_function(self.env2d, state_values, LearningCriterion.AVERAGE)
 
@@ -1883,6 +1883,83 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
         # Assertions about the value functions
         assert np.allclose(observed_values_V, self.expected_fv_V, atol=1E-6)
         assert np.allclose(observed_values_Q, self.expected_fv_Q, atol=1E-6)
+
+    def test_Env_PolRandomWalk_MetFV_SoftKilling(self):
+        "Tests the differential value functions estimation using Fleming-Viot with soft killing"
+        print("\n*** Running test " + self.id() + " ***")
+
+        min_prop_absorbed_particles = 1.0
+        state_values, action_values, advantage_values, state_counts, state_counts_et, probas_stationary, average_reward, average_cycle_time, n_cycles, n_events_et, n_events_fv = \
+           self.sim_fv.run(soft_killing=True, max_time_steps=self.N*30, min_prop_absorbed_particles=min_prop_absorbed_particles, seed=self.seed, verbose=True, verbose_period=100)
+
+        observed_values_V = state_values
+        observed_values_Q = action_values.reshape((self.env2d.getNumStates(), self.env2d.getNumActions()))
+
+        # Observed frequency of each state (which is an inflated estimation of the stationary probability distribution)
+        observed_p = state_counts / np.sum(state_counts)
+        # FV-adjusted frequency of each state (which is the actual FV estimation of the stationary probability distribution)
+        # (note that we convert the result originally stored in a dictionary (probas_stationary) to a list to facilitate
+        # the comparison used below in the assertion on this result.
+        observed_p_fv = [probas_stationary.get(x, np.nan) for x in self.env2d.getAllStates()]
+        observed_average_reward = np.nansum([p*self.env2d.getReward(x) for x, p in enumerate(observed_p_fv) if x in self.env2d.getTerminalStates()])
+
+        print(f"\nNumber of learning steps run: {n_events_et + n_events_fv} (should coincide with the sum of the state counts minus 1, because the start state is not counted in the number of learning steps ({sum(state_counts)-1}))")
+        assert n_events_et + n_events_fv == sum(state_counts) - 1
+
+        print("\nObserved state value function (using the FV-based average reward as correction):\n" + test_utils.array2str(observed_values_V))
+        print(f"\nObserved action value function (using the FV-based average reward as correction):\n{observed_values_Q}")
+        print(f"State counts: " + test_utils.array2str(state_counts))
+        print("State frequency distribution (observed during FV simulation): " + test_utils.array2str(observed_p))
+        print("\nState probability distribution using the ET+FV estimator: " + test_utils.array2str(observed_p_fv))
+        print(f"(observed average cycle time on {n_cycles} cycles: {average_cycle_time}")
+        print(f"\nEstimated average reward (using FV estimator): {observed_average_reward}")
+
+        plot_estimated_state_value_function(self.env2d, state_values, LearningCriterion.AVERAGE)
+
+        assert self.nS == 3*4 and \
+               min_prop_absorbed_particles == 1.0 and \
+               self.N == 100 and \
+               self.T == 1000 and \
+               self.seed == 1717 and \
+               self.start_state == 8 and \
+               self.A == set({8}) and \
+               self.B == set({4, 9})
+        # Assertions about state counts
+        assert all(state_counts == [486., 354., 175.,  95., 576.,   0., 249., 195., 680., 513., 376., 302.])
+
+        # Assertions about the estimated expected cycle time
+        assert np.isclose(average_cycle_time, 8.8468, atol=1E-4)
+        assert n_cycles == 111
+
+        # Assertions about the stationary distribution of the state of interest estimated by FV
+        # TODO: (2025/01/05) There should NOT be any NaN... why are there? En tout cas, those values should be 0.0 not NaN.
+        assert np.allclose(observed_p_fv, [0.11751068126272912, 0.10308395926680246, 0.028271315682281056, 0.023077826883910375,
+                                           0.1630979969450101, np.nan, 0.0618641883910387, 0.04203034215885947,
+                                           np.nan, 0.10832447046843176, 0.0703285600814664, 0.05506323421588594], atol=1E-6, equal_nan=True)
+
+        # Assertions about the average reward estimated by FV
+        assert np.isclose(observed_average_reward, 0.02307, atol=1E-4)
+        assert np.isclose(observed_average_reward, average_reward, atol=1E-6), \
+            f"The average reward computed from the estimated stationary probabilities by FV ({observed_average_reward}) must coincide with the estimated average reward (`average_reward={average_reward}`) returned by the FV simulator"
+        assert np.isclose(observed_average_reward, self.agent_rw_fv.getLearner().getAverageReward(), atol=1E-6), \
+            "The average reward stored in the FV learner must coincide with the average reward estimated by the FV estimator"
+
+        # Assertions about the value functions
+        assert np.allclose(observed_values_V, [-0.0492565,   0.06174813,  0.33919312, -0.10373021,
+                                               -0.08711332,  0.,          0.30169854,  0.54027671,
+                                               -0.08992078, -0.02992293,  0.15665362,  0.30528630], atol=1E-6)
+        assert np.allclose(observed_values_Q, [[-0.04828604,  0.01655388, -0.05130797, -0.04933443],
+                                               [ 0.03135541,  0.18765689,  0.01570098, -0.04360944],
+                                               [ 0.19147699,  0.80505315,  0.17232776,  0.02273132],
+                                               [-0.10373021, -0.10373021, -0.10373021, -0.10373021],
+                                               [-0.04346337, -0.07932918, -0.05827965, -0.06284948],
+                                               [ 0.        ,  0.        ,  0.        ,  0.        ],
+                                               [ 0.16716498,  0.44304123,  0.05600633,  0.15788699],
+                                               [ 0.82601269,  0.47338969,  0.13762215,  0.18956712],
+                                               [-0.08048373, -0.04574597, -0.06926577, -0.08144892],
+                                               [-0.05191475,  0.04410096, -0.04563312, -0.08067755],
+                                               [ 0.17024424,  0.18337279,  0.05818165, -0.04626259],
+                                               [ 0.46606577,  0.1822159 ,  0.18723129,  0.06395086]], atol=1E-6)
 
 
 class Test_EstValueFunctionV_MetMCLambda_EnvMountainCar(unittest.TestCase, test_utils.EpisodeSimulation):
@@ -2034,6 +2111,7 @@ class Test_EstValueFunctionV_MetMCLambda_EnvMountainCar(unittest.TestCase, test_
         return observed, state_counts, params, sim, learning_info
 
     def test_Env_PolRandomWalk_MetMCLambdaReturn_TestMCvsLambdaReturn(self, verbose_convergence=False):
+        # TODO: (2024/12/28) This test is currently VACUUM because the estimated state value function that is tested at the end is ALL zeros! Also, there is NO test of the actual value function that is expected, only a comparison between two different methods of estimation which should give the same result...
         print("\n*** Running test " + self.id() + " ***")
 
         # Learner and agent
@@ -2172,6 +2250,7 @@ if __name__ == '__main__':
         test_suite_gw2dobstacles.addTest(Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles("test_Env_PolRandomWalk_MetTDLambda"))
         test_suite_gw2dobstacles.addTest(Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles("test_Env_PolRandomWalk_MetTDLambda_FromCycles"))
         test_suite_gw2dobstacles.addTest(Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles("test_Env_PolRandomWalk_MetFV"))
+        test_suite_gw2dobstacles.addTest(Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles("test_Env_PolRandomWalk_MetFV_SoftKilling"))
 
         # --- Mountain Car tests
         test_suite_mountain = unittest.TestSuite()
