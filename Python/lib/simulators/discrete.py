@@ -1278,37 +1278,19 @@ class Simulator:
         """
         #------------------------------- Auxiliary functions ----------------------------------#
         def reactivate_particle_internal(idx_particle):
-            """
-            Internal function that reactivates a particle until a valid reactivation is obtained
-            (i.e. a particle whose state is not in an absorbed set of states.
-
-            (2023/11/15) Note that the reactivated particle can perfectly be at a terminal state, because terminal
-            states are NOT part of the absorption set.
-            What IS true is that once a particle reaches a terminal state, THE NEXT TIME THE PARTICLE IS PICKED,
-            its state is changed to an environment's start state, which COULD be part of the absorption set,
-            in which case the particle is reactivated right-away (i.e. this function is called).
-            """
-            # TODO: (2023/09/06) Try to implement a more efficient way (i.e. without looping) to reactivate the particle to one of the other particles that are NOT at an absorption set
-            done_reactivate = False
+            "Internal function that reactivates a particle"
             state = envs[idx_particle].getState()
             if DEBUG_TRAJECTORIES:
                 # We can add a `True` condition above in order to show the following useful piece of information of the proportion of particles at the state of interest x is useful for tracking the stabilization of Phi(t,x) around the QSD
                 flags_particle_at_terminal_state = [1 if envs[p].getIndexFromState(envs[p].getState()) in self.env.getTerminalStates() else 0 for p in range(len(envs))]
                 print("[reactivate_particle_internal] % particles at terminal states: {:.1f}% ({} out of {})".format(np.mean(flags_particle_at_terminal_state)*100, np.sum(flags_particle_at_terminal_state), len(envs)))
-            new_state = None
-            while not done_reactivate:
-                idx_reactivate = reactivate_particle(envs, idx_particle, 0, reactivation_number=None)
-                    ## (2023/01/05) the third parameter is dummy when we do NOT use method = ReactivateMethod.VALUE_FUNCTION to reactivate the particle inside function reactivate_particle().
-                    ## (2024/01/28) Use reactivation_number=reactivation_number to indicate that we want to use method = ReactivateMethod.ROBINS.
-                # TODO: (2023/11/15) Check whether there is any possibility that the particle to which the absorbed particle has been reactivated COULD really be in the absorption set...
-                # Note that, at the initial devise of the FV simulation/estimation method, we have considered that the set of FV particles changes with time...
-                # But this dynamic set of FV particles might no longer be the case, at the time of this writing (2023/11/15).
-                if envs[idx_particle].getIndexFromState(envs[idx_particle].getState()) not in absorption_set:
-                    done_reactivate = True
-                    new_state = envs[idx_particle].getState()
-                    if DEBUG_TRAJECTORIES:
-                        print("*** t={}: Particle #{} ABSORBED at state={} and REACTIVATED to particle #{} at state {}" \
-                              .format(t, idx_particle, state, idx_reactivate, new_state))
+
+            idx_reactivate = reactivate_particle(envs, idx_particle, 0, reactivation_number=None)
+                ## (2023/01/05) the third parameter is dummy when we do NOT use method = ReactivateMethod.VALUE_FUNCTION to reactivate the particle inside function reactivate_particle().
+                ## (2024/01/28) Use reactivation_number=reactivation_number to indicate that we want to use method = ReactivateMethod.ROBINS.
+            new_state = envs[idx_particle].getState()
+            if DEBUG_TRAJECTORIES:
+                print("*** t={}: Particle #{} ABSORBED at state={} and REACTIVATED to particle #{} at state {}".format(t, idx_particle, state, idx_reactivate, new_state))
 
             return new_state
 
