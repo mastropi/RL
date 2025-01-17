@@ -671,17 +671,10 @@ for rep in range(nrep):
         # (recall that no critic is defined for the ALL-online learning method)
         _learner_value_functions_for_critic = simulator_value_functions.getAgent().getLearner()
 
-        # Reset the value functions and average reward that may have been obtained at the end of the previous replication
-        # Note that these may not be reset at the start of the first policy learning step because execution parameter use_average_reward_from_previous_step may be set to True.
-        _learner_value_functions_for_critic.reset(reset_episode=True, reset_value_functions=True, reset_average_reward=True)
+        print(f"[OUT] The average reward stored in learner is: {_learner_value_functions_for_critic.average_reward}")
 
         # Reset the initial alpha of the TD learner (just in case)
         _learner_value_functions_for_critic.setInitialLearningRate(alpha_initial)
-
-        # For FV learners, reset the start distribution for the E(T_A) simulation and for FV to their original values defined in the learners defined in test_ac
-        if learning_method_type == "values_fv":
-            _learner_value_functions_for_critic.setProbasStationaryStartStateET(probas_stationary_start_state_et)
-            _learner_value_functions_for_critic.setProbasStationaryStartStateFV(probas_stationary_start_state_fv)
 
     time_start_rep = timer()
     if learning_method == "all_online":

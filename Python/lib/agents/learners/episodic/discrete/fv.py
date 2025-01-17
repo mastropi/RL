@@ -138,6 +138,8 @@ class LeaFV(LeaTDLambda):
             raise ValueError("Parameter `activation_set` must be a set ({}).".format(type(activation_set)))
         self.absorption_set = absorption_set
         self.activation_set = activation_set
+        self._absorption_set_at_construction = absorption_set
+        self._activation_set_at_construction = activation_set
         # The complement of the absorption set A
         self.active_set = self._compute_active_set()
         self.states_of_interest = self.active_set if states_of_interest is None else set(states_of_interest)
@@ -148,6 +150,10 @@ class LeaFV(LeaTDLambda):
         # If None, uniformly random distributions are used.
         self.probas_stationary_start_state_et = probas_stationary_start_state_et
         self.probas_stationary_start_state_fv = probas_stationary_start_state_fv
+        # Same information but their ORIGINAL value, i.e. at the time of object's construction, which is NOT updated when these stationary probabilities are updated
+        # Goal: be able to restore their values in simulations e.g. at the start of a new replication.
+        self._probas_stationary_start_state_et_at_construction = probas_stationary_start_state_et
+        self._probas_stationary_start_state_fv_at_construction = probas_stationary_start_state_fv
 
         # Note: The average reward that is estimated by the FV learner is already stored in the GenericLearner class
         # which is the superclass of the Learner class which in turn is the superclass of the LeaTDLambda class
@@ -212,10 +218,36 @@ class LeaFV(LeaTDLambda):
         # the "start" state-actions (s,a)!
         self.burnin_time = self.N*2 if burnin_time is None else burnin_time
 
+        #-- Auxiliary information about the average reward which may be handy for analyzing the effectiveness and correctness of the FV estimation process
+        # Expected reward estimated during the initial exploration of the environment
+        self.average_reward_initial_exploration = 0.0
+        # Average reward observed by the FV particle system, without adjustment by the FV estimator
+        self.average_reward_raw = 0.0
+        # Expected absorption time estimated from the initial exploration of the environment and number of cycles behind its estimation
+        self.expected_absorption_time = np.nan
+        self.n_absorption_cycles = 0
+
         self.reset()
 
-    def reset(self, reset_episode=False, reset_value_functions=False, reset_average_reward=False,):
+    def reset(self, reset_episode=False, reset_value_functions=False, reset_average_reward=False):
         super().reset(reset_episode=reset_episode, reset_value_functions=reset_value_functions, reset_average_reward=reset_average_reward)
+        if reset_average_reward:
+            # Reset the average reward information potentially stored in the learner that is specific to the FV learner, namely:
+            # - the average reward observed during an initial exploration of the environment.
+            # - the *raw* average reward observed during the FV simulation.
+            self.average_reward_initial_exploration = 0.0
+            self.average_reward_raw = 0.0
+        if reset_value_functions:
+            #-- Reset pieces of information that are ALSO related, although INDIRECTLY to value functions, to their original definitions, defined at the object's construction
+            # The absorption and activation sets
+            self.resetAbsorptionSet()
+            self.resetActivationSet()
+            # Distribution to use for the selection of start states
+            self.resetProbasStationaryStartStateET()
+            self.resetProbasStationaryStartStateFV()
+            # Estimates obtained during the initial exploration of the environment
+            self.expected_absorption_time = np.nan
+            self.n_absorption_cycles = 0
 
         #-- Reset the (integer) absorption times
         # We initialize the list of absorption times to 0 to make the update of the Phi contribution to the FV integral
@@ -1285,7 +1317,34 @@ class LeaFV(LeaTDLambda):
     def getProbasStationaryStartStateFV(self):
         return self.probas_stationary_start_state_fv
 
+    def getAverageRewardInitialExploration(self):
+        "Returns the average reward observed during the initial exploration of the environment, which is used to estimate the expected cycle time"
+        return self.average_reward_initial_exploration
+
+    def getAverageRewardRaw(self):
+        "Returns the average reward observed during the exploration of the FV particles, i.e. without adjustment by the FV estimator"
+        return self.average_reward_raw
+
+    def getExpectedAbsorptionTimeAndNumCycles(self):
+        return self.expected_absorption_time, self.n_absorption_cycles
+
+    def getExpectedAbsorptionTime(self):
+        return self.expected_absorption_time
+
+    def getNumAbsorptionCycles(self):
+        return self.n_absorption_cycles
+
     #-- SETTERS
+    def setAverageRewardInitialExploration(self, average_reward):
+        self.average_reward_initial_exploration = average_reward
+
+    def setAverageRewardRaw(self, average_reward):
+        self.average_reward_raw = average_reward
+
+    def setExpectedAbsorptionTimeAndNumCycles(self, expected_absorption_time, n_absorption_cycles):
+        self.expected_absorption_time = expected_absorption_time
+        self.n_absorption_cycles = n_absorption_cycles
+
     def setStartStateAction(self, idx_particle, state, action):
         self.start_states[idx_particle] = state
         self.start_actions[idx_particle] = action
@@ -1300,11 +1359,24 @@ class LeaFV(LeaTDLambda):
     def setProbasStationaryStartStateFV(self, dict_proba):
         self.probas_stationary_start_state_fv = dict_proba
 
+    def resetAbsorptionSet(self):
+        self.absorption_set = self._absorption_set_at_construction
+
+    def resetActivationSet(self):
+        self.activation_set = self._activation_set_at_construction
+
+    def resetProbasStationaryStartStateET(self):
+        self.probas_stationary_start_state_et = self._probas_stationary_start_state_et_at_construction
+
+    def resetProbasStationaryStartStateFV(self):
+        self.probas_stationary_start_state_fv = self._probas_stationary_start_state_fv_at_construction
+
     def setAbsorptionSet(self, absorption_set):
         "Sets the absorption set and updates the activation and active sets so that they are consistent with the absorption set"
         # TEMPORARY: This calculation of the activation set is ONLY valid for GRIDWORLD environments.
         # In the general case, the activation set should be computed from the transition matrix P associated to the environment.
         # TODO: (2024/05/12) Compute the activation set from the transition matrix of the environment
+        # TODO: (2025/01/08) DO NOT DO THE ABOVE TODO! In fact, the agent is NOT supposed to know the transition probabilities! (it's a model-free RL approach we are using!)
         try:
             from Python.lib.environments.gridworlds import get_adjacent_states
             activation_set = set()

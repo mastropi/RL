@@ -653,10 +653,10 @@ class Test_EstPolicy_EnvMountainCar(unittest.TestCase):
             trajectory = learner.getStates()
             cls.env_mc.plot_points(trajectory, ax=ax, cmap="coolwarm", style=".-")
             # Add the absorption set
-            absorption_set_as_simulation_states = [cls.env_mc.getStateFromIndex(s, simulation=True) for s in absorption_set]
-            cls.env_mc.plot_points(absorption_set_as_simulation_states, ax=ax, color="red", markersize=5, style="x")
+            absorption_set_as_indices = [cls.env_mc.getStateFromIndex(s, simulation=True) for s in absorption_set]
+            cls.env_mc.plot_points(absorption_set_as_indices, ax=ax, color="red", markersize=5, style="x")
             plt.suptitle(f"{cls.env_mc.__class__.__name__} {cls.env_mc.getShape()}, T={T} steps taken" +
-                         "\nDistribution of state counts and trajectory\n(dx={:.3g}, dv={:.3g})".format(cls.env_mc.dx, cls.env_mc.dv))
+                         "\nDistribution of state counts and trajectory (blue)\nAbsorption set indicated with red crosses\n(dx={:.3g}, dv={:.3g})".format(cls.env_mc.dx, cls.env_mc.dv))
             plt.pause(0.1)
             plt.draw()
 

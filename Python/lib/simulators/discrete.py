@@ -347,6 +347,16 @@ class Simulator:
         - n_events_et: number of events observed during the simulation of the single Markov chain used to estimate E(T_A) and P(T>t).
         - n_events_fv: number of events observed during the FV simulation that estimates Phi(t).
         """
+        if t_learn == 0:
+            # Reset the learner completely if this is the first step of a policy learning process (this is the default case, even if we are NOT in a policy learning process
+            # but just running the simulation process just once, e.g. as part of a unit test)
+            # Note that the first policy learning step (or the fact that t_learn = 0, even if there is no policy learning process)
+            # implies e.g. a start of a new replication, therefore no information currently stored from a previously executed replication should be present in the learner.
+            # Note that in an FV learner, this may imply resetting collateral information to the information specific to the FV simulation, such as:
+            # the absorption set, the activation set, the average reward observed during the initial exploration, the estimated expected reabsorption time, etc.
+            self.agent.getLearner().reset(reset_episode=True, reset_value_functions=True, reset_average_reward=True)
+            print(f"[IN FV, t_learn=0] The average reward stored in learner after RESET is: {self.agent.getLearner().average_reward}, {self.agent.getLearner()._average_reward_in_episode} (EPISODE)")
+
         #--- Parse input parameters ---
         if min_num_cycles_for_expectations is None:
             if self.agent.getLearner().getLearningCriterion() == LearningCriterion.AVERAGE:
@@ -384,19 +394,19 @@ class Simulator:
 
         state_values, action_values, advantage_values, state_counts, state_counts_from_single_markov_chain, probas_stationary, expected_reward, expected_absorption_time, n_absorption_cycles_used, \
             time_last_absorption, max_survival_time, n_events_et, n_events_fv = \
-                self._estimate_value_functions_and_expected_reward_fv( envs, dict_params_simul, dict_params_info,
-                                                                            probas_stationary_start_state_et=self.agent.getLearner().getProbasStationaryStartStateET(),
-                                                                            probas_stationary_start_state_fv=self.agent.getLearner().getProbasStationaryStartStateFV(),
-                                                                            use_average_reward_stored_in_learner=use_average_reward_stored_in_learner,
-                                                                            reset_value_functions=reset_value_functions)
+                self._estimate_value_functions_and_expected_reward_fv(  envs, dict_params_simul, dict_params_info,
+                                                                        probas_stationary_start_state_et=self.agent.getLearner().getProbasStationaryStartStateET(),
+                                                                        probas_stationary_start_state_fv=self.agent.getLearner().getProbasStationaryStartStateFV(),
+                                                                        use_average_reward_stored_in_learner=use_average_reward_stored_in_learner,
+                                                                        reset_value_functions=reset_value_functions)
 
         return state_values, action_values, advantage_values, state_counts, state_counts_from_single_markov_chain, probas_stationary, expected_reward, expected_absorption_time, n_absorption_cycles_used, n_events_et, n_events_fv
 
-    def _estimate_value_functions_and_expected_reward_fv(self, envs, dict_params_simul, dict_params_info,
-                                                              probas_stationary_start_state_et: dict=None,
-                                                              probas_stationary_start_state_fv: dict=None,
-                                                              use_average_reward_stored_in_learner=False,
-                                                              reset_value_functions=True):
+    def _estimate_value_functions_and_expected_reward_fv( self, envs, dict_params_simul, dict_params_info,
+                                                          probas_stationary_start_state_et: dict=None,
+                                                          probas_stationary_start_state_fv: dict=None,
+                                                          use_average_reward_stored_in_learner=False,
+                                                          reset_value_functions=True):
         """
         Estimates the differential state values and action values, the stationary state probabilities,
         and the expected reward (a.k.a. long-run average reward) using the Fleming-Viot approach.
@@ -1016,7 +1026,7 @@ class Simulator:
         - learn()
 
         EXAMPLE OF CALLING THIS METHOD:
-        learner, n_events_absorption_set_estimation = self.run_exploration(t_learn=dict_params_info.get('t_learn', 0), max_time_steps=dict_params_simul['T'], seed=dict_params_simul['seed'], verbose=dict_params_info.get('verbose', False), verbose_period=dict_params_info.get('verbose_period', 1))
+        learner, n_events_absorption_set_estimation = self.run_exploration(t_learn=0, max_time_steps=dict_params_simul['T'], seed=1313)
 
         t_learn: (opt) int
             The learning step number (starting at 0) for which the simulation is run when learning is used in the context of policy learning.
