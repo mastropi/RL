@@ -140,6 +140,7 @@ class LeaFV(LeaTDLambda):
         self.activation_set = activation_set
         self._absorption_set_at_construction = absorption_set
         self._activation_set_at_construction = activation_set
+        self.less_frequently_visited_set = set()    # Set of less frequently visited states that could be considered as start states for the FV particle system should no other state be available (because e.g. no exit state was observed from the absorption set during the initial exploration)
         # The complement of the absorption set A
         self.active_set = self._compute_active_set()
         self.states_of_interest = self.active_set if states_of_interest is None else set(states_of_interest)
@@ -1305,6 +1306,10 @@ class LeaFV(LeaTDLambda):
     def getActiveSet(self):
         return self.active_set
 
+    def getLessFrequentlyVisitedSet(self):
+        "Returns the set of less frequently visited states observed during the FV simulation that can be potentially used as start states for the FV particle system"
+        return self.less_frequently_visited_set
+
     def getStatesOfInterest(self):
         return self.states_of_interest
 
@@ -1393,3 +1398,6 @@ class LeaFV(LeaTDLambda):
         if not self.fixed_states_of_interest:
             # Update the set containing the states of interest based on the new active set
             self.states_of_interest = self.active_set
+
+    def setLessFrequentlyVisitedSet(self, less_frequently_visited_set):
+        self.less_frequently_visited_set = less_frequently_visited_set

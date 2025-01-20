@@ -562,6 +562,8 @@ max_time_steps_benchmark = max_time_steps_fv_for_expectation + max_time_steps_fv
 print(f"max_time_steps_benchmark (T + M2) = {max_time_steps_benchmark}")
 
 # Absorption strategy
+estimate_absorption_set_at_every_step = True
+update_absorption_set_with_fv_visits = True
 soft_killing = False #True
 
 #-- Common learning parameters
@@ -631,11 +633,6 @@ if learning_method_type == "values_fv":
     # so that we use the same number for the TD learner of value functions when the TDAC policy learning process is run afterwards.
     # I.e. this assumes that FVAC is run BEFORE TDAC!
     max_time_steps_benchmark_all = np.nan * np.ones((nrep, n_learning_steps))
-
-    # Store the definition of the start state distribution for the E(T_A) simulation for the FV simulation, so that we can reset them to their original ones
-    # when starting a new replication (as these distributions may be updated by the process)
-    probas_stationary_start_state_et = test_ac.agent_nn_fv.getLearner().getProbasStationaryStartStateET()
-    probas_stationary_start_state_fv = test_ac.agent_nn_fv.getLearner().getProbasStationaryStartStateFV()
 if learning_method == "all_online":
     # Online Actor-Critic policy learner with TD as value functions learner and value functions learning happens at the same time as policy learning
     learner_ac = LeaActorCriticNN(test_ac.getEnv(), simulator_value_functions.getAgent().getPolicy(), simulator_value_functions.getAgent().getLearner(),
@@ -780,7 +777,7 @@ for rep in range(nrep):
                                                   min_num_cycles_for_expectations=0,
                                                       ## Note: We set the minimum number of cycles for the estimation of E(T_A) to 0 because we do NOT need
                                                       ## the estimation of the average reward to learn the optimal policy, as it cancels out in the advantage function Q(s,a) - V(s)!!
-                                                  estimate_absorption_set=estimate_absorption_set_at_this_step, threshold_absorption_set=threshold_absorption_set,
+                                                  estimate_absorption_set=estimate_absorption_set_at_this_step, update_absorption_set_with_fv_visits=update_absorption_set_with_fv_visits, threshold_absorption_set=threshold_absorption_set,
                                                   soft_killing=soft_killing,
                                                   use_average_reward_stored_in_learner=use_average_reward_from_previous_step,
                                                   reset_value_functions=reset_value_functions_at_this_step,
