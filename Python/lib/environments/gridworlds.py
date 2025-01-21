@@ -262,18 +262,23 @@ class EnvGridworld1D(EnvironmentDiscrete):
         "Returns the 2D state indices associated to the 1D state index, which in this case is simply (s, 0)"
         return np.unravel_index(s, self.shape)
 
-    def plot_values(self, values, ax=None, figsize=(8, 8), cmap="Blues", vmin=None, vmax=None, alpha=1.0):
+    def plot_values(self, values, ax=None, figsize=(8, 8), cmap="Blues", vmin=None, vmax=None, alpha=1.0, add_colorbar=True):
         "Plots values, defined for EVERY state, given as a 1D array on the 2D shape used to represent the environment as an image. Returns the axis object and the image object."
         values_2d = values.reshape(self.shape)
         if ax is None:
+            new_figure = True
             ax = plt.figure(figsize=figsize).subplots(1, 1)
+        else:
+            new_figure = False
 
         # Plot the values by starting from the upper left corner and going horizontally on the first row, then the second row, etc.
         img = ax.imshow(values_2d, cmap=cmap, vmin=vmin, vmax=vmax, alpha=alpha)
-        plt.colorbar(img)
+        if add_colorbar:
+            plt.colorbar(img)
 
-        ax.xaxis.set_major_locator(MaxNLocator(integer=True))
-        ax.yaxis.set_ticks(())
+        if new_figure:
+            ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+            ax.yaxis.set_ticks(())
 
         return ax, img
 
@@ -786,18 +791,23 @@ class EnvGridworld2D(EnvironmentDiscrete):
 
         return plt.gca()
 
-    def plot_values(self, values, ax=None, figsize=(8, 8), cmap="Blues", vmin=None, vmax=None, alpha=1.0):
+    def plot_values(self, values, ax=None, figsize=(8, 8), cmap="Blues", vmin=None, vmax=None, alpha=1.0, add_colorbar=True):
         "Plots values, defined for EVERY state, given as a 1D array on the 2D shape used to represent the environment as an image. Returns the axis object and the image object."
         values_2d = values.reshape(self.shape)
         if ax is None:
+            new_figure = True
             ax = plt.figure(figsize=figsize).subplots(1, 1)
+        else:
+            new_figure = False
 
         # Plot the values by starting from the upper left corner and going horizontally on the first row, then the second row, etc.
         img = ax.imshow(values_2d, origin="upper", cmap=cmap, vmin=vmin, vmax=vmax, alpha=alpha)
-        plt.colorbar(img)
+        if add_colorbar:
+            plt.colorbar(img)
 
-        ax.xaxis.set_major_locator(MaxNLocator(integer=True))
-        ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+        if new_figure:
+            ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+            ax.yaxis.set_major_locator(MaxNLocator(integer=True))
 
         return ax, img
 

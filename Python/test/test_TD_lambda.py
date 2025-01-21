@@ -704,7 +704,7 @@ class Test_TD_Lambda_MountainCar(unittest.TestCase, test_utils.EpisodeSimulation
         self.nepisodes = kwargs.pop('nepisodes', 10)
         self.max_time_steps_per_episode = kwargs.pop('max_time_steps_per_episode', 500)  # Maximum number of steps to run per episode
         self.normalizer = kwargs.pop('normalizer', 1)            # Normalize for the plots: Set it to max_time_steps_per_episode when the rewards are NOT sparse (i.e. are -1 every where except at terminal states), o.w. set it to 1 (when rewards are sparse, i.e. they occur at terminal states)
-        self.plot = kwargs.pop('plot', False)
+        self.plot = kwargs.pop('plot', True)
         self.colormap = cm.get_cmap("rainbow")  # useful colormaps are "jet", "rainbow", seismic"
         super().__init__(*args, **kwargs)
 
@@ -733,7 +733,7 @@ class Test_TD_Lambda_MountainCar(unittest.TestCase, test_utils.EpisodeSimulation
 
         cls.policy_rw = random_walks.PolRandomWalkDiscrete(cls.env)
 
-    def plot_results(self, values_2d, state_counts):
+    def _plot_results(self, params, values_2d, state_counts):
         # First replace estimated state values with NaN when the number of visits to the state is < 10
         # so that we don't get a bad idea of what the estimate is, since it is not reliable.
         idx_not_enough_counts_x, idx_not_enough_counts_v = np.where(state_counts < 10)
@@ -743,8 +743,8 @@ class Test_TD_Lambda_MountainCar(unittest.TestCase, test_utils.EpisodeSimulation
         import matplotlib.pyplot as plt
         x, dim_x, color_x = self.env.getPositions(), self.env.getPositionDimension(), self.env.getPositionColor()  # normally x is on the rows of `values_2d`
         v, dim_v, color_v = self.env.getVelocities(), self.env.getVelocityDimension(), self.env.getVelocityColor() # normally v is on the cols of `values_2d`
-        assert len(x) == values_2d_toplot.shape[0]
-        assert len(v) == values_2d_toplot.shape[1]
+        assert len(x) == values_2d_toplot.shape[dim_x]
+        assert len(v) == values_2d_toplot.shape[dim_v]
         title_params = "(lambda={:.2f}, alpha={:.1f}, adj={}, episodes={}, max_time={}, density=(x:{}, v:{}) points)" \
             .format(params['lambda'], params['alpha'], params['adjust_alpha'], self.nepisodes, self.max_time_steps_per_episode,
                     self.env.nx, self.env.nv)
@@ -765,14 +765,41 @@ class Test_TD_Lambda_MountainCar(unittest.TestCase, test_utils.EpisodeSimulation
         # 2D plots
         params['nepisodes'] = self.nepisodes  # Needed for the call to plot_results_2D
         fig = plt.figure()
-        axes = fig.subplots(1,3)
-        test_utils.plot_results_2D(axes[0], values_2d_toplot / self.normalizer, params, colormap=self.colormap,
-                                   fontsize=5, title="Value function (normalized by {})".format(
-                self.normalizer))
-        test_utils.plot_results_2D(axes[1], state_counts, params, colormap=cm.get_cmap("Blues"), fontsize=5, format_labels=".0f",
-                                   title="State visit count")
-        test_utils.plot_results_2D(axes[2], np.log10(1 + state_counts), params, colormap=cm.get_cmap("Blues"), fontsize=5, format_labels=".0f",
-                                   title="State visit count (log scale)")
+        # Decide the figure layout of subplots based on the shape of the 2D matrix to plot (values_2d_toplot) so that the longer dimension is plotted along the COMMON axis
+        # across the three plots with the ultimate goal of making each subplot more readable.
+        if values_2d_toplot.shape[1] >= values_2d_toplot.shape[0]:
+            # Recall that dimension 1 of the matrix to plot is the dimension that goes on the horizontal axis of the plot
+            axes = fig.subplots(3, 1)
+            if dim_x == 1:
+                # The position is on the COMMON axis (horizontal)
+                xdim_concept = "position"
+                ydim_concept = "velocity"
+            else:
+                xdim_concept = "velocity"
+                ydim_concept = "position"
+        else:
+            axes = fig.subplots(1, 3)
+            if dim_x == 0:
+                # The position is on the COMMON axis (vertical)
+                xdim_concept = "velocity"
+                ydim_concept = "position"
+            else:
+                xdim_concept = "position"
+                ydim_concept = "velocity"
+        ax = test_utils.plot_results_2D(axes[0], values_2d_toplot / self.normalizer, params, colormap=self.colormap,
+                                        fontsize=5, title="Value function (normalized by {})".format(self.normalizer))
+        ax.set_xlabel(f"{xdim_concept} index")
+        ax.set_ylabel(f"{ydim_concept} index")
+
+        ax = test_utils.plot_results_2D(axes[1], state_counts, params, colormap=cm.get_cmap("Blues"), fontsize=5, format_labels=".0f",
+                                        title="State visit count")
+        ax.set_xlabel(f"{xdim_concept} index")
+        ax.set_ylabel(f"{ydim_concept} index")
+
+        ax = test_utils.plot_results_2D(axes[2], np.log10(1 + state_counts), params, colormap=cm.get_cmap("Blues"), fontsize=5, format_labels=".0f",
+                                        title="State visit count (log scale)")
+        ax.set_xlabel(f"{xdim_concept} index")
+        ax.set_ylabel(f"{ydim_concept} index")
 
         return fig
 
@@ -963,7 +990,7 @@ class Test_TD_Lambda_MountainCar(unittest.TestCase, test_utils.EpisodeSimulation
         print("\n{}, observed: ".format(self.id(), observed))
         #print("Average RMSE over {} episodes: {:.3f}".format(self.nepisodes, np.mean(RMSE_by_episode)))
         if self.plot:
-            self.plot_results(observed, state_counts)
+            self._plot_results(params, observed, state_counts)
         #assert np.allclose(observed, expected, atol=1E-6)
 
         return observed, state_counts, params, sim, learning_info
@@ -1000,6 +1027,7 @@ if __name__ == "__main__":
         #--- Mountain Car tests
         suite_mountain = unittest.TestSuite()
         suite_mountain.addTest(Test_TD_Lambda_MountainCar("test_environment"))
+        suite_mountain.addTest(Test_TD_Lambda_MountainCar("run_random_walk_onecase"))
 
         runner.run(suite_gw1d)
         runner.run(suite_gw2d)
@@ -1156,7 +1184,7 @@ if __name__ == "__main__":
 
                 # 2D image plots of the error and the state counts observed during estimation
                 algorithm_name = params['adaptive_type'] is not None and params['adaptive_type'].name or "TD({:.2f})".format(params['lambda'])
-                fig = test_obj.plot_results(Verror, state_counts)
+                fig = test_obj.plot_results(params, Verror, state_counts)
                 fig.suptitle(algorithm_name)
 
                 # Plot

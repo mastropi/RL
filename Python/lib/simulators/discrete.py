@@ -2025,9 +2025,10 @@ class Simulator:
             plt.step(df_proba_surv['t'], df_proba_surv['P(T>t)'], color="blue", where='post')
             for x in learner.dict_phi.keys():
                 # Choose a particular state to plot if needed
-                if True or x == 410:
+                if x == 263: #19:
                     plt.step(learner.dict_phi[x]['t'], learner.dict_phi[x]['Phi'], color="red", where='post')
-                    plt.title(f"[_run_simulation_fv, Learning step {t_learn+1}]\nP(T>t) (blue) and Phi(t,x) (red) for state x = {x}")
+                    plt.title(f"[_run_simulation_fv, Learning step {t_learn+1}]\nP(T>t) (blue) and Phi(t,x) (red) for state x = {x} ({self.env.getStateFromIndex(x, simulation=False) if not self.env.isStateContinuous() else x})")
+                    plt.draw()
 
         if plot:
             self._update_plots_at_episode_end(0, 1, learner, t_learn, fig_V, fig_V2, None, colors_V, None, 0.0, pause=pause, method_name="_run_simulation_fv, ")

@@ -820,7 +820,7 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
 
         Arguments:
         simulation: (opt) bool
-            Whether to return state associated to the given 1D index as the value used in simulations or return the state as a tuple representing the
+            Whether to return the state associated to the given 1D index as the value used in simulations or return the state as a tuple representing the
             continuous-valued state associated to `idx_state` (when self.state_is_continuous = True) or the discrete-valued state (when self.state_is_continuous = False)
             default: True
 
@@ -919,7 +919,7 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
         ani.save('./mountain_car.gif', writer='pillow', fps=10)
         print("GIF saved to: ./mountain_car.gif")
 
-    def plot_values(self, values, ax=None, figsize=(8, 8), cmap="Blues", vmin=None, vmax=None, alpha=1.0):
+    def plot_values(self, values, ax=None, figsize=(8, 8), cmap="Blues", vmin=None, vmax=None, alpha=1.0, add_colorbar=True):
         "Plots values (optionally on the given `ax` axis), defined for EVERY state and given as a 1D array, on the 2D shape used to represent the environment as an image. Returns the axis object and the image object."
         values_2d = self.reshape_from_1d_to_2d(values)
         if ax is None:
@@ -931,7 +931,8 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
         # Plot the values by starting from the lower left corner and going first horizontally showing the values on the first row of `values_2d`,
         # then move up one line in the image and plot the values on the second row, etc.
         img = ax.imshow(values_2d, origin="lower", cmap=cmap, vmin=vmin, vmax=vmax, alpha=alpha)
-        plt.colorbar(img)
+        if add_colorbar:
+            plt.colorbar(img)
 
         if new_figure:
             self._finalize_plot(ax)
