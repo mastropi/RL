@@ -11,8 +11,10 @@ import copy
 import re
 
 import numpy as np
+import numbers
 from scipy.interpolate import splrep, splev     # For smoothing splines
 from matplotlib import pyplot as plt, cm
+from matplotlib.ticker import MaxNLocator
 
 from .basic import parse_dict_params, aggregation_bygroups
 
@@ -37,6 +39,21 @@ def default_plot_options():
             'stats':        {'center': "mean", 'scale': "std"},
             'texts':        {'title': None}
             }    
+
+
+def set_ticklabels(axis, labels, override_ticks=False):
+    "Sets the tick labels to a given axis (e.g. returned by ax.xaxis for the X-axis). Use override_ticks=True to set the ticks at 1, 2, ... len(labels)"
+    if override_ticks:
+        # We set the ticks as the indices of the labels to set, so that the number of ticks is the same as the number of labels
+        # This may NOT be the case if the number of ticks in the axis are less than the number of points/violins/etc. that are plotted in the graph.
+        axis.set_ticks(np.arange(1, len(labels)+1), labels=labels)
+    else:
+        # Respect the original ticks in the axis
+        # NOTE the tricky horrible way of setting the labels!!
+        # This is because the value of axis.get_ticklabels() return two more NON-VISIBLE ticks, one at the left end and one at the right end of the axis.
+        if len(axis.get_ticklabels()) != len(labels) + 2:
+            raise ValueError("The number of ticks in the axis does not match the number of labels to set. Try calling the function with `override_ticks=True`.")
+        axis.set_ticklabels([axis.get_ticklabels()[0]] + [f"{x}" for x in labels] + [axis.get_ticklabels()[-1]])
 
 
 def plot_colormap(x, y, ax=None, ncolors=None, cmap_name="Blues", marker='.'):
@@ -388,6 +405,7 @@ def deprecated_errorbars_standalone(df, x, y, yref=None,
 
     return axes
 
+
 def pointsplot(ax, df, x, y, dict_options):
     "Produces a basic points plot"
     # Parse options
@@ -398,6 +416,7 @@ def pointsplot(ax, df, x, y, dict_options):
                     color=dict_options['properties']['color'],
                     marker=dict_options['properties']['marker'], markersize=dict_options['properties']['markersize'],
                     linestyle='None')
+
 
 def plot(plotting_func,
          df, xvars, yvars, dict_params=dict(),
@@ -713,6 +732,7 @@ def plot(plotting_func,
 
     return axes
 
+
 def plot_splines(ax, df, x, y, w=None, s=None, dict_options=dict()):
     """
     Plots a scatter plot + smoothing spline fit.
@@ -785,6 +805,7 @@ def plot_splines(ax, df, x, y, w=None, s=None, dict_options=dict()):
                     "Spline fit"]
 
     return legend_objects, legend_texts
+
 
 def plot_errorbars(ax, df, x, y, dict_options=dict()):
     """
@@ -859,7 +880,8 @@ def plot_errorbars(ax, df, x, y, dict_options=dict()):
 
     return legend_objects, legend_texts
 
-def plot_violins(ax, df, x, y, showmeans=True, showmedians=False, dict_options=dict()):
+
+def plot_violins(ax, df, x, y, positions=[], showmeans=True, showmedians=False, dict_options=dict()):
     """
     Generates a jittered-points + violin-plots for each `x` value which is assumed to contain
     replicated measures of `y`.
@@ -879,6 +901,11 @@ def plot_violins(ax, df, x, y, showmeans=True, showmedians=False, dict_options=d
     y: str
         Name of the column in `df` to use on the Y-axis.
 
+    positions: array-like
+        List of horizontal positions where the violins are placed.
+        Use `None` to use the integer values 1, 2, ..., G, where G is the number of groups, i.e. distinct values of variable df[x].
+        default: [], in which case the sorted distinct x values are used to place the violins
+
     dict_options: (opt) dict
         Dictionary of options containing at least the following attributes:
         - multipliers: (defining a scalar by which each plotted variable is multiplied)
@@ -893,44 +920,76 @@ def plot_violins(ax, df, x, y, showmeans=True, showmedians=False, dict_options=d
     Return: tuple
     Duple containing:
     - the list of legend objects indicated by the legend texts
-    - the list of legend texts 
+    - the list of legend texts
     """
-    #------- Parse input parameters
+    # ------- Parse input parameters
     assert isinstance(x, str)
     assert isinstance(y, str)
     dict_options_default = default_plot_options()
     parse_dict_params(dict_options, dict_options_default)
-    #------- Parse input parameters
+    # Make a copy of the options because they may be modified in this function and we do not want to modify the values in the dictionary passed by the user!
+    _dict_options = dict_options.copy()
+    # ------- Parse input parameters
 
-    fraction_violin_widths = 0.1
     x_values = np.unique(df[x])
-    if len(x_values) > 1:
-        violin_widths = fraction_violin_widths * (x_values[-1] - x_values[0]) * dict_options['multipliers']['x']
-    else:
-        violin_widths = fraction_violin_widths * x_values[0] * dict_options['multipliers']['x']
-    col = dict_options['properties']['color']
-    violinplot(ax,  [df[ df[x]==xvalue ][y] * dict_options['multipliers']['y'] for xvalue in x_values],
-                    positions=x_values * dict_options['multipliers']['x'],
-                    showmeans=showmeans, showmedians=showmedians, linewidth=2, widths=violin_widths,
-                    color_body=col, color_lines=col, color_means=col)
 
-    # Add the observed points
+    # Position of violins
+    fraction_violin_widths = 0.1
+    positions_are_x_values = False
+    if positions == [] or positions == () or isinstance(positions, np.ndarray) and len(positions) == 0:
+        # Use the distinct x values as position
+        positions = x_values * _dict_options['multipliers']['x']
+        positions_are_x_values = True
+    elif positions is None:
+        positions = np.arange(1, len(x_values)+1)
+        _dict_options['multipliers']['x'] = 1   # Remove any multiplier for x so that our life is much easier when defining the values for the jittered points below
+
+    # Width of violins
+    if len(positions) > 1:
+        violin_widths = fraction_violin_widths * (positions[-1] - positions[0])
+    else:
+        violin_widths = fraction_violin_widths * positions[0]
+
+    # Note: the `astype(float)` conversion on the column of the data frame is just in case, to avoid the problem explained here by digdug:
+    # https://stackoverflow.com/questions/50051165/attributeerror-float-object-has-no-attribute-shape-when-using-seaborn
+    # which solves the error "'float' object has no attribute 'shape' in `if scl.shape != avg_as_array.shape` line in numpy\lib\function_base.py
+    color = _dict_options['properties']['color']
+    violinplot(ax, [df.loc[ df[x] == xvalue, y].astype(float) * _dict_options['multipliers']['y'] for xvalue in x_values],
+               positions=positions,
+               showmeans=showmeans, showmedians=showmedians, linewidth=2, widths=violin_widths,
+               color_body=color, color_lines=color, color_means="black")
+
+    if not positions_are_x_values:
+        # Show the original x values as tick labels
+        set_ticklabels(ax.xaxis, x_values, override_ticks=True)
+    elif all([isinstance(_, numbers.Integral) for _ in positions]):
+        # Show integer tick values if the x values behind the violins are all integers
+        ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+
+    # Add the measured points behind the violin plots with an added jitter --> df["_x_jitter"]
     npoints = df.shape[0]
     # Create a horizontal jitter whose magnitude is scaled:
     # - proportionally to the range of the horizontal axis limits --> so that the jitter is VISIBLE
-    # - inversely proportional to the number of distinct x values (i.e. number of violinplots) --> so that the jittered points do not OVERLAP among the different violinplots
-    xrange = ax.get_xlim()[1] - ax.get_xlim()[0]
-    num_xvalues = len( np.unique(df[x]) )
-    jitter = 0.1 / num_xvalues * xrange * (np.random.random(npoints) - 0.5)   # The random value is between -0.5 and 0.5
-    df["x_jitter"] = df[x] + jitter
-    # Set the color for the points in dict_options which is passed to the pointsplot() function below
-    dict_options['properties']['color'] = "black"
-    points = pointsplot(ax, df, "x_jitter", y, dict_options)
+    # - inversely proportional to the number of distinct x values (i.e. number of violinplots) --> so that the jittered points do not OVERLAP among the different violins
+    # We NEED to:
+    # - Distinguish between the case where the positions are given by the user
+    # - Divide the X-axis limits by an eventual multiplier applied on x because this multiplier is applied to _x_jitter when adding the points with pointsplot() below.
+    xrange = (ax.get_xlim()[1] - ax.get_xlim()[0]) / _dict_options['multipliers']['x']
+    xcoords = df[x] if positions_are_x_values \
+                  else np.array([ positions[idx] for idx in [np.where(x_values == _x)[0].astype(int)[0] for _x in df[x]] ])  # Retrieve the x coordinates in the scale of `positions` for EACH point to plot!
+    num_xvalues = len(x_values)
+    jitter = 0.1 / num_xvalues * xrange * (np.random.random(npoints) - 0.5)  # The random value is between -0.5 and 0.5
+    df["_x_jitter"] = xcoords + jitter
+
+    # Set the color for the points in _dict_options which is passed to the pointsplot() function below
+    _dict_options['properties']['color'] = "black"
+    points = pointsplot(ax, df, "_x_jitter", y, _dict_options)
 
     legend_objects = [points[0]]
-    legend_texts = [y + (dict_options['multipliers']['y'] == 1 and " " or "*{}".format(dict_options['multipliers']['y']))]
+    legend_texts = [y + (_dict_options['multipliers']['y'] == 1 and " " or "*{}".format(_dict_options['multipliers']['y']))]
 
     return legend_objects, legend_texts
+
 
 def violinplot(axis, dataset, positions=None, showmeans=True, showmedians=True,
                color_body=None, color_lines=None, color_means=None, color_medians=None,
