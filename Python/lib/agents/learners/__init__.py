@@ -18,6 +18,8 @@ Classes inheriting from this class should define the following methods:
 import copy
 from enum import Enum, unique
 from collections import deque
+import numpy as np
+import pandas as pd
 
 
 MIN_COUNT = 1  # Minimum state count to start shrinking alpha
@@ -480,6 +482,15 @@ class GenericLearner:
         "Returns the number of times the given state and action has been visited during the learning process"
         key = str( (state, action) )
         return self.dict_state_action_counts.get(key, 0)
+
+    def getStateCountsFromTrajectory(self):
+        "Returns a 1D array with the state counts of each possible state in the environment from the self.states list stored in the object"
+        state_counts = np.zeros(self.env.getNumStates(), dtype=int)
+        _visited_states = pd.Series(self.getStates()).value_counts()
+        for s, c in _visited_states.items():
+            state_counts[s] = c
+
+        return state_counts
 
     def getTimes(self):
         "Returns a list with the observed event times during the trajectory"

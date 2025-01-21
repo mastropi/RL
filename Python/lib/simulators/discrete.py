@@ -198,13 +198,13 @@ class Simulator:
             print("------> {}".format(self.results_file))
 
     def run(self, **kwargs):
-        # Put the learner of value functions in training mode when the value functions are approximated by a neural network (so far, done in the continuous state case)
+        # Put the LEARNER of value functions in training mode when the value functions are approximated by a neural network (so far, done in the continuous state case)
         # This is important in case the neural network model has dropout layers, so that the dropout is actually used
         if self.env.isStateContinuous():
             self.agent.getLearner().getV().getModel().train()
             self.agent.getLearner().getQ().getModel().train()
 
-        # Set the policy in evaluation mode (e.g. this is the time to compute the Critic of a policy, where the policy is evaluated, NOT trained)
+        # Set the POLICY in evaluation mode (e.g. this is the time to compute the Critic of a policy, where the policy is evaluated, NOT trained)
         if isinstance(self.agent.getPolicy(), PolNN):
             self.agent.getPolicy().nn_model.eval()
 
@@ -1020,7 +1020,7 @@ class Simulator:
         return state_values, action_values, advantage_values, state_counts_all, state_counts_et, probas_stationary, expected_reward, expected_absorption_time, n_absorption_cycles_used, \
                time_last_absorption, max_survival_time, n_events_et, n_events_fv
 
-    def run_exploration(self, t_learn=0, max_time_steps=1000, seed=None, verbose=False, verbose_period=1):
+    def run_exploration(self, t_learn=0, max_time_steps=1000, epsilon_random_action=0.0, seed=None, verbose=False, verbose_period=1):
         """
         Performs an exploration of the environment without learning, just with the purpose of collecting state visit frequencies
 
@@ -1038,6 +1038,10 @@ class Simulator:
         max_time_steps: (opt) int
             Number of steps to run.
             default: 1000
+
+        epsilon_random_action: (opt) float in [0, 1]
+            Probability of taking a random action at each step.
+            default: 0.0
 
         seed: (opt) int
             Seed to use for the random number generator for the simulation, both for choosing the agent's next action and the next state of the environment
@@ -1109,7 +1113,7 @@ class Simulator:
                 done_episode = False
                 t_episode = -1
             else:
-                action = self._choose_action(policy, state)
+                action = self._choose_action(policy, state, epsilon_random_action=epsilon_random_action)
                 next_state, reward, done_episode, info = self.env.step(action)
 
             # Update the trajectory stored in the learner
@@ -1128,7 +1132,7 @@ class Simulator:
 
         return learner
 
-    def run_exploration_and_learn_value_functions(self, t_learn=0, max_time_steps=1000, seed=None, verbose=False, verbose_period=1):
+    def run_exploration_and_learn_value_functions(self, t_learn=0, max_time_steps=1000, epsilon_random_action=0.0, seed=None, verbose=False, verbose_period=1):
         """
         Perform an exploration of the environment with the main objective of collecting state visit frequencies.
         However, the exploration is also used to learn value functions.
@@ -1215,7 +1219,7 @@ class Simulator:
                         'update_counts': False}
                 # TEMPORARY (2024/05/14): Needed only because of the EPISODIC view of the average reward
             else:
-                action = self._choose_action(policy, state)
+                action = self._choose_action(policy, state, epsilon_random_action=epsilon_random_action)
                 next_state, reward, done_episode, info = self.env.step(action)
 
             # TEMPORARY (2024/05/14): Needed only because of the EPISODIC view of the average reward in its iterative update formula in Learner.update_average_reward()
