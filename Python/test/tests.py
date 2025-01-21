@@ -489,6 +489,8 @@ dict_colors, dict_linestyles, dict_legends, figsize = define_plotting_parameters
 dict_loss = dict()
 dict_R = dict()
 dict_R_long = dict()
+dict_R_long_initial = dict()
+dict_R_long_fv_inflated = dict()
 dict_R_long_true = dict()   # True average reward under the policy used at each policy learning step to learn value functions. GOAL: Keep track on how rare is reaching the reward.
 dict_V = dict()
 dict_Q = dict()
@@ -620,6 +622,8 @@ Q_all = np.zeros((nrep, n_learning_steps, test_ac.getEnv().getNumStates(), test_
 A_all = np.zeros((nrep, n_learning_steps, test_ac.getEnv().getNumStates(), test_ac.getEnv().getNumActions()))
 R_all = np.nan * np.ones((nrep, n_learning_steps))       # Average reward (EPISODIC learning task)
 R_long_all = np.nan * np.ones((nrep, n_learning_steps))  # Long-run Average reward (CONTINUING learning task). It does NOT converge to the same value as the episodic average reward because there is one more reward value per episode!! (namely the reward going from the terminal state to the start state)
+R_long_initial_all = np.zeros((nrep, n_learning_steps))  # Useful for FV only: average reward observed during the initial simulation (useful for ablation study of FV)
+R_long_fv_inflated_all = np.nan * np.ones((nrep, n_learning_steps))  # Useful for FV only: compare the average reward inflated by the FV exploration and a sensible estimate of the average reward by FV
 R_long_true_all = np.nan * np.ones((nrep, n_learning_steps))  # True Long-run Average reward (CONTINUING learning task) under the policy at the start of each policy learning step
 loss_all = np.nan * np.ones((nrep, n_learning_steps))
 nsteps_all = np.nan * np.ones((nrep, n_learning_steps), dtype=int)  # Number of value function time steps run per every policy learning step
@@ -784,8 +788,9 @@ for rep in range(nrep):
                                                   plot=plot if t_learn+1 in learning_steps_observe else False, colormap=colormap,
                                                   epsilon_random_action=epsilon_random_action,
                                                   seed=seed_learn, verbose=False, verbose_period=verbose_period)
-                #average_reward = simulator_value_functions.getAgent().getLearner().getAverageReward()  # This average reward should not be used because it is inflated by the FV process that visits the states with rewards more often
-                average_reward = expected_reward
+                average_reward_initial_exploration = simulator_value_functions.getAgent().getLearner().getAverageRewardInitialExploration()
+                average_reward_fv_inflated = simulator_value_functions.getAgent().getLearner().getAverageRewardRaw()
+                average_reward = expected_reward    # Note: this is the same information stored in the FV learner, i.e. it would also be returned by calling simulator_value_functions.getAgent().getLearner().getAverageReward()
                 nsteps_all[rep, t_learn] = n_events_et + n_events_fv
                 max_time_steps_benchmark_all[rep, t_learn] = n_events_et + n_events_fv  # Number of steps to use when running TDAC at the respective learning step
             else:
@@ -904,6 +909,12 @@ for rep in range(nrep):
             # Store the long-run average reward estimated by the value functions learner used above
             R_long_all[rep, t_learn] = average_reward
 
+            if learning_method_type == "values_fv":
+                # Store auxiliary information on the average reward which can help understand the usefulness of the FV simulation (i.e. towards an ablation study)
+                R_long_initial_all[rep, t_learn] = average_reward_initial_exploration
+                # Store the inflated average reward (inflated by the FV oversampling effect) in order to analyze how sensible is the average reward estimated by FV
+                R_long_fv_inflated_all[rep, t_learn] = average_reward_fv_inflated
+
             # Check if we need to stop learning because the average reward didn't change a bit
             if  break_when_no_change and t_learn > 0 and R_all[rep, t_learn] - R_all[rep, t_learn-1] == 0.0 or \
                 break_when_goal_reached and np.isclose(R_all[rep, t_learn], max_avg_reward_episodic, rtol=0.001):
@@ -926,6 +937,8 @@ else:
 dict_loss[learning_method] = loss_all.copy()
 dict_R[learning_method] = R_all.copy()
 dict_R_long[learning_method] = R_long_all.copy()
+dict_R_long_initial[learning_method] = R_long_initial_all.copy()
+dict_R_long_fv_inflated[learning_method] = R_long_fv_inflated_all.copy()
 dict_R_long_true[learning_method] = R_long_true_all.copy()
 dict_V[learning_method] = V_all.copy()
 dict_Q[learning_method] = Q_all.copy()
@@ -976,6 +989,17 @@ ax_R.legend(["Average reward (episodic)", "Max. average reward (episodic)",
 plt.title(f"{learning_method.upper()}\n{learning_task.name} learning task - {learning_criterion.name} reward criterion (gamma={simulator_value_functions.getAgent().getLearner().gamma}) - {env_type.name} {env_shape}"
           f"\nN={test_ac.agent_nn_fv.getLearner().getNumParticles()}, T={test_ac.agent_nn_fv.getLearner().getNumTimeStepsForExpectation()}, MAX budget={max_time_steps_benchmark} steps per policy learning step"
           f"\nEvolution of the LOSS (left, red) and Average Reward (right, green) with the learning step")
+
+# How much the FV simulation contributes to the average reward value at each learning step
+if learning_method_type == "values_fv":
+    ax = plt.figure(figsize=figsize).subplots(1, 1)
+    ax.plot(np.arange(1, n_learning_steps+1), dict_R_long[learning_method][rep, :n_learning_steps], marker='.', color="greenyellow")
+    ax.plot(np.arange(1, n_learning_steps+1), dict_R_long_initial[learning_method][rep, :n_learning_steps], marker='.', color="magenta")
+    ax.plot(np.arange(1, n_learning_steps+1), dict_R_long_fv_inflated[learning_method][rep, :n_learning_steps], marker='.', color="cyan")
+    ax.set_xlabel("Learning step")
+    ax.set_ylabel("Average reward")
+    plt.title(f"{learning_method.upper()}" + f"{((' - SOFT' if soft_killing else ' - HARD') + ' killing') if learning_method_type == 'values_fv' else ''}" + "\nComparison between the Average Rewards")
+    plt.legend(["Avg. Reward estimated by FV", "Avg. Reward from Initial Exploration", "Inflated Avg. Reward from FV simulation"])
 
 
 #-- Plot the trajectory as a GIF
@@ -1320,7 +1344,7 @@ if save:
     wind_dict = None if "wind_dict" not in locals() else wind_dict
     exit_state = None if "exit_state" not in locals() else exit_state
     objects_to_save = ["_env", "env_type", "wind_dict", "learning_task", "learning_criterion", "gamma", "exit_state", "nn_hidden_layer_sizes", "is_NPG", "policy_learning_mode", "simulator_value_functions",
-                       "dict_loss", "dict_R", "dict_R_long", "dict_R_long_true", "dict_V", "dict_Q", "dict_A", "dict_state_counts", "dict_nsteps", "dict_KL", "dict_alpha", "dict_time_elapsed",
+                       "dict_loss", "dict_R", "dict_R_long", "dict_R_long_true", "dict_R_long_initial", "dict_R_long_fv_inflated", "dict_V", "dict_Q", "dict_A", "dict_state_counts", "dict_nsteps", "dict_KL", "dict_alpha", "dict_time_elapsed",
                        "max_time_steps_benchmark"]
     if "max_time_steps_benchmark_all" in locals():
         objects_to_save += ["max_time_steps_benchmark_all"]

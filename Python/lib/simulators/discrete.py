@@ -698,9 +698,10 @@ class Simulator:
         # Parse specific parameters, related to the simulation in general, and related to the absorption dynamics characteristics
         dict_params_simul, dict_params_info, less_frequently_visited_states_case = parse_simulation_parameters_fv(dict_params_simul, dict_params_info, envs[0])
 
-        estimated_average_reward_before_single_simulation = None
+        estimated_average_reward_before_initial_exploration = None
         if use_average_reward_stored_in_learner and self.agent.getLearner().getAverageReward() != 0.0:
-            estimated_average_reward_before_single_simulation = self.agent.getLearner().getAverageReward()
+            estimated_average_reward_before_initial_exploration = self.agent.getLearner().getAverageReward()
+        print(f"[IN] The average reward before initial exploration is: {estimated_average_reward_before_initial_exploration}")
         # -- Parse input parameters
 
         # -- Step 1: Simulate a single Markov chain to estimate the EXIT state distribution from A and the expected cycle time of return to A, E(T_A)
@@ -738,7 +739,7 @@ class Simulator:
                             t_learn=dict_params_info['t_learn'],
                             max_time_steps=dict_params_simul['T'],      # Max simulation time over ALL episodes
                             start_state_first_episode=start_state,
-                            estimated_average_reward=estimated_average_reward_before_single_simulation,
+                            estimated_average_reward=estimated_average_reward_before_initial_exploration,
                             reset_value_functions=reset_value_functions,
                             epsilon_random_action=dict_params_simul['epsilon_random_action'],
                             seed=dict_params_simul['seed'],
@@ -750,8 +751,38 @@ class Simulator:
         n_events_et = learning_info['nsteps']
         n_absorption_cycles_used = learning_info['num_cycles']
         time_last_absorption = learning_info['last_cycle_entrance_time']
-        average_reward_from_single_simulation = self.agent.getLearner().getAverageReward()
-        print(f"--> Average reward estimated from the single simulation: {average_reward_from_single_simulation} (it will be used to correct the value functions estimated by the FV simulation)")
+
+        # Store information about the estimated expected absorption time
+        # One of the reasons for storing this information is to be able to use an estimated value for E(T_A) from a *previous* policy learning step,
+        # in case an estimate happens to NOT be available at a particular learning step (due to not enough number of cycles observed).
+        # So, the value we store here could be used in that case for the estimation of the long-run expected reward by FV.
+        # Note that, if not enough cycles are observed during this initial exploration, we set the expected absorption time to the one measured in the previous policy learning step
+        # whenever there is a previous step; if not, we set it to the number of steps taken during the initial exploration, which is our best estimate.
+        if n_absorption_cycles_used == 0:
+            warning_msg = "WARNING: The estimation of the expected absorption time E(T_A) cannot be reliably performed" \
+                        f" because no cycles were observed after the burn-in period of {dict_params_simul['burnin_time_steps']} time steps: {n_absorption_cycles_used} < {dict_params_simul['min_num_cycles_for_expectations']}"
+            if dict_params_info['t_learn'] == 0:
+                expected_absorption_time = learning_info['nsteps']
+                warning_msg += f"\nThe value of E(T_A) will be set to the number of steps run: {expected_absorption_time}"
+            else:
+                expected_absorption_time = self.agent.getLearner().getExpectedAbsorptionTime()
+                warning_msg += f"\nThe value of E(T_A) will be set to the value of the previous policy learning step: {expected_absorption_time}"
+            print(warning_msg)
+            warnings.warn(warning_msg)
+        else:
+            expected_absorption_time = learning_info['expected_cycle_time']
+        self.agent.getLearner().setExpectedAbsorptionTimeAndNumCycles(expected_absorption_time, n_absorption_cycles_used)
+        print(f"--> Estimated absorption time E(T_A) on {n_absorption_cycles_used} cycles: {expected_absorption_time}")
+
+        # Store information about the average reward observed during the initial exploration of the environment
+        # One of the reasons for storing this is that we can analyze how much the initial exploration and the FV simulation contribute to the final average reward.
+        # Note that it is NOT the same to compute the average reward as a simple average of the rewards observed during the excursion and to retrieve it directly from the
+        # average reward stored in the learner, because the latter may be the result of a correction of an initial estimate of the average reward
+        # (e.g. taken from a previous policy learning step when use_average_reward_stored_in_learner=True) whereas the former is the direct average on the rewards
+        # observed EXCLUSIVELY on this particular excursion.
+        average_reward_from_initial_exploration = np.mean(self.agent.getLearner().getRewards())
+        self.agent.getLearner().setAverageRewardInitialExploration(average_reward_from_initial_exploration)
+        print(f"--> Average reward estimated from the initial exploration: {average_reward_from_initial_exploration} (it will be used to correct the value functions estimated by the FV simulation)")
 
         #-- Step 2: Simulate N particles with Fleming-Viot to compute the empirical distribution and estimate the stationary probabilities, and from them the expected reward
         # BUT do this ONLY when the estimation of E(T_A) is reliable... otherwise, set the stationary probabilities and expected reward to NaN.
@@ -791,7 +822,7 @@ class Simulator:
             # to estimate the optimal theta parameters of the policy.
             # However, we would need the average reward if we estimate the advantage function in a better way,
             # namely as R(n+1) - avg.R(n) + V(S(n+1)) - V(S(n)) at each simulation step n.
-            expected_absorption_time = learning_info['expected_cycle_time'] if learning_info['expected_cycle_time'] > 0.0 else learning_info['nsteps']
+            expected_absorption_time = self.agent.getLearner().getExpectedAbsorptionTime()
             print(f"FV simulation on N={N} particles starts...")
             # TEMPORARY (2023/12/05) To test whether FV learns the optimal policy when the values of the states and actions taken in set A are NOT estimated at all
             #self.agent.getLearner().reset(reset_value_functions=True)
@@ -886,10 +917,11 @@ class Simulator:
                             expected_absorption_time=expected_absorption_time,
                             # IMPORTANT: (2024/08/11) Using a previously estimated average reward as initial estimate of the average reward estimation by FV
                             # ASSUMES that that initial estimate only contains reward information from OUTSIDE the absorption set A!
-                            # This may not be the case if the absorption set A contains states with non-zero reward...
-                            # TODO: (2024/08/11) Pass to the FV estimator of the average reward an initial estimation of the average reward that includes ONLY contributions from rewards observed OUTSIDE A (as explained above)
-                            estimated_average_reward=estimated_average_reward_before_single_simulation  if use_average_reward_stored_in_learner and estimated_average_reward_before_single_simulation is not None
-                                                                                                        else average_reward_from_single_simulation,
+                            # In fact, if this were not the case, we would be using that average reward value to update the average reward estimated by FV involving ONLY
+                            # states that are OUTSIDE A. Therefore we would be "contaminating" rewards OUTSIDE A with reward information coming from A... and that would be wrong.
+                            # TODO: (2024/08/11) Pass to the FV estimator of the average reward an initial estimation of the average reward that includes ONLY contributions from rewards observed OUTSIDE A (as explained above) (as only THAT piece of information of the average reward should be used to update the average reward that is estimated by FV (namely the reward outside A)
+                            estimated_average_reward=estimated_average_reward_before_initial_exploration  if use_average_reward_stored_in_learner and estimated_average_reward_before_initial_exploration is not None
+                                                                                                        else average_reward_from_initial_exploration,
                             epsilon_random_action=dict_params_simul['epsilon_random_action'],
                             seed=dict_params_simul['seed'] + 131713,    # Choose a different seed from the one used by the single Markov chain simulation (note that this seed is the base seed used for the seeds assigned to the different FV particles)
                             verbose=dict_params_info['verbose'],
@@ -958,12 +990,12 @@ class Simulator:
                 self.agent.getLearner().setAverageReward(expected_reward)
 
             ##### TEMPORARY PATCH (WORKED!) (TO TRY TO FIX THE UNLEARNING OF THE POLICY IN THE MOUNTAIN CAR PROBLEM) #########
-            # If the expected reward estimated by FV is 0.0, DISCARD IT and SET IT TO the expected reward estimated by the single simulation
-            # if expected_reward == 0.0:
-            #     expected_reward_to_restore = average_reward_from_single_simulation
-            #     self.agent.getLearner().setAverageReward(expected_reward_to_restore)
-            #     print(f"***** ESTIMATED EXPECTED REWARD BY FV (solely w.o. info from previously estimated avg. reward) IS ZERO!"
-            #           f"\n***** => The previously estimated expected reward has been restored in the learner! (restored reward = {expected_reward_to_restore})")
+            # If the expected reward estimated by FV is 0.0, DISCARD IT and SET IT TO the expected reward estimated by the initial exploration
+            #if expected_reward == 0.0:
+            #    expected_reward_to_restore = average_reward_from_initial_exploration
+            #    self.agent.getLearner().setAverageReward(expected_reward_to_restore)
+            #    print(f"***** ESTIMATED EXPECTED REWARD BY FV (solely w.o. info from previously estimated avg. reward) IS ZERO!"
+            #          f"\n***** => The previously estimated expected reward has been restored in the learner! (restored reward = {expected_reward_to_restore})")
             ##### TEMPORARY PATCH (WORKED!) (TO TRY TO FIX THE UNLEARNING OF THE POLICY IN THE MOUNTAIN CAR PROBLEM) #########
 
             if True or DEBUG_ESTIMATORS or show_messages(dict_params_info['verbose'], dict_params_info['verbose_period'], dict_params_info['t_learn']):
@@ -1670,6 +1702,7 @@ class Simulator:
                             # setting it equal to > 1 gives more weight to most recent estimates of Phi,
                             # setting it equal to < 1 gives more weight to older estimates of Phi.
         n_consecutive_steps_at_same_system_state = 0    # Counter of what the variable name indicates that is used to check whether the system gets stuck (see explanation and example below, where this variable is updated)
+        rewards_after_reactivation = deque([])  # List of rewards observed after each reactivation, which are NOT kept track of by the learner (because no value function learning should take place after reactivation because the transition does not correspond to a valid transition of the original Markov chain
         info = dict()       # We need this variable to be defined when calling learner.learn() for the first time if the first particle picked for moving has started at a terminal state
 
         if plot:  #False:
@@ -1743,8 +1776,8 @@ class Simulator:
                 # TODO: (2024/01/29) Revise the correct use of the `done` variable here, instead of `done_episode`, because actually when we are done by `done`, this line will NEVER be executed because we will NOT enter again the `while done` loop...
                 # DM-2024/04/22: Uncomment the following set of info['average_reward'] if we want to use a fixed value for the average reward as correction at every learning step
                 ##### TEMPORARY PATCH (WORKED!) (TO TRY TO FIX THE UNLEARNING OF THE POLICY IN THE MOUNTAIN CAR PROBLEM) #########
-                # if estimated_average_reward is not None:
-                #     info['average_reward'] = estimated_average_reward
+                #if estimated_average_reward is not None:
+                #    info['average_reward'] = estimated_average_reward
                 ##### TEMPORARY PATCH (WORKED!) (TO TRY TO FIX THE UNLEARNING OF THE POLICY IN THE MOUNTAIN CAR PROBLEM) #########
                 learner.learn(t, state, action, next_state, reward, done, info)
             if reward != 0.0:
@@ -1837,6 +1870,7 @@ class Simulator:
                 _absorbed_state = next_state
                 next_state = reactivate_particle_internal(idx_particle)
                 reward = envs[idx_particle].getReward(next_state)
+                rewards_after_reactivation.append(reward)
                 if reward != 0.0:
                     print(f"*** [reactivation] NON ZERO REWARD [2]!! (t={t}, P={idx_particle}, state={state} ({self.env.getStateFromIndex(state, simulation=False) if not self.env.isStateContinuous() else state}) -> "
                           f"abs_state={_absorbed_state} ({self.env.getStateFromIndex(_absorbed_state, simulation=False) if not self.env.isStateContinuous() else _absorbed_state}), action='REACTIVATION', "
@@ -1944,6 +1978,9 @@ class Simulator:
         if expected_absorption_time is None:
             expected_absorption_time = expected_exit_time + np.mean(survival_times)
         max_survival_time = df_proba_surv['t'].iloc[-1]
+
+        # Store the RAW average reward observed by the FV particles which can be used to evaluate the oversampling effect generated by the FV particle system
+        learner.setAverageRewardRaw( np.mean(learner._rewards + rewards_after_reactivation) )
 
         # Update the absorption set by adding frequently visited states during the FV simulation with no reward, so that the agent can get closer to the states with rewards
         if update_absorption_set_with_fv_visits:
