@@ -269,6 +269,12 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
         "Sets the value of the 1D index representing the environment state"
         self.s = s
 
+    def setReward(self, s, reward):
+        "Sets the reward of state `s` to `reward`"
+        if not (0 <= s < self.getNumStates()):
+            raise ValueError(f"The state index to set to the reward to is out of bounds: s={s} (must be in [0, {self.getNumStates()-1}])")
+        self.rewards[s] = reward
+
     def setV(self, state_values: np.ndarray(1)):
         "Sets the true state value function for a particular policy (not shown explicitly)"
         self.V = state_values

@@ -453,7 +453,7 @@ elif env_type == Environment.MountainCar:
                        env_discrete=env_discrete,
                        nx=40,       # Number of points in the discretization of the positions (only used in the continuous-state-dynamic Mountain Car, in which case the "factor for force" parameter is not used)
                        nv=21,       # Number of points in the discretization of the velocities
-                       factor_for_force_and_gravity=10 if not env_discrete else 100, #90, #20, #15,   # Factor controlling the number of discrete positions in the discretized problem --> NOTE: Using `1` is TOO SMALL! (as there are too many points in the grid)
+                       factor_for_force_and_gravity=10 if not env_discrete else 90, #100, #90, #20, #15,   # Factor controlling the number of discrete positions in the discretized problem --> NOTE: Using `1` is TOO SMALL! (as there are too many points in the grid)
                        factor_force=1.0,
                        factor_max_speed=3.0,    # Only used in MountainCarDiscrete (with continuous states)
                        # Value function approximations model
@@ -641,7 +641,7 @@ policy_learning_mode = "online" #"offline" #"online"
     ## or when they are learned at the same time (policy gradient, without critic).
     ## The OFFLINE mode makes sense only when value functions are learned SEPARATELY from the policy.
 is_NPG = len(nn_hidden_layer_sizes) == 0
-n_learning_steps = 50 #200 #50 #100 #30
+n_learning_steps = 100 #200 #50 #100 #30
 n_episodes_per_learning_step = 50 #100 #30  # Number of episodes for the policy update step when learning the policy online and in NON-NPG mode
 # Max time steps per episode during exploration for the online policy learning
 # In the Mountain Car problem we limit the number of steps per episode in the continuous-dynamics case because I've seen out-of-memory problems otherwise.
@@ -661,6 +661,7 @@ alpha_initial = simulator_value_functions.getAgent().getLearner().getInitialLear
 adjust_alpha_initial_by_learning_step = False; t_learn_min_to_adjust_alpha = 30 # based at 1 (regardless of the base value used for t_learn)
 #max_time_steps_per_episode = test_ac.getEnv().getNumStates()*10  # (2024/05/02) NO LONGER USED!  # This parameter is just set as a SAFEGUARD against being blocked in an episode at some state of which the agent could be liberated by restarting to a new episode (when this max number of steps is reached)
 epsilon_random_action = 0.1 #if policy_learning_mode == "online" else 0.0 #0.1 #0.05 #0.0 #0.01
+reward_to_promote_exploration = 1.0 #None   # Reward for a reward shaping strategy used to promote the visit of EXIT events from A which allow the execution of the FV simulation to estimate value functions (which is crucial for the FV estimation procedure to be effective)
 use_average_max_time_steps_in_td_learner = True #learning_method == "values_td2" #True #False
 learning_steps_observe = [7, 25] #[50, 90] #[2, 30, 48] #[2, 10, 11, 30, 31, 49, 50] #[7, 20, 30, 40]  # base at 1, regardless of the base value used for t_learn
 verbose_period = max_time_steps_fv_for_all_particles // 10
@@ -896,6 +897,7 @@ for rep in range(nrep):
                                                   reset_value_functions=reset_value_functions_at_this_step,
                                                   plot=plot if t_learn+1 in learning_steps_observe else False, colormap=colormap,
                                                   epsilon_random_action=epsilon_random_action,
+                                                  reward_for_exit_states=reward_to_promote_exploration,
                                                   seed=seed_learn, verbose=False, verbose_period=verbose_period)
                 average_reward_initial_exploration = simulator_value_functions.getAgent().getLearner().getAverageRewardInitialExploration()
                 average_reward_fv_inflated = simulator_value_functions.getAgent().getLearner().getAverageRewardRaw()

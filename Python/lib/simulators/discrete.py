@@ -24,7 +24,7 @@ import os
 import sys
 import copy
 import warnings
-from typing import Union
+import time
 from datetime import datetime
 
 from collections import deque   # Used for fast update of lists at the borders (which is a very common operation done on lists by the methods implemented here)
@@ -225,6 +225,7 @@ class Simulator:
                 estimate_absorption_set=False, update_absorption_set_with_fv_visits=False, threshold_absorption_set=0.90,
                 use_average_reward_stored_in_learner=False, reset_value_functions=True,
                 epsilon_random_action=0.0,
+                reward_for_exit_states: float=None,
                 seed=None, verbose=True, verbose_period=100, plot=False, colormap="seismic", pause=0.1):
         """
         Runs all the simulations that are needed to learn differential value functions using the Fleming-Viot approach.
@@ -399,6 +400,7 @@ class Simulator:
                                     'activation_set': self.agent.getLearner().getActivationSet(),
                                     'min_num_cycles_for_expectations': min_num_cycles_for_expectations,
                                     'epsilon_random_action': epsilon_random_action,
+                                    'reward_for_exit_states': reward_for_exit_states,
                                     'seed': seed})
         dict_params_info = dict({'verbose': verbose,
                                  'verbose_period': verbose_period,
@@ -537,6 +539,7 @@ class Simulator:
             dict_params_simul['update_absorption_set_with_fv_visits'] = dict_params_simul.get('update_absorption_set_with_fv_visits', False)
             dict_params_simul['threshold_absorption_set'] = dict_params_simul.get('threshold_absorption_set', 0.90)
             dict_params_simul['max_prop_absorption_set'] = dict_params_simul.get('max_prop_absorption_set', 0.70)
+            dict_params_simul['reward_for_exit_states'] = dict_params_simul.get('reward_for_exit_states', None)
 
             dict_params_simul['soft_killing'] = dict_params_simul.get('soft_killing', False)
 
@@ -751,6 +754,7 @@ class Simulator:
                             estimated_average_reward=estimated_average_reward_before_initial_exploration,
                             reset_value_functions=reset_value_functions,
                             epsilon_random_action=dict_params_simul['epsilon_random_action'],
+                            reward_for_exit_states=dict_params_simul['reward_for_exit_states'],
                             seed=dict_params_simul['seed'],
                             set_cycle=dict_params_simul['absorption_set'] if not dict_params_simul['soft_killing'] else None,
                             dict_proba_cycle=dict_params_simul['proba_killing'] if dict_params_simul['soft_killing'] else None,
@@ -929,12 +933,15 @@ class Simulator:
                             soft_killing=dict_params_simul['soft_killing'],
                             dict_proba_killing=dict_params_simul['proba_killing'] if dict_params_simul['soft_killing'] else None,
                             update_absorption_set_with_fv_visits=dict_params_simul['update_absorption_set_with_fv_visits'],
+                            reward_shaping=dict_params_simul['reward_for_exit_states'] is not None,
                             expected_absorption_time=expected_absorption_time,
                             # IMPORTANT: (2024/08/11) Using a previously estimated average reward as initial estimate of the average reward estimation by FV
                             # ASSUMES that that initial estimate only contains reward information from OUTSIDE the absorption set A!
                             # In fact, if this were not the case, we would be using that average reward value to update the average reward estimated by FV involving ONLY
                             # states that are OUTSIDE A. Therefore we would be "contaminating" rewards OUTSIDE A with reward information coming from A... and that would be wrong.
                             # TODO: (2024/08/11) Pass to the FV estimator of the average reward an initial estimation of the average reward that includes ONLY contributions from rewards observed OUTSIDE A (as explained above) (as only THAT piece of information of the average reward should be used to update the average reward that is estimated by FV (namely the reward outside A)
+                            # 2025/01/19: Use the average reward estimated from the initial exploration as the estimated_average_reward value to test the REWARD SHAPING OF THE EXIT STATES
+                            #estimated_average_reward=average_reward_from_initial_exploration,
                             estimated_average_reward=estimated_average_reward_before_initial_exploration  if use_average_reward_stored_in_learner and estimated_average_reward_before_initial_exploration is not None
                                                                                                         else average_reward_from_initial_exploration,
                             epsilon_random_action=dict_params_simul['epsilon_random_action'],
@@ -1012,6 +1019,14 @@ class Simulator:
             #    print(f"***** ESTIMATED EXPECTED REWARD BY FV (solely w.o. info from previously estimated avg. reward) IS ZERO!"
             #          f"\n***** => The previously estimated expected reward has been restored in the learner! (restored reward = {expected_reward_to_restore})")
             ##### TEMPORARY PATCH (WORKED!) (TO TRY TO FIX THE UNLEARNING OF THE POLICY IN THE MOUNTAIN CAR PROBLEM) #########
+
+            # Reset the reward to ZERO for the states affected by the reward shaping to promote the visit of EXIT states from A
+            # This is important to prevent the assertion that "no state in A has non-zero reward" from failing at the next policy learning step.
+            # ASSUMPTION: Only terminal states have a non-zero reward.
+            if dict_params_simul['reward_for_exit_states'] is not None:
+                for s in learning_info['probas_stationary_exit_cycle_set'].keys():
+                    if not self.env.isTerminalState(s):
+                        self.env.setReward(s, 0.0)
 
             if True or DEBUG_ESTIMATORS or show_messages(dict_params_info['verbose'], dict_params_info['verbose_period'], dict_params_info['t_learn']):
                 #max_rows = pd.get_option('display.max_rows')
@@ -1273,6 +1288,7 @@ class Simulator:
                             soft_killing: bool=False,
                             dict_proba_killing: dict=None,
                             update_absorption_set_with_fv_visits: bool=False,
+                            reward_shaping=False,
                             expected_absorption_time=None, expected_exit_time=None,
                             estimated_average_reward=None,
                             epsilon_random_action=0.0,
@@ -1355,6 +1371,13 @@ class Simulator:
 
         update_absorption_set_with_fv_visits: (opt) bool
             Whether the absorption set should be updated based on the visit frequency by the FV simulation.
+            default: False
+
+        reward_shaping: (opt) bool
+            Whether the environment has been affected by reward shaping.
+            This is important only when update_absorption_set_with_fv_visits = True, so that states that were potentially affected by reward shaping
+            (i.e. that were assigned a non-zero reward while there original reward is 0 --e.g. EXIT states from A) can be selected to enlarge A
+            (because only states with no reward are accepted as part of the enlargement of A).
             default: False
 
         expected_absorption_time: (opt) positive float
@@ -1795,6 +1818,7 @@ class Simulator:
                 # TODO: (2024/01/29) Revise the correct use of the `done` variable here, instead of `done_episode`, because actually when we are done by `done`, this line will NEVER be executed because we will NOT enter again the `while done` loop...
                 # DM-2024/04/22: Uncomment the following set of info['average_reward'] if we want to use a fixed value for the average reward as correction at every learning step
                 ##### TEMPORARY PATCH (WORKED!) (TO TRY TO FIX THE UNLEARNING OF THE POLICY IN THE MOUNTAIN CAR PROBLEM) #########
+                # 2025/01/19: Piece of code that can be reactivated to perform a quick try of the REWARD SHAPING strategy of exit states to promote a policy that goes out of A
                 #if estimated_average_reward is not None:
                 #    info['average_reward'] = estimated_average_reward
                 ##### TEMPORARY PATCH (WORKED!) (TO TRY TO FIX THE UNLEARNING OF THE POLICY IN THE MOUNTAIN CAR PROBLEM) #########
@@ -2003,6 +2027,14 @@ class Simulator:
 
         # Update the absorption set by adding frequently visited states during the FV simulation with no reward, so that the agent can get closer to the states with rewards
         if update_absorption_set_with_fv_visits:
+            # Remove any reward shaping reward so that we can correctly select new states with no reward to enlarge the absorption set A
+            if reward_shaping:
+                for s in self.env.getAllValidStates():
+                    # TODO: (2025/01/20) Generalize the following reset of the rewards to zero for cases where non-zero rewards can also be observed in non-terminal states
+                    # IMPORTANT: It is assumed that all states except terminal states have ZERO REWARD! This may not be the case in the future...
+                    if not self.env.isTerminalState(s):
+                        self.env.setReward(s, 0.0)
+
             # Compute the distribution of the states visited by the FV particle system (under VALID transitions)
             # so that we can add the most frequently visited states to the absorption set!
             _max_cum_freq_threshold = 0.50; _min_freq_threshold = 0.50
@@ -3851,7 +3883,7 @@ class Simulator:
                                     estimated_average_reward=None, reset_value_functions=True,
                                     seed=None, compute_rmse=False, weights_rmse=None,
                                     state_observe=None, set_cycle=None, dict_proba_cycle=None,
-                                    epsilon_random_action=0.0,
+                                    epsilon_random_action=0.0, reward_for_exit_states: float=None,
                                     verbose=False, verbose_period=1, verbose_convergence=False,
                                     plot=False, colormap="seismic", pause=0.1):
         """
@@ -3889,6 +3921,13 @@ class Simulator:
             Probability to take a random action instead of choosing an action dictated by the policy.
             This is useful to guarantee ergodicity when policies are deterministic or have some actions with zero probability.
             default: 0.0
+
+        reward_for_exit_states: float
+            Reward to assign to every exit state from the cycle set.
+            This is typically used as a reward shaping strategy to nudge the policy towards visiting the boundary states of the absorption set A
+            in FV estimation procedures, since those states are less frequently visited under the current policy, so we want to promote their visit
+            to continue exploring outside the frequently visited states in A.
+            default: None
 
         Returns: tuple
         Tuple containing the following elements:
@@ -4282,19 +4321,6 @@ class Simulator:
                                   state, action, self._get_action_value(learner, state, action),
                                   state), end="")
 
-                # Learn: i.e. update the value functions (stored in the learner) for the *currently visited state and action* with the new observation
-                # NOTE: If this call to learn() is done at the end of the episode (done_episode = True) further updates of information is performed
-                # (e.g. update of the average reward stored in GenericLearner (its average_reward attribute) via the LeaTD.learn_at_episode_end() method when the learner is TD)
-                # DM-2024/04/22: Uncomment the following set of info['average_reward'] if we want to use a fixed value for the average reward as correction at every learning step
-                #if estimated_average_reward is not None:
-                #    info['average_reward'] = estimated_average_reward
-                learner.learn(t_episode, state, action, next_state, reward, done_episode, info)
-                if state in self.env.getTerminalStates():
-                    # We need to copy the Q-values of the terminal state to the other actions because the action chosen to go to the start state is always the same (action 0)
-                    action_anchor = 0
-                    for _action in range(self.env.getNumActions()):
-                        learner.getQ()._setWeight(state, _action, learner.getQ().getValue(state, action_anchor))
-
                 if self.debug:
                     print("{:.4f}, Q=({},{})={:.4f}, avg. reward = {:.4f}".format(self._get_state_value(learner, state), state, action, self._get_action_value(learner, state, action), learner.getAverageReward()))
                 if done_episode: #self.debug and done_episode:
@@ -4316,7 +4342,26 @@ class Simulator:
                                                                             dict_state_counts_start_cycle, dict_state_counts_end_cycle)
 
                 # Check if the system has EXITED the set of states defining a cycle
-                dict_state_counts_exit_cycle_set = self._check_cycle_exit_and_update_exit_counts(set_cycle, self.env.getIndexFromState(state), self.env.getIndexFromState(next_state), dict_state_counts_exit_cycle_set)
+                exit_event, dict_state_counts_exit_cycle_set = self._check_cycle_exit_and_update_exit_counts(set_cycle, self.env.getIndexFromState(state), self.env.getIndexFromState(next_state), dict_state_counts_exit_cycle_set)
+                if exit_event and reward_for_exit_states is not None and not self.env.isTerminalState(next_state) and self.env.getReward(next_state) != reward_for_exit_states:
+                    # This is the first EXIT event at this next_state state and it does NOT happen at a terminal state (which is assumed to have a non-zero reward)
+                    # => Set the reward of the exit state to the given reward_for_exit_states value and update the reward used below to learn value functions and the long-run expected reward
+                    self.env.setReward(next_state, reward_for_exit_states)
+                    reward = reward_for_exit_states
+                    print(f"[run_single_continuing_task] REWARD SHAPING: r={reward_for_exit_states} assigned to exit state {next_state} ({self.env.getStateFromIndex(next_state, simulation=False) if not self.env.isStateContinuous() else next_state})")
+
+                # Learn: i.e. update the value functions (stored in the learner) for the *currently visited state and action* with the new observation
+                # NOTE: If this call to learn() is done at the end of the episode (done_episode = True) further updates of information is performed
+                # (e.g. update of the average reward stored in GenericLearner (its average_reward attribute) via the LeaTD.learn_at_episode_end() method when the learner is TD)
+                # DM-2024/04/22: Uncomment the following set of info['average_reward'] if we want to use a fixed value for the average reward as correction at every learning step
+                #if estimated_average_reward is not None:
+                #    info['average_reward'] = estimated_average_reward
+                learner.learn(t_episode, state, action, next_state, reward, done_episode, info)
+                if state in self.env.getTerminalStates():
+                    # We need to copy the Q-values of the terminal state to the other actions because the action chosen to go to the start state is always the same (action 0)
+                    action_anchor = 0
+                    for _action in range(self.env.getNumActions()):
+                        learner.getQ()._setWeight(state, _action, learner.getQ().getValue(state, action_anchor))
 
                 #---- UPDATE FOR CONTINUING TASK
                 # Plotting step moved INSIDE the episode because there is only 1 episode!
@@ -4654,16 +4699,21 @@ class Simulator:
             The states in either side of the boundary are updated, i.e. the state in the inside boundary and the state in the outside boundary,
             respectively `state` and `next_state` whenever an exit event occurs.
 
-        Return: dict
-        The updated dict_state_counts_exit_cycle_set dictionary, based on the current visit of `state` and `next_state`.
+        Return: tuple
+        Duple with two elements:
+        - Whether the transition from `state` to `next_state` corresponds to a cycle exit event.
+        - The updated dict_state_counts_exit_cycle_set dictionary, based on the current visit of `state` and `next_state`.
         """
         exited_set_cycle = lambda s, ns: s in set_cycle and ns not in set_cycle
+        exit_event = False
         if set_cycle is not None:
-            if exited_set_cycle(state, next_state):
+            exit_event = exited_set_cycle(state, next_state)
+            if exit_event:
+                # EXIT event because next_state is OUTSIDE the cycle set
                 dict_state_counts_exit_cycle_set[state] = dict_state_counts_exit_cycle_set.get(state, 0) + 1
                 dict_state_counts_exit_cycle_set[next_state] = dict_state_counts_exit_cycle_set.get(next_state, 0) + 1
 
-        return dict_state_counts_exit_cycle_set
+        return exit_event, dict_state_counts_exit_cycle_set
 
     def _initialize_run_with_learner_status(self, nepisodes, learner, compute_rmse, weights, state_observe):
         """
