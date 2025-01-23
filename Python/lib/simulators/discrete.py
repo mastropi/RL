@@ -41,7 +41,7 @@ from Python.lib.estimators import DEBUG_ESTIMATORS
 from Python.lib.estimators.fv import initialize_phi, estimate_stationary_probabilities, update_phi, update_phi_on_all_states
 from Python.lib.agents.policies.parameterized import PolNN
 from Python.lib.simulators.fv import reactivate_particle
-from Python.lib.simulators import DEBUG_TRAJECTORIES, MIN_NUM_CYCLES_FOR_EXPECTATIONS, choose_state_from_set, parse_simulation_parameters, show_messages
+from Python.lib.simulators import DEBUG_TRAJECTORIES, MAX_NUMBER_OF_STEPS_FOR_EXPECTATION, MIN_NUM_CYCLES_FOR_EXPECTATIONS, choose_state_from_set, parse_simulation_parameters, show_messages
 
 from Python.lib.utils.basic import find_signed_max_value, generate_datetime_string, get_current_datetime_as_string, insort, is_integer, measure_exec_time
 from Python.lib.utils.computing import compute_expected_reward, compute_set_of_frequent_states_with_zero_reward, compute_survival_probability, mape, rmse
@@ -593,8 +593,16 @@ class Simulator:
                                                                  self.env.getReward(self.env.getStateFromIndex(s, simulation=True)) != 0.0]
                 assert len(_states_in_absorption_set_with_nonzero_reward) == 0, f"The absorption set must not contain states with non-zero reward. The following states in the absorption set have non-zero reward: {_states_in_absorption_set_with_nonzero_reward}"
 
+                _size_absorption_set_before_update = len(self.agent.getLearner().getAbsorptionSet())
                 _absorption_set_has_been_updated, _number_of_new_states_in_absorption_set = \
                     update_absorption_set_if_not_too_large(estimated_absorption_set, dict_params_simul['max_prop_absorption_set'])
+
+                # Increase the simulation time for the initial exploration by the increase in the absorption set (if it's not the first policy learning step)
+                if dict_params_info['t_learn'] > 0:
+                    _T_prev = dict_params_simul['T']
+                    dict_params_simul['T'] = min( int(dict_params_simul['T'] * (1 + _number_of_new_states_in_absorption_set / _size_absorption_set_before_update)), MAX_NUMBER_OF_STEPS_FOR_EXPECTATION )
+                    self.agent.getLearner().setNumTimeStepsForExpectation(dict_params_simul['T'])
+                    print(f"Parameter T increased from T={_T_prev} to T={dict_params_simul['T']} ({(dict_params_simul['T'] / _T_prev - 1)*100:.1f}%)")
 
                 # Update the absorption and activation sets of the simulation parameters dictionary with the sets stored in the learner and possibly just updated
                 dict_params_simul['absorption_set'] = self.agent.getLearner().getAbsorptionSet()
@@ -731,9 +739,10 @@ class Simulator:
                 start_state = choose_state_from_set(dict_params_simul['backup_start_states_for_fv'])
         else:
             start_state = choose_state_from_set(set(probas_stationary_start_state_et.keys()), probas_stationary_start_state_et)
-        print(f"SINGLE simulation for the estimation of the expected reabsorption time E(T_A) starts at state s={start_state} "
+        print(f"SINGLE simulation on T={dict_params_simul['T']} steps for the estimation of the expected reabsorption time E(T_A) starts at state s={start_state} "
               f"(when None, the simulation starts following the Initial State Distribution of the environment: "
               f"\n{self.env.getInitialStateDistribution() if len(self.env.getInitialStateDistribution()) <= 20 else 'Not printed because too large (' + str(len(self.env.getInitialStateDistribution())) + ' elements)'}")
+        time.sleep(1)
         state_values, action_values, advantage_values, state_counts_et, _, _, learning_info = \
             self._run_single_continuing_task(
                             t_learn=dict_params_info['t_learn'],
@@ -809,6 +818,12 @@ class Simulator:
                           f"The estimate of the long-run expected reward will be set to the estimate obtained during the initial exploration: {expected_reward}"
             print(warning_msg)
             warnings.warn(warning_msg)
+
+            # Increase the simulation time for the initial exploration so that at the next policy learning step the chances of observing exit states from A are hopefully larger
+            _increase_rate_T = 0.10
+            _T_next = min( int(dict_params_simul['T'] * (1 + _increase_rate_T)), MAX_NUMBER_OF_STEPS_FOR_EXPECTATION )
+            self.agent.getLearner().setNumTimeStepsForExpectation(_T_next)
+            print(f"The number of steps for the initial exploration has been increased {(_T_next / dict_params_simul['T'] - 1)*100:.1f}%, from {dict_params_simul['T']} to {_T_next}")
         else:
             # Perform the Fleming-Viot simulation, as the estimator of the denominator in the FV estimator is reliable
             N = len(envs)

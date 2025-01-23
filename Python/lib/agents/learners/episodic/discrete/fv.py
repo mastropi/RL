@@ -132,6 +132,8 @@ class LeaFV(LeaTDLambda):
             self.N_for_start_state_action[s] = [0]*self.env.getNumActions()
         # Maximum number of time steps that are allowed to be run in each episode of the single Markov chain that estimates the expected reabsorption time E(T_A)
         self.T = T
+        self._N_at_construction = N
+        self._T_at_construction = T
         if not isinstance(absorption_set, set):
             raise ValueError("Parameter `absorption_set` must be a set ({}).".format(type(absorption_set)))
         if activation_set is not None and not isinstance(activation_set, set):
@@ -240,6 +242,9 @@ class LeaFV(LeaTDLambda):
             self.average_reward_raw = 0.0
         if reset_value_functions:
             #-- Reset pieces of information that are ALSO related, although INDIRECTLY to value functions, to their original definitions, defined at the object's construction
+            # The number of particles and the number of time steps T used for the estimation of E(T_A)
+            self.resetNumParticles()
+            self.resetNumTimeStepsForExpectation()
             # The absorption and activation sets
             self.resetAbsorptionSet()
             self.resetActivationSet()
@@ -1350,6 +1355,9 @@ class LeaFV(LeaTDLambda):
         self.expected_absorption_time = expected_absorption_time
         self.n_absorption_cycles = n_absorption_cycles
 
+    def setNumTimeStepsForExpectation(self, T):
+        self.T = T
+
     def setStartStateAction(self, idx_particle, state, action):
         self.start_states[idx_particle] = state
         self.start_actions[idx_particle] = action
@@ -1363,6 +1371,12 @@ class LeaFV(LeaTDLambda):
 
     def setProbasStationaryStartStateFV(self, dict_proba):
         self.probas_stationary_start_state_fv = dict_proba
+
+    def resetNumParticles(self):
+        self.N = self._N_at_construction
+
+    def resetNumTimeStepsForExpectation(self):
+        self.T = self._T_at_construction
 
     def resetAbsorptionSet(self):
         self.absorption_set = self._absorption_set_at_construction

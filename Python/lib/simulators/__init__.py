@@ -33,6 +33,8 @@ BURNIN_TIME_STEPS = 20
 # Default minimum number of observed cycles (under assumed stationarity) that should be used to estimate expectations under
 # stationarity (e.g. stationary probabilities, E(T) in Monte-Carlo, E(T_A) in Fleming-Viot)
 MIN_NUM_CYCLES_FOR_EXPECTATIONS = 5
+# Default maximum number of steps T for the initial exploration used to estimate the expected reabsorption time to A, E(T_A), when increasing T as the absorption set A increases
+MAX_NUMBER_OF_STEPS_FOR_EXPECTATION = 1000
 
 DEBUG_TRAJECTORIES = False
 
@@ -300,7 +302,7 @@ def choose_state_from_set(_set, dist_proba: dict=None):
     dist_proba: dict
         Dictionary indexed by the states in `_set`.
         When given, it must have the same number of elements as `_set`.
-        default: None
+        default: None, in which case the state is chosen uniformly at random among the states in the set
 
     Return: state in _set
     The state chosen from the set of states `_set`, which is chosen uniformly at random when dist_proba=None or
