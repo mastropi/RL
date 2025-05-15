@@ -20,10 +20,36 @@ import warnings
 import numpy as np
 import pandas as pd
 
+import gym
 from gym.envs.toy_text import discrete
 from gym import spaces
 
 #__all__ = [ 'EnvironmentDiscrete' ]
+
+
+class EnvironmentContinuous(gym.Env):
+    "Class defining general attributes and methods for environments with continuous states"
+    def __init__(self):
+        # Note that the gym.Env environment does NOT have a constructor!
+        self.state = None
+        self.seed = None
+
+    def set_seed(self, seed):
+        "Sets the numpy seed which is also stored in the environment"
+        self.seed = seed
+        np.random.seed(self.seed)
+
+    def get_seed(self):
+        return self.seed
+
+    def reset(self):
+        return NotImplementedError
+
+    def step(self, action):
+        return NotImplementedError
+
+    def render(self, mode='human'):
+        return NotImplementedError
 
 
 class EnvironmentDiscrete(discrete.DiscreteEnv):

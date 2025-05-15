@@ -361,8 +361,12 @@ def estimate_stationary_probabilities(dict_phi, df_proba_surv, expected_absorpti
     - the stationary probability of state x
     - the value of the integral P(T>t) * Phi(t, x)
    """
-    states = sorted(list(dict_phi.keys()))  # Note that sorted() still works when the keys, i.e. the elements of the list that is being sorted, are in turn a *list* of values
+    # DM-2025/05/12: The states of interest stored as keys of dict_phi are no longer sorted because an error is raised when the keys are sympy.Set objects,
+    # as is the case in the diffusion environment context (e.g. Ornstein-Uhlenbeck process used to model the grid frequency variability).
+    # I don't think sorting the states of interest is an important nor crucial step in the discrete-state environment case.
+    #states = sorted(list(dict_phi.keys()))  # Note that sorted() still works when the keys, i.e. the elements of the list that is being sorted, are in turn a *list* of values
                                             # (e.g. sorted( [(2, 2, 0), (1, 2, 3), (0, 1, 5)] ) returns [(0, 1, 5), (1, 2, 3), (2, 2, 0)]
+    states = list(dict_phi.keys())
     probas_stationary = dict()
     integrals = dict()
     for x in states:
@@ -382,11 +386,14 @@ def estimate_stationary_probabilities(dict_phi, df_proba_surv, expected_absorpti
                 ax = plt.gca()
                 ax.axhline(0, color="lightgray")
                 ax.step(df_phi_proba_surv['t'], df_phi_proba_surv['P(T>t)'], color="blue", where='post')
+                ax.set_xlabel("t")
+                ax.set_ylabel(r"$\mathbb{P}(T_{abs}>t)$")
                 ax2 = ax.twinx()
-                ax2.step(df_phi_proba_surv['t'], df_phi_proba_surv['Phi'], color="red", where='post')
+                ax2.step(df_phi_proba_surv['t'], df_phi_proba_surv['Phi'], color="darkviolet", where='post')
                 ax2.step(df_phi_proba_surv['t'], df_phi_proba_surv['Phi'] * df_phi_proba_surv['P(T>t)'], color="green", where='post')
                 ax2.set_ylim(ax.get_ylim())
-                plt.title("P(T>t) (blue) and Phi(t,x) (red) and their product (green) for state x = {}\n(Integral = Area under the green curve = {:.3f})".format(x, integrals[x]))
+                ax2.set_ylabel(r"$\mathbb{P}(X(t)=" + str(x) + " | T_{abs}>t)$")
+                plt.title("P(T>t) (blue) and Phi(t,x) (violet) and their product (green) for state x = {}\n(Integral = Area under the green curve = {:.3f})".format(x, integrals[x]))
 
     return probas_stationary, integrals
 

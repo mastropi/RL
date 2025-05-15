@@ -6,8 +6,9 @@ Created on Thu Jun 07 21:43:52 2020
 @description: Functions used to help in basic operations that are usually complicated in Python
 """
 
-import bisect   # To insert elements in order in a list (bisect.insort(list, element)
+import bisect  # To insert elements in order in a list (bisect.insort(list, element)
 import copy
+import inspect
 import os
 import sys
 import re
@@ -48,12 +49,15 @@ def measure_exec_time(func):
         if exec_time > 0: #> 1
             print("+++ Execution time for {}: {:.1f} hs = {:.1f} min = {:.1f} sec = {:.2f} msec (CPU: {:.1f} hs, {:.1f} min, {:.1f} sec, {:.2f} msec)" \
                   .format(func.__name__, exec_time/3600, exec_time/60, exec_time, exec_time*1000,
-                          cpu_time/3600,cpu_time/60, cpu_time, cpu_time*1000))
+                          cpu_time/3600, cpu_time/60, cpu_time, cpu_time*1000))
         return results
+
     return func_decorated
+
 
 def get_exception_message(e):
     return getattr(e, "message", str(e))
+
 
 def get_current_datetime_as_string(format=None):
     """
@@ -77,9 +81,11 @@ def get_current_datetime_as_string(format=None):
 
     return generate_datetime_string(format=format_strftime)
 
+
 def get_datetime_from_string(dt, format="%Y-%m-%d %H:%M:%S"):
     "Returns the datetime associated to a string in the given format"
     return datetime.datetime.strptime(dt, format)
+
 
 def generate_datetime_string(dt=None, format="%Y%m%d_%H%M%S", prefix="", suffix="", extension="", sep="_"):
     """
@@ -125,6 +131,7 @@ def generate_datetime_string(dt=None, format="%Y%m%d_%H%M%S", prefix="", suffix=
     dt_str = dt_str + extension
 
     return dt_str
+
 
 def log_file_open(path, subdir="", prefix="run", suffix="", use_datetime=True):
     """
@@ -188,6 +195,7 @@ def log_file_open(path, subdir="", prefix="run", suffix="", use_datetime=True):
 
     return dt_open, stdout_sys, stderr_sys, fh_log, logfile
 
+
 def log_file_close(fh_log, stdout_sys, stderr_sys, dt_open):
     """
     Closes a previously opened log file and re-establishes output to the given output handle `stdout_sys` (normally the standard output)
@@ -228,17 +236,21 @@ def log_file_close(fh_log, stdout_sys, stderr_sys, dt_open):
 
     return dt_close, time_elapsed
 
+
 def is_integer(x):
     "Returns whether the input parameter is an integer (i.e. either int, np.int32, np.int64)"
     return isinstance(x, (int, np.int32, np.int64))
+
 
 def is_float(x):
     "Returns whether the input parameter is a float number (i.e. either float, np.float32, np.float64)"
     return isinstance(x, (float, np.float32, np.float64))
 
+
 def is_scalar(x):
     "Returns whether the input parameter is a scalar (i.e. either int, np.int32, np.int64, float, np.float32, np.float64)"
     return is_integer(x) or is_float(x)
+
 
 def as_array(x):
     "Converts a scalar or list of values to a numpy array"
@@ -251,17 +263,19 @@ def as_array(x):
 
     return x
 
+
 def convert_str_argument_to_list_of_type(option, opt, value, parser, type=float):
     "Function to be used as callback by the optparse.OptionParser class when parsing a user argument that should be interpreted as a list of elements of the given `type` (e.g. '[3.0, 2.1]' or '3.0, 2.1')"
     # For debugging, uncomment the following print() lines:
-    #print(f"option: {type(option)}, {dir(option)}")
-    #print(f"opt: {opt}")
-    #print(f"value: {value}")
-    #print(f"parser: {parser}")
-    #print(f"parser.values: {parser.values}")
+    # print(f"option: {type(option)}, {dir(option)}")
+    # print(f"opt: {opt}")
+    # print(f"value: {value}")
+    # print(f"parser: {parser}")
+    # print(f"parser.values: {parser.values}")
     if isinstance(value, str):
         # Set the argument as a list of floats
         setattr(parser.values, option.dest, convert_str_to_list_of_type(value, type=type))
+
 
 def convert_str_to_list_of_type(str_value, sep="[, ]", type=float):
     """
@@ -271,15 +285,16 @@ def convert_str_to_list_of_type(str_value, sep="[, ]", type=float):
     It is assumed that the values in the string are convertible to the given number type.
     """
     str_value_as_list = [type(float(s.replace("[", "").replace("]", ""))) for s in re.split(sep, str_value) if len(s) > 0 and s not in ['[', ']']]
-        ## NOTES:
-        ## - We use type(float()) so that when type=int, the conversion of e.g. '3.48' returns 3 instead of an error!
-        ## (the reason is that int('3.48') gives an error whereas float('3.48') does NOT! so we first convert to float and then to integer)
-        ## - The `not in` condition is used because when the string is of the form e.g. '[3.48434049 4.9   ]',
-        ## then the last element of re.split() is ']' which cannot be converted to a number.
+    ## NOTES:
+    ## - We use type(float()) so that when type=int, the conversion of e.g. '3.48' returns 3 instead of an error!
+    ## (the reason is that int('3.48') gives an error whereas float('3.48') does NOT! so we first convert to float and then to integer)
+    ## - The `not in` condition is used because when the string is of the form e.g. '[3.48434049 4.9   ]',
+    ## then the last element of re.split() is ']' which cannot be converted to a number.
     if len(str_value_as_list) == 1:
         return str_value_as_list[0]
     else:
         return str_value_as_list
+
 
 def save_objects_to_pickle(object_names, filename, namespace, lib="joblib"):
     """
@@ -309,6 +324,7 @@ def save_objects_to_pickle(object_names, filename, namespace, lib="joblib"):
     else:
         import joblib
         joblib.dump(dict_objects_to_save, filename)
+
 
 def load_objects_from_pickle(filename, namespace, lib="joblib"):
     """
@@ -350,6 +366,17 @@ def load_objects_from_pickle(filename, namespace, lib="joblib"):
 
     return object_names
 
+
+def keep_dict_params_defined_in_function(dict_params, func):
+    """
+    Returns a dictionary that is a subset of the given dictionary `dict_params` obtained from its intersection
+    with the parameters defined in the given function `func`
+
+    Note that both positional and keyword parameters in `func` are retained in `dict_params` if present.
+    """
+    return dict([(k, dict_params[k]) for k in inspect.signature(func).parameters.keys() if k in dict_params])
+
+
 def parse_dict_params(dict_params, dict_params_default):
     """
     Parses a set of user parameters given as a dictionary by
@@ -377,7 +404,7 @@ def parse_dict_params(dict_params, dict_params_default):
     params
     {'a': {'w': -7, 'z': {'k': 2, 'y': "ok"}}, 'y': 3, 't_new': -13}  
     """
-    dict_params_keys = dict_params.keys() 
+    dict_params_keys = dict_params.keys()
     # Go over all keys in the default params dictionary
     # and recursively retrieve their value when the value is in turn a dictionary
     for key, value in dict_params_default.items():
@@ -386,6 +413,7 @@ def parse_dict_params(dict_params, dict_params_default):
         else:
             # Get the key from the user parameters and if not given, assign its default value 
             dict_params[key] = dict_params.get(key, dict_params_default[key])
+
 
 def show_exec_params(dict_params):
     "Shows the values of a set of parameters given in a dictionary, in alphabetical order of the keys"
@@ -396,11 +424,13 @@ def show_exec_params(dict_params):
         print("{}: {}".format(key, dict_params[key]))
     print("**************** Execution parameters ***********************")
 
+
 def set_numpy_options(edgeitems=+np.Inf, precision=3):
     "Sets numpy options to e.g. display numbers with a given number of decimals. The original options are returned in the options dictionary retrieved by np.get_printoptions()"
     dict_numpy_options = np.get_printoptions()
     np.set_printoptions(edgeitems=edgeitems, precision=precision, suppress=True)  # `suppress=True` means "show small results as 0 (i.e. suppress them)"
     return dict_numpy_options
+
 
 def reset_numpy_options(dict_numpy_options: dict):
     """
@@ -416,6 +446,7 @@ def reset_numpy_options(dict_numpy_options: dict):
     """
     np.set_printoptions(edgeitems=dict_numpy_options['edgeitems'], precision=dict_numpy_options['precision'], suppress=dict_numpy_options['suppress'])
 
+
 def set_pandas_options():
     "Sets pandas options to e.g. display all columns and all rows in a data frame"
     pandas_options = dict({'display.width': pd.get_option('display.width'),
@@ -427,6 +458,7 @@ def set_pandas_options():
     pd.set_option('display.max_rows', None)
 
     return pandas_options
+
 
 def reset_pandas_options(pandas_options: dict):
     """Resets pandas options to the ones given in the input dictionary
@@ -442,6 +474,7 @@ def reset_pandas_options(pandas_options: dict):
     pd.set_option('display.width', pandas_options['display.width'])
     pd.set_option('display.max_columns', pandas_options['display.max_columns'])
     pd.set_option('display.max_rows', pandas_options['display.max_rows'])
+
 
 def assert_equal_data_frames(df_observed, df_expected, columns, atol=1E-6, printFlag=False):
     """
@@ -479,10 +512,11 @@ def assert_equal_data_frames(df_observed, df_expected, columns, atol=1E-6, print
             if printFlag:
                 print(f"idx={idx}, observed={observed_value}, expected={expected_value}")
             assert is_scalar(observed_value) and is_scalar(expected_value) or \
-                    not is_scalar(observed_value) and len(observed_value) == 1 and is_scalar(expected_value) or \
-                    is_scalar(observed_value) and not is_scalar(expected_value) and len(expected_value) == 1 or \
-                    len(observed_value) == len(expected_value), "The observed and expected value have the same length"
+                   not is_scalar(observed_value) and len(observed_value) == 1 and is_scalar(expected_value) or \
+                   is_scalar(observed_value) and not is_scalar(expected_value) and len(expected_value) == 1 or \
+                   len(observed_value) == len(expected_value), "The observed and expected value have the same length"
             assert np.allclose(observed_value, expected_value, atol=atol, equal_nan=True), f"The observed and expected value are the same within an absolute tolerance of {atol}"
+
 
 def index_linear2multi(idx, shape, order='C'):
     """
@@ -517,12 +551,13 @@ def index_linear2multi(idx, shape, order='C'):
 
     if order == 'F':
         # Fortran-like order: by columns
-        x1, x2 = idx % n1, int( idx / n1 )
+        x1, x2 = idx % n1, int(idx / n1)
     else:
         # C-like order: by rows
-        x1, x2 = int( idx / n2 ), idx % n2
+        x1, x2 = int(idx / n2), idx % n2
 
     return int(x1), int(x2)
+
 
 def index_multi2linear(idx_2d, shape, order='C'):
     """
@@ -642,13 +677,13 @@ def deprecated_discretize(x, n, xmin, xmax):
     x = float(x)
 
     # Bound x into [xmin, xmax]
-    x_bounded = max( xmin, min(x , xmax) )
+    x_bounded = max(xmin, min(x, xmax))
 
     # Interval size
     dx = (xmax - xmin) / n
 
     # Discrete value (we consider the special case when x_bounded == xmax so that the value belongs to the rightmost interval)
-    x_discrete = (n - 1) if x_bounded == xmax else int( (x_bounded - xmin) / dx )
+    x_discrete = (n - 1) if x_bounded == xmax else int((x_bounded - xmin) / dx)
 
     assert isinstance(x_discrete, int), "The discretized value is an integer"
     assert 0 <= x_discrete < n, "The discretized value is between 0 and n-1={} ({})".format(n-1, x_discrete)
@@ -692,7 +727,7 @@ def array_of_objects(size, value=None, dtype=list):
             # Multi-dimensional array
             # Fill the values using a stacked version of the array
             # (so that the array can be filled regardless of its shape)
-            arr_stacked = arr.reshape( np.prod(size) )
+            arr_stacked = arr.reshape(np.prod(size))
             for idx in range(len(arr_stacked)):
                 # We store a COPY of `value` so that in case the value is immutable (e.g. a list)
                 # they don't share the same memory address and they can be changed without affecting the other entries of the array!
@@ -700,6 +735,7 @@ def array_of_objects(size, value=None, dtype=list):
             arr = arr_stacked.reshape(size)
 
     return arr
+
 
 def insort(alist, value, unique=False):
     """
@@ -746,6 +782,7 @@ def insort(alist, value, unique=False):
 
     return idx, found
 
+
 def find_signed_max_value(x):
     """
     Finds the maximum value in an array or list based on their absolute values and returns the maximum value found with its original sign
@@ -777,6 +814,7 @@ def find_signed_max_value(x):
 
     return max_signed_value
 
+
 def find(alist, value):
     """
     Returns all the indices in `alist` that are equal to `value`.
@@ -792,6 +830,7 @@ def find(alist, value):
     """
 
     return [i for i, v in enumerate(alist) if v == value]
+
 
 def find_first(alist, value):
     """
@@ -811,6 +850,7 @@ def find_first(alist, value):
             return i
     return -1
 
+
 def find_last(alist, value):
     """
     Returns the largest index in `alist` that is equal to `value`
@@ -828,6 +868,7 @@ def find_last(alist, value):
         if alist[i] == value:
             return i
     return -1
+
 
 def find_first_value_in_list(alist, value):
     """
@@ -847,6 +888,7 @@ def find_first_value_in_list(alist, value):
             return i
     return -1
 
+
 def find_last_value_in_list(alist, value):
     """
     Returns the largest index in `alist` (a list of lists) that contains `value`
@@ -864,6 +906,7 @@ def find_last_value_in_list(alist, value):
         if value in alist[i]:
             return i
     return -1
+
 
 # DM-2024/03/04: NOTE: there is also the np.searchsorted() function which tells us at what index a new element would be inserted in a sorted array, so essentially it does the same thing as this function...
 def find_smaller_and_closest_in_sorted_array(arr, value, check=False):
@@ -896,10 +939,11 @@ def find_smaller_and_closest_in_sorted_array(arr, value, check=False):
     arr = np.r_[arr, +np.Inf]
     return np.argmax(value < arr) - 1
 
-def list_contains_either(container :list, content):
+
+def list_contains_either(container: list, content):
     "Checks whether a list contains an element or at least one element of another list"
     if not isinstance(content, list):
-        content = [ content ]
+        content = [content]
 
     if container is not None:
         for elem in container:
@@ -907,6 +951,7 @@ def list_contains_either(container :list, content):
                 return True
 
     return False
+
 
 def merge_values_in_time(t1, y1, t2, y2, unique=False):
     """
@@ -997,7 +1042,7 @@ def merge_values_in_time(t1, y1, t2, y2, unique=False):
         y2_merged = y2.copy()
 
     # Insert values in the first pair of lists
-    ntimes_t0 = 0   # Counter to check that the number of time values equal to 0 is only one
+    ntimes_t0 = 0  # Counter to check that the number of time values equal to 0 is only one
     for t in t2:
         if t == 0:
             ntimes_t0 += 1
@@ -1010,7 +1055,7 @@ def merge_values_in_time(t1, y1, t2, y2, unique=False):
                 y1_merged.insert(idx_insort, y1_merged[idx_insort-1])
 
     # Insert values in the second pair of lists
-    ntimes_t0 = 0   # Counter to check that the number of time values equal to 0 is only one
+    ntimes_t0 = 0  # Counter to check that the number of time values equal to 0 is only one
     for t in t1:
         if t == 0:
             ntimes_t0 += 1
@@ -1031,6 +1076,7 @@ def merge_values_in_time(t1, y1, t2, y2, unique=False):
     #        .format(t1_merged, t2_merged)
 
     return t1_merged, y1_merged, y2_merged
+
 
 def aggregation_bygroups(df, groupvars, analvars,
                          stats=["count", "mean", "std", "min", "max"]):
@@ -1069,7 +1115,7 @@ def aggregation_bygroups(df, groupvars, analvars,
 
     # Create the groupby object
     df_grouped = df.groupby(groupvars, as_index=True, group_keys=False)
-        ## I don't know what's the effect of group_keys=False as I don't see any difference with group_keys=True
+    ## I don't know what's the effect of group_keys=False as I don't see any difference with group_keys=True
 
     # Aggregate the analysis variables
     df_agg = df_grouped[analvars].agg(stats)
@@ -1086,17 +1132,50 @@ def aggregation_bygroups(df, groupvars, analvars,
 
 
 if __name__ == "__main__":
+    #---------------- keep_dict_params_defined_in_function ------------#
+    print("\n--- keep_dict_params_defined_in_function() ---")
+    def func(x, a=3, b=4):
+        pass
+    def func_noparams():
+        pass
+
+    # Simple case
+    params = {'a': 3, 'b': 0, 'c': 5, 'x': 1}
+    params_func = keep_dict_params_defined_in_function(params, func)
+    print(params)
+    assert params_func == {'a': 3, 'b': 0, 'x': 1}
+
+    # Empty parameters
+    params = {}
+    params_func = keep_dict_params_defined_in_function(params, func)
+    print(params)
+    assert params_func == {}
+
+    # No intersection
+    params = {'y': 3, 'z': 8}
+    params_func = keep_dict_params_defined_in_function(params, func)
+    print(params)
+    assert params_func == {}
+
+    # No parameters in function
+    params = {'y': 3, 'z': 8}
+    params_func = keep_dict_params_defined_in_function(params, func_noparams)
+    print(params)
+    assert params_func == {}
+    #---------------- keep_dict_params_defined_in_function ------------#
+
+
     #---------------------- parse_dict_params -------------------------#
     print("\n--- parse_dict_params() ---")
     params = {'a': {'w': -7}, 't_new': -13, 't_new_dict': {'a': 2, 'b': {'c': 5, 'd': None}}}
-    params_default =  {'a': {'w': 8, 'z': {'k': 2, 'y': "ok"}},    # nested parameters
-                       'x': {'a': 2, 'f': 5},   # 'a' key is repeated in this nested dictionary
-                       'y': 3}
+    params_default = {'a': {'w': 8, 'z': {'k': 2, 'y': "ok"}},  # nested parameters
+                      'x': {'a': 2, 'f': 5},  # 'a' key is repeated in this nested dictionary
+                      'y': 3}
     parse_dict_params(params, params_default)
     print(params)
     # NOTE: The order of the keys in both compared dictionaries don't have any influence in the comparison, GREAT! :)
     assert params == {'a': {'w': -7, 'z': {'k': 2, 'y': "ok"}},
-                      'x': {'a': 2, 'f': 5}, 'y': 3, 
+                      'x': {'a': 2, 'f': 5}, 'y': 3,
                       't_new': -13, 't_new_dict': {'a': 2, 'b': {'c': 5, 'd': None}}}
     #---------------------- parse_dict_params -------------------------#
 
@@ -1106,11 +1185,11 @@ if __name__ == "__main__":
     print("\n--- index_multi2linear() and index_linear2multi() ---")
     # 2D matrix with linear indices as its values
     M = np.arange(12).reshape([4, 3])
-    assert index_multi2linear([2, 1], M.shape) == 7                 # This is the linear index in the by-column numbering of the 2D-cells in matrix M
+    assert index_multi2linear([2, 1], M.shape) == 7  # This is the linear index in the by-column numbering of the 2D-cells in matrix M
     assert index_linear2multi(7, M.shape) == (2, 1)
     assert index_linear2multi(6, M.shape) == (2, 0)
 
-    assert index_multi2linear([2, 1], M.shape, order='F') == 6      # This is the linear index in the by-column numbering of the 2D-cells in matrix M
+    assert index_multi2linear([2, 1], M.shape, order='F') == 6  # This is the linear index in the by-column numbering of the 2D-cells in matrix M
     assert index_linear2multi(6, M.shape, order='F') == (2, 1)
     assert index_linear2multi(7, M.shape, order='F') == (3, 1)
 
@@ -1187,7 +1266,7 @@ if __name__ == "__main__":
     assert find_signed_max_value(x) == 0
     #----------------------- find_signed_max_value --------------------#
 
-    
+
     #----------------- find_first/last_value_in_list ------------------#
     print("\n--- find_first/last_value_in_list() ---")
     ll = [[1, 3], ['A', 'B'], [3]]
@@ -1233,8 +1312,8 @@ if __name__ == "__main__":
     assert list_contains_either(container, content4)
     assert not list_contains_either(container, content5)
     #---------------------- list_contains_either  ---------------------#
-    
-    
+
+
     #-------------------- merge_values_in_time ------------------------#
     print("\n--- merge_values_in_time(): Test #1 on unique time values across series of different lengths")
     t1 = [0.0, 2.5, 3.2, 7.2, 11.3]
@@ -1248,7 +1327,7 @@ if __name__ == "__main__":
     print(np.c_[t, y1f, y2f])
     assert t == [0.0, 1.1, 2.5, 2.51, 2.87, 3.2, 3.3, 4.8, 6.9, 7.2, 11.3]
     assert y1f == [4, 4, 3, 3, 3, 2, 2, 2, 2, 1, 0]
-    assert y2f == [0, 0, 0, 1, 2, 2, 1, 1, 0, 0, 0]   
+    assert y2f == [0, 0, 0, 1, 2, 2, 1, 1, 0, 0, 0]
 
     #-------------------------
     print("\n--- merge_values_in_time(): Test #2 on UNIQUE time values WITHIN series but some common time values across series (UNIQUE=True)")
@@ -1284,8 +1363,8 @@ if __name__ == "__main__":
     print("\n--- merge_values_in_time(): Test #4 on REPEATED time values in the MIDDLE of each series and a few common time values across series (UNIQUE=True)")
     t1 = [0.0, 2.5, 2.5, 2.5, 3.2,   3.2, 3.2, 7.2, 11.3]
     y1 = [  4,   3,   2,   1,   4,     5,   6,   5,    4]
-    t2 = [0.0, 1.1, 2.5, 2.5, 2.87, 3.3, 4.8,  6.9, 7.5]
-    y2 = [  0,   0,   1,   3,    2,   1,   1,    0,   2]
+    t2 = [0.0, 1.1, 2.5, 2.5, 2.87, 3.3, 4.8,  6.9,  7.5]
+    y2 = [  0,   0,   1,   3,    2,   1,   1,    0,    2]
 
     t, y1f, y2f = merge_values_in_time(t1, y1, t2, y2, unique=True)
 
