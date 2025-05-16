@@ -248,7 +248,10 @@ def rewardOnJobRejection_ExponentialCost(env, state, action, next_state, dict_pa
         assert env.getBufferSizeFromState(state) == env.getBufferSizeFromState(next_state), \
             "At REJECT, the queue's buffer size after rejection ({}) is the same as before rejection ({})" \
             .format(env.getBufferSizeFromState(state), env.getBufferSizeFromState(next_state))
-        reward = -costBlockingExponential(env.getBufferSizeFromState(state), dict_params['buffer_size_ref'])
+        reward = -costBlockingExponential(env.getBufferSizeFromState(state), dict_params['buffer_size_ref'],
+                                          piecewise=dict_params.get('piecewise', False),
+                                          B=dict_params.get('B', 5.0),
+                                          b=dict_params.get('b', 3.0))
         assert reward <= 0.0, "The reward of job rejection must be negative or zero ({})".format(reward)
         return reward
     else:
@@ -256,37 +259,71 @@ def rewardOnJobRejection_ExponentialCost(env, state, action, next_state, dict_pa
         # => No reward
         return 0.0
 
-def costBlockingExponential(buffer_size: int, buffer_size_ref :int, debug=False):
+def costBlockingExponential(buffer_size: int, buffer_size_ref :int, piecewise=False, B=5.0, b=3.0, debug=False):
     """
-    Cost of blocking a job from entering a queue, modelled as exponentially increasing on the queue's buffer size, defined as:
-        C(s, a=block) = B (1 + b^(buffer_size - buffer_size_ref))
-    with B = 5.0, b = 3.0.
+    Cost of blocking a job from entering a queue, modelled as an exponentially increasing function of the queue's buffer size,
+    whose definition depends on parameter `piecewise`. as follows:
+    If piecewise = True: piecewise constant + exponential function
+        C(s, a) = (B I{s<=sref} + B*b**(buffer_size - buffer_size_ref) I{s>sref}) * I{a=block}
+    If piecewise = False: pure exponential function
+        C(s, a) = B (1 + b**(buffer_size - buffer_size_ref))
 
-    The minimum of the expected cost in the M/M/1/K queue is near `buffer_size_ref`, more specifically at `buffer_size_ref - shift`, where
-    shift = log( -log(rho) / (log(b) + log(rho)) ) / log(b)
+    The minimum of the expected cost in the M/M/1/K queue for the pure exponential cost case (piecewise=False)
+    and under the deterministic policy of rejecting at K, is very close to `buffer_size_ref`, more specifically at `buffer_size_ref - shift`,
+    as long as b > 1 / rho**(1 + rho) (rho = lambda / mu, the load of the queue), where
+        shift = log( -log(rho) / (log(b) + log(rho)) ) / log(b)
 
-    where rho is the system's load = lambda / mu, where lambda is the job arrival rate and mu is the service rate.
+    For example, when b = 3.0 and rho = 0.7, shift = 0.67, so if buffer_size_ref = 18, then the minimum is at K* = 17.33.
+
+    Note that for b <= 1 / rho**(1 + rho), the long-run expected cost associated to this exponential cost is trivial (i.e. K* = Inf).
+
+    Ref: Paper on FVRL submitted to QUESTA, after revision in Mar-2025 (see footnote in Section 4.1.2).
+
+    Arguments:
+    buffer_size: positive float
+        The buffer size at which the blocking cost should be computed.
+
+    buffer_size_ref: positive float
+        Reference buffer size defining the location of the minimum of the expected blocking cost in the M/M/1/K queue.
+
+    piecewise: bool
+        Whether the blocking cost is a piecewise function with a constant piece and an exponential piece (piecewise=True),
+        or a pure exponential function (piecewise=False).
+        default: False
+
+    B: positive float
+        Constant defining the minimum cost when `piecewise=True` and half the cost at buffer_size_ref when `piecewise=False`.
+        See the two possible cost expressions, C(s,a), above.
+        default: 5.0
+
+    b: positive float
+        Base of the exponential function that increases with the size of the queue at which an incoming job is blocked.
+        See the two possible cost expressions, C(s,a), above.
+        default: 3.0
     """
     # C(s, a=block): Cost function when action = "block"
     # Two options were considered during development of this function:
     # 1) Piecewise cost function (i.e. constant until sref, then exponentially increasing):
-    #       C(s, a=block) = B I{s<=sref} + B*b**(s-sref) I{s>sref}
+    #       C(s, a) = (B I{s<=sref} + B*b**(s - sref) I{s>sref}) * I{a=block}
     #
     # 2) Exponential cost function:
-    #       C(s, a=block) = B + B*b**(s-sref)
+    #       C(s, a) = (B + B*b**(s - sref)) * I{a=block}
     #
-    # In both cases the expected cost is given by (recall that there is only cost when action = "block"):
-    #       E(C(s,a)) = E( C(S(t), a=block) * I{A(t)=block} ) = C(s, a=block) * Pr(A(t)=block)
+    # In both cases, the long-run expected cost is given by:
+    #       lim_{t->Inf} E(C(S(t),A(t))) = lim_{t->Inf} E( C(S(t), A(t)) * I{A(t)=block} )
+    #                                    = lim_{t->Inf} E( C(S(t), A(t)) | A(t)=block ) * Pr(A(t)=block) (by definition of conditional expectation)
+    #                                    = P(A(t)=block) * sum_{s} p(s) C(s, a=block)
+    # where p(s) is the stationary probability at state s.
     #
     # Note that the buffer size at which the minimum of the expected cost is attained is different, as follows:
     # 1) The minimum is at sref.
-    # 2) The minimum is *near* sref, more precisely, if sref is large (making 1 - rho**(sref+1) ~= 1), the minimum is at:
+    # 2) The minimum is *near* sref, more precisely at:
     #       sref - shift
     #   where `shift` is a positive shift equal to:
-    #   shift = log( -log(rho) / (log(b) + log(rho)) ) / log(b)
-    #   which is a controlled shift (i.e. it doesn't go to infinity, as long as b is chosen larger away from 1/rho.
-    #   (e.g. b = 3.0 for rho = 0.7 suffices to get the shift equal to 0.666667)
-    #   (I wrote this in my orange Carrefour tiny notebook)
+    #       shift = log( -log(rho) / log(b*rho) ) / log(b)
+    #   which is a controlled shift (i.e. it doesn't go to -infinity, as long as b > 1/rho (which guarantees that the argument of the outer log is positive.
+    #   (e.g. b = 3.0 for rho = 0.7 then shift = 0.666667)
+    #   (I wrote this in my orange Carrefour tiny notebook, but see also the footnote in Section 4.1.2 of the revised paper to QUESTA submitted in Apr-2025.
     #
     # Code to generate the plot of the expected cost in both cases:
     #   B = 1; b = 3.0; sref = 3;
@@ -302,16 +339,14 @@ def costBlockingExponential(buffer_size: int, buffer_size_ref :int, debug=False)
     #   plt.plot(s, f, 'b-')
     #   plt.plot(s, g, 'r-')
     #   ax = plt.gca(); ax.set_ylim((0,2)); ax.set_xlabel("Blocking buffer size"); ax.set_ylabel("Expected cost")
-    B = 5.0     # Blocking associated just to the fact the queue is blocked
-    b = 3.0     # Base of the exponential function
-
-    # Option 1: Exponential cost ONLY when the buffer size is larger than `buffer_size_ref`, o.w. it is constant
-    #cost = B if buffer_size <= buffer_size_ref else B * b**(buffer_size - buffer_size_ref)
-    #if debug and cost != B:
-    #    print("The cost is in the exponential part (increasing with `buffer size - REF buffer size`): buffer={}, ref={}".format(buffer_size, buffer_size_ref))
-
-    # Option 2: Exponential cost
-    cost = B * (1 + b**(buffer_size - buffer_size_ref))
+    if piecewise:
+        # Option 1: Exponential cost ONLY when the buffer size is larger than `buffer_size_ref`, o.w. it is constant
+        cost = B if buffer_size <= buffer_size_ref else B * b**(buffer_size - buffer_size_ref)
+        if debug and cost != B:
+            print("The cost is obtained from the exponential contribution to the cost (that increases with `buffer size - REF buffer size`): buffer={}, ref={}".format(buffer_size, buffer_size_ref))
+    else:
+        # Option 2: Exponential cost
+        cost = B * (1 + b**(buffer_size - buffer_size_ref))
 
     if debug:
         print("Computed cost for buffer size = {} with sref = {} --> Cost = {:.3f}".format(buffer_size, buffer_size_ref, cost))
@@ -342,7 +377,7 @@ class GenericEnvQueueWithJobClasses(gym.Env):
         Dictionary containing non-standard parameters (i.e. besides the state, the action and the next state)
         on which the reward function `reward_func` depends on.
         Ex: dict_params_reward_func = {'buffer_size_ref': 20}
-        default: None, in which case the default parameter values are used
+        default: None, in which case the default parameter values (defined in the `reward_func` function) are used
     """
 
     def __init__(self, queue: QueueMM, buffer_type: BufferType,
@@ -849,3 +884,68 @@ class EnvQueueLossNetworkWithJobClasses(GenericEnvQueueWithJobClasses):
         self.setQueueState(job_class_occupancy)
         self.job_class = job_class
         self.state = (self.getQueueState(), self.job_class)
+
+
+if __name__ == "__main__":
+    #------------------------------ M/M/1: Plot the exponential cost function and the long-run expected blocking cost ---------------------#
+    import matplotlib.pyplot as plt
+    from Python.lib.utils.computing import stationary_distribution_product_form, func_prod_birthdeath
+
+    rho = 0.7
+    buffer_size_ref = 18.0
+    piecewise = False
+    B = 5.0
+    b = 3.0  #1/rho**2 #1/rho**(1 + rho) - 0.5  (Note: using b = 1/rho**2 gives the minimum expected cost exactly at buffer_size_ref!
+    thetas = np.linspace(0, 2*buffer_size_ref - 1, 100)
+    Ks = np.array(range(1, int(2*buffer_size_ref)), dtype=int)
+
+    f = [costBlockingExponential(K, buffer_size_ref, piecewise=piecewise, B=B, b=b) for K in Ks]  # Exponential cost
+    p = rho ** Ks * (1 - rho) / (1 - rho ** (Ks + 1))  # Blocking probability at K
+    g = [ff * pp for ff, pp in zip(f, p)]  # Expected cost = BlockingProbability * ExponentialCost
+
+    # Stationary probability for all
+    # p_stationary = [stationary_distribution_birth_death_process(1, int(np.ceil(theta)+1), [rho])[1] for theta in thetas]
+    p_stationary = [stationary_distribution_product_form(int(np.ceil(theta) + 1), [rho], func_prod_birthdeath)[1] for theta in thetas]
+
+    # Stationary probability at deterministic blocking K and at non-deterministic blocking K-1 (when using parameter theta which is a real value)
+    pblock_K = np.array([p[-1] for p in p_stationary])
+    pblock_Km1 = np.array([p[-2] for p in p_stationary])
+
+    # Adjusted probabilities by the non-deterministic blocking probability (due to parameter theta which can be a real number
+    pblock_K_adj = np.squeeze([pK * (1 - (int(np.ceil(theta) + 1) - 1 - theta)) for theta, pK in zip(thetas, pblock_K)])
+    pblock_Km1_adj = pblock_Km1
+    # The true long-run expected cost is:
+    # lim_{n->Inf} E(C(Xn,An)) = \sum_x{ p(x) \sum_a c(x,a) Pi(a|x) } = p(K-1) c(K-1, a=0) Pi(a=0 | x=K-1) + p(K) c(K, a=0) Pi(a=0 | x=K) = p(K-1) c(K-1) (K - 1 - theta) + p(K) c(K)
+    Vtrue = np.array([costBlockingExponential(int(np.ceil(theta) + 1), buffer_size_ref, piecewise=piecewise, B=B, b=b) * pK +
+                      costBlockingExponential((int(np.ceil(theta) + 1) - 1), buffer_size_ref, piecewise=piecewise, B=B, b=b) * (int(np.ceil(theta) + 1) - 1 - theta) * pKm1
+                      for theta, pK, pKm1 in zip(thetas, pblock_K_adj, pblock_Km1_adj)])
+
+    plt.figure()
+    plt.plot(Ks, f, 'm.-')
+    plt.plot(Ks, g, 'b.-')
+    plt.plot(Ks, p, 'k.-')
+    plt.plot(thetas, Vtrue, 'g.-')
+    plt.title('Theoretical cost structure for the single server queue (rho = 0.7)')
+    plt.legend(['Blocking cost as a function of K', 'Expected blocking cost as a function of K (if blocking only at K)',
+                'Expected blocking cost as a function of theta (non-deterministic blocking at K-1)'])
+    ax = plt.gca()
+    ax.set_ylim((0, 3 * min(f)))
+    ax.set_xlabel('theta or K')
+    ax.set_ylabel('Cost')
+
+    # 2025/04/08: For QUESTA paper
+    fontsize = 24
+    markersize = 12
+    plt.figure()
+    plt.plot(Ks, g, 'b.--', markersize=markersize)
+    plt.plot(thetas, Vtrue, 'm-', markersize=markersize)
+    plt.legend([r'Expected cost as a function of $K$', r'Expected cost as a function of $\theta$'], fontsize=np.floor(0.8 * fontsize), loc='upper center')
+    ax = plt.gca()
+    ax.set_xticks(np.linspace(0, max(Ks), max(Ks) + 1))
+    ax.tick_params(axis='both', labelsize=np.floor(0.6 * fontsize))
+    ax.set_ylim((0.9 * min(g), 3.1))
+    ax.set_yscale('log')
+    ax.set_xlabel(r'$\theta$ or $K$', fontsize=fontsize)
+    # ax.set_ylabel(r'Long-run expected cost: $\lim_{n \to \infty} \mathbb{E}^\pi \left\{ C(X_n, A_n) \right\}$', fontsize=fontsize)
+    ax.set_ylabel(r'Long-run expected cost, $\mathbb{E}^\pi(C)', fontsize=fontsize)
+    #------------------------------ M/M/1: Plot the exponential cost function and the long-run expected blocking cost ---------------------#

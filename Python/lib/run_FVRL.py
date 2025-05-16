@@ -4,6 +4,11 @@ Created on Sun Jul 11 08:42:57 2022
 
 @author: Daniel Mastropietro
 @description: Runs the FVRL algorithm to learn the optimum parameter of a parameterized policy.
+@notes: The process can be run either from a Unix command prompt (using `python <this-script> <parameters>`) or from an IDE.
+Only one method is run by the process, either FV (Fleming-Viot RL) or MC (Monte-Carlo RL), and FV should be run FIRST in order to generate the so-called
+benchmark file from where the number of steps used by FVRL at each policy learning step is retrieved when running the MC learning method.
+When running from an IDE, it is easier to run the process for each method on separate sessions --as the execution is simpler (just run the script)--
+and the execution parameters should be set as default parameters inside the parse_input_parameters() function at the line where parser.set_defaults() is called.
 """
 
 if __name__ == "__main__":
@@ -40,7 +45,7 @@ from Python.lib.simulators.queues import compute_nparticles_and_narrivals_for_fv
     LearningMode, SimulatorQueue
 
 from Python.lib.utils.basic import aggregation_bygroups, array_of_objects, convert_str_argument_to_list_of_type, \
-    convert_str_to_list_of_type, is_scalar, show_exec_params
+    convert_str_to_list_of_type, is_integer, is_scalar, show_exec_params
 from Python.lib.utils.computing import compute_blocking_probability_birth_death_process, compute_expected_cost_knapsack
 import Python.lib.utils.plotting as plotting
 
@@ -276,8 +281,12 @@ def compute_optimum_blocking_sizes_and_expected_cost(simul: SimulatorQueue, dict
         Default: min
 
     Return: tuple
-    Tuple with the following two elements:
-    - expected costs: a dictionary containing the expected cost (value) for each tuple corresponding to the blocking states (key)
+    Tuple with the following elements:
+    - expected costs: a dictionary containing the expected cost (value) for each tuple corresponding to the blocking states (key).
+    This value is only relevant in multi-class problems where different classes of job can arrive to the network system at different arrival rates.
+    And this is why the cost is *expected*, in the sense that it is a function of the "expected" class of the arriving next job whose arrival time is unknown.
+    For single-class arriving jobs, a list with one element containing the function of the blocking size that should be used to compute the blocking cost
+    is returned, as the blocking size K can be ANY value between 0 and infinity... therefore we cannot compute the cost for each of those values!
     - optimum blocking sizes: list of integers or list of lists containing the optimum blocking sizes based on the dict_params_environment['reward_func']
     (for single-buffer queue systems, in which we have a list of integers --e.g. [8]) or on the parameters defined in `dict_params_environment`
     (for systems with no buffer, i.e. loss networks, in which we have a list of lists -- e.g. [[4, 7, 10]]).
@@ -289,27 +298,32 @@ def compute_optimum_blocking_sizes_and_expected_cost(simul: SimulatorQueue, dict
     if simul.getEnv().getBufferType() == BufferType.SINGLE:
         print(f"Computing the optimum expected cost and set of optimum capacities (normaly one value) for a single-buffer queue system with "
               f"lambdas = {dict_params_environment.get('job_class_rates')}, mus = {dict_params_environment.get('service_rates')}, rhos = {rhos} and exponential reward function...")
-        assert dict_params_environment['reward_func'].__name__ == "rewardOnJobRejection_ExponentialCost", \
-            "The reward function is an exponential function of the blocking size: {}".format(dict_params_environment['reward_func'].__name__)
 
         # IMPORTANT: The following is only valid for the SINGLE-SERVER system.
         # In the single-buffer / single-server queue system we assume that:
         # - the reward function is the exponential function of the buffer size whose reference buffer size parameter is stored
         # in the 'buffer_size_ref' entry of dict_params_environment['reward_func_params'].
-        # - the optimum theta parameter for the acceptance policy is close to the reference buffer size parameter of such exponential reward function.
-        # Strictly speaking we should minimize the exponential function but it is not so evident how this should be implemented... (i.e. what functions I would use in Python to accomplish that)
-        # TODO: (2023/03/01) Find the optimum theta by minimizing the expected cost function based on the exponential cost for blocking. I could probably use an optimization package.
-        optimum_theta = dict_params_environment['reward_func_params']['buffer_size_ref']
-        optimum_K = get_deterministic_blocking_boundaries(simul.agent, optimum_theta)
-        assert is_scalar(optimum_K), "The optimum blocking sizes must be just one value and must be stored as a scalar: {}".format(optimum_K)
+        # - the optimum blocking size K value for the admission control policy is close to the reference buffer size parameter of such exponential reward function.
+        # The shift between the two values is specified in the documentation for costBlockingExponential() in environments/queues.py and in the paper we submitted to QUESTA
+        # in Apr-2025 (see footnote in Section 4.1.2).
+        if dict_params_environment['reward_func'].__name__ != "rewardOnJobRejection_ExponentialCost":
+            raise ValueError("The reward function must an exponential function of the blocking size, specifically it must be the function `rewardOnJobRejection_ExponentialCost()`: {}".format(dict_params_environment['reward_func'].__name__))
+        rho = rhos[0]
+        b = dict_params_environment['reward_func_params']['b']
+        buffer_size_opt_shift = np.log(-np.log(rho) / np.log(rho*b)) / np.log(b)
+        optimum_K = int(np.round( dict_params_environment['reward_func_params']['buffer_size_ref'] + buffer_size_opt_shift ))
         # Convert the optimum blocking sizes to a list because in general there may be more than one optimum
         # (for instance, in a no-buffer/loss-network system, this could be the case)
         # In addition, each element list is in turn a list which contains the blocking sizes for the different job classes,
         optimum_blocking_sizes = [[optimum_K]]
-        cost_at_optimum_K = -dict_params_environment['reward_func'](simul.getEnv(), (optimum_K, None), Actions.REJECT, (optimum_K, None))
+        cost_at_optimum_K = -dict_params_environment['reward_func'](simul.getEnv(), (optimum_K, None), Actions.REJECT, (optimum_K, None), dict_params=dict_params_environment['reward_func_params'])
+        expected_costs = [dict_params_environment['reward_func']]
+            ## (2025/04/14) We return the function of the blocking size K that defines the blocking cost. In fact, unlike in the loss network system where all possible blocking sizes are known,
+            ## here ANY blocking size K between 0 and infinity is possible, and it is not possible to compute the blocking cost for each of those values!
+            ## So we just return the function to compute the cost.
         # Stationary probability of x=K which is the only blocking state and thus, whne multiplied with the blocking cost at K, gives the expected cost
         pK = compute_blocking_probability_birth_death_process(rhos, optimum_K)
-        optimum_expected_cost =  pK * cost_at_optimum_K
+        optimum_expected_cost = pK * cost_at_optimum_K
         average_expected_cost = np.nan
         maximum_expected_cost = np.Inf
     elif simul.getEnv().getBufferType() == BufferType.NOBUFFER:
@@ -335,6 +349,7 @@ def compute_optimum_blocking_sizes_and_expected_cost(simul: SimulatorQueue, dict
         for k in sorted(expected_costs, key=lambda x: expected_costs[x])[-11:]:
             print(k, expected_costs[k])
     else:
+        expected_costs = []
         optimum_blocking_sizes = []
         optimum_expected_cost = np.nan
         average_expected_cost = np.nan
@@ -389,7 +404,7 @@ def parse_input_parameters(argv):
                                          "[--benchmark_datetime] "
                                          "[--clipping] "
                                          "[--clipping_value] "
-                                         "[--theta_ref] "
+                                         "[--sref] "
                                          "[--theta_true] "
                                          "[--theta_start] "
                                          "[--J_factor] "
@@ -434,10 +449,10 @@ def parse_input_parameters(argv):
                       type="float",
                       metavar="Clipping value",
                       help="Value to which the changes of the theta parameter during learning are clipped to [default: %default]")
-    parser.add_option("--theta_ref",
+    parser.add_option("--sref",
                       type="float",
-                      metavar="Reference theta value",
-                      help="Reference theta value used in the blocking cost function of the buffer size in single-buffer systems [default: %default]")
+                      metavar="Reference buffer size for admission control policies that are a function of the buffer size and where the rejection cost is an exponential function having `sref` as location parameter",
+                      help="Reference buffer size value used in the blocking cost function of the buffer size in single-buffer systems [default: %default]")
     parser.add_option("--theta_true",
                       action="callback",
                       callback=convert_str_argument_to_list_of_type,
@@ -516,22 +531,22 @@ def parse_input_parameters(argv):
     default_create_output_files = True
     parser.set_defaults(queue_system=default_queue_system,
                         method="FV", #"MC", #"FV",
-                        t_learn=30,
+                        t_learn=30, #30 #100
                         replications=20, #7, #20,
                         benchmark_filename="benchmark_fv.csv",  # Not used when benchmark_datetime is given (i.e. not empty or None)
                         benchmark_datetime=None, #"20230410_102003", #"20230409_163723",  # Format: "<yymmdd>_<hhmmss>". Use this parameter ONLY when method = "MC" and we want to automatically generate the benchmark filename to read the benchmark data from
                         clipping=False,
                         clipping_value=1.0,
-                        theta_ref=18, #COST_EXP_BUFFER_SIZE_REF (this value should coincide with the optimum K, meaning that the optimum theta (theta_true) is theta_ref - 1)
+                        sref=18, #COST_EXP_BUFFER_SIZE_REF (in general this value is a little bit larger than the optimum K, more precisely the optimum K is equal to sref + shift, where shift is described in the costBlockingExponential() in environments/queues.py)
                         theta_true=[3, 5], #17,          # Use this parameter ONLY when method = "MC" and we want to automatically generate the benchmark filename to read the benchmark data from
                         # TODO: (2023/03/19) Make the process work on a SINGLE-CLASS loss network
-                        theta_start=[0.1, 0.1], #28.1, #[0.1, 0.1],  # For loss-network: [4.1, 4.1] #[7.1, 7.1] #[3.1, 3.1] #[0.1, 0.1]
-                        J_factor=[0.5, 0.5], #[0.3, 0.5], #0.3, #[0.5, 0.5], #[0.3, 0.5]
+                        theta_start=28.1, #[4.9, 4.9], #[0.1, 0.1], #28.1, #[0.1, 0.1],  # For loss-network: [4.1, 4.1] #[7.1, 7.1] #[3.1, 3.1] #[0.1, 0.1]
+                        J_factor=0.3, #[0.5, 0.5], #[0.3, 0.5], #0.3, #[0.5, 0.5], #[0.3, 0.5]
                         use_exit_state_distribution_for_start_states=True,
                         N=np.nan if default_queue_system == "single-server" else 100, #400, #50, #200, #100, #500,
                         T=np.nan if default_queue_system == "single-server" else 500, #400, #500, #1000,
-                        error_rel_et=0.5 if default_queue_system == "single-server" else np.nan,
-                        error_rel_phi=0.5 if default_queue_system == "single-server" else np.nan,
+                        error_rel_et=0.2 if default_queue_system == "single-server" else np.nan,
+                        error_rel_phi=1.0 if default_queue_system == "single-server" else np.nan,
                         burnin_time_steps=10,   #10 #20
                         min_num_cycles_for_expectations=5,
                         seed=1317, #1313,  # 1317 #1717 #1313
@@ -552,7 +567,7 @@ def generate_parameter_string_for_filename(queue_system,
                                            capacity,
                                            blocking_costs,
                                            rhos,
-                                           theta_ref,
+                                           sref,
                                            theta_true,
                                            theta_start,
                                            J_factor,
@@ -563,11 +578,12 @@ def generate_parameter_string_for_filename(queue_system,
     if queue_system == "loss-network":
         params_str = learning_method.name + \
                      "-K={}-costs={}-rhos={},theta0={}-theta={}-J={}-NT={}-ProbStart={}" \
-                         .format(capacity, [int(c) for c in blocking_costs], rhos, theta_true, theta_start, J_factor, NT_values,
+                         .format(capacity, str([int(c) for c in blocking_costs]).replace(" ", ""), str(rhos).replace(" ", ""),
+                                 str(theta_true).replace(" ", ""), str(theta_start).replace(" ", ""), str(J_factor).replace(" ", ""), str(NT_values).replace(" ", ""),
                                  "None" if use_exit_state_distribution_for_start_states is None else "EXIT" if use_exit_state_distribution_for_start_states else "UNIFORM")
     else:
         params_str = learning_method.name + \
-                     "-theta_ref={}-theta={}-J={}-E={},{}".format(theta_ref, theta_start, J_factor, error_rel_phi, error_rel_et)
+                     "-sref={}-theta={}-J={}-E={},{}".format(sref, theta_start, J_factor, error_rel_phi, error_rel_et)
 
     return params_str
 
@@ -580,7 +596,7 @@ def show_execution_parameters(options):
     print("#replications={}".format(options.replications))
     print("clipping={}".format(options.clipping))
     print("clipping_value={}".format(options.clipping_value))
-    print("theta_ref={}".format(theta_ref))
+    print("sref={}".format(sref))
     print("theta_start={}".format(options.theta_start))
     print("J_factor={}".format(options.J_factor))
     print("use_exit_state_distribution_for_start_states={}".format(use_exit_state_distribution_for_start_states))
@@ -668,19 +684,19 @@ if __name__ == "__main__":
     nservers = len(service_rates)
 
     learning_method = LearningMethod.FV if options.method == "FV" else LearningMethod.MC
-    # NOTE: In unidimensional theta parameters and in blocking by buffer size systems, we the value of theta_ref from the input arguments of the script.
-    # In those cases the theta_ref value defines the reference value of the reward function that is an exponential function of the buffer size.
+    # NOTE: In unidimensional theta parameters and in blocking by buffer size systems, we set the value of sref from the input arguments of the script.
+    # In those cases the sref value defines the reference value of the reward function that is an exponential function of the buffer size.
     # In multidimensional theta parameters with blocking by job class (as opposed to blocking by buffer size)
-    # the theta_ref has no meaning, therefore we set it to a list of NaN, where the list has length equal to the dimension of the theta parameter to estimate.
+    # the sref has no meaning, therefore we set it to a list of NaN, where the list has length equal to the dimension of the theta parameter to estimate.
     if options.queue_system == "single-server":
-        theta_ref = options.theta_ref
+        sref = options.sref
         # The values of N (#particles) and T (#arrival events) are computed from the expected relative errors wished for the estimation of E(T_A) and Phi(t)
         N = np.nan; T = np.nan
         error_rel_phi = options.error_rel_phi
         error_rel_et = options.error_rel_et
         use_exit_state_distribution_for_start_states = None
     elif options.queue_system == "loss-network":
-        theta_ref = [np.nan]*len(job_class_rates)
+        sref = [np.nan]*len(job_class_rates)
         # Values of N (#particles) and T (#arrival events) to use for the simulation used to estimate stationary probabilities
         if learning_method.name == "MC":
             # This is ONLY used when there is no benchmark file or if it does not exist
@@ -696,8 +712,11 @@ if __name__ == "__main__":
     # Reward functions
     rewards_accept_by_job_class = [0.0] * len(job_class_rates)
     if options.queue_system == "single-server":
+        reward_func_params = dict({'buffer_size_ref': np.nan,     # The value of this parameter will be set at each simulation iteration run in the LOOP below
+                                   'piecewise': False,
+                                   'B': 5.0,
+                                   'b': 3.0})       # In order that the long-run expected cost has a non-trivial (i.e. finite) minimum, we should choose b > 1/rho^(1+rho) (see footnote in Section 4.1.2 of revised QUESTA paper submitted in Apr-2025)
         reward_func = rewardOnJobRejection_ExponentialCost
-        reward_func_params = dict({'buffer_size_ref': np.nan})   # The value of this parameter will be set at each simulation iteration run in the below LOOP
         policy_assignment_probabilities = [[1.0]] # For multi-server: [[0.5, 0.5, 0.0], [0.0, 0.5, 0.5]] )
     elif options.queue_system == "loss-network":
         reward_func = rewardOnJobRejection_ByClass
@@ -737,13 +756,13 @@ if __name__ == "__main__":
             # Notes:
             # - In the call below, we enclose some parameters in brackets because when the benchmark file is saved
             # those parameters are stored as a LIST of different values tried in the filename
-            # (see below when calling this function using e.g. theta_ref_values, etc.).
+            # (see below when calling this function using e.g. sref_values, etc.).
             # - NOT all parameters are used to generate the string of parameters. The parameters that are used depend
             # on the queue system (e.g. "single-server" or "loss-network").
             params_str = generate_parameter_string_for_filename(# System parameters
                                                                 options.queue_system, capacity, blocking_costs, rhos,
                                                                 # Policy parameters
-                                                                [theta_ref], options.theta_true, [options.theta_start],
+                                                                [sref], options.theta_true, [options.theta_start],
                                                                 # Learning parameters
                                                                 [options.J_factor], [[options.N, options.T]], error_rel_phi, error_rel_et,
                                                                 use_exit_state_distribution_for_start_states)
@@ -760,7 +779,7 @@ if __name__ == "__main__":
         plot_trajectories = False
         symbol = 'r-'
     fixed_window = False
-    alpha_start = 1.0  # / t_sim  # Use `/ t_sim` when using update of theta at each simulation step (i.e. LeaPolicyGradient.learn_update_theta_at_each_time_step() is called instead of LeaPolicyGradient.learn_update_theta_at_episode_end())
+    alpha_start = 1.0 #1.0 (loss network) #10.0 (single server)  # / t_sim  # Use `/ t_sim` when using update of theta at each simulation step (i.e. LeaPolicyGradient.learn_update_theta_at_each_time_step() is called instead of LeaPolicyGradient.learn_update_theta_at_episode_end())
     adjust_alpha = True  # True
     func_adjust_alpha = np.float # np.sqrt
     min_time_to_update_alpha = 0  # int(t_learn / 3)
@@ -829,14 +848,13 @@ if __name__ == "__main__":
     # These are defined here (even if we are running the simulation based on a benchmark file)
     # because these parameter values are used when naming the results file for both situations.
 
-    # In the non-benchmark case (i.e. FVRL) we run the learning method on each set of parameters defined here
-    # for as many replications defined as input argument.
-    # When defining the theta values we specify the blocking size K and we subtract 1. Recall that K = ceil(theta+1)
+    # In the non-benchmark case (i.e. FVRL) we run the learning method on each set of parameters defined here for as many replications defined as input argument.
+    # When defining the start value(s) for theta, we specify the starting blocking size K that we want to use and we subtract 1. Recall that K = ceil(theta+1)
     # So, if we want K = 35, we can set theta somewhere between 33+ and 34, so we define e.g. theta = 34.9 - 1
     # Note that the list of theta values can contain more than one value, in which case a simulation will be run for each of them
-    theta_ref_values = [theta_ref]  # [24.0 - 1] #[20.0 - 1]  # [32.0-1, 34.0-1, 36.0-1] #[10.0-1, 15.0-1, 20.0-1, 25.0-1, 30.0-1]  # 39.0
+    sref_values = [sref]
     theta_start_values = [options.theta_start]  # [34.9 - 1] #[30.0 - 1] #[20.0 - 1, 25.0 - 1]
-    # theta_ref_values = np.linspace(start=1.0, stop=20.0, num=20)
+    #sref_values = np.linspace(start=1.0, stop=20.0, num=20)
     J_factor_values = [options.J_factor]  # [0.2, 0.3, 0.5]  # [0.2, 0.3, 0.5, 0.7]
     NT_exponents = [0]  # [-2, -1, 0, 1]  # Exponents to consider for different N and T values as in exp(exponent)*N0, where N0 is the reference value to achieve a pre-specified relative error
     NT_values = [[N, T]] if not np.isnan(N) and not np.isnan(T) else None
@@ -850,17 +868,17 @@ if __name__ == "__main__":
     if benchmark_file is None:
         # Output variables of the simulation
         case = 0
-        ncases = len(theta_ref_values) * len(theta_start_values) * len(J_factor_values) * len(NT_exponents)
+        ncases = len(sref_values) * len(theta_start_values) * len(J_factor_values) * len(NT_exponents)
         theta_opt_values = [[np.nan] * options.replications] * ncases   # List of optimum theta values achieved by the learning algorithm for each replication in each parameter setting
         K_opt_values = [[np.nan] * options.replications] * ncases       # List of optimum K values where deterministic blocking occurs
         cost_opt_values = [[np.nan] * options.replications] * ncases    # List of optimum costs found by the learning algorithm
-        for i, theta_ref in enumerate(theta_ref_values):
-            # For single-buffer systems, store the value of theta_ref as parameter of the reward function because,
+        for i, sref in enumerate(sref_values):
+            # For single-buffer systems, store the value of sref as parameter of the reward function because,
             # in those systems, we use it in the next line to compute the TRUE optimum blocking sizes and the optimum expected cost.
             # In no-buffer systems (e.g. loss networks), the TRUE optimum blocking sizes and optimum expected cost are computed by brute force,
             # i.e. by trying all possible blocking sizes that can be tried on the system.
             if simul.getEnv().getBufferType() == BufferType.SINGLE:
-                dict_params['environment']['reward_func_params']['buffer_size_ref'] = theta_ref
+                dict_params['environment']['reward_func_params']['buffer_size_ref'] = sref
 
             # Compute the optimum blocking sizes and its respective expected cost, i.e. the one this optimization process optimizes
             expected_costs, K_true, cost_true, cost_mean, cost_max = compute_optimum_blocking_sizes_and_expected_cost(simul, dict_params['environment'])
@@ -873,8 +891,8 @@ if __name__ == "__main__":
                 ## HOWEVER: what happens in FVRL, when we have to choose J < K... and K = 0...?
                 ## TODO: (2023/03/01) Check if theta can be 0 when using FVRL to learn theta (because of what I just wrote in the line above)
 
-            print("\nSimulating with {} learning on a queue environment with reference theta {} and optimum theta (one less the deterministic blocking size) = {}..." \
-                .format(learning_method.name, theta_ref, theta_true))
+            print("\nSimulating with {} learning on a queue environment with reference buffer size {} and optimum theta (one less the optimum deterministic blocking size K) = {}..." \
+                .format(learning_method.name, sref, theta_true))
 
             # Set the number of learning steps to double the true theta value
             # Use this ONLY when looking at the MC method and running the learning process on several true theta values
@@ -979,7 +997,15 @@ if __name__ == "__main__":
             theta_true = convert_str_to_list_of_type(theta_true, type=int)  # Recall that the true theta values are always integer
             if simul.getEnv().getBufferType() == BufferType.SINGLE:
                 # Store the value of theta_true as parameter of the reward function because we use it below to compute the optimum blocking sizes and optimum expected cost
-                dict_params['environment']['reward_func_params']['buffer_size_ref'] = theta_true
+                b = dict_params['environment']['reward_func_params']['b']   # Base of the exponential function defining the blocking cost as a function of the buffer size (see costBlockingExponential() in environments/queues.py
+                K_true_shift = np.log(-np.log(rhos[0]) / np.log(rhos[0] * b)) / np.log(b)  # This is the difference `K* - sref`, where sref is an execution parameter of this script
+                assert is_integer(theta_true), f"The theta_true value must be of type `int`: {theta_true}"
+                dict_params['environment']['reward_func_params']['buffer_size_ref'] = theta_true + 1 - K_true_shift
+                    ## Recall that theta_true is an integer value, hence K_true = theta_true + 1
+                    ## Then, we need to subtract the shift between the true optimum K (K_true) and sref (buffer_size_ref in costBlockingExponential() in environments/queues.py)
+                    ## (i.e. subtract K* - sref, in order to retrieve sref from K*, since the shift = K* - sref => sref = K* - shift)
+                    ## because that gives as the value of the reference value `buffer_size_ref` to use in the exponential blocking cost function that yields
+                    ## the optimum blocking size given by the theta_true value considered here as true optimum theta (i.e. K_true = theta_true + 1).
             theta_true_values[idx_case] = theta_true
             theta_start = benchmark_groups['theta'].iloc[i]
             theta_start = convert_str_to_list_of_type(theta_start)
@@ -1058,7 +1084,7 @@ if __name__ == "__main__":
                                                             capacity,
                                                             blocking_costs,
                                                             rhos,
-                                                            theta_ref_values,
+                                                            sref_values,
                                                             theta_true,
                                                             theta_start_values,
                                                             J_factor_values,
@@ -1092,7 +1118,7 @@ if __name__ == "__main__":
     else:
         params_str = "-- No output file --"
 
-    if len(theta_ref_values) == 1:
+    if len(sref_values) == 1:
         if PLOT_GRADIENT and env_queue.getBufferType == BufferType.SINGLE:
             # Save the estimation of G(t) for the last learning step to a file
             # file_results_G = "G.csv"
@@ -1227,7 +1253,7 @@ if __name__ == "__main__":
             ax2.set_yscale('log')
             plt.title(title)
         elif options.plot:
-            # Plot the evolutoin of theta and of the expected cost
+            # Plot the evolution of theta and of the expected cost
             axes = plt.figure().subplots(1, 2)
             ax_params, ax_objective = axes
 
@@ -1338,6 +1364,9 @@ if __name__ == "__main__":
         The plots to show in the paper are generated.
         HOWEVER, THIS IS EXPECTED TO BE RUN MANUALLY AND BY PIECES, AS THE INPUT FILES CONTAINING THE RESULTS TO PLOT
         NEED TO BE CHANGED EVERY TIME WE WANT TO PLOT THE RESULTS.
+        
+        IMPORTANT: (2025/02/26) I think this piece of code is deprecated as a new script plot_FVRL.py was created in Nov-2022 to generate the plots,
+        at least those that are shown in papers. 
         """
         # Read the results from files and plot the MC and FV results on the same graph
         resultsdir = "E:/Daniel/Projects/PhD-RL-Toulouse/projects/RL-002-QueueBlocking/results/RL/" + options.queue_system

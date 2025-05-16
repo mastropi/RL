@@ -3,7 +3,9 @@
 Created on Sun Nov 14 10:59:13 2022
 
 @author: Daniel Mastropietro
-@description: Reads FVRL results and plots them
+@description: Reads FVRL results and plots them.
+@usage: Run the file as a script so that the necessary packages and path setup are run until the `raise KeyboardInterrupt` is found.
+Then, run the section for the problem we want to generate the plot for (e.g. "Single Server" or "Loss Network").
 """
 
 import runpy
@@ -32,11 +34,13 @@ def percentile(n):
     percentile_.__name__ = 'percentile_{:.0f}'.format(n)
     return percentile_
 
+
 def plot_curves(ax, results, color="blue", linewidth=0.3):
     for r in np.unique(results.replication):
         toplot = results[results.replication == r].reset_index(drop=True)
         ax.plot(np.r_[0, toplot.t_learn], np.r_[toplot.theta[0], toplot.theta],
                 color=color, linewidth=linewidth)
+
 
 def plot_two_bands(fig, ax, df_agg, percentiles_low, percentiles_upp, alphas, linecolor, marker=".", markersize=5, param_var='theta',
                    ymin=-1.1, ymax=None, ref=None, ylabel="theta(s)", plot_median=True, plot_mean=False,
@@ -91,7 +95,8 @@ def plot_two_bands(fig, ax, df_agg, percentiles_low, percentiles_upp, alphas, li
                     labels=legend_labels,
                     fontsize=fontsize)
 
-    return line_median, line_mean, fill_between_1, fill_between_2, legend_obj_fill2, ref_line, legend_obj
+    return line_median, line_mean, fill_between_1, fill_between_2, legend_obj_fill2, ref_line, legend_obj, legend_labels
+
 
 def finalize_plot(fig, ax, method, ymin=-1.1, ymax=None, ref=None, ylabel=r"$\theta$(s)", title="", show_title=True, fontsize=15):
     ax.set_xlabel("Learning step", fontsize=fontsize)
@@ -121,6 +126,7 @@ def finalize_plot(fig, ax, method, ymin=-1.1, ymax=None, ref=None, ylabel=r"$\th
         # This can be used to add reference lines, such as the true values of estimated parameters
         ref_line = ax.axhline(ref, color="gray", linestyle="dashed")
         return ref_line
+
 
 def plot_expected_costs_2d(expected_costs, colormap="jet", type="img", axes_content="theta"):
     """
@@ -188,33 +194,45 @@ def plot_expected_costs_2d(expected_costs, colormap="jet", type="img", axes_cont
 
     return handle, ax
 
-#raise KeyboardInterrupt
-
+raise KeyboardInterrupt
 #------------------------ Auxiliary functions ------------------------
 
 
 #---------------------------- Single Server --------------------------
-resultsdir = "../../RL-002-QueueBlocking/results/RL/single-server"
+# First import packages at the beginning
+#os.chdir("./Python/lib")    # If necessary to change to the location of the current file when not run as a script
+resultsdir = os.path.realpath("../../RL-002-QueueBlocking/results/RL/single-server")
 figuresdir = resultsdir
-
+print(f"Results will be read from the following directory:\n{resultsdir}")
 
 #-- Execution parameters whose results should be read
 # The values of the execution parameters are present in the names of the result files
 # They ALL need to be lists. When saving the generated plot to a file, we should list only ONE value in the list (because we select the first value to be stored in the filename)
-theta_true_values = [18.0] #[23.0] #[18.0]
+buffer_size_ref_values = [18.0] #[23.0] #[18.0]
 theta_start_values = [28.1] #[34.1] #[28.1]
 J_factor_values = [0.3] #[0.3] #[0.5]
-error_rel_phi = [0.2] #[1.0] #[0.2]
-error_rel_et = [1.0] #[1.0] #[0.2]
+error_rel_phi = [1.0] #[1.0] #[0.2]
+error_rel_et = [0.2] #[1.0] #[0.2]
 suffix = "" #"-DecreasingAlpha"
 
 # Read the results
+# Apr-2025: Different tests run on different adjustment strategies of the learning rate alpha (e.g. 1/n, 1/sqrt(n), etc.)
+#results_file_fv = os.path.join(resultsdir, "SimulatorQueue_20230320_010404_FV-theta0=[18]-theta=[28.1]-J=[0.3]-E=[0.5],[0.5].csv"); sep = "|"
+#results_file_fv = os.path.join(resultsdir, "SimulatorQueue_20250414_164353_FV-theta_ref=[18]-theta=[28.1]-J=[0.3]-E=[1.0],[0.2].csv"); sep = "|"    # alpha = 1 / n
+#results_file_fv = os.path.join(resultsdir, "SimulatorQueue_20250414_223106_FV-theta_ref=[18]-theta=[28.1]-J=[0.3]-E=[1.0],[0.2].csv"); sep = "|"    # alpha = 1 / sqrt(n)
+#results_file_fv = os.path.join(resultsdir, "SimulatorQueue_20250414_175630_FV-theta_ref=[18]-theta=[28.1]-J=[0.3]-E=[1.0],[0.2].csv"); sep = "|"    # alpha = 10 / n
+#results_file_fv = os.path.join(resultsdir, "SimulatorQueue_20250414_181315_FV-theta_ref=[18]-theta=[28.1]-J=[0.3]-E=[1.0],[0.2].csv"); sep = "|"    # alpha = 10 / sqrt(n)
+# NOTE that in the file naming convention below, theta0 refers to the value that is close to the optimum K value (K* = theta0 - shift), NOT the optimum theta value.
+# (For the value of `shift` see the `buffer_size_opt_shift` variable defined below, and its explanation in the costBlockingExponential() function in environments/queues.py
+# or in the revised QUESTA paper submitted in Apr-2025.)
+# So the naming convention is unfortunate, as it might be confusing as to what is the actual optimum theta value (to make it clear, this is equal to theta0 - shift - 1,
+# as defined below when defining the `theta_opt_true` variable.
 results_file_fv = os.path.join(resultsdir, "SimulatorQueue_FV-theta0={}-theta={}-J={}-E={},{}{}.csv" \
-                                            .format(theta_true_values, theta_start_values, J_factor_values, error_rel_phi, error_rel_et, suffix))
+                                            .format(buffer_size_ref_values, theta_start_values, J_factor_values, error_rel_phi, error_rel_et, suffix)); sep = ","
 results_file_mc = os.path.join(resultsdir, "SimulatorQueue_MC-theta0={}-theta={}-J={}-E={},{}{}.csv" \
-                                            .format(theta_true_values, theta_start_values, J_factor_values, error_rel_phi, error_rel_et, suffix))
-results = dict({'fv': pd.read_csv(results_file_fv),
-                'mc': pd.read_csv(results_file_mc)})
+                                            .format(buffer_size_ref_values, theta_start_values, J_factor_values, error_rel_phi, error_rel_et, suffix)); sep =","
+results = dict({'fv': pd.read_csv(results_file_fv, sep=sep),
+                'mc': pd.read_csv(results_file_mc, sep=sep)})
 
 
 #----- Plot
@@ -229,8 +247,30 @@ markers = dict({'fv': "o", 'mc': "d"})
 color_normalization = matplotlib.colors.Normalize()    # matplotlib.colors.LogNorm()
 plot_each_curve = False  # Whether to plot each learning curve in the bands plot as well
 plot_all_methods_in_same_plot = True
+plot_median = True
+plot_mean = True
 savefig = True
 show_title = not savefig
+
+n_replications = max(results['fv'].replication)
+
+# Shift that allows us to go from the `buffer_size_ref` value to the optimum K value, K*.
+# Notes about the shift and the optimum theta:
+# 1) In most choices of the exponential base `b`, this shift is negative making K* a little smaller than `buffer_size_ref`, the reference buffer size used as shift of the exponential cost function.
+# For example, for rho = 0.7, b = 3.0 the shift value is -0.67 (i.e. K* is 0.67 smaller than `buffer_size_ref`).
+# Note however that there is a range of values of b (specifically between 1/rho**(1 + rho) and 1/rho**2) for which the shift is positive,
+# making K* LARGER than `buffer_size_ref`. The largest possible shift to the right is achieved when b = 1/rho**(1 + rho), in which case the shift is +1/(1+rho).
+# 2) As b tends to infinity, we can easily see that the shift tends to 0 again, from the left of `buffer_size_ref`, but this tendency is usually very slow, as it goes as log(log(b))/log(b).
+# 3) The optimum theta is ALWAYS set to an integer value, so that we can easily deduce the value of the optimum blocking size K as K = theta + 1, and avoid rounding steps.
+rho = 0.7   # queue load (rho = lambda / mu)
+b = 3.0     # base of the exponential function defining the exponentially increasing blocking cost with blocking size K (see costBlockingExponential() in environments/queues.py)
+buffer_size_opt_shift = np.log( -np.log(rho) / np.log(rho*b) ) / np.log(b)
+title_params = "Optimum theta = {}, Theta start = {}, J/K = {}, Rel. Error Phi = {}%, Rel. Error E(T_A) = {}%" \
+                 .format([np.round(buffer_size_ref + buffer_size_opt_shift - 1) for buffer_size_ref in buffer_size_ref_values], theta_start_values, J_factor_values, [e*100 for e in error_rel_phi], [e*100 for e in error_rel_et]) + \
+               (suffix == "" and "\n(constant learning rate alpha on " or suffix and "\n(decreasing learning rate alpha on ") + "{} replications)".format(n_replications)
+
+#theta_max = np.max([ max(results['fv'].theta), max(results['mc'].theta) ])
+theta_max = 35
 
 # fig1: histogram of curves location at each learning step
 # fig2: median and mean at each learning step with percentile bands
@@ -246,14 +286,9 @@ else:
 axes1 = fig1.subplots(*fig_layout)
 axes2 = fig2.subplots(*fig_layout)
 
-n_replications = max(results['fv'].replication)
-#theta_max = np.max([ max(results['fv'].theta), max(results['mc'].theta) ])
-theta_max = 35
-title_params = "Optimum theta = {}, Theta start = {}, J/K = {}, Rel. Error Phi = {}%, Rel. Error E(T_A) = {}%" \
-                 .format([theta - 1 for theta in theta_true_values], theta_start_values, J_factor_values, [e*100 for e in error_rel_phi], [e*100 for e in error_rel_et]) + \
-               (suffix == "" and "\n(constant learning rate alpha on " or suffix and "\n(decreasing learning rate alpha on ") + "{} replications)".format(n_replications)
 if plot_all_methods_in_same_plot:
     legend_obj = []
+    legend_labels = []
 for i, method in enumerate(results.keys()):
     if plot_all_methods_in_same_plot:
         ax1 = axes1
@@ -262,9 +297,9 @@ for i, method in enumerate(results.keys()):
         ax1 = axes1[i]
         ax2 = axes2[i]
 
-    theta_opt_true = theta_true_values[0] - 1   # IMPORTANT: We subtract 1 because recall that the optimum theta is not precisely `theta_true`,
-                                                # as this value is actually theta_ref, the sref value on which the exponential cost is centered.
-                                                # For more details see the notes in the costBlockingExponential() function in environments/queues.py
+    # Optimum theta value (note that we subtract 1 because the optimum theta is one less the optimum blocking size K)
+    theta_opt_true = np.round( buffer_size_ref_values[0] + buffer_size_opt_shift - 1 )
+
     linecolor = colormaps[method].lower()[:-1]  # e.g. "Greens" -> "green"
 
     #-- Distribution of theta values by learning step (t_learn)
@@ -324,7 +359,7 @@ for i, method in enumerate(results.keys()):
         cbar.set_label("% curves", fontsize=fontsize)
     # If we want to add vertical lines to indicate each t_learn value... but it usually becomes too clumsy
     #ax.vlines(results[method].t_learn, 0, ax.get_ylim()[1], colors="gray", linewidth=0.1)
-    ref_line = finalize_plot(fig1, ax1, method, ymax=theta_max*1.1, ref=theta_opt_true, ylabel="theta", title="" if savefig else title_params, show_title=not plot_all_methods_in_same_plot, fontsize=fontsize)
+    ref_line = finalize_plot(fig1, ax1, method, ymax=theta_max*1.1, ref=theta_opt_true, ylabel=r"$\theta$", title="" if savefig else title_params, show_title=not plot_all_methods_in_same_plot, fontsize=fontsize)
                 ## NOTE: We do NOT include the title when saving the plot because the file is intended to be inserted into a document, where this technical title should not be shown
 
     if plot_each_curve:
@@ -337,8 +372,12 @@ for i, method in enumerate(results.keys()):
     if not plot_all_methods_in_same_plot:
         # Reset the legend to empty if the results for the two methods are shown on separate plots
         legend_obj = []
-    line_median, line_mean, fill_between_1, fill_between_2, legend_obj_fill2, ref_line, legend_obj = plot_two_bands(fig2, ax2, results_grp_agg, percentiles_low, percentiles_upp, alphas, linecolor, marker=markers[method],
-                    ymax=theta_max*1.1, ref=theta_opt_true, ylabel="theta", legend_obj=legend_obj, show_legend=not plot_all_methods_in_same_plot, title="" if savefig else title_params, show_title=not plot_all_methods_in_same_plot, fontsize=fontsize)
+        legend_labels = []
+    line_median, line_mean, fill_between_1, fill_between_2, legend_obj_fill2, ref_line, legend_obj, legend_labels = \
+        plot_two_bands( fig2, ax2, results_grp_agg, percentiles_low, percentiles_upp, alphas, linecolor, marker=markers[method],
+                        ymax=theta_max*1.1, ref=theta_opt_true, ylabel=r"$\theta$",
+                        plot_median=plot_median, plot_mean=plot_mean,
+                        legend_obj=legend_obj, legend_labels=legend_labels, show_legend=not plot_all_methods_in_same_plot, title="" if savefig else title_params, show_title=not plot_all_methods_in_same_plot, fontsize=fontsize)
             ## NOTE: We do NOT include the title when saving the plot because the file is intended to be inserted into a document, where this technical title should not be shown
 
     if plot_each_curve:
@@ -375,15 +414,17 @@ if savefig:
 
 #---------------------------- Loss Network --------------------------
 # First import packages at the beginning
-resultsdir = "../../RL-002-QueueBlocking/results/RL/loss-network"
+#os.chdir("./Python/lib")    # If necessary to change to the location of the current file when not run as a script
+resultsdir = os.path.realpath("../../RL-002-QueueBlocking/results/RL/loss-network")
 figuresdir = resultsdir
+print(f"Results will be read from the following directory:\n{resultsdir}")
 
 # Parameters of the simulation to plot
 K = 6
 blocking_costs = [int(2E3), int(2E5)] #[2E3, 2E5] #[1920, 19753] #[183, 617]
 rhos = [0.3, 0.1] #[0.8, 0.6] #[0.5, 0.3] #[0.8, 0.6]
 lambdas = [1, 5]
-theta_start = [0.1, 0.1]
+theta_start = [0.1, 0.1]  #[4.9, 4.9]
 theta_min = 0.0 #-1     # This is used to define the lower limit of the Y-axis in the plots and is defined by the THETA_MIN value used when learning (see THETA_MIN global variable defined in policies.py)
 J_factors = [0.5, 0.5] #[0.3, 0.5] #[0.5, 0.5]
 NT_values = [100, 500] #[200, 400] #[200, 500] #[100, 500]
@@ -421,6 +462,7 @@ symbols = dict({'1-true': 'b-', '2-fv': 'g-', '3-mc': 'r-'})
 theta_plotted_separately = False #True     # Make a separate plot for each theta dimension (for clearer visualization)
 savefig = False
 show_title = False #not savefig
+
 
 #----- 1) Plot the evolution of theta and of the expected cost
 # We plot FV and MC side by side
