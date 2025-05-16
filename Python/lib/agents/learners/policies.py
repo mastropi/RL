@@ -540,7 +540,7 @@ class LeaPolicyGradient(GenericLearner):
     def learn_linear_theoretical_from_estimated_values(self, T, probas_stationary, Q_values):
         """
         Learns the policy by updating the theta parameter using gradient ascent and estimating the gradient
-        from the theoretical expression of the gradient in the linear step policy (only applies for this type of policy!),
+        from the theoretical expression of the gradient of the average reward (grad(V)) in the linear step policy (only applies for this type of policy!),
         namely:
 
         grad(V) = sum_x{ Pr(x) * ( Q(x,1) - Q(x,0) )}
@@ -570,7 +570,8 @@ class LeaPolicyGradient(GenericLearner):
         (when the acceptance policy blocks based on job-class occupancy of the arriving job class).
         - Q_mean: dictionary indexed by each state of interest where the estimated stationary probability is > 0 with
         the average of the two state-action values (just to return something as it is not really meaningful).
-        - gradV: gradient of the value function responsible for the update on theta.
+        - gradV: gradient of the value function responsible for the update on theta (typically this is the gradient of the average reward,
+        so we should not call it value function, but this is how it was called initially, and the name is used elsewhere in the code base).
         - Q_diff: same as Q_mean but the values stored are the difference in the state-action values for each state.
         """
         #---- Auxiliary functions -----
@@ -600,10 +601,17 @@ class LeaPolicyGradient(GenericLearner):
         else:
             Ks = [self.policy.getDeterministicBlockingValue()]
 
-        # Estimated grad(V)
+        # Estimated grad(V) = grad(J) in Sutton = gradient of the long-run expected reward, usually called rho.
         gradV = np.zeros(self.getNumPolicies()) if self.is_multi_policy else np.array([0.0])
             ## Note: For single policy learners we still define the gradient as an array in order to define a common code below
             ## that works both for the multidimensional theta case and the unidimensional theta case.
+        # DM-2025/02: Use the following definition of the fisher_information_matrix_diagonal if we want to perform the natural gradient update of theta in the multidiensional case.
+        # See below for more details.
+        #if not self.is_theta_unidimensional(theta):
+        #    # Fisher information matrix that is used in the multidimensional case in order to apply the natural policy gradient algorithm
+        #    # Note that, in the linear step policy, the Fisher information matrix (FIM) is diagonal, so here we just store the values on the diagonal,
+        #    # which default to 1, as that value gives the standard gradient.
+        #    fisher_information_matrix_diagonal = np.ones(len(theta))
         # Create the dictionaries that will contain the information about the average Q and the Q difference between the two possible actions for each state or buffer size
         Q_mean = dict()
         Q_diff = dict()
@@ -631,6 +639,20 @@ class LeaPolicyGradient(GenericLearner):
                         Q_mean[x] = 0.5 * (Q_values[x][1] + Q_values[x][0])
                         Q_diff[x] = Q_values[x][1] - Q_values[x][0]
                         gradV[i] += p * Q_diff[x]
+                        # DM-2025/02: In the context of revising the paper submitted to QUESTA, I implemented the natural gradient update of theta for the multidimensional case (loss network receiving multiple job classes)
+                        # While this is an interesting approach, it didn't solve the global convergence property we were looking after, so for now I disable it
+                        # (in order to avoid changing the results obtained when running the code again in the spirit of reproducing the results presented in the paper).
+                        #if self.is_theta_unidimensional(theta):
+                        #    # Unidimensional case
+                        #    gradV[i] += p * Q_diff[x]
+                        #else:
+                        #    # Multidimensional case
+                        #    # => We use the Natural Policy Gradient algorithm
+                        #    # (the term multiplying at the end is the inverse of the Fisher matrix, which is diagonal in this linear step policy case)
+                        #    # Update the Fisher information matrix for the entry associated to the current incoming job class
+                        #    _delta_x_theta = x[i] - theta[i]
+                        #    fisher_information_matrix_diagonal[i] = _delta_x_theta * (1 - _delta_x_theta)
+                        #    gradV[i] += p * Q_diff[x] * fisher_information_matrix_diagonal[i]
                     # DM-2022/10/30: This is a test to use the estimated probability as 1.0 (idea suggested by Urtzi/Matt on 19-Oct-2022 for the single-server queue system stating that the
                     # resulting algorithm is a stochastic approximation algorithm and therefore should converge if alpha is decreased)
                     #if x in Q_values.keys():
@@ -694,6 +716,9 @@ class LeaPolicyGradient(GenericLearner):
                 assert isinstance(theta, np.ndarray), "The theta parameter must be an array for multidimensional theta parameters: {}".format(theta)
                 assert isinstance(gradV, np.ndarray), "The gradV object storing the policy gradient must be an array for multidimensional theta parameters: {}".format(gradV)
                 alpha = self.getLearningRate()
+                # DM-2025/02: The following is used in the context of the natural gradient update of theta in the multidimensional case (wee above for more detailsu under comments with "DM-2025/02")
+                #_max_KL = 0.005   # Maximum K-L divergence allowed for the policy update to be performed now (Ref: https://agustinus.kristia.de/blog/natural-gradient)
+                #alpha = np.sqrt( 2*_max_KL / np.sum(gradV**2 * fisher_information_matrix_diagonal) )
 
                 gradV_norm = np.linalg.norm(gradV)
                 nonzero_gradV_components = [np.abs(v) for v in gradV if v != 0.0]
