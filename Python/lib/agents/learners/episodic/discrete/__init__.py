@@ -350,13 +350,12 @@ class Learner(GenericLearner):
                           f"and if so, whether the reset() method is defined for the object containing the action value function.")
             print(e)
 
-    def _update_trajectory(self, t, state, action, reward):
-        "Updates the trajectory of the CURRENT episode"
+    def _update_trajectory_and_average_reward(self, t, state, action, reward):
+        "Updates the trajectory of the CURRENT episode and the average reward observed so far in the episode"
         self._times += [t]
         self._states += [state]
         self._actions += [action]
         self._rewards += [reward]
-        # TODO: (2024/05/21) It would be good to, at some point, disentangle the update of the average reward from the trajectory update because they are two different concepts. However, this change will require important changes in Learners code (e.g. learn() method) when calling update_trajectory().
         self._update_average_reward()
 
     def _update_state_counts(self, t, state):

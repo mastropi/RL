@@ -30,7 +30,7 @@ from Python.lib.estimators.fv import initialize_phi, update_phi, estimate_statio
 
 from Python.lib.simulators import BURNIN_TIME_STEPS, MIN_NUM_CYCLES_FOR_EXPECTATIONS, DEBUG_TRAJECTORIES, \
     analyze_event_times, check_done, choose_state_from_setofstates_based_on_distribution, parse_simulation_parameters, \
-    show_messages, step, update_trajectory, SetOfStates
+    show_messages, step, update_trajectory_and_average_reward, SetOfStates
 from Python.lib.simulators.discrete import Simulator
 from Python.lib.simulators.fv import ReactivateMethod, reactivate_particle
 from Python.lib.queues import Event, QueueMM
@@ -826,7 +826,7 @@ class SimulatorQueue(Simulator):
                 # S(t): state BEFORE an action is taken
                 # A(t): action taken given the state S(t)
                 # R(t): reward received by taking action A(t) and transition to S(t+1)
-                update_trajectory(agent, (t_learn - 1) * (t_max + 1) + t, t, state, action, reward)
+                update_trajectory_and_average_reward(agent, (t_learn - 1) * (t_max + 1) + t, t, state, action, reward)
 
                 done = check_done(t_max, t, state, action, reward)
             elif event == Event.DEATH:
@@ -840,7 +840,7 @@ class SimulatorQueue(Simulator):
                     # at the end showing the states of the system at each time step does not raise suspicion
                     # because the buffer size doesn't change between two consecutive time steps --which would be
                     # inconsistent with the fact that a new time step is defined when a new job arrives).
-                    update_trajectory(agent, (t_learn - 1) * (t_max + 1) + t, t, state, action, reward)
+                    update_trajectory_and_average_reward(agent, (t_learn - 1) * (t_max + 1) + t, t, state, action, reward)
 
             if self.debug:
                 print("{} | t={}: event={}, action={} -> state={}, reward={}".format(state, t, event, action, next_state, reward), end="\n")
@@ -1146,6 +1146,7 @@ class SimulatorQueue(Simulator):
 
             return t, state, action, next_state, reward
 
+        # TODO: (2025/04/19) Based on the theory (see QUESTA paper), mixing happens when the states of the parallel chains coincide, regardless of the actions they take. => we should remove the condition on `a0 = a1` from the lambbda function.
         mixing = lambda s0, a0, s1, a1: s0 == s1 and a0 is not None and a1 is not None and a0 == a1
         # ------------------------------ Auxiliary functions ----------------------------------#
 
@@ -2017,6 +2018,7 @@ def get_deterministic_blocking_boundaries(agent, thresholds: Union[float, list]=
         Thresholds on which the blocking boundaries are requested. This is useful for parameterized policies,
         for which we are interested in obtaining the *deterministic* blocking policies, for example when the policies
         are of class PolQueueTwoActionsLinearStep.
+        In this case, each threshold is a theta value (NOT a blocking size K value) of the (possibly multidimensional) parameterized linear-step policy.
         default: None
 
     return_int_when_single_policy: (opt) bool
@@ -2627,7 +2629,7 @@ def run_simulation_mc(env, agent, t_learn, start_state, t_sim_max,
               .format(env.getState(), buffer_size_start))
 
     # Store the initial position as part of the trajectory
-    update_trajectory(agent, (t_learn - 1) * (t_max + 1) + 0, 0.0, env.getState(), None, 0.0)
+    update_trajectory_and_average_reward(agent, (t_learn - 1) * (t_max + 1) + 0, 0.0, env.getState(), None, 0.0)
 
     # Time step in the queue trajectory (the first time step is t = 0)
     done = False
@@ -2787,7 +2789,7 @@ def run_simulation_mc(env, agent, t_learn, start_state, t_sim_max,
         # S(t): state BEFORE an action is taken
         # A(t): action taken given the state S(t)
         # R(t): reward received by taking action A(t) and transition to S(t+1)
-        update_trajectory(agent, (t_learn - 1) * (t_max + 1) + t, time_abs, next_state, action, reward)
+        update_trajectory_and_average_reward(agent, (t_learn - 1) * (t_max + 1) + t, time_abs, next_state, action, reward)
 
         # Check RETURN
         # Either the initial buffer size (e.g. single-buffer queue systems) OR
@@ -3579,8 +3581,11 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
     only_one_dimension_of_state_is_at_boundary = lambda state, _set: np.sum(np.array(state) == np.array(_set.getSetBoundaries())) == 1
 
     # ---------------------------- Check input parameters ---------------------------------#
+    # Flag variable that is used only when debugging estimators (i.e. when DEBUG_ESTIMATORS = True)
+    is_mm1_queue = envs[0].getNumJobClasses() == 1 and envs[0].getNumServers() == 1
+
     # -- Absorption and activation sets
-    # Class
+    # Type of absorption and activation sets
     if not isinstance(absorption_set, SetOfStates):
         raise ValueError("Parameter `absorption_set` must be of type SetOfStates: {}".format(absorption_set))
     if not isinstance(activation_set, SetOfStates):
@@ -3685,7 +3690,7 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
     has_particle_been_absorbed_once = [False]*N  # List that keeps track of whether each particle has been absorbed once
                                                  # so that we can end the simulation when all particles have been absorbed
                                                  # when the survival probability is estimated by this function.
-    if DEBUG_ESTIMATORS and envs[0].getNumJobClasses() == 1 and envs[0].getNumServers() == 1:
+    if DEBUG_ESTIMATORS and is_mm1_queue:
         # Check realization of the arrival and service rates for each particle
         # (assuming there is only one class job and one server; otherwise things can get rather complicated, as we should
         # consider also the different job classes and analyze the job class arrival rates at each server --by applying
@@ -3739,7 +3744,7 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
             # The event is an incoming job class
             # => Update the state of the queue, apply the acceptance policy, and finally the server assignment policy
             action, next_state, reward, gradient_for_action = manage_job_arrival(t, envs[idx_particle], agent, state, job_class_or_server)
-            if DEBUG_ESTIMATORS:
+            if DEBUG_ESTIMATORS and is_mm1_queue:
                 times_inter_arrival[idx_particle] += [time_abs - time_last_arrival[idx_particle]]
                 # Prepare for the next iteration
                 time_last_arrival[idx_particle] = time_abs
@@ -3802,7 +3807,7 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
 
             # This should come AFTER the possible reactivation, because the next state will never be 0
             # when reactivation takes place.
-            if DEBUG_ESTIMATORS:
+            if DEBUG_ESTIMATORS and is_mm1_queue:
                 assert not np.isnan(time_last_service[idx_particle])
                 times_service[idx_particle] += [time_abs - time_last_service[idx_particle]]
                 # Prepare for the next iteration
@@ -3849,8 +3854,7 @@ def run_simulation_fv(t_learn, envs, agent, absorption_set: SetOfStates, activat
             "==> agent ENDS at discrete time t={} (continuous time = {:.1f}, compared to maximum observed time for P(T>t) = {:.1f}) at state {} coming from state = {}, action = {}, reward = {})" \
             .format(t, time_abs, df_proba_surv is not None and df_proba_surv['t'].iloc[-1] or survival_times[-1], envs[idx_particle].getState(), state, action, reward))
 
-    if DEBUG_ESTIMATORS:
-        assert envs[0].getNumJobClasses() == 1 and envs[0].getNumServers() == 1
+    if DEBUG_ESTIMATORS and is_mm1_queue:
         # Put together all the observed inter-arrival times and all service times into ONE list that are labeled
         # with the particle number in which they were observed (this is the structure required by the analyze_event_times()
         # function called below.

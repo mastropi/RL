@@ -143,7 +143,7 @@ class LeaMCLambda(Learner):
     def deprecated_learn_slow(self, t, state, action, next_state, reward, done, info):
         # This learner updates the estimate of the value function V ONLY at the end of the episode
         if info.get('update_trajectory', True):
-            self._update_trajectory(t, state, action, reward)
+            self._update_trajectory_and_average_reward(t, state, action, reward)
         if info.get('update_counts', True):
             self._update_state_counts(t, state)
         if done:
@@ -216,7 +216,7 @@ class LeaMCLambda(Learner):
             # and thus the state of the environment and action taken should NOT be recorded because they had already
             # been recorded at the previous step, when the episode ended (by the `done` block below)
             # --see also discrete.Simulator._run_single() and search for 'LearningTask.CONTINUING')
-            self._update_trajectory(t, state, action, reward)
+            self._update_trajectory_and_average_reward(t, state, action, reward)
         if info.get('update_counts', True):
             self._update_state_counts(t, state)
 
@@ -344,7 +344,7 @@ class LeaMCLambda(Learner):
             # and thus the state of the environment and action taken should NOT be recorded because they had already
             # been recorded at the previous step, when the episode ended (by the `done` block below)
             # --see also discrete.Simulator._run_single() and search for 'LearningTask.CONTINUING')
-            self._update_trajectory(t, state, action, reward)
+            self._update_trajectory_and_average_reward(t, state, action, reward)
         if info.get('update_counts', True):
             self._update_state_counts(t, state)
         self._updateG(t, state, next_state, reward, done)
@@ -557,7 +557,7 @@ class LeaMCLambdaAdaptive(LeaMCLambda):
     def learn(self, t, state, action, next_state, reward, done, info):
         "Learn the prediction problem: estimate the state value function"
         if info.get('update_trajectory', True):
-            self._update_trajectory(t, state, action, reward)
+            self._update_trajectory_and_average_reward(t, state, action, reward)
         if info.get('update_counts', True):
             self._update_state_counts(t, state)
         self._updateG(t, state, next_state, reward, done)

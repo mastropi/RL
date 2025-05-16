@@ -1147,6 +1147,8 @@ class Simulator:
                 next_state, reward, done_episode, info = self.env.step(action)
 
             # Update the trajectory stored in the learner
+            # NOTE: This trajectory update does NOT update the average reward observed so far in the trajectory.
+            # If such update is needed, we should call learner.update_average_reward(t, state) as well.
             learner.update_trajectory(t, state, action, reward)
 
             if show_messages(verbose, verbose_period, t):

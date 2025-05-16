@@ -384,9 +384,10 @@ def step(t, env, agent: GenericAgent, policy_type: PolicyTypes):
 
     return action, observation, reward, info
 
-def update_trajectory(agent, t_total, t_sim, state, action, reward):
+def update_trajectory_and_average_reward(agent, t_total, t_sim, state, action, reward):
     """
-    Updates the trajectory stored in the state value function learner and in the policy learner of the given agent
+    Updates the trajectory stored in the state value function learner and in the policy learner of the given agent as well as the respective average reward
+    observed so far
 
     Arguments:
     agent: Agent
@@ -411,14 +412,16 @@ def update_trajectory(agent, t_total, t_sim, state, action, reward):
     """
     if agent.getLearnerV() is not None:
         agent.getLearnerV().update_trajectory(t_sim, state, action, reward)
+        agent.getLearnerV().update_average_reward(t_sim, state)
     if agent.getLearnerP() is not None:
         # DM-2021/11/28: This assertion is no longer true because we are now storing in the trajectory ALSO the states
         # occurring just before the FIRST DEATH event happening after a BIRTH event (so that we can show it in the
         # trajectory plot we show at the end of the simulation and thus avoid the suspicion that something is wrong
         # when we observe no change in the buffer size from one time step to the next --given that a new time step
         # is created ONLY when a new job arrives (i.e. a BIRTH event occurs)
-        # assert action is not None, "The action is not None when learning the policy"
+        #assert action is not None, "The action is not None when learning the policy"
         agent.getLearnerP().update_trajectory(t_total, state, action, reward)
+        agent.getLearnerV().update_average_reward(t_total, state)
 
 def show_messages(verbose, verbose_period, t_learn):
     return verbose and np.mod(t_learn, verbose_period) == 0

@@ -392,8 +392,9 @@ class GenericLearner:
 
     def update_trajectory(self, t, state, action, reward):
         """
-        Records the state S(t) on which an action is taken, the taken action A(t), and the observed reward R(t)
-        for going to state S(t+1), and updates the history of this trajectory.
+        Records the state S(t) on which an action is taken, the taken action A(t), and the observed reward
+        after going to state S(t+1) (which is either R(t) or R(t+1), depending on the subclass actual implementation of the self.rewards list),
+        and updates the history of this trajectory.
 
         Arguments:
         t: int
@@ -403,10 +404,6 @@ class GenericLearner:
         self.action = action
         self.reward = reward
         self._update_trajectory_history(t)
-        # NOTE: # We need to update the average reward AFTER updating the trajectory because the average reward update
-        # uses the length of the historic rewards stored (as the number of sampled rewards on which the average is computed).
-        # TODO: (2024/05/21) It would be good to, at some point, disentangle the update of the average reward from the trajectory update because they are two different concepts. However, this change will require important chnages in Learners code (e.g. learn() method) when calling update_trajectory().
-        self.update_average_reward(t, state)
 
     def _update_trajectory_history(self, time):
         """
