@@ -232,7 +232,7 @@ class LeaFV(LeaTDLambda):
 
         self.reset()
 
-    def reset(self, reset_episode=False, reset_value_functions=False, reset_average_reward=False):
+    def reset(self, reset_episode=False, reset_value_functions=False, reset_average_reward=False, reset_auxiliary_info=False):
         super().reset(reset_episode=reset_episode, reset_value_functions=reset_value_functions, reset_average_reward=reset_average_reward)
         if reset_average_reward:
             # Reset the average reward information potentially stored in the learner that is specific to the FV learner, namely:
@@ -240,8 +240,8 @@ class LeaFV(LeaTDLambda):
             # - the *raw* average reward observed during the FV simulation.
             self.average_reward_initial_exploration = 0.0
             self.average_reward_raw = 0.0
-        if reset_value_functions:
-            #-- Reset pieces of information that are ALSO related, although INDIRECTLY to value functions, to their original definitions, defined at the object's construction
+        if reset_auxiliary_info:
+            #-- Reset auxiliary pieces of information to their original definitions, defined at the time of object construction
             # The number of particles and the number of time steps T used for the estimation of E(T_A)
             self.resetNumParticles()
             self.resetNumTimeStepsForExpectation()

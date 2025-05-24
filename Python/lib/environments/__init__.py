@@ -242,9 +242,16 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
         "Returns the list of terminal states"
         return list(self.terminal_states)
 
+    def getRewardsLandscape(self):
+        "Returns the rewards landscape of the environment, i.e. an array that has the length of the number of states in the environment with 0 where there is no reward"
+        arr_rewards = np.zeros(self.getNumStates())
+        for s, r in self.getRewardsDict().items():
+            arr_rewards[s] = r
+        return arr_rewards
+
     def getRewards(self):
         "Returns the rewards (only their values, not the states where they occur; for the latter, use getRewardsDict())"
-        return self.getRewardsDict().values()
+        return [self.getReward(s) for s in sorted(self.getRewardsDict().keys())]
 
     def getRewardsDict(self):
         "Returns the dictionary containing the rewards, indexed by the state"

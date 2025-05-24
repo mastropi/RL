@@ -897,7 +897,11 @@ for rep in range(nrep):
                                                   reset_value_functions=reset_value_functions_at_this_step,
                                                   plot=plot if t_learn+1 in learning_steps_observe else False, colormap=colormap,
                                                   epsilon_random_action=epsilon_random_action,
-                                                  reward_for_exit_states=reward_to_promote_exploration,
+                                                  reward_for_exit_states=reward_to_promote_exploration if reward_to_promote_exploration != 0 else None,
+
+                                                  # DM-2025/01: This is used when performing reward shaping, in order to update the policy after the initial exploration has finished (so that reward shaping has actually an effect on the policy, which is the goal of doing reward shaping!)
+                                                  learner_policy=learner_ac,
+
                                                   seed=seed_learn, verbose=False, verbose_period=verbose_period)
                 average_reward_initial_exploration = simulator_value_functions.getAgent().getLearner().getAverageRewardInitialExploration()
                 average_reward_fv_inflated = simulator_value_functions.getAgent().getLearner().getAverageRewardRaw()

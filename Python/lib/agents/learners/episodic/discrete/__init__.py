@@ -148,9 +148,7 @@ class Learner(GenericLearner):
             Whether to store in the object (in the attributes of the super class) the history over ALL episodes
             or just the history of the latest observed episode.
             The former is useful when we need to do computations on the whole observed history, possibly
-            for learning under the average reward criterion (although its validity is arguable, as rewards
-            observed in an episode may not be related to rewards observed in future episodes, thus making
-            its combination invalid).
+            for learning under the average reward criterion, which is usually the case for continuing learning tasks.
             Note also that if storing the whole history is requested, the occupied memory will be large
             if a large number of episodes are run...
             default: False
@@ -434,6 +432,10 @@ class Learner(GenericLearner):
         Updates the average reward over all episodes, when storing the history over all episodes, at the end of a new episode
 
         This is used when estimating the average reward of a continuing learning task.
+
+        Note that for episodic learning tasks, in which case the average reward across episodes is normally not of interest, no track of the reward observed
+        across episodes is maintained, i.e. the value of the super attribute GenericLearner.reward attribute is NOT updated at every new observed reward
+        during the episode. Hence, I call to the GenericLearner.update_average_reward() method will fail (this already happened today on 19-May-2025).
 
         Arguments:
         T: int

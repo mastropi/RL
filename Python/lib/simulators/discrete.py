@@ -82,6 +82,7 @@ class Simulator:
         - getAllValidStates()
         - getTerminalStates()
         - getRewards()
+        - getRewardsLandscape()
         - getInitialStateDistribution()
         - getV() --> returns the true state value function (which can be None, if unknown)
         - setInitialStateDistribution()
@@ -226,6 +227,11 @@ class Simulator:
                 use_average_reward_stored_in_learner=False, reset_value_functions=True,
                 epsilon_random_action=0.0,
                 reward_for_exit_states: float=None,
+
+                # DM-2025/01: Parameter that contains the policy learner used to update the policy after the initial exploration (using reward shaping) has finished
+                # (so that reward shaping has actually an effect on the policy, which is the goal of doing reward shaping!)
+                learner_policy=None,
+
                 seed=None, verbose=True, verbose_period=100, plot=False, colormap="seismic", pause=0.1):
         """
         Runs all the simulations that are needed to learn differential value functions using the Fleming-Viot approach.
@@ -373,7 +379,7 @@ class Simulator:
             # implies e.g. a start of a new replication, therefore no information currently stored from a previously executed replication should be present in the learner.
             # Note that in an FV learner, this may imply resetting collateral information to the information specific to the FV simulation, such as:
             # the absorption set, the activation set, the average reward observed during the initial exploration, the estimated expected reabsorption time, etc.
-            self.agent.getLearner().reset(reset_episode=True, reset_value_functions=True, reset_average_reward=True)
+            self.agent.getLearner().reset(reset_episode=True, reset_value_functions=True, reset_average_reward=True, reset_auxiliary_info=True)
             print(f"[IN FV, t_learn=0] The average reward stored in learner after RESET is: {self.agent.getLearner().average_reward}, {self.agent.getLearner()._average_reward_in_episode} (EPISODE)")
 
         #--- Parse input parameters ---
@@ -401,6 +407,7 @@ class Simulator:
                                     'min_num_cycles_for_expectations': min_num_cycles_for_expectations,
                                     'epsilon_random_action': epsilon_random_action,
                                     'reward_for_exit_states': reward_for_exit_states,
+                                    'learner_policy': learner_policy,
                                     'seed': seed})
         dict_params_info = dict({'verbose': verbose,
                                  'verbose_period': verbose_period,
@@ -507,9 +514,9 @@ class Simulator:
             dict_params_info['pause'] = dict_params_info.get('pause', 0.1)
 
             # Parse FV-specific simulation parameters
-            dict_params_simul, less_frequently_visited_states_case = parse_absorption_parameters(dict_params_simul, dict_params_info)
+            dict_params_simul, less_frequently_visited_states_case, absorption_set_has_been_updated = parse_absorption_parameters(dict_params_simul, dict_params_info)
 
-            return dict_params_simul, dict_params_info, less_frequently_visited_states_case
+            return dict_params_simul, dict_params_info, less_frequently_visited_states_case, absorption_set_has_been_updated
 
         def parse_absorption_parameters(dict_params_simul, dict_params_info):
             """
@@ -525,11 +532,18 @@ class Simulator:
             dict_params_info: dict
                 Dictionary containing information parameters (e.g. 'verbose', etc.).
 
-            Return: dict
-            Updated dict_params_simul with updated values for the following keys:
-            - 'proba_killing' when dict_params_simul['soft_killing'] is True, which is a dictinoary containing the killing probability for each state.
-            - 'absorption_set' and 'activation_set' when dict_params_simul['soft_killing'] is False (or is not given)
-            AND dict_params_simul['estimate_absorption_set'] is True.
+            Return: tuple
+            Tuple with the following elements:
+            - Updated dict_params_simul with updated values for the following keys:
+                - 'proba_killing' when dict_params_simul['soft_killing'] is True, which is a dictinoary containing the killing probability for each state.
+                - 'absorption_set' and 'activation_set' when dict_params_simul['soft_killing'] is False (or is not given)
+                AND dict_params_simul['estimate_absorption_set'] is True.
+            - less_frequently_visited_states_case: str, a description of the case that classifies the set of less frequently visited states
+            by the initial exploration used to define the absorption set A. Either "N/A" when the absorption set is not estimated by the process
+            (based on the visit frequency) or a number that identifies the case (e.g. 1, 2, 3) followed by a description of the case.
+            - absorption_set_has_been_updated: whether the absorption set has been updated w.r.t. to the set previously stored in the learner.
+            Even if the process is responsible for updating the absorption set, this may not be updated if it has become "sufficiently" large
+            (based on dict_params_simul['max_prop_absorption_set'] which defaults to 0.80).
             """
             dict_params_simul['max_time_steps_for_absorbed_particles_check'] = dict_params_simul.get('max_time_steps_for_absorbed_particles_check', +np.Inf)
             dict_params_simul['min_prop_absorbed_particles'] = dict_params_simul.get('min_prop_absorbed_particles', 0.90)
@@ -544,6 +558,7 @@ class Simulator:
             dict_params_simul['soft_killing'] = dict_params_simul.get('soft_killing', False)
 
             less_frequently_visited_states_case = "N/A"
+            absorption_set_has_been_updated = False
             if dict_params_simul['estimate_absorption_set'] or dict_params_simul['soft_killing']:
                 # Update the absorption set, as long as its proportion of all the environment states is smaller than the maximum allowed (e.g. 70% of valid states)
                 # Note that states can only be ADDED to the absorption set, NOT removed, which means that the absorption set can only GROW or stay stable.
@@ -597,7 +612,7 @@ class Simulator:
                 assert len(_states_in_absorption_set_with_nonzero_reward) == 0, f"The absorption set must not contain states with non-zero reward. The following states in the absorption set have non-zero reward: {_states_in_absorption_set_with_nonzero_reward}"
 
                 _size_absorption_set_before_update = len(self.agent.getLearner().getAbsorptionSet())
-                _absorption_set_has_been_updated, _number_of_new_states_in_absorption_set = \
+                absorption_set_has_been_updated, _number_of_new_states_in_absorption_set = \
                     update_absorption_set_if_not_too_large(estimated_absorption_set, dict_params_simul['max_prop_absorption_set'])
 
                 # Increase the simulation time for the initial exploration by the increase in the absorption set (if it's not the first policy learning step)
@@ -669,7 +684,7 @@ class Simulator:
                     f"Activation set (2D) (n={np.nan if dict_params_simul['activation_set'] is None else len(dict_params_simul['activation_set'])}):\n{dict_params_simul['activation_set'] is None and 'None' or [str(s) + ': ' + str(self.env.getStateIndicesFromIndex(s)) for s in dict_params_simul['activation_set']]}")
                 print("**** ABSORPTION SET SELECTION ****\n")
 
-            return dict_params_simul, less_frequently_visited_states_case
+            return dict_params_simul, less_frequently_visited_states_case, absorption_set_has_been_updated
 
         def update_absorption_set_if_not_too_large(absorption_set, max_prop_absorption_set):
             """
@@ -707,7 +722,7 @@ class Simulator:
         np.random.seed(dict_params_simul['seed'])
 
         # Parse specific parameters, related to the simulation in general, and related to the absorption dynamics characteristics
-        dict_params_simul, dict_params_info, less_frequently_visited_states_case = parse_simulation_parameters_fv(dict_params_simul, dict_params_info, envs[0])
+        dict_params_simul, dict_params_info, less_frequently_visited_states_case, absorption_set_has_been_updated = parse_simulation_parameters_fv(dict_params_simul, dict_params_info, envs[0])
 
         estimated_average_reward_before_initial_exploration = None
         if use_average_reward_stored_in_learner and self.agent.getLearner().getAverageReward() != 0.0:
@@ -754,7 +769,8 @@ class Simulator:
                             estimated_average_reward=estimated_average_reward_before_initial_exploration,
                             reset_value_functions=reset_value_functions,
                             epsilon_random_action=dict_params_simul['epsilon_random_action'],
-                            reward_for_exit_states=dict_params_simul['reward_for_exit_states'],
+                            reward_shaping=dict_params_simul['reward_for_exit_states'] is not None,
+                            reward_for_exit_states=dict_params_simul['reward_for_exit_states'] if absorption_set_has_been_updated else np.nan,
                             seed=dict_params_simul['seed'],
                             set_cycle=dict_params_simul['absorption_set'] if not dict_params_simul['soft_killing'] else None,
                             dict_proba_cycle=dict_params_simul['proba_killing'] if dict_params_simul['soft_killing'] else None,
@@ -796,6 +812,13 @@ class Simulator:
         average_reward_from_initial_exploration = np.mean(self.agent.getLearner().getRewards())
         self.agent.getLearner().setAverageRewardInitialExploration(average_reward_from_initial_exploration)
         print(f"--> Average reward estimated from the initial exploration: {average_reward_from_initial_exploration} (it will be used to correct the value functions estimated by the FV simulation)")
+
+        # When reward shaping is used to promote the exploration of the states at the boundary of A, we should update the policy AFTER the initial exploration,
+        # because the value functions are reset at the beginning of the FV simulation (so that the FV simulation reflects the original environment, WITHOUT reward shaping)
+        # This is important, because o.w. the policy for all the states in A will never change, even if we do reward shaping.
+        if dict_params_simul['reward_for_exit_states'] is not None:
+            print(f"[AFTER INITIAL EXPLORATION] Updating the policy based on the value functions learned with reward shaping on EXIT states from A (r={dict_params_simul['reward_for_exit_states']})")
+            dict_params_simul['learner_policy'].learn_natural(self.agent.getLearner().getA().getValues())
 
         #-- Step 2: Simulate N particles with Fleming-Viot to compute the empirical distribution and estimate the stationary probabilities, and from them the expected reward
         # BUT do this ONLY when the estimation of E(T_A) is reliable... otherwise, set the stationary probabilities and expected reward to NaN.
@@ -933,7 +956,7 @@ class Simulator:
                             soft_killing=dict_params_simul['soft_killing'],
                             dict_proba_killing=dict_params_simul['proba_killing'] if dict_params_simul['soft_killing'] else None,
                             update_absorption_set_with_fv_visits=dict_params_simul['update_absorption_set_with_fv_visits'],
-                            reward_shaping=dict_params_simul['reward_for_exit_states'] is not None,
+                            reward_shaping=dict_params_simul['reward_for_exit_states'] is not None and absorption_set_has_been_updated,
                             expected_absorption_time=expected_absorption_time,
                             # IMPORTANT: (2024/08/11) Using a previously estimated average reward as initial estimate of the average reward estimation by FV
                             # ASSUMES that that initial estimate only contains reward information from OUTSIDE the absorption set A!
@@ -942,8 +965,9 @@ class Simulator:
                             # TODO: (2024/08/11) Pass to the FV estimator of the average reward an initial estimation of the average reward that includes ONLY contributions from rewards observed OUTSIDE A (as explained above) (as only THAT piece of information of the average reward should be used to update the average reward that is estimated by FV (namely the reward outside A)
                             # 2025/01/19: Use the average reward estimated from the initial exploration as the estimated_average_reward value to test the REWARD SHAPING OF THE EXIT STATES
                             #estimated_average_reward=average_reward_from_initial_exploration,
-                            estimated_average_reward=estimated_average_reward_before_initial_exploration  if use_average_reward_stored_in_learner and estimated_average_reward_before_initial_exploration is not None
-                                                                                                        else average_reward_from_initial_exploration,
+                            estimated_average_reward=estimated_average_reward_before_initial_exploration  if use_average_reward_stored_in_learner and dict_params_info['t_learn'] > 0 and estimated_average_reward_before_initial_exploration is not None
+                                                                                                        else average_reward_from_initial_exploration if dict_params_simul['reward_for_exit_states'] is None
+                                                                                                        else None,
                             epsilon_random_action=dict_params_simul['epsilon_random_action'],
                             seed=dict_params_simul['seed'] + 131713,    # Choose a different seed from the one used by the single Markov chain simulation (note that this seed is the base seed used for the seeds assigned to the different FV particles)
                             verbose=dict_params_info['verbose'],
@@ -1019,14 +1043,6 @@ class Simulator:
             #    print(f"***** ESTIMATED EXPECTED REWARD BY FV (solely w.o. info from previously estimated avg. reward) IS ZERO!"
             #          f"\n***** => The previously estimated expected reward has been restored in the learner! (restored reward = {expected_reward_to_restore})")
             ##### TEMPORARY PATCH (WORKED!) (TO TRY TO FIX THE UNLEARNING OF THE POLICY IN THE MOUNTAIN CAR PROBLEM) #########
-
-            # Reset the reward to ZERO for the states affected by the reward shaping to promote the visit of EXIT states from A
-            # This is important to prevent the assertion that "no state in A has non-zero reward" from failing at the next policy learning step.
-            # ASSUMPTION: Only terminal states have a non-zero reward.
-            if dict_params_simul['reward_for_exit_states'] is not None:
-                for s in learning_info['probas_stationary_exit_cycle_set'].keys():
-                    if not self.env.isTerminalState(s):
-                        self.env.setReward(s, 0.0)
 
             if True or DEBUG_ESTIMATORS or show_messages(dict_params_info['verbose'], dict_params_info['verbose_period'], dict_params_info['t_learn']):
                 #max_rows = pd.get_option('display.max_rows')
@@ -1616,11 +1632,21 @@ class Simulator:
             policy.env.seed(seed)
 
         # Reset the learner, but WITHOUT resetting the value functions as they were possibly learned a bit during an initial exploration of the environment
+        # (UNLESS reward shaping was performed during the initial exploration of the environment to promote a policy that takes the agent towards the boundary of A,
+        # in which case we should discard any information about the value functions that came from that phase, because they correspond to a modified environment
+        # --although that this is the best strategy is not yet clear).
         # The average reward is reset when no initially estimated average reward is given. If such initially estimated average reward is given,
         # it means that it should be used as initial estimate of the average reward during further learning. Otherwise, when it is not given,
         # it means that we start the average reward learning process from scratch (i.e. from an average reward initially estimated as zero).
         # What is most important of this reset is to reset the learning rates of all states and actions! (so that we start the FV-based learning with full intensity)
-        learner.reset(reset_episode=True, reset_value_functions=False, reset_average_reward=estimated_average_reward is None)
+        #learner.reset(reset_episode=True, reset_value_functions=False, reset_average_reward=estimated_average_reward is None, reset_auxiliary_info=(t_learn == 0))
+        learner.reset(reset_episode=True, reset_value_functions=reward_shaping, reset_average_reward=estimated_average_reward is None, reset_auxiliary_info=(t_learn == 0))
+        if reward_shaping:
+            # Reset the value functions INSIDE the absorption set A, so that we keep whatever was learned already outside A!
+            for s in absorption_set:
+                learner.getV().setValue(s, 0.0)
+                for a in range(self.env.getNumActions()):
+                    learner.getQ().setValue(s, a, 0.0)
 
         # Store the estimated average reward passed by the user as the average reward value of the learner,
         # so that it can be used as correction value when learning the differential value functions (which is precisely the average reward)
@@ -3885,7 +3911,8 @@ class Simulator:
                                     estimated_average_reward=None, reset_value_functions=True,
                                     seed=None, compute_rmse=False, weights_rmse=None,
                                     state_observe=None, set_cycle=None, dict_proba_cycle=None,
-                                    epsilon_random_action=0.0, reward_for_exit_states: float=None,
+                                    epsilon_random_action=0.0,
+                                    reward_shaping=False, reward_for_exit_states: float=None,
                                     verbose=False, verbose_period=1, verbose_convergence=False,
                                     plot=False, colormap="seismic", pause=0.1):
         """
@@ -3924,11 +3951,19 @@ class Simulator:
             This is useful to guarantee ergodicity when policies are deterministic or have some actions with zero probability.
             default: 0.0
 
-        reward_for_exit_states: float
-            Reward to assign to every exit state from the cycle set.
+        reward_shaping: (bool) opt
+            Whether to do reward shaping of the EXIT states from the cycle set.
             This is typically used as a reward shaping strategy to nudge the policy towards visiting the boundary states of the absorption set A
             in FV estimation procedures, since those states are less frequently visited under the current policy, so we want to promote their visit
             to continue exploring outside the frequently visited states in A.
+            default: False
+
+        reward_for_exit_states: float
+            Reward to assign to every exit state from the cycle set.
+            Use np.nan to indicate that no reward shaping should be done even if reward_shaping=True.
+            The use case for this is the following: show plots of the reward landscape for the current policy learning step and state that NO reward shaping
+            is done (even if reward_shaping=True), which may be the case for instance of the absorption set A has not changed (i.e. grown)
+            w.r.t. the previous absorption set, which indicates that we should stop doing reward shaping because A may have become large enough.
             default: None
 
         Returns: tuple
@@ -4129,6 +4164,11 @@ class Simulator:
             print("V = {}".format(V))
             print("Q = {}".format(Q.reshape(self.env.getNumStates(), self.env.getNumActions())))
 
+        # Check whether the state value function is ALL zeros, for all states
+        # This is used when assigning a reward to states in EXIT events (i.e. reward_shaping=True)
+        # in order to know whether we should assign the value of `reward_for_exit_states` or a value that is proportional to the state value function in absolute value.
+        state_value_function_is_all_zeros = (np.min(V) == np.max(V) == 0.0)
+
         # Average state values and average change of V by episode for plotting purposes
         V_abs_mean = np.nan*np.ones(nepisodes+1)            # mean|V|
         V_abs_mean_weighted = np.nan*np.ones(nepisodes+1)   # mean|V| weighted by the state count
@@ -4176,6 +4216,22 @@ class Simulator:
                                         WINDOW_TOP_LEFT_VERTICAL + WINDOW_HEIGHT + 3*SPACE_BETWEEN_WINDOWS, # `3*` because we need to leave space for the WINDOW's title
                                         WINDOW_WIDTH,
                                         WINDOW_HEIGHT)
+
+        if plot and keep_track_of_cycles and set_cycle is not None and reward_shaping: #False
+            # Initialize the plot showing the absorption set and eventually the shaped rewards (when reward shaping is used)
+            ax_absorption_and_rewards = plt.figure().subplots(1, 1)
+            self.env.plot_points(list(set_cycle), ax=ax_absorption_and_rewards, style='x', markersize=5, color="red")
+            _arr_rewards = self.env.getRewardsLandscape()
+            self.env.plot_values(_arr_rewards, ax=ax_absorption_and_rewards, cmap="Greys", vmin=0, vmax=np.max(_arr_rewards))
+            if reward_shaping:
+                if np.isnan(reward_for_exit_states):
+                    ax_absorption_and_rewards.set_title(f"Learning step t_learn = {t_learn+1}\nNO REWARD SHAPING AT THIS STEP")
+                else:
+                    ax_absorption_and_rewards.set_title(f"Learning step t_learn = {t_learn+1}\nDist. of ORIGINAL rewards")
+            else:
+                ax_absorption_and_rewards.set_title(f"Learning step t_learn = {t_learn+1}\nNo reward shaping")
+            plt.pause(pause)
+            plt.draw()
 
         # Iterate on the episodes to run
         nepisodes_max_steps_reached = 0
@@ -4344,13 +4400,15 @@ class Simulator:
                                                                             dict_state_counts_start_cycle, dict_state_counts_end_cycle)
 
                 # Check if the system has EXITED the set of states defining a cycle
+                _exit_state_has_not_yet_been_visited = next_state not in dict_state_counts_exit_cycle_set.keys()
                 exit_event, dict_state_counts_exit_cycle_set = self._check_cycle_exit_and_update_exit_counts(set_cycle, self.env.getIndexFromState(state), self.env.getIndexFromState(next_state), dict_state_counts_exit_cycle_set)
-                if exit_event and reward_for_exit_states is not None and not self.env.isTerminalState(next_state) and self.env.getReward(next_state) != reward_for_exit_states:
+                if exit_event and reward_shaping and not np.isnan(reward_for_exit_states) and not self.env.isTerminalState(next_state) and _exit_state_has_not_yet_been_visited:
                     # This is the first EXIT event at this next_state state and it does NOT happen at a terminal state (which is assumed to have a non-zero reward)
                     # => Set the reward of the exit state to the given reward_for_exit_states value and update the reward used below to learn value functions and the long-run expected reward
-                    self.env.setReward(next_state, reward_for_exit_states)
-                    reward = reward_for_exit_states
-                    print(f"[run_single_continuing_task] REWARD SHAPING: r={reward_for_exit_states} assigned to exit state {next_state} ({self.env.getStateFromIndex(next_state, simulation=False) if not self.env.isStateContinuous() else next_state})")
+                    # NOTE that the shaped reward is chosen equal to the state value function |V(s)|, unless all values of V(s) (for all states) are zero, in which case we use the given constant value of `reward_for_exit_states`
+                    reward = reward_for_exit_states if state_value_function_is_all_zeros else np.abs(self._get_state_value(learner, next_state))
+                    self.env.setReward(next_state, reward)
+                    print(f"[run_single_continuing_task] REWARD SHAPING: r={reward} assigned to exit state {next_state} ({self.env.getStateFromIndex(next_state, simulation=False) if not self.env.isStateContinuous() else next_state})")
 
                 # Learn: i.e. update the value functions (stored in the learner) for the *currently visited state and action* with the new observation
                 # NOTE: If this call to learn() is done at the end of the episode (done_episode = True) further updates of information is performed
@@ -4467,6 +4525,24 @@ class Simulator:
         # Store the sample size behind the calculation of the average reward, in case we use this calculated average reward as initial value for future learning processes
         # (e.g. on future policy learning steps)
         learner.setSampleSizeForAverageReward()
+
+        if plot and reward_shaping and not np.isnan(reward_for_exit_states):
+            # Plot the distribution of the shaped rewards
+            _arr_rewards = self.env.getRewardsLandscape()
+            self.env.plot_values(_arr_rewards, ax=ax_absorption_and_rewards, cmap="Greys", vmin=0, vmax=np.max(_arr_rewards), add_colorbar=False)
+            ax_absorption_and_rewards.set_title(f"Learning step t_learn = {t_learn+1}\nDist. of SHAPED rewards and true rewards")
+            plt.pause(pause)
+            plt.draw()
+
+        # Reset the reward to ZERO for the states affected by the reward shaping (if any) to promote the visit of EXIT states from A.
+        # This is important in the context of Fleming-Viot learning because reward shaping should only take place during the initial exploration of the environment,
+        # o.w. we are changing the environment itself on which an optimal policy is learned. Reward shaping should only be used to try a policy other than the one that has been
+        # repetitively used without success, to observe EXIT states from the absorption set A that allow the execution of the FV simulation.
+        # *** IMPORTANT ASSUMPTION: Only terminal states have a non-zero reward. ***
+        if reward_shaping and not np.isnan(reward_for_exit_states):
+            for s in dict_state_counts_exit_cycle_set.keys():
+                if not self.env.isTerminalState(s):
+                    self.env.setReward(s, 0.0)
 
         # Compute the stationary distribution of the state at the start of a cycle and of the state when exiting the cycle set (which is considered to be OUTSIDE of the cycle set)
         # These variables are dictionaries that are never None (when no cycle set has been specified, their values are empty dictionaries, as deduced from the function called here)
