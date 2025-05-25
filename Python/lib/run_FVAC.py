@@ -98,7 +98,7 @@ def compute_true_state_value_function(env, policy, learning_task, learning_crite
     P_epi, P_con, b_epi, b_con, g, mu = compute_transition_matrices(env, policy)
     P = P_con if learning_task == LearningTask.CONTINUING else P_epi
     b = b_con if learning_task == LearningTask.CONTINUING else b_epi
-    bias = g if learning_criterion == LearningCriterion.AVERAGE else None
+    bias = g if learning_criterion == LearningCriterion.AVERAGE else 0.0
     V_true = compute_state_value_function_from_transition_matrix(P, b, bias=bias, gamma=gamma)
     env.setV(V_true)
     dict_proba_stationary = dict(zip(np.arange(len(mu)), mu))

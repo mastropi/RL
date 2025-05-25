@@ -618,9 +618,11 @@ class Simulator:
                 # Increase the simulation time for the initial exploration by the increase in the absorption set (if it's not the first policy learning step)
                 if dict_params_info['t_learn'] > 0:
                     _T_prev = dict_params_simul['T']
-                    dict_params_simul['T'] = min( int(dict_params_simul['T'] * (1 + _number_of_new_states_in_absorption_set / _size_absorption_set_before_update)), MAX_NUMBER_OF_STEPS_FOR_EXPECTATION )
+                    _prop_increase_absorption_set = _number_of_new_states_in_absorption_set / _size_absorption_set_before_update
+                    # The relative increase of T is the same as the relative increase in the size of absorption set A
+                    dict_params_simul['T'] = min( int(dict_params_simul['T'] * (1 + _prop_increase_absorption_set)), MAX_NUMBER_OF_STEPS_FOR_EXPECTATION )
                     self.agent.getLearner().setNumTimeStepsForExpectation(dict_params_simul['T'])
-                    print(f"Parameter T increased from T={_T_prev} to T={dict_params_simul['T']} ({(dict_params_simul['T'] / _T_prev - 1)*100:.1f}%)")
+                    print(f"Parameter T increased from T={_T_prev} to T={dict_params_simul['T']} ({(dict_params_simul['T'] / _T_prev - 1)*100:.1f}%) (due to increase of absorption set by {_prop_increase_absorption_set*100:.1f}%)")
 
                 # Update the absorption and activation sets of the simulation parameters dictionary with the sets stored in the learner and possibly just updated
                 dict_params_simul['absorption_set'] = self.agent.getLearner().getAbsorptionSet()
@@ -846,11 +848,12 @@ class Simulator:
             print(warning_msg)
             warnings.warn(warning_msg)
 
-            # Increase the simulation time for the initial exploration so that at the next policy learning step the chances of observing exit states from A are hopefully larger
+            # Increase the simulation time for the initial exploration at the next policy iteration, so that at the chances of observing exit states from A are larger next time
             _increase_rate_T = 0.10
             _T_next = min( int(dict_params_simul['T'] * (1 + _increase_rate_T)), MAX_NUMBER_OF_STEPS_FOR_EXPECTATION )
             self.agent.getLearner().setNumTimeStepsForExpectation(_T_next)
-            print(f"The number of steps for the initial exploration has been increased {(_T_next / dict_params_simul['T'] - 1)*100:.1f}%, from {dict_params_simul['T']} to {_T_next}")
+            print(f"Parameter T increased from {dict_params_simul['T']} to {_T_next} ({(_T_next / dict_params_simul['T'] - 1)*100:.1f}%) "
+                  f"for next policy iteration (due to NO EXIT states observed and NO BACKUP states to use at the next policy iteration)")
         else:
             # Perform the Fleming-Viot simulation, as the estimator of the denominator in the FV estimator is reliable
             N = len(envs)
@@ -993,7 +996,7 @@ class Simulator:
             print("Expected reabsorption time E(T_A): {:.3f} ({} cycles)".format(expected_absorption_time, learning_info['num_cycles']))
             print(f"proba_surv P(T>t):\n{df_proba_surv}")
             print(f"Time-average Phi value per state of interest:")
-            if len(phi) <= 20:
+            if len(phi) <= 50:
                 _average_phi_values = dict([(x, np.mean(phi[x]['Phi'])) for x in phi.keys()])
                 print(_average_phi_values)
             else:
@@ -1128,11 +1131,15 @@ class Simulator:
         # --but I am not really sure about this need, because a learner should be anyway RESET before starting a simulation... right?)
         learner.reset(reset_episode=True)
 
-        # Initialize the rewards list with a dummy first element as if the environment came from an action taken by the agent and a reward of landing at the reset state is observed
-        # This is important for the correct association of states and rewards in the sense that learner.states[k] is the state where the reward learner.rewards[k] is observed,
-        # and this is particularly useful if we estimate the absorption set A in the FV simulation with function compute_set_of_frequent_states_with_zero_reward() where
-        # the lists of observed states and rewards are passed to the function which are expected to be aligned as just indicated!
-        # (because e.g. we filter on the states receiving zero reward).
+        # Initialize the rewards list with a dummy first element as if the environment came from an action taken by the agent and a reward of LANDING at the reset state is observed
+        # This is important for the correct association of states and rewards in the sense that learner.states[k] is the state where the reward learner.rewards[k] is observed
+        # once the state stored in learner.states[k] is visited, and this is particularly useful if we estimate the absorption set A in the FV simulation
+        # with function compute_set_of_frequent_states_with_zero_reward() where the lists of observed states and rewards are passed to the function which are expected
+        # to be aligned as just indicated! (because e.g. we filter on the states receiving zero reward).
+        # (Note that this alignment corresponds to the usual RL notation of a trajectory as S(0), A(0), R(1), S(1), A(1), ..., where R(1) corresponds to the reward received
+        # when the system transitions from state S(0) TO S(1) after taking action A(0) or, otherwise said, when the system LANDS / transitions-TO state S(1), that is the index
+        # of S(t) at which the reward R(1) is received is t = 1 (as opposed to t = 0, in which case R(1) would be the reward observed when transitioning from S(0), i.e. by the
+        # fact that the system leaves S(0)... but this is not the convention used here).
         # IMPORTANT: This learner.rewards attribute is the attribute present in the GenericLearner class, NOT in the Learner class of which the `learner` here is an instance of.
         # The Learner class stores rewards in learner._rewards which DOES already have ONE element at the beginning with the reward associated to the start state of the episode.
         # Recall that the Learner class stores just the trajectory observed WITHIN the episode, whereas the GenericLearner class stores the WHOLE trajectory, e.g. the trajectory
@@ -1163,8 +1170,11 @@ class Simulator:
                 next_state, reward, done_episode, info = self.env.step(action)
 
             # Update the trajectory stored in the learner
-            # NOTE: This trajectory update does NOT update the average reward observed so far in the trajectory.
-            # If such update is needed, we should call learner.update_average_reward(t, state) as well.
+            # NOTE: (2025/05/18) This method should NOT learn the average reward, just explore...
+            # In fact, if we learned the average reward here, it might affect the process of average reward learning. And I am writing this now because this already happened!
+            # I tried learning the average reward here by calling learner.update_average_reward() and, since that method STORES the average reward in the learner,
+            # it overrides the eventual average reward already stored there, which may be very informative, as it would normally contain the average reward estimated
+            # at the previous learning step which is normally used as starting point for the average reward estimate of the current learning step!!
             learner.update_trajectory(t, state, action, reward)
 
             if show_messages(verbose, verbose_period, t):
@@ -1728,15 +1738,16 @@ class Simulator:
             #-- Setup the concepts and figures to plot (e.g. that will be updated at every absorption event)
             # Setup the figures that will be updated at every verbose_period
             num_colors_in_colormap = N # Use the following if we plan to update the plot of V(s) at verbose_period (instead of at every absorption event) #None if max_time_steps is None or max_time_steps == +np.Inf else max_time_steps
-            fig_V, fig_V2, fig_C, fig_RMSE_state, colors_V, _ = self._setup_plots(colormap=colormap, lut=num_colors_in_colormap, setup_policy_plot=False)
+            fig_V, fig_V2, fig_C, fig_RMSE_state, colors_V, _ = self._setup_plots(t_learn=t_learn, colormap=colormap, lut=num_colors_in_colormap, setup_policy_plot=False)
 
             # Setup the axes to use for each plotted object, indexed by the name of the plotted object (e.g. "average_reward")
             dict_axes = dict({'average_reward': plt.figure().subplots(1, 1)})
             # Initialize the average reward plot with the current estimate of the average reward stored in the learner
-            # Note that we add two line objects, one that will plot the updated average reward coming solely from the FV excursion (dashed line),
-            # and the other line will plot the updated average reward stored in the learner, which may have a contribution from the original average reward stored in the learner (continuous line).
-            dict_lines = dict({'average_reward': [dict_axes['average_reward'].plot(0, learner.getAverageReward(), '.-', color="red", linestyle="dashed")[0],
-                                                  dict_axes['average_reward'].plot(0, learner.getAverageReward(), '.-', color="green")[0]]})
+            # Note that we add two line objects, one that will plot the updated average reward coming solely from the FV excursion (green line),
+            # and the other line will plot the updated average reward stored in the learner, which may have a contribution from the original average reward stored in the learner (red line).
+            # Note that these line properties will be preserved when updating the plot by extracting the information from the line objects returned by plot() below (see plotting.update_plots())
+            dict_lines = dict({'average_reward': [dict_axes['average_reward'].plot(0, learner.getAverageReward(), '.-', color="green", linestyle="solid")[0],
+                                                  dict_axes['average_reward'].plot(0, learner.getAverageReward(), '.-', color="red", linestyle="dashed")[0]]})
             # Set the maximum X axis value if the number simulation steps to run in advance is known
             dict_axes['average_reward'].set_xlim((None, max_time_steps))
             dict_axes['average_reward'].set_xlabel("Survival time contributing to P(T>t)")
@@ -2083,7 +2094,7 @@ class Simulator:
             _new_length_of_absorption_set = len(absorption_set)
             less_frequently_visited_set = set(_dist_state_counts.index).difference(_new_absorption_set)
             if _new_length_of_absorption_set - _current_length_of_absorption_set > 0:
-                print(f"--> The absorption set will be potentially updated (if its size does not become too large) with {_new_length_of_absorption_set - _current_length_of_absorption_set} new states (growing from {_current_length_of_absorption_set} to {_new_length_of_absorption_set} states)")
+                print(f"--> The absorption set will be potentially updated (if its size does not become too large) with {_new_length_of_absorption_set - _current_length_of_absorption_set} new states (growing {(_new_length_of_absorption_set / _current_length_of_absorption_set - 1):.1f}%, from {_current_length_of_absorption_set} to {_new_length_of_absorption_set} states)")
             else:
                 print(f"--> The absorption set will NOT be updated as no new states were visited under the above conditions.")
         else:
@@ -2102,16 +2113,17 @@ class Simulator:
             # Make a plot
             plt.figure()
             plt.step(df_proba_surv['t'], df_proba_surv['P(T>t)'], color="blue", where='post')
-            for x in learner.dict_phi.keys():
+            for x in sorted(learner.dict_phi.keys()):
                 # Choose a particular state to plot if needed
-                if x == 263: #19:
-                    plt.step(learner.dict_phi[x]['t'], learner.dict_phi[x]['Phi'], color="red", where='post')
-                    plt.title(f"[_run_simulation_fv, Learning step {t_learn+1}]\nP(T>t) (blue) and Phi(t,x) (red) for state x = {x} ({self.env.getStateFromIndex(x, simulation=False) if not self.env.isStateContinuous() else x})")
+                #if x == 263: #19:
+                if self.env.getReward(x) != 0.0:
+                    plt.step(learner.dict_phi[x]['t'], learner.dict_phi[x]['Phi'], color="darkviolet", where='post')
+                    plt.title(f"[_run_simulation_fv, Learning step {t_learn+1}]\nP(T>t) (blue) and Phi(t,x) (violet) for state x = {x} ({self.env.getStateFromIndex(x, simulation=False) if not self.env.isStateContinuous() else x})")
                     plt.draw()
 
         if plot:
             self._update_plots_at_episode_end(0, 1, learner, t_learn, fig_V, fig_V2, None, colors_V, None, 0.0, pause=pause, method_name="_run_simulation_fv, ")
-            self._final_plots(learner, t_learn, fig_V, fig_C, method_name="_run_simulation_fv, ")
+            self._final_plots(learner, t_learn, fig_V, fig_C, points_to_add_in_counts_plot=list(absorption_set), method_name="_run_simulation_fv, ")
 
         return t, learner.getV().getValues(), learner.getQ().getValues(), learner.getA().getValues(), learner._state_counts, learner.dict_phi, df_proba_surv, expected_absorption_time, max_survival_time, \
                 absorption_set, less_frequently_visited_set
@@ -3377,8 +3389,8 @@ class Simulator:
             plt.figure()
             plt.step(df_proba_surv['t'], df_proba_surv['P(T>t)'], color="blue", where='post')
             for x in learner.dict_phi.keys():
-                plt.step(learner.dict_phi[x]['t'], learner.dict_phi[x]['Phi'], color="red", where='post')
-                plt.title(f"[_run_simulation_fv_discounted, Learning step {t_learn+1}]\nP(T>t) (blue) and Phi(t,x) (red) for state x = {x}")
+                plt.step(learner.dict_phi[x]['t'], learner.dict_phi[x]['Phi'], color="darkviolet", where='post')
+                plt.title(f"[_run_simulation_fv_discounted, Learning step {t_learn+1}]\nP(T>t) (blue) and Phi(t,x) (violet) for state x = {x}")
 
         print(f"Distribution of start actions:\n{pd.Series([learner.getStartAction(idx_particle) for idx_particle in range(N)]).value_counts()}")
 
@@ -3543,7 +3555,7 @@ class Simulator:
         # Plotting setup
         if plot:
             # Setup the figures that will be updated at every verbose_period
-            fig_V, fig_V2, fig_C, fig_RMSE_state, colors_V, self.fig_policy = self._setup_plots(colormap=colormap, lut=nepisodes, state_observe=state_observe)
+            fig_V, fig_V2, fig_C, fig_RMSE_state, colors_V, self.fig_policy = self._setup_plots(t_learn=t_learn, colormap=colormap, lut=nepisodes, state_observe=state_observe)
         #--- Parse input parameters
 
         # Define the policy and the learner
@@ -3839,7 +3851,8 @@ class Simulator:
                         MAPE[min(episode+1, nepisodes)] = mape(self.env.getV() - ref_V_true, learner.getV().getValues() - ref_V, weights=weights)
 
                 if plot and show_messages(True, verbose_period, episode):
-                    self._update_plots_at_episode_end(episode, nepisodes, learner, t_learn, fig_V, fig_V2, fig_RMSE_state, colors_V, state_observe, ntimes_rmse_inside_ci95, weights=weights, pause=pause, method_name="_run_single, ")
+                    self._update_plots_at_episode_end(episode, nepisodes, learner, t_learn, fig_V, fig_V2, fig_RMSE_state, colors_V, state_observe, ntimes_rmse_inside_ci95,
+                                                      weights=weights, pause=pause, method_name="_run_single, ")
 
                 if plot and isinstance(learner, LeaTDLambdaAdaptive) and episode == nepisodes - 1:
                     learner.plot_info(episode, nepisodes)
@@ -4147,7 +4160,7 @@ class Simulator:
         # the average reward is reset to zero and learning starts again from scratch, o.w. the given estimated average reward should be used as initial estimate of
         # the average reward during further learning.
         learner.reset(reset_episode=True, reset_value_functions=reset_value_functions, reset_average_reward=t_learn == 0 or estimated_average_reward is None)
-        print(f"[IN] The average reward stored in learner after RESET is: {learner.average_reward}, {learner._average_reward_in_episode} (EPISODE)")
+        print(f"[IN] The average reward stored in learner after RESET is: {learner.average_reward}, {learner._average_reward_in_episode} (internal avg. reward attribute by EPISODE)")
 
         # Store initial values used in the analysis of all the episodes run
         V_state_observe, RMSE, MAPE, ntimes_rmse_inside_ci95 = self._initialize_run_with_learner_status(nepisodes, learner, compute_rmse, weights, state_observe)
@@ -4195,9 +4208,9 @@ class Simulator:
         if plot:
             # Setup the figures that will be updated at every verbose_period
             num_colors_in_colormap = max_time_steps
-            fig_V, fig_V2, fig_C, fig_RMSE_state, colors_V, self.fig_policy = self._setup_plots(colormap=colormap, lut=num_colors_in_colormap, state_observe=state_observe)
+            fig_V, fig_V2, fig_C, fig_RMSE_state, colors_V, self.fig_policy = self._setup_plots(t_learn=t_learn, colormap=colormap, lut=num_colors_in_colormap, state_observe=state_observe)
 
-            # Setup the axes to use for the average reward evolution plot
+            # Setup the axes to use for the average reward evolution plot (a new plot that is not created above by self._setup_plots())
             dict_axes = dict({'average_reward': plt.figure().subplots(1, 1)})
             # Initialize the average reward plot with the current estimate of the average reward stored in the learner
             dict_lines = dict({'average_reward': dict_axes['average_reward'].plot(0, learner.getAverageReward(), '.-', color="red")})
@@ -4297,7 +4310,8 @@ class Simulator:
                             # => Set the minimum at 0, so that we get a visual comparison with other figures plotting the same concept
                             dict_axes['average_reward'].set_ylim((0, None))
                         plt.figure(dict_axes['average_reward'].get_figure().number)  # Need to select the figure so that it is re-drawn, otherwise, the redraw applies to the active figure (already redrawn) selected above by plt.figure()
-                        plt.suptitle(f"[_run_single_continuing_task, Learning step {t_learn+1}]\nEpisode ended at episode time t_episode={t_episode}, simulation time t={t}")
+                        plt.suptitle(f"[_run_single_continuing_task, Learning step {t_learn+1}]\nEpisode ended at episode time t_episode={t_episode}, simulation time t={t}"
+                                     f"\n(More than one point is plotted ONLY when a terminal state has been reached at least once)")
                         plt.pause(pause)
                         plt.draw()
 
@@ -4788,6 +4802,9 @@ class Simulator:
             exit_event = exited_set_cycle(state, next_state)
             if exit_event:
                 # EXIT event because next_state is OUTSIDE the cycle set
+                # Note that both the state INSIDE the cycle set (state) and the state OUTSIDE the cycle set (next_state) are updated
+                # so that we keep track of BOTH two states through which the system exits the cycle set.
+                # Based on the information of what states are part of the cycle set and what states are not we can further filter what counts we want to look at.
                 dict_state_counts_exit_cycle_set[state] = dict_state_counts_exit_cycle_set.get(state, 0) + 1
                 dict_state_counts_exit_cycle_set[next_state] = dict_state_counts_exit_cycle_set.get(next_state, 0) + 1
 
@@ -4853,22 +4870,26 @@ class Simulator:
 
         return V, RMSE, MAPE, ntimes_rmse_inside_ci95
 
-    def _setup_plots(self, colormap="seismic", lut=None, state_observe=None, setup_policy_plot=True):
+    def _setup_plots(self, t_learn=0, colormap="seismic", lut=None, state_observe=None, setup_policy_plot=True):
         """
         Sets up the plots when iterative plots are requested
 
         These mainly includes the plot of the state value function V(s) estimated during the learning process, the state counts, the policy,
         and possibly the RMSE of a particle state of interest.
 
-        lut: (opt) int
-            Lookup Up Table size defining the number of colors in the colormap used for the value function plots.
-            The colormap is defined by the matplotlib.cm.get_cmap() function.
-            default: None
+        t_learn: (opt) int
+            Policy learning step at which this method is called (for informational purposes).
+            default: 0
 
         colormap: (opt) str
             Name of the colormap to use in the generation of the animated plots showing the evolution of the value function estimates.
             It must be a valid colormap among those available in the matplotlib.cm module.
             default: seismic, a colormap that ranges from blue to red, where the middle is white
+
+        lut: (opt) int
+            Lookup Up Table size defining the number of colors in the colormap used for the value function plots.
+            The colormap is defined by the matplotlib.cm.get_cmap() function.
+            default: None
 
         setup_policy_plot: (opt) bool
             Whether to setup (create) a figure for the plot of the policy when the value functions learning process ends.
@@ -4923,7 +4944,7 @@ class Simulator:
             # Image plot of the policy, it has as many subplots as state in the environment, laid out with its shape
             fig_P = plt.figure()
             # Plot the initial policy
-            self._update_policy_plot(fig_P)
+            self._update_policy_plot(fig_P, title_prefix=f"[INITIAL, Learning step {t_learn+1}]\n")
         else:
             fig_P = None
 
@@ -4967,7 +4988,7 @@ class Simulator:
         if fig_P is not None:
             plt.figure(fig_P.number)
             fig_mgr = plt.get_current_fig_manager()
-            fig_mgr.window.setGeometry(WINDOW_TOP_LEFT_HORIZONTAL + 2 * (WINDOW_WIDTH + SPACE_BETWEEN_WINDOWS),
+            fig_mgr.window.setGeometry(WINDOW_TOP_LEFT_HORIZONTAL + 2*(WINDOW_WIDTH + SPACE_BETWEEN_WINDOWS),
                                        WINDOW_TOP_LEFT_VERTICAL + WINDOW_HEIGHT + 3*SPACE_BETWEEN_WINDOWS,  # `3*` because we need to leave space for the WINDOW's title
                                        WINDOW_WIDTH,
                                        WINDOW_HEIGHT)
@@ -4975,7 +4996,7 @@ class Simulator:
         return fig_V, fig_V2, fig_C, fig_RMSE_state, colors_V, fig_P
 
     def _update_plots(self, learner, t_learn, fig_V, fig_C, colors_V, colors_V_length, t, max_time_steps,
-                      points_to_add_in_counts_plot=None,    # These are points to add to the fig_C plot given as 1D state index format (e.g. the 1D state indices of the absorption set
+                      points_to_add_in_counts_plot=None,  # These are points to add to the fig_C plot given as 1D state index format, e.g. the 1D state indices of the absorption set
                       pause=0.1, method_name="", fontsize_labels=LABELS_FONTSIZE, color_labels=LABELS_COLOR):
         # NOTE: If fig_C is None and a state counts plot should be generated SEPARATE from the state value function plot (because e.g. the environment is 2D),
         # a new figure is created by this method. This is useful when we want to see how the state counts evolve.
@@ -4989,7 +5010,8 @@ class Simulator:
         ax.set_xlabel(f"1D state index (0 - {self.env.getNumStates()-1})")
         ax.set_ylabel(f"V(s) - {ref_V}")
         ax.xaxis.set_major_locator(MaxNLocator(integer=True))
-        plt.title(f"[{method_name}UPDATE, Learning step {t_learn+1}]\nV(s) evolution (blue: true, blueish: initial, reddish: final): # Steps={t} of {max_time_steps}", fontsize=10)
+        plt.title(f"[{method_name}UPDATE, Learning step {t_learn+1}]\nV(s) evolution (blue: true, blueish: initial, reddish: final): # Steps={t} of {max_time_steps}"
+                  f"\nAverage[V(s) - avg.R] = {np.mean(learner.getV().getValues() - ref_V):0.4f}", fontsize=10)
                   #f"\nSystem's time t = {t} of max {max_time_steps}, from state = {state} --> next state = {next_state} (V(s) = {np.round(self._get_state_value(learner, next_state), 3)})"
                   #f"\nV(state={state}) = {V_state_prev is not None and np.round(V_state_prev, 3) or 'N/A'} --> V(state={state}) = {np.round(self._get_state_value(learner, state), 3)} (delta(V) = {V_state_prev is not None and np.round(self._get_state_value(learner, state) - V_state_prev, 3) or 'N/A'}, {V_state_prev is not None and np.round((self._get_state_value(learner, state) - V_state_prev) / max(1, V_state_prev) * 100, 1) or 'N/A'}%)"
                   #f"\nCount[s] = {learner.getStateCounts()}, alpha[s] = {learner.getAlphasByState()}")
@@ -5043,7 +5065,8 @@ class Simulator:
         plt.plot(self.env.getAllStates(), learner.getV().getValues() - ref_V, linewidth=0.5, color=colors_V(min(episode, nepisodes-1) / nepisodes))
         plt.gca().set_xlabel(f"1D state index (0 - {self.env.getNumStates()-1})")
         plt.gca().set_ylabel(f"V(s) - {ref_V}")
-        plt.title(f"[{method_name}UPDATE@Episode end, Learning step {t_learn+1}]\nV(s) evolution (blue: true, blueish: initial, reddish: final): Episode {episode+1} of {nepisodes}", fontsize=10)
+        plt.title(f"[{method_name}UPDATE@Episode end, Learning step {t_learn+1}]\nV(s) evolution (blue: true, blueish: initial, reddish: final): Episode {episode+1} of {nepisodes}"
+                  f"\nAverage[V(s) - avg.R] = {np.mean(learner.getV().getValues() - ref_V):0.4f}", fontsize=10)
         plt.pause(pause)
         plt.draw()
         # fig_V.canvas.draw()    # This should be equivalent to plt.draw()
@@ -5057,7 +5080,7 @@ class Simulator:
             ax_V2.set_title("State values, V(s)")
 
             arr_state_counts = learner.getStateCounts()
-            ax_C.cla()
+            ax_C.cla()  # Clear the plot to avoid overlap with new plot
             self.env.plot_values(arr_state_counts, ax=ax_C, cmap="Blues", vmin=0, vmax=np.max(arr_state_counts))
             self._add_count_labels(ax_C, arr_state_counts, fontsize=fontsize_labels, color=color_labels, factor_fontsize=0.8)
             ax_C.set_title("State visit count")
@@ -5114,7 +5137,9 @@ class Simulator:
             plt.pause(pause)
             plt.draw()
 
-    def _final_plots(self, learner, t_learn, fig_V, fig_C, method_name="", fontsize_labels=LABELS_FONTSIZE, color_labels=LABELS_COLOR):
+    def _final_plots(self, learner, t_learn, fig_V, fig_C,
+                     points_to_add_in_counts_plot=None,  # These are points to add to the fig_C plot given as 1D state index format, e.g. the 1D state indices of the absorption set
+                     method_name="", fontsize_labels=LABELS_FONTSIZE, color_labels=LABELS_COLOR):
         if self.env.getDimension() == 2:
             # The state counts plot is shown on a separate image than the state value function plot
             if fig_C is None:
@@ -5134,6 +5159,8 @@ class Simulator:
 
             arr_state_counts = learner.getStateCounts()
             self.env.plot_values(arr_state_counts, ax=ax_C, cmap="Blues", vmin=0, vmax=np.max(arr_state_counts))
+            if points_to_add_in_counts_plot is not None:
+                self.env.plot_points(points_to_add_in_counts_plot, ax=ax_C, style='x', markersize=5, color="red")
             self._add_count_labels(ax_C, arr_state_counts, fontsize=fontsize_labels, color=color_labels)
 
             plt.title("[{}FINAL, Learning step {}]\nState visit counts: # visits: (min, mean, max) = ({:.0f}, {:.1f}, {:.0f})" \

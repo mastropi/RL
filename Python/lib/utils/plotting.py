@@ -461,7 +461,7 @@ def plot(plotting_func,
                 default: None
             - 'smooth_par': Smoothing parameters to use for the spline fit in each subplot.
                 default: None, which means the parameter is determined by the spline fit function.
-        - 'violin': parameters for the plotting.plot_violin() function:
+        - 'violin': parameters for the plotting.plot_violins() function:
             - 'showmeans': whether to show the mean in each violin plot.
                 default: False
             - 'showmedians': whether to show the median in each violin plot.

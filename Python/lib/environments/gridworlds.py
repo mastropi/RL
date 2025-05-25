@@ -282,19 +282,54 @@ class EnvGridworld1D(EnvironmentDiscrete):
 
         return ax, img
 
-    def plot_points(self, points, ax=None, style=".-", figsize=(8, 8), color="blue", cmap=None, markersize=5):
+    def plot_points(self, points, ax=None, figsize=(8, 8), cmap=None, color="blue", style=".-", markersize=5, is_trajectory=False, pause=0.0):
         """
-        Plots a set of points representing simulation states (i.e. recorded by simulations) in the 2D representation of the environment.
+        Plots a set of points on the 1D representation of the environment
 
-        Points are connected by lines if requested by the code in `style`.
+        When is_trajectory=True, points are connected by lines and the cyan color is used for the point representing the currently plotted
+        point of the trajectory.
 
         Arguments:
         points: array-like
-            Points to plot representing states obtained from simulations.
+            Points to plot.
+
+        ax: (opt) Axes object
+            Existing axes object on which the points should be added.
+            default: None, in which case a new axes object is created
+
+        cmap: (opt) colormap
+            Colormap to use (in `matplotlib.cm.get_cmap(cmap)`) when is_trajectory=True to indicate the evolution of time.
+            This option is ignored when is_trajectory=False.
+            default: "coolwarm" which goes from blue to red
+
+        color: (opt) str
+            Color to use for each plotted point.
+            This option is ignored when is_trajectory=False.
+            default: "blue"
 
         style: (opt) str
             Style of the plotted points, it's the symbol used in matplotlib.pyplot.plot(), e.g. ".-" or "." or "x".
+
+        markersize: (opt) int
+            Size of the points.
+            default: 5
+
+        is_trajectory: (opt) bool
+            Whether the plotted points are part of a trajectory, in which case lines connect the points and a colormap is used to indicate time progress.
+            default: False
+
+        pause: (opt) positive float
+            Seconds to pause after each added point, for better visualization of how the trajectory evolves.
+            default: 0.0
         """
+        if is_trajectory:
+            if cmap is None:
+                cmap = "coolwarm"
+            color = "cyan"
+            style = '.-'
+        else:
+            cmap = None
+
         if ax is None:
             ax = plt.figure(figsize=figsize).subplots(1, 1)
 
@@ -308,9 +343,21 @@ class EnvGridworld1D(EnvironmentDiscrete):
             _color = colors(i / n_points) if cmap is not None else color
             # Because of the plt.imshow() function used to plot the environment in plot_values(), we need to place the second coordinate first (horizontal axis)
             # and the second coordinate next (vertical axis) in the call to plt.plot() now.
-            ax.plot( [idx_point_2d[1], idx_point_2d_next[1]],
-                     [idx_point_2d[0], idx_point_2d_next[0]],
-                     style, color=_color, markersize=markersize)
+            xvalues = [idx_point_2d[1], idx_point_2d_next[1]]
+            yvalues = [idx_point_2d[0], idx_point_2d_next[0]]
+
+            # Plot the current and next point (they are connected if is_trajectory=True)
+            ax.plot(xvalues, yvalues, style, color=_color, markersize=markersize)
+            if is_trajectory:
+                # Mark the next point differently (different color and larger size), so that we can see where we are plotting
+                ax.plot(xvalues[1], yvalues[1], style, color=color, markersize=2*markersize)
+                # Remove the special mark from the current point
+                ax.plot(xvalues[0], yvalues[0], style, color="white", markersize=2*markersize)
+                ax.plot(xvalues[0], yvalues[0], style, color=_color, markersize=markersize)
+                if pause > 0:
+                    ax.set_title(f"Step {i+1} of {len(points)}")
+                    plt.pause(pause)
+                    plt.draw()
 
         ax.xaxis.set_major_locator(MaxNLocator(integer=True))
         ax.yaxis.set_ticks(())
@@ -811,19 +858,54 @@ class EnvGridworld2D(EnvironmentDiscrete):
 
         return ax, img
 
-    def plot_points(self, points, ax=None, style=".-", figsize=(8, 8), color="blue", cmap=None, markersize=5):
+    def plot_points(self, points, ax=None, figsize=(8, 8), cmap=None, color="blue", style=".-", markersize=5, is_trajectory=False, pause=0.0):
         """
-        Plots a set of points representing simulation states (i.e. recorded by simulations) in the 2D representation of the environment.
+        Plots a set of points on the 1D representation of the environment
 
-        Points are connected by lines if requested by the code in `style`.
+        When is_trajectory=True, points are connected by lines and the cyan color is used for the point representing the currently plotted
+        point of the trajectory.
 
         Arguments:
         points: array-like
-            Points to plot representing states obtained from simulations.
+            Points to plot.
+
+        ax: (opt) Axes object
+            Existing axes object on which the points should be added.
+            default: None, in which case a new axes object is created
+
+        cmap: (opt) colormap
+            Colormap to use (in `matplotlib.cm.get_cmap(cmap)`) when is_trajectory=True to indicate the evolution of time.
+            This option is ignored when is_trajectory=False.
+            default: "coolwarm" which goes from blue to red
+
+        color: (opt) str
+            Color to use for each plotted point.
+            This option is ignored when is_trajectory=False.
+            default: "blue"
 
         style: (opt) str
             Style of the plotted points, it's the symbol used in matplotlib.pyplot.plot(), e.g. ".-" or "." or "x".
+
+        markersize: (opt) int
+            Size of the points.
+            default: 5
+
+        is_trajectory: (opt) bool
+            Whether the plotted points are part of a trajectory, in which case lines connect the points and a colormap is used to indicate time progress.
+            default: False
+
+        pause: (opt) positive float
+            Seconds to pause after each added point, for better visualization of how the trajectory evolves.
+            default: 0.0
         """
+        if is_trajectory:
+            if cmap is None:
+                cmap = "coolwarm"
+            color = "cyan"
+            style = '.-'
+        else:
+            cmap = None
+
         if ax is None:
             ax = plt.figure(figsize=figsize).subplots(1, 1)
 
@@ -837,9 +919,21 @@ class EnvGridworld2D(EnvironmentDiscrete):
             _color = colors(i / n_points) if cmap is not None else color
             # Because of the plt.imshow() function used to plot the environment in plot_values(), we need to place the second coordinate first (horizontal axis)
             # and the second coordinate next (vertical axis) in the call to plt.plot() now.
-            ax.plot( [idx_point_2d[1], idx_point_2d_next[1]],
-                     [idx_point_2d[0], idx_point_2d_next[0]],
-                     style, color=_color, markersize=markersize)
+            xvalues = [idx_point_2d[1], idx_point_2d_next[1]]
+            yvalues = [idx_point_2d[0], idx_point_2d_next[0]]
+
+            # Plot the current and next point (they are connected if is_trajectory=True)
+            ax.plot(xvalues, yvalues, style, color=_color, markersize=markersize)
+            if is_trajectory:
+                # Mark the next point differently (different color and larger size), so that we can see where we are plotting
+                ax.plot(xvalues[1], yvalues[1], style, color=color, markersize=2*markersize)
+                # Remove the special mark from the current point
+                ax.plot(xvalues[0], yvalues[0], style, color="white", markersize=2*markersize)
+                ax.plot(xvalues[0], yvalues[0], style, color=_color, markersize=markersize)
+                if pause > 0:
+                    ax.set_title(f"Step {i+1} of {len(points)}")
+                    plt.pause(pause)
+                    plt.draw()
 
         ax.xaxis.set_major_locator(MaxNLocator(integer=True))
         ax.yaxis.set_major_locator(MaxNLocator(integer=True))

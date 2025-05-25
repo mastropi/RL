@@ -168,7 +168,7 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
         P_epi, P_con, b_epi, b_con, g, mu = compute_transition_matrices(cls.env2d, cls.policy_nn)
         P = P_con if learning_task == LearningTask.CONTINUING else P_epi
         b = b_con if learning_task == LearningTask.CONTINUING else b_epi
-        bias = g if learning_criterion == LearningCriterion.AVERAGE else None
+        bias = g if learning_criterion == LearningCriterion.AVERAGE else 0.0
         V_true = compute_state_value_function_from_transition_matrix(P, b, bias=bias, gamma=gamma)
         cls.env2d.setV(V_true)
         #-- Policy characteristics
@@ -651,7 +651,7 @@ class Test_EstPolicy_EnvMountainCar(unittest.TestCase):
             ax, _ = cls.env_mc.plot_values(state_counts)
             # Add the trajectory
             trajectory = learner.getStates()
-            cls.env_mc.plot_points(trajectory, ax=ax, cmap="coolwarm", style=".-")
+            cls.env_mc.plot_points(trajectory, ax=ax, is_trajectory=True)
             # Add the absorption set
             absorption_set_as_indices = [cls.env_mc.getStateFromIndex(s, simulation=True) for s in absorption_set]
             cls.env_mc.plot_points(absorption_set_as_indices, ax=ax, color="red", markersize=5, style="x")

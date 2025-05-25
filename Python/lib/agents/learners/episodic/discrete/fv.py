@@ -14,6 +14,7 @@ from Python.lib.agents.learners.episodic.discrete.td import LeaTDLambda, LeaTDLa
 from Python.lib.estimators.fv import compute_fv_integral, merge_proba_survival_and_phi, update_phi
 from Python.lib.utils import basic, computing
 
+
 class LeaFV(LeaTDLambda):
     """
     Fleming-Viot learner on a discrete environment defined with the DiscreteEnv class of openAI's gym module based on
@@ -922,9 +923,9 @@ class LeaFV(LeaTDLambda):
                     print(f"Interactive: {plt.isinteractive()}")
                     ax = fig.gca()
                     ax.step(df_phi_proba_surv_for_state['t'], df_phi_proba_surv_for_state['P(T>t)'], color="blue", where='post')
-                    ax.step(df_phi_proba_surv_for_state['t'], df_phi_proba_surv_for_state['Phi'], color="red", where='post')
+                    ax.step(df_phi_proba_surv_for_state['t'], df_phi_proba_surv_for_state['Phi'], color="darkviolet", where='post')
                     ax.step(df_phi_proba_surv_for_state['t'], self.gamma**df_phi_proba_surv_for_state['t']*df_phi_proba_surv_for_state['P(T>t)']*df_phi_proba_surv_for_state['Phi'], color="green", where='post')
-                    ax.set_title(f"P(T>t; state) (blue) and Phi(t,x; state) (red), gamma*P*Phi (green) for start state = {state}, x = {x}\nAbsorption state: {state_absorption}, Survival time = {t_surv}")
+                    ax.set_title(f"P(T>t; state) (blue) and Phi(t,x; state) (violet), gamma*P*Phi (green) for start state = {state}, x = {x}\nAbsorption state: {state_absorption}, Survival time = {t_surv}")
                     plt.draw()
                     plt.pause(0.01) # Need this pause() call with a positive argument in order for the plot to be drawn with plt.draw()!!
 

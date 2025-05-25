@@ -393,7 +393,7 @@ def estimate_stationary_probabilities(dict_phi, df_proba_surv, expected_absorpti
                 ax2.step(df_phi_proba_surv['t'], df_phi_proba_surv['Phi'] * df_phi_proba_surv['P(T>t)'], color="green", where='post')
                 ax2.set_ylim(ax.get_ylim())
                 ax2.set_ylabel(r"$\mathbb{P}(X(t)=" + str(x) + " | T_{abs}>t)$")
-                plt.title("P(T>t) (blue) and Phi(t,x) (violet) and their product (green) for state x = {}\n(Integral = Area under the green curve = {:.3f})".format(x, integrals[x]))
+                plt.title("P(T>t) (blue) and Phi(t,x) (violet) and their product (green) for state x = {}\n(Integral (>0) = Area under the green curve = {:.3f})".format(x, integrals[x]))
 
     return probas_stationary, integrals
 

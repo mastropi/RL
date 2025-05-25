@@ -34,13 +34,15 @@ from Python.lib.agents.policies import probabilistic
 from Python.lib.environments.gridworlds import Direction2D
 from Python.lib.estimators.nn_models import InputLayer
 
-from Python.lib.utils.basic import get_current_datetime_as_string, load_objects_from_pickle, log_file_open, log_file_close, save_objects_to_pickle
+from Python.lib.utils.basic import get_current_datetime_as_string, load_objects_from_pickle, log_file_open, log_file_close, save_objects_to_pickle, set_numpy_options, reset_numpy_options
 from Python.lib.utils.computing import compute_expected_reward, compute_transition_matrices, compute_state_value_function_from_transition_matrix
 
 from Python.test.test_optimizers_discretetime import Test_EstPolicy_EnvGridworldsWithObstacles, Test_EstPolicy_EnvMountainCar
 
 # When saving results or reading previously saved results
 rootdir = os.path.realpath("./RL-003-Classic")
+# When running the process
+rootdir = os.path.realpath("../../RL-003-Classic")
 resultsdir = f"{rootdir}/results"
 logsdir = f"{rootdir}/logs"
 
@@ -109,7 +111,7 @@ def compute_true_state_value_function(env, policy, learning_task, learning_crite
     P_epi, P_con, b_epi, b_con, g, mu = compute_transition_matrices(env, policy, atol=atol)
     P = P_con if learning_task == LearningTask.CONTINUING else P_epi
     b = b_con if learning_task == LearningTask.CONTINUING else b_epi
-    bias = g if learning_criterion == LearningCriterion.AVERAGE else None
+    bias = g if learning_criterion == LearningCriterion.AVERAGE else 0.0
     V_true = compute_state_value_function_from_transition_matrix(P, b, bias=bias, gamma=gamma)
     env.setV(V_true)
     dict_proba_stationary = dict(zip(np.arange(len(mu)), mu))
@@ -212,11 +214,74 @@ def compute_prob_states(state_counts, probas_stationary=None):
 #--- Auxiliary functions
 
 #--- Plotting functions
-def plot_state_counts(dict_simulator, learning_method, params_exec, trajectory=None, seed=None, verbose=False, verbose_period=1):
-    "seed: Seed to generate the trajectory under the current policy stored in the `dict_simulator` simulator when no `trajectory` is given"
+def plot_trajectory(env, trajectory, ax=None, style=".-", figsize=(8, 8), cmap="coolwarm", markersize=5, pause=0.0):
+    """
+    Plots a trajectory of states in the given environment which is assumed to be 2D
+
+    The states in the trajectory are connected by lines defined by `style`.
+
+    Arguments:
+    env: Environment
+        2D environment where the trajectory is plotted.
+        Ex: a 2D gridworld, the mountain car
+
+    trajectory: array-like
+        Trajectory to plot.
+
+    ax: (opt) Axes object
+        Existing axes object on which the trajectory should be added.
+        default: None, in which case a new axes object is created
+
+    style: (opt) str
+        Style of the plotted trajectory, it's the symbol used in matplotlib.pyplot.plot(), e.g. ".-" or "." or "x".
+
+    pause: (opt) int
+        Number of seconds to pause after each added point. For better visualization purposes.
+        default: 0.0
+    """
+    if ax is None:
+        ax = plt.figure(figsize=figsize).subplots(1, 1)
+        env._finalize_plot(ax)
+
+    n_points = len(trajectory)
+    colors = cm.get_cmap(cmap, lut=n_points)
+    for i, point in enumerate(trajectory[:-1]):
+        # Convert the point to a 2D index representing the entry of the point in the 2D shape representation of the environment
+        idx_point = env.getIndexFromState(point)
+        idx_point_next = env.getIndexFromState(trajectory[i + 1])
+        idx_point_2d = env.get_index_2d_from_index(idx_point)
+        idx_point_2d_next = env.get_index_2d_from_index(idx_point_next)
+        _color = colors(i / n_points)
+        if env.getShapeDisplayNames() == ("velocity", "position"):
+            # Velocity is on the VERTICAL axis and position on the HORIZONTAL axis
+            xvalues = [idx_point_2d[env.getPositionDimension()], idx_point_2d_next[env.getPositionDimension()]]
+            yvalues = [idx_point_2d[env.getVelocityDimension()], idx_point_2d_next[env.getVelocityDimension()]]
+        else:
+            # Velocity is on the HORIZONTAL axis and position on the VERTICAL axis
+            xvalues = [idx_point_2d[env.getVelocityDimension()], idx_point_2d_next[env.getVelocityDimension()]]
+            yvalues = [idx_point_2d[env.getPositionDimension()], idx_point_2d_next[env.getPositionDimension()]]
+        # Connect the current point with the next
+        ax.plot(xvalues, yvalues, style, color=_color, markersize=markersize)
+        # Mark the next point differently (different color and larger size), so that we can see where we are plotting
+        ax.plot(xvalues[1], yvalues[1], style, color="cyan", markersize=2 * markersize)
+        # Remove the special mark from the current point
+        ax.plot(xvalues[0], yvalues[0], style, color="white", markersize=2 * markersize)
+        ax.plot(xvalues[0], yvalues[0], style, color=_color, markersize=markersize)
+        if pause > 0:
+            ax.set_title(f"Step {i + 1} of {len(trajectory)}")
+            plt.pause(pause)
+            plt.draw()
+
+    return ax
+
+def plot_state_counts(dict_simulator, learning_method, params_exec, trajectory=None, trajectory_length=1000, seed=None, verbose=False, verbose_period=1, plot_absorption_set=True):
+    """
+    trajectory_length: Length of the trajectory to generate when no `trajectory` is given.
+    seed: Seed to generate the trajectory under the current policy stored in the `dict_simulator` simulator when no `trajectory` is given.
+    """
     learning_method_type = learning_method[:9]
     learning_task = params_exec['learning_task']
-    learning_criterio = params_exec['learning_criterion']
+    learning_criterion = params_exec['learning_criterion']
     max_time_steps_benchmark = params_exec['max_time_steps_benchmark']
     env_type = params_exec['env_type']
     N = params_exec['N']
@@ -225,44 +290,145 @@ def plot_state_counts(dict_simulator, learning_method, params_exec, trajectory=N
     if trajectory is None:
         # Generate a trajectory under the policy stored in the learner of the simulator
         _simulator = copy.deepcopy(dict_simulator[learning_method])
-        learner_under_policy = _simulator.run_exploration(max_time_steps=T, epsilon_random_action=epsilon_random_action, seed=seed, verbose=verbose, verbose_period=verbose_period)
+        learner_under_policy = _simulator.run_exploration(max_time_steps=trajectory_length, epsilon_random_action=epsilon_random_action, seed=seed, verbose=verbose, verbose_period=verbose_period)
         trajectory = np.array(learner_under_policy.getStates())
         # Generate the 1D array containing the state counts for each state index
         # (as the above run_exploration() method does NOT update the state counts of the learner because this is done by the learn() method of the learner and the run_exploration()
         # method does NOT learn, it only collects a trajectory)
         state_counts = learner_under_policy.getStateCountsFromTrajectory()
-        use_trajectory_stored_in_given_simulator = False
     else:
-        # Distribution of state counts stored in the learner of dict_simulator, at last learning step
-        # IMPORTANT: For FV, recall that the state counts only contain information about the states visited during the FV simulation as the counts are reset after the initial exploration
-        state_counts = dict_simulator[learning_method].getAgent().getLearner().getStateCounts()
-        use_trajectory_stored_in_given_simulator = True
+        # Distribution of state counts in the given trajectory
+        state_counts = np.zeros(dict_simulator[learning_method].getEnv().getNumStates(), dtype=int)
+        _visited_states = pd.Series(trajectory).value_counts()
+        for s, c in _visited_states.items():
+            state_counts[s] = c
+
+    # Show the state counts as an image
     ax, img = dict_simulator[learning_method].getEnv().plot_values(state_counts, cmap="Blues")
-    if learning_method_type == "values_fv" and use_trajectory_stored_in_given_simulator and not params_exec['estimate_absorption_set_at_every_step']:
-        # Check that no visit was done to the absorption set
-        print("Intersection between absorption set and state visit count > 0 in FV (IT SHOULD BE EMPTY! --recall that the state counts in FV are reset after the initial exploration):")
-        _visited_states = set(np.where(state_counts > 0)[0])
-        if learning_method_type == "values_fv" and not params_exec['soft_killing']:
-            assert len(_visited_states.intersection(dict_simulator[learning_method].getAgent().getLearner().getAbsorptionSet())) == 0, "The visited states during the FV excursion must NOT be in the absorption set"
     if env_type == Environment.MountainCar:
         # Add the trajectory of the last replication
         assert T <= len(trajectory)
         trajectory2plot = trajectory[:T]
-        dict_simulator[learning_method].getEnv().plot_points(trajectory2plot, ax=ax, cmap="coolwarm", style=".-")
-        if learning_method_type == "values_fv":
-            states_absorption_set = np.nan*np.ones(dict_simulator[learning_method].getEnv().getNumStates())
-            states_absorption_set[list(dict_simulator[learning_method].getAgent().getLearner().getAbsorptionSet())] = 1.0
-            dict_simulator[learning_method].getEnv().plot_values(states_absorption_set, ax=ax, cmap="Oranges", alpha=0.5)
-            #dict_simulator[learning_method].getEnv().plot_points(list(dict_simulator[learning_method].getAgent().getLearner().getAbsorptionSet()), ax=ax, color="red", markersize=7, style="x")
+        dict_simulator[learning_method].getEnv().plot_points(trajectory2plot, ax=ax, is_trajectory=True)
 
-    if learning_method_type == "values_fv":
+    if learning_method_type == "values_fv" and plot_absorption_set:
         # Plot the final absorption set
         dict_simulator[learning_method].getEnv().plot_points(np.array(list(dict_simulator[learning_method].getAgent().getLearner().getAbsorptionSet())), ax=ax, color="red", markersize=5, style="x")
 
-    dict_simulator[learning_method]._add_count_labels(ax, state_counts, factor_fontsize=5.0)
+    # Add the count labels
+    dict_simulator[learning_method]._add_count_labels(ax, state_counts, factor_fontsize=3.0)
     plt.suptitle(f"{learning_method.upper()}\n{learning_task.name} learning task - {learning_criterion.name} reward criterion - {env_type.name} {dict_simulator[learning_method].getEnv().getShape()}"
                  f"\nN={N}, T={T}, MAX budget={max_time_steps_benchmark} steps per policy learning step"
-                 f"\nDistribution of state counts at end of policy learning process AND final absorption set A" + f"\n{'(FV simulation ONLY, not E(T))' if learning_method_type == 'values_fv' else ''}")
+                 f"\nDistribution of state counts by a trajectory that follows the last learned policy AND final absorption set A")
+
+def plot_policy(env, policy, state_counts, params_exec, axes=None, is_problem_2d=True, t_learn=1, fontsize=14):
+    "Plots the given policy on the given environment. The state counts are used in the Mountain Car environment only in order to find out the states with some visit during policy learning"
+    learning_method = params_exec['learning_method']
+    learning_criterion = params_exec['learning_criterion']
+    env_type = params_exec['env_type']
+    N = params_exec['N']
+    T = params_exec['T']
+
+    # Put the policy in Evaluation mode
+    policy.getModel().eval()
+    #print("Network parameters:")
+    #print(list(policy.getThetaParameter()))
+
+    colormap = cm.get_cmap("rainbow")  # useful colormaps are "jet", "rainbow", seismic"
+    aspect_ratio = "auto" if env_type == Environment.MountainCar else "equal"
+    factor_fontsize = 1.0   # Scaling factor when computing the final fontsize to use for labels showing the policy values of the different actions
+
+    # Policy for each action at each state
+    new_figure = False
+    if env_type == Environment.MountainCar:
+        # Plot the best action and their probability at each state, as an image
+        # We initialize these arrays as NaN so that we can decide not to show anything for a state that hasn't been visited at all during the policy learning process (in one replication)
+        best_action = np.nan*np.ones(env.getNumStates())
+        highest_probability = np.nan * np.ones_like(best_action)
+        states_with_at_least_one_visit_during_policy_learning = np.where( np.sum(state_counts, axis=0) )[0]
+
+        # Find the action with highest probability for each discrete state
+        policy_values = policy.get_policy_values()
+        for s in range(env.getNumStates()):
+            if s in states_with_at_least_one_visit_during_policy_learning:
+                action_highest_probability = np.argmax(policy_values[s])
+                best_action[s] = action_highest_probability  #(action_highest_probability + 1) / 3.0
+            highest_probability[s] = np.max(policy_values[s])
+        print(f"Policy values for each discrete state:\n{policy_values}")
+
+        # Show the best action map as an image plot whose intensity is proportional to the probability of the best action, distinguishing the action by color as indicated in variable `colormaps`
+        if axes is None:
+            new_figure = True
+            ax = plt.figure().subplots(1, 1)
+        else:
+            ax = axes[0]
+            ax.cla()   # Clear the existing plot (if any) so that there is no overlap with what is being plotted now
+        colormaps = ["Blues", "Greens", "Reds"]  # Colormaps for actions LEFT, STAY, RIGHT
+        for a in np.arange(env.getNumActions()-1, -1, -1):   # We go in reverse order so that the colomaps appear from left to right to represent LEFT, ZERO, RIGHT
+            msk = best_action == a
+            highest_probability_toplot = np.nan*np.ones_like(highest_probability)
+            highest_probability_toplot[msk] = highest_probability[msk]
+            ax, img = env.plot_values(highest_probability_toplot, ax=ax, cmap=colormaps[a], vmin=0, vmax=1, add_colorbar=new_figure)
+        env._finalize_plot(ax)
+        axes = [ax]
+        plt.subplots_adjust(top=0.80, wspace=0, hspace=0)
+        plt.suptitle(f"{learning_method.upper()}, {learning_criterion.name.upper()} criterion, t_learn={t_learn}\nN={N}, T={T}"
+                     f"\nPolicy at each state:\nShowing the highest probability of:\nBlue = Acc. LEFT, Green: = Do NOT acc., Red = Acc. RIGHT")
+    else:
+        # Plot suitable for Gridworlds
+        if axes is None:
+            new_figure = True
+            axes = plt.figure().subplots(*env_shape, sharex=True, sharey=True, gridspec_kw=dict(hspace=0, wspace=0))  # See also help(plt.subplots); help(matplotlib.gridspec.GridSpec)
+        proba_actions_toplot = np.nan*np.ones((3, 3))
+        if is_problem_2d:
+            # Factor for the fontsize that depends on the environment size
+            factor_fs = factor_fontsize * np.min((4 / axes.shape[0], 4 / axes.shape[1]))
+            for i in range(axes.shape[0]):
+                for j in range(axes.shape[1]):
+                    state_1d = np.ravel_multi_index((i, j), env_shape)
+                    print("")
+                    for action in range(env.getNumActions()):
+                        print(f"Computing policy Pr(a={action}|s={(i,j)})...", end= " ")
+                        idx_2d = (0, 1) if action == 0 else (1, 2) if action == 1 else (2, 1) if action == 2 else (1, 0)
+                        proba_actions_toplot[idx_2d] = policy.getPolicyForAction(action, state_1d)
+                        print("p = {:.3f}".format(proba_actions_toplot[idx_2d]))
+                    img = axes[i, j].imshow(proba_actions_toplot, cmap=colormap, vmin=0, vmax=1, aspect=aspect_ratio)  # aspect="auto" means use the same aspect ratio as the axes
+                    # Remove the axes ticks as they do not convey any information
+                    axes[i, j].set_xticks([])
+                    axes[i, j].set_yticks([])
+                    for action in range(env.getNumActions()):
+                        idx_2d = (0, 1) if action == 0 else (1, 2) if action == 1 else (2, 1) if action == 2 else (1, 0)
+                        axes[i, j].text(idx_2d[1], idx_2d[0], "{:02d}".format(int(round(proba_actions_toplot[idx_2d]*100))),
+                                        color="white", fontsize=fontsize*factor_fs,
+                                        horizontalalignment="center", verticalalignment="center")
+        else:
+            factor_fs = factor_fontsize * 4 / axes.shape[0]
+            for i in range(len(axes)):
+                state = i
+                for action in range(env.getNumActions()):
+                    print(f"Computing policy Pr(a={action}|s={state})...", end=" ")
+                    idx_2d = (0, 1) if action == 0 else (1, 2) if action == 1 else (2, 1) if action == 2 else (1, 0)
+                    proba_actions_toplot[idx_2d] = policy.getPolicyForAction(action, state)
+                    print("p = {:.3f}".format(proba_actions_toplot[idx_2d]))
+                axes[i].cla()  # Clear the existing plot (if any) so that there is no overlap with what is being plotted now
+                img = axes[i].imshow(proba_actions_toplot, cmap=colormap, vmin=0, vmax=1, aspect="auto")  # aspect="auto" means use the same aspect ratio as the axes
+                # Remove the axes ticks as they do not convey any information
+                axes[i].set_xticks([])
+                axes[i].set_yticks([])
+                for action in range(env.getNumActions()):
+                    axes[i].text(0, action, "{:02d}".format(int(round(proba_actions_toplot[0, action] * 100))),
+                                 color="white", fontsize=fontsize*factor_fs,
+                                 horizontalalignment="center", verticalalignment="center")
+        if new_figure:
+            plt.colorbar(img, ax=axes)  # This adds a colorbar to the right of the FIGURE. However, the mapping from colors to values is taken from the last generated image! (which is ok because all images have the same range of values.
+                                        # Otherwise see answer by user10121139 in https://stackoverflow.com/questions/13784201/how-to-have-one-colorbar-for-all-subplots
+        plt.suptitle(f"{learning_method.upper()}, {learning_criterion.name.upper()} criterion, t_learn={t_learn}\nN={N}, T={T}"
+                     f"\nPolicy at each state")
+
+    plt.pause(0.01)
+    plt.draw()
+
+    return axes
 #--- Plotting functions
 #-------------------- AUXILIARY AND PLOTTING FUNCTIONS ------------------#
 
@@ -789,7 +955,7 @@ for rep in range(nrep):
     time_start_rep = timer()
     if learning_method == "all_online":
         for t_learn in range(n_learning_steps):
-            print(f"\n\n*** Running learning step {t_learn+1} of {n_learning_steps} (AVERAGE REWARD at previous step = {R_all[rep, max(0, t_learn-1)]}) of "
+            print(f"\n\n*** Running learning step {t_learn+1} of {n_learning_steps} (AVERAGE REWARD at previous step (not-reward-shaped) = {R_all[rep, max(0, t_learn-1)]}) of "
                   f"MAX={max_avg_reward_episodic if policy_learning_mode == 'online' else max_avg_reward_continuing} using {nsteps_all[rep, max(0, t_learn-1)]} time steps for Critic estimation)... (seed={seed_learn}) @{get_current_datetime_as_string()}")
             print("Learning the VALUE FUNCTIONS and POLICY simultaneously...")
             loss_all[rep, t_learn] = learner_ac.learn(n_episodes_per_learning_step, start_state=entry_state, max_time_steps_per_episode=max_time_steps_per_policy_learning_episode, prob_include_in_train=1.0) # prob_include_in_train=0.5)
@@ -806,6 +972,9 @@ for rep in range(nrep):
     else:
         # Keep track of the policy learned so that we can analyze how much it changes after each learning step w.r.t. the previous learning step
         policy_prev = None
+        if plot_policy_update:
+            # Initialize the plot of the policy at each policy learning step
+            axes_policy = plot_policy(test_ac.getEnv(), learner_ac.getPolicy(), state_counts_all[rep, :, :], params_exec, is_problem_2d=problem_2d, t_learn=1)
         for t_learn in range(n_learning_steps):
             # Set the policy in evaluation mode
             # This is important if we are using dropout layers in the neural network, o.w. the policy output by the model may be incorrect because some connections might be missing
@@ -822,9 +991,9 @@ for rep in range(nrep):
             # Pass a different seed (for the simulator) for each learning step... o.w. we will be using the same seed for them at every learning step!!
             seed_learn = seed_rep + t_learn
             if env_type == Environment.Gridworld:
-                print(f"\n\n*** Running learning step {t_learn+1} of {n_learning_steps} (True average reward under current policy = {avg_reward_true}) (AVERAGE REWARD at previous step = {R_all[rep, max(0, t_learn-1)]} of MAX={max_avg_reward_episodic})... (seed={seed_learn}) @{get_current_datetime_as_string()}")
+                print(f"\n\n*** Running learning step {t_learn+1} of {n_learning_steps} (True average reward under current policy = {avg_reward_true}) (AVERAGE REWARD at previous step (not-reward-shaped) = {R_all[rep, max(0, t_learn-1)]} of MAX={max_avg_reward_episodic})... (seed={seed_learn}) @{get_current_datetime_as_string()}")
             else:
-                print(f"\n\n*** Running learning step {t_learn+1} of {n_learning_steps}  (AVERAGE REWARD at previous step = {R_all[rep, max(0, t_learn-1)]} of MAX={max_avg_reward_episodic})... (seed={seed_learn}) @{get_current_datetime_as_string()}")
+                print(f"\n\n*** Running learning step {t_learn+1} of {n_learning_steps}  (AVERAGE REWARD at previous step (not-reward-shaped) = {R_all[rep, max(0, t_learn-1)]} of MAX={max_avg_reward_episodic})... (seed={seed_learn}) @{get_current_datetime_as_string()}")
             time.sleep(1)   # Wait for a second so that I can easily read the learning step number
             reset_value_functions_at_this_step = reset_value_functions_at_every_learning_step if t_learn > 0 else True  # ALWAYS RESET THE VALUE FUNCTIONS WHEN IT'S THE VERY FIRST LEARNING STEP (becaue we don't want to keep histroy from a earlier learning process on the same learner!)
             # Update the initial learning rate for the value functions at each learning step to a smaller value than the previous learning step
@@ -837,9 +1006,9 @@ for rep in range(nrep):
             # under the previous policy is most likely far away from the true values functions under the new policy.
             # Note: rel_entr(p, q) computes the term p * log(p/q) contributing to the relative entropy or Kullback-Leibler divergence
             # of the "new" distribution p(x) w.r.t. the "old" distribution q(x), which is defined as the expectation (measured over p(x)) of the
-            # difference between log(p(x)) and log(q(x)). Hence if p(x) is larger than q(x) the contribution is positive and
-            # if it is smaller, the contribution is negative. Therefore a positive K-L divergence typically corresponds to an increase
-            # in the probability from q(x) at the values of x having a large "new" probability p(x) value.
+            # difference between log(p(x)) and log(q(x), i.e. the p-expected difference in information provided by the new policy p(x) w.r.t. the previous policy q(x)).
+            # Hence if p(x) is larger than q(x) the contribution is positive and if it is smaller, the contribution is negative.
+            # Therefore a positive K-L divergence typically corresponds to an increase in the probability, from q(x) to p(x), at states x having a larger "new" probability p(x).
             # Ref: https://docs.scipy.org/doc/scipy/reference/generated/scipy.special.rel_entr.html
             # Note that we could also use the function scipy.stats.entropy() to compute directly the K-L divergence (i.e. without summing over the rel_entr() values, as done here)
             if not test_ac.getEnv().isStateContinuous():
@@ -862,14 +1031,19 @@ for rep in range(nrep):
                     else:
                         simulator_value_functions.getAgent().getLearner().setInitialLearningRate(alpha_initial / 10)
                 alpha_all[rep, t_learn] = simulator_value_functions.getAgent().getLearner().getInitialLearningRate()
-            print(
-                f"*** INITIAL learning rate alpha = {simulator_value_functions.getAgent().getLearner().getInitialLearningRate()} " +
-                (f"(adjustment happens starting at learning step (base 1) >= {t_learn_min_to_adjust_alpha}) " if adjust_alpha_initial_by_learning_step else "***\n"))
+            print(f"*** INITIAL learning rate alpha = {simulator_value_functions.getAgent().getLearner().getInitialLearningRate()} " +
+                 (f"(adjustment happens starting at learning step (base 1) >= {t_learn_min_to_adjust_alpha}) " if adjust_alpha_initial_by_learning_step else "***\n"))
 
             #--- 1) CRITIC
             print(f"Learning the CRITIC (at the current policy) using {learning_method.upper()}...")
             # Learn the value functions using the FV simulator
             if learning_method_type == "values_fv":
+                if plot and t_learn+1 in learning_steps_observe and t_learn+1 != learning_steps_observe[0]:
+                    _close_plots = input("Before proceeding, would you like to close all plots generated for all learning steps observed so far (y/n)?")
+                    if _close_plots.upper() == "Y":
+                        for _fig_number in plt.get_fignums():
+                            # Do NOT close the first 2 figures that are created at the beginning of the process showing the absorption set and initial trajectory
+                            plt.close(_fig_number) if _fig_number > 2 else None
                 # Reset to None the start state distribution for the E(T_A) excursion at the very first learning step so that
                 # we do NOT carry over whatever this distribution was at the end of the previous replication or at the end of the previous execution of the learning process
                 # using this same learner.
@@ -1031,14 +1205,20 @@ for rep in range(nrep):
                 # "NotImplementedError: TransformNode instances can not be copied. Consider using frozen() instead."
                 _simulator = copy.deepcopy(simulator_value_functions)   # We create a copy because we don't want to change the learner object in the simulator eventually used above (e.g. the state counts that are plotted below)
             except:
-                print("WARNING: The `simulator_value_functions` object could NOT be DEECOPied. "
+                print("WARNING: The `simulator_value_functions` object could NOT be DEEPCOPied. "
                       "This means that the online exploration after the value functions have been learned will override the trajectory stored in the value function's learner. "
                       "This might affect trajectory plots which might show unexpected results.")
                 _simulator = simulator_value_functions
+            # Generate a trajectory for the current policy, so that we always have a trajectory to plot,
+            # regardless of whether we learn the policy via NPG (in which case no trajectory is generated to learn the policy)
+            # or whether we learn the policy via regular policy gradient (in which case a trajectory is generated when updating the policy by the learner_ac.learn() call above).
+            # Note that we use 1000 time steps, regardless of the value of T above (used for the estimation of E(T_A) in the FVAC learning case). We do so in order to get
+            # a reasonable estimation of the average reward, because the value of parameter T may be too small (e.g. T = 100).
             learner_current_policy = _simulator.run_exploration(t_learn=t_learn, max_time_steps=T, epsilon_random_action=epsilon_random_action, seed=seed_learn, verbose=False, verbose_period=verbose_period)
             trajectory_under_policy = np.array(learner_current_policy.getStates())
             if is_NPG or policy_learning_mode != "online":
-                R_all[rep, t_learn] = np.mean(learner_current_policy.getRewards())  # Note that the average reward is NOT estimated by the run_exploration() method called above, therefore we compute it here from the observed rewards
+                # Note that the average reward is NOT estimated by the run_exploration() method called above, therefore we compute it here from the observed rewards
+                R_all[rep, t_learn] = np.mean(learner_current_policy.getRewards())
 
             # Store the long-run average reward estimated by the value functions learner used above
             R_long_all[rep, t_learn] = average_reward
@@ -1054,6 +1234,10 @@ for rep in range(nrep):
                 break_when_goal_reached and np.isclose(R_all[rep, t_learn], max_avg_reward_episodic, rtol=0.001):
                 print(f"*** Policy learning process stops at learning step t_learn+1={t_learn+1} because the average reward didn't change a bit from previous learning step! ***")
                 break
+
+            if plot_policy_update:
+                # Initialize the plot of the policy at each policy learning step
+                plot_policy(test_ac.getEnv(), learner_ac.getPolicy(), state_counts_all[rep, :, :], params_exec, axes=axes_policy, is_problem_2d=problem_2d, t_learn=t_learn+1)
     time_elapsed_rep = timer() - time_start_rep
     print(f"<<<<<<<<<< FINISHED replication {rep+1} of {nrep}... (@{format(get_current_datetime_as_string())}" + ", took {:.1f} min)".format(time_elapsed_rep / 60))
     time_elapsed_all[rep] = time_elapsed_rep
@@ -1107,7 +1291,8 @@ if policy_learning_mode == "online":
 ax_R.plot(np.arange(1, n_learning_steps+1), dict_R_long[learning_method][rep, :n_learning_steps], marker='.', color="greenyellow")
 ax_R.axhline(max_avg_reward_continuing, color="greenyellow", linewidth=1)
 ax_R.set_ylabel("Average reward", color="green")
-ax_R.plot(np.arange(1, n_learning_steps+1), dict_KL[learning_method][rep, :n_learning_steps], color="blue", linewidth=1)
+# For now I have eliminated the plot of the K-L divergence between consecutive learning steps to avoid cluttering
+#ax_R.plot(np.arange(1, n_learning_steps+1), dict_KL[learning_method][rep, :n_learning_steps], color="blue", linewidth=1)
 ax_R.axhline(KL_THRESHOLD, color="blue", linestyle="dashed")
 ax_R.axhline(0, color="green", linewidth=1, linestyle='dashed')
 # Set the Y-axis limits so that we can see better the learning curve despite possible large K-L values that could make the curve look very tiny
@@ -1138,10 +1323,20 @@ if learning_method_type == "values_fv":
     plt.title(f"{learning_method.upper()}" + f"{((' - SOFT' if soft_killing else ' - HARD') + ' killing') if learning_method_type == 'values_fv' else ''}" + "\nComparison between the Average Rewards")
     plt.legend(["Avg. Reward estimated by FV", "Avg. Reward from Initial Exploration", "Inflated Avg. Reward from FV simulation"])
 
+if learning_method != "all_online": # Otherwise, `trajectory_under_policy` (used in the call below) is not defined
+    plot_state_counts(dict_simulator, learning_method, params_exec, trajectory=trajectory_under_policy, plot_absorption_set=True)
 
-plot_state_counts(dict_simulator, learning_method, params_exec, trajectory=trajectory_under_policy)
+if not plot_policy_update:
+    _state_counts_during_policy_learning = dict_state_counts[learning_method][nrep-1, :, :]
+    axes = plot_policy(dict_simulator[learning_method].getEnv(), dict_simulator[learning_method].getAgent().getPolicy(), _state_counts_during_policy_learning, params_exec,
+                       is_problem_2d=problem_2d, t_learn=n_learning_steps, fontsize=14)
+print("{} learning process took {:.1f} minutes ({:.1f} hours)".format(learning_method.upper(), dict_time_elapsed[learning_method][rep] / 60, dict_time_elapsed[learning_method][rep] / 3600))
+
 
 raise KeyboardInterrupt
+
+# Use this to generate a slow-paced trajectory drawing
+test_ac.getEnv().plot_points(trajectory_under_policy, is_trajectory=True, pause=0.1)
 
 
 #-- Plot the trajectory as a GIF
@@ -1316,96 +1511,10 @@ plt.suptitle(f"{learning_method.upper()}\n{learning_task.name} learning task - {
              f"\nEvolution of the Advantage function A(s,a) with the learning step by state\nMaximum average reward (continuing): {max_avg_reward_continuing}")
 
 
-#-- Final policy parameters and policy distribution by state (for the last replication)
-policy = dict_simulator[learning_method].getAgent().getPolicy()
-policy.getModel().eval()
-print("Final network parameters:")
-print(list(policy.getThetaParameter()))
-
-# Plot the evolution of a few weights of the neural network
-# TBD
-
-colormap = cm.get_cmap("rainbow")  # useful colormaps are "jet", "rainbow", seismic"
-colornorm = None
-aspect_ratio = "auto" if env_type == Environment.MountainCar else "equal"
-fontsize = 14
-factor_fontsize = 1.0   # Scaling factor when computing the final fontsize to use for labels showing the policy values of the different actions
-
-# Policy for each action at each state
-if env_type == Environment.MountainCar:
-    # Plot the best action and their probability at each state, as an image
-    # We initialize these arrays as NaN so that we can decide not to show anything for a state that hasn't been visited at all during the policy learning process (in one replication)
-    best_action = np.nan*np.ones(test_ac.getEnv().getNumStates())
-    highest_probability = np.nan * np.ones_like(best_action)
-    states_with_at_least_one_visit_during_policy_learning = np.where( np.sum(state_counts_all[rep, :, :], axis=0) )[0]
-
-    # Find the action with highest probability for each discrete state
-    policy_values = policy.get_policy_values()
-    for s in range(test_ac.getEnv().getNumStates()):
-        if s in states_with_at_least_one_visit_during_policy_learning:
-            action_highest_probability = np.argmax(policy_values[s])
-            best_action[s] = action_highest_probability  #(action_highest_probability + 1) / 3.0
-        highest_probability[s] = np.max(policy_values[s])
-    print(f"Policy values for each discrete state:\n{policy_values}")
-
-    # Show the best action map as an image plot whose intensity is proportional to the probability of the best action, distinguishing the action by color as indicated in variable `colormaps`
-    ax = plt.figure().subplots(1, 1)
-    colormaps = ["Blues", "Greens", "Reds"]  # Colormaps for actions LEFT, STAY, RIGHT
-    for a in np.arange(test_ac.getEnv().getNumActions()-1, -1, -1):   # We go in reverse order so that the colomaps appear from left to right to represent LEFT, ZERO, RIGHT
-        msk = best_action == a
-        highest_probability_toplot = np.nan*np.ones_like(highest_probability)
-        highest_probability_toplot[msk] = highest_probability[msk]
-        ax, img = test_ac.getEnv().plot_values(highest_probability_toplot, ax=ax, cmap=colormaps[a], vmin=0, vmax=1)
-    test_ac.getEnv()._finalize_plot(ax)
-    axes = [ax]
-    plt.subplots_adjust(top=0.80, wspace=0, hspace=0)
-    plt.suptitle(f"{learning_method.upper()}\nPolicy at each state:\nShowing the highest probability of:\nBlue = Acc. LEFT, Green: = Do NOT acc., Red = Acc. RIGHT")
-else:
-    # Plot suitable for Gridworlds
-    axes = plt.figure().subplots(*env_shape, sharex=True, sharey=True, gridspec_kw=dict(hspace=0, wspace=0))  # See also help(plt.subplots); help(matplotlib.gridspec.GridSpec)
-    proba_actions_toplot = np.nan*np.ones((3, 3))
-    if problem_2d:
-        # Factor for the fontsize that depends on the environment size
-        factor_fs = factor_fontsize * np.min((4 / axes.shape[0], 4 / axes.shape[1]))
-        for i in range(axes.shape[0]):
-            for j in range(axes.shape[1]):
-                state_1d = np.ravel_multi_index((i, j), env_shape)
-                print("")
-                for action in range(test_ac.getEnv().getNumActions()):
-                    print(f"Computing policy Pr(a={action}|s={(i,j)})...", end= " ")
-                    idx_2d = (0, 1) if action == 0 else (1, 2) if action == 1 else (2, 1) if action == 2 else (1, 0)
-                    proba_actions_toplot[idx_2d] = policy.getPolicyForAction(action, state_1d)
-                    print("p = {:.3f}".format(proba_actions_toplot[idx_2d]))
-                img = axes[i, j].imshow(proba_actions_toplot, cmap=colormap, vmin=0, vmax=1, aspect=aspect_ratio)  # aspect="auto" means use the same aspect ratio as the axes
-                # Remove the axes ticks as they do not convey any information
-                axes[i, j].set_xticks([])
-                axes[i, j].set_yticks([])
-                for action in range(test_ac.getEnv().getNumActions()):
-                    idx_2d = (0, 1) if action == 0 else (1, 2) if action == 1 else (2, 1) if action == 2 else (1, 0)
-                    axes[i, j].text(idx_2d[1], idx_2d[0], "{:02d}".format(int(round(proba_actions_toplot[idx_2d]*100))),
-                                    color="white", fontsize=fontsize*factor_fs,
-                                    horizontalalignment="center", verticalalignment="center")
-    else:
-        factor_fs = factor_fontsize * 4 / axes.shape[0]
-        for i in range(len(axes)):
-            state = i
-            for action in range(test_ac.getEnv().getNumActions()):
-                print(f"Computing policy Pr(a={action}|s={state})...", end=" ")
-                idx_2d = (0, 1) if action == 0 else (1, 2) if action == 1 else (2, 1) if action == 2 else (1, 0)
-                proba_actions_toplot[idx_2d] = policy.getPolicyForAction(action, state)
-                print("p = {:.3f}".format(proba_actions_toplot[idx_2d]))
-            img = axes[i].imshow(proba_actions_toplot, cmap=colormap, vmin=0, vmax=1, aspect="auto")  # aspect="auto" means use the same aspect ratio as the axes
-            # Remove the axes ticks as they do not convey any information
-            axes[i].set_xticks([])
-            axes[i].set_yticks([])
-            for action in range(test_ac.getEnv().getNumActions()):
-                axes[i].text(0, action, "{:02d}".format(int(round(proba_actions_toplot[0, action] * 100))),
-                             color="white", fontsize=fontsize*factor_fs,
-                             horizontalalignment="center", verticalalignment="center")
-    plt.colorbar(img, ax=axes)  # This adds a colorbar to the right of the FIGURE. However, the mapping from colors to values is taken from the last generated image! (which is ok because all images have the same range of values.
-                            # Otherwise see answer by user10121139 in https://stackoverflow.com/questions/13784201/how-to-have-one-colorbar-for-all-subplots
-    plt.suptitle(f"{learning_method.upper()}\nPolicy at each state")
-
+#-- Final policy
+_state_counts_during_policy_learning = dict_state_counts[learning_method][nrep-1, :, :]
+axes = plot_policy(dict_simulator[learning_method].getEnv(), dict_simulator[learning_method].getAgent().getPolicy(), _state_counts_during_policy_learning, params_exec,
+                   is_problem_2d=problem_2d, t_learn=n_learning_steps, fontsize=14)
 print("{} learning process took {:.1f} minutes ({:.1f} hours)".format(learning_method.upper(), dict_time_elapsed[learning_method][rep] / 60, dict_time_elapsed[learning_method][rep] / 3600))
 
 
