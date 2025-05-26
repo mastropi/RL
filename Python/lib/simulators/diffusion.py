@@ -19,7 +19,7 @@ from Python.lib.environments.diffusion import EnvDiffusion
 from Python.lib.estimators.fv import estimate_stationary_probabilities
 from Python.lib.simulators.discrete import Simulator
 from Python.lib.utils.basic import measure_exec_time
-from Python.lib.utils.computing import compute_survival_probability
+from Python.lib.utils.computing import compute_survival_probability, test_for_stationarity
 
 
 class SimulatorDiffusionFV(Simulator):
@@ -32,8 +32,12 @@ class SimulatorDiffusionFV(Simulator):
     I am doing this now to analyze if this type of implementation (with less interdependence with other pats of the code) is easier to implement
     compared to what I have done already in the SimulatorQueue class and in the Simulator class.
     Let's see... otherwise I can always refactor the code later.
+
+    Arguments:
+    - agent: Agent
+        For now it is not used and `None` can be passed.
     """
-    def __init__(self, env, agent, dict_params_learning=dict(), case=1, replication=1, N=10, seed=None, log=False, save=False, logsdir=None, resultsdir=None, debug=False):
+    def __init__(self, env, agent, dict_params_learning=dict(), case=1, replication=1, seed=None, log=False, save=False, logsdir=None, resultsdir=None, debug=False):
         super().__init__(env, agent, case=case, replication=replication, seed=seed, log=log, save=save, logsdir=logsdir, resultsdir=resultsdir, debug=debug)
 
         if not isinstance(env, EnvDiffusion):
@@ -61,6 +65,12 @@ class SimulatorDiffusionFV(Simulator):
             - N: # particles to use in the Fleming-Viot particle system.
             - T: # steps to run the simulation that estimates the expected return time to the absorption set A.
             - absorption_set: sympy.Set defining the absorption set A.
+            Optional keys are:
+            - check_for_stationarity: whether to check for stationarity before starting to collect exit states from A to estimate their distribution
+            to be used to select the start states for the Fleming-Viot particle system in self._run_simulation_fv().
+            default: True
+            - burnin_for_stationarity_check: number of steps to wait before checking for stationarity when check_for_stationarity=True.
+            default: 30
 
         sets_of_interest: list of sympy.Set
             List containing the sets of interest on which the stationary probability should be estimated with Fleming-Viot.
@@ -78,6 +88,9 @@ class SimulatorDiffusionFV(Simulator):
         absorption_set = dict_params_simul.get('absorption_set')
         if not isinstance(absorption_set, sympy.Set):
             raise ValueError(f"The absorption set A must be passed in dict_params_simul['absorption_set'] and must be of type `sympy.Set`: {absorption_set}")
+
+        check_for_stationarity = dict_params_simul.get('check_for_stationarity', True)
+        burnin_for_stationarity_check = dict_params_simul.get('burnin_for_stationarity_check', 30)
         #--- Parse input parameters
 
         # 1) Monte-Carlo simulation
@@ -87,30 +100,84 @@ class SimulatorDiffusionFV(Simulator):
         # - the absorption set A (possibly as a sympy.logic.boolalg.Boolean.as_set() object which is of type sympy.sets.sets.UniversalSet --> However, it seems for this I would need to upgrade Python because I have sympy-1.1.1 and the latest is sympy-1.14.0 and the former version does NOT have sympy.logic.boolalg defined!!
         # - (opt, not prio) min number of cycles to compute expectation
         # - (opt, not prio) burn-in time
-        start_state = 0.0 #float(list(absorption_set.boundary)[0])   # IMPORTANT: convert to float() o.w. the exit states in _run_simulation_mc() are stored as type `object` instead of `float`!!
+        start_state = 0.0 #float(absorption_set.inf)   # IMPORTANT: convert to float() o.w. the exit states in _run_simulation_mc() are stored as type `object` instead of `float`!!
+        print(f"\tRunning Monte-Carlo simulation to estimate the expected return time to absorption set A and the exit state distribution: start state = {start_state}, seed = {seed}...")
         expected_cycle_time, n_cycles, dist_exit_state, info_mc = self._run_simulation_mc(dict_params_simul, start_state=start_state, store_trajectory=store_trajectories,
+                                                                                          check_for_stationarity=check_for_stationarity, burnin_for_stationarity_check=burnin_for_stationarity_check,
                                                                                           seed=seed, verbose=verbose, verbose_period=verbose_period, plot=plot.get('MC', False))
 
-        # 2) Fleming-Viot simulation
-        # Estimation of the survival probability and the conditional occupation probability of each set of interest.
-        # Simulation parameters:
-        # - # particles, N
-        # - the absorption set A
-        # - sets C of states of interest
-        # OUTPUT:
-        # - df_proba_surv: as in the discrete.Simulator case, a data frame with two columns, 't', 'P(T>t)' where t is the observed DISCRETE survival times
-        # - dict_phi: an entry per set of interest, whose value is a data frame with two columns, 't', 'Phi' containing the DISCRETE times at which Phi changes
-        #   and the corresponding Phi value (after the change).
-        df_proba_surv, dict_phi, info_fv = self._run_simulation_fv(dict_params_simul, dist_exit_state, sets_of_interest, store_trajectory=store_trajectories,
-                                                                   seed=seed + 131713, verbose=verbose, verbose_period=verbose_period, plot=plot.get('FV', False))
+        if len(dist_exit_state) == 0:
+            warnings.warn("No exit events from A were observed during the Monte-Carlo simulation. "
+                          "The Fleming-Viot simulation will not be run and most corresponding output variables stored in the `info` output dictionary will be set to `None`.")
+            df_proba_surv = None
+            dict_phi = None
+            integrals = None
+            probas_stationary = dict()  # TODO: (2025/05/26) Estimate the stationarity probabilities from the MC excursion run above (call the estimate_probabilities_in_sets_of_interest() to this end, which should be moved to a new file called estimators/diffusion.py.
+            info_fv = dict()
+        else:
+            # 2) Fleming-Viot simulation
+            # Estimation of the survival probability and the conditional occupation probability of each set of interest.
+            # Simulation parameters:
+            # - # particles, N
+            # - the absorption set A
+            # - sets C of states of interest
+            # OUTPUT:
+            # - df_proba_surv: as in the discrete.Simulator case, a data frame with two columns, 't', 'P(T>t)' where t is the observed DISCRETE survival times
+            # - dict_phi: an entry per set of interest, whose value is a data frame with two columns, 't', 'Phi' containing the DISCRETE times at which Phi changes
+            #   and the corresponding Phi value (after the change).
+            if store_trajectories:
+                # Plot the process observed during the MC simulation, its running statistics, and the exit state distribution
+                ax_mc, ax_longrun, ax_dist = plt.figure().subplots(1, 3)
+                
+                # Process
+                ax_mc.plot(self.trajectory_mc, color="red")
+                ax_mc.plot(info_mc['exit_times'], info_mc['exit_states'], "ko", markersize=3)
+                if np.isfinite(float(absorption_set.inf)):
+                    ax_mc.axhline(float(absorption_set.inf), color="blue", linestyle="dashed")
+                if np.isfinite(float(absorption_set.sup)):
+                    ax_mc.axhline(float(absorption_set.sup), color="blue", linestyle="dashed")
+                ax_mc.axhline(0.0, color="gray")
+                ax_mc.set_xlabel("t")
+                ax_mc.set_ylabel("X(t)")
+                ax_mc.set_title(f"MC simulation on {T} steps")
 
-        # Estimation of the stationary probabilities of each set of interest
-        probas_stationary, integrals = estimate_stationary_probabilities(dict_phi, df_proba_surv, expected_cycle_time, uniform_jump_rate=N)
+                # Long-run estimations
+                cumN = np.arange(1, len(self.trajectory_mc) + 1)
+                mu_est = np.cumsum(self.trajectory_mc) / cumN
+                sigma_est = np.sqrt(np.cumsum(self.trajectory_mc**2) / cumN - mu_est**2)
+                ax_longrun.plot(mu_est, color="blue")
+                ax_longrun.plot(self.env.mu + sigma_est, color="red")
+                ax_longrun.axhline(self.env.mu, color="blue", linestyle="dashed")
+                ax_longrun.axhline(self.env.mu + self.env.sigma, color="red", linestyle="dashed")
+                ax_longrun.axhline(self.env.mu - self.env.sigma, color="red", linestyle="dashed")
+                ax_longrun.set_xlabel("t: discrete time step")
+                ax_longrun.set_ylabel("X(t)")
+                ax_longrun.legend(["Running average", "Running standard deviation", "mu: true mean", "sigma: true standard deviation"])
+                ax_longrun.set_title("Convergence of the long-run estimates of mu and sigma\n$\mu={}, \sigma={}$ (seed={})".format(self.env.mu, self.env.sigma, seed))
+                print(f"The long-run average value of the process at the end is mu = {mu_est[-1]} vs. its nominal value of mu = {self.env.mu}")
+
+                ax_dist.plot(dist_exit_state['x'], dist_exit_state['p'], color="blue")
+                ax_dist.axhline(0, color="gray")
+                if np.isfinite(float(absorption_set.inf)):
+                    ax_dist.axvline(float(absorption_set.inf), color="black", linestyle="dashed")
+                if np.isfinite(float(absorption_set.sup)):
+                    ax_dist.axvline(float(absorption_set.sup), color="black", linestyle="dashed")
+                ax_dist.set_xlabel("Exit state")
+                ax_dist.set_ylabel("Relative frequency")
+                ax_dist.set_title(f"Distribution of exit states based on histogram (nsteps={T})")
+
+            seed_fv = seed + 131713
+            print(f"\n\tRunning Fleming-Viot particle simulation to estimate the stationary probabilities of the sets of interest (seed={seed_fv})...")
+            df_proba_surv, dict_phi, info_fv = self._run_simulation_fv(dict_params_simul, dist_exit_state, sets_of_interest, store_trajectory=store_trajectories,
+                                                                       seed=seed_fv, verbose=verbose, verbose_period=verbose_period, plot=plot.get('FV', False))
+
+            # Estimation of the stationary probabilities of each set of interest
+            probas_stationary, integrals = estimate_stationary_probabilities(dict_phi, df_proba_surv, expected_cycle_time, uniform_jump_rate=N)
 
         # Additional information that may be of interest
         # Note the merge of two dictionaries with the `**` operator
         # (new in Python-3.5, Ref: https://stackoverflow.com/questions/38987/how-do-i-merge-two-dictionaries-in-a-single-expression-in-python)
-        info = dict({'nsteps': info_mc['last_updated_time'] + info_fv['last_updated_time'],
+        info = dict({'nsteps': info_mc['last_time_observed'] + info_fv.get('last_time_observed', 0),
                      'MC': {**{ 'expected_cycle_time': expected_cycle_time,
                                 'n_cycles': n_cycles,
                                 'dist_exit_state': dist_exit_state},
@@ -124,7 +191,7 @@ class SimulatorDiffusionFV(Simulator):
         return probas_stationary, info
 
     @measure_exec_time
-    def _run_simulation_mc(self, dict_params_simul, start_state=0.0, store_trajectory=False, seed=None, verbose=False, verbose_period=1, plot=False):
+    def _run_simulation_mc(self, dict_params_simul, start_state=0.0, store_trajectory=False, check_for_stationarity=True, burnin_for_stationarity_check=30, seed=None, verbose=False, verbose_period=1, plot=False):
         """
         Runs the Monte-Carlo simulation that is used to estimate the denominator of the FV estimator of the stationary probability,
         the expected return time to the absorption set A, E(T_A)
@@ -138,6 +205,15 @@ class SimulatorDiffusionFV(Simulator):
         start_state: float
             Initial state of the process.
             default: 0.0
+
+        check_for_stationarity: bool
+            Whether to check for stationarity before starting to collect exit states from the absorption set
+            for the computation of the stationary exit distribution to be used to select the start positions of the FV particles.
+            default: True
+
+        burnin_for_stationarity_check: int
+            Number of time steps to wait before performing the test for stationarity of the process.
+            default: 30
 
         store_trajectory: bool
             Whether the observed trajectory should be stored in this object as attribute self.trajectory_mc, an np.array of length dict_params_simul['T'] + 1
@@ -171,6 +247,77 @@ class SimulatorDiffusionFV(Simulator):
         """
         # If needed, base the process on what is done in simulators.queues.run_simulation_mc().
 
+        #--- Auxiliary functions
+        def estimate_expected_cycle_time(first_time_in_cycle, last_time_in_cycle, n_cycles, last_time_observed):
+            "Estimates the expected cycle time based on the first and last times observed in the cycle and the number of cycles observed"
+            assert n_cycles == 0 and last_time_in_cycle == first_time_in_cycle or \
+                   n_cycles > 0 and last_time_in_cycle > first_time_in_cycle, "The last time in the cycle must be larger than the last time in the cycle when at least one cycle was observed"
+
+            # When no full cycle has been observed, the expected cycle time is computed on the basis of the last observed time (censored estimation)
+            if n_cycles == 0:
+                warnings.warn("No full return cycle to A has been observed. The expected cycle time is estimated using the censored observation of the last observed time step.")
+                expected_cycle_time = last_time_observed - first_time_in_cycle
+            else:
+                expected_cycle_time = (last_time_in_cycle - first_time_in_cycle) / n_cycles
+
+            return expected_cycle_time
+
+        def estimate_exit_state_distribution(exit_states, bins=30):
+            """
+            Estimates the exit state distribution as a histogram computed on the observed exit states on bins defined only OUTSIDE the absorption set A
+
+            The absorption set A is assumed to be a single interval.
+
+            Arguments:
+            exit_state: numpy array
+                Array containing the observed exit states from the absorption set A.
+
+            bins: int
+                Number of bins to use for the histogram calculation of `exit_state` on EACH side of the region outside A.
+                default: 30
+
+            Return: pandas DataFrame
+            Data frame containing two columns:
+            - 'x': the midpoint of the histogram bin.
+            - 'p': the relative observed frequency of the bin in `exit_states`.
+            The frequency value of the bin representing the absorption set interval is set to zero.
+            """
+
+            # Option 1: Single histogram on all the observed exit states considered altogether
+            # It is NOT so useful because there is a large set of empty bins in the states belonging to the absorption set A that are not informative,
+            # and we lose resolution in the region that we want to pay attention to (i.e. outside A). This problem is resolved in Option 2.
+            #_freq, hist_exit_state_bins = np.histogram(exit_states, bins=30)
+            #hist_exit_state_probs = _freq / np.sum(_freq)
+
+            # Option 2: Restrict the histogram computation on the region OUTSIDE the absorption set A in order to avoid the problem of option 1
+            # This option assumes that the absorption set is given as a single interval.
+            # separate the exit states that are negative from the exit states that are positive, o.w. there is a large number of empty bins that reduces
+            # resolution that we would like to have on the exit states distribution.
+            # IMPORTANT: This ASSUMES that the problem is 1D!
+            _ind_left = exit_states < float(absorption_set.inf)
+            _ind_right = ~_ind_left
+            _freq, _bins = np.array([]), np.array([])
+            if sum(_ind_left) > 0:
+                _freq_left, _bins_left = np.histogram(exit_states[_ind_left], bins=bins)
+                _freq = np.r_[_freq, _freq_left]
+                _bins = np.r_[_bins, _bins_left]
+            if sum(_ind_right) > 0:
+                _freq_right, _bins_right = np.histogram(exit_states[~_ind_left], bins=bins)
+                _bins = np.r_[_bins, _bins_right]
+                if len(_freq) > 0:
+                    _freq = np.r_[_freq, [0], _freq_right]
+                else:
+                    _freq = np.r_[_freq_right]
+            hist_exit_state_probs = _freq / np.sum(_freq)
+            hist_exit_state_bins = _bins
+
+            _bin_intervals = [(hist_exit_state_bins[i], hist_exit_state_bins[i + 1]) for i, _ in enumerate(hist_exit_state_bins[:-1])]
+            _midpoints = [0.5 * (hist_exit_state_bins[i] + hist_exit_state_bins[i + 1]) for i, _ in enumerate(hist_exit_state_bins[:-1])]
+            dist_exit_state = pd.DataFrame({'x': _midpoints, 'p': hist_exit_state_probs}, index=_bin_intervals, columns=['x', 'p'])
+
+            return dist_exit_state
+        #--- Auxiliary functions
+
         #--- Parse input parameters
         # Absorption set definition
         # TEMPORARY for 1D states: the absorption set is assumed to be a sympy.Set (https://docs.sympy.org/latest/modules/sets.html). Note that Sets can be of many `kind`s. See the `kind` property of the set.
@@ -184,7 +331,8 @@ class SimulatorDiffusionFV(Simulator):
         #--- Parse input parameters
 
         # What defines a FULL cycle?
-        # Full cycles are defined from first to last EXIT event if the start state is INSIDE the absorption set, o.w. full cycles are defined from first to last ENTRY event
+        # Full cycles are defined from first to last EXIT event if the start state is INSIDE the absorption set,
+        # o.w., if the start state is OUTSIDE the absorption set then full cycles are defined from first to last ENTRY event.
         full_cycles_marked_by_exit_events = absorption_set.contains(start_state)
 
         # Times to keep track of in order to estimate the expected cycle time to A
@@ -198,6 +346,14 @@ class SimulatorDiffusionFV(Simulator):
         exit_times = deque()
         exit_states = deque()
 
+        # Information about rolling statistics (used to test for stationarity)
+        # These values will be updated incrementally as the simulation proceeds
+        mu_est = mu_est_prev = start_state  # Estimation of long-run mu
+        var_est = var_est_prev = 0.0        # Estimation of long-run variance
+        is_stationary = not check_for_stationarity
+        if not check_for_stationarity:
+            warnings.warn(f"No check for stationarity has been requested. The exit state distribution from A may be biased towards the start state of the simulation: s0={start_state}")
+
         if store_trajectory:
             self.trajectory_mc = np.nan*np.ones(dict_params_simul['T'] + 1)
 
@@ -209,97 +365,134 @@ class SimulatorDiffusionFV(Simulator):
             print(f"MC simulation for the estimation of E(T_A): the environment starts at state {self.env.getState()} and uses seed={seed}")
         if plot:
             import matplotlib.pyplot as plt
-            ax = plt.figure().subplots(1, 1)
+            ax, ax_longrun = plt.figure().subplots(1, 2)
             plt.suptitle(f"MC simulation on {dict_params_simul['T']} steps")
+
+            # Process
             ax.set_xlabel("t")
             for _boundary in absorption_set.boundary:
                 ax.axhline(_boundary, color="blue", linestyle="dashed")
             ax.axhline(0.0, color="gray")
             ax.plot(0, start_state, color="red")
+
+            # Rolling mean and standard deviation
+            ax_longrun.plot(0, mu_est, color="blue")
+            ax_longrun.plot(0, self.env.mu, self.env.mu + np.sqrt(var_est), color="red")
+            ax_longrun.axhline(self.env.mu, color="blue", linestyle="dashed")
+            ax_longrun.axhline(self.env.mu + self.env.sigma, color="red", linestyle="dashed")
+            ax_longrun.axhline(self.env.mu - self.env.sigma, color="red", linestyle="dashed")
+            ax_longrun.set_xlabel("t")
+            ax_longrun.set_ylabel("X(t)")
+            ax_longrun.legend(["Running average", "Running standard deviation", "mu: true mean", "sigma: true standard deviation"])
+
         for t in tqdm(range(1, dict_params_simul['T']+1)):    # We start the time step at 1 because t=0 corresponds to the initial state which is stored above
             state = self.env.getState()
             next_state, _, _, _ = self.env.step(0)
             if store_trajectory:
                 self.trajectory_mc[t] = next_state
 
+            # Compute rolling statistics in order to check for stationarity and thus start collecting exit states
+            # (and exit times as well, although this is less important because the effect of non-stationarity washes out as more data is collected)
+            mu_est += (state - mu_est) / t
+            var_est = max(0, (t - 2)) / max(1, (t - 1)) * var_est + (state - mu_est)**2 / t
+
             # Plot
             if plot:
+                # Process
                 ax.plot([t-1, t], [state, next_state], color="red")
                 ax.set_title(f"t = {t}")
                 ax.set_xlim((max(0, t - 30), t))    # Show the last 30 steps only (to speed up the plotting process)
+
+                # Rolling mean and standard deviation
+                ax_longrun.plot([t-1, t], [mu_est_prev, mu_est], color="blue")
+                ax_longrun.plot([t-1, t], [self.env.mu + np.sqrt(var_est_prev), self.env.mu + np.sqrt(var_est)], color="red")
+                ax_longrun.set_xlim((max(0, t - 30), t))    # Show the last 30 steps only (to speed up the plotting process)
+
                 plt.pause(0.00000001)
                 plt.draw()
 
-            # Check exit from A (i.e. state is inside A and next_state is outside A)
-            if exit_from_absorption_set(absorption_set, state, next_state):
-                exit_times.append(t)
-                exit_states.append(next_state)
-                #exit_times.append(t - t_last_absorption)
-                last_time_exit = t
-                if full_cycles_marked_by_exit_events:
-                    if first_time_in_cycle == -1:
-                        first_time_in_cycle = t    # The time starting the first cycle is the first EXIT event from the absorption set
-                    else:
-                        n_cycles += 1
+            if not is_stationary and t > burnin_for_stationarity_check:
+                # Wait for the burn-in time before testing for stationary and
+                # once the test is passed we assume the process stays stationary
+                is_stationary, pvalue = test_for_stationarity(mu_est, np.sqrt(var_est), t)
+                full_cycles_marked_by_exit_events = absorption_set.contains(state)
+                if plot:
+                    ax_longrun.set_title(f"Stationarity test p-value={pvalue:.6f}")
+                if is_stationary:
+                    print(f"STATIONARITY REACHED at t = {t}, state = {state}! (pvalue={pvalue})")
+                    if plot:
+                        ax.axvline(t, color="gray", linestyle="dashed")
+                        plt.pause(0.0001)
+                        plt.draw()
+                        input("Press ENTER to continue...")
+                    elif store_trajectory:
+                        # Plot the process and the evolution of the rolling mu and sigma (for check)
+                        import matplotlib.pyplot as plt
+                        ax, ax_longrun = plt.figure().subplots(1, 2)
+                        plt.suptitle(f"MC simulation until stationarity reached on step {t} out of {dict_params_simul['T']}")
 
-            # Check entry to A (i.e. state is outside A and next_state is inside A)
-            if entry_to_absorption_set(absorption_set, state, next_state):
-                # killing_times.append(t - t_last_exit)
-                last_time_entry = t
-                if not full_cycles_marked_by_exit_events:
-                    if first_time_in_cycle == -1:
-                        first_time_in_cycle = t  # The time starting the first cycle is the first ENTRY event to the absorption set
-                    else:
-                        n_cycles += 1
-        last_updated_time = t
+                        # Process
+                        ax.set_xlabel("t")
+                        for _boundary in absorption_set.boundary:
+                            ax.axhline(_boundary, color="blue", linestyle="dashed")
+                        ax.axhline(0.0, color="gray")
+                        ax.plot(np.arange(t+1), self.trajectory_mc[:t+1], color="red")
+
+                        # Rolling mu and sigma
+                        cumN = np.arange(1, t+1)
+                        mu_est_hist = np.cumsum(self.trajectory_mc[:t]) / cumN
+                        std_est_hist = np.sqrt(np.cumsum(self.trajectory_mc[:t] ** 2) / cumN - mu_est_hist ** 2)
+                        ax_longrun.plot(cumN, mu_est_hist, color="blue")
+                        ax_longrun.plot(cumN, self.env.mu + std_est_hist, color="red")
+                        ax_longrun.axhline(self.env.mu, color="blue", linestyle="dashed")
+                        ax_longrun.axhline(self.env.mu + self.env.sigma, color="red", linestyle="dashed")
+                        ax_longrun.axhline(self.env.mu - self.env.sigma, color="red", linestyle="dashed")
+                        ax_longrun.set_xlabel("t: discrete time step")
+                        ax_longrun.set_ylabel("X(t)")
+
+                        plt.pause(0.0001)
+                        plt.draw()
+
+            if is_stationary:
+                # Check exit from A (i.e. state is inside A and next_state is outside A)
+                if exit_from_absorption_set(absorption_set, state, next_state):
+                    exit_times.append(t)
+                    exit_states.append(next_state)
+                    last_time_exit = t
+                    if full_cycles_marked_by_exit_events:
+                        if first_time_in_cycle == -1:
+                            first_time_in_cycle = t    # The time starting the first cycle is the first EXIT event from the absorption set
+                        else:
+                            n_cycles += 1
+
+                    if plot:
+                        ax.plot(t, next_state, "ko", markersize=3)
+
+                # Check entry to A (i.e. state is outside A and next_state is inside A)
+                if entry_to_absorption_set(absorption_set, state, next_state):
+                    last_time_entry = t
+                    if not full_cycles_marked_by_exit_events:
+                        if first_time_in_cycle == -1:
+                            first_time_in_cycle = t  # The time starting the first cycle is the first ENTRY event to the absorption set
+                        else:
+                            n_cycles += 1
+
+            mu_est_prev = mu_est
+            var_est_prev = var_est
+        last_time_observed = t
 
         # Convert the deques to arrays for easier manipulation
         exit_times = np.array(exit_times)
         exit_states = np.array(exit_states)
 
+        # Estimates
         # Define the first and last time on which the expected cycle time is computed
         last_time_in_cycle = last_time_exit if full_cycles_marked_by_exit_events else last_time_entry
-        assert  n_cycles == 0 and last_time_in_cycle == first_time_in_cycle or \
-                n_cycles  > 0 and last_time_in_cycle  > first_time_in_cycle, "The last time in the cycle must be larger than the last time in the cycle when at least one cycle was observed"
-
-        # When no full cycle has been observed, the expected cycle time is computed on the basis of the last observed time (censored estimation)
-        if n_cycles == 0:
-            warnings.warn("No full return cycle to A (from exit to exit if the start state is inside A or from entry to entry if the start state is outside A) has been observed. "
-                          "The expected cycle time is estimated using the censored observation of the last observed time step.")
-            expected_cycle_time = t - first_time_in_cycle
-        else:
-            expected_cycle_time = (last_time_in_cycle - first_time_in_cycle ) / n_cycles
-
-        # Exit state distribution estimated as a histogram
-        # Single histogram on all the values altogether --> it's not so useful because there is a large set of empty bins near zero
-        #_freq, hist_exit_state_bins = np.histogram(exit_states, bins=30)
-        #hist_exit_state_probs = _freq / np.sum(_freq)
-        # Note that we separate the exit states that are negative from the exit states that are positive, o.w. there is a large number of empty bins that reduces
-        # resolution that we would like to have on the exit states distribution.
-        # IMPORTANT: This ASSUMES that the problem is 1D!
-        _ind_left = exit_states < float(list(absorption_set.boundary)[0])
-        _ind_right = ~_ind_left
-        _freq, _bins = np.array([]), np.array([])
-        if sum(_ind_left) > 0:
-            _freq_left, _bins_left = np.histogram(exit_states[_ind_left], bins=30)
-            _freq = np.r_[_freq, _freq_left]
-            _bins = np.r_[_bins, _bins_left]
-        if sum(_ind_right) > 0:
-            _freq_right, _bins_right = np.histogram(exit_states[~_ind_left], bins=30)
-            _bins = np.r_[_bins, _bins_right]
-            if len(_freq) > 0:
-                _freq = np.r_[_freq, [0], _freq_right]
-            else:
-                _freq = np.r_[_freq_right]
-        hist_exit_state_probs = _freq / np.sum(_freq)
-        hist_exit_state_bins = _bins
-
-        _bin_intervals = [(hist_exit_state_bins[i], hist_exit_state_bins[i+1]) for i, _ in enumerate(hist_exit_state_bins[:-1])]
-        _midpoints = [0.5*(hist_exit_state_bins[i] + hist_exit_state_bins[i+1]) for i, _ in enumerate(hist_exit_state_bins[:-1])]
-        dist_exit_state = pd.DataFrame({'x': _midpoints, 'p': hist_exit_state_probs}, index=_bin_intervals, columns=['x', 'p'])
+        expected_cycle_time = estimate_expected_cycle_time(first_time_in_cycle, last_time_in_cycle, n_cycles, last_time_observed)
+        dist_exit_state = estimate_exit_state_distribution(exit_states)
 
         # Additional info to return that may be of interest
-        info = dict({'last_updated_time': last_updated_time,
+        info = dict({'last_time_observed': last_time_observed,
                      'exit_times': exit_times,
                      'exit_states': exit_states,
                      })
@@ -353,7 +546,7 @@ class SimulatorDiffusionFV(Simulator):
 
         Return: dict
         An `info` dict containing the following pieces of information that may be useful:
-        - 'last_updated_time': int giving the last time a particle was updated. It must be <= dict_params_simul['max_nsteps'].
+        - 'last_time_observed': int giving the last time observed in the simulation. It must be <= dict_params_simul['max_nsteps'].
         - 'absorption_times': array with the observed absorption times.
         - 'absorption_states': array with the observed absorption states at the respective absorption times.
         """
@@ -549,10 +742,10 @@ class SimulatorDiffusionFV(Simulator):
 
             done = num_particles_absorbed_at_least_once == N or t >= max_nsteps
         last_updated_particle = p
-        last_updated_time = t
+        last_time_observed = t
 
         assert t < max_nsteps and num_particles_absorbed_at_least_once == N or t == max_nsteps, \
-            f"When the simulation did NOT stop by max. #steps = {max_nsteps}, {N} particles should have been absorbed at least once: {num_particles_absorbed_at_least_once} at t = {last_updated_time}"
+            f"When the simulation did NOT stop by max. #steps = {max_nsteps}, {N} particles should have been absorbed at least once: {num_particles_absorbed_at_least_once} at t = {last_time_observed}"
 
         # Estimate the survival probability distribution
         assert len(survival_times)-1 == N, f"There must be exactly N={N} survival times measured: {len(survival_times)}"
@@ -560,13 +753,13 @@ class SimulatorDiffusionFV(Simulator):
 
         if store_trajectory:
             # Define a series that is used to check that at each time step exactly one particle was updated
-            ptimes_all = np.zeros(last_updated_time+1)
+            ptimes_all = np.zeros(last_time_observed+1)
 
             self.trajectories_fv = list()
             for p in range(N):
                 if p != last_updated_particle:
                     # Fill the last update of the particle until the last simulation step so that all trajectories end at the same time
-                    ptimes_hist[p].append(last_updated_time)
+                    ptimes_hist[p].append(last_time_observed)
                     pstates_hist[p].append(pstates[p])
                 self.trajectories_fv += [pd.Series(pstates_hist[p], index=ptimes_hist[p], name='x')]
                 ptimes_all[ptimes_hist[p]] = ptimes_hist[p]
@@ -574,7 +767,7 @@ class SimulatorDiffusionFV(Simulator):
 
         info = dict({'absorption_times': absorption_times,
                      'absorption_states': absorption_states,
-                     'last_updated_time': last_updated_time,
+                     'last_time_observed': last_time_observed,
                      })
 
         if plot and store_trajectory:
@@ -583,8 +776,8 @@ class SimulatorDiffusionFV(Simulator):
             for p in range(N):
                 ax.step(self.trajectories_fv[p].index, self.trajectories_fv[p], where='post', color=colormap(p/N))
             ax.plot(info['absorption_times'], info['absorption_states'], "ro", markersize=3)
-            ax.axhline(float(list(absorption_set.boundary)[0]), color="blue", linestyle="dashed")
-            ax.axhline(float(list(absorption_set.boundary)[1]), color="blue", linestyle="dashed")
+            ax.axhline(float(absorption_set.inf), color="blue", linestyle="dashed")
+            ax.axhline(float(absorption_set.sup), color="blue", linestyle="dashed")
             ax.axhline(0.0, color="gray")
             ax.set_xlabel("t")
             ax.set_title(f"FV simulation on N={N} particles")

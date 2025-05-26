@@ -14,6 +14,7 @@ from typing import Union
 from collections import deque
 import numpy as np
 import pandas as pd
+from scipy.stats import norm
 
 from Python.lib.utils.basic import as_array, is_integer
 
@@ -1099,6 +1100,29 @@ def func_prod_knapsack(rho, n):
     return rho ** n / factorial(n)
 
 
+def test_for_stationarity(mu_est, sigma_est, n, mu=0.0, pvalue=0.01, method="z-score", silent=False):
+    """
+    Tests whether stationarity of a process has been reached based on its rolling estimates of mean and standard deviation, which is compared to the given mu
+
+    Use silent=True to silence any warnings in terms of the sample size not being large enough for a reliable p-value computation.
+
+    Currently, only a two-sided z test can be run. In the future, an Dickey-Fuller test may also be avialable.
+
+    Return: tuple
+    Tuple with two elements:
+    - bool: whether the p-value of the performed test is smaller than the given `pvalue`.
+    - p-value: the p-value of the stationarity test performed.
+    """
+    if method != "z-score":
+        raise ValueError(f"The only currently accepted tests are 'z-score': {method}")
+
+    if n < 30 and not silent:
+        warnings.warn("The sample size is considered to not be sufficiently large to give a reliable calculation of the p-value of the test based on the z-score. Increase the sample size to at least 30.")
+    z = (mu_est - mu) / (sigma_est / np.sqrt(n))
+    p = 2 * norm.sf(np.abs(z))  # Two-sided test
+    return (p >= pvalue), p
+
+
 # Tests
 if __name__ == "__main__":
     import pytest   # For pytest.raises() which allows to check if an exception is raised when calling a function
@@ -1384,11 +1408,12 @@ if __name__ == "__main__":
     order = np.random.permutation(nsteps)
     states = [states[o] for o in order]
     rewards = [rewards[o] for o in order]
-    set_A = compute_set_of_frequent_states_with_zero_reward(states, rewards)
+    non_cumulative_freq_threshold = 0.05
+    set_A = compute_set_of_frequent_states_with_zero_reward(states, rewards, threshold=non_cumulative_freq_threshold, cumulative=False)
     print(f"States and rewards observed in the trajectory (n={len(states)}):\n{np.c_[states, rewards].T}")
     print(f"Distribution of states:\n{pd.Series(states).value_counts(sort=False)}")
     print(f"Distribution of states with zero reward:\n{pd.Series(states)[pd.Series(rewards)==0].value_counts(sort=False)}")
-    print(f"Default threshold (5% of {sum(pd.Series(rewards)==0)}) = {0.05*sum(pd.Series(rewards)==0)}")
+    print(f"Default threshold (5% of {sum(pd.Series(rewards)==0)}) = {non_cumulative_freq_threshold*sum(pd.Series(rewards)==0)}")
     print(f"Absorption set A: {set_A}")
     assert set_A == {0, 1, 3, 5}, f"The absorption set A must be equal to {{0, 1, 3, 4}}: {set_A}"
     #------------------ compute_set_of_frequent_states_with_zero_reward() ------------------#
@@ -1614,3 +1639,59 @@ if __name__ == "__main__":
     print("True p = {:.6f}".format(p_expected))
     assert np.isclose(p, p_expected), "The expected blocking probability is verified"
     #----------------- compute_blocking_probability -----------------#
+
+
+    #---------------------- test_for_stationarity -------------------#
+    print("\n--- Testing test_for_stationarty(mu_est, sigma_est, n):")
+
+    print("---------------")
+    print("Test #1: Positive relatively small estimated mu compared to zero")
+    mu_est = 1.96
+    sigma_est = 10
+    n = 100
+    is_stationary, pvalue = test_for_stationarity(mu_est, sigma_est, n, mu=0.0, pvalue=0.01)
+    print(f"Result of the test for stationarity: {is_stationary} (p-value = {pvalue})")
+    assert is_stationary
+    assert np.isclose(pvalue, 0.05, atol=1E-4)
+
+    print("---------------")
+    print("Test #2: Negative relatively small estimated mu compared to zero")
+    mu_est = -1.96
+    sigma_est = 10
+    n = 100
+    is_stationary, pvalue = test_for_stationarity(mu_est, sigma_est, n, mu=0.0, pvalue=0.01)
+    print(f"Result of the test for stationarity: {is_stationary} (p-value = {pvalue})")
+    assert is_stationary
+    assert np.isclose(pvalue, 0.05, atol=1E-4)
+
+    print("---------------")
+    print("Test #3: Positive relatively large estimated mu compared to zero")
+    mu_est = 10.5
+    sigma_est = 10
+    n = 100
+    is_stationary, pvalue = test_for_stationarity(mu_est, sigma_est, n, mu=0.0, pvalue=0.01)
+    print(f"Result of the test for stationarity: {is_stationary} (p-value = {pvalue})")
+    assert not is_stationary
+    assert pvalue < 0.01
+
+    print("---------------")
+    print("Test #4: Negative relatively large estimated mu compared to zero")
+    mu_est = -10.5
+    sigma_est = 10
+    n = 100
+    is_stationary, pvalue = test_for_stationarity(mu_est, sigma_est, n, mu=0.0, pvalue=0.01)
+    print(f"Result of the test for stationarity: {is_stationary} (p-value = {pvalue})")
+    assert not is_stationary
+    assert pvalue < 0.01
+
+    print("---------------")
+    print("Test #5: Negative relatively small estimated mu compared to non-zero mu")
+    mu_est = -10.5
+    sigma_est = 10
+    n = 100
+    mu = -10.0
+    is_stationary, pvalue = test_for_stationarity(mu_est, sigma_est, n, mu=mu, pvalue=0.01)
+    print(f"Result of the test for stationarity: {is_stationary} (p-value = {pvalue})")
+    assert is_stationary
+    assert pvalue >= 0.01
+    #---------------------- test_for_stationarity -------------------#
