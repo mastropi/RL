@@ -446,6 +446,7 @@ class PolNN:
         - getIndexFromState(): returns the 1D state index from the state of the environment used in simulations.
         - getStateFromIndex(): returns the actual (physical) state of the environment from the 1D state index
         (i.e. the continuous-valued state (x, v) in the Mountain Car environment from the 1D state index in the EnvironmentDiscrete environment).
+        - isStateContinuous(): returns True when the physical state of the environment is a continuous-valued state.
         - seed()
 
     nn_model: Neural network inheriting from torch.nn.Module
@@ -705,7 +706,8 @@ class PolNN:
             proba_actions = F.softmax(self.nn_model(state_multidim), dim=0)
 
         # Note: we do NOT use np.isclose() nor np.sum() to avoid the error "numpy is not available" which happens if numpy's version is not so recent w.r.t. torch's version
-        assert nn.init.torch.isclose(nn.init.torch.sum(proba_actions), tensor(1.0), atol=1E-4)
+        assert nn.init.torch.isclose(nn.init.torch.sum(proba_actions), tensor(1.0), atol=1E-4), \
+            f"The sum of the probability of all actions must be 1.0 (sum = {nn.init.torch.sum(proba_actions)})"
 
         return proba_actions
 

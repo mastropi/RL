@@ -86,6 +86,14 @@ class LeaFV(LeaTDLambda):
         in order to tackle the case of non-ergodic Markov chain induced by a deterministic policies).
         default: LearningCriterion.AVERAGE
 
+    task: (opt) LearningTask
+        The learning task under consideration, either CONTINUING or EPISODIC.
+        The usual setting for the Fleming-Viot learner is the CONTINUING setting.
+        However, in an attempt to extend the Fleming-Viot learner to the EPISODIC context, we started considering also the EPISODIC learning task.
+        This implementation, however, turned up to be very high-time consuming and was not practical. But still its implementation is kept, just in case
+        it becomes useful in the future, as it is a very complex implementation.
+        default: LearningTask.CONTINUING
+
     burnin_time: (opt) int or None
         Burn-in time to wait until the empirical mean estimation of Phi(t,x) is considered to have reached
         stationarity, and thus be independent of the initial state and action.
@@ -110,6 +118,7 @@ class LeaFV(LeaTDLambda):
                  probas_stationary_start_state_fv: dict=None,
                  dict_function_approximations: dict=None,
                  criterion=LearningCriterion.AVERAGE,
+                 task=LearningTask.CONTINUING,
                  alpha=0.1, gamma=1.0, lmbda=0.0,
                  adjust_alpha=False, alpha_update_type=AlphaUpdateType.EVERY_STATE_VISIT,
                  adjust_alpha_by_episode=False, alpha_min=0., func_adjust_alpha=None,
@@ -117,7 +126,7 @@ class LeaFV(LeaTDLambda):
                  burnin_time=0, TIME_RESOLUTION=1,
                  debug=False):
         super().__init__(env, dict_function_approximations=dict_function_approximations,
-                         criterion=criterion, task=LearningTask.CONTINUING, alpha=alpha,  gamma=gamma, lmbda=lmbda, adjust_alpha=adjust_alpha,
+                         criterion=criterion, task=task, alpha=alpha,  gamma=gamma, lmbda=lmbda, adjust_alpha=adjust_alpha,
                          alpha_update_type=alpha_update_type, adjust_alpha_by_episode=adjust_alpha_by_episode,
                          alpha_min=alpha_min, func_adjust_alpha=func_adjust_alpha,
                          store_history_over_all_episodes=True,  # We set this to True because FV is a CONTINUING learning task
@@ -208,11 +217,17 @@ class LeaFV(LeaTDLambda):
 
         # Expected value of the discounted state value at absorption, which is part of the decomposition of the value functions in FV-estimated part and rest in e.g.
         # Q(x,a) = Q_FV(x,a) + Q_after_absorption(x,a) = Q_FV(x,a) + E[ gamma^t_abs * V(X_abs) ]
+        # These attributes are only used in the DISCOUNTED (episodic) setting, NOT in the AVERAGE (continuing) setting.
+        # Note that in the eventuality of a DISCOUNTED *CONTINUING* setting, we don't need to store these pieces of information because they are required by EPISODIC tasks only.
         self.expected_discounted_state_value_at_absorption = 0.0
         self.n_expected_discounted_state_value_at_absorption = 0    # Sample size associated to the estimated expected discounted state value at absorption
 
         # Whether to use fixed group of particles to estimate the value functions (based on the particle's start state and start state-actions)
-        self.is_criterion_discounted = criterion == LearningCriterion.DISCOUNTED
+        # This corresponds to the implementation done when we tried to extend the Fleming-Viot learner to EPISODIC learning tasks,
+        # which ALWAYS call for the DISCOUNTED learning criterion.
+        # In fact, the AVERAGE reward learning criterion does not work because the number of steps by which the sum of rewards is divided to compute the average
+        # in an episodic setting is RANDOM and this complicates things enormously (e.g. we cannot take the denominator T out of the expectation of the average to check if the estimator is unbiased!)
+        self.is_task_episodic = task == LearningTask.EPISODIC
 
         # Burn-in time that should be waited to consider that Phi(t,x) has achieved stationarity,
         # and thus independent of the starting state and action where the particles contributing to its estimation
@@ -274,10 +289,10 @@ class LeaFV(LeaTDLambda):
             self.dict_phi_sum[x] = pd.DataFrame([[0.0, 0.0]], columns=['t', 'Phi'])
             self.dict_integral[x] = 0.0
 
-        if self.is_criterion_discounted:
-            # (2024/08/06) This is the case when FV is used in the DISCOUNTED setting, which requires particles to start at different states and actions
-            # in order to estimate the state and action value functions.
-            # It is NOT used in the AVERAGE reward setting.
+        if self.is_task_episodic:
+            # (2024/08/06) This is the case when FV is used in the EPISODIC setting, which calls for a DISCOUNTED reward criterion
+            # and requires particles to start at different states and actions in order to estimate the state and action value functions.
+            # It is NOT used in the AVERAGE reward criterion context.
             # Note that this initialization process takes a lot of time if the number of states and actions is large, e.g. > 100,
             # so it's good to disable it under the AVERAGE reward criterion.
 
@@ -303,7 +318,7 @@ class LeaFV(LeaTDLambda):
                 self.dict_integral_for_state_action[s] = dict()
                 for x in self.states_of_interest:
                     self.dict_phi_for_state[s][x] = pd.DataFrame([[0, float(s in self.env.getTerminalStates())]], columns=['t', 'Phi'])
-                    # TODO: (2024/01/27) Case before the is_criterion_discounted mode... Do we need to use this when self.is_criterion_discounted = False?
+                    # TODO: (2024/01/27) Case before the is_task_episodic mode... Do we need to use this when self.is_task_episodic = False?
                     #self.dict_phi_for_state[s][x] = pd.DataFrame(columns=['t', 'Phi'])
                     self.dict_integral_for_state[s][x] = 0.0
                 for a in range(self.env.getNumActions()):
@@ -312,7 +327,7 @@ class LeaFV(LeaTDLambda):
                     self.dict_integral_for_state_action[s][a] = dict()
                     for x in self.states_of_interest:
                         self.dict_phi_for_state_action[s][a][x] = pd.DataFrame([[0, float(s in self.env.getTerminalStates())]], columns=['t', 'Phi'])
-                        # TODO: (2024/01/27) Case before the is_criterion_discounted mode... Do we need to use this when self.is_criterion_discounted = False?
+                        # TODO: (2024/01/27) Case before the is_task_episodic mode... Do we need to use this when self.is_task_episodic = False?
                         #self.dict_phi_for_state_action[s][a][x] = pd.DataFrame(columns=['t', 'Phi'])
                         self.dict_integral_for_state_action[s][a][x] = 0.0
 
@@ -371,7 +386,7 @@ class LeaFV(LeaTDLambda):
                 # Note however that at the moment of computing the FV integral, there will be an alignment between the
                 # survival time associated to the survival probability of a particle starting at state s and action `a`
                 # and the time t stored in the Phi(t,x) function considered on the state of interest x.
-                if self.is_criterion_discounted:
+                if self.is_task_episodic:
                     assert self.getStartAction(idx_particle) >= 0, f"The start action must be a valid start action, i.e. there must be at least one particle that started at that action (s={self.getStartState(idx_particle)}, a={self.getStartAction(idx_particle)})"
                     self._update_phi_function_by_start_state_action(self.getStartState(idx_particle), self.getStartAction(idx_particle), t, state, next_state)
                     #print(f"[learn] Updated Phi(t,x; s={self.start_states[idx_particle]}):\n{self.dict_phi_for_state[self.start_states[idx_particle]]}")

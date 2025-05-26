@@ -18,7 +18,7 @@ import pandas as pd
 
 import Python.lib.environments.gridworlds as gridworlds
 from Python.lib.estimators.fv import merge_proba_survival_and_phi, estimate_proba_stationary
-from Python.lib.agents.learners import LearningCriterion
+from Python.lib.agents.learners import LearningCriterion, LearningTask
 from Python.lib.agents.learners.episodic.discrete.fv import LeaFV
 
 
@@ -37,7 +37,10 @@ class Test_Class_LeaFV_discretetime(unittest.TestCase):
         absorption_set = set(range(2))
         absorption_boundary = max(absorption_set)
         activation_set = {absorption_boundary + 1}
-        learner_fv = LeaFV(self.env, N=N, T=10, absorption_set=absorption_set, activation_set=activation_set, states_of_interest=self.env.getTerminalStates()) #, TIME_RESOLUTION=1) # This was commented out because the default value of TIME_RESOLUTION is supposed to be 1 and by omitting its value here we want to stress this out, as normally when creating the LeaFV object, we will forget about setting this parameter... This value of TIME_RESOLUTION=1 should we set for discrete-time Markov chains.
+        learner_fv = LeaFV(self.env, N=N, T=10, task=LearningTask.CONTINUING, criterion=LearningCriterion.AVERAGE, absorption_set=absorption_set, activation_set=activation_set, states_of_interest=self.env.getTerminalStates())
+            #, TIME_RESOLUTION=1)
+            ## The above parameter `TIME_RESOLUTION=1` was commented out because its default value is supposed to be 1 and by omitting its value here we want to stress this out,
+            ## as normally when creating the LeaFV object, we will forget about setting this parameter... This value of TIME_RESOLUTION=1 should be set for discrete-time Markov chains.
 
         # Create the particles and mock where they are so that we can have a Phi estimate
         envs = [copy.deepcopy(self.env) for _ in range(learner_fv.N)]
@@ -169,7 +172,8 @@ class Test_Class_LeaFV_discretetime(unittest.TestCase):
         absorption_set = {0}
         absorption_boundary = max(absorption_set)
         activation_set = {absorption_boundary + 1}
-        learner_fv = LeaFV(self.env, N=3, T=10, absorption_set=absorption_set, activation_set=activation_set, states_of_interest=self.env.getTerminalStates(), criterion=LearningCriterion.DISCOUNTED, gamma=0.9)
+        learner_fv = LeaFV(self.env, N=3, T=10, absorption_set=absorption_set, activation_set=activation_set, states_of_interest=self.env.getTerminalStates(),
+                           task=LearningTask.EPISODIC, criterion=LearningCriterion.DISCOUNTED, gamma=0.9)
 
         # Now we mock the evolution of the particles in the FV system
         # We do so by creating a data frame index by each time the particle system is updated, i.e. indexed by the FV system's clock
@@ -280,16 +284,17 @@ if __name__ == '__main__':
     else:
         # Ad-hoc test for the FV estimator (in discrete time), which inspired a few unit tests run by this script
 
-        #--- Test 1: (2023/12) FV learning of value functions under the DISCOUNTED learning criterion
+        #--- Test 1: (2023/12) FV learning of value functions under the EPISODIC DISCOUNTED setting
         # These are the modules that are needed for the execution below which I may have commented out because they are included above
         # but leave here in order to know what is really needed for this execution.
-        import numpy as np
-        from Python.lib.environments import gridworlds
-        from Python.lib.agents.learners import LearningCriterion
-        from Python.lib.agents.policies import probabilistic
-        from Python.lib.agents import GenericAgent
-        from Python.lib.agents.learners.episodic.discrete.fv import LeaFV
-        from Python.lib.simulators.discrete import Simulator as DiscreteSimulator
+        if False:
+            import numpy as np
+            from Python.lib.environments import gridworlds
+            from Python.lib.agents.learners import LearningCriterion, LearningTask
+            from Python.lib.agents.policies import probabilistic
+            from Python.lib.agents import GenericAgent
+            from Python.lib.agents.learners.episodic.discrete.fv import LeaFV
+            from Python.lib.simulators.discrete import Simulator as DiscreteSimulator
 
         # Note: the EnvGridworld1D environment always starts at 0, so no need to define an initial state distribution (isd)
         nS = 5
@@ -300,7 +305,8 @@ if __name__ == '__main__':
         active_set = set(np.arange(absorption_boundary + 1, env.getNumStates()))
         print(f"Absorption set: {absorption_set}")
         print(f"Activation set: {activation_set}")
-        learner_fv = LeaFV(env, N=5, T=10, absorption_set=absorption_set, activation_set=activation_set, criterion=LearningCriterion.DISCOUNTED, gamma=0.9)
+        learner_fv = LeaFV(env, N=5, T=10, absorption_set=absorption_set, activation_set=activation_set,
+                           task=LearningTask.EPISODIC, criterion=LearningCriterion.DISCOUNTED, gamma=0.9)
         policy = probabilistic.PolGenericDiscrete(env, dict({0: [0.0, 1.0], env.getNumStates()-1: [0.0, 1.0]}), policy_default=[0.5, 0.5]) #[0.9, 0.1])
         agent_fv = GenericAgent(policy, learner_fv)
 
@@ -317,15 +323,16 @@ if __name__ == '__main__':
                     plot=False)
 
 
-
-
         #--- Test 2: (2024/01/09) Phi(t,x) estimate as a function of the start state and state-action
-        import copy
-        import numpy as np
-        import pandas as pd
-        from Python.lib.environments import gridworlds
-        from Python.lib.agents.learners import LearningCriterion
-        from Python.lib.agents.learners.episodic.discrete.fv import LeaFV
+        # These are the modules that are needed for the execution below which I may have commented out because they are included above
+        # but leave here in order to know what is really needed for this execution.
+        if False:
+            import copy
+            import numpy as np
+            import pandas as pd
+            from Python.lib.environments import gridworlds
+            from Python.lib.agents.learners import LearningCriterion
+            from Python.lib.agents.learners.episodic.discrete.fv import LeaFV
 
         # Note: the EnvGridworld1D environment always starts at 0, so no need to define an initial state distribution (isd)
         nS = 5
@@ -337,7 +344,8 @@ if __name__ == '__main__':
         active_set = set(np.arange(absorption_boundary + 1, env.getNumStates()))
         print(f"Absorption set: {absorption_set}")
         print(f"Activation set: {activation_set}")
-        learner_fv = LeaFV(env, N=3, T=10, absorption_set=absorption_set, activation_set=activation_set, criterion=LearningCriterion.DISCOUNTED, gamma=0.9)
+        learner_fv = LeaFV(env, N=3, T=10, absorption_set=absorption_set, activation_set=activation_set,
+                           task=LearningTask.EPISODIC, criterion=LearningCriterion.DISCOUNTED, gamma=0.9)
 
         # Now we mock the evolution of the 3 particles in the FV particle system
         # We do so by creating a data frame index by each time the particle system is updated, i.e. indexed by the FV system's clock

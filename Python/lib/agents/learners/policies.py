@@ -1283,10 +1283,9 @@ class LeaActorCriticNN(GenericLearner):
                         if action_values is None:
                             # The user did not provide any critic, we extract the state value from the value function learner defined in this object
                             # which is learning the value functions on the fly, as the current simulation progresses (see call to the learner_value_functions.learn() method above).
-                            state_value += self.learner_value_functions.getQ().getValue(state, a)
+                            state_value += self.policy.getPolicyForAction(a, state) * self.learner_value_functions.getQ().getValue(state, a)
                         else:
-                            state_value += action_values[self.env.getIndexFromState(state) * self.env.getNumActions() + a]
-                    state_value /= self.env.getNumActions()
+                            state_value += self.policy.getPolicyForAction(a, state) * action_values[self.env.getIndexFromState(state) * self.env.getNumActions() + a]
 
                     # Option 2: (worse) The state value is directly the estimate of V(s)
                     # HOWEVER, this may give incorrect advantage function values because the value of V(s) is
@@ -1367,6 +1366,7 @@ class LeaActorCriticNN(GenericLearner):
 
         old_policy = self.policy.get_policy_values()
         new_policy = np.zeros((nS, nA))  #, dtype=np.float32)    # Note: (2024/08/03) using dtype=np.float32 (which was done with Alphonse in order to avoid the weird error by torch that it was expecting Double but got Float or viceversa) gives the following error down the line when working with tensors in torch: "Could not infer dtype of numpy.float32", and apparently the reason is that the default type in numpy if float64, whereas the default type in torch is float32. More info: https://stackoverflow.com/questions/61226042/pytorch-infer-dtype-from-device-capability-not-input-data
+        # TODO: (2025/05/21) Reshape the variable `advantage` into the same shape as the policy so that we can avoid a LOOP and make the update of the policy much faster
         for state in range(nS):
             for action in range(nA):
                 advantage = advantage_values[state * self.env.getNumActions() + action]

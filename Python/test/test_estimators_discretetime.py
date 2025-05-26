@@ -54,6 +54,11 @@ def plot_estimated_state_value_function(env, state_values, learning_criterion):
 
 
 class Test_EstStateValueV_MetOffline_EnvDeterministicNextState(unittest.TestCase):
+    """
+    Tests the estimation of value functions under the EPISODIC DISCOUNTED setting using OFFLINE learning, i.e. where all states and actions
+    of the environment are freely chosen, and NOT based on exploration of the environment.
+    Different environments are considered.
+    """
 
     @classmethod
     def setUpClass(cls):
@@ -170,6 +175,7 @@ class Test_EstStateValueV_MetOffline_EnvDeterministicNextState(unittest.TestCase
 
 
 class Test_EstStateValueV_EnvGridworld1D(unittest.TestCase, test_utils.EpisodeSimulation):
+    "Tests the estimation of value functions under the EPISODIC DISCOUNTED setting on the 1D gridworld environment"
     # Note: nice explanation about the three types of methods that can be defined in Python: instance, class, static
     # https://stackoverflow.com/questions/54264073/what-is-the-use-and-when-to-use-classmethod-in-python
     # See the only answer by Navy Cheng.
@@ -717,6 +723,16 @@ class Test_EstStateValueV_EnvGridworld1D(unittest.TestCase, test_utils.EpisodeSi
 
 
 class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_utils.EpisodeSimulation):
+    """
+    Tests the estimation of the differential value functions on the 1D Gridworld environment, i.e. the value function under the average reward criterion.
+    Note that the average reward criterion is ALWAYS associated to a CONTINUING learning task (because episodic learning tasks cannot use
+    the average reward criterion because the denominator T that would be used to compute the average reward is random and that complicates things enormously!
+    --e.g. computing the expectation of the average reward)
+
+    Under this setup, the value of the discount parameter gamma is equal to 1.
+
+    Ref on average reward setting: Sutton, chapter 10, pag. 249.
+    """
 
     @classmethod
     def setUpClass(cls):
@@ -1203,6 +1219,7 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
 
 
 class Test_EstValueFunctions_EnvGridworld2DWithObstacles(unittest.TestCase, test_utils.EpisodeSimulation):
+    "Tests the estimation of value functions under the EPISODIC DISCOUNTED setting on the 2D gridworld environment"
 
     @classmethod
     def setUpClass(cls):
@@ -1227,6 +1244,9 @@ class Test_EstValueFunctions_EnvGridworld2DWithObstacles(unittest.TestCase, test
         cls.nepisodes = 100
         cls.start_state = 8
 
+        # The learning criterion and learning task definition
+        cls.learning_criterion = LearningCriterion.DISCOUNTED
+        cls.learning_task = LearningTask.EPISODIC
         cls.gamma = 0.9
 
         #-- True state value function which is stored in the environment for comparison purposes with the estimated V(s)
@@ -1237,7 +1257,10 @@ class Test_EstValueFunctions_EnvGridworld2DWithObstacles(unittest.TestCase, test
         #cls.env2d.setV(V_true)
 
         #-- Learners and simulators used in tests
-        learner_mclambda = mc.LeaMCLambda(cls.env2d, alpha=1.0,
+        learner_mclambda = mc.LeaMCLambda(cls.env2d,
+                                          criterion=cls.learning_criterion,
+                                          task=cls.learning_task,
+                                          alpha=1.0,
                                           gamma=cls.gamma,
                                           adjust_alpha=True,
                                           adjust_alpha_by_episode=False,
@@ -1252,7 +1275,10 @@ class Test_EstValueFunctions_EnvGridworld2DWithObstacles(unittest.TestCase, test
         # NOTE: If adjusting alpha at the same 1/n rate as in the MC learner, TD(0) learns more slowly...
         # We can reach the same speed of learning as MC if we decrease alpha as 1/sqrt(n) OR if we use e.g. lambda = 0.7.
         # INTERESTING!
-        learner_tdlambda = td.LeaTDLambda(cls.env2d, alpha=1.0,
+        learner_tdlambda = td.LeaTDLambda(cls.env2d,
+                                          criterion=cls.learning_criterion,
+                                          task=cls.learning_task,
+                                          alpha=1.0,
                                           gamma=cls.gamma, lmbda=0.0,
                                           adjust_alpha=True,
                                           adjust_alpha_by_episode=False,
@@ -1275,7 +1301,8 @@ class Test_EstValueFunctions_EnvGridworld2DWithObstacles(unittest.TestCase, test
                                 N, T, absorption_set, activation_set,
                                 probas_stationary_start_state_et=None,
                                 probas_stationary_start_state_fv=None,
-                                criterion=LearningCriterion.DISCOUNTED,
+                                criterion=cls.learning_criterion,
+                                task=cls.learning_task,
                                 states_of_interest=cls.env2d.getTerminalStates(),
                                 alpha=1.0,
                                 gamma=cls.gamma,
@@ -1320,7 +1347,7 @@ class Test_EstValueFunctions_EnvGridworld2DWithObstacles(unittest.TestCase, test
                              [0.32572204, 0.26179925, 0.19081792, 0.10207814],
                              [0.47968696, 0.25279819, 0.25260026, 0.1854122 ]]
 
-        # TODO: (2024/02/19) Update the expected results once we have correctly implemented the value functions learning under the DISCOUNTED reward setting and generated the results
+        # TODO: (2024/02/19) Update the expected results once we have correctly implemented the value functions learning under the EPISODIC DISCOUNTED reward setting and generated the results
         # For now, these values are the expected results of the not so correct implementation, where the time clock used to estimate P(T>t; s) is the same as the time used to estimate Phi(t,x; s), but these two time clocks are actually different
         cls.expected_fv_V = np.array(
                             [0.026471, 0.180172, 0.537639, 0.007238,
@@ -1431,7 +1458,10 @@ class Test_EstValueFunctions_EnvGridworld2DWithObstacles(unittest.TestCase, test
 
 class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.TestCase, test_utils.EpisodeSimulation):
     """
-    Test the estimation of the differential value function, i.e. the value function under the average reward setting
+    Tests the estimation of the differential value functions on the 2D Gridworld environment, i.e. the value function under the average reward criterion.
+    Note that the average reward criterion is ALWAYS associated to a CONTINUING learning task (because episodic learning tasks cannot use
+    the average reward criterion because the denominator T that would be used to compute the average reward is random and that complicates things enormously!
+    --e.g. computing the expectation of the average reward)
 
     Under this setup, the value of the discount parameter gamma is equal to 1.
 
@@ -1471,6 +1501,10 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
         cls.nepisodes = 100
         cls.max_time_steps = 4648   # Maximum number of steps over ALL episodes
 
+        # The learning criterion and learning task definition
+        cls.learning_criterion = LearningCriterion.AVERAGE
+        cls.learning_task = LearningTask.CONTINUING
+
         #-- True state value function so that we can compare it with the estimated V(s)
         _, P, _, b, g, mu = computing.compute_transition_matrices(cls.env2d, cls.policy_rw)
         V_true = computing.compute_state_value_function_from_transition_matrix(P, b, bias=g, gamma=1.0)
@@ -1478,8 +1512,8 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
 
         # Monte-Carlo learner
         learner_mclambda = mc.LeaMCLambda(cls.env2d,
-                                          criterion=LearningCriterion.AVERAGE,
-                                          task=LearningTask.CONTINUING,
+                                          criterion=cls.learning_criterion,
+                                          task=cls.learning_task,
                                           alpha=1.0,
                                           gamma=1.0,
                                           adjust_alpha=True,
@@ -1493,8 +1527,8 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
 
         # TD(lambda) learner
         learner_tdlambda = td.LeaTDLambda(cls.env2d,
-                                          criterion=LearningCriterion.AVERAGE,
-                                          task=LearningTask.CONTINUING,
+                                          criterion=cls.learning_criterion,
+                                          task=cls.learning_task,
                                           alpha=1.0,
                                           gamma=1.0, lmbda=0.0,
                                           adjust_alpha=True,
@@ -1515,7 +1549,8 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
                                 probas_stationary_start_state_et=None,
                                 probas_stationary_start_state_fv=None,
                                 states_of_interest=set(cls.env2d.getAllValidStates()).difference(absorption_set),
-                                criterion=LearningCriterion.AVERAGE,
+                                criterion=cls.learning_criterion,
+                                task=cls.learning_task,
                                 alpha=1.0,
                                 lmbda=0.0,
                                 adjust_alpha=True,
@@ -1963,6 +1998,7 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
 
 
 class Test_EstValueFunctionV_MetMCLambda_EnvMountainCar(unittest.TestCase, test_utils.EpisodeSimulation):
+    "Tests the estimation of value functions under the EPISODIC DISCOUNTED setting on the Mountain Car environment"
 
     def __init__(self, *args, **kwargs):
         self.seed = kwargs.pop('seed', 1717)

@@ -9,7 +9,7 @@ Created on Wed Feb  3 21:00:15 2021
 #runpy.run_path('../../setup.py')
 
 
-########
+######## Tests on FVAC (Fleming-Viot Actor-Critic)
 # 2023/10/12: Learn an actor-critic policy using neural networks (with the torch package)
 # Learning happens with the ActorCriticNN learner which defines a loss of type `tensor` which can be minimized using the backward() method of torch Tensors
 # IT WORKS!
@@ -442,8 +442,8 @@ learning_criterion = LearningCriterion.AVERAGE; gamma = 1.0    # gamma could be 
 #learning_criterion = LearningCriterion.DISCOUNTED; gamma = 0.9
 
 seed = 1317
-#env_type = Environment.Gridworld
-env_type = Environment.MountainCar
+env_type = Environment.Gridworld
+#env_type = Environment.MountainCar
 problem_2d = True
 use_random_obstacles_set = False; prop_obstacles = 0.5; seed_obstacles = 4217 #4215    # Seed 4217 with 50% of obstacles gives good results in the 6x8 labyrinth
 exit_state_at_bottom = True
@@ -457,8 +457,8 @@ if env_type == Environment.Gridworld:
     if problem_2d:
         # 2D labyrinth
         size_vertical = 3; size_horizontal = 4
-        #size_vertical = 4; size_horizontal = 5
-        #size_vertical = 6; size_horizontal = 8
+        size_vertical = 4; size_horizontal = 5
+        size_vertical = 6; size_horizontal = 8
         #size_vertical = 8; size_horizontal = 12
         #size_vertical = 9; size_horizontal = 13
         #size_vertical = 10; size_horizontal = 14
@@ -827,11 +827,12 @@ alpha_initial = simulator_value_functions.getAgent().getLearner().getInitialLear
 adjust_alpha_initial_by_learning_step = False; t_learn_min_to_adjust_alpha = 30 # based at 1 (regardless of the base value used for t_learn)
 #max_time_steps_per_episode = test_ac.getEnv().getNumStates()*10  # (2024/05/02) NO LONGER USED!  # This parameter is just set as a SAFEGUARD against being blocked in an episode at some state of which the agent could be liberated by restarting to a new episode (when this max number of steps is reached)
 epsilon_random_action = 0.1 #if policy_learning_mode == "online" else 0.0 #0.1 #0.05 #0.0 #0.01
-reward_to_promote_exploration = 1.0 #None   # Reward for a reward shaping strategy used to promote the visit of EXIT events from A which allow the execution of the FV simulation to estimate value functions (which is crucial for the FV estimation procedure to be effective)
+reward_to_promote_exploration = 0.0 #1.0 #0.1 #None   # Reward for a reward shaping strategy used to promote the visit of EXIT events from A which allow the execution of the FV simulation to estimate value functions (which is crucial for the FV estimation procedure to be effective). Note that the shaped reward may be proportional to |V(s)|, not necessarily constant
 use_average_max_time_steps_in_td_learner = True #learning_method == "values_td2" #True #False
-learning_steps_observe = [7, 25] #[50, 90] #[2, 30, 48] #[2, 10, 11, 30, 31, 49, 50] #[7, 20, 30, 40]  # base at 1, regardless of the base value used for t_learn
+learning_steps_observe = [7, 8, 19, 20] #[1, 2, 7, 8, 22, 23, 24] #[50, 90] #[2, 30, 48] #[2, 10, 11, 30, 31, 49, 50] #[7, 20, 30, 40]  # base at 1, regardless of the base value used for t_learn
 verbose_period = max_time_steps_fv_for_all_particles // 10
-plot = False         # Whether to plot the evolution of value function and average reward estimation
+plot = False         # Whether to plot the evolution of the state value function and average reward estimation
+plot_policy_update = False  # Whether to plot the policy after each policy learning step update
 colormap = "seismic"  # "Reds"  # Colormap to use in the plot of the estimated state value function V(s)
 
 # Results saving, with filename prefix and suffix
@@ -891,8 +892,8 @@ state_counts_all = np.zeros((nrep, n_learning_steps, test_ac.getEnv().getNumStat
 V_all = np.zeros((nrep, n_learning_steps, test_ac.getEnv().getNumStates()))
 Q_all = np.zeros((nrep, n_learning_steps, test_ac.getEnv().getNumStates(), test_ac.getEnv().getNumActions()))
 A_all = np.zeros((nrep, n_learning_steps, test_ac.getEnv().getNumStates(), test_ac.getEnv().getNumActions()))
-R_all = np.nan * np.ones((nrep, n_learning_steps))       # Average reward (EPISODIC learning task)
-R_long_all = np.nan * np.ones((nrep, n_learning_steps))  # Long-run Average reward (CONTINUING learning task). It does NOT converge to the same value as the episodic average reward because there is one more reward value per episode!! (namely the reward going from the terminal state to the start state)
+R_all = np.nan * np.ones((nrep, n_learning_steps))       # Average reward (corresponding to EPISODIC learning tasks)
+R_long_all = np.nan * np.ones((nrep, n_learning_steps))  # Long-run average reward (corresponding to CONTINUING learning tasks). It does NOT converge to the same value as the episodic average reward because there is one more reward value per episode!! (namely the reward going from the terminal state to the start state)
 R_long_initial_all = np.zeros((nrep, n_learning_steps))  # Useful for FV only: average reward observed during the initial simulation (useful for ablation study of FV)
 R_long_fv_inflated_all = np.nan * np.ones((nrep, n_learning_steps))  # Useful for FV only: compare the average reward inflated by the FV exploration and a sensible estimate of the average reward by FV
 R_long_true_all = np.nan * np.ones((nrep, n_learning_steps))  # True Long-run Average reward (CONTINUING learning task) under the policy at the start of each policy learning step
@@ -1096,21 +1097,20 @@ for rep in range(nrep):
                     # and may not be exactly equal to the number of steps the FV learner took at each policy learning step.
                     _max_time_steps = max_time_steps_benchmark
                 print(f"*** TD learning will use {_max_time_steps} simulation steps. ***")
-                if False:
-                    # Use this when the discrete.Simulator.run() calls the _run_single() method to run the simulation, which is based on the existence of episodes
+                if learning_task == LearningTask.EPISODIC:
                     V, Q, A, state_counts, _, _, learning_info = \
                         simulator_value_functions.run(nepisodes=n_episodes_per_learning_step,
                                                       t_learn=t_learn,
                                                       max_time_steps=max_time_steps_benchmark,
-                                                      max_time_steps_per_episode=max_time_steps_per_episode,  # max_time_steps_benchmark // n_episodes_per_learning_step,
+                                                      max_time_steps_per_episode=max_time_steps_per_policy_learning_episode,  # max_time_steps_benchmark // n_episodes_per_learning_step,
                                                       reset_value_functions=reset_value_functions_at_this_step,
                                                       seed=seed_learn,
-                                                      state_observe=state_observe, compute_rmse=True if t_learn+1 in learning_steps_observe else False,
+                                                      state_observe=state_observe,
                                                       epsilon_random_action=epsilon_random_action,
+                                                      compute_rmse=plot if t_learn+1 in learning_steps_observe else False,
                                                       plot=plot if t_learn+1 in learning_steps_observe else False, colormap=colormap,
                                                       verbose=True, verbose_period=verbose_period)
                 else:
-                    # Use this when the discrete.Simulator.run() calls the _run_single_continuing_task() method to run the simulation (where there are no episodes)
                     V, Q, A, state_counts, _, _, learning_info = \
                         simulator_value_functions.run(t_learn=t_learn,
                                                       max_time_steps=_max_time_steps,
@@ -1118,9 +1118,9 @@ for rep in range(nrep):
                                                       reset_value_functions=reset_value_functions_at_this_step,
                                                       seed=seed_learn,
                                                       state_observe=state_observe,
+                                                      epsilon_random_action=epsilon_random_action,
                                                       compute_rmse=plot if t_learn+1 in learning_steps_observe else False,
                                                       plot=plot if t_learn+1 in learning_steps_observe else False, colormap=colormap,
-                                                      epsilon_random_action=epsilon_random_action,
                                                       verbose=True, verbose_period=verbose_period)
                 average_reward = simulator_value_functions.getAgent().getLearner().getAverageReward()
                 nsteps_all[rep, t_learn] = learning_info['nsteps']
@@ -1140,8 +1140,27 @@ for rep in range(nrep):
             # Policy learning
             if is_NPG:
                 # Learn using NPG (Natural Policy Gradient)
-                print("\n(Natural Policy Gradient learning)")
-                learner_ac.learn_natural(A)
+                if use_advantage:
+                    print("\n(Natural Policy Gradient learning using the direct estimation of the advantage function)")
+                    learner_ac.learn_natural(A)
+                else:
+                    # Compute the advantage function as Q - V, where V = policy-weighted-average(Q) over all actions, and then update the policy using that advantage function
+                    # Under the AVERAGE reward learning criterion, this makes the average reward (present in both V and Q), cancel out, thus making its estimation useless.
+                    # In the FV approach, this is tantamount to leveraging Fleming-Viot JUST as an OVERSAMPLING mechanism, not as an estimator of the long-run expected reward.
+                    # However, it has been shown by different sources (see e.g. the 2021 paper by K. Ross and Zhang on the average reward actor-critic learning:
+                    # "On-Policy Deep RL for the Average-Reward Criterion" or the lecture by David Silver available in YouTube where he talks about this at one point
+                    # saying that using a direct estimate of the Advantage function is better than using Q - V).
+                    print("\n(Natural Policy Gradient learning using an INDIRECT estimation of the advantage function as Q(s,a) - policy-weighted-avg(Q)-over-all-actions(s))")
+                    _A_as_Q_minus_avgQ = np.zeros_like(A)
+                    for s in range(test_ac.getEnv().getNumStates()):
+                        _state_value = 0.0
+                        for a in range(test_ac.getEnv().getNumActions()):
+                            # NOTE: This assumes that the order of the states and actions in the 1D arrays containing Q and A is grouped by state,
+                            # i.e. for state 0, the value of all actions are given, then the same for state 1 and so forth.
+                            _ind2update = s*test_ac.getEnv().getNumActions() + a
+                            _state_value += learner_ac.getPolicy().getPolicyForAction(a, s) * Q[_ind2update]
+                            _A_as_Q_minus_avgQ[_ind2update] = Q[_ind2update] - _state_value
+                    learner_ac.learn_natural(_A_as_Q_minus_avgQ)
                 if not test_ac.getEnv().isStateContinuous():
                     print(f"NEW policy (states x actions):\n{learner_ac.getPolicy().get_policy_values()}")
             else:

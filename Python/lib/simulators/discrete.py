@@ -43,7 +43,7 @@ from Python.lib.agents.policies.parameterized import PolNN
 from Python.lib.simulators.fv import reactivate_particle
 from Python.lib.simulators import DEBUG_TRAJECTORIES, MAX_NUMBER_OF_STEPS_FOR_EXPECTATION, MIN_NUM_CYCLES_FOR_EXPECTATIONS, choose_state_from_set, parse_simulation_parameters, show_messages
 
-from Python.lib.utils.basic import find_signed_max_value, generate_datetime_string, get_current_datetime_as_string, insort, is_integer, measure_exec_time
+from Python.lib.utils.basic import find_signed_max_value, generate_datetime_string, get_current_datetime_as_string, is_integer, keep_dict_params_defined_in_function, measure_exec_time
 from Python.lib.utils.computing import compute_expected_reward, compute_set_of_frequent_states_with_zero_reward, compute_survival_probability, mape, rmse
 from Python.lib.utils.plotting import update_plots
 
@@ -217,6 +217,7 @@ class Simulator:
                 kwargs['nepisodes'] = 1
                 return self._run_single_continuing_task(**kwargs)
             else:
+                kwargs = keep_dict_params_defined_in_function(kwargs, self._run_single)
                 return self._run_single(**kwargs)
 
     def _run_fv(self, t_learn=0, max_time_steps=None,
@@ -873,8 +874,9 @@ class Simulator:
             #self.agent.getLearner().reset(reset_value_functions=True)
             #print(f"VALUE FUNCTIONS RESET BEFORE STARTING FLEMING-VIOT!\nV = \n{self.agent.getLearner().getV().getValues()}\nQ = \n{self.agent.getLearner().getQ().getValues()}")
             # TEMPORARY
-            if self.agent.getLearner().getLearningCriterion() == LearningCriterion.AVERAGE:
-                method_fv = self._run_simulation_fv; uniform_jump_rate = N         # We need to divide the FV sum by N in order to make it comparable with the denominator E(T_A) whose time measure is N times shorter than the time measure of an FV particle (as the FV particle is chosen on average once every N time steps of the FV system)
+            if self.agent.getLearner().getLearningTask() == LearningTask.CONTINUING:
+                # Continuing learning task. Note that the learning criterion can be either AVERAGE or DISCOUNTED, but the former is more common.
+                method_fv = self._run_simulation_fv; uniform_jump_rate = N  # We need to divide the FV sum by N in order to make it comparable with the denominator E(T_A) whose time measure is N times shorter than the time measure of an FV particle (as the FV particle is chosen on average once every N time steps of the FV system)
                 #method_fv = self._run_simulation_fv_fraiman; uniform_jump_rate = 1  # In this case, all FV particles are updated at the same system's time step, therefore no adjustmend needs to be done to the FV sum.
                 #method_fv = self._run_simulation_fv_fraiman_modified; uniform_jump_rate = 1  # In this case, all FV particles are updated at the same system's time step, therefore no adjustmend needs to be done to the FV sum.
                 start_set = dict_params_simul['activation_set']
@@ -932,7 +934,19 @@ class Simulator:
                     # just used (normally) to define the distribution for the start state of the FV particles --read above from learning_info['probas_stationary_exit_cycle_set']).
                     self.getAgent().getLearner().setProbasStationaryStartStateET(probas_stationary_start_state_fv)
             else:
-                # When running FV to learn the value functions V(s) and Q(s,a) under the DISCOUNTED reward criterion,
+                # EPISODIC learning task. (2025/05/26) FV is not really prepared for this situation at this point UNLESS we use it simply as an oversampling mechanism.
+                # To leverage the Fleming-Viot oversampling mechanism in learning a policy (and make learning independent of the estimated expected reward by Fleming-Viot),
+                # follow the directives described in the error message triggered before when the user chooses the EPISODIC learning task.
+                raise ValueError("The EPISODIC learning tasks is currently NOT handled by Fleming-Viot. "
+                                 "If you wish to use Fleming-Viot in episodic tasks, just call it with the usual way, i.e. CONTINUING task with either AVERAGE or DISCOUNTED reward criterion "
+                                 "and REQUEST that the policy learner do NOT use the advantage function estimated by the critic learning process to update the policy "
+                                 "(which uses the average reward estimated by Fleming-Viot to correct each observed reward and thus construct the differential value function) "
+                                 "and to instead use the advantage function computed as `Q - V`, where the average reward correction term persent in both Q and V cancels out."
+                                 "\nAt the moment of writing (25-May-2025), this behaviour can be accomplished in test/tests.py by setting `use_advantage = False` "
+                                 "a variable that is passed to the online policy learner or otherwise parsed before applying NPG learning (Natural Policy Gradient), "
+                                 "in case the latter is the learning method chosen for the policy learner.")
+                # When running FV to learn the value functions V(s) and Q(s,a) under the EPISODIC learning task
+                # (which implies a DISCOUNTED learning criterion, as the AVERAGE reward criterion cannot be used in that case because of the random episode lengths),
                 # the particles should start all over the place outside A, so that we can explore all those states
                 # more uniformly, as we need to estimate the value of EACH state.
                 # I've tested starting all the particles at the outer boundary of A to estimate V(s) on a 5-state 1D gridworld with +1 reward with a very small

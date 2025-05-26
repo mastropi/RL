@@ -6,6 +6,8 @@ Created on Sun Jun 07 23:48:41 2024
 @description: Runs the FVAC algorithm (Fleming-Viot Actor-Critic) to learn optimal parameterized policies in discrete-time Markov decision processes.
               Execution is possible either in batch mode (i.e. passing parameters from the prompt) or interactive mode (e.g. from PyCharm), in which case
               the parameters should be defined as default values in the code below, when invoking parser.set_defaults().
+*** IN PREPARATION ***
+*** Also, we need to take here the latest changes in the tests.py file under section "Tests on FVAC", which I have continued using for testing.
 """
 
 if __name__ == "__main__":
