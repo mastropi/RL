@@ -90,6 +90,10 @@ class EnvDiffusion(EnvironmentContinuous):
         Function that returns the noise process as a function of the state and other parameters passed as kwargs.
         default: func_noise_gaussian, which is a zero-mean Gaussian process independent of the state
 
+    reflect: bool
+        Whether to reflect the process at 0.
+        default: False
+
     mu: float
         Mean of the OU process.
         default: 0.0
@@ -108,10 +112,11 @@ class EnvDiffusion(EnvironmentContinuous):
     as they are commonly used by those functions.
     """
     def __init__(self,  func_drift: callable=func_drift_const, func_noise: callable=func_noise_gaussian,
-                        mu=0.0, sigma=0.1, dt=0.1, **kwargs):
+                        reflect=False, mu=0.0, sigma=0.1, dt=0.1, **kwargs):
         super().__init__()
         self.func_drift = func_drift
         self.func_noise = func_noise
+        self.reflect = reflect
         self.mu = mu
         self.sigma = sigma
         self.dt = dt
@@ -129,11 +134,15 @@ class EnvDiffusion(EnvironmentContinuous):
     def reset(self):
         "Resets the state to the long-run average"
         self.state = self.mu
+        if self.reflect:
+            self.state = np.abs(self.state)
 
     def step(self, action):
         "Environment step method defining the next state given the current state and an action. It should return the same information returned by the gym step() methods"
         # Compute next state based on drift and noise terms
         next_state = self.state + self.drift() + self.noise()
+        if self.reflect:
+            next_state = np.abs(next_state)
         reward = 0.0
         done = False
         info = {}
@@ -158,6 +167,8 @@ class EnvDiffusion(EnvironmentContinuous):
 
     def setState(self, state):
         "Sets the state of the environment"
+        if self.reflect and state < 0:
+            raise ValueError(f"The state cannot be set to a negative value when self.reflect=True: {state}")
         self.state = state
 
     def getState(self):

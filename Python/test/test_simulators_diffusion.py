@@ -17,11 +17,11 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 import sympy
-from scipy.integrate import quad
 import seaborn as sns
 
 from Python.lib.estimators.fv import estimate_stationary_probabilities
 from Python.lib.environments.diffusion import EnvDiffusion, func_drift_fcr_piecewise, func_noise_gaussian
+from Python.lib.estimators.diffusion import calculate_probabilities, calculate_probability, estimate_probabilities_in_sets_of_interest
 from Python.lib.simulators.diffusion import SimulatorDiffusionFV
 
 
@@ -37,99 +37,12 @@ def define_sets_of_interest(thresholds):
     return sets_of_interest
 
 
-def estimate_probabilities_in_sets_of_interest(F, sets_of_interest):
-    """
-    Estimates the probabilities that the simulated process is in each of the given sets of interest
-
-    Parameters:
-    - F: array-like containing the samples of the simulated process.
-    - sets_of_interest: List of sympy.Set objects defining each set of interest to analyze.
-
-    Returns: dict
-    Dictionary containing the estimated probabilities
-    """
-    probas = dict.fromkeys(sets_of_interest)
-    for _set in sets_of_interest:
-        if not isinstance(_set, sympy.Set):
-            raise ValueError(f"Each element in the `interval` list must be of type sympy.Set: {type(_set)}")
-        print(f"Processing set {_set}...")
-        if isinstance(_set, sympy.Interval):
-            # Extract the boundaries of the interval and use them to check belonging instead of the much slower Set.contains() method!
-            lower, upper = float(_set.inf), float(_set.sup)
-            count = np.sum((lower <= F) & (F < upper))
-        else:
-            # Vectorize the Set.contains() method to have the result faster (in principle)
-            # Ref: https://stackoverflow.com/questions/10678843/evaluate-sympy-expression-from-an-array-of-values (answer by Marek)
-            _set_contains_for_vectors = np.vectorize(_set.contains, otypes=[bool])
-            count = np.sum(_set_contains_for_vectors(F))
-        probas[_set] = count / len(F)  # Normalize by the total number of samples
-
-    return probas
-
-
-def calculate_probabilities(r, x, sigma, verbose=False):
-    """
-    Calculate the probabilities p_1,...,p_6 as a function of r, x, and sigma.
-
-    Parameters:
-    r (float): Capacity reserved for FCR-N.
-    x (float): Decision variable, capacity reserved for FCR-D.
-    sigma (float): Volatility.
-
-    Returns:
-    dict: A dictionary with the probabilities p_1, p_2, p_3 (and p_4, p_5, p_6 since p_4 = p_3, p_5 = p_2, p_6 = p_1).
-    """
-    K1, K2, K3 = compute_K_integrals(x, r, sigma)
-
-    exp1 = np.exp(-5 * x / (48 * sigma**2))
-    exp2 = np.exp(-(31 * x + r) / (300 * sigma**2))
-
-    if K1 == 0 or np.log10(K1) < -15:
-        denom = 2 * K2 * exp1 + 2 * K3 * exp2
-        p_1 = p_6 = 0.0
-        p_2 = p_5 = K2 * exp1 / denom
-        p_3 = p_4 = K3 * exp2 / denom
-    else:
-        denom = 2 + 2 * (K2 / K1) * exp1 + 2 * (K3 / K1) * exp2
-        p_1 = p_6 = 1 / denom
-        p_2 = p_5 = (K2 / K1) * exp1 / denom
-        p_3 = p_4 = (K3 / K1) * exp2 / denom
-
-    if verbose:
-        print(f"p_1: {round(p_1, 10)}\np_2: {round(p_2, 10)}\np_3: {round(p_3, 10)}\np_4: {round(p_4, 10)}\np_5: {round(p_5, 10)}\np_6: {round(p_6, 10)}")
-
-    return {
-        "p_1": p_1,
-        "p_2": p_2,
-        "p_3": p_3,
-        "p_4": p_4,
-        "p_5": p_5,
-        "p_6": p_6,
-    }
-
-
-def compute_K_integrals(x, r, sigma, beta=1):
-    def K1_integrand(y):
-        return np.exp(-y**2 * (beta*r + beta*x) / sigma**2)
-
-    def K2_integrand(y):
-        return np.exp(
-            - y**2 * (4*beta*r - beta*x) / (4*sigma**2)
-            + y**3 * (5*beta*x) / (3*sigma**2)
-        )
-
-    def K3_integrand(y):
-        return np.exp((20*y**3 * beta*r) / (3*sigma**2))
-
-    K1 = quad(K1_integrand, -np.inf, -0.5, epsabs=1e-30, epsrel=1e-11)[0]
-    K2 = quad(K2_integrand, -0.5, -0.1, epsabs=1e-30, epsrel=1e-11)[0]
-    K3 = quad(K3_integrand, -0.1, 0.0, epsabs=1e-30, epsrel=1e-11)[0]
-
-    return K1, K2, K3
-
-
 class Test_Class_SimulatorDiffusionFV(unittest.TestCase):
     "Tests for the SimulatorDiffusionFV simulator that simulates the EnvDiffusion environment"
+
+    def __init__(self, reflect=False, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.reflect = reflect
 
     @classmethod
     def setUpClass(cls):
@@ -143,7 +56,7 @@ class Test_Class_SimulatorDiffusionFV(unittest.TestCase):
         # Parameters for the piecewise drift function (alpha in the paper referenced in func_drift_fcr_piecewise())
         cls.r = 0.6  # Capacity reserved for FCR-N
         cls.x = 1.4  # Capacity reserved for FCR-D
-        cls.env_ou = EnvDiffusion(func_drift=func_drift_fcr_piecewise, func_noise=func_noise_gaussian, mu=mu, dt=dt, sigma=sigma, r=cls.r, x=cls.x)
+        cls.env_ou = EnvDiffusion(func_drift=func_drift_fcr_piecewise, func_noise=func_noise_gaussian, reflect=cls.reflect, mu=mu, dt=dt, sigma=sigma, r=cls.r, x=cls.x)
 
     def test_run_estimation_fv(self, dict_params_simul=dict({'N': 50, 'T': 1000, 'absorption_set': sympy.Interval(-0.08, 0.08)}), sets_of_interest=None, store_trajectories=False, seed=1313, debug=False, plot={'MC': False, 'FV': False}):
         """ (2025/05/12)
@@ -248,34 +161,39 @@ if __name__ == "__main__":
         time_start = timer()
 
         # Number of replications to run
-        nrep = 3 #21
+        nrep = 9 #21
         seed_base = 1313  # 1317
 
         # Sets of interest for the estimation of stationary probabilities
         # Note: the `sets_case` variable is used below to define the sets2analyze when generating the violin plots that compare FV vs. MC
-        #sets_of_interest = define_sets_of_interest(thresholds=[-np.Inf, -0.5, -0.1, 0.0, 0.1, 0.5, +np.Inf]); sets_case = 1
-        #sets_of_interest = define_sets_of_interest(thresholds=[-1.0, -0.5, -0.3, -0.2, 0.0, 0.2, 0.3, 0.5, +1.0]); sets_case = 2
-        #sets_of_interest = define_sets_of_interest(thresholds=[-1.0, -0.5, -0.3, -0.15, 0.0, 0.15, 0.3, 0.5, +1.0]); sets_case = 2 --> This works quite nicely to show the advantage of FV but still MC can estimate something
-        sets_of_interest = define_sets_of_interest(thresholds=[-1.0, -0.5, -0.3, -0.16, 0.0, 0.16, 0.3, 0.5, +1.0]); sets_case = 2
+        #sets_of_interest = define_sets_of_interest(thresholds=[-np.Inf, -0.5, -0.1, 0.0, 0.1, 0.5, +np.Inf]); T = int(1E5); N = 50; sets_case = 1
+        #sets_of_interest = define_sets_of_interest(thresholds=[-1.0, -0.5, -0.3, -0.2, 0.0, 0.2, 0.3, 0.5, +1.0]); T = int(1E5); N = 50; sets_case = 2
+        #sets_of_interest = define_sets_of_interest(thresholds=[-1.0, -0.5, -0.3, -0.15, 0.0, 0.15, 0.3, 0.5, +1.0]); T = int(1E5); N = 50; sets_case = 2 --> This works quite nicely to show the advantage of FV but still MC can estimate something
+        #sets_of_interest = define_sets_of_interest(thresholds=[-1.0, -0.5, -0.3, -0.16, 0.0, 0.16, 0.3, 0.5, +1.0]); T = int(1E5); N = 50; sets_case = 2
+        # Sets of interest on the REFLECTED process
+        sets_of_interest = define_sets_of_interest(thresholds=[0.0, 0.16, 0.3, 0.5, +1.0]); sets_case = 3; A_boundaries = (-0.12, 0.12); T = 1000; N = 50; #T = int(1E5); N = 50
+        #sets_of_interest = define_sets_of_interest(thresholds=[0.0, 0.18, 0.3, 0.5, +1.0]); sets_case = 3; A_boundaries = (-0.14, 0.14); T = int(1E6); N = 80
+        #sets_of_interest = define_sets_of_interest(thresholds=[0.0, 0.20, 0.3, 0.5, +1.0]); sets_case = 3; A_boundaries = (-0.15, 0.15); T = int(1E6); N = 100
 
-        A_boundaries = (-0.12, 0.12)  #(-0.08, +0.08)
+        if sets_case <= 2:
+            A_boundaries = (-0.12, 0.12)  #(-0.08, +0.08)
 
-        test_obj = Test_Class_SimulatorDiffusionFV()
+        # Whether the process is reflected at 0
+        reflect = sets_case >= 3
+
+        # Create the test object
+        test_obj = Test_Class_SimulatorDiffusionFV(reflect=reflect)
         # Need to define selected process parameters and the environment ad-hoc because they are not found when defined via setUpClass() in this ad-hoc execution
         mu = 0.0
         sigma = 0.04
         dt = 0.01
         test_obj.r = 0.6  # Capacity reserved for FCR-N
         test_obj.x = 1.4  # Capacity reserved for FCR-D
-        test_obj.env_ou = EnvDiffusion(func_drift=func_drift_fcr_piecewise, func_noise=func_noise_gaussian, mu=mu, dt=dt, sigma=sigma, r=test_obj.r, x=test_obj.x)
+        test_obj.env_ou = EnvDiffusion(func_drift=func_drift_fcr_piecewise, func_noise=func_noise_gaussian, reflect=reflect, mu=mu, dt=dt, sigma=sigma, r=test_obj.r, x=test_obj.x)
 
-        if "FV" in tests2run:   # This test runs the whole process altogether, by calling the run() method of the SimulatorDiffusionFV class
-            A_boundaries = (-0.08, +0.08)
-            absorption_set = sympy.Interval(*A_boundaries)
-            seed = 1317 #1313
-
-        # True stationary probability of the sets of interest
-        # IMPORTANT: For now, the sets of interest must COINCIDE with the smooth pieces of the drift function (as there is no argument in the called function that receivs the sets of interest)
+        # True stationary probability of the smooth pieces of the drift function alpha(x)
+        # NOTE: In order to compute the true probability of the sets of interest, use the calculate_probability(interval) function where one can specify an interval of interest
+        # This is done below, when analyzing the sets of interest.
         probas_true = calculate_probabilities(test_obj.r, test_obj.r, sigma)
 
         # Output variables to store the results for each replication
@@ -363,8 +281,8 @@ if __name__ == "__main__":
             absorption_set = sympy.Interval(*A_boundaries)
 
             # Simulation parameters
-            dict_params_simul = dict({'N': 50, #50,  # 100
-                                      'T': int(1E5), #50000,  # 10000
+            dict_params_simul = dict({'N': N, #50,  # 100
+                                      'T': T, #int(1E5), #50000,  # 10000
                                       'absorption_set': absorption_set,
                                       'check_for_stationarity': False, #True,
                                       'burnin_for_stationarity_check': 30,
@@ -432,7 +350,18 @@ if __name__ == "__main__":
         elif sets_case == 2:
             # Rarer sets of interest and larger A
             intervals2analyze = [2, 5]
+        elif sets_case == 3:
+            # Reflected process
+            intervals2analyze = [1]
         sets2analyze = [sets_of_interest[i] for i in intervals2analyze]
+
+        print(f"\nTrue probabilities of the sets of interest:")
+        proba_true = np.sum([calculate_probability((_set.inf, _set.sup), test_obj.r, test_obj.x, sigma) for _set in sets2analyze])
+        if sets_case == 3:
+            # This is the case where the simulation is done on the reflected process, meaning that we only specify the interval on ONE side of the origin in sets2analyze
+            # => We need to multiply the computed true probability by 2 because we also need to add the probability of the corresponding negative interval
+            proba_true = 2*proba_true
+
         print(f"\nProbabilities estimated by FV (N={dict_params_simul['N']}, T={dict_params_simul['T']}, A={dict_params_simul['absorption_set']}):")
         # Compute the estimated probabilities of the set to analyze and collect them on a data frame for easy plotting
         df_results = pd.DataFrame(np.zeros((nrep, 4)), columns=['mc', 'fv', 'nsteps_mc', 'nsteps_fv'], index=np.arange(nrep))
@@ -451,6 +380,7 @@ if __name__ == "__main__":
         plt.figure()
         sns.boxplot(data=df_toplot, x="method", y="p", hue="method", order=["fv", "mc"], palette={'fv': "green", 'mc': "red"}, orient="v")
         plt.axhline(0, color="gray")
+        plt.axhline(proba_true, color="gray", linestyle="dashed")
         if sets_case == 1:
             plt.axhline(np.sum([probas_true[f'p_{i+1}'] for i in intervals2analyze]), color="gray", linestyle="dashed")
         plt.title(f"Estimated probabilities for {sets2analyze} on {nrep} replications\nN={dict_params_simul['N']}, T={dict_params_simul['T']}, A={dict_params_simul['absorption_set']}, avg(#steps)={int(np.mean(df_toplot['nsteps']))}")
