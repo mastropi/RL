@@ -879,25 +879,25 @@ class Simulator:
                 method_fv = self._run_simulation_fv; uniform_jump_rate = N  # We need to divide the FV sum by N in order to make it comparable with the denominator E(T_A) whose time measure is N times shorter than the time measure of an FV particle (as the FV particle is chosen on average once every N time steps of the FV system)
                 #method_fv = self._run_simulation_fv_fraiman; uniform_jump_rate = 1  # In this case, all FV particles are updated at the same system's time step, therefore no adjustmend needs to be done to the FV sum.
                 #method_fv = self._run_simulation_fv_fraiman_modified; uniform_jump_rate = 1  # In this case, all FV particles are updated at the same system's time step, therefore no adjustmend needs to be done to the FV sum.
-                start_set = dict_params_simul['activation_set']
-                start_state_selection_case = "0 - PREDEFINED BY USER"
+                start_set = None  # Normally we should use `probas_stationary_start_state_fv` to select the start states in FV
                 if probas_stationary_start_state_fv is None:
                     # Define the stationary probability for the start state in the FV simulation to be carried out below.
                     # This distribution is derived from the initial exploration run above, and it depends on whether SOFT KILLING is used or not, as follows:
                     # - if SOFT KILLING: it is set to the stationary distribution of the state at which a killing CLOCK occurs.
                     # - Otherwise: it is set to the stationary exit probability from the absorption set.
                     # *** IMPORTANT: Note that this distribution is NOT stored in the FV learner ***
-                    # Otherwise, if this simulation is part of policy learning process, the next time the simulation is called
-                    # (e.g. at a subsequent policy learning step) the start distribution for the FV particles
-                    # will no longer be None, because the distribution (probas_stationary_start_state_fv, which is checked against None above)
-                    # is read from the distribution stored in the FV learner by the caller, and this would impede an update of the start distribution
-                    # (which may be required because the policy has been updated at the latest policy learning step).
+                    # In fact, if we stored it in the FV learner and this simulation is part of policy learning process, the next time the simulation is called
+                    # (e.g. at a subsequent policy learning step) the start distribution for the FV particles would no longer be None,
+                    # because the distribution (probas_stationary_start_state_fv, which is checked against `None` above)
+                    # would be read from the distribution stored in the FV learner by the caller, and this would impede an update of the start distribution
+                    # (which is required when the policy had been updated at the latest policy learning step).
                     if dict_params_simul['soft_killing']:
                         # DM-2025/01/05: Starting at the start of a cycle is not so effective because the start of a cycle is a frequently visited state and thus the FV particles
                         # remain mostly in the set of frequently visited states. So, it is better to start at the state JUST BEFORE the killing state
                         # (collected at each occurrence of a killing event).
                         #probas_stationary_start_state_fv = learning_info['probas_stationary_start_cycle']
                         probas_stationary_start_state_fv = learning_info['probas_stationary_end_cycle']
+                        assert len(probas_stationary_start_state_fv) > 0, "(Assertion added 22-May-2025) The number of end cycle states in the SOFT killing case must not be empty"
                         start_state_selection_case = "1 - END CYCLE STATES"
                     elif dict_params_simul['estimate_absorption_set']:
                         # This means that the absorption set is potentially updated at each policy learning step
@@ -914,14 +914,23 @@ class Simulator:
                             # => Choose the backup set of start states for FV so that we have more variety of start states, which helps the FV particle system explore more
                             # and reduces its chances of getting stuck at a fixed system configuration (i.e. distribution of FV particles).
                             probas_stationary_start_state_fv = dict.fromkeys(dict_params_simul['backup_start_states_for_fv'], 1/len(dict_params_simul['backup_start_states_for_fv']))
-                            start_state_selection_case = f"3 - STATES OUTSIDE A VISITED in INI EXP (exit size: {len(learning_info['probas_stationary_exit_cycle_set'])})"
+                            assert len(probas_stationary_start_state_fv) > 0, "(Assertion added 22-May-2025) The number of backup start states for FV must not be empty"
+                            start_state_selection_case = f"3 - GOOD, STATES OUTSIDE A VISITED in INI exploration (exit size: {len(learning_info['probas_stationary_exit_cycle_set'])})"
                         else:
                             probas_stationary_start_state_fv = learning_info['probas_stationary_exit_cycle_set']
-                            start_state_selection_case = "2 - EXIT CYCLE STATES (A is variable)"
+                            # NOTE: The above variable is a dictionary which COULD be empty (i.e. when no EXIT states from A has been observed in the initial exploration).
+                            # If this is the case, a WARNING message will be issued by _run_simulation_fv() when parsing its value and the value of the `start_set` argument.
+                            # Nevertheless we still issue a warning message here to be sure it shows up, because it is rather a GRAVE situation, because the FV agent uses
+                            # information that is supposed NOT to have, namely the set of activation states (i.e. the outer boundary of A).
+                            if len(probas_stationary_start_state_fv) == 0:
+                                print("CHEATING-WARNING: The activation set will be used as set for the selection of the start states of the FV particles. "
+                                      "This however is NOT allowed because the agent is supposed NOT to know the activation set!")
+                                start_set = dict_params_simul['activation_set']    # We should use `probas_stationary_start_state_fv` when not empty
+                            start_state_selection_case = "2 - EXIT CYCLE STATES (A may vary)"
                     else:
-                        # Note that this set can be EMPTY... in which case, the problem is dealt with in _run_simulation_fv() where input parameter start_set is parsed
                         probas_stationary_start_state_fv = learning_info['probas_stationary_exit_cycle_set']
-                        start_state_selection_case = "4 - EXIT CYCLE STATE (A is fixed)"
+                        assert len(probas_stationary_start_state_fv) > 0, "(Assertion added 22-May-2025) The probability distribution of EXIT states must not be empty"
+                        start_state_selection_case = "4 - EXIT CYCLE STATES (A is fixed)"
                     start_state_selection_case += f" (size: {len(probas_stationary_start_state_fv)})"
 
                     # Either when soft killing is used or not, set the distribution for the start state for the E(T_A) simulation
