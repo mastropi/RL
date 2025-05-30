@@ -1045,19 +1045,21 @@ for rep in range(nrep):
                         for _fig_number in plt.get_fignums():
                             # Do NOT close the first 2 figures that are created at the beginning of the process showing the absorption set and initial trajectory
                             plt.close(_fig_number) if _fig_number > 2 else None
-                # Reset to None the start state distribution for the E(T_A) excursion at the very first learning step so that
-                # we do NOT carry over whatever this distribution was at the end of the previous replication or at the end of the previous execution of the learning process
-                # using this same learner.
-                if t_learn == 0:
-                    simulator_value_functions.getAgent().getLearner().setProbasStationaryStartStateET(None)
-                    # NEW-2024/10/23: We should estimate the absorption set at the FIRST policy learning step for EVERY replication, as estimating the absorption set is part of the FVAC process!
-                    # Otherwise, if estimate_absorption_set_at_every_step = False, FVAC will be stick to use ALWAYS the same absorption set A estimated
-                    # by the preparation of the simulation environment in test_optimizers_discretetime.py, and this is not completely fair... In fact, we already observed that
-                    # the absorption set A may strongly depend on the seed used (e.g. Labyrinth 6x8 with 50% obstacles and obstacle seed = 4217, with WIND = 0.5, where for the
-                    # initial simulation seed of 1317, the absorption set A turns out to be extremely favorable for FVAC... but only for THAT SEED!!)
-                    estimate_absorption_set_at_this_step = True
-                else:
-                    estimate_absorption_set_at_this_step = estimate_absorption_set_at_every_step
+                if False:
+                    # DM-2025/05/29: REMOVED THIS STEP BECAUSE THIS IS NOW FULLY DONE BY THE discrete.Simulator class WHEN (i) calling the learner.reset() method with the reset_auxiliary_info=True argument, and when ALWAYS estimating the absorption set at the first learning step, i.e. when t_learn = 0.
+                    # Reset to None the start state distribution for the E(T_A) excursion at the very first learning step so that
+                    # we do NOT carry over whatever this distribution was at the end of the previous replication or at the end of the previous execution of the learning process
+                    # using this same learner.
+                    if t_learn == 0:
+                        simulator_value_functions.getAgent().getLearner().setProbasStationaryStartStateET(None)
+                        # NEW-2024/10/23: We should estimate the absorption set at the FIRST policy learning step for EVERY replication, as estimating the absorption set is part of the FVAC process!
+                        # Otherwise, if estimate_absorption_set_at_every_step = False, FVAC will be stick to use ALWAYS the same absorption set A estimated
+                        # by the preparation of the simulation environment in test_optimizers_discretetime.py, and this is not completely fair... In fact, we already observed that
+                        # the absorption set A may strongly depend on the seed used (e.g. Labyrinth 6x8 with 50% obstacles and obstacle seed = 4217, with WIND = 0.5, where for the
+                        # initial simulation seed of 1317, the absorption set A turns out to be extremely favorable for FVAC... but only for THAT SEED!!)
+                        estimate_absorption_set_at_this_step = True
+                    else:
+                        estimate_absorption_set_at_this_step = estimate_absorption_set_at_every_step
                 V, Q, A, state_counts, state_counts_et, probas_stationary, expected_reward, expected_absorption_time, n_cycles_absorption_used, n_events_et, n_events_fv = \
                     simulator_value_functions.run(t_learn=t_learn,
                                                   max_time_steps=max_time_steps_fv_overall,
@@ -1066,7 +1068,7 @@ for rep in range(nrep):
                                                   min_num_cycles_for_expectations=0,
                                                       ## Note: We set the minimum number of cycles for the estimation of E(T_A) to 0 because we do NOT need
                                                       ## the estimation of the average reward to learn the optimal policy, as it cancels out in the advantage function Q(s,a) - V(s)!!
-                                                  estimate_absorption_set=estimate_absorption_set_at_this_step, update_absorption_set_with_fv_visits=update_absorption_set_with_fv_visits, threshold_absorption_set=threshold_absorption_set,
+                                                  estimate_absorption_set=estimate_absorption_set_at_every_step, update_absorption_set_with_fv_visits=update_absorption_set_with_fv_visits, threshold_absorption_set=threshold_absorption_set,
                                                   soft_killing=soft_killing,
                                                   use_average_reward_stored_in_learner=use_average_reward_from_previous_step,
                                                   reset_value_functions=reset_value_functions_at_this_step,
