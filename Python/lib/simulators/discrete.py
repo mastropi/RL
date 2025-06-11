@@ -674,32 +674,38 @@ class Simulator:
 
                 # Store the set of states that were visited during the excursion but that are NOT part of the absorption set
                 # This is useful if we want to choose the start states for the FV particle system among those states, which makes sense in the following situations:
-                # - under soft killing, it would be possible to choose the FV start states OUTSIDE the set of frequently visited states, which is where we want to be.
-                # - under hard killing, it would be possible to choose the FV start states when the exit state probability could not be estimated  from the initial exploration
+                # - under soft killing, it would be possible to choose the FV start states OUTSIDE the set of frequently visited states, which is where we want to be during FV.
+                # - under hard killing, it would be possible to choose the FV start states when the exit state probability could not be estimated from the initial exploration
+                # Note that we look at the less frequently visited states and NOT just the EXIT states from A because potentially using these as candidates for the FV start states
+                # at the next iteration amy most likely lead to states that are already in the next A set (thinking that our strategy of filling the holes in A consists of
+                # adding the states that are frequently visited by the FV excursion which could also be states where the FV system gets stuck. So, if we use those states
+                # again as start states in the upcoming policy iteration, they would most likely be states where the FV system will again get stuck...)
                 dict_params_simul['backup_start_states_for_fv'] = set(dist_state_counts.index).difference(dict_params_simul['absorption_set'])
-                less_frequently_visited_states_case = "1 - LESS FREQUENTLY VISITED STATES DURING INITIAL EXPLORATION are OUTSIDE A"
+                less_frequently_visited_states_case = "1 - GREAT, LESS FREQUENTLY VISITED STATES DURING INITIAL EXPLORATION are OUTSIDE A"
                 if len(dict_params_simul['backup_start_states_for_fv']) == 0:
                     print("WARNING: All visited states during the initial exploration are part of the absorption set."
                           " This would be a problem if we need to use them as BACKUP set for the start state of the FV particles, if no EXIT states from A are observed."
                           "\nTrying to solve this now...")
                     # Check if there are states stored in the set of less frequently visited states in the FV learner
-                    print("Checking if the set of LESS frequently visited states during the FV simulation performed in the PREVIOUS learning step are OUTSIDE the absorption set just identified...")
+                    print("1) Checking if the set of LESS frequently visited states during the FV simulation performed in the PREVIOUS learning step are OUTSIDE the absorption set just identified...")
                     _less_frequently_visited_states_not_in_absorption_set = self.agent.getLearner().getLessFrequentlyVisitedSet().difference(dict_params_simul['absorption_set'])
                     if len(_less_frequently_visited_states_not_in_absorption_set) > 0:
-                        print(f"The set of visited states that are not in the absorption set is defined as the set of less frequently visited states during the last FV simulation that are NOT in the currently identified absorption set.")
+                        print(f"=== OK! ===: The set of visited states that are not in the absorption set is defined as the set of less frequently visited states during the last FV simulation that are NOT in the currently identified absorption set.")
                         dict_params_simul['backup_start_states_for_fv'] = _less_frequently_visited_states_not_in_absorption_set
-                        less_frequently_visited_states_case = "2 - GREAT, THE LESS FREQUENTLY VISITED STATES BY FV IN PREVIOUS STEP are OUTSIDE A"
+                        less_frequently_visited_states_case = "2 - GOOD, THE LESS FREQUENTLY VISITED STATES BY FV IN PREVIOUS STEP are OUTSIDE A"
                     else:
                         # Add a few states to this set, namely the states with smallest visit frequency of the absorption set
                         # and REMOVE those states from the absorption set in the HARD killing setting
                         # (o.w. there would be a problem when selecting that state as starting state for the FV particles because the start state would belong to the absorption set
                         # and this is not allowed in the HARD killing setting)
                         _number_of_less_frequently_visited_states_to_remove_from_absorption_set = min(len(dist_state_counts), 5)
-                        print(f"*** WARNING ***: Problem NOT solved: no visited state by the FV simulation at the previous learning step is outside the currently identified absorption set."
+                        print(f"*** WARNING ***: Problem NOT solved: no visited state by the FV simulation at the PREVIOUS learning step is OUTSIDE the currently identified absorption set."
                               f"\nThe set of visited states that are not in the absorption set is defined as the {_number_of_less_frequently_visited_states_to_remove_from_absorption_set} least frequently visited states in the absorption set.")
                         _less_frequently_visited_states_to_remove_from_absorption_set = set( sorted(dist_state_counts.index, key=lambda x: dist_state_counts[x])[:_number_of_less_frequently_visited_states_to_remove_from_absorption_set] )
                         if False and not dict_params_simul['soft_killing']:
-                            print(f"Removing those states from the absorption set: {sorted(_less_frequently_visited_states_to_remove_from_absorption_set)}")
+                            # NOTE: (2025/05/23) I think I deactivated this step of removing states from A because it may lead to a decrease of the absorption set A, which is actually not allowed.
+                            # HOWEVER, I think we could allow a decrease in A in order to accommodate this situation!
+                            print(f"2) Removing those states from the absorption set: {sorted(_less_frequently_visited_states_to_remove_from_absorption_set)}")
                             dict_params_simul['absorption_set'] = dict_params_simul['absorption_set'].difference(_less_frequently_visited_states_to_remove_from_absorption_set)
                             self.agent.getLearner().setAbsorptionSet(dict_params_simul['absorption_set'])
                         dict_params_simul['backup_start_states_for_fv'] = _less_frequently_visited_states_to_remove_from_absorption_set
@@ -747,6 +753,8 @@ class Simulator:
                 absorption_set_has_been_updated = True
                 number_of_new_states_in_absorption_set = len(absorption_set) - len(self.agent.getLearner().getAbsorptionSet())
                 assert number_of_new_states_in_absorption_set >= 0, f"The size of the absorption set must NOT decrease: number of new states = {number_of_new_states_in_absorption_set}"
+                print(f"[CHECK #2] Absorption set UPDATED! ({number_of_new_states_in_absorption_set} new states) --> "
+                      f"New size = {_size_absorption_set} states ({_prop_absorption_set * 100}% of {_n_valid_states} valid states)")
                 self.agent.getLearner().setAbsorptionSet(absorption_set)
 
             return absorption_set_has_been_updated, number_of_new_states_in_absorption_set
@@ -787,7 +795,7 @@ class Simulator:
         # - the states in the outside boundary of A, when this is known, i.e. when LeaFV.getActivationSet() is not None (seldom the case) OR
         # - the states belonging to the backup set of start states for FV, which could be potentially used at the beginning of the FV simulation in degenerate situations,
         # particularly useful in SOFT killing settings (not really in HARD killing settings because in this case, the start states should be outside A
-        # and this is not guaranteed by the backup set of start states.
+        # and this is not guaranteed by the backup set of start states).
         if probas_stationary_start_state_et is None or len(probas_stationary_start_state_et) == 0:
             if self.agent.getLearner().getActivationSet() is not None and len(self.agent.getLearner().getActivationSet()) > 0:
                 start_state = choose_state_from_set(self.agent.getLearner().getActivationSet(), None)
@@ -875,7 +883,7 @@ class Simulator:
         if len(learning_info['probas_stationary_exit_cycle_set']) == 0 and less_frequently_visited_states_case[:1] == "3":
             # This is the case when the start states of the FV particles cannot be chosen because:
             # - no EXIT states from A were observed during the initial exploration of the environment
-            # - all less-frequently-visited states during the initial exploration are inside the absorption set A, so those states can't either be used as backup start states.
+            # - all less-frequently-visited states during the initial exploration are inside the absorption set A, so those states cannot be used as backup start states.
             state_counts_all = state_counts_et
             expected_reward = self.agent.getLearner().getAverageReward()
             probas_stationary = dict()
@@ -946,7 +954,7 @@ class Simulator:
                         # Note that, when the absorption set becomes too large, there may be no EXIT event observed during the initial exploration.
                         if len(learning_info['probas_stationary_exit_cycle_set']) == 0:
                             print("*** WARNING: *** The set of EXIT states from A is EMPTY!!! The BACKUP set of start states will be used to choose the initial location of FV particles.")
-                        if less_frequently_visited_states_case[:1] != "3" and \
+                        if False and less_frequently_visited_states_case[:1] != "3" and \
                            len(learning_info['probas_stationary_exit_cycle_set']) <= 2 and \
                            len(dict_params_simul['backup_start_states_for_fv']) >= len(learning_info['probas_stationary_exit_cycle_set']):
                             # The backup set of start states for FV is not degenerate (i.e. it is NOT a subset of the absorption set A) and it has more elements
@@ -972,6 +980,7 @@ class Simulator:
                         assert len(probas_stationary_start_state_fv) > 0, "(Assertion added 22-May-2025) The probability distribution of EXIT states must not be empty"
                         start_state_selection_case = "4 - EXIT CYCLE STATES (A is fixed)"
                     start_state_selection_case += f" (size: {len(probas_stationary_start_state_fv)})"
+                    print(f"[Analysis of EXIT states] => START STATE selection case: {start_state_selection_case}")
 
                     # Either when soft killing is used or not, set the distribution for the start state for the E(T_A) simulation
                     # also to the stationary distribution for the FV start state. This MUST be the case in the soft killing case.
