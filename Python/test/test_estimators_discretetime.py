@@ -28,6 +28,7 @@ from Python.lib.agents.policies import probabilistic, random_walks
 
 from Python.lib.environments import gridworlds, mountaincars
 from Python.lib.simulators.discrete import Simulator as DiscreteSimulator
+from Python.lib.simulators.fv import StoppingCriterion
 
 from Python.lib.utils import computing
 
@@ -1055,10 +1056,11 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
             sim.run(max_time_steps=max_time_steps_fv,
                     max_time_steps_for_absorbed_particles_check=max_time_steps_fv,
                     min_prop_absorbed_particles=min_prop_absorbed_particles,
+                    stopping_criterion_fv=StoppingCriterion.MAX_TIME_STEPS_OR_MIN_PROP_ABSORBED_PARTICLES_AS_LONG_AS_ENOUGH_TIME_STEPS_HAVE_BEEN_TAKEN,
                     use_average_reward_stored_in_learner=False,
-                        ## Set the above parameter to True in case we want to test what happens when we start with an initially estimated average reward,
-                        ## e.g. to check if that changes the value function estimation results considerably. To this end, we could call learner_fv.setAverageReward(<value>)
-                        ## when instantiating the FV learner above.
+                    ## Set the above parameter to True in case we want to test what happens when we start with an initially estimated average reward,
+                    ## e.g. to check if that changes the value function estimation results considerably. To this end, we could call learner_fv.setAverageReward(<value>)
+                    ## when instantiating the FV learner above.
                     seed=seed,
                     verbose=True, verbose_period=max_time_steps_fv // 20,
                     plot=False)
@@ -1102,6 +1104,7 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
                 params['lambda'] == 0.0 and \
                 params['alpha_min'] == 0.1
         assert all(state_counts == expected_state_counts)
+        assert sum(state_counts) == n_events_et + n_events_fv + 1
         assert n_events_et == expected_n_events_et
         assert n_events_fv == expected_n_events_fv
         assert n_cycles_absorption_used == expected_n_cycles_absorption
@@ -1156,13 +1159,14 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
             sim.run(max_time_steps=max_time_steps_fv,
                     max_time_steps_for_absorbed_particles_check=max_time_steps_fv,
                     min_prop_absorbed_particles=min_prop_absorbed_particles,
+                    stopping_criterion_fv=StoppingCriterion.MAX_TIME_STEPS_OR_MIN_PROP_ABSORBED_PARTICLES_AS_LONG_AS_ENOUGH_TIME_STEPS_HAVE_BEEN_TAKEN,
                     use_average_reward_stored_in_learner=False,
-                        ## Set the above parameter to True in case we want to test what happens when we start with an initially estimated average reward,
-                        ## e.g. to check if that changes the value function estimation results considerably. To this end, we could call learner_fv.setAverageReward(<value>)
-                        ## when instantiating the FV learner above.
-                        ## Note that, if we set it to True and set the initial average reward value in the learner to be a too large value,
-                        ## we might end up with a very bad V(s) estimate because a too large average reward is subtracted at every
-                        ## TD learning step carried out by the FV simulation, and this brings the V(s) estimate very negative for states far away from the positive reward on the right.
+                    ## Set the above parameter to True in case we want to test what happens when we start with an initially estimated average reward,
+                    ## e.g. to check if that changes the value function estimation results considerably. To this end, we could call learner_fv.setAverageReward(<value>)
+                    ## when instantiating the FV learner above.
+                    ## Note that, if we set it to True and set the initial average reward value in the learner to be a too large value,
+                    ## we might end up with a very bad V(s) estimate because a too large average reward is subtracted at every
+                    ## TD learning step carried out by the FV simulation, and this brings the V(s) estimate very negative for states far away from the positive reward on the right.
                     seed=seed,
                     verbose=True, verbose_period=max_time_steps_fv // 20,
                     plot=False)
@@ -1206,6 +1210,7 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
                 params['lambda'] == 0.0 and \
                 params['alpha_min'] == 0.1
         assert all(state_counts == expected_state_counts)
+        assert sum(state_counts) == n_events_et + n_events_fv + 1
         assert n_events_et == expected_n_events_et
         assert n_events_fv == expected_n_events_fv
         assert n_cycles_absorption_used == expected_n_cycles_absorption
@@ -1423,6 +1428,7 @@ class Test_EstValueFunctions_EnvGridworld2DWithObstacles(unittest.TestCase, test
         state_values, action_values, advantage_values, state_counts, state_counts_et, probas_stationary, average_reward, average_cycle_time, n_cycles, n_events_et, n_events_fv = \
            self.sim_fv.run(max_time_steps=500,
                            max_time_steps_for_absorbed_particles_check=500,
+                           stopping_criterion_fv=StoppingCriterion.MAX_TIME_STEPS_OR_MIN_PROP_ABSORBED_PARTICLES_AS_LONG_AS_ENOUGH_TIME_STEPS_HAVE_BEEN_TAKEN,
                            seed=self.seed, verbose=True, verbose_period=100)
 
         # The following are the state values (value function) calculated using the average reward observed during the single Markov chain excursion used to estimate E(T_A)
@@ -1695,6 +1701,7 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
         assert np.isclose(observed_average_reward, self.expected_average_reward, atol=1E-6)
 
         assert all(state_counts == self.expected_counts)
+        assert sum(state_counts) == learning_info['nsteps'] + 1
         assert np.allclose(observed_p, self.expected_p, atol=1E-6)
 
     def test_Env_PolRandomWalk_MetMC_FromCycles(self):
@@ -1743,6 +1750,7 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
         assert np.isclose(observed_average_reward, self.expected_average_reward, atol=1E-6)
 
         assert all(state_counts == self.expected_counts)
+        assert sum(state_counts) == learning_info['nsteps'] + 1
         assert np.allclose(observed_p, self.expected_p, atol=1E-6)
         assert np.allclose(observed_p_from_cycles, self.expected_p_from_cycles, atol=1E-6)
         assert np.isclose(learning_info['expected_cycle_time'], self.expected_cycle_time, atol=1E-1)
@@ -1785,6 +1793,7 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
         assert np.isclose(observed_average_reward, self.expected_average_reward, atol=1E-6)
 
         assert all(state_counts == self.expected_counts)
+        assert sum(state_counts) == learning_info['nsteps'] + 1
         assert np.allclose(observed_p, self.expected_p, atol=1E-6)
 
     def test_Env_PolRandomWalk_MetTDLambda_FromCycles(self):
@@ -1839,6 +1848,7 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
         assert np.isclose(observed_average_reward, self.expected_average_reward, atol=1E-6)
 
         assert all(state_counts == self.expected_counts)
+        assert sum(state_counts) == learning_info['nsteps'] + 1
         assert np.allclose(observed_p, self.expected_p, atol=1E-6)
         assert np.allclose(observed_p_from_cycles, self.expected_p_from_cycles, atol=1E-6)
         assert np.isclose(observed_average_reward_from_cycles, self.expected_average_reward_from_cycles, atol=1E-6)
@@ -1854,7 +1864,7 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
         # and as of the writing of this, it is set to N*100, where N is the number of particles in the FV system.
         min_prop_absorbed_particles = 1.0
         state_values, action_values, advantage_values, state_counts, state_counts_et, probas_stationary, average_reward, average_cycle_time, n_cycles, n_events_et, n_events_fv = \
-           self.sim_fv.run(min_prop_absorbed_particles=min_prop_absorbed_particles, seed=self.seed, verbose=True, verbose_period=100)
+           self.sim_fv.run(min_prop_absorbed_particles=min_prop_absorbed_particles, stopping_criterion_fv=StoppingCriterion.MAX_TIME_STEPS_OR_MIN_PROP_ABSORBED_PARTICLES, seed=self.seed, verbose=True, verbose_period=100)
 
         # The following are the state values (value function) calculated using the average reward observed during the single Markov chain excursion used to estimate E(T_A)
         # therefore it is NOT an inflated estimation of the average reward. However, if the labyrinth is too large, that reward could be well underestimated
@@ -1871,7 +1881,6 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
         observed_average_reward = np.nansum([p*self.env2d.getReward(x) for x, p in enumerate(observed_p_fv) if x in self.env2d.getTerminalStates()])
 
         print(f"\nNumber of learning steps run: {n_events_et + n_events_fv} (should coincide with the sum of the state counts minus 1, because the start state is not counted in the number of learning steps ({sum(state_counts)-1}))")
-        assert n_events_et + n_events_fv == sum(state_counts) - 1
         print(f"Expected number of learning steps: {self.expected_fv_total_events}")
 
         print("\nObserved state value function (using the FV-based average reward as correction):\n" + test_utils.array2str(observed_values_V))
@@ -1900,6 +1909,7 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
                self.B == set({4, 9})
         # Assertions about state counts
         assert all(state_counts == self.expected_fv_state_counts)
+        assert sum(state_counts) == n_events_et + n_events_fv + 1
 
         # Assertions about the estimated expected cycle time
         assert np.isclose(average_cycle_time, self.expected_fv_cycle_time, atol=1E-1)
@@ -1925,7 +1935,7 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
 
         min_prop_absorbed_particles = 1.0
         state_values, action_values, advantage_values, state_counts, state_counts_et, probas_stationary, average_reward, average_cycle_time, n_cycles, n_events_et, n_events_fv = \
-           self.sim_fv.run(soft_killing=True, max_time_steps=self.N*30, min_prop_absorbed_particles=min_prop_absorbed_particles, seed=self.seed, verbose=True, verbose_period=100)
+           self.sim_fv.run(soft_killing=True, max_time_steps=self.N*30, min_prop_absorbed_particles=min_prop_absorbed_particles, stopping_criterion_fv=StoppingCriterion.MAX_TIME_STEPS_OR_MIN_PROP_ABSORBED_PARTICLES, seed=self.seed, verbose=True, verbose_period=100)
 
         observed_values_V = state_values
         observed_values_Q = action_values.reshape((self.env2d.getNumStates(), self.env2d.getNumActions()))
@@ -1939,8 +1949,6 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
         observed_average_reward = np.nansum([p*self.env2d.getReward(x) for x, p in enumerate(observed_p_fv) if x in self.env2d.getTerminalStates()])
 
         print(f"\nNumber of learning steps run: {n_events_et + n_events_fv} (should coincide with the sum of the state counts minus 1, because the start state is not counted in the number of learning steps ({sum(state_counts)-1}))")
-        assert n_events_et + n_events_fv == sum(state_counts) - 1
-
         print("\nObserved state value function (using the FV-based average reward as correction):\n" + test_utils.array2str(observed_values_V))
         print(f"\nObserved action value function (using the FV-based average reward as correction):\n{observed_values_Q}")
         print(f"State counts: " + test_utils.array2str(state_counts))
@@ -1961,6 +1969,7 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
                self.B == set({4, 9})
         # Assertions about state counts
         assert all(state_counts == [486., 354., 175.,  95., 576.,   0., 249., 195., 680., 513., 376., 302.])
+        assert sum(state_counts) == n_events_et + n_events_fv + 1
 
         # Assertions about the estimated expected cycle time
         assert np.isclose(average_cycle_time, 8.8468, atol=1E-4)

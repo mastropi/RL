@@ -33,16 +33,18 @@ from Python.lib.agents.policies import probabilistic
 
 from Python.lib.environments.gridworlds import Direction2D
 from Python.lib.estimators.nn_models import InputLayer
+from Python.lib.simulators.fv import StoppingCriterion
 
 from Python.lib.utils.basic import get_current_datetime_as_string, load_objects_from_pickle, log_file_open, log_file_close, save_objects_to_pickle, set_numpy_options, reset_numpy_options
 from Python.lib.utils.computing import compute_expected_reward, compute_transition_matrices, compute_state_value_function_from_transition_matrix
 
 from Python.test.test_optimizers_discretetime import Test_EstPolicy_EnvGridworldsWithObstacles, Test_EstPolicy_EnvMountainCar
 
-# When saving results or reading previously saved results
-rootdir = os.path.realpath("./RL-003-Classic")
-# When running the process
-rootdir = os.path.realpath("../../RL-003-Classic")
+if os.getcwd()[-4:] == "test":
+    rootdir = os.path.realpath("../../RL-003-Classic")
+else:
+    rootdir = os.path.realpath("./RL-003-Classic")
+print(f"Root directory is: {rootdir}")
 resultsdir = f"{rootdir}/results"
 logsdir = f"{rootdir}/logs"
 
@@ -736,17 +738,19 @@ dict_time_elapsed = dict()
 # Number of replications to run on each method
 nrep = 1 #9
 # Logging
-log = False #True  #learning_method_type == "values_fv"
+log = nrep > 1  #learning_method_type == "values_fv"
 
 # Learning method (of the value functions and the policy)
 # Both value functions and policy are learned online using the same simulation
 learning_method = "all_online"; simulator_value_functions = None
 # Value functions are learned separately from the policy
 # Policy learning can happen online or OFFLINE
+# TD
 learning_method = "values_td"; simulator_value_functions = test_ac.sim_td0      # TD(0)
 #learning_method = "values_td2"; simulator_value_functions = test_ac.sim_td0    # TD(0)
 #learning_method = "values_tdl"; simulator_value_functions = test_ac.sim_td     # TD(lambda)
 #learning_method = "values_tda"; simulator_value_functions = test_ac.sim_tda    # Adaptive TD(lambda)
+# FV
 learning_method = "values_fv"; simulator_value_functions = test_ac.sim_fv
 #learning_method = "values_fv2"; simulator_value_functions = test_ac.sim_fv
 #learning_method = "values_fv3"; simulator_value_functions = test_ac.sim_fv
@@ -770,11 +774,13 @@ M1 = max_time_steps_fv_for_all_particles = N * max_time_steps_fv_per_particle  #
 # after which the simulation stops, regardless of the number of absorbed particles
 # Use the following to avoid too large simulation times, for instance when the policy is close to optimal:
 #M2 = max_time_steps_fv_overall = max(5000, max_time_steps_fv_for_all_particles)
-M2 = max_time_steps_fv_overall = max_time_steps_fv_for_all_particles #2*max_time_steps_fv_for_all_particles
-min_prop_absorbed_particles = 1.0  #0.90 #0.70 #0.90    # WARNING: currently (2024/08/09) this ONLY has effect when M2 > M1!! So, if we want to use it just set M1 very small and M2 a value of the order of M1 usually used before
-stop_if_prop_absorbed_particles_reached_regardless_of_time_steps = True
+M2 = max_time_steps_fv_overall = 2*max_time_steps_fv_for_all_particles #max_time_steps_fv_for_all_particles #2*max_time_steps_fv_for_all_particles
+min_prop_absorbed_particles = 1.0  #0.90 #0.70    # WARNING: currently (2024/08/09) this ONLY has effect when M2 > M1!! So, if we want to use it just set M1 very small and M2 a value of the order of M1 usually used before
+#*********************
+stopping_criterion_fv = StoppingCriterion.MAX_TIME_STEPS_OR_MIN_PROP_ABSORBED_PARTICLES_AS_LONG_AS_ENOUGH_TIME_STEPS_HAVE_BEEN_TAKEN #StoppingCriterion.MAX_TIME_STEPS_AND_MIN_PROP_ABSORBED_PARTICLES #StoppingCriterion.MAX_TIME_STEPS #StoppingCriterion.MAX_TIME_STEPS_OR_MIN_PROP_ABSORBED_PARTICLES #StoppingCriterion.MAX_TIME_STEPS
+#*********************
 print(f"Thresholds for FV simulation: T={T}, M1 = {M1}, M2 = {M2}"
-      f"\n% Absorbed particles required between M1 and M2: {min_prop_absorbed_particles*100}% (STOP when reached regardless of t? {stop_if_prop_absorbed_particles_reached_regardless_of_time_steps})")
+      f"\n% Absorbed particles required between M1 and M2: {min_prop_absorbed_particles*100}% (STOP when reached regardless of t? {stopping_criterion_fv})")
 
 # Traditional method learning parameters
 # They are set for a fair comparison with FV learning
@@ -807,7 +813,9 @@ policy_learning_mode = "online" #"offline" #"online"
     ## or when they are learned at the same time (policy gradient, without critic).
     ## The OFFLINE mode makes sense only when value functions are learned SEPARATELY from the policy.
 is_NPG = len(nn_hidden_layer_sizes) == 0
-n_learning_steps = 100 #200 #50 #100 #30
+#*********************
+n_learning_steps = 50 #100 #30 #200 #50 #100
+#*********************
 n_episodes_per_learning_step = 50 #100 #30  # Number of episodes for the policy update step when learning the policy online and in NON-NPG mode
 # Max time steps per episode during exploration for the online policy learning
 # In the Mountain Car problem we limit the number of steps per episode in the continuous-dynamics case because I've seen out-of-memory problems otherwise.
@@ -956,7 +964,7 @@ for rep in range(nrep):
     time_start_rep = timer()
     if learning_method == "all_online":
         for t_learn in range(n_learning_steps):
-            print(f"\n\n*** Running learning step {t_learn+1} of {n_learning_steps} (AVERAGE REWARD at previous step (not-reward-shaped) = {R_all[rep, max(0, t_learn-1)]}) of "
+            print(f"\n\n*** Running learning step {t_learn+1} of {n_learning_steps} (AVERAGE REWARD at previous step (not reward-shaped) = {R_all[rep, max(0, t_learn-1)]}) of "
                   f"MAX={max_avg_reward_episodic if policy_learning_mode == 'online' else max_avg_reward_continuing} using {nsteps_all[rep, max(0, t_learn-1)]} time steps for Critic estimation)... (seed={seed_learn}) @{get_current_datetime_as_string()}")
             print("Learning the VALUE FUNCTIONS and POLICY simultaneously...")
             loss_all[rep, t_learn] = learner_ac.learn(n_episodes_per_learning_step, start_state=entry_state, max_time_steps_per_episode=max_time_steps_per_policy_learning_episode, prob_include_in_train=1.0) # prob_include_in_train=0.5)
@@ -992,11 +1000,13 @@ for rep in range(nrep):
             # Pass a different seed (for the simulator) for each learning step... o.w. we will be using the same seed for them at every learning step!!
             seed_learn = seed_rep + t_learn
             if env_type == Environment.Gridworld:
-                print(f"\n\n*** Running learning step {t_learn+1} of {n_learning_steps} (True average reward under current policy = {avg_reward_true}) (AVERAGE REWARD at previous step (not-reward-shaped) = {R_all[rep, max(0, t_learn-1)]} of MAX={max_avg_reward_episodic})... (seed={seed_learn}) @{get_current_datetime_as_string()}")
+                print(f"\n\n*** Running learning step {t_learn+1} of {n_learning_steps} (True average reward under current policy = {avg_reward_true}) (AVERAGE REWARD at previous step (not reward-shaped) = {R_all[rep, max(0, t_learn-1)]} of MAX={max_avg_reward_episodic})... (seed={seed_learn}) @{get_current_datetime_as_string()}")
             else:
-                print(f"\n\n*** Running learning step {t_learn+1} of {n_learning_steps}  (AVERAGE REWARD at previous step (not-reward-shaped) = {R_all[rep, max(0, t_learn-1)]} of MAX={max_avg_reward_episodic})... (seed={seed_learn}) @{get_current_datetime_as_string()}")
+                print(f"\n\n*** Running learning step {t_learn+1} of {n_learning_steps}  (AVERAGE REWARD at previous step (not reward-shaped) = {R_all[rep, max(0, t_learn-1)]} of MAX={max_avg_reward_episodic})... (seed={seed_learn}) @{get_current_datetime_as_string()}")
             time.sleep(1)   # Wait for a second so that I can easily read the learning step number
-            reset_value_functions_at_this_step = reset_value_functions_at_every_learning_step if t_learn > 0 else True  # ALWAYS RESET THE VALUE FUNCTIONS WHEN IT'S THE VERY FIRST LEARNING STEP (becaue we don't want to keep histroy from a earlier learning process on the same learner!)
+
+            # ALWAYS RESET THE VALUE FUNCTIONS WHEN IT'S THE VERY FIRST LEARNING STEP (because we don't want to keep history from a earlier learning process on the same learner!)
+            reset_value_functions_at_this_step = reset_value_functions_at_every_learning_step if t_learn > 0 else True
             # Update the initial learning rate for the value functions at each learning step to a smaller value than the previous learning step
             # SHOULD WE SET IT TO THE AVERAGE LEARNING RATE FROM THE PREVIOUS LEARNING STEP?? (so that we start off where we left at the last learning moment)
             alpha_initial_at_current_learning_step = alpha_initial / (t_learn + 1)
@@ -1064,7 +1074,7 @@ for rep in range(nrep):
                     simulator_value_functions.run(t_learn=t_learn,
                                                   max_time_steps=max_time_steps_fv_overall,
                                                   max_time_steps_for_absorbed_particles_check=max_time_steps_fv_for_all_particles,
-                                                  min_prop_absorbed_particles=min_prop_absorbed_particles, stop_if_prop_absorbed_particles_reached_regardless_of_time_steps=stop_if_prop_absorbed_particles_reached_regardless_of_time_steps,
+                                                  min_prop_absorbed_particles=min_prop_absorbed_particles, stopping_criterion_fv=stopping_criterion_fv,
                                                   min_num_cycles_for_expectations=0,
                                                       ## Note: We set the minimum number of cycles for the estimation of E(T_A) to 0 because we do NOT need
                                                       ## the estimation of the average reward to learn the optimal policy, as it cancels out in the advantage function Q(s,a) - V(s)!!

@@ -16,10 +16,16 @@ import copy
 import numpy as np
 import pandas as pd
 
-import Python.lib.environments.gridworlds as gridworlds
-from Python.lib.estimators.fv import merge_proba_survival_and_phi, estimate_proba_stationary
+from Python.lib.agents import GenericAgent
 from Python.lib.agents.learners import LearningCriterion, LearningTask
 from Python.lib.agents.learners.episodic.discrete.fv import LeaFV
+from Python.lib.agents.policies import random_walks
+import Python.lib.environments.gridworlds as gridworlds
+from Python.lib.estimators.fv import merge_proba_survival_and_phi, estimate_proba_stationary
+from Python.lib.simulators.discrete import Simulator as DiscreteSimulator
+from Python.lib.simulators.fv import StoppingCriterion
+
+import test_utils
 
 
 class Test_Class_LeaFV_discretetime(unittest.TestCase):
@@ -259,6 +265,76 @@ class Test_Class_LeaFV_discretetime(unittest.TestCase):
                     # otherwise I get the error message "unfunc `isfinite()`..." or similar.
                     assert np.allclose(learner_fv.dict_phi_for_state_action[s][a][x].astype(float), expected_dict_phi_for_state_action[s][a][x])
 
+    def test_parametric_estimation_of_FV_integral(self):
+        "(2025/05/30) Tests the parametric estimation of the FV integral, i.e. where the survival probability distribution P(T>t) is modeled as an exponential distribution"
+        # IMPORTANT: In order to see the plots comparing the parametric with the non-parametric estimation of P(T>t), run this test with global variable DEBUG_ESTIMATORS = True
+        # in DEBUG mode placing a breakpoint at the last line of this method. HOPEFULLY, the plots will be show up... but it didn't always happen in my experience.
+        print("\n*** Running test " + self.id() + " ***")
+
+        # Define the agent's policy that will explore the environment defined in the class setup
+        policy_rw = random_walks.PolRandomWalkDiscrete(self.env)
+
+        # Learner and agent definition
+        N = 20
+        T = 200
+        max_time_steps_fv = 100*N
+        params = dict({'N': N,
+                       'T': T,
+                       'absorption_set': set(np.arange(3)),
+                       'activation_set': set({3}),
+                       })
+        learner_fv = LeaFV(self.env, params['N'], params['T'], params['absorption_set'], params['activation_set'],
+                           task=LearningTask.CONTINUING,
+                           criterion=LearningCriterion.AVERAGE,
+                           states_of_interest=set(np.arange(self.env.getNumStates()-2, self.env.getNumStates())),   # Estimate the probability of the last two states in the grid
+                           debug=False)
+
+        # Define the agents for the policies that are used in the tests
+        agent_fv = GenericAgent(policy_rw, learner_fv)
+        sim = DiscreteSimulator(self.env, agent_fv, debug=False)
+
+        # Non-parametric (historical) estimation of P(T>t)
+        seed = 1317
+        _, _, _, state_counts_nonparametric, _, probas_stationary_nonparametric, average_reward_nonparametric, _, _, _, _  = \
+            sim.run(max_time_steps=max_time_steps_fv,
+                    stopping_criterion_fv=StoppingCriterion.MAX_TIME_STEPS_OR_MIN_PROP_ABSORBED_PARTICLES,
+                    seed=seed,
+                    verbose=False, verbose_period=max_time_steps_fv // 20,
+                    plot=True)
+
+        # Parametric estimation of P(T>t)
+        _, _, _, state_counts_parametric, _, probas_stationary_parametric, average_reward_parametric, _, _, _, _  = \
+            sim.run(max_time_steps=max_time_steps_fv,
+                    stopping_criterion_fv=StoppingCriterion.MAX_TIME_STEPS,
+                    seed=seed,
+                    verbose=False, verbose_period=max_time_steps_fv // 20,
+                    plot=False)
+
+        print("State counts, stationary probabilities, and average rewards estimated via non-parametric and parametric estimation of P(T>t):")
+        print("Non-parametric:")
+        print(f"State counts: " + test_utils.array2str(state_counts_nonparametric))
+        print(f"p =\n{probas_stationary_nonparametric}\navg. reward = {average_reward_nonparametric}")
+        print("Parametric:")
+        print(f"State counts: " + test_utils.array2str(state_counts_parametric))
+        print(f"p =\n{probas_stationary_parametric}\navg. reward = {average_reward_parametric}")
+
+        assert self.env.getNumStates() == 5 and \
+               params['N'] == 20 and \
+               params['T'] == 200 and \
+               params['absorption_set'] == set(np.arange(3)) and \
+               seed == 1317
+        # Assertions about state counts
+        assert all(state_counts_nonparametric == [70., 58., 39., 54., 38.])
+        assert all(state_counts_parametric == [70., 58., 39., 105., 1929.])  # The counts in states outside A (x=3 and x=4) are much larger than in the non-parametric case because the FV simulation lasts for much longer
+
+        assert probas_stationary_nonparametric == dict({3: 0.08848674242424243, 4: 0.04057891414141416})
+        assert np.isclose(average_reward_nonparametric, 0.04057891414141416)
+
+        assert probas_stationary_parametric == dict({3: 0.0804628076372886, 4: 0.04245686528238432})
+        assert np.isclose(average_reward_parametric, 0.04245686528238432)
+
+        print("\nTest ends.")
+
 
 if __name__ == '__main__':
     # Reference for creating test suites:
@@ -278,6 +354,7 @@ if __name__ == '__main__':
         test_suite = unittest.TestSuite()
         test_suite.addTest(Test_Class_LeaFV_discretetime("test_iterative_computation_of_FV_integral"))
         test_suite.addTest(Test_Class_LeaFV_discretetime("test_computation_of_phi_as_function_of_start_state_and_action"))
+        test_suite.addTest(Test_Class_LeaFV_discretetime("test_parametric_estimation_of_FV_integral"))
 
         # Run the test suite
         runner.run(test_suite)

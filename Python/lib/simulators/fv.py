@@ -13,11 +13,49 @@ from enum import Enum, unique
 
 import numpy as np
 
+
 @unique
 class ReactivateMethod(Enum):
     RANDOM = 1                  # Random choice of the reactivation particle among the N-1 other non-absorbed particles
     VALUE_FUNCTION = 2          # Choice of the reactivation particle based on the value function of each state at which the other N-1 particles are located
     ROBINS = 3
+
+
+@unique
+class StoppingCriterion(Enum):
+    """
+    Possible stopping criteria for the Fleming-Viot simulation, as follows:
+
+    MAX_TIME_STEPS:
+        Look ONLY at the number of steps taken by the FV particle system regardless of the number of particles absorbed for the first time.
+        This should be used to estimate the survival probability distribution P(T>t) as an exponential distribution with rate 1/E(T).
+
+    MAX_TIME_STEPS_OR_MIN_PROP_ABSORBED_PARTICLES:
+        Look at the number of steps taken by the FV particle system AND at the proportion of particles absorbed at least once.
+        This should be used to estimate the survival probability distribution P(T>t) with the non-parametric moment estimator.
+        If used in conjunction with the parameter that establishes the proportion of absorbed particles that are sufficient to stop the FV simulation,
+        this option is also useful to stop the simulation early, without waiting for ALL particles to be absorbed at least once, if this is taking too much time.
+
+    MAX_TIME_STEPS_OR_MIN_PROP_ABSORBED_PARTICLES_AS_LONG_AS_ENOUGH_TIME_STEPS_HAVE_BEEN_TAKEN:
+        Same as MAX_TIME_STEPS_OR_MIN_PROP_ABSORBED_PARTICLES, but only look at the proportion of particles absorbed at least once if enough number of steps have been taken.
+        This only has an effect when the parameter that establishes the proportion of absorbed particles that are sufficient to stop the FV simulation
+        is less than 1, o.w. when all FV particles are absorbed at least once, the simulation stops, regardless of the number of steps taken.
+        This should be used when we suspect a too early termination of the FV simulation will happen because particles are absorbed too fast or
+        because the minimum proportion of absorbed particles allowed for stopping is too small (say 30%).
+
+    MAX_TIME_STEPS_AND_MIN_PROP_ABSORBED_PARTICLES:
+        The condition for stopping is defined by whatever of the two mentioned events happens later:
+        - the maximum allowed number of steps
+        - the absorption at least once of a specified proportion of particles
+        The goal here is to leverage the largest amount of information that can be provided by the FV particle system within a flexible budget (MAX_TIME_STEPS),
+        which can be either achieved or not.
+        The survival probability distribution P(T>t) is estimated parametrically, as an exponential distribution with rate 1/E(T).
+        WARNING: This option is risky because the FV simulation could take forever... i.e. when not the minimum proportion of particles are absorbed at least once.
+    """
+    MAX_TIME_STEPS = 1
+    MAX_TIME_STEPS_OR_MIN_PROP_ABSORBED_PARTICLES = 2
+    MAX_TIME_STEPS_OR_MIN_PROP_ABSORBED_PARTICLES_AS_LONG_AS_ENOUGH_TIME_STEPS_HAVE_BEEN_TAKEN = 3
+    MAX_TIME_STEPS_AND_MIN_PROP_ABSORBED_PARTICLES = 4
 
 
 def reactivate_particle(envs: list, idx_particle: int, K: int, reactivation_distribution: dict=None, reactivation_number: int=None, all_idx_particles: list=None):

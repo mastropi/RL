@@ -30,6 +30,7 @@ import torch
 from Python.lib.agents.learners import ResetMethod
 
 from Python.lib.estimators.nn_models import InputLayer, NNBackprop
+from Python.lib.simulators.fv import StoppingCriterion
 
 from Python.lib.utils.basic import is_scalar
 
@@ -662,7 +663,7 @@ if __name__ == "__main__":
     # Now explore and learn the value functions
     learner_after_learning, nsteps = sim_for_initial_exploration.run_exploration_and_learn_value_functions(max_time_steps=10, seed=seed, verbose=debug, verbose_period=1)
 
-    # Now run the single Markov chain under a continuning learning task
+    # Now run the single Markov chain under a continuing learning task
     V, Q, A, state_counts_et, _, _, learning_info = sim_for_initial_exploration._run_single_continuing_task(max_time_steps=20, set_cycle=absorption_set, seed=seed, verbose=debug, verbose_period=1)
     print(learning_info['probas_stationary_exit_cycle_set'])
 
@@ -685,18 +686,18 @@ if __name__ == "__main__":
     sim_fv = Simulator(env_mc, agent_nn_fv, debug=debug)
 
     envs = [copy.deepcopy(env_mc) for _ in range(N)]
-    n_events_fv, state_values, action_values, advantage_values, state_counts_fv, phi, df_proba_surv, expected_absorption_time, max_survival_time = \
+    n_events_fv, state_values, action_values, advantage_values, state_counts_fv, phi, df_proba_surv, expected_absorption_time, max_survival_time, absorption_set, less_frequently_visited_set = \
         sim_fv._run_simulation_fv(0, envs,
-                  absorption_set,
-                  start_set=None,
-                  max_time_steps=500,
-                  max_time_steps_for_absorbed_particles_check=500,
-                  min_prop_absorbed_particles=0.90,
-                  stop_if_prop_absorbed_particles_reached_regardless_of_time_steps=True,
-                  dist_proba_for_start_state=learning_info['probas_stationary_exit_cycle_set'],
-                  expected_absorption_time=10.3,
-                  estimated_average_reward=0.8,
-                  epsilon_random_action=0.1,
-                  seed=131713,
-                  verbose=True,
-                  verbose_period=1)
+                                  absorption_set,
+                                  start_set=None,
+                                  max_time_steps=500,
+                                  max_time_steps_for_absorbed_particles_check=500,
+                                  min_prop_absorbed_particles=0.90,
+                                  stopping_criterion_fv=StoppingCriterion.MAX_TIME_STEPS_OR_MIN_PROP_ABSORBED_PARTICLES,
+                                  dist_proba_for_start_state=learning_info['probas_stationary_exit_cycle_set'],
+                                  expected_absorption_time=10.3,
+                                  estimated_average_reward=0.8,
+                                  epsilon_random_action=0.1,
+                                  seed=131713,
+                                  verbose=True,
+                                  verbose_period=1)

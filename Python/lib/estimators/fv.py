@@ -16,6 +16,7 @@ import tracemalloc
 
 import numpy as np
 import pandas as pd
+import scipy.stats as stats
 import matplotlib.pyplot as plt
 
 from Python.lib.environments import EnvironmentDiscrete
@@ -23,7 +24,7 @@ from Python.lib.environments.queues import GenericEnvQueueWithJobClasses
 
 from Python.lib.estimators import DEBUG_ESTIMATORS
 
-from Python.lib.utils.basic import is_scalar, measure_exec_time, merge_values_in_time
+from Python.lib.utils.basic import is_scalar, measure_exec_time, merge_values_in_time, set_pandas_options, reset_pandas_options
 
 @unique
 class SurvivalProbabilityEstimation(Enum):
@@ -310,7 +311,7 @@ def update_phi_on_all_states(envs: list, t: float, dict_phi: dict, alpha: float=
 
 
 @measure_exec_time
-def estimate_stationary_probabilities(dict_phi, df_proba_surv, expected_absorption_time, uniform_jump_rate=1):
+def estimate_stationary_probabilities(dict_phi, df_proba_surv, expected_absorption_time, parametric=False, uniform_jump_rate=1):
     """
     Computes the stationary probability for each state of interest for the empirical distribution Phi using the Fleming-Viot estimator
 
@@ -331,6 +332,12 @@ def estimate_stationary_probabilities(dict_phi, df_proba_surv, expected_absorpti
     expected_absorption_time: float
         Estimated expected absorption cycle time, i.e. the expected time the system takes to complete a
         reabsorption cycle when starting at the stationary absorption distribution of states.
+
+    parametric: (opt) bool
+        Whether the estimation of the survival probability distribution used in the computation of the stationary probabilities is parametric.
+        The parametric estimator of P(T>t) is given by exp(-alpha*t) where alpha is the inverse of the expected survival time estimated from the times
+        stored in `df_proba_surv`.
+        default: False
 
     uniform_jump_rate: (opt) positive float
         Uniform jump rate used to discretize the underlying continuous-time Markov process represented by the
@@ -366,36 +373,96 @@ def estimate_stationary_probabilities(dict_phi, df_proba_surv, expected_absorpti
     # I don't think sorting the states of interest is an important nor crucial step in the discrete-state environment case.
     #states = sorted(list(dict_phi.keys()))  # Note that sorted() still works when the keys, i.e. the elements of the list that is being sorted, are in turn a *list* of values
                                             # (e.g. sorted( [(2, 2, 0), (1, 2, 3), (0, 1, 5)] ) returns [(0, 1, 5), (1, 2, 3), (2, 2, 0)]
-    states = list(dict_phi.keys())
+    # Non-parametric moment estimation
     probas_stationary = dict()
     integrals = dict()
+
+    # Parametric estimation
+    probas_stationary_parametric = dict()
+    integrals_parametric = dict()
+
+    # Go over all the states recorded by Phi(x, t)
+    states = list(dict_phi.keys())
     for x in states:
         if dict_phi[x].shape[0] == 1 and dict_phi[x]['Phi'].iloc[-1] == 0.0:
             # State x was never observed during the simulation
             probas_stationary[x] = 0.0
             integrals[x] = 0.0
-        else:
-            # Merge the times where (T>t) and Phi(t) are measured
-            df_phi_proba_surv = merge_proba_survival_and_phi(df_proba_surv, dict_phi[x])
-
-            # Stationary probability for each state of interest
-            probas_stationary[x], integrals[x] = estimate_proba_stationary(df_phi_proba_surv, expected_absorption_time, interval_size=1/uniform_jump_rate)
+            probas_stationary_parametric[x] = 0.0
+            integrals_parametric[x] = 0.0
 
             if DEBUG_ESTIMATORS:
+                _, _, exponential_rate, ks_test = estimate_proba_stationary_parametric(dict_phi[x], df_proba_surv, expected_absorption_time, interval_size=1/uniform_jump_rate)
+
                 plt.figure()
                 ax = plt.gca()
+                lines = []
                 ax.axhline(0, color="lightgray")
-                ax.step(df_phi_proba_surv['t'], df_phi_proba_surv['P(T>t)'], color="blue", where='post')
+                # Non-parametric estimator of the survival probability distribution
+                lines += ax.step(df_proba_surv['t'], df_proba_surv['P(T>t)'], color="blue", where='post')
+                # Parametric estimator of the survival probability distribution as exp(-alpha*t)
+                _t = np.linspace(0.0, max(df_proba_surv['t']), 100)
+                lines += ax.plot(_t, np.exp(-exponential_rate * _t), color="blue", linestyle="dashed", linewidth=2)
+                ax.set_xlabel("t")
+                ax.set_ylabel(r"$\mathbb{P}(T_{abs}>t)$")
+                ax.legend(lines, ["P(T>t)", r"exp(-$\alpha t$)"], loc="upper right")
+                plt.title(f"P(T>t): non-parametric (solid) adn parametric (dashed) estimators\n(KS exp. fit p-value = {ks_test.pvalue:.3g})")
+                plt.pause(0.001)
+                plt.draw()
+        else:
+            # We compute both estimators of the stationary probabilities for comparison purposes when DEBUG_ESTIMATORS = True
+            if parametric or DEBUG_ESTIMATORS:
+                # A) Parametric estimation of the survival probability distribution as an exponential distribution using the expected survival times as inverse of the exponential rate
+                probas_stationary_parametric[x], integrals_parametric[x], exponential_rate, ks_test = \
+                    estimate_proba_stationary_parametric(dict_phi[x], df_proba_surv, expected_absorption_time, interval_size=1/uniform_jump_rate)
+                if ks_test.pvalue < 0.05:
+                    # The parametric fit is not good enough
+                    # From experiments and plots, this most likely happens when P(T>t) has large tails, i.e. a few T values are observed very far away from the rest,
+                    # and when NOT all particles are absorbed. Therefore we should be in business in terms of observing contributions from Phi(x,t) at large t values,
+                    # which is the ultimate purpose of requesting the parametric fit in the first place.
+                    # => Use the non-parametric estimation of the P(T>t) function to compute the integral.
+                    parametric = False
+
+            if not parametric or DEBUG_ESTIMATORS:
+                # B) Non-parametric (i.e. moment) estimation of the survival probability
+                # Merge the times where (T>t) and Phi(t) are measured
+                df_phi_proba_surv = merge_proba_survival_and_phi(df_proba_surv, dict_phi[x])
+                # Stationary probability for each state of interest
+                probas_stationary[x], integrals[x] = estimate_proba_stationary(df_phi_proba_surv, expected_absorption_time, interval_size=1/uniform_jump_rate)
+
+            if DEBUG_ESTIMATORS:
+                _pandas_options = set_pandas_options()
+                print(f"Survival probability and Phi(x,t) for x={x}:\n{df_phi_proba_surv}")
+                reset_pandas_options(_pandas_options)
+
+                plt.figure()
+                ax = plt.gca()
+                lines = []
+                ax.axhline(0, color="lightgray")
+                # Non-parametric estimator of the survival probability distribution
+                lines += ax.step(df_phi_proba_surv['t'], df_phi_proba_surv['P(T>t)'], color="blue", where='post')
+                # Parametric estimator of the survival probability distribution as exp(-alpha*t)
+                _t = np.linspace(0.0, max(df_phi_proba_surv['t']), 100)
+                lines += ax.plot(_t, np.exp(-exponential_rate * _t), color="blue", linestyle="dashed", linewidth=2)
                 ax.set_xlabel("t")
                 ax.set_ylabel(r"$\mathbb{P}(T_{abs}>t)$")
                 ax2 = ax.twinx()
-                ax2.step(df_phi_proba_surv['t'], df_phi_proba_surv['Phi'], color="darkviolet", where='post')
-                ax2.step(df_phi_proba_surv['t'], df_phi_proba_surv['Phi'] * df_phi_proba_surv['P(T>t)'], color="green", where='post')
+                lines += ax2.step(df_phi_proba_surv['t'], df_phi_proba_surv['Phi'], color="darkviolet", where='post')
+                lines += ax2.step(df_phi_proba_surv['t'], df_phi_proba_surv['Phi'] * df_phi_proba_surv['P(T>t)'], color="green", where='post')
+                lines += ax2.plot(df_phi_proba_surv['t'], df_phi_proba_surv['Phi'] * np.exp(-exponential_rate * df_phi_proba_surv['t']), color="green", linestyle="dashed", linewidth=2)
                 ax2.set_ylim(ax.get_ylim())
                 ax2.set_ylabel(r"$\mathbb{P}(X(t)=" + str(x) + " | T_{abs}>t)$")
-                plt.title("P(T>t) (blue) and Phi(t,x) (violet) and their product (green) for state x = {}\n(Integral (>0) = Area under the green curve = {:.3f})".format(x, integrals[x]))
+                ax.legend(lines, ["P(T>t)", r"exp(-$\alpha t$)", f"Phi(x={x}, t)", "P(T>t)*Phi(t)", r"exp(-$\alpha t$)*Phi(t)"], loc="upper center")
+                plt.title(f"P(T>t) (blue) and Phi(t,x) (violet) and their product (green) for state x = {x}"
+                          f"\n(non-parametric Integral (>0) = Area under the green curve = {integrals[x]:.3f}; parametric Integral = {integrals_parametric[x]:.3f})"
+                          f"\n(KS exp. fit p-value = {ks_test.pvalue:.3g})")
+                plt.pause(0.001)
+                plt.draw()
 
-    return probas_stationary, integrals
+    if parametric:
+        return probas_stationary_parametric, integrals_parametric
+    else:
+        return probas_stationary, integrals
 
 
 #@measure_exec_time
@@ -488,7 +555,7 @@ def estimate_proba_stationary(df_phi_proba_surv, expected_absorption_time, inter
     if expected_absorption_time <= 0.0 or np.isnan(expected_absorption_time) or expected_absorption_time is None:
         raise ValueError("The expected absorption time must be a positive float ({})".format(expected_absorption_time))
 
-    # Integrate => Multiply the survival density function, the empirical distribution Phi, delta(t) and SUM
+    # Integrate => Multiply the survival probability distribution, the empirical distribution Phi, delta(t) and SUM
     if DEBUG_ESTIMATORS:
         max_rows = pd.get_option('display.max_rows')
         pd.set_option('display.max_rows', None)
@@ -511,6 +578,63 @@ def estimate_proba_stationary(df_phi_proba_surv, expected_absorption_time, inter
             print(stat)
 
     return proba_stationary, integral
+
+
+def estimate_proba_stationary_parametric(df_phi, df_proba_surv, expected_absorption_time, interval_size: float=1.0):
+    """
+    Computes the stationary probability for ONE particular state using a parametric estimator of the survival probability assumed to follow an exponential distribution
+
+    Arguments:
+    df_phi: pandas data frame
+        Data frame with the empirical distribution of a state of interest on which the integral that leads to the Fleming-Viot estimation of the stationary
+        probability of the state is computed.
+        It should contain columns 't' and 'Phi', where 't' gives the times at which the function Phi changes value.
+
+    df_proba_surv: pandas data frame
+        Data frame containing at least column 't' with the observed survival times that are used to estimate the exponential rate
+        used to model the survival probability distribution P(T>t) in this parametric estimation of the stationary probabilities.
+
+    expected_absorption_time: float
+        Estimated expected absorption cycle time.
+
+    interval_size: (opt) positive float
+        Factor by which the integral of the Fleming-Viot estimator should be adjusted (i.e. multiplied by) which determines the time scale of the FV process.
+        See details in the documentation of compute_fv_integral(), and see the documentation of
+        estimate_stationary_probabilities() on how this interval size should be set for Fleming-Viot.
+        default: 1.0
+
+    Return: tuple
+    Duple with the following content:
+    - the estimated stationary probability
+    - the value of the integral P(T>t)*Phi(t)
+    - the estimated exponential rate that models P(T>t)
+    - the Kolmogorov-Smirnov test results (with attributes 'statistic', 'pvalue')
+    """
+    if expected_absorption_time <= 0.0 or np.isnan(expected_absorption_time) or expected_absorption_time is None:
+        raise ValueError("The expected absorption time must be a positive float ({})".format(expected_absorption_time))
+
+    # Integrate => Sum the mini-integrals of the exponential function representing the survival probability distribution at each piece of Phi(t), SUM and multiply by the expected survival time
+    # NOTE: It's important to use reset_index(drop=True) when subtracting the two shifted exponentials as o.w. the rows are matched by their 't' index which is NOT what we want!!
+    # (we want to compute exp(-alpha*t(k)) - exp(-alpha*t(k-1)))
+    expected_survival_time = np.mean(df_proba_surv['t'])
+    alpha = 1 / expected_survival_time
+    # K-S test statistic that checks whether the survival times may follow an exponential distribution
+    ks_test = stats.kstest(df_proba_surv['t']*alpha, "expon")
+    integral = interval_size * expected_survival_time * np.sum( df_phi['Phi'] * (np.exp(-alpha * df_phi['t'][:-1]).reset_index(drop=True) - np.exp(-alpha * df_phi['t'][1:]).reset_index(drop=True)) )
+
+    if DEBUG_ESTIMATORS:
+        max_rows = pd.get_option('display.max_rows')
+        pd.set_option('display.max_rows', None)
+        print("Data for integral:\n{}".format(pd.DataFrame({'t': df_phi['t'],
+                                                            'Phi': df_phi['Phi'],
+                                                            'delta(exp)': np.exp(-alpha * df_phi['t'][:-1]).reset_index(drop=True) - np.exp(-alpha * df_phi['t'][1:]).reset_index(drop=True) },
+                                                           columns=['t', 'Phi', 'delta(exp)'])))
+        pd.set_option('display.max_rows', max_rows)
+        print("integral = {:.3f}, E(T) = {:.3f}".format(integral, expected_absorption_time))
+
+    proba_stationary = integral / expected_absorption_time
+
+    return proba_stationary, integral, alpha, ks_test
 
 
 def compute_fv_integral(df_phi_proba_surv, reward: float=1.0, interval_size: float=1.0, discount_factor: float=1.0):
