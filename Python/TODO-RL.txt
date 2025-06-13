@@ -31,3 +31,10 @@ Goal: Leave the root directory clean, with only the __init__.py file, the requir
 test/:
 T1) Remove any "runners" from the test files since test files should only be devoted to running UNIT tests.
 Place runners in the root directory under file names called "run_...", e.g. run_FVRL.py.
+
+
+simulators/discrete.py:
+D1) Implement a FAST learning from FV signals => Implement ADAPTIVE TD(lambda) on the trajectories of the particles since they are reactivated from absorption.
+This should not be difficult to implement. We should:
+	- store the LIVING trajectory of the FV particles ONLY since their last REACTIVATION.
+	- make a DEEP copy of the FV learner to each particle so that we can apply separate TD(lambda) learners to each of them. The trajectory history should be RESET at every absorption time.

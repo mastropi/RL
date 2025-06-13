@@ -804,8 +804,8 @@ estimate_absorption_set_at_every_step = True
 update_absorption_set_with_fv_visits = True
 soft_killing = False #True
 
-#-- Common learning parameters
-# Parameters about policy learning (Actor)
+#-- Common learning parameters (to all methods)
+# 1) Parameters about POLICY learning (Actor)
 policy_learning_mode = "online" #"offline" #"online"
     ## Whether the policy is learned ONLINE (i.e. by collecting trajectories at each policy estimate)
     ## or OFFLINE (where ALL states and actions are swept and the loss is computed on all of them using the state distribution as weights)
@@ -825,18 +825,20 @@ else:
     _multiplier = 1
 max_time_steps_per_policy_learning_episode = _multiplier*test_ac.getEnv().getNumStates() if problem_2d else 2*test_ac.getEnv().getNumStates() #np.prod(env_shape) * 10 #max_time_steps_benchmark // n_episodes_per_learning_step   # Maximum number of steps per episode while LEARNING THE *POLICY* ONLINE (NOT used for the value functions (critic) learning)
 allow_deterministic_policy = True #False
-use_average_reward_from_previous_step = True #learning_method_type == "values_fv" #False #True            # Under the AVERAGE reward crtierion, whether to use the average reward estimated from the previous policy learning step as correction of the value functions (whenever it is not 0), at least as an initial estimate
 use_advantage = not (learning_method == "values_fvos") # Set this to True if we want to use the advantage function learned as the TD error, instead of using the advantage function as the difference between the estimated Q(s,a) and the estimated V(s) (where the average reward cancels out)
 optimizer_learning_rate = 10 if is_NPG else 0.05 #if policy_learning_mode == "online" else 0.05 #0.01 #0.1
 reset_value_functions_at_every_learning_step = False #(learning_method == "values_fv")     # Reset the value functions when learning with FV, o.w. the learning can become too unstable due to the oversampling of the states with high value... (or something like that)
 
-# Parameters about value function learning (Critic)
+# 2) Parameters about VALUE FUNCTION learning (Critic)
 alpha_initial = simulator_value_functions.getAgent().getLearner().getInitialLearningRate()      # NOTE: alpha_initial is NOT used when learning the value functions by function approximation, as this is set by the default learning rate of the Adam optimizer
 adjust_alpha_initial_by_learning_step = False; t_learn_min_to_adjust_alpha = 30 # based at 1 (regardless of the base value used for t_learn)
 #max_time_steps_per_episode = test_ac.getEnv().getNumStates()*10  # (2024/05/02) NO LONGER USED!  # This parameter is just set as a SAFEGUARD against being blocked in an episode at some state of which the agent could be liberated by restarting to a new episode (when this max number of steps is reached)
 epsilon_random_action = 0.1 #if policy_learning_mode == "online" else 0.0 #0.1 #0.05 #0.0 #0.01
 reward_to_promote_exploration = 0.0 #1.0 #0.1 #None   # Reward for a reward shaping strategy used to promote the visit of EXIT events from A which allow the execution of the FV simulation to estimate value functions (which is crucial for the FV estimation procedure to be effective). Note that the shaped reward may be proportional to |V(s)|, not necessarily constant
 use_average_max_time_steps_in_td_learner = True #learning_method == "values_td2" #True #False
+use_average_reward_from_previous_step = True #learning_method_type == "values_fv" #False #True            # Under the AVERAGE reward crtierion, whether to use the average reward estimated from the previous policy learning step as correction of the value functions (whenever it is not 0), at least as an initial estimate
+use_fixed_average_reward = False
+keep_fv_estimation_of_average_reward_and_stationary_probability_consistent = False  #True   # Use `False` when we are only interested in leveraging the reward information for policy learning as opposed to consistency of the estimation of the average reward
 learning_steps_observe = [7, 8, 19, 20] #[1, 2, 7, 8, 22, 23, 24] #[50, 90] #[2, 30, 48] #[2, 10, 11, 30, 31, 49, 50] #[7, 20, 30, 40]  # base at 1, regardless of the base value used for t_learn
 verbose_period = max_time_steps_fv_for_all_particles // 10
 plot = False         # Whether to plot the evolution of the state value function and average reward estimation
@@ -863,6 +865,7 @@ break_when_goal_reached = False  # Whether to stop the learning process when the
 # Store the execution parameters in a dictionary
 params_exec = dict([(k, eval(k)) for k in [ # --- Environment
                                             'env_type',
+                                            'wind_dict',
                                             # --- Learning
                                             'learning_method',
                                             'learning_task',
@@ -878,7 +881,6 @@ params_exec = dict([(k, eval(k)) for k in [ # --- Environment
                                             'n_episodes_per_learning_step',
                                             'max_time_steps_per_policy_learning_episode',
                                             'allow_deterministic_policy',
-                                            'use_average_reward_from_previous_step',
                                             'use_advantage',
                                             'optimizer_learning_rate',
                                             'reset_value_functions_at_every_learning_step',
@@ -890,10 +892,16 @@ params_exec = dict([(k, eval(k)) for k in [ # --- Environment
                                             'adjust_alpha_initial_by_learning_step',
                                             'epsilon_random_action',
                                             'use_average_max_time_steps_in_td_learner',
+                                            'use_average_reward_from_previous_step',
+                                            'use_fixed_average_reward',
+                                            'keep_fv_estimation_of_average_reward_and_stationary_probability_consistent',
                                             'learning_steps_observe',
                                             'verbose_period',
                                             'plot',
                                             'colormap']])
+print("\nExecution parameters:")
+for param, value in params_exec.items():
+    print(f"{param}: {value}")
 
 # Initialize objects that will contain the results by learning step
 state_counts_all = np.zeros((nrep, n_learning_steps, test_ac.getEnv().getNumStates()), dtype=int)
@@ -956,7 +964,7 @@ for rep in range(nrep):
         # (recall that no critic is defined for the ALL-online learning method)
         _learner_value_functions_for_critic = simulator_value_functions.getAgent().getLearner()
 
-        print(f"[OUT] The average reward stored in learner is: {_learner_value_functions_for_critic.average_reward}")
+        print(f"[OUT] The average reward stored in learner is: {_learner_value_functions_for_critic.getAverageReward()}")
 
         # Reset the initial alpha of the TD learner (just in case)
         _learner_value_functions_for_critic.setInitialLearningRate(alpha_initial)
@@ -1081,6 +1089,8 @@ for rep in range(nrep):
                                                   estimate_absorption_set=estimate_absorption_set_at_every_step, update_absorption_set_with_fv_visits=update_absorption_set_with_fv_visits, threshold_absorption_set=threshold_absorption_set,
                                                   soft_killing=soft_killing,
                                                   use_average_reward_stored_in_learner=use_average_reward_from_previous_step,
+                                                  use_fixed_average_reward=use_fixed_average_reward,
+                                                  keep_fv_estimation_of_average_reward_and_stationary_probability_consistent=keep_fv_estimation_of_average_reward_and_stationary_probability_consistent,
                                                   reset_value_functions=reset_value_functions_at_this_step,
                                                   plot=plot if t_learn+1 in learning_steps_observe else False, colormap=colormap,
                                                   epsilon_random_action=epsilon_random_action,
@@ -1092,7 +1102,7 @@ for rep in range(nrep):
                                                   seed=seed_learn, verbose=False, verbose_period=verbose_period)
                 average_reward_initial_exploration = simulator_value_functions.getAgent().getLearner().getAverageRewardInitialExploration()
                 average_reward_fv_inflated = simulator_value_functions.getAgent().getLearner().getAverageRewardRaw()
-                average_reward = expected_reward    # Note: this is the same information stored in the FV learner, i.e. it would also be returned by calling simulator_value_functions.getAgent().getLearner().getAverageReward()
+                average_reward_from_critic_estimation = expected_reward    # Note: this is the same information stored in the FV learner, i.e. it would also be returned by calling simulator_value_functions.getAgent().getLearner().getAverageReward()
                 nsteps_all[rep, t_learn] = n_events_et + n_events_fv
                 max_time_steps_benchmark_all[rep, t_learn] = n_events_et + n_events_fv  # Number of steps to use when running TDAC at the respective learning step
             else:
@@ -1127,6 +1137,7 @@ for rep in range(nrep):
                         simulator_value_functions.run(t_learn=t_learn,
                                                       max_time_steps=_max_time_steps,
                                                       estimated_average_reward=simulator_value_functions.getAgent().getLearner().getAverageReward() if use_average_reward_from_previous_step else None,
+                                                      use_fixed_average_reward=use_fixed_average_reward,
                                                       reset_value_functions=reset_value_functions_at_this_step,
                                                       seed=seed_learn,
                                                       state_observe=state_observe,
@@ -1134,11 +1145,11 @@ for rep in range(nrep):
                                                       compute_rmse=plot if t_learn+1 in learning_steps_observe else False,
                                                       plot=plot if t_learn+1 in learning_steps_observe else False, colormap=colormap,
                                                       verbose=True, verbose_period=verbose_period)
-                average_reward = simulator_value_functions.getAgent().getLearner().getAverageReward()
+                average_reward_from_critic_estimation = simulator_value_functions.getAgent().getLearner().getAverageReward()
                 nsteps_all[rep, t_learn] = learning_info['nsteps']
 
             print(f"Learning step #{t_learn+1}: Learning of value functions COMPLETED using {learning_method} method on {nsteps_all[rep, t_learn]} time steps")
-            print(f"Estimated average reward: {average_reward}")
+            print(f"Estimated average reward by Critic learning process: {average_reward_from_critic_estimation}")
             state_counts_all[rep, t_learn, :] = state_counts
             if simulator_value_functions.getAgent().getLearner().getV().isTabular():
                 V_all[rep, t_learn, :] = V
@@ -1188,7 +1199,7 @@ for rep in range(nrep):
                                                               use_advantage=use_advantage,
                                                               advantage_values=A,
                                                               action_values=Q,       # This parameter is not used when use_advantage=False
-                                                              expected_reward=average_reward)
+                                                              expected_reward=average_reward_from_critic_estimation)
                         ## Note that we make sure that the start state when learning the policy is the entrance state to the labyrinth, `entry_state`,
                         ## because the environment may have defined a different initial state distribution, which is used during the learning of the value functions,
                         ## for instance, any randomly selected state outside the absorption set A used by the FV learner.
@@ -1202,12 +1213,16 @@ for rep in range(nrep):
                     else:
                         prob_states = compute_prob_states(state_counts)
                     loss_all[rep, t_learn] = learner_ac.learn_offline_from_estimated_value_functions(V, A, Q, state_counts, prob_states=prob_states, use_advantage=use_advantage)
-                    R_all[rep, t_learn] = average_reward
+                    R_all[rep, t_learn] = average_reward_from_critic_estimation # ...although here we should store the EPISODIC average reward
+                                                                                # (regardless of the learning task type --CONTINUING or EPISODIC), and when the learning task is
+                                                                                # CONTINUING, this average_reward_from_critic_estimation is the continuing average reward...
+                                                                                # In any case, at this point we don't have easy access to the episodic average reward that we could
+                                                                                # use to store here.
                     _dict_numpy_options = set_numpy_options()
                     print(f"True stationary probabilities:\n{mu.reshape(env_shape)}")
                     print(f"Estimated stationary probabilities:\n{prob_states.reshape(env_shape)}")
                     reset_numpy_options(_dict_numpy_options)
-                    if False and (average_reward != 0.0 or t_learn+1 in learning_steps_observe):
+                    if False and (average_reward_from_critic_estimation != 0.0 or t_learn+1 in learning_steps_observe):
                         def plot_probas(ax, prob_states_2d, fontsize=14, colormap="Blues", color_text="orange"):
                             colors = cm.get_cmap(colormap)
                             ax.imshow(prob_states_2d, cmap=colors)
@@ -1252,7 +1267,7 @@ for rep in range(nrep):
                 R_all[rep, t_learn] = np.mean(learner_current_policy.getRewards())
 
             # Store the long-run average reward estimated by the value functions learner used above
-            R_long_all[rep, t_learn] = average_reward
+            R_long_all[rep, t_learn] = average_reward_from_critic_estimation
 
             if learning_method_type == "values_fv":
                 # Store auxiliary information on the average reward which can help understand the usefulness of the FV simulation (i.e. towards an ablation study)

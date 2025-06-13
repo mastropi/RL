@@ -225,7 +225,8 @@ class Simulator:
                 min_num_cycles_for_expectations=None,
                 soft_killing=False,
                 estimate_absorption_set=False, update_absorption_set_with_fv_visits=False, threshold_absorption_set=0.90,
-                use_average_reward_stored_in_learner=False, reset_value_functions=True,
+                use_average_reward_stored_in_learner=False, use_fixed_average_reward=False, keep_fv_estimation_of_average_reward_and_stationary_probability_consistent=True,
+                reset_value_functions=True,
                 epsilon_random_action=0.0,
                 reward_for_exit_states: float=None,
 
@@ -349,6 +350,28 @@ class Simulator:
             the value functions (by TD) during the FV simulation that comes thereafter.
             default: False
 
+        use_fixed_average_reward: (opt) bool
+            Whether to use a fixed average reward value in the correction of the value functions estimated by the learner during simulations.
+            This condition applies to all simulations, be it the simulation run for the initial exploration of the environment or the FV simulation.
+            The value of the average reward used in each case, is determined as follows:
+            - for the initial exploration: using True in this parameter only has an effect when use_average_reward_stored_in_learner=True,
+            in which case the average reward stored in the learner is used as fixed average reward value.
+            Otherwise, the average reward is computed online, as the simulation proceeds.
+            In a typical policy learning context, the average reward stored in the learner is the average reward estimated by the previous policy learning step,
+            and of course that value exists so long as at least one policy learning step has already been run.
+            - for the FV simulation: the average reward estimated by the initial exploration is used as fixed average reward value for value functions correction.
+            Note that this is ALWAYS the case when the stopping criterion for FV (passed in dict_params_simul['stopping_criterion_fv']) requires to always
+            reach MAX_TIME_STEPS, i.e. either when it is equal to MAX_TIME_STEPS or MAX_TIME_STEPS_AND_MIN_PROP_ABSORBED_PARTICLES.
+            default: False
+
+        keep_fv_estimation_of_average_reward_and_stationary_probability_consistent: (opt) bool
+            Whether to guarantee that the average reward estimated by the FV estimator is consistent with the estimated stationary probability distribution
+            outside A, meaning that the following equality is satisfied:
+                "average reward estimated by FV" = \sum_{x outside A} p(x) r(x)
+            Set this parameter to False if we are only interested in using the average reward signal for policy learning,
+            as opposed to estimation purposes which require that the above consistency be satisfied.
+            default: True
+
         reset_value_functions: (opt) bool
             Whether value function estimates, possibly stored in the value functions learner, should be reset at the beginning of the learning process
             (i.e. before launching the single Markov chain simulation used to estimate the expected reabsorption time, E(T_A)).
@@ -429,6 +452,8 @@ class Simulator:
                                                                         probas_stationary_start_state_et=self.agent.getLearner().getProbasStationaryStartStateET(),
                                                                         probas_stationary_start_state_fv=self.agent.getLearner().getProbasStationaryStartStateFV(),
                                                                         use_average_reward_stored_in_learner=use_average_reward_stored_in_learner,
+                                                                        use_fixed_average_reward=use_fixed_average_reward,
+                                                                        keep_fv_estimation_of_average_reward_and_stationary_probability_consistent=keep_fv_estimation_of_average_reward_and_stationary_probability_consistent,
                                                                         reset_value_functions=reset_value_functions)
 
         return state_values, action_values, advantage_values, state_counts, state_counts_from_single_markov_chain, probas_stationary, expected_reward, expected_absorption_time, n_absorption_cycles_used, n_events_et, n_events_fv
@@ -437,6 +462,8 @@ class Simulator:
                                                           probas_stationary_start_state_et: dict=None,
                                                           probas_stationary_start_state_fv: dict=None,
                                                           use_average_reward_stored_in_learner=False,
+                                                          use_fixed_average_reward=False,
+                                                          keep_fv_estimation_of_average_reward_and_stationary_probability_consistent=True,
                                                           reset_value_functions=True):
         """
         Estimates the differential state values and action values, the stationary state probabilities,
@@ -477,8 +504,16 @@ class Simulator:
             typically to the EXIT state distribution (but other options are possible, depending on whether SOFT killing is used and on the visited states).
 
         use_average_reward_stored_in_learner: (opt) bool
-            See the description in _run_fv().
+            See description in _run_fv().
             default: False
+
+        use_fixed_average_reward: (opt) bool
+            See description in _run_fv().
+            default: False
+
+        keep_fv_estimation_of_average_reward_and_stationary_probability_consistent: (opt) bool
+            See description in _run_fv().
+            default: True
 
         reset_value_functions: (opt) bool
             See the description in _run_fv().
@@ -814,7 +849,9 @@ class Simulator:
                             t_learn=dict_params_info['t_learn'],
                             max_time_steps=dict_params_simul['T'],      # Max simulation time over ALL episodes
                             start_state_first_episode=start_state,
+                            #estimated_average_reward=0.0,  # (2025/05/18) Use this (TOGETHER WITH use_fixed_average_reward=True) for the ABLATION study of estimating the average reward at a wrong value (e.g. always 0)
                             estimated_average_reward=estimated_average_reward_before_initial_exploration,
+                            use_fixed_average_reward=use_fixed_average_reward,
                             reset_value_functions=reset_value_functions,
                             epsilon_random_action=dict_params_simul['epsilon_random_action'],
                             reward_shaping=dict_params_simul['reward_for_exit_states'] is not None,
@@ -1040,11 +1077,26 @@ class Simulator:
                             # In fact, if this were not the case, we would be using that average reward value to update the average reward estimated by FV involving ONLY
                             # states that are OUTSIDE A. Therefore we would be "contaminating" rewards OUTSIDE A with reward information coming from A... and that would be wrong.
                             # TODO: (2024/08/11) Pass to the FV estimator of the average reward an initial estimation of the average reward that includes ONLY contributions from rewards observed OUTSIDE A (as explained above) (as only THAT piece of information of the average reward should be used to update the average reward that is estimated by FV (namely the reward outside A)
-                            # 2025/01/19: Use the average reward estimated from the initial exploration as the estimated_average_reward value to test the REWARD SHAPING OF THE EXIT STATES
+                            # 2025/01/19: Use the average reward estimated from the initial exploration as the estimated_average_reward value to test the REWARD SHAPING OF THE EXIT STATES (because in the current implementation, most of the reward defined by reward shaping is NOT seen by the FV simulation and thus the value of `estimated_average_reward_before_initial_exploration` will not have their full contribution)
                             #estimated_average_reward=average_reward_from_initial_exploration,
-                            estimated_average_reward=estimated_average_reward_before_initial_exploration  if use_average_reward_stored_in_learner and dict_params_info['t_learn'] > 0 and estimated_average_reward_before_initial_exploration is not None
+                            #estimated_average_reward=0.0,  # (2025/05/18) Use this to the ABLATION study of estimating the average reward at a wrong value (e.g. always 0)
+                            # LOGIC FOR THE estimated_average_reward PARAMETER:
+                            # 1) IF this is the first policy learning step:
+                            #   - IF reward shaping has been used during the initial exploration (to boost the visit of EXIT states)
+                            #     (i.e. `dict_params_simul['reward_for_exit_states'] is not None`)
+                            #       => set the estimated_average_reward=None (because we don't want to bias the FV learning based on information obtained from a changed environment)
+                            #   - ELSE:
+                            #       => use the average reward estimated during the initial exploration of the environment (average_reward_from_initial_exploration)
+                            # 2) ELSE (i.e. this is NOT the first policy learning step):
+                            #   - IF the user requested to use the average reward estimated at the previous learning step:
+                            #       => use such average reward value if if not missing (estimated_average_reward_before_initial_exploration, which actually should actually only take the value None and never np.nan... but still we check that here to be sure, as adding an assertion is not possible)
+                            #   - ELSE:
+                            #       => use the average reward estimated during the initial exploration of the environment (average_reward_from_initial_exploration)
+                            estimated_average_reward=estimated_average_reward_before_initial_exploration  if use_average_reward_stored_in_learner and dict_params_info['t_learn'] > 0 and estimated_average_reward_before_initial_exploration is not None and not np.isnan(estimated_average_reward_before_initial_exploration)
                                                                                                         else average_reward_from_initial_exploration if dict_params_simul['reward_for_exit_states'] is None
                                                                                                         else None,
+                            use_fixed_average_reward=use_fixed_average_reward,
+                            keep_fv_estimation_of_average_reward_and_stationary_probability_consistent=keep_fv_estimation_of_average_reward_and_stationary_probability_consistent,
                             epsilon_random_action=dict_params_simul['epsilon_random_action'],
                             seed=dict_params_simul['seed'] + 131713,    # Choose a different seed from the one used by the single Markov chain simulation (note that this seed is the base seed used for the seeds assigned to the different FV particles)
                             verbose=dict_params_info['verbose'],
@@ -1121,11 +1173,14 @@ class Simulator:
 
             ##### TEMPORARY PATCH (WORKED!) (TO TRY TO FIX THE UNLEARNING OF THE POLICY IN THE MOUNTAIN CAR PROBLEM) #########
             # If the expected reward estimated by FV is 0.0, DISCARD IT and SET IT TO the expected reward estimated by the initial exploration
-            #if expected_reward == 0.0:
-            #    expected_reward_to_restore = average_reward_from_initial_exploration
-            #    self.agent.getLearner().setAverageReward(expected_reward_to_restore)
-            #    print(f"***** ESTIMATED EXPECTED REWARD BY FV (solely w.o. info from previously estimated avg. reward) IS ZERO!"
-            #          f"\n***** => The previously estimated expected reward has been restored in the learner! (restored reward = {expected_reward_to_restore})")
+            # (UNLESS reward shaping was performed during the initial exploration of the environment to promote a policy that takes the agent towards the boundary of A,
+            # in which case we should discard any average reward estimated from that phase because it corresponds to a modified environment).
+            if expected_reward == 0.0 and dict_params_simul['reward_for_exit_states'] is None:
+                expected_reward_to_restore = average_reward_from_initial_exploration
+                self.agent.getLearner().setAverageReward(expected_reward_to_restore)
+                expected_reward = expected_reward_to_restore
+                print(f"***** ESTIMATED EXPECTED REWARD BY THE FV SIMULATION PROCESS IS ZERO!"
+                      f"\n***** => The expected reward estimated during the initial exploration of the environment has been restored in the learner! (restored reward = {expected_reward})")
             ##### TEMPORARY PATCH (WORKED!) (TO TRY TO FIX THE UNLEARNING OF THE POLICY IN THE MOUNTAIN CAR PROBLEM) #########
 
             if True or DEBUG_ESTIMATORS or show_messages(dict_params_info['verbose'], dict_params_info['verbose_period'], dict_params_info['t_learn']):
@@ -1402,6 +1457,8 @@ class Simulator:
                            reward_shaping=False,
                            expected_absorption_time=None, expected_exit_time=None,
                            estimated_average_reward=None,
+                           use_fixed_average_reward=False,
+                           keep_fv_estimation_of_average_reward_and_stationary_probability_consistent=True,
                            epsilon_random_action=0.0,
                            seed=None, verbose=False, verbose_period=1,
                            plot=False, colormap="seismic", pause=0.1):
@@ -1509,16 +1566,33 @@ class Simulator:
             default: None
 
         estimated_average_reward: (opt) None
-            An existing estimation of the average reward.
-            When stopping_criterion_fv = StoppingCriterion.MAX_STEPS, this average reward is used to correct the estimated value function. When `None`,
-            zero is used, with a warning.
-            When stopping_criterion_fv = StoppingCriterion.MAX_TIME_STEPS_OR_MIN_PROP_ABSORBED_PARTICLES or
+            An existing estimation of the average reward, used as follows:
+            - when stopping_criterion_fv = StoppingCriterion.MAX_STEPS or MAX_TIME_STEPS_AND_MIN_PROP_ABSORBED_PARTICLES,
+            it is the average reward that is used as fixed correction value for the computation of the value functions.
+            Note that, under these two criteria, the average reward is NOT iteratively updated during the FV simulation process
+            because it is actually estimated at the END of the FV simulation (by the caller method) using a parametric estimation of
+            the survival probability distribution, P(T>t), which is based on having observed ALL the survival times (used in the estimation of E(T)).
+            If the value is `None` or missing, its value is set to zero, with a warning.
+            - when stopping_criterion_fv = StoppingCriterion.MAX_TIME_STEPS_OR_MIN_PROP_ABSORBED_PARTICLES or
             StoppingCriterion.MAX_TIME_STEPS_OR_MIN_PROP_ABSORBED_PARTICLES_AS_LONG_AS_ENOUGH_TIME_STEPS_HAVE_BEEN_TAKEN,
             this average reward is used as initial value for the iterative FV-based estimation of the average reward,
             where the average reward is updated every time a new survival time (used in the estimation of P(T>t), normally the first survival time
             of each particle) is observed. When `None`, the FV-based average reward is estimated from scratch, i.e. from zero.
             Usually, this estimated average reward comes from the single Markov chain simulation that is used to estimate the expected reabsorption time, E(T_A).
             default: None
+
+        use_fixed_average_reward: (opt) bool
+            Whether to use the average reward given in `estimated_average_reward` (when not None or missing) as a fixed correction of the value functions
+            estimated by the learner during this simulation.
+            default: False
+
+        keep_fv_estimation_of_average_reward_and_stationary_probability_consistent: (opt) bool
+            Whether to guarantee that the average reward estimated by the FV estimator is consistent with the estimated stationary probability distribution
+            outside A, meaning that the following equality is satisfied:
+                "average reward estimated by FV" = \sum_{x outside A} p(x) r(x)
+            Set this parameter to False if we are only interested in using the average reward signal for policy learning,
+            as opposed to estimation purposes which require that the above consistency be satisfied.
+            default: True
 
         epsilon_random_action: (opt) float in [0, 1]
             Probability to take a random action instead of choosing an action dictated by the policy.
@@ -1650,21 +1724,28 @@ class Simulator:
                 ## because some of those states may be present in the absorption set A, which should NOT be considered in the estimation of
                 ## the expected reward outside A.
             n_survival_times_observed_so_far = len(survival_times) - 1  # -1 because the first value in the survival_times list is a dummy survival time of 0
-            if estimated_average_reward_at_start_of_fv_process is not None and n_survival_times_observed_so_far < N:
+            if  estimated_average_reward_at_start_of_fv_process is None or \
+                keep_fv_estimation_of_average_reward_and_stationary_probability_consistent and n_survival_times_observed_so_far == N:
+                # => The updated average reward computed above (as FV_integral_on_reward_values / E(T_A)) is directly the estimate of the average reward
+                # we store in the learner to be used as correction for the value functions.
+                # Notes:
+                # a) This makes the average reward CONSISTENT with the stationary probability distribution outside A,
+                # meaning that if we compute \sum_{x outside A} p(x) r(x) we must get the average reward stored in the learner.
+                # In fact the stationary probability distribution outside A is computed as FV_integral / E(T_A),
+                # i.e. in the same way as the average reward but using the indicator function I(x) instead of the reward function r(x) in the integrand.
+                # b) If the average reward computed at the end of the FV simulation is 0.0, then that would be the value
+                # stored as average reward in the learner, even if a non-zero initial estimate of the average reward
+                # was passed as parameter estimated_average_reward_at_start_of_fv_process...
+                # However, this is unlikely because the FV simulation is expected to estimate a non-zero average reward when the initial E(T_A) excursion
+                # estimates a non-zero average reward. What is more likely though is the situation where the average reward estimated by the FV simulation
+                # is zero but the average reward estimated at the PREVIOUS policy learning step is not zero... this MIGHT make sense (although not guaranteed)
+                # in the case when the current average reward is computed on a different policy than the policy at the previous learning step.
+                learner.setAverageReward(updated_average_reward)
+            else:
                 # We have a START value for the average reward (possibly provided from the FV estimate under a previously learned policy)
-                # => Recursively update such average reward using the newly updated FV-based average reward just computed,
-                # UNLESS THE NEWLY OBSERVED SURVIVAL TIME COMPLETES THE MAXIMUM NUMBER OF SURVIVAL TIMES TO OBSERVE (which is N, the number of particles).
-                # (If this is the case, we compute the average reward SOLELY on the information gained by this FV simulation, i.e. we do not weigh in any more
-                # the value initially estimated for the average reward --e.g. coming from the initial E(T_A) excursion or coming from a previous policy learning step;
-                # we do this because we want the average reward at the end of the FV simulation to coincide with the average reward that we obtain by computing
-                # it using the estimated stationary probabilities which are computed from the integral values stored in the learner; and in fact, this is what we
-                # do in one of the unit tests about FV in test_estimators_discretetime.py (see the *_MetFV test for the estimation of the differential value functions
-                # in the 2D gridworld with obstacles. NOTE also that if the average reward computed at the end of the FV simulation is 0.0, then that would be the value
-                # stored as average reward in the learner, even if the initial estimate of the average reward passed as parameter estimated_average_reward_at_start_of_fv_process
-                # is not 0... but this is unlikely, because the FV simulation should estimate a non-zero average reward when the initial E(T_A) excursion estimates a non-zero
-                # average reward; what is more likely is that the average reward estimated by the FV simulation is 0.0 and that the average reward estimated at the previous
-                # policy learning step is not zero... but well, that is ok, because we are talking about two different policies, so it makes sense to keep the average reward
-                # estimated under the current policy, even if it is zero!).
+                # AND we don't care about keeping a consistency between the estimated average reward and the estimated stationary probability distribution,
+                # i.e. we care only on having a "large enough" value of the average reward that may provide sensible information for policy learning.
+                # => Recursively update the average reward using the newly updated FV-based average reward just computed,
                 # Note that the weight given to the current estimate of the average reward is equal to the fraction of survival times observed so far
                 # out of ("number of particles" + "number of survival times observed so far").
                 # By doing this, we are assuming that the previous estimate of the average reward (stored in the learner) was done on as many survival times as
@@ -1674,11 +1755,6 @@ class Simulator:
                 # observations n and n+k), and this means that the weight given to the current average X(n) is n/(n+k) and the weight given to the latest observed
                 # average, X(n, n+k) is k/(n+k))
                 learner.setAverageReward(estimated_average_reward_at_start_of_fv_process + (updated_average_reward - estimated_average_reward_at_start_of_fv_process) * n_survival_times_observed_so_far / (learner.getNumParticles() + n_survival_times_observed_so_far))
-            else:
-                # We do NOT have a starting point for the average reward OR all N particles have been absorbed at least once
-                # => The updated average reward computed above (as FV_integral / E(T_A)) is directly the estimate of the average reward which we store in the learner
-                # for use as correction value when learning the value functions.
-                learner.setAverageReward(updated_average_reward)
 
             return updated_average_reward
         #------------------------------- Auxiliary functions ----------------------------------#
@@ -1722,6 +1798,15 @@ class Simulator:
 
         if expected_absorption_time is None and expected_exit_time is None:
             raise ValueError("Parameter `expected_exit_time` must be provided when `expected_absorption_time` is None")
+
+        if use_fixed_average_reward and (estimated_average_reward is None or np.isnan(estimated_average_reward)):
+            # Do NOT use a fixed average reward if the given average reward value is None or missing
+            # Note that we would enter this condition ONLY when the stopping criterion are NOT MAX_TIME_STEPS or MAX_TIME_STEPS_AND_MIN_PROP_ABSORBED_PARTICLES
+            # because in those cases, a potential missing value of estimated_average_reward has already been taken care of by defining its value as 0.0 above.
+            warnings.warn("The user requested to use a FIXED value of the average reward as correction of the value functions"
+                          " but the given average reward in `estimated_average_reward` is None or missing."
+                          " The average reward used as correction will be initially set to 0.0 and updated during the simulation as new observations are collected.")
+            use_fixed_average_reward = False
         #----------------------------- Parse input parameters ---------------------------------#
 
         N = len(envs)
@@ -1962,12 +2047,22 @@ class Simulator:
                 # reward will fluctuate a lot (i.e. as the average reward observed by episode fluctuates) and this is NOT what we want,
                 # we want a stable estimate of the average reward over all episodes.
                 # TODO: (2024/01/29) Revise the correct use of the `done` variable here, instead of `done_episode`, because actually when we are done by `done`, this line will NEVER be executed because we will NOT enter again the `while done` loop...
-                # DM-2024/04/22: Uncomment the following set of info['average_reward'] if we want to use a fixed value for the average reward as correction at every learning step
-                ##### TEMPORARY PATCH (WORKED!) (TO TRY TO FIX THE UNLEARNING OF THE POLICY IN THE MOUNTAIN CAR PROBLEM) #########
-                # 2025/01/19: Piece of code that can be reactivated to perform a quick try of the REWARD SHAPING strategy of exit states to promote a policy that goes out of A
-                #if estimated_average_reward is not None:
-                #    info['average_reward'] = estimated_average_reward
-                ##### TEMPORARY PATCH (WORKED!) (TO TRY TO FIX THE UNLEARNING OF THE POLICY IN THE MOUNTAIN CAR PROBLEM) #########
+                if use_fixed_average_reward:
+                    # NOTE: Setting this parameter to True ONLY has an effect when the stopping criterion is NOT any of the ones that include the MAX_TIME_STEPS condition
+                    # (i.e. the stopping criterion is different from MAX_TIME_STEPS and MAX_TIME_STEPS_AND_MIN_PROP_ABSORBED_PARTICLES)
+                    # because in those cases, the average reward is already fixed (because the average reward is only computed at the END of the FV simulation
+                    # by the caller of this method, using a parametric estimate of P(T>t), which is based on ALL survival times (used in the estimation of E(T)).
+
+                    ##### TEMPORARY PATCH (WORKED!) (TO TRY TO FIX THE UNLEARNING OF THE POLICY IN THE MOUNTAIN CAR PROBLEM) #########
+                    # 2025/01/19: Use this as quick try of the REWARD SHAPING strategy of exit states to promote a policy that goes out of A.
+                    # 2025/05/18: Also, it can be used to do the ABLATION study of estimating the average reward at a wrong value (e.g. always 0)
+                    # DONE TODAY AND SAW THAT THE POLICY IS NOT LEARNED AT ALL! (only for the state next to the EXIT state in a 6x8 gridworld with WIND=0.7).
+
+                    # Always use the same (fixed) average reward value as correction of the value functions at every learning step
+                    # Note that the check of whether estimated_average_reward is missing has been done at the beginning when parsing input parameters,
+                    # in which case parameter use_fixed_average_reward is set to False.
+                    info['average_reward'] = estimated_average_reward
+                    ##### TEMPORARY PATCH (WORKED!) (TO TRY TO FIX THE UNLEARNING OF THE POLICY IN THE MOUNTAIN CAR PROBLEM) #########
                 learner.learn(t, state, action, next_state, reward, done, info)
             if reward != 0.0:
                 print(f"*** NON ZERO REWARD [1]!! (t={t}, P={idx_particle}, state={state} ({self.env.getStateFromIndex(state, simulation=False) if not self.env.isStateContinuous() else state}), action={action}, next_state={next_state} ({self.env.getStateFromIndex(next_state, simulation=False) if not self.env.isStateContinuous() else next_state}), reward={reward})")
@@ -4021,6 +4116,8 @@ class Simulator:
 
         if DEBUG_ESTIMATORS:
             if self.env.isStateContinuous():
+                # We initialize DUMMY state value functions, so that we can refer to them as if the state space were discrete, so that we don't need to add many IF conditions below...
+                # (2025/02/08) HOWEVER, maybe we should change this and call the self._get_state_value() and self._get_action_value() methods.
                 V = np.repeat(0.0, self.env.getNumStates())
                 Q = np.repeat(0.0, self.env.getNumStates() * self.env.getNumActions())
             else:
@@ -4067,7 +4164,7 @@ class Simulator:
                 }
 
     def _run_single_continuing_task(self, t_learn=-1, nepisodes=1, max_time_steps=1000, max_time_steps_per_episode=+np.Inf, start_state_first_episode=None,
-                                    estimated_average_reward=None, reset_value_functions=True,
+                                    estimated_average_reward=None, use_fixed_average_reward=False, reset_value_functions=True,
                                     seed=None, compute_rmse=False, weights_rmse=None,
                                     state_observe=None, set_cycle=None, dict_proba_cycle=None,
                                     epsilon_random_action=0.0,
@@ -4088,12 +4185,14 @@ class Simulator:
             default: -1 (which means that the simulation is not part of a policy learning process by default)
 
         estimated_average_reward: (opt) None
-            An existing estimation of the average reward that is used as correction of the value functions being learned during this simulation process.
+            When given, it corresponds to the INITIAL estimation of the average reward used by the learner during the learning process.
+            I.e. the average reward stored in the learner is NOT reset and then it is updated as new observations are collected during the current simulation.
             default: None
 
-        t_learn: (opt) int
-            The learning step number (starting at 0) for which the simulation is run when learning is used in the context of policy learning.
-            This is ONLY used for informational purposes, i.e. to show which stage of the policy learning we are at.
+        use_fixed_average_reward: (opt) bool
+            Whether to use the average reward given in `estimated_average_reward` (when not None or missing) as a fixed correction of the value functions
+            estimated by the learner during this simulation.
+            default: False
 
         set_cycle: (opt) set
             Set of states whose entrance from the complement set defines a cycle.
@@ -4195,6 +4294,13 @@ class Simulator:
         if max_time_steps is None or max_time_steps <= 0 or max_time_steps == np.Inf:
             raise ValueError(f"The maximum number of time steps to run must be given and must be a FINITE positive number: {max_time_steps}")
         # ---- UPDATE FOR CONTINUING TASK
+
+        if use_fixed_average_reward and (estimated_average_reward is None or np.isnan(estimated_average_reward)):
+            # Do NOT use a fixed average reward if the given average reward value is None or missing
+            warnings.warn("The user requested to use a FIXED value of the average reward as correction of the value functions"
+                          " but the given average reward in `estimated_average_reward` is None or missing."
+                          " The average reward used as correction will be initially set to 0.0 and updated during the simulation as new observations are collected.")
+            use_fixed_average_reward = False
 
         # Set the weights to be used to compute the RMSE and MAPE based on the weights_rmse value
         # Only when weights_rmse = True are the weights NOT set definitely here, as they are set at every episode
@@ -4320,6 +4426,8 @@ class Simulator:
 
         # Initial state value function
         if self.env.isStateContinuous():
+            # We initialize DUMMY state value functions, so that we can refer to them as if the state space were discrete, so that we don't need to add many IF conditions below...
+            # (2025/02/08) HOWEVER, maybe we should change this and call the self._get_state_value() and self._get_action_value() methods.
             V = np.repeat(0.0, self.env.getNumStates())
             Q = np.repeat(0.0, self.env.getNumStates()*self.env.getNumActions())
         else:
@@ -4580,9 +4688,11 @@ class Simulator:
                 # Learn: i.e. update the value functions (stored in the learner) for the *currently visited state and action* with the new observation
                 # NOTE: If this call to learn() is done at the end of the episode (done_episode = True) further updates of information is performed
                 # (e.g. update of the average reward stored in GenericLearner (its average_reward attribute) via the LeaTD.learn_at_episode_end() method when the learner is TD)
-                # DM-2024/04/22: Uncomment the following set of info['average_reward'] if we want to use a fixed value for the average reward as correction at every learning step
-                #if estimated_average_reward is not None:
-                #    info['average_reward'] = estimated_average_reward
+                if use_fixed_average_reward:
+                    # Always use the same (fixed) average reward value as correction of the value functions at every learning step
+                    # Note that the check of whether estimated_average_reward is missing has been done at the beginning when parsing input parameters,
+                    # in which case parameter use_fixed_average_reward is set to False.
+                    info['average_reward'] = estimated_average_reward
                 learner.learn(t_episode, state, action, next_state, reward, done_episode, info)
                 if state in self.env.getTerminalStates():
                     # We need to copy the Q-values of the terminal state to the other actions because the action chosen to go to the start state is always the same (action 0)
