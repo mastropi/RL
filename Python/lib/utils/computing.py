@@ -438,10 +438,18 @@ def compute_state_value_function_from_transition_matrix(P, expected_one_step_rew
     gamma: (opt) float in (0, 1]
         Discount factor for the DISCOUNTED learning criterion.
         default: 1.0
+
+    Return: numpy array
+    1D array containing the state value function on the environment's state indices.
     """
     b = expected_one_step_reward
     g = bias
-    V = np.asarray(np.dot(np.linalg.pinv(np.eye(len(P)) - gamma*P), b - g))[0]
+    try:
+        # We enclose the generalized inverse operation in a try block because today (14-Jun-2025) the inverse failed with the following error message:
+        # "numpy.linalg.linalg.LinAlgError: SVD did not converge"
+        V = np.asarray(np.dot(np.linalg.pinv(np.eye(len(P)) - gamma*P), b - g))[0]
+    except:
+        V = np.nan
     return V
 
 

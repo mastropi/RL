@@ -15,6 +15,7 @@ Created on Wed Feb  3 21:00:15 2021
 # IT WORKS!
 
 from timeit import default_timer as timer
+from time import process_time
 import os
 import copy
 import time
@@ -59,6 +60,9 @@ class Environment(Enum):
 #--- Auxiliary functions
 KL_THRESHOLD = 0.005
 policy_changed_from_previous_learning_step = lambda KL_distance, num_states: np.abs(KL_distance) / num_states > KL_THRESHOLD
+
+def show_elapsed_time(learning_method, time_elapsed, time_cpu):
+    print("{} learning process took {:.1f} minutes, ({:.1f} hours (CPU: {:.1f} minutes, {:.1f} hours)".format(learning_method.upper(), time_elapsed / 60, time_elapsed / 3600, time_cpu / 60, time_cpu / 3600))
 
 def define_plotting_parameters():
     dict_colors = dict(); dict_linestyles = dict(); dict_legends = dict()
@@ -446,6 +450,7 @@ learning_criterion = LearningCriterion.AVERAGE; gamma = 1.0    # gamma could be 
 seed = 1317
 env_type = Environment.Gridworld
 #env_type = Environment.MountainCar
+env_type_name = env_type.name   # The environment NAME is retrieved to avoid an error that happened at least once (Jun-2025) when saving results to a pickle file: "Can't pickle <enum 'Environment'>: attribute lookup Environment on __main__ failed"
 problem_2d = True
 use_random_obstacles_set = False; prop_obstacles = 0.5; seed_obstacles = 4217 #4215    # Seed 4217 with 50% of obstacles gives good results in the 6x8 labyrinth
 exit_state_at_bottom = True
@@ -479,7 +484,7 @@ if env_type == Environment.Gridworld:
 
     # Environment's entry and exit states
     entry_state = np.ravel_multi_index((size_vertical - 1, 0), env_shape)
-    exit_state = entry_state + env_shape[1] - 1 if exit_state_at_bottom else None   # None means that the EXIT state is set at the top-right of the labyrinth
+    exit_state = entry_state + env_shape[1] - 1 if exit_state_at_bottom else env_shape[1] - 1
 
     # Presence of wind: direction and probability of deviation in that direction when moving
     if problem_2d:
@@ -514,7 +519,9 @@ if env_type == Environment.Gridworld:
         #-- 1D gridworld
         obstacles_set = set()
 else:
-    entry_state = None  # `None` so that the start state is defined by the reset method of the environment
+    # Define variables that are always stored as part of the params_exec dictionary, regardless of the environment
+    entry_state = None
+    exit_state = None
     wind_dict = None    # Just for information purposes in titles, etc.
 #-------------------------------- ENVIRONMENT -------------------------#
 
@@ -578,7 +585,7 @@ if env_type == Environment.Gridworld:
 #-------------------------------- TEST SETUP --------------------------#
 if env_type == Environment.Gridworld:
     N = 50  #20 #50, #200, #200 if problem_2d else 100, #50 #20 #100
-    T = 100 #500 #1000, #100, #10000 if problem_2d else 1000, #1000, #1000, #3000,  # np.prod(env_shape) * 10  #100 #1000
+    T = 500 #100 #500 #1000, #100, #10000 if problem_2d else 1000, #1000, #1000, #3000,  # np.prod(env_shape) * 10  #100 #1000
     dropout_policy = 0.0  #0.5 #0.5  # Set it to 0.0 if we do not want any dropout layer in the network
     test_ac = Test_EstPolicy_EnvGridworldsWithObstacles()
     test_ac.setUpClass(shape=env_shape, obstacles_set=obstacles_set, n_obstacles=n_obstacles, wind_dict=wind_dict,
@@ -597,7 +604,7 @@ if env_type == Environment.Gridworld:
                        N=N,
                        T=T,
                        estimate_absorption_set=estimate_absorption_set, threshold_absorption_set=threshold_absorption_set, absorption_set=default_absorption_set,
-                       states_of_interest_fv=None,  # exit_state,
+                       states_of_interest_fv=set({exit_state}),    #None
                        seed=seed, plot=True, debug=False, seed_obstacles=seed_obstacles)
     test_ac.setUp()
     print(test_ac.policy_nn.nn_model)
@@ -732,6 +739,7 @@ dict_nsteps = dict()
 dict_KL = dict()
 dict_alpha = dict()
 dict_time_elapsed = dict()
+dict_time_cpu = dict()
 #------------------ RESULTS COLLECTION AND PLOTS SETUP ----------------#
 
 
@@ -862,9 +870,15 @@ print("******")
 break_when_no_change = False    # Whether to stop the learning process when the average reward doesn't change from one step to the next
 break_when_goal_reached = False  # Whether to stop the learning process when the average reward is close enough to the maximum average reward (by a relative tolerance of 0.1%)
 
+# Define the BASE seed for the simulation
+seed_base = test_ac.seed
+
 # Store the execution parameters in a dictionary
 params_exec = dict([(k, eval(k)) for k in [ # --- Environment
                                             'env_type',
+                                            'env_type_name',    # We also store the env_type_name because of errors generated when saving to pickle (can't pickle Environment enum)
+                                            'entry_state',
+                                            'exit_state',
                                             'wind_dict',
                                             # --- Learning
                                             'learning_method',
@@ -898,7 +912,10 @@ params_exec = dict([(k, eval(k)) for k in [ # --- Environment
                                             'learning_steps_observe',
                                             'verbose_period',
                                             'plot',
-                                            'colormap']])
+                                            'colormap',
+                                            # -- Simulation
+                                            'seed_base',
+                                            ]])
 print("\nExecution parameters:")
 for param, value in params_exec.items():
     print(f"{param}: {value}")
@@ -918,6 +935,7 @@ nsteps_all = np.nan * np.ones((nrep, n_learning_steps), dtype=int)  # Number of 
 KL_all = np.nan * np.ones((nrep, n_learning_steps))      # K-L divergence between two consecutive policies
 alpha_all = alpha_initial * np.ones((nrep, n_learning_steps))   # Initial alpha used at each policy learning step
 time_elapsed_all = np.nan * np.ones(nrep)   # Execution time for each replication
+time_cpu_all = np.nan * np.ones(nrep)    # CPU time for each replication
 
 # Prepare the Actor learner
 if learning_method_type == "values_fv":
@@ -940,11 +958,11 @@ else:
                                   reset_value_functions=reset_value_functions_at_every_learning_step, initial_policy=initial_policy, optimizer_learning_rate=optimizer_learning_rate, seed=test_ac.seed, debug=True)
 
 time_start = timer()
+cpu_start = process_time()
 dt_start_filename = get_current_datetime_as_string(format="filename")
 
-seed_base = test_ac.seed
 for rep in range(nrep):
-    seed_rep = seed_base + rep*1317
+    seed_rep = seed_base*(rep + 1)
     # Use the following IF to run just the LAST replication, in case we need to compare it with another LAST replication from a set of experiments previously run.
     #if rep < nrep - 1:
     #    print(f"Replication {rep} skipped!")
@@ -970,6 +988,7 @@ for rep in range(nrep):
         _learner_value_functions_for_critic.setInitialLearningRate(alpha_initial)
 
     time_start_rep = timer()
+    cpu_start_rep = process_time()
     if learning_method == "all_online":
         for t_learn in range(n_learning_steps):
             print(f"\n\n*** Running learning step {t_learn+1} of {n_learning_steps} (AVERAGE REWARD at previous step (not reward-shaped) = {R_all[rep, max(0, t_learn-1)]}) of "
@@ -1285,16 +1304,20 @@ for rep in range(nrep):
                 # Initialize the plot of the policy at each policy learning step
                 plot_policy(test_ac.getEnv(), learner_ac.getPolicy(), state_counts_all[rep, :, :], params_exec, axes=axes_policy, is_problem_2d=problem_2d, t_learn=t_learn+1)
     time_elapsed_rep = timer() - time_start_rep
-    print(f"<<<<<<<<<< FINISHED replication {rep+1} of {nrep}... (@{format(get_current_datetime_as_string())}" + ", took {:.1f} min)".format(time_elapsed_rep / 60))
+    time_cpu_rep = process_time() - cpu_start_rep
+    print(f"<<<<<<<<<< FINISHED replication {rep+1} of {nrep}... (@{format(get_current_datetime_as_string())}" + ", took {:.1f} min (CPU: {:.1f}))".format(time_elapsed_rep / 60, time_cpu_rep / 60))
     time_elapsed_all[rep] = time_elapsed_rep
+    time_cpu_all[rep] = time_cpu_rep
 
 time_end = timer()
+cpu_end = process_time()
 time_elapsed = time_end - time_start
+time_cpu = cpu_end - cpu_start
 
 if log:
     log_file_close(fh_log, stdout_sys, stderr_sys, dt_start)
 else:
-    print("{} learning process took {:.1f} minutes ({:.1f} hours)".format(learning_method.upper(), time_elapsed / 60, time_elapsed / 3600))
+    show_elapsed_time(learning_method, time_elapsed, time_cpu)
 
 
 ############# Store the measures that we would like to compare
@@ -1314,6 +1337,7 @@ dict_nsteps[learning_method] = nsteps_all.copy()
 dict_KL[learning_method] = KL_all.copy()
 dict_alpha[learning_method] = alpha_all.copy()
 dict_time_elapsed[learning_method] = time_elapsed_all.copy()
+dict_time_cpu[learning_method] = time_cpu_all.copy()
 ############# Store the measures that we would like to compare
 
 
@@ -1376,7 +1400,7 @@ if not plot_policy_update:
     _state_counts_during_policy_learning = dict_state_counts[learning_method][nrep-1, :, :]
     axes = plot_policy(dict_simulator[learning_method].getEnv(), dict_simulator[learning_method].getAgent().getPolicy(), _state_counts_during_policy_learning, params_exec,
                        is_problem_2d=problem_2d, t_learn=n_learning_steps, fontsize=14)
-print("{} learning process took {:.1f} minutes ({:.1f} hours)".format(learning_method.upper(), dict_time_elapsed[learning_method][rep] / 60, dict_time_elapsed[learning_method][rep] / 3600))
+show_elapsed_time(learning_method, time_elapsed, time_cpu)
 
 
 raise KeyboardInterrupt
@@ -1561,7 +1585,7 @@ plt.suptitle(f"{learning_method.upper()}\n{learning_task.name} learning task - {
 _state_counts_during_policy_learning = dict_state_counts[learning_method][nrep-1, :, :]
 axes = plot_policy(dict_simulator[learning_method].getEnv(), dict_simulator[learning_method].getAgent().getPolicy(), _state_counts_during_policy_learning, params_exec,
                    is_problem_2d=problem_2d, t_learn=n_learning_steps, fontsize=14)
-print("{} learning process took {:.1f} minutes ({:.1f} hours)".format(learning_method.upper(), dict_time_elapsed[learning_method][rep] / 60, dict_time_elapsed[learning_method][rep] / 3600))
+show_elapsed_time(learning_method, time_elapsed, time_cpu)
 
 
 plot_state_counts(dict_simulator, learning_method, params_exec, seed=seed_learn)
@@ -1600,27 +1624,36 @@ plt.suptitle(f"{learning_method.upper()}\n{learning_task.name} learning task - {
 ############## SAVE ALL RESULTS TOGETHER
 if save:
     _env = test_ac.getEnv()
+    _time_elapsed_min = np.sum([np.sum(t) for k, t in dict_time_elapsed.items()]) / 60
+    _time_cpu_min = np.sum([np.sum(t) for k, t in dict_time_cpu.items()]) / 60
     wind_dict = None if "wind_dict" not in locals() else wind_dict
     exit_state = None if "exit_state" not in locals() else exit_state
+    params_exec_orig = params_exec.copy()
+    del params_exec['env_type']    # This entry is removed because of error in saving an Environment enum object to a pickle file
     objects_to_save = ["params_exec",
-                       "_env", "env_type", "wind_dict", "learning_task", "learning_criterion", "gamma", "exit_state", "nn_hidden_layer_sizes", "is_NPG", "policy_learning_mode",
+                       "_env", "env_type_name",
+                       "wind_dict", "learning_task", "learning_criterion", "gamma", "exit_state", "nn_hidden_layer_sizes", "is_NPG", "policy_learning_mode",
                        "simulator_value_functions", "dict_simulator",
-                       "dict_loss", "dict_R", "dict_R_long", "dict_R_long_true", "dict_R_long_initial", "dict_R_long_fv_inflated", "dict_V", "dict_Q", "dict_A", "dict_state_counts", "dict_nsteps", "dict_KL", "dict_alpha", "dict_time_elapsed",
+                       "dict_loss", "dict_R", "dict_R_long", "dict_R_long_true", "dict_R_long_initial", "dict_R_long_fv_inflated", "dict_V", "dict_Q", "dict_A",
+                       "dict_state_counts", "dict_nsteps", "dict_KL", "dict_alpha", "dict_time_elapsed", "dict_time_cpu",
                        "max_time_steps_benchmark"]
     if "max_time_steps_benchmark_all" in locals():
         objects_to_save += ["max_time_steps_benchmark_all"]
     else:
         objects_to_save += ["max_time_steps_benchmark"]
     _shape_str = f"{env_shape[0]}x{env_shape[1]}" if "env_shape" in locals() else ""
-    _filename = f"{prefix}{dt_start_filename}_ALL.pkl"
+    _filename = f"{prefix}{dt_start_filename}_ALL_exec={_time_elapsed_min:.0f}min_cpu={_time_cpu_min:.0f}min.pkl"
     _filepath = os.path.join(resultsdir, _filename)
     # Save the original object names plus those with the prefix so that, when loading the data back,
     # we have also the objects without the prefix which are need to generate the plots right-away.
     # HOWEVER, when reading the saved data, make sure that any object with the original name (without the suffix) has been copied to another object
     # (e.g. loss_all_td could be a copy of loss_all before reading the data previously saved for the FV learning method)
     object_names_to_save = objects_to_save + [f"{obj_name}" for obj_name in objects_to_save]
-    save_objects_to_pickle(object_names_to_save, _filepath, locals(), lib="pickle")
+    save_objects_to_pickle(object_names_to_save, _filepath, locals(), lib="joblib")
     print(f"Results for ALL Actor-Critic methods: {[str.replace(meth, 'values_', '').upper() for meth in dict_loss.keys()]} saved to '{_filepath}'")
+    # Restore the params_exec object
+    params_exec = params_exec_orig.copy()
+    del params_exec_orig
 ############## SAVE ALL RESULTS TOGETHER
 
 
@@ -1630,8 +1663,10 @@ if save:
 
 #_datetime = "20240428_092427" #"20240428_205959" #"20240421_140558" #"20240405_094608" #"20240322_095848" #"20240219_230301" #"20240219_142206"          # Use format yyymmdd_hhmmss
 #_shape_str = "6x8" #"21x1" #"10x14" #"3x4" #"10x14"
+import os
 
-resultsdir = "./RL-003-Classic/results"
+resultsdir = os.path.realpath("./RL-003-Classic/results")
+print(f"Results will be read from directory '{resultsdir}'")
 
 # 2024/10/15: Random labyrinth WITH NPG and without NPG
 _filename = "ActorCritic_gridworld_6x8_20241015_195628_FV_WindyRandomLabyrinth0.5Seed4217,N=20,T=500,AlphaA=0.90,L=30N,iter=50.pkl"
@@ -1671,16 +1706,16 @@ _filename = "ActorCritic_labyrinth_4x5_20240513_124235_ALL_WindyLabyrinth0.8Fini
 _filename = "ActorCritic_labyrinth_6x8_20240515_111830_ALL_WindyLabyrinth0.8FinishAtBottomAbsorptionSetEstimated0_TDAC,FVAC,N=20,T=500,LimitedTime=5x,epsilon=0.10,Budget4Loss=5x_FVisBetter.pkl"
 _filename = "ActorCritic_labyrinth_6x8_20240515_102102_ALL_WindyLabyrinth0.6FinishAtBottomAbsorptionSetEstimated_TDAC,FVAC,N=20,T=500,LimitedTime=5x,epsilon=0.10,Budget4Loss=5x_FVisBetter.pkl"
 
-_env_name = "mountaincar" #"gridworld" #"labyrinth"    # For older results (before implementing also learning in Mountain Car), use "labyrinth", for new results, use "gridworld"
-_ndigits = 5  #3  # Number of digits used to define the dimension of the environment including the `x` (e.g. "4x5" => _ndigits = 3; "22x21" => _ndigits = 5)
-_shape_str = _filename[len(f"ActorCritic_{_env_name}_"):len(f"ActorCritic_{_env_name}_") + _ndigits]
+_env_type_name = "mountaincar" #"gridworld" #"labyrinth"    # For older results (before implementing also learning in Mountain Car), use "labyrinth", for new results, use "gridworld"
+_ndigits = 3 #5  #3  # Number of digits used to define the dimension of the environment including the `x` (e.g. "4x5" => _ndigits = 3; "22x21" => _ndigits = 5)
+_shape_str = _filename[len(f"ActorCritic_{_env_type_name}_"):len(f"ActorCritic_{_env_type_name}_") + _ndigits]
 _N = int(_filename[_filename.index("N=") + len("N="):_filename.index(",", _filename.index("N="))])
 _T = int(_filename[_filename.index("T=") + len("T="):_filename.index(",", _filename.index("T="))])
 _filepath = os.path.join(resultsdir, _filename)
 object_names = load_objects_from_pickle(_filepath, globals())
 print(f"The following objects were loaded from '{_filepath}':\n{object_names}")
 
-# The following reward values are used in the ALTOGETHER plots below
+# The following variables are used in the "altogether" plots below
 _methods = list(dict_loss.keys())
 env_shape = (int(_shape_str[:_shape_str.index("x")]), int(_shape_str[_shape_str.index("x")+1:]))
 if _filename.lower().find("random") >= 0:
@@ -1689,6 +1724,7 @@ if _filename.lower().find("random") >= 0:
     max_avg_reward_episodic = np.nan
 else:
     max_avg_reward_continuing, max_avg_reward_episodic = compute_max_avg_rewards_in_labyrinth_with_corridor(_env, wind_dict, learning_task, learning_criterion)
+seed_base = params_exec['seed_base']
 nrep = len(dict_loss[_methods[0]])
 n_learning_steps = len(dict_loss[_methods[0]][0])
 # (2024/08/04) The following objects are now read from the pickle file
@@ -1703,6 +1739,16 @@ dict_colors, dict_linestyles, dict_legends, figsize = define_plotting_parameters
 #-- ALTOGETHER PLOT
 # Plot all average rewards together (to compare methods)
 # Color names are listed here: https://matplotlib.org/stable/gallery/color/named_colors.html
+
+# Show the execution times by method
+for meth in dict_time_elapsed.keys():
+    print(f"Execution times for meth={meth}: total = {np.sum(dict_time_elapsed[meth])/60:.1f} min (CPU: {np.sum(dict_time_cpu[meth])/60:.1f} min),"
+          f"average = {np.mean(dict_time_elapsed[meth])/60:.1f} min (CPU: {np.mean(dict_time_cpu[meth])/60:.1f} min)")
+
+# Show the number of steps by method
+for meth in dict_nsteps.keys():
+    print(f"# steps for meth={meth}: average across replications and learning steps = {np.mean(dict_nsteps[meth]):.1f} steps")
+
 # We normalize the average reward plots so that they converge to 1.0 (easier interpretation of the plot)
 if is_NPG or policy_learning_mode != "online":
     dict_R_toplot = dict_R_long
@@ -1713,7 +1759,7 @@ else:
 # Check that the max avg. reward is defined, if not set it to 1.0 so that we plot the unnormalized observed average reward
 max_avg_reward = 1.0 if np.isnan(max_avg_reward) or max_avg_reward == 0.0 else max_avg_reward
 
-_exit_state_str = 'TOP' if "exit_state" in locals() and exit_state is None else 'BOTTOM' if "exit_state" in locals() else "RIGHT"
+_exit_state_str = 'TOP' if "exit_state" in locals() and exit_state == env_shape[1] - 1 else 'BOTTOM' if "exit_state" in locals() else "(unknown)"
 _learning_characteristics = f"\nN={'N' in locals() and N or _N}, " + \
                             f"T={'T' in locals() and T or _T}, " + \
                             f"MAX budget={'max_time_steps_benchmark' in locals() and max_time_steps_benchmark or 'N/A'} steps - NN hidden layer: {nn_hidden_layer_sizes}, " + \
@@ -1751,7 +1797,7 @@ if max_avg_reward != 1.0:
 ax_R.axhline(0, color="gray")
 ax_R.set_title(f"Evolution of NORMALIZED Average Reward")
 ax_R.legend(legend, loc="lower left")
-plt.suptitle(f"ALL LEARNING METHODS: {env_type.name} {env_shape} - {learning_task.name} learning task - {learning_criterion.name} reward criterion (gamma={gamma})" +
+plt.suptitle(f"ALL LEARNING METHODS: {env_type_name} {env_shape} - {learning_task.name} learning task - {learning_criterion.name} reward criterion (gamma={gamma})" +
              _learning_characteristics +
              f"\n(last replication #{nrep})")
 
@@ -1771,6 +1817,7 @@ legend = []
 for rep in range(nrep):
     for meth in dict_R_toplot.keys():
         line = ax.plot(np.arange(1, n_learning_steps+1), dict_R_toplot[meth][rep, :n_learning_steps], '-', color=dict_colors[meth], linewidth=0.3)
+        ax.text(n_learning_steps, dict_R_toplot[meth][rep, -1], f"rep={rep+1} (seed={seed_base*(rep+1)})", color=dict_colors[meth])
         lines += line if rep == 0 else []
         legend += [meth] if rep == 0 else []
         #ax.axhline(0, color="gray")
@@ -1781,7 +1828,7 @@ line = ax.axhline(max_avg_reward_continuing, color="lightgreen") if policy_learn
 lines += [line]
 legend += ["Max. average reward" + (policy_learning_mode == "online" and " (episodic)" or " (continuing)")]
 ax.legend(lines, legend, loc="center right")
-plt.suptitle(f"ALL LEARNING METHODS: {env_type.name} {env_shape} - {learning_task.name} learning task - {learning_criterion.name} reward criterion (gamma={gamma})"
+plt.suptitle(f"ALL LEARNING METHODS: {env_type_name} {env_shape} - {learning_task.name} learning task - {learning_criterion.name} reward criterion (gamma={gamma})"
              f"\nWIND: {wind_dict}, EXIT: {_exit_state_str}, ALL {nrep} replications" +
              _learning_characteristics)
 
@@ -1866,7 +1913,7 @@ if nrep > 1:
         ax.tick_params(axis='both', labelsize=int(0.8*fontsize))
     else:
         ax.set_ylabel(f"Average reward {'(normalized by the MAX average reward = {:.2g})' if max_avg_reward != 1.0 else ''}".format(max_avg_reward), fontsize=fontsize)
-        plt.suptitle(f"ALL LEARNING METHODS: {env_type.name} {env_shape} - {learning_task.name} learning task - {learning_criterion.name} reward criterion (gamma={gamma})"
+        plt.suptitle(f"ALL LEARNING METHODS: {env_type_name} {env_shape} - {learning_task.name} learning task - {learning_criterion.name} reward criterion (gamma={gamma})"
                      f"\nWIND: {wind_dict}, EXIT: {_exit_state_str}, {nrep} replications" +
                      _learning_characteristics)
 
