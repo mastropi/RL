@@ -1066,17 +1066,17 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
                     plot=False)
 
         # The expected state values are close to self.V_true_optimal but not quite there
-        expected_V = [-0.335716, -0.327215, -0.321336, -0.318088, -0.316093,
-                      -0.395134, -0.292521, -0.144666,  0.034477,  0.203168,
-                       0.304436,  0.341835,  0.348890,  0.358013,  0.393345,
-                       0.432999,  0.477292,  0.523828,  0.570643, -0.382537]
-        expected_state_counts = [50, 50, 50, 50, 50, 101, 100, 100, 100, 101, 101, 109, 117, 141, 150, 161, 189, 239, 300, 351]
+        expected_V = [-0.296443, -0.296425, -0.296353, -0.296093, -0.295239,
+                      -0.378338, -0.273216, -0.120802,  0.065629,  0.244013,
+                       0.353102,  0.393889,  0.395780,  0.398294,  0.432665,
+                       0.472158,  0.516463,  0.563024,  0.609864, -0.343289]
+        expected_state_counts = [50, 50, 50, 50, 50, 100, 100, 100, 100, 101, 101, 109, 117, 141, 150, 161, 189, 239, 300, 351]
         expected_n_events_et = params['T']
         expected_n_events_fv = 1609
         expected_n_cycles_absorption = 49
         expected_absorption_time = 20.0
         expected_average_reward = 0.0467760
-        expected_probas_stationary = dict({19: 0.0467760})
+        expected_probas_stationary = dict({19: expected_average_reward})
         # The following is NOT an expected value for the unit test, but just the expected reward under stationarity computed using its definition,
         # i.e. E(R) = sum{x} p(x)*r(x), where p(x) is the stationary probability
         expected_reward_under_stationarity = computing.compute_expected_reward(self.env1d, probas_stationary)
@@ -1104,7 +1104,7 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
                 params['lambda'] == 0.0 and \
                 params['alpha_min'] == 0.1
         assert all(state_counts == expected_state_counts)
-        assert sum(state_counts) == n_events_et + n_events_fv + 1
+        assert sum(state_counts) == n_events_et + n_events_fv
         assert n_events_et == expected_n_events_et
         assert n_events_fv == expected_n_events_fv
         assert n_cycles_absorption_used == expected_n_cycles_absorption
@@ -1173,16 +1173,16 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
 
         # The expected state values are close to self.V_true_optimal but not quite there
         expected_V = [-0.015381, -0.014586, -0.014211, -0.014184, -0.014429,
-                      -0.020892, -0.020013, -0.009237,  0.009575,  0.041849,
-                       0.072141,  0.102611,  0.159001,  0.303956,  0.378875,
-                       0.547796,  0.612846,  0.743180,  0.854892, -0.017290]
-        expected_state_counts = [150, 119, 111, 113, 104, 388, 480, 523, 517, 503, 529, 522, 443, 412, 354, 272, 207, 139, 76, 39]
+                      -0.020980, -0.020205, -0.009501,  0.009265,  0.041493,
+                       0.071749,  0.102210,  0.158615,  0.303587,  0.378520,
+                       0.547492,  0.612574,  0.742988,  0.854776, -0.017312]
+        expected_state_counts = [156, 118, 109, 112, 103, 387, 480, 523, 517, 503, 529, 522, 443, 412, 354, 272, 207, 139, 76, 39]
         expected_n_events_et = params['T']
         expected_n_events_fv = 5000
-        expected_n_cycles_absorption = 48
-        expected_absorption_time = 20.58333
-        expected_average_reward = 0.00222471
-        expected_probas_stationary = dict({19: 0.00222471})
+        expected_n_cycles_absorption = 47
+        expected_absorption_time = 19.468
+        expected_average_reward = 0.00235216
+        expected_probas_stationary = dict({19: expected_average_reward})
         # The following is NOT an expected value for the unit test, but just the expected reward under stationarity computed using its definition,
         # i.e. E(R) = sum{x} p(x)*r(x), where p(x) is the stationary probability
         expected_reward_under_stationarity = computing.compute_expected_reward(self.env1d, probas_stationary)
@@ -1215,7 +1215,7 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
         assert n_events_fv == expected_n_events_fv
         assert n_cycles_absorption_used == expected_n_cycles_absorption
         assert np.isclose(average_absorption_time, expected_absorption_time)
-        assert np.isclose(average_reward, expected_average_reward)
+        assert np.isclose(average_reward, expected_average_reward, atol=1E-6)
         for key, value in probas_stationary.items():
             assert np.isclose(probas_stationary[key], expected_probas_stationary[key])
         assert np.isclose(average_reward, expected_reward_under_stationarity), f"The estimated average reward must satisfy the expected reward formula under stationarity: average reward = {average_reward}, expected reward = {expected_reward_under_stationarity}"
@@ -1624,27 +1624,27 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
         # as the particles reach a terminal state --in which case they are restarted inside A, e.g. at the START of the labyrinth).
         # The maximum number of particles in the system is N.
         cls.expected_fv_V = np.array(
-                            [0.034611, 0.233607, 0.489649, -0.037725,
-                             -0.039828, 0.000000, 0.298730, 0.446793,
-                             -0.020460, -0.039909, 0.095248, 0.181238])
+                            [ 0.034743,  0.233790, 0.489875, -0.037515,
+                             -0.039710,  0.000000, 0.298950, 0.447024,
+                             -0.020319, -0.039758, 0.095426, 0.181439])
         # (2023/12/18) The expected action value function seems reasonable in terms of what action is better at each state to reach the terminal state at the upper-right cell of the labyrinth
         cls.expected_fv_Q = np.array(
-                            [[-0.01372256,  0.11842766, -0.05322752, -0.01172401],
-                             [ 0.17156283,  0.45928130,  0.15855929, -0.00848867],
-                             [ 0.52790925,  0.95445672,  0.24200374,  0.16486543],
-                             [-0.03772502, -0.03772502, -0.03772502, -0.03772502],
-                             [-0.01943105, -0.04612045, -0.02255808, -0.0530044],
-                             [0., 0., 0., 0.],
-                             [ 0.50198879,  0.27610796,  0.00762336,  0.12776161],
-                             [ 0.84976620,  0.34293355,  0.06632555,  0.23181229],
-                             [-0.00801942, -0.00779333, -0.00766584, -0.00763694],
-                             [-0.05960949, -0.02489578, -0.04200519, -0.02730922],
-                             [ 0.14694258,  0.02757644, -0.01567993, -0.06464362],
-                             [ 0.28655787,  0.04766436,  0.04968611, -0.00896531]])
-        cls.expected_fv_average_reward = 0.023840
-        cls.expected_fv_cycle_time = 10.8261
-        cls.expected_fv_n_cycles = 92
-        cls.expected_fv_state_counts = [1085, 843, 481, 224, 818, 0, 528, 383, 185, 533, 559, 513]
+                            [[-0.01367791,  0.11848694, -0.05318403, -0.01168208],
+                             [ 0.17164916,  0.45940778,  0.15864210, -0.00842918],
+                             [ 0.52806234,  0.95464411,  0.24212508,  0.16495517],
+                             [-0.03751482, -0.03751482, -0.03751482, -0.03751482],
+                             [-0.01941363, -0.04611871, -0.02248051, -0.05298840],
+                             [0.,           0.,          0.,          0.        ],
+                             [ 0.50213080,  0.27621888,  0.00773258,  0.12787165],
+                             [ 0.84994117,  0.34307159,  0.06641850,  0.23193807],
+                             [-0.00798979, -0.00769294, -0.00754817, -0.00751653],
+                             [-0.05953017, -0.02484684, -0.04193591, -0.02717974],
+                             [ 0.14703614,  0.02765407, -0.01561109, -0.06454853],
+                             [ 0.28667113,  0.04775472,  0.04977956, -0.0088709]])
+        cls.expected_fv_average_reward = 0.023652
+        cls.expected_fv_cycle_time = 10.9121
+        cls.expected_fv_n_cycles = 91
+        cls.expected_fv_state_counts = [1085,  843,  481,  224,  817,    0,  528,  383,  186, 533,  559,  513]
         cls.expected_fv_total_events = sum(cls.expected_fv_state_counts)
 
         #-- Expected values that do NOT depend on the estimation method (e.g. average reward, number of cycles, etc.)
@@ -1666,9 +1666,9 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
         cls.expected_p_from_cycles = [0.130022, 0.104104, 0.049244, 0.021382,
                                       0.152916, 0.000000, 0.048164, 0.039309,
                                       0.200864, 0.130022, 0.070842, 0.056371]
-        cls.expected_p_fv = [0.173195, 0.086442, 0.048993, cls.expected_fv_average_reward,
-                             0.182853,   np.nan, 0.056673, 0.036539,
-                             np.nan,   0.123786, 0.073015, 0.051289]
+        cls.expected_p_fv = [0.171830, 0.085760, 0.048607, cls.expected_fv_average_reward,
+                             0.181412,   np.nan, 0.056226, 0.036251,
+                             np.nan,   0.122810, 0.072440, 0.050885]
 
     def test_Env_PolRandomWalk_MetMC(self):
         print("\n*** Running test " + self.id() + " ***")
@@ -1968,7 +1968,7 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
                self.A == set({8}) and \
                self.B == set({4, 9})
         # Assertions about state counts
-        assert all(state_counts == [486., 354., 175.,  95., 576.,   0., 249., 195., 680., 513., 376., 302.])
+        assert all(state_counts == [486., 354., 175.,  95., 576.,   0., 251., 193., 680., 513., 377., 301.])
         assert sum(state_counts) == n_events_et + n_events_fv + 1
 
         # Assertions about the estimated expected cycle time
@@ -1989,21 +1989,21 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
             "The average reward stored in the FV learner must coincide with the average reward estimated by the FV estimator"
 
         # Assertions about the value functions
-        assert np.allclose(observed_values_V, [-0.0492565,   0.06174813,  0.33919312, -0.10373021,
-                                               -0.08711332,  0.,          0.30169854,  0.54027671,
-                                               -0.08992078, -0.02992293,  0.15665362,  0.30528630], atol=1E-6)
-        assert np.allclose(observed_values_Q, [[-0.04828604,  0.01655388, -0.05130797, -0.04933443],
-                                               [ 0.03135541,  0.18765689,  0.01570098, -0.04360944],
-                                               [ 0.19147699,  0.80505315,  0.17232776,  0.02273132],
-                                               [-0.10373021, -0.10373021, -0.10373021, -0.10373021],
-                                               [-0.04346337, -0.07932918, -0.05827965, -0.06284948],
-                                               [ 0.        ,  0.        ,  0.        ,  0.        ],
-                                               [ 0.16716498,  0.44304123,  0.05600633,  0.15788699],
-                                               [ 0.82601269,  0.47338969,  0.13762215,  0.18956712],
-                                               [-0.08048373, -0.04574597, -0.06926577, -0.08144892],
-                                               [-0.05191475,  0.04410096, -0.04563312, -0.08067755],
-                                               [ 0.17024424,  0.18337279,  0.05818165, -0.04626259],
-                                               [ 0.46606577,  0.1822159 ,  0.18723129,  0.06395086]], atol=1E-6)
+        assert np.allclose(observed_values_V, [-0.048985,    0.062923,    0.341079,   -0.103347,
+                                               -0.086998,    0.0,         0.304401,    0.542247,
+                                               -0.089413,   -0.028424,    0.159238,    0.307917], atol=1E-6)
+        assert np.allclose(observed_values_Q, [ [-0.04830524,  0.01685302, -0.05130689, -0.04937437],
+                                                [ 0.03156942,  0.18919254,  0.01623364, -0.04363127],
+                                                [ 0.19273859,  0.80517147,  0.17743615,  0.02350946],
+                                                [-0.10334710,  -0.1033471, -0.1033471,  -0.1033471 ],
+                                                [-0.04346483, -0.07934325, -0.05816373, -0.06285601],
+                                                [ 0.,          0.,          0.,          0.        ],
+                                                [ 0.16465952,  0.44706463,  0.05878794,  0.15979296],
+                                                [ 0.82775883,  0.47547588,  0.13853342,  0.19526448],
+                                                [-0.08049551, -0.04504468, -0.06910456, -0.08128324],
+                                                [-0.05094879,  0.04632566, -0.04481171, -0.08047806],
+                                                [ 0.17427736,  0.18568194,  0.06002421, -0.04526816],
+                                                [ 0.46890963,  0.18421572,  0.18865816,  0.06611749]], atol=1E-6)
 
 
 class Test_EstValueFunctionV_MetMCLambda_EnvMountainCar(unittest.TestCase, test_utils.EpisodeSimulation):

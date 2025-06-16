@@ -324,14 +324,14 @@ class Test_Class_LeaFV_discretetime(unittest.TestCase):
                params['absorption_set'] == set(np.arange(3)) and \
                seed == 1317
         # Assertions about state counts
-        assert all(state_counts_nonparametric == [70., 58., 39., 54., 38.])
-        assert all(state_counts_parametric == [70., 58., 39., 105., 1929.])  # The counts in states outside A (x=3 and x=4) are much larger than in the non-parametric case because the FV simulation lasts for much longer
+        assert all(state_counts_nonparametric == [73., 57., 38., 53., 38.])
+        assert all(state_counts_parametric == [73., 57., 38., 104., 1929.])  # The counts in states outside A (x=3 and x=4) are much larger than in the non-parametric case because the FV simulation lasts for much longer
 
-        assert probas_stationary_nonparametric == dict({3: 0.08848674242424243, 4: 0.04057891414141416})
-        assert np.isclose(average_reward_nonparametric, 0.04057891414141416)
+        assert probas_stationary_nonparametric == dict({3: 0.08690183246073295, 4: 0.039852094240837695})
+        assert np.isclose(average_reward_nonparametric, 0.039852094240837695)
 
-        assert probas_stationary_parametric == dict({3: 0.0804628076372886, 4: 0.04245686528238432})
-        assert np.isclose(average_reward_parametric, 0.04245686528238432)
+        assert probas_stationary_parametric == dict({3: 0.07902161653879758, 4: 0.04169640889126968})
+        assert np.isclose(average_reward_parametric, 0.04169640889126968)
 
         print("\nTest ends.")
 

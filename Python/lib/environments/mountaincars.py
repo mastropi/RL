@@ -180,6 +180,8 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
 
         # Store whether the state of this environment is DISCRETE-valued or CONTINUOUS-valued
         # i.e. whether the result of taking an action on the car is computed on the discrete-valued or on the continuous-valued state
+        # This does NOT mean that the state space is infinite. In fact, it is NOT because the state obtained after taking the action is ALWAYS discretized,
+        # regardless of how such state is computed.
         self.state_is_continuous = not discrete_state
 
         # Adjust the force, the gravity and the max speed based on the given factor
@@ -743,6 +745,7 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
         return self.velocities
 
     def isStateContinuous(self):
+        "Indicates whether a continuous-valued representation of the state is used to compute the next state"
         return self.state_is_continuous
 
     def getStateDimensions(self):

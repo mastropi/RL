@@ -638,11 +638,12 @@ class Simulator:
                 # Compute the absorption set
                 # Note: this process accepts environments with continuous states, thanks to calling _learner.getStateIndices() which always return a list of 1D state indices.
                 _state_indices = _learner.getStateIndices()
-                dist_state_counts = pd.Series(_state_indices).value_counts(normalize=True)
+                dist_state_counts = pd.Series(_state_indices).value_counts(normalize=True)  # Note: value_counts() returns the values sorted by decreasing frequency, nice! (unless we use argument sort=False)
                 _set_of_frequent_states_with_zero_reward = compute_set_of_frequent_states_with_zero_reward(_state_indices, _learner.getRewards(), threshold=dict_params_simul['threshold_absorption_set'])
                 # 2024/10/23: Use this option of cumulative=False to reproduce the result presented in the EWRL-2024 POSTER on the LABYRINTH results where the absorption set is defined on NON-CUMULATIVE relative frequency
                 #_set_of_frequent_states_with_zero_reward = compute_set_of_frequent_states_with_zero_reward(_state_indices, _learner.getRewards(), threshold=dict_params_simul['threshold_absorption_set'], cumulative=False)
-                print(f"Distribution of state frequency on n={_learner.getNumSteps()} steps:\n{dist_state_counts}")
+                print(f"Distribution of state frequency on n={_learner.getNumSteps()} steps:"
+                      f"\n{pd.concat([pd.Series(dist_state_counts, name='f'), pd.Series(np.cumsum(dist_state_counts), name='F')], axis=1)}")
 
                 if dict_params_info['t_learn'] == 0:
                     # Store the absorption set in the learner as this is the first learning step
@@ -657,9 +658,13 @@ class Simulator:
                         # This state is chosen as one of the most common states according to the initial state distribution of the environment
                         _most_common_state_in_isd = np.argmax(self.env.getInitialStateDistribution())
                         estimated_absorption_set = set({_most_common_state_in_isd})
+                        warning_msg = f"WARNING: The estimated absorption set is EMPTY. One of the most common states in the initial state distribution of the environment is defined as absorption set: {estimated_absorption_set}"
+                        print(warning_msg)
+                        warnings.warn(warning_msg)
                     else:
                         estimated_absorption_set = _set_of_frequent_states_with_zero_reward
 
+                    # Store the absorption set in the learner
                     self.agent.getLearner().setAbsorptionSet(estimated_absorption_set)
                 else:
                     # Read the absorption set stored in the learner and ADD any new states to it as this is not the first learning step and an absorption set is already stored
@@ -677,18 +682,24 @@ class Simulator:
                         f"\nstored A = {_absorption_set_stored_in_learner} (n={len(_absorption_set_stored_in_learner)})" \
                         f"\nupdated A = {estimated_absorption_set} (n={len(estimated_absorption_set)})"
 
-                    # Keep track of the size before update and update the absorption set to the new set just computed
-                    _size_absorption_set_before_update = len(self.agent.getLearner().getAbsorptionSet())
-                    absorption_set_has_been_updated, _number_of_new_states_in_absorption_set = \
-                        update_absorption_set_if_not_too_large(estimated_absorption_set, dict_params_simul['max_prop_absorption_set'])
+                    _absorption_set_increased = len(estimated_absorption_set) > len(_absorption_set_stored_in_learner)
+                    if  dict_params_simul['soft_killing'] or \
+                        _absorption_set_increased and dict_params_simul['T'] < MAX_NUMBER_OF_STEPS_FOR_EXPECTATION:
+                        # If soft killing is used or o.w. if the number of steps T used in the initial exploration has NOT reached its maximum allowed,
+                        # updated the absorption set A based on the recently visited states yielding no rewards.
+                        # Reason to avoid increasing A when T has reached its maximum: this fact is an indicator that the absorption set has grown too much...
+                        # ALSO: this condition also makes the increase decision of the absorption set INDEPENDENT OF THE AGENT KNOWING THE SIZE OF THE ENVIRONMENT,
+                        # which is supposed to NOT know (i.e. the agent should not know anything about the environment apart from what it finds during exploration).
 
-                    # Increase the simulation time for the initial exploration by the increase in the absorption set
-                    _T_prev = dict_params_simul['T']
-                    _prop_increase_absorption_set = _number_of_new_states_in_absorption_set / _size_absorption_set_before_update
-                    # The relative increase of T is the same as the relative increase in the size of absorption set A
-                    dict_params_simul['T'] = min( int(dict_params_simul['T'] * (1 + _prop_increase_absorption_set)), MAX_NUMBER_OF_STEPS_FOR_EXPECTATION )
-                    self.agent.getLearner().setNumTimeStepsForExpectation(dict_params_simul['T'])
-                    print(f"Parameter T increased from T={_T_prev} to T={dict_params_simul['T']} ({(dict_params_simul['T'] / _T_prev - 1)*100:.1f}%) (due to increase of absorption set by {_prop_increase_absorption_set*100:.1f}%)")
+                        # Keep track of the size before update and update the absorption set to the new set just computed
+                        _size_absorption_set_before_update = len(self.agent.getLearner().getAbsorptionSet())
+                        absorption_set_has_been_updated, _number_of_new_states_in_absorption_set = update_absorption_set_if_not_too_large(estimated_absorption_set)
+                        assert _number_of_new_states_in_absorption_set > 0
+
+                        # Increase the simulation time for the initial exploration by the increase in the absorption set
+                        _prop_increase_absorption_set = _number_of_new_states_in_absorption_set / _size_absorption_set_before_update
+                        dict_params_simul = update_number_of_steps_for_expectation(dict_params_simul, increase_rate=_prop_increase_absorption_set,
+                                                                                   reason=f"(due to increase of absorption set by {_prop_increase_absorption_set*100:.1f}%)")
 
                 # Update the absorption and activation sets of the simulation parameters dictionary with the sets stored in the learner and possibly just updated
                 assertions_on_absorption_set(estimated_absorption_set)
@@ -706,9 +717,22 @@ class Simulator:
                         dict_params_simul['proba_killing'][s] = dist_state_counts[s]
                         # Use this to define the killing probability as a STEP function that is non-zero in the states in the absorption set A
                         #dict_params_simul['proba_killing'][s] = 0.50  # dict_params_simul['threshold_absorption_set']
-                        # TODO: (2025/05/29) Implement a sigmoid function of the cumulative visit frequency (computed on the *decreasing* visit frequencies) as killing probability, centered at e.g. F(x) = 0.90 (the larger this threshold, the larger the set of states which would potentially have a large killing probability --how large this probability is depends on the sigmoid parameter (which is an hyperparameter of the process)
+                        # TODO: (2025/05/29) Implement a sigmoid function of the cumulative visit frequency proposed by Matt (computed on the *decreasing* visit frequencies) as killing probability, centered at e.g. F(x) = 0.90 (the larger this threshold, the larger the set of states which would potentially have a large killing probability --how large this probability is depends on the sigmoid parameter (which is an hyperparameter of the process)
                         # (continuing with the to-do task: this is the idea proposed by Matt which makes absolute sense and should solve the problems encountered with the other two strategies above --although I don't recall what they are.)
 
+                # Store the state with smallest visit frequency during the initial exploration to use as start state for the E(T_A) simulation
+                # Goal: Start at a state that is most likely close to the boundary of A
+                #dict_params_simul['start_states_for_et'] = set({dist_state_counts.index[-1]})  # THIS DOES NOT SEEM LIKE A GOOD IDEA... POLICY LEARNING FAILS!! (perhaps because it is only one point...?
+                dict_params_simul['start_states_for_et'] = set(dist_state_counts.index).difference(dict_params_simul['absorption_set'])
+
+                # ******
+                # DM-2025/06/15: Disabled the following section because the information collected about the less frequently visited states is no longer used as a backup for
+                # the selection of start states of the FV particles. I do not remove the section completely because there is a possibly useful step of removing
+                # the less frequently visited states from the absorption set A in order to increase the probability of observing EXIT states from A and thus being able to
+                # choose the start states for the FV particles (see the `_less_frequently_visited_states_to_remove_from_absorption_set` variable definition).
+                # Note, however, that this removal process may at the same time regenerate holes in A which may have been filled by the high visit frequency observed
+                # during the FV simulation, so it's not clear that it is a useful strategy.
+                # ******
                 # Store the set of states that were visited during the excursion but that are NOT part of the absorption set
                 # This is useful if we want to choose the start states for the FV particle system among those states, which makes sense in the following situations:
                 # - under soft killing, it would be possible to choose the FV start states OUTSIDE the set of frequently visited states, which is where we want to be during FV.
@@ -717,53 +741,61 @@ class Simulator:
                 # at the next iteration amy most likely lead to states that are already in the next A set (thinking that our strategy of filling the holes in A consists of
                 # adding the states that are frequently visited by the FV excursion which could also be states where the FV system gets stuck. So, if we use those states
                 # again as start states in the upcoming policy iteration, they would most likely be states where the FV system will again get stuck...)
-                dict_params_simul['backup_start_states_for_fv'] = set(dist_state_counts.index).difference(dict_params_simul['absorption_set'])
-                less_frequently_visited_states_case = "1 - GREAT, LESS FREQUENTLY VISITED STATES DURING INITIAL EXPLORATION are OUTSIDE A"
-                if len(dict_params_simul['backup_start_states_for_fv']) == 0:
-                    print("WARNING: All visited states during the initial exploration are part of the absorption set."
-                          " This would be a problem if we need to use them as BACKUP set for the start state of the FV particles, if no EXIT states from A are observed."
-                          "\nTrying to solve this now...")
-                    # Check if there are states stored in the set of less frequently visited states in the FV learner
-                    print("1) Checking if the set of LESS frequently visited states during the FV simulation performed in the PREVIOUS learning step are OUTSIDE the absorption set just identified...")
-                    _less_frequently_visited_states_not_in_absorption_set = self.agent.getLearner().getLessFrequentlyVisitedSet().difference(dict_params_simul['absorption_set'])
-                    if len(_less_frequently_visited_states_not_in_absorption_set) > 0:
-                        print(f"=== OK! ===: The set of visited states that are not in the absorption set is defined as the set of less frequently visited states during the last FV simulation that are NOT in the currently identified absorption set.")
-                        dict_params_simul['backup_start_states_for_fv'] = _less_frequently_visited_states_not_in_absorption_set
-                        less_frequently_visited_states_case = "2 - GOOD, THE LESS FREQUENTLY VISITED STATES BY FV IN PREVIOUS STEP are OUTSIDE A"
-                    else:
-                        # Add a few states to this set, namely the states with smallest visit frequency of the absorption set
-                        # and REMOVE those states from the absorption set in the HARD killing setting
-                        # (o.w. there would be a problem when selecting that state as starting state for the FV particles because the start state would belong to the absorption set
-                        # and this is not allowed in the HARD killing setting)
-                        _number_of_less_frequently_visited_states_to_remove_from_absorption_set = min(len(dist_state_counts), 5)
-                        print(f"*** WARNING ***: Problem NOT solved: no visited state by the FV simulation at the PREVIOUS learning step is OUTSIDE the currently identified absorption set."
-                              f"\nThe set of visited states that are not in the absorption set is defined as the {_number_of_less_frequently_visited_states_to_remove_from_absorption_set} least frequently visited states in the absorption set.")
-                        _less_frequently_visited_states_to_remove_from_absorption_set = set( sorted(dist_state_counts.index, key=lambda x: dist_state_counts[x])[:_number_of_less_frequently_visited_states_to_remove_from_absorption_set] )
-                        if False and not dict_params_simul['soft_killing']:
-                            # NOTE: (2025/05/23) I think I deactivated this step of removing states from A because it may lead to a decrease of the absorption set A, which is actually not allowed.
-                            # HOWEVER, I think we could allow a decrease in A in order to accommodate this situation!
-                            print(f"2) Removing those states from the absorption set: {sorted(_less_frequently_visited_states_to_remove_from_absorption_set)}")
-                            dict_params_simul['absorption_set'] = dict_params_simul['absorption_set'].difference(_less_frequently_visited_states_to_remove_from_absorption_set)
-                            self.agent.getLearner().setAbsorptionSet(dict_params_simul['absorption_set'])
-                        dict_params_simul['backup_start_states_for_fv'] = _less_frequently_visited_states_to_remove_from_absorption_set
-                        less_frequently_visited_states_case = "3 - BAD, THE LESS FREQUENTLY VISITED STATES are taken FROM A"
-                print(f"Less frequently visited states case: {less_frequently_visited_states_case}")
+                if False:
+                    dict_params_simul['backup_start_states_for_fv'] = set(dist_state_counts.index).difference(dict_params_simul['absorption_set'])
+                    less_frequently_visited_states_case = "1 - GREAT, LESS FREQUENTLY VISITED STATES DURING INITIAL EXPLORATION are OUTSIDE A"
+                    if len(dict_params_simul['backup_start_states_for_fv']) == 0:
+                        print("WARNING: All visited states during the initial exploration are part of the absorption set."
+                              " This would be a problem if we need to use them as BACKUP set for the start state of the FV particles, if no EXIT states from A are observed."
+                              "\nTrying to solve this now...")
+                        # Check if there are states stored in the set of less frequently visited states in the FV learner
+                        print("1) Checking if the set of LESS frequently visited states during the FV simulation performed in the PREVIOUS learning step are OUTSIDE the absorption set just identified...")
+                        _less_frequently_visited_states_not_in_absorption_set = self.agent.getLearner().getLessFrequentlyVisitedSet().difference(dict_params_simul['absorption_set'])
+                        if len(_less_frequently_visited_states_not_in_absorption_set) > 0:
+                            print(f"=== OK! ===: The set of visited states that are not in the absorption set is defined as the set of less frequently visited states during the last FV simulation that are NOT in the currently identified absorption set.")
+                            dict_params_simul['backup_start_states_for_fv'] = _less_frequently_visited_states_not_in_absorption_set
+                            less_frequently_visited_states_case = "2 - GOOD, THE LESS FREQUENTLY VISITED STATES BY FV IN PREVIOUS STEP are OUTSIDE A"
+                        else:
+                            # Add a few states to this set, namely the states with smallest visit frequency of the absorption set
+                            # and REMOVE those states from the absorption set in the HARD killing setting
+                            # (o.w. there would be a problem when selecting that state as starting state for the FV particles because the start state would belong to the absorption set
+                            # and this is not allowed in the HARD killing setting)
+                            _number_of_less_frequently_visited_states_to_remove_from_absorption_set = min(len(dist_state_counts), 5)
+                            print(f"*** WARNING ***: Problem NOT solved: no visited state by the FV simulation at the PREVIOUS learning step is OUTSIDE the currently identified absorption set."
+                                  f"\nThe set of visited states that are not in the absorption set is defined as the {_number_of_less_frequently_visited_states_to_remove_from_absorption_set} least frequently visited states in the absorption set.")
+                            _less_frequently_visited_states_to_remove_from_absorption_set = set( sorted(dist_state_counts.index, key=lambda x: dist_state_counts[x])[:_number_of_less_frequently_visited_states_to_remove_from_absorption_set] )
+                            if False and not dict_params_simul['soft_killing']:
+                                # NOTE: (2025/05/23) I think I deactivated this step of removing states from A because it may lead to a decrease of the absorption set A, which is actually not allowed.
+                                # HOWEVER, I think we could allow a decrease in A in order to accommodate this situation!
+                                print(f"2) Removing those states from the absorption set: {sorted(_less_frequently_visited_states_to_remove_from_absorption_set)}")
+                                dict_params_simul['absorption_set'] = dict_params_simul['absorption_set'].difference(_less_frequently_visited_states_to_remove_from_absorption_set)
+                                self.agent.getLearner().setAbsorptionSet(dict_params_simul['absorption_set'])
+                            dict_params_simul['backup_start_states_for_fv'] = _less_frequently_visited_states_to_remove_from_absorption_set
+                            less_frequently_visited_states_case = "3 - BAD, THE LESS FREQUENTLY VISITED STATES are taken FROM A"
+                    print(f"Less frequently visited states case: {less_frequently_visited_states_case}")
 
-                if self.env.isStateContinuous():
-                    print(
-                        f"\nAbsorption set (2D) (1D-index, 2D-discrete) (n={len(dict_params_simul['absorption_set'])} out of {self.env.getNumStates()}, {np.round(len(dict_params_simul['absorption_set']) / self.env.getNumStates() * 100, 1)}%):"
-                        f"\n{[str(s) + ': ' + str(self.env.get_state_discrete_from_index(s)) for s in dict_params_simul['absorption_set']]}")
-                else:
-                    print(
-                        f"\nAbsorption set (2D) (1D-index, 2D-index, 2D-discrete) (n={len(dict_params_simul['absorption_set'])} out of {self.env.getNumStates()}, {np.round(len(dict_params_simul['absorption_set']) / self.env.getNumStates() * 100, 1)}%):"
-                        f"\n{[str(s) + ': ' + str(self.env.getStateIndicesFromIndex(s)) + ', ' + str(self.env.getStateFromIndex(s, simulation=False)) for s in dict_params_simul['absorption_set']]}")
-                print(
-                    f"Activation set (2D) (n={np.nan if dict_params_simul['activation_set'] is None else len(dict_params_simul['activation_set'])}):\n{dict_params_simul['activation_set'] is None and 'None' or [str(s) + ': ' + str(self.env.getStateIndicesFromIndex(s)) for s in dict_params_simul['activation_set']]}")
+                print("\nAbsorption set (2D)")
+                self.env.show_states(dict_params_simul['absorption_set'])
+                print("Activation set (2D)")
+                self.env.show_states(dict_params_simul['activation_set'])
                 print("**** ABSORPTION SET SELECTION ****\n")
 
             return dict_params_simul, less_frequently_visited_states_case, absorption_set_has_been_updated
 
-        def update_absorption_set_if_not_too_large(absorption_set, max_prop_absorption_set):
+        def update_number_of_steps_for_expectation(dict_params_simul, increase_rate=0.10, reason=""):
+            """
+            Increases the number of steps used for the initial exploration in an attempt to observe EXIT states
+
+            The number of steps is stored in the FV learner so that it keeps being used in subsequent learning steps.
+            """
+            T_prev = dict_params_simul['T']
+            dict_params_simul['T'] = int( min(dict_params_simul['T'] * (1 + increase_rate), MAX_NUMBER_OF_STEPS_FOR_EXPECTATION) )
+            self.agent.getLearner().setNumTimeStepsForExpectation(dict_params_simul['T'])
+            print(f"Parameter T increased from {T_prev} to {dict_params_simul['T']} ({(dict_params_simul['T'] / T_prev - 1) * 100:.1f}%) {reason}")
+
+            return dict_params_simul
+
+        def update_absorption_set_if_not_too_large(absorption_set, max_prop_absorption_set=+np.Inf):
             """
             Updates the absorption set stored in the FV learner with the given `absorption_set` as long as it has not grown above
             the `max_prop_absorption_set` threshold and returns whether it has been updated.
@@ -783,16 +815,15 @@ class Simulator:
                 number_of_new_states_in_absorption_set = 0
             else:
                 # Set the absorption set in the learner, which also automatically updates the activation and active sets
-                # WARNING: (2024/08/07) The activation set is computed only when the environment is a Gridworld as it uses the get_adjacent_states() function defined in environments/gridworlds.py
-                # If the activation set is not computed, it is defined as `None` and in that case it is computed by the initial exploration of the Markov chain performed by the
-                # _run_single_continuing_task() method where a dictionary containing the exit states as keys and their observed frequency as values is returned as part of the
-                # learning_info dictionary (see `probas_stationary_exit_cycle_set` therein).
-                absorption_set_has_been_updated = True
                 number_of_new_states_in_absorption_set = len(absorption_set) - len(self.agent.getLearner().getAbsorptionSet())
                 assert number_of_new_states_in_absorption_set >= 0, f"The size of the absorption set must NOT decrease: number of new states = {number_of_new_states_in_absorption_set}"
-                print(f"[CHECK #2] Absorption set UPDATED! ({number_of_new_states_in_absorption_set} new states) --> "
-                      f"New size = {_size_absorption_set} states ({_prop_absorption_set * 100}% of {_n_valid_states} valid states)")
-                self.agent.getLearner().setAbsorptionSet(absorption_set)
+                if absorption_set != self.agent.getLearner().getAbsorptionSet():
+                    print(f"[CHECK #2] Absorption set UPDATED! ({number_of_new_states_in_absorption_set} new states) --> "
+                          f"New size = {_size_absorption_set} states ({_prop_absorption_set * 100:.1f}% of {_n_valid_states} valid states)")
+                    self.agent.getLearner().setAbsorptionSet(absorption_set)
+                    absorption_set_has_been_updated = True
+                else:
+                    absorption_set_has_been_updated = False
 
             return absorption_set_has_been_updated, number_of_new_states_in_absorption_set
         # -- Auxiliary functions
@@ -828,43 +859,80 @@ class Simulator:
         # for the first time, because the start state is part of a set of frequently observed states, which is how A is defined, thus delaying
         # the time when samples used to estimate E(T_A) can be taken.
         # When probas_stationary_start_state_et is None (which is the case at the very first step of a policy learning process),
-        # the start state is chosen uniformly, either out of:
-        # - the states in the outside boundary of A, when this is known, i.e. when LeaFV.getActivationSet() is not None (seldom the case) OR
-        # - the states belonging to the backup set of start states for FV, which could be potentially used at the beginning of the FV simulation in degenerate situations,
-        # particularly useful in SOFT killing settings (not really in HARD killing settings because in this case, the start states should be outside A
-        # and this is not guaranteed by the backup set of start states).
+        # the start state is chosen uniformly as the set of states defined after the initial exploration of the environment in entry dict_params_simul['start_states_for_et']
+        # as long as it is not empty (it should never be empty though, because of the way it is defined above).
+        # Otherwise, if for some reason it happens to be empty, we set the start state to None so that the state is chosen
+        # following the initial state distribution of the environment (isd) (done by the env.reset() when called in the _run_single_continuing_task() method).
         if probas_stationary_start_state_et is None or len(probas_stationary_start_state_et) == 0:
-            if self.agent.getLearner().getActivationSet() is not None and len(self.agent.getLearner().getActivationSet()) > 0:
-                start_state = choose_state_from_set(self.agent.getLearner().getActivationSet(), None)
-            else:
-                start_state = choose_state_from_set(dict_params_simul['backup_start_states_for_fv'])
+            # DM-2025/06/14: We should NOT use information about the activation set because that would be cheating,
+            # as the agent is assumed not to know anything about the environment, except for what it discovers while exploring.
+            #if self.agent.getLearner().getActivationSet() is not None and len(self.agent.getLearner().getActivationSet()) > 0:
+            #    start_state = choose_state_from_set(self.agent.getLearner().getActivationSet(), None)
+            #else:
+
+            # Note: setting the start_state value to `None` (when the 'start_states_for_et' entry in dict_params_simul is empty)
+            # means that the start state will be chosen from the environment's initial state distribution
+            # (done by _run_single_continuing_task() when choosing the start state of the simulation)
+            start_state = choose_state_from_set(dict_params_simul['start_states_for_et']) if len(dict_params_simul.get('start_states_for_et', {})) > 0 else None
+            print(f"The start state for the E(T_A) simulation has been chosen UNIFORMLY at random from the following set:")
+            self.env.show_states(dict_params_simul.get('start_states_for_et'))
         else:
             start_state = choose_state_from_set(set(probas_stationary_start_state_et.keys()), probas_stationary_start_state_et)
-        print(f"SINGLE simulation on T={dict_params_simul['T']} steps for the estimation of the expected reabsorption time E(T_A) starts at state s={start_state} "
-              f"(when None, the simulation starts following the Initial State Distribution of the environment: "
-              f"\n{self.env.getInitialStateDistribution() if len(self.env.getInitialStateDistribution()) <= 20 else 'Not printed because too large (' + str(len(self.env.getInitialStateDistribution())) + ' elements)'}")
+            print(f"The start state for the E(T_A) simulation has been chosen as a random sample from the following distribution:"
+                  f"\n{probas_stationary_start_state_et}"
+                  f"\ntaking values on the following set,", end=" ")
+            self.env.show_states(set(probas_stationary_start_state_et.keys()))
+        print(f"SINGLE simulation on T={dict_params_simul['T']} steps for the estimation of the expected reabsorption time E(T_A) starts at state s={start_state}")
+        if start_state is None:
+            warning_msg = "WARNING: No information is available for choosing the start state of the E(T_A) simulation (=> start_state = None). " \
+                          f"The start state will be chosen using the initial state distribution of the environment:" \
+                          f"\n{self.env.getInitialStateDistribution() if len(self.env.getInitialStateDistribution()) <= 20 else 'Not printed because too large (' + str(len(self.env.getInitialStateDistribution())) + ' elements)'}"
+            print(warning_msg)
+            warnings.warn(warning_msg)
         time.sleep(1)
-        state_values, action_values, advantage_values, state_counts_et, _, _, learning_info = \
-            self._run_single_continuing_task(
-                            t_learn=dict_params_info['t_learn'],
-                            max_time_steps=dict_params_simul['T'],      # Max simulation time over ALL episodes
-                            start_state_first_episode=start_state,
-                            #estimated_average_reward=0.0,  # (2025/05/18) Use this (TOGETHER WITH use_fixed_average_reward=True) for the ABLATION study of estimating the average reward at a wrong value (e.g. always 0)
-                            estimated_average_reward=estimated_average_reward_before_initial_exploration,
-                            use_fixed_average_reward=use_fixed_average_reward,
-                            reset_value_functions=reset_value_functions,
-                            epsilon_random_action=dict_params_simul['epsilon_random_action'],
-                            reward_shaping=dict_params_simul['reward_for_exit_states'] is not None,
-                            reward_for_exit_states=dict_params_simul['reward_for_exit_states'] if absorption_set_has_been_updated else np.nan,
-                            seed=dict_params_simul['seed'],
-                            set_cycle=dict_params_simul['absorption_set'] if not dict_params_simul['soft_killing'] else None,
-                            dict_proba_cycle=dict_params_simul['proba_killing'] if dict_params_simul['soft_killing'] else None,
-                            plot=dict_params_info['plot'],
-                            verbose=dict_params_info['verbose'],
-                            verbose_period=dict_params_info['verbose_period'])
-        n_events_et = learning_info['nsteps']
+
+        # Simulate the single Markov chain until EXIT states are observed from A or, if soft killing is used, only simulate it ONCE (as EXIT states are NOT used in soft killing)
+        n_events_et = 0
+        n_initial_explorations_run = 0
+        flag_soft_killing_or_exit_states_observed_or_maximum_t_reached = False
+        while not flag_soft_killing_or_exit_states_observed_or_maximum_t_reached:
+            state_values, action_values, advantage_values, state_counts_et, _, _, learning_info = \
+                self._run_single_continuing_task(
+                                t_learn=dict_params_info['t_learn'],
+                                max_time_steps=dict_params_simul['T'],      # Max simulation time over ALL episodes
+                                start_state_first_episode=start_state,
+                                #estimated_average_reward=0.0,  # (2025/05/18) Use this (TOGETHER WITH use_fixed_average_reward=True) for the ABLATION study of estimating the average reward at a wrong value (e.g. always 0)
+                                estimated_average_reward=estimated_average_reward_before_initial_exploration,
+                                use_fixed_average_reward=use_fixed_average_reward,
+                                reset_value_functions=reset_value_functions,
+                                epsilon_random_action=dict_params_simul['epsilon_random_action'],
+                                reward_shaping=dict_params_simul['reward_for_exit_states'] is not None,
+                                reward_for_exit_states=dict_params_simul['reward_for_exit_states'] if absorption_set_has_been_updated else np.nan,
+                                seed=dict_params_simul['seed'] + n_initial_explorations_run,
+                                set_cycle=dict_params_simul['absorption_set'] if not dict_params_simul['soft_killing'] else None,
+                                dict_proba_cycle=dict_params_simul['proba_killing'] if dict_params_simul['soft_killing'] else None,
+                                plot=dict_params_info['plot'],
+                                verbose=dict_params_info['verbose'],
+                                verbose_period=dict_params_info['verbose_period'])
+            n_initial_explorations_run += 1
+            # Increase the number of steps taken during the initial exploration
+            n_events_et += learning_info['nsteps']
+
+            # Check if EXIT states from A have been observed
+            if len(learning_info['probas_stationary_exit_cycle_set']) == 0 and dict_params_simul['T'] < MAX_NUMBER_OF_STEPS_FOR_EXPECTATION:
+                # Increase the simulation time for the initial exploration to see if by repeating the exploration, EXIT states can be observed
+                dict_params_simul = update_number_of_steps_for_expectation(dict_params_simul, reason="before REPEATING the initial exploration (due to NO EXIT states observed from A)")
+
+            flag_soft_killing_or_exit_states_observed_or_maximum_t_reached = dict_params_simul['soft_killing'] or \
+                                                                             len(learning_info['probas_stationary_exit_cycle_set']) > 0 or \
+                                                                             dict_params_simul['T'] == MAX_NUMBER_OF_STEPS_FOR_EXPECTATION
+
         n_absorption_cycles_used = learning_info['num_cycles']
         time_last_absorption = learning_info['last_cycle_entrance_time']
+
+        print(f"Number of initial explorations run = {n_initial_explorations_run} for a total of {n_events_et} exploration steps. Last value of T = {dict_params_simul['T']}.")
+        if len(learning_info['probas_stationary_exit_cycle_set']) > 0:
+            print("--> SUCCESS: EXIT states from absorption set A observed!")
 
         # Store information about the estimated expected absorption time
         # One of the reasons for storing this information is to be able to use an estimated value for E(T_A) from a *previous* policy learning step,
@@ -919,10 +987,10 @@ class Simulator:
                           f"{n_absorption_cycles_used} < {dict_params_simul['min_num_cycles_for_expectations']}"
             print(warning_msg)
             warnings.warn(warning_msg)
-        if len(learning_info['probas_stationary_exit_cycle_set']) == 0 and less_frequently_visited_states_case[:1] == "3":
+        if not dict_params_simul['soft_killing'] and len(learning_info['probas_stationary_exit_cycle_set']) == 0:
             # This is the case when the start states of the FV particles cannot be chosen because:
+            # - we are NOT using the soft killing strategy
             # - no EXIT states from A were observed during the initial exploration of the environment
-            # - all less-frequently-visited states during the initial exploration are inside the absorption set A, so those states cannot be used as backup start states.
             state_counts_all = state_counts_et
             expected_reward = self.agent.getLearner().getAverageReward()
             probas_stationary = dict()
@@ -931,17 +999,14 @@ class Simulator:
             n_events_et = n_events_et
             n_events_fv = 0
 
-            warning_msg = f"*** WARNING: *** The set of EXIT states from A and the BACKUP set are EMPTY!!! The FV simulation will not be run. " \
+            warning_msg = f"*** WARNING: *** The set of EXIT states from A is EMPTY!!! The FV simulation will not be run. " \
                           f"The estimate of the long-run expected reward will be set to the estimate obtained during the initial exploration: {expected_reward}"
             print(warning_msg)
             warnings.warn(warning_msg)
 
-            # Increase the simulation time for the initial exploration at the next policy iteration, so that at the chances of observing exit states from A are larger next time
-            _increase_rate_T = 0.10
-            _T_next = min( int(dict_params_simul['T'] * (1 + _increase_rate_T)), MAX_NUMBER_OF_STEPS_FOR_EXPECTATION )
-            self.agent.getLearner().setNumTimeStepsForExpectation(_T_next)
-            print(f"Parameter T increased from {dict_params_simul['T']} to {_T_next} ({(_T_next / dict_params_simul['T'] - 1)*100:.1f}%) "
-                  f"for next policy iteration (due to NO EXIT states observed and NO BACKUP states to use at the next policy iteration)")
+            assert dict_params_simul['T'] == MAX_NUMBER_OF_STEPS_FOR_EXPECTATION and self.agent.getLearner().getNumTimeStepsForExpectation() == MAX_NUMBER_OF_STEPS_FOR_EXPECTATION, \
+                f"The number of steps for the initial exploration must have reached its possible maximum of T={MAX_NUMBER_OF_STEPS_FOR_EXPECTATION} when no EXIT states were observed" \
+                f"during the several trials of initial exploration of the environment: T={self.agent.getLearner().getNumTimeStepsForExpectation()}"
         else:
             # Perform the Fleming-Viot simulation, as the estimator of the denominator in the FV estimator is reliable
             N = len(envs)
@@ -973,11 +1038,11 @@ class Simulator:
                     # - if SOFT KILLING: it is set to the stationary distribution of the state at which a killing CLOCK occurs.
                     # - Otherwise: it is set to the stationary exit probability from the absorption set.
                     # *** IMPORTANT: Note that this distribution is NOT stored in the FV learner ***
-                    # In fact, if we stored it in the FV learner and this simulation is part of policy learning process, the next time the simulation is called
+                    # In fact, if we stored it in the FV learner and this simulation is part of a policy learning process, the next time the simulation is called
                     # (e.g. at a subsequent policy learning step) the start distribution for the FV particles would no longer be None,
                     # because the distribution (probas_stationary_start_state_fv, which is checked against `None` above)
                     # would be read from the distribution stored in the FV learner by the caller, and this would impede an update of the start distribution
-                    # (which is required when the policy had been updated at the latest policy learning step).
+                    # (which is required when the policy had been updated --and possibly the absorption set A as well-- at the latest policy learning step).
                     if dict_params_simul['soft_killing']:
                         # DM-2025/01/05: Starting at the start of a cycle is not so effective because the start of a cycle is a frequently visited state and thus the FV particles
                         # remain mostly in the set of frequently visited states. So, it is better to start at the state JUST BEFORE the killing state
@@ -986,38 +1051,10 @@ class Simulator:
                         probas_stationary_start_state_fv = learning_info['probas_stationary_end_cycle']
                         assert len(probas_stationary_start_state_fv) > 0, "(Assertion added 22-May-2025) The number of end cycle states in the SOFT killing case must not be empty"
                         start_state_selection_case = "1 - END CYCLE STATES"
-                    elif dict_params_simul['estimate_absorption_set']:
-                        # This means that the absorption set is potentially updated at each policy learning step
-                        # => We choose the largest set between the set of CYCLE EXIT states and the set of states visited during the initial exploration NOT in the absorption set
-                        # as set of start states for the FV simulation, but give priority to the CYCLE EXIT set if it is large enough.
-                        # Note that, when the absorption set becomes too large, there may be no EXIT event observed during the initial exploration.
-                        if len(learning_info['probas_stationary_exit_cycle_set']) == 0:
-                            print("*** WARNING: *** The set of EXIT states from A is EMPTY!!! The BACKUP set of start states will be used to choose the initial location of FV particles.")
-                        if False and less_frequently_visited_states_case[:1] != "3" and \
-                           len(learning_info['probas_stationary_exit_cycle_set']) <= 2 and \
-                           len(dict_params_simul['backup_start_states_for_fv']) >= len(learning_info['probas_stationary_exit_cycle_set']):
-                            # The backup set of start states for FV is not degenerate (i.e. it is NOT a subset of the absorption set A) and it has more elements
-                            # than the set of observed EXIT states, which in turn is not too large (<= 2)
-                            # => Choose the backup set of start states for FV so that we have more variety of start states, which helps the FV particle system explore more
-                            # and reduces its chances of getting stuck at a fixed system configuration (i.e. distribution of FV particles).
-                            probas_stationary_start_state_fv = dict.fromkeys(dict_params_simul['backup_start_states_for_fv'], 1/len(dict_params_simul['backup_start_states_for_fv']))
-                            assert len(probas_stationary_start_state_fv) > 0, "(Assertion added 22-May-2025) The number of backup start states for FV must not be empty"
-                            start_state_selection_case = f"3 - GOOD, STATES OUTSIDE A VISITED in INI exploration (exit size: {len(learning_info['probas_stationary_exit_cycle_set'])})"
-                        else:
-                            probas_stationary_start_state_fv = learning_info['probas_stationary_exit_cycle_set']
-                            # NOTE: The above variable is a dictionary which COULD be empty (i.e. when no EXIT states from A has been observed in the initial exploration).
-                            # If this is the case, a WARNING message will be issued by _run_simulation_fv() when parsing its value and the value of the `start_set` argument.
-                            # Nevertheless we still issue a warning message here to be sure it shows up, because it is rather a GRAVE situation, because the FV agent uses
-                            # information that is supposed NOT to have, namely the set of activation states (i.e. the outer boundary of A).
-                            if len(probas_stationary_start_state_fv) == 0:
-                                print("CHEATING-WARNING: The activation set will be used as set for the selection of the start states of the FV particles. "
-                                      "This however is NOT allowed because the agent is supposed NOT to know the activation set!")
-                                start_set = dict_params_simul['activation_set']    # We should use `probas_stationary_start_state_fv` when not empty
-                            start_state_selection_case = "2 - EXIT CYCLE STATES (A may vary)"
                     else:
                         probas_stationary_start_state_fv = learning_info['probas_stationary_exit_cycle_set']
                         assert len(probas_stationary_start_state_fv) > 0, "(Assertion added 22-May-2025) The probability distribution of EXIT states must not be empty"
-                        start_state_selection_case = "4 - EXIT CYCLE STATES (A is fixed)"
+                        start_state_selection_case = "2 - EXIT CYCLE STATES"
                     start_state_selection_case += f" (size: {len(probas_stationary_start_state_fv)})"
                     print(f"[Analysis of EXIT states] => START STATE selection case: {start_state_selection_case}")
 
@@ -1063,10 +1100,7 @@ class Simulator:
                             min_prop_absorbed_particles=dict_params_simul['min_prop_absorbed_particles'],
                             stopping_criterion_fv=dict_params_simul['stopping_criterion_fv'],
                             dist_proba_for_start_state=probas_stationary_start_state_fv,
-
                             start_state_selection_case=start_state_selection_case,
-                            less_frequently_visited_states_case=less_frequently_visited_states_case,
-
                             soft_killing=dict_params_simul['soft_killing'],
                             dict_proba_killing=dict_params_simul['proba_killing'] if dict_params_simul['soft_killing'] else None,
                             update_absorption_set_with_fv_visits=dict_params_simul['update_absorption_set_with_fv_visits'],
@@ -1110,11 +1144,17 @@ class Simulator:
                                                              self.env.getReward(self.env.getStateFromIndex(s, simulation=True)) != 0.0]
             assert len(_states_in_absorption_set_with_nonzero_reward) == 0, f"[CHECK #2] The absorption set must not contain states with non-zero reward. The following states in the absorption set have non-zero reward: {_states_in_absorption_set_with_nonzero_reward}"
 
-            _absorption_set_has_been_updated, _number_of_new_states_in_absorption_set = update_absorption_set_if_not_too_large(absorption_set, dict_params_simul['max_prop_absorption_set'])
-            if _absorption_set_has_been_updated:
-                # Update also the set of less frequently visited states during the FV simulation so that it can be used as potential start states at the next policy learning step
-                # should anything go wrong with the normal selection of the FV start states (e.g. based on the exit state distribution from the absorption set)
-                self.agent.getLearner().setLessFrequentlyVisitedSet(less_frequently_visited_set)
+            if dict_params_simul['soft_killing'] or dict_params_simul['T'] < MAX_NUMBER_OF_STEPS_FOR_EXPECTATION:
+                # Increase the absorption set A based on visit frequencies during the FV simulation,
+                # when soft killing is used, and otherwise ONLY when the number of steps T used for the initial simulation has NOT reached its maximum value.
+                # Reason: the fact that T reached the maximum allowed value is an indicator that the absorption set has grown too much...
+                # ALSO: this condition also makes the increase decision of the absorption set INDEPENDENT OF THE AGENT KNOWING THE SIZE OF THE ENVIRONMENT,
+                # which is supposed to NOT know (i.e. the agent should not know anything about the environment apart from what it finds during exploration).
+                _absorption_set_has_been_updated, _number_of_new_states_in_absorption_set = update_absorption_set_if_not_too_large(absorption_set)
+                if _absorption_set_has_been_updated:
+                    # Update also the set of less frequently visited states during the FV simulation in order to keep consistency of this piece of information
+                    # with the information about the absorption set.
+                    self.agent.getLearner().setLessFrequentlyVisitedSet(less_frequently_visited_set)
 
             #-- Process the estimated expected reward
             state_counts_all = state_counts_et + state_counts_fv
@@ -1447,10 +1487,7 @@ class Simulator:
                            max_time_steps=None,
                            max_time_steps_for_absorbed_particles_check=+np.Inf, min_prop_absorbed_particles=1.0, stopping_criterion_fv=StoppingCriterion.MAX_TIME_STEPS_OR_MIN_PROP_ABSORBED_PARTICLES,
                            dist_proba_for_start_state: dict=None,
-
                            start_state_selection_case: str="",
-                           less_frequently_visited_states_case: str="",
-
                            soft_killing: bool=False,
                            dict_proba_killing: dict=None,
                            update_absorption_set_with_fv_visits: bool=False,
@@ -1641,7 +1678,8 @@ class Simulator:
         NOTE: the absorption set is updated ONLY when enough number of absorption cycles have been observed (say 5), o.w. it would be risky to enlarge the
         absorption set because it may well be the case that no more cycles are observed under the current policy.
         - less_frequently_visited_set: set of states visited by the FV particles (under VALID transitions of the original Markov process) that are not part of
-        the most visited set by the FV particles and that have been added to `absorption_set`.
+        the most visited set by the FV particles and that have NOT been added to the `absorption_set`. This might be useful as backup information
+        in extreme cases where the choice of the start states of the FV particles is not clear due to lacking to observe EXIT states from the absorption set.
         """
         #------------------------------- Auxiliary functions ----------------------------------#
         def reactivate_particle_internal(idx_particle):
@@ -1828,11 +1866,15 @@ class Simulator:
         # The average reward is reset when no initially estimated average reward is given. If such initially estimated average reward is given,
         # it means that it should be used as initial estimate of the average reward during further learning. Otherwise, when it is not given,
         # it means that we start the average reward learning process from scratch (i.e. from an average reward initially estimated as zero).
-        # The reset of the auxiliary information (e.g. number of particles, absorption set, FV start states distribution, etc.) happens whenever this is the first learning step
-        # in a policy learning process (t_learn = 0) or when it is a simulation that is run independently of any policy learning (e.g. by unit tests where t_learn < 0).
-        # Another important aspect of this reset step is the reset of the learning rates (alpha) of all states and actions,
+        # IMPORTANT: The reset of the auxiliary information (e.g. number of particles, absorption set, FV start states distribution, etc.) is NOT done
+        # because we might need auxiliary information stored in the FV learner for the following policy learning step, namely the expected absorption time E(T_A)
+        # estimated during the current policy learning step. This value is used as replacement of the expected absorption time
+        # estimated by the FOLLOWING policy learning step in case no cycles are observed during the single Markov chain simulation; if we reset this value here,
+        # (i.e. at the first policy learning step having t_learn=0), its value would be np.nan and there is a risk that an error will be triggered
+        # if no cycles are observed at the next policy learning step.
+        # Another important aspect of this reset step (which always happens, regardless of parameter values) is the reset of the learning rates (alpha) of all states and actions,
         # so that we start the FV-based learning with full strength).
-        learner.reset(reset_episode=True, reset_value_functions=reward_shaping, reset_average_reward=estimated_average_reward is None, reset_auxiliary_info=(t_learn <= 0))
+        learner.reset(reset_episode=True, reset_value_functions=reward_shaping, reset_average_reward=estimated_average_reward is None, reset_auxiliary_info=False)
         if reward_shaping:
             # Reset the value functions INSIDE the absorption set A, so that we keep whatever was learned already outside A!
             for s in absorption_set:
@@ -1855,7 +1897,7 @@ class Simulator:
 
         # Set the start state of each environment/particle to an activation state, as this is a requirement
         # for the empirical distribution Phi(t).
-        if dist_proba_for_start_state is None and len(start_set) > 1:
+        if dist_proba_for_start_state is None or len(dist_proba_for_start_state) == 0:
             print(f"The distribution for the start state selection of the FV particles is None. A UNIFORM distribution on the states in `start_set` will be used:\n{start_set}")
         else:
             print(f"Probability distribution used to select the start states of the FV particles:\n{dist_proba_for_start_state}")
@@ -2143,7 +2185,6 @@ class Simulator:
                             _state_counts[_dist_fv_particles.index] = _dist_fv_particles
                             self.env.plot_values(_state_counts, ax=ax_dist_fv, cmap="Blues", vmin=0, vmax=N, add_colorbar=False)
                             ax_dist_fv.set_title(f"Learning step t_learn = {t_learn+1}"
-                                                 f"\nLESS FREQ. VISITED STATES: '{less_frequently_visited_states_case}'"
                                                  f"\nSTART STATE CASE: '{start_state_selection_case}'"
                                                  f"\nDist. of FV particles (N={N}) at t = {t} of {max_time_steps}"
                                                  f" ({n_particles_absorbed_once / N * 100:.0f}% absorbed once)", fontsize=7)
@@ -2318,13 +2359,16 @@ class Simulator:
             _new_length_of_absorption_set = len(absorption_set)
             less_frequently_visited_set = set(_dist_state_counts.index).difference(_new_absorption_set)
             if _new_length_of_absorption_set - _current_length_of_absorption_set > 0:
-                print(f"--> The absorption set will be potentially updated (if its size does not become too large) with {_new_length_of_absorption_set - _current_length_of_absorption_set} new states (growing {(_new_length_of_absorption_set / _current_length_of_absorption_set - 1):.1f}%, from {_current_length_of_absorption_set} to {_new_length_of_absorption_set} states)")
+                print(f"--> The absorption set will be potentially updated (given certain conditions are satisfied) "
+                      f"with {_new_length_of_absorption_set - _current_length_of_absorption_set} new states "
+                      f"(growing {(_new_length_of_absorption_set / _current_length_of_absorption_set - 1):.1f}%, "
+                      f"from {_current_length_of_absorption_set} to {_new_length_of_absorption_set} states)")
             else:
                 print(f"--> The absorption set will NOT be updated as no new states were visited under the above conditions.")
         else:
             # When the absorption set is not updated, we set the set of less frequently visited states to all the states visited during the FV simulation
-            # so that any of them can be selected as start states for the next FV simulation (for the next policy learning step), in case "everything else" fails,
-            # i.e. when the FV start states are selected out of the EXIT states from the absorption set.
+            # so that any of them can be selected as start states for the next FV simulation (for the next policy learning step), in case "everything else" fails.
+            # Note that this may or may not be used in the code, depending on the current state of the evolving implementation.
             less_frequently_visited_set = set(learner._states)
 
         if DEBUG_ESTIMATORS and stopping_criterion_fv not in [StoppingCriterion.MAX_TIME_STEPS, StoppingCriterion.MAX_TIME_STEPS_AND_MIN_PROP_ABSORBED_PARTICLES]:

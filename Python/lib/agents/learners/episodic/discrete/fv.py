@@ -1410,16 +1410,16 @@ class LeaFV(LeaTDLambda):
         "Sets the absorption set and updates the activation and active sets so that they are consistent with the absorption set"
         # TEMPORARY: This calculation of the activation set is ONLY valid for GRIDWORLD environments.
         # In the general case, the activation set should be computed from the transition matrix P associated to the environment.
-        # TODO: (2024/05/12) Compute the activation set from the transition matrix of the environment
-        # TODO: (2025/01/08) DO NOT DO THE ABOVE TODO! In fact, the agent is NOT supposed to know the transition probabilities! (it's a model-free RL approach we are using!)
-        try:
+        # [DONE-2025/06/13: Disregarded for what is written in the next "to-do"] to-do: (2024/05/12) Compute the activation set from the transition matrix of the environment
+        # [DONE-2025/06/13: The activation set is no longer computed to avoid CHEATING by the FV agent when learning value functions] to-do: (2025/01/08) DO NOT DO THE ABOVE TODO! In fact, the agent is NOT supposed to know the transition probabilities! (it's a model-free RL approach we are using!)
+        if False:
             from Python.lib.environments.gridworlds import get_adjacent_states
             activation_set = set()
             for s in absorption_set:
                 for sadj, dir in get_adjacent_states(self.env.getShape(), s):
                     if sadj is not None and sadj not in set.union(absorption_set, self.env.getObstacleStates()):
                         activation_set.add(sadj)
-        except:
+        else:
             activation_set = None
 
         self.absorption_set = absorption_set

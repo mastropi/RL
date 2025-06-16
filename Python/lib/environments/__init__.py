@@ -169,9 +169,31 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
         "Renders the environment. See details in the Env class defined in gym/core.py"
         raise NotImplementedError
 
+    def show_states(self, states):
+        """
+        Shows states of the environment, sorted by their 1D index and nicely formatted for better human understanding
+
+        Arguments:
+        states: list, tuple, set
+            States to show given as their 1D index representation.
+        """
+        n_string = f"(n={np.nan if states is None else str(len(states)) + ' out of ' + str(self.getNumStates()) + ', ' + str(np.round(len(states) / self.getNumStates() * 100, 1)) + '%'}):"
+        if self.isStateContinuous():
+            # This is the case for e.g. the MountainCar environment when the environment is defined on the continuous-valued states, but ONLY for the computation of the next state
+            # based on Physics law (although the environment's state space is still discrete --which is why we call get_state_discrete_from_index() below).
+            print(f"States (1D-index, 2D-discrete) {n_string}"
+                  f"\n{states is None and 'None' or [str(s) + ': ' + str(self.get_state_discrete_from_index(s)) for s in sorted(states)]}")
+        else:
+            print(f"States (1D-index, 2D-index, 2D-discrete) {n_string}"
+                  f"\n{states is None and 'None' or [str(s) + ': ' + str(self.getStateIndicesFromIndex(s)) + ', ' + str(self.getStateFromIndex(s, simulation=False)) for s in sorted(states)]}")
+
     #--- Getters
     def isStateContinuous(self):
+        "Indicates whether a continuous-valued representation of the state is used to compute the next state"
         return False
+
+    def get_state_discrete_from_index(self, idx_state: int):
+        raise NotImplementedError()
 
     def getDimension(self):
         return self.dim
