@@ -51,8 +51,7 @@ class SimulatorDiffusionFV(Simulator):
         self.trajectories_fv = None
 
     def run(self, dict_params_simul: dict, sets_of_interest :list,
-            dict_params_info: dict={'plot': False, 'log': False},
-            dict_info: dict={},
+            start_state=0.0,
             store_trajectories=False,
             seed=None,
             verbose=False, verbose_period=1, plot={'MC': False, 'FV': False}):
@@ -74,6 +73,15 @@ class SimulatorDiffusionFV(Simulator):
 
         sets_of_interest: list of sympy.Set
             List containing the sets of interest on which the stationary probability should be estimated with Fleming-Viot.
+
+        start_state: float
+            Start state for the initial simulation that estimates the exit states and expected cycle time.
+            default: 0.0
+
+        Return: tuple
+        Tuple with the following two elements:
+        - probas_stationary: list containing the probability of each set of interest given in `sets_of_interest`.
+        - info: dictionary containing information about the simulation run.
         """
         #--- Parse input parameters
         N = dict_params_simul.get('N')
@@ -100,7 +108,7 @@ class SimulatorDiffusionFV(Simulator):
         # - the absorption set A (possibly as a sympy.logic.boolalg.Boolean.as_set() object which is of type sympy.sets.sets.UniversalSet --> However, it seems for this I would need to upgrade Python because I have sympy-1.1.1 and the latest is sympy-1.14.0 and the former version does NOT have sympy.logic.boolalg defined!!
         # - (opt, not prio) min number of cycles to compute expectation
         # - (opt, not prio) burn-in time
-        start_state = 0.0 #float(absorption_set.inf)   # IMPORTANT: convert to float() o.w. the exit states in _run_simulation_mc() are stored as type `object` instead of `float`!!
+        start_state = start_state #float(absorption_set.inf)   # IMPORTANT: convert to float() o.w. the exit states in _run_simulation_mc() are stored as type `object` instead of `float`!!
         print(f"\tRunning Monte-Carlo simulation to estimate the expected return time to absorption set A and the exit state distribution: start state = {start_state}, seed = {seed}...")
         expected_cycle_time, n_cycles, dist_exit_state, info_mc = self._run_simulation_mc(dict_params_simul, start_state=start_state, store_trajectory=store_trajectories,
                                                                                           check_for_stationarity=check_for_stationarity, burnin_for_stationarity_check=burnin_for_stationarity_check,

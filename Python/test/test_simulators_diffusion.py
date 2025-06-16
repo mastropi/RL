@@ -40,7 +40,10 @@ def define_sets_of_interest(thresholds):
 class Test_Class_SimulatorDiffusionFV(unittest.TestCase):
     "Tests for the SimulatorDiffusionFV simulator that simulates the EnvDiffusion environment"
 
-    def __init__(self, reflect=False, *args, **kwargs):
+    # NOTE: We should NOT define an __init__() method because this breaks the capability of running tests!
+    # (the error "Test_Class_SimulatorDiffusionFV object has no attribute 'runTest' is raised)
+    # See also: https://sqlpey.com/python/top-5-methods-to-initialize-your-unittest-testcase/#method-1-customizing-the-__init__-method
+    def setUp(self, reflect=False, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.reflect = reflect
 
@@ -56,7 +59,7 @@ class Test_Class_SimulatorDiffusionFV(unittest.TestCase):
         # Parameters for the piecewise drift function (alpha in the paper referenced in func_drift_fcr_piecewise())
         cls.r = 0.6  # Capacity reserved for FCR-N
         cls.x = 1.4  # Capacity reserved for FCR-D
-        cls.env_ou = EnvDiffusion(func_drift=func_drift_fcr_piecewise, func_noise=func_noise_gaussian, reflect=cls.reflect, mu=mu, dt=dt, sigma=sigma, r=cls.r, x=cls.x)
+        cls.env_ou = EnvDiffusion(func_drift=func_drift_fcr_piecewise, func_noise=func_noise_gaussian, reflect=False, mu=mu, dt=dt, sigma=sigma, r=cls.r, x=cls.x)
 
     def test_run_estimation_fv(self, dict_params_simul=dict({'N': 50, 'T': 1000, 'absorption_set': sympy.Interval(-0.08, 0.08)}), sets_of_interest=None, store_trajectories=False, seed=1313, debug=False, plot={'MC': False, 'FV': False}):
         """ (2025/05/12)
@@ -171,9 +174,9 @@ if __name__ == "__main__":
         #sets_of_interest = define_sets_of_interest(thresholds=[-1.0, -0.5, -0.3, -0.15, 0.0, 0.15, 0.3, 0.5, +1.0]); T = int(1E5); N = 50; sets_case = 2 --> This works quite nicely to show the advantage of FV but still MC can estimate something
         #sets_of_interest = define_sets_of_interest(thresholds=[-1.0, -0.5, -0.3, -0.16, 0.0, 0.16, 0.3, 0.5, +1.0]); T = int(1E5); N = 50; sets_case = 2
         # Sets of interest on the REFLECTED process
-        sets_of_interest = define_sets_of_interest(thresholds=[0.0, 0.16, 0.3, 0.5, +1.0]); sets_case = 3; A_boundaries = (-0.12, 0.12); T = 1000; N = 50; #T = int(1E5); N = 50
+        #sets_of_interest = define_sets_of_interest(thresholds=[0.0, 0.16, 0.3, 0.5, +1.0]); sets_case = 3; A_boundaries = (-0.12, 0.12); T = 1000; N = 50; #T = int(1E5); N = 50
         #sets_of_interest = define_sets_of_interest(thresholds=[0.0, 0.18, 0.3, 0.5, +1.0]); sets_case = 3; A_boundaries = (-0.14, 0.14); T = int(1E6); N = 80
-        #sets_of_interest = define_sets_of_interest(thresholds=[0.0, 0.20, 0.3, 0.5, +1.0]); sets_case = 3; A_boundaries = (-0.15, 0.15); T = int(1E6); N = 100
+        sets_of_interest = define_sets_of_interest(thresholds=[0.0, 0.20, 0.3, 0.5, +1.0]); sets_case = 3; A_boundaries = (-0.15, 0.15); T = int(1E6); N = 100
 
         if sets_case <= 2:
             A_boundaries = (-0.12, 0.12)  #(-0.08, +0.08)
@@ -306,7 +309,7 @@ if __name__ == "__main__":
             # Use as number of steps of the MC simulation the same as the number of events observed during the FV simulation above, in case this was run (for comparison purposes)
             if {"FV", "FV0"}.intersection(tests2run) == set():
                 # No FV simulation was run so the number of steps to run MC can be chosen freely
-                nsteps = 10000
+                nsteps = int(1E6) #10000
             elif "FV0" in tests2run:
                 # Choose the number of steps to run MC for from the (assumed) SINGLE FV simulation run above
                 assert nrep == 1, f"The number of replications to run for the Monte-Carlo simulation when 'FV0' has been run must be 1: {nrep}"

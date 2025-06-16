@@ -29,7 +29,7 @@ from Python.lib.utils.basic import keep_dict_params_defined_in_function
 
 def func_drift_const(state, theta=1.0):
     "Function that defines a constant drift that does not depend on the state of the diffusion process"
-    return theta
+    return -theta
 
 
 #@jit
