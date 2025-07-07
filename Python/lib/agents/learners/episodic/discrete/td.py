@@ -144,7 +144,8 @@ class LeaTDLambda(Learner):
             # and thus the state of the environment and action taken should NOT be recorded because they have already
             # been recorded at the previous step, when the episode ended (a learning materialized here by the `done` block below)
             # --see also discrete.Simulator._run_single() and search for 'LearningTask.CONTINUING'
-            self._update_trajectory_and_average_reward(t, state, action, reward)  # This method belongs to the Learner super class defined in learners.episodic.discrete
+            self._update_trajectory(t, state, action, reward)  # This method belongs to the Learner super class defined in learners.episodic.discrete
+            self._update_average_reward()
         if info.get('update_counts', True):
             self._update_visit_counts(t, state, action)
 
@@ -501,7 +502,8 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
         if info.get('update_trajectory', True):
             # We may not want to update the trajectory when using this call just to learn the value functions.
             # See the comment in the learn() method of the super class (normally LeaTDLambda) for an use case.
-            self._update_trajectory_and_average_reward(t, state, action, reward)  # This method belongs to the Learner super class defined in learners.episodic.discrete
+            self._update_trajectory(t, state, action, reward)  # This method belongs to the Learner super class defined in learners.episodic.discrete
+            self._update_average_reward()
         if info.get('update_counts', True):
             self._update_visit_counts(t, state, action)
 

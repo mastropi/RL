@@ -216,7 +216,8 @@ class LeaMCLambda(Learner):
             # and thus the state of the environment and action taken should NOT be recorded because they had already
             # been recorded at the previous step, when the episode ended (by the `done` block below)
             # --see also discrete.Simulator._run_single() and search for 'LearningTask.CONTINUING')
-            self._update_trajectory_and_average_reward(t, state, action, reward)
+            self._update_trajectory(t, state, action, reward)
+            self._update_average_reward()
         if info.get('update_counts', True):
             self._update_visit_counts(t, state, action)
 
@@ -344,7 +345,8 @@ class LeaMCLambda(Learner):
             # and thus the state of the environment and action taken should NOT be recorded because they had already
             # been recorded at the previous step, when the episode ended (by the `done` block below)
             # --see also discrete.Simulator._run_single() and search for 'LearningTask.CONTINUING')
-            self._update_trajectory_and_average_reward(t, state, action, reward)
+            self._update_trajectory(t, state, action, reward)
+            self._update_average_reward()
         if info.get('update_counts', True):
             self._update_visit_counts(t, state, action)
 
@@ -560,7 +562,8 @@ class LeaMCLambdaAdaptive(LeaMCLambda):
     def learn(self, t, state, action, next_state, reward, done, info):
         "Learn the prediction problem: estimate the state value function"
         if info.get('update_trajectory', True):
-            self._update_trajectory_and_average_reward(t, state, action, reward)
+            self._update_trajectory(t, state, action, reward)
+            self._update_average_reward()
         if info.get('update_counts', True):
             self._update_visit_counts(t, state, action)
         self._updateG(t, state, next_state, reward, done)

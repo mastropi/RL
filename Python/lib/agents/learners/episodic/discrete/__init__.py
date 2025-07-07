@@ -360,13 +360,18 @@ class Learner(GenericLearner):
                           f"and if so, whether the reset() method is defined for the object containing the action value function.")
             print(e)
 
-    def _update_trajectory_and_average_reward(self, t, state, action, reward):
+    def _update_trajectory(self, t, state, action, reward):
         "Updates the trajectory of the CURRENT episode and the average reward observed so far in the episode"
         self._times += [t]
         self._states += [state]
         self._actions += [action]
         self._rewards += [reward]
-        self._update_average_reward()
+
+    def _update_average_reward(self):
+        # TODO: (2023/08/31) According to the algorithm for learning the average reward presented in Sutton (2018), pag. 251, a better learner of the average reward uses a separate learning rate which is applied on the delta error... Implement this.
+        # I think this should probably be implemented within each learner inheriting from this class...(?) because they store the delta error value to use.
+        n_rewards_observed_so_far = len(self._rewards) - 1   # We subtract 1 to the length of self.rewards because the first element in self.rewards is a fictitious reward of 0 (see its initialization in the constructor)
+        self._average_reward_in_episode += (self._rewards[-1] - self._average_reward_in_episode) / max(1, n_rewards_observed_so_far)    # `max(1, ...) to avoid division by 0 if we are storing the very first reward
 
     def _update_visit_counts(self, t, state, action):
         "Updates the count that keeps track of the state's first visit within the CURRENT episode, whose within-time step is indexed by parameter t"
@@ -392,12 +397,6 @@ class Learner(GenericLearner):
         self._state_counts_over_all_episodes[state] += 1            # Counts over all episodes
         self._action_counts[state, action] += 1                     # Counts per-episode
         self._action_counts_over_all_episodes[state, action] += 1   # Counts over all episodes
-
-    def _update_average_reward(self):
-        # TODO: (2023/08/31) According to the algorithm for learning the average reward presented in Sutton (2018), pag. 251, a better learner of the average reward uses a separate learning rate which is applied on the delta error... Implement this.
-        # I think this should probably be implemented within each learner inheriting from this class...(?) because they store the delta error value to use.
-        n_rewards_observed_so_far = len(self._rewards) - 1   # We subtract 1 to the length of self.rewards because the first element in self.rewards is a fictitious reward of 0 (see its initialization in the constructor)
-        self._average_reward_in_episode += (self._rewards[-1] - self._average_reward_in_episode) / max(1, n_rewards_observed_so_far)    # `max(1, ...) to avoid division by 0 if we are storing the very first reward
 
     def _update_alphas(self, state, action):
         # with np.printoptions(precision=4):
