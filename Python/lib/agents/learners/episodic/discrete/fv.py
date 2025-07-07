@@ -511,9 +511,8 @@ class LeaFV(LeaTDLambda):
             # o.w. we don't want to decrease alpha when no signal was received from the rare rewards outside A.
             #print("Learn: state = {}, next_state = {}, done = {}".format(state, next_state, done))
             if delta_V != 0.0:
-                self._update_state_counts(t, state)
-                self._update_alphas(state)
-            # TODO: (2024/01/03) ALSO update the alphas by state-action (to be defined in the GenericLearner class first)
+                self._update_visit_counts(t, state, action)
+                self._update_alphas(state, action)
 
             if delta_Q != 0.0 and state in self.env.getTerminalStates():
                 # TODO: (2024/01/17) Move this piece of code to a function as this is done already at two places at least
@@ -585,9 +584,8 @@ class LeaFV(LeaTDLambda):
         # o.w. we don't want to decrease alpha when no signal was received from the rare rewards outside A.
         #print("Learn: state = {}, next_state = {}, done = {}".format(state, next_state, done))
         if delta_V != 0.0:
-            self._update_state_counts(t_phi, start_state)
-            self._update_alphas(start_state)
-        # TODO: (2024/01/03) ALSO update the alphas by state-action (to be defined in the GenericLearner class first)
+            self._update_visit_counts(t_phi, start_state, start_action)
+            self._update_alphas(start_state, start_action)
 
         if delta_Q != 0.0 and start_state in self.env.getTerminalStates():
             # TODO: (2024/01/17) Move this piece of code to a function as this is done already at two places at least

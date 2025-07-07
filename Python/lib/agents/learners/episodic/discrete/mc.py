@@ -145,14 +145,14 @@ class LeaMCLambda(Learner):
         if info.get('update_trajectory', True):
             self._update_trajectory_and_average_reward(t, state, action, reward)
         if info.get('update_counts', True):
-            self._update_state_counts(t, state)
+            self._update_visit_counts(t, state, action)
         if done:
             # Terminal time
             T = t + 1
 
             # Store the trajectory
             self.store_trajectory_at_episode_end(T, next_state, debug=self.debug)
-            self._update_state_counts(t+1, next_state)
+            self._update_visit_counts(t + 1, next_state, 0)
 
             assert len(self._states) == T and len(self._rewards) == T + 1, \
                     "The number of _states visited ({}) is equal to T ({}) " \
@@ -183,7 +183,7 @@ class LeaMCLambda(Learner):
                 self._updateQ(state, action, delta)
                 self._updateA(state, action, delta)
                 # Update the learning rate alpha for the next iteration
-                self._update_alphas(state)
+                self._update_alphas(state, action)
 
     def deprecated_gt2tn(self, start, end):
         """
@@ -218,7 +218,7 @@ class LeaMCLambda(Learner):
             # --see also discrete.Simulator._run_single() and search for 'LearningTask.CONTINUING')
             self._update_trajectory_and_average_reward(t, state, action, reward)
         if info.get('update_counts', True):
-            self._update_state_counts(t, state)
+            self._update_visit_counts(t, state, action)
 
         if done:
             # This means t+1 is the terminal time T
@@ -238,7 +238,7 @@ class LeaMCLambda(Learner):
             # while traversing the states visited in the trajectory),
             self.store_trajectory_at_episode_end(T, next_state, debug=self.debug)
             if info.get('update_counts', True):
-                self._update_state_counts(T, next_state)
+                self._update_visit_counts(T, next_state, 0)  # We pass '0' as action to update because this is the action used as "anchor" action when learning Q-values for terminal states. Recall that the action is associated to the CURRENT state, therefore, if we talk about "next_state" which should talk about "next_action", which is unknown at this point. Note however that we cannot pass np.nan because the _update_visit_counts() method updates the visit count of each visited state and action, and np.nan is NOT accepted by the arrays that store those counts for each state and action.
 
     def learn_mc_at_episode_end(self, T, state_end):
         """
@@ -317,7 +317,7 @@ class LeaMCLambda(Learner):
                 self._updateQ(state, action, delta)
                 self._updateA(state, action, delta)
                 # Update the learning rate alpha for the next iteration
-                self._update_alphas(state)
+                self._update_alphas(state, action)
                 n_updates[state] += 1
 
         assert all(n_updates <= 1), "Each state has been updated at most once"
@@ -346,7 +346,8 @@ class LeaMCLambda(Learner):
             # --see also discrete.Simulator._run_single() and search for 'LearningTask.CONTINUING')
             self._update_trajectory_and_average_reward(t, state, action, reward)
         if info.get('update_counts', True):
-            self._update_state_counts(t, state)
+            self._update_visit_counts(t, state, action)
+
         self._updateG(t, state, next_state, reward, done)
 
         if done:
@@ -367,7 +368,7 @@ class LeaMCLambda(Learner):
             # while traversing the states visited in the trajectory),
             self.store_trajectory_at_episode_end(T, next_state, debug=self.debug)
             if info.get('update_counts', True):
-                self._update_state_counts(T, next_state)
+                self._update_visit_counts(T, next_state, 0)  # We pass '0' as action to update because this is the action used as "anchor" action when learning Q-values for terminal states. Recall that the action is associated to the CURRENT state, therefore, if we talk about "next_state" which should talk about "next_action", which is unknown at this point. Note however that we cannot pass np.nan because the _update_visit_counts() method updates the visit count of each visited state and action, and np.nan is NOT accepted by the arrays that store those counts for each state and action.
 
     def _updateG(self, t, state, next_state, reward, done):
         times_reversed = np.arange(t, -1, -1)  # This is t, t-1, ..., 0
@@ -498,8 +499,7 @@ class LeaMCLambda(Learner):
                 # Note that the update is based ONLY on the state visit frequency, NOT on the state-action visit frequency...
                 # This may not be the best approach for the estimation of Q(s,a) if, for instance, certain actions of a given state
                 # are not visited often, their learning rate will be decreased even if the action was never visited!
-                # TODO: (2023/11/08) We might need to update alphas ALSO by the ACTION visit frequency in order to have an appropriate estimation of Q(s,a)...
-                self._update_alphas(state)
+                self._update_alphas(state, action)
     #---------------------- MC(lambda): lambda-return Monte Carlo --------------------------------#
 
 
@@ -512,8 +512,11 @@ class LeaMCLambda(Learner):
     def _updateQ(self, state, action, delta):
         "Updates the action value function Q(s,a) for the given state and action using the given delta on the gradient computed assuming a linear approximation function"
         gradient_Q = self.Q.X[:, self.Q.getLinearIndex(state, action)]  # row vector
-        _alphas = np.repeat(self.getAlphasByState(), self.env.getNumActions()) # We use the same alpha on all the actions associated to each state, but the alpha depends on the state
-        self.Q.setWeights( self.Q.getWeights() + _alphas * delta * gradient_Q )
+        # DM-2025/06/22: We now use the alpha by state-action instead of the alpha by state as alpha for the update of Q,
+        # which better takes into account the number of visits to each state AND action, not only to each state.
+        #_alphas = np.repeat(self.getAlphasByState(), self.env.getNumActions()) # We use the same alpha on all the actions associated to each state, but the alpha depends on the state
+        _alphas2 = self.getAlphasByStateAction().reshape(-1)
+        self.Q.setWeights( self.Q.getWeights() + _alphas2 * delta * gradient_Q )
 
     def _updateA(self, state, action, advantage):
         """
@@ -559,7 +562,7 @@ class LeaMCLambdaAdaptive(LeaMCLambda):
         if info.get('update_trajectory', True):
             self._update_trajectory_and_average_reward(t, state, action, reward)
         if info.get('update_counts', True):
-            self._update_state_counts(t, state)
+            self._update_visit_counts(t, state, action)
         self._updateG(t, state, next_state, reward, done)
 
         if done:
@@ -570,7 +573,7 @@ class LeaMCLambdaAdaptive(LeaMCLambda):
             # Store the trajectory
             self.store_trajectory_at_episode_end(T, next_state, debug=self.debug)
             if info.get('update_counts', True):
-                self._update_state_counts(T, next_state)
+                self._update_visit_counts(T, next_state, 0)  # We pass '0' as action to update because this is the action used as "anchor" action when learning Q-values for terminal states. Recall that the action is associated to the CURRENT state, therefore, if we talk about "next_state" which should talk about "next_action", which is unknown at this point. Note however that we cannot pass np.nan because the _update_visit_counts() method updates the visit count of each visited state and action, and np.nan is NOT accepted by the arrays that store those counts for each state and action.
             
             # Compute the gamma-discounted _rewards for each state visited in the episode
             state_rewards_prev = self.state_rewards.copy()

@@ -423,6 +423,7 @@ class GenericLearner:
         # Create a string version of the state, so that we can store lists as dictionary keys
         # which are actually not accepted as dictionary keys (with the error message "list type is unhashable").
         # e.g. [3, 1, 5] becomes '[3, 1, 5]'
+        # We could convert the list to a tuple, as these are acceptable as dictionary keys.
         state_str = str(state)
         if state_str in self.dict_state_counts.keys():
             # Update the value of the dictionary key representing the state that is visited now
@@ -436,6 +437,7 @@ class GenericLearner:
         # Create a string version of the state, so that we can store lists as dictionary keys
         # which are actually not accepted as dictionary keys (with the error message "list type is unhashable").
         # e.g. [3, 1, 5] becomes '[3, 1, 5]'
+        # We could convert the list to a tuple, as these are acceptable as dictionary keys.
         state_action_str = str( (state, action) )
         if state_action_str in self.dict_state_action_counts.keys():
             # Update the value of the dictionary key representing the state-action that is visited now

@@ -169,7 +169,9 @@ class Learner(GenericLearner):
 
         # Current learning rate across states
         self._alphas = self.alpha * np.ones(self.env.getNumStates())
-        # Learning rate at episode = MAX_EPISODE_FOR_ALPHA_MIN (for each state) so that
+        # Current learning rate across state-actions
+        self._alphas2 = self.alpha * np.ones((self.env.getNumStates(), self.env.getNumActions()))
+        # Learning rate at episode = MAX_EPISODE_FOR_ALPHA_MIN (for EACH state) so that
         # we can continue decreasing alpha further --from this self._alphas_at_max_episode value (for each state)--
         # with no lower bound --even if alpha_min has been specified-- past the MAX_EPISODE_FOR_ALPHA_MIN episode.
         self._alphas_at_max_episode = None
@@ -189,6 +191,8 @@ class Learner(GenericLearner):
         # State counts over ALL episodes run after reset, and state counts of just their first visits
         self._state_counts_over_all_episodes = np.zeros(self.env.getNumStates(), dtype=int)
         self._state_counts_first_visit_over_all_episodes = np.zeros(self.env.getNumStates(), dtype=int)
+        self._action_counts_over_all_episodes = np.zeros((self.env.getNumStates(), self.env.getNumActions()), dtype=int)
+        self._action_counts_first_visit_over_all_episodes = np.zeros((self.env.getNumStates(), self.env.getNumActions()), dtype=int)
 
         # Instructions for resetting the value function
         self.reset_method = reset_method
@@ -250,12 +254,16 @@ class Learner(GenericLearner):
         self.alpha_mean_by_episode = deque([])
         self.average_reward_by_episode = deque([])
         self.times_at_episode_end = deque([])
-        del self._state_counts_over_all_episodes, self._state_counts_first_visit_over_all_episodes, self._alphas
-        self._state_counts_over_all_episodes = np.zeros(self.env.getNumStates())
-        self._state_counts_first_visit_over_all_episodes = np.zeros(self.env.getNumStates())
+        del self._state_counts_over_all_episodes, self._state_counts_first_visit_over_all_episodes, self._alphas, \
+            self._action_counts_over_all_episodes, self._action_counts_first_visit_over_all_episodes, self._alphas2
+        self._state_counts_over_all_episodes = np.zeros(self.env.getNumStates(), dtype=int)
+        self._state_counts_first_visit_over_all_episodes = np.zeros(self.env.getNumStates(), dtype=int)
+        self._action_counts_over_all_episodes = np.zeros((self.env.getNumStates(), self.env.getNumActions()), dtype=int)
+        self._action_counts_first_visit_over_all_episodes = np.zeros((self.env.getNumStates(), self.env.getNumActions()), dtype=int)
 
         # Learning rate
         self._alphas = self.alpha * np.ones(self.env.getNumStates())
+        self._alphas2 = self.alpha * np.ones((self.env.getNumStates(), self.env.getNumActions()))
         self._alphas_at_max_episode = None
 
     def _reset_at_start_of_episode(self):
@@ -264,12 +272,16 @@ class Learner(GenericLearner):
         (all attributes referring to the current episode should start with an underscore)
         """
 
-        # States and actions visited in the current episode and the state count
+        # States and actions visited in the current episode
         self._times = deque([])
         self._states = deque([])
         self._actions = deque([])
-        self._state_counts = np.zeros(self.env.getNumStates())
+
+        # Visit counts
+        self._state_counts = np.zeros(self.env.getNumStates(), dtype=int)
         self._states_first_visit_time = np.nan * np.ones(self.env.getNumStates())
+        self._action_counts = np.zeros((self.env.getNumStates(), self.env.getNumActions()), dtype=int)
+        self._actions_first_visit_time = np.nan * np.ones((self.env.getNumStates(), self.env.getNumActions()))
 
         # Store the _rewards obtained after each action
         # We initialize the _rewards with one element so that there is an INDEX match between the
@@ -317,10 +329,10 @@ class Learner(GenericLearner):
         """
         Resets the value functions stored in the object.
 
-        Both the state- and the action-value function (V & Q) are tried to be reset,
-        which are retrieved with the getV() and getQ() methods, respectively.
+        The state-value, action-value, and advantage function (V, Q, A) are tried to be reset,
+        which are retrieved with the getV(), getQ(), and getA() methods, respectively.
         These methods should be defined in the class inheriting from this class
-        (see below the definition of getV() and getQ(), which raise a NonImplementedError,
+        (see below the definition of getV(), getQ(), getA(), which raise a NonImplementedError,
         informing the reader that these methods are expected to be defined by inheriting classes).
 
         A warning is issued when one of the reset fails for a value function
@@ -341,7 +353,7 @@ class Learner(GenericLearner):
                           f"and if so, whether the reset() method is defined for the object containing the action value function.")
             print(e)
         try:
-            self.getA().reset(method=self.reset_method, params_random=self.reset_params, seed=self.reset_seed + 1 if self.reset_seed is not None else None)  # We sum +1 to the seed to avoid having the same initial values for V(s) and Q(s,a)
+            self.getA().reset(method=self.reset_method, params_random=self.reset_params, seed=self.reset_seed + 2 if self.reset_seed is not None else None)  # We sum +1 to the seed to avoid having the same initial values for V(s) and Q(s,a)
         except Exception as e:
             warnings.warn(f"Resetting the value of the ADVANTAGE function failed. If this is needed, "
                           f"check whether the `getA()` is defined in the learner class '{self.__class__.__name__}', "
@@ -356,7 +368,7 @@ class Learner(GenericLearner):
         self._rewards += [reward]
         self._update_average_reward()
 
-    def _update_state_counts(self, t, state):
+    def _update_visit_counts(self, t, state, action):
         "Updates the count that keeps track of the state's first visit within the CURRENT episode, whose within-time step is indexed by parameter t"
         if self.env.isStateContinuous():
             # Discretize the state so that we can update the count of a visited state
@@ -365,14 +377,21 @@ class Learner(GenericLearner):
         #print("t: {}, visit to state: {}".format(t, state))
         if np.isnan(self._states_first_visit_time[state]):
             self._state_counts_first_visit_over_all_episodes[state] += 1
-            #print("\tFIRST VISIT!")
+            #print("\tFIRST STATE VISIT!")
             #print("\tcounts first visit after: {}".format(self._state_counts_first_visit_over_all_episodes[state]))
             #print("\tall counts fv: {}".format(self._state_counts_first_visit_over_all_episodes))
-        self._states_first_visit_time[state] = np.nanmin([t, self._states_first_visit_time[state]])
+        if np.isnan(self._actions_first_visit_time[state, action]):
+            self._action_counts_first_visit_over_all_episodes[state, action] += 1
 
-        # Keep track of state every-visit counts
-        self._state_counts[state] += 1  # Counts per-episode
-        self._state_counts_over_all_episodes[state] += 1  # Counts over all episodes
+        # Update first-visit times
+        self._states_first_visit_time[state] = np.nanmin([t, self._states_first_visit_time[state]])
+        self._actions_first_visit_time[state, action] = np.nanmin([t, self._actions_first_visit_time[state, action]])
+
+        # Keep track of every-visit counts
+        self._state_counts[state] += 1                              # Counts per-episode
+        self._state_counts_over_all_episodes[state] += 1            # Counts over all episodes
+        self._action_counts[state, action] += 1                     # Counts per-episode
+        self._action_counts_over_all_episodes[state, action] += 1   # Counts over all episodes
 
     def _update_average_reward(self):
         # TODO: (2023/08/31) According to the algorithm for learning the average reward presented in Sutton (2018), pag. 251, a better learner of the average reward uses a separate learning rate which is applied on the delta error... Implement this.
@@ -380,7 +399,7 @@ class Learner(GenericLearner):
         n_rewards_observed_so_far = len(self._rewards) - 1   # We subtract 1 to the length of self.rewards because the first element in self.rewards is a fictitious reward of 0 (see its initialization in the constructor)
         self._average_reward_in_episode += (self._rewards[-1] - self._average_reward_in_episode) / max(1, n_rewards_observed_so_far)    # `max(1, ...) to avoid division by 0 if we are storing the very first reward
 
-    def _update_alphas(self, state):
+    def _update_alphas(self, state, action):
         # with np.printoptions(precision=4):
         #    print("Before updating alpha: episode {}, state {}: state_count={:.0f}, alpha>={}: alpha={}\n{}" \
         #          .format(self.episode, state, self._state_counts_over_all_episodes[state], self.alpha_min, self.getAlphaForState(state), np.array(self._alphas)))
@@ -388,21 +407,25 @@ class Learner(GenericLearner):
             # Discretize the state so that we can update the count of a visited state
             state = self.env.getIndexFromState(state)
 
-        # NOTE that we store the alpha value BEFORE its update, as this is the value that was used to learn prior to
-        # updating alpha!
+        # NOTE that we store the alpha value BEFORE its update, as this is the value that was used to learn prior to updating alpha!
         self._alphas_used_in_episode += [self._alphas[state]]
+
+        # Adjust alphas (both state-level alphas and state-action-level alphas)
         if self.adjust_alpha:
             if self.adjust_alpha_by_episode:
                 # Update using the episode number (equal for all states)
-                _time_divisor = self.func_adjust_alpha(max(1, self.episode - MIN_EPISODE + 2))
+                _time_divisor = self.func_adjust_alpha(max(1, self.episode - MIN_EPISODE + 2)) # +2 => see the note below on the ELSE block for why we use +2 and not +1.
                 self._alphas[state] = max(self.alpha_min, self.alpha / _time_divisor)
-                    ## +2 => see the note below on the ELSE block for why we use +2 and not +1.
+                self._alphas2[state, action] = max(self.alpha_min, self.alpha / _time_divisor)
             else:
                 if self.alpha_update_type == AlphaUpdateType.FIRST_STATE_VISIT:
                     state_count = self._state_counts_first_visit_over_all_episodes[state]
+                    state_action_count = self._action_counts_first_visit_over_all_episodes[state, action]
                 else:
                     state_count = self._state_counts_over_all_episodes[state]
-                _time_divisor = self.func_adjust_alpha(max(1, state_count - self.min_count_to_update_alpha + 2))
+                    state_action_count = self._action_counts_over_all_episodes[state, action]
+                _time_divisor_alpha = self.func_adjust_alpha(max(1, state_count - self.min_count_to_update_alpha + 2))
+                _time_divisor_alpha2 = self.func_adjust_alpha(max(1, state_action_count - self.min_count_to_update_alpha + 2))
                     ## +2 => when state_count = min_count_to_update_alpha, the time divisor is > 1; if we used +1, the time divisor would be equal to 1
                     ## and this would imply that alpha would NOT be reduced, even if the state count had reached
                     ## the specified min count to adjust (reduce) alpha.
@@ -415,17 +438,22 @@ class Learner(GenericLearner):
                     # at which stage, alpha continues to decrease using the decreasing rule, starting off from the
                     # alpha value observed (for each state) at the MAX_EPISODE_FOR_ALPHA_MIN episode
                     # (which can be either alpha_min or larger than alpha_min).
-                    self._alphas[state] = max(self.alpha_min, self.alpha / _time_divisor)
+                    self._alphas[state] = max(self.alpha_min, self.alpha / _time_divisor_alpha)
+                    self._alphas2[state, action] = max(self.alpha_min, self.alpha / _time_divisor_alpha2)
                     if MAX_EPISODE_FOR_ALPHA_MIN is not None and self.episode == MAX_EPISODE_FOR_ALPHA_MIN:
                         # Store the last alpha value observed for each state
                         # so that we can use it as starting point from now on when decreasing alpha further.
                         self._alphas_at_max_episode = self._alphas.copy()
-                        # print("episode {}, state {}: alphas at max episode: {}".format(self.episode, state, self._alphas_at_max_episode))
+                        self._alphas2_at_max_episode = self._alphas2.copy()
+                        #print("episode {}, state {}: alphas at max episode: {}".format(self.episode, state, self._alphas_at_max_episode))
+                        #print("episode {}, state {}, action {}: alphas at max episode: {}".format(self.episode, state, action, self._alphas2_at_max_episode))
                 else:
                     # Start decreasing from the alpha value left at episode = MAX_EPISODE_FOR_ALPHA_MIN
                     # without any lower bound for alpha
-                    self._alphas[state] = self._alphas_at_max_episode[state] / _time_divisor
-                    # print("episode {}, state {}: alphas: {}".format(self.episode, state, self._alphas))
+                    self._alphas[state] = self._alphas_at_max_episode[state] / _time_divisor_alpha
+                    self._alphas2[state, action] = self._alphas2_at_max_episode[state, action] / _time_divisor_alpha2
+                    #print("episode {}, state {}: alphas: {}".format(self.episode, state, self._alphas))
+                    #print("episode {}, state {}, action {}: alphas: {}".format(self.episode, state, action, self._alphas2))
 
     def update_average_reward(self, T, state_end):
         """
@@ -610,8 +638,14 @@ class Learner(GenericLearner):
     def getAlphasByState(self):
         return self._alphas
 
+    def getAlphasByStateAction(self):
+        return self._alphas2
+
     def getAlphaForState(self, state):
         return self._alphas[state]
+
+    def getAlphaForStateAction(self, state, action):
+        return self._alphas2[state, action]
 
     def getAverageAlphaByEpisode(self):
         return self.alpha_mean_by_episode

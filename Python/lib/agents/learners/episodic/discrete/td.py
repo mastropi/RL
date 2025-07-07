@@ -146,7 +146,7 @@ class LeaTDLambda(Learner):
             # --see also discrete.Simulator._run_single() and search for 'LearningTask.CONTINUING'
             self._update_trajectory_and_average_reward(t, state, action, reward)  # This method belongs to the Learner super class defined in learners.episodic.discrete
         if info.get('update_counts', True):
-            self._update_state_counts(t, state)
+            self._update_visit_counts(t, state, action)
 
         # Compute the delta values used for the update of each value function
         # NOTE: We compute the delta separately, and NOT inside the functions that update the value functions,
@@ -170,7 +170,7 @@ class LeaTDLambda(Learner):
         self._updateA(state, action, delta_V)
 
         # We store the effective learning rates alpha
-        # (effective in terms of  the eligibility trace that affects the delta values used when updating V and Q above)
+        # (effective in terms of  the eligibility trace that affects the delta values used when updating V above)
         self._alphas_effective = np.r_[self._alphas_effective, (self._alphas * self._z_V).reshape(1, len(self._z_V))]
             ## NOTE: We need to reshape the product alpha*z because _alphas_effective is a 2D array with as many rows as
             ## the number of episodes run so far and as many columns as the number of states. The length of alpha*z
@@ -180,7 +180,7 @@ class LeaTDLambda(Learner):
         # Update alpha for the next iteration for "by state counts" update
         #print("Learn: state = {}, next_state = {}, done = {}".format(state, next_state, done))
         if not self.adjust_alpha_by_episode and info.get('update_alphas', True):
-            self._update_alphas(state)
+            self._update_alphas(state, action)
 
         if done and info.get('update_trajectory', True):
             # TEMPORARY-2025/01/14: The condition on 'update_trajectory' was added today and is linked to the current implementation of the CONTINUING average reward
@@ -219,12 +219,12 @@ class LeaTDLambda(Learner):
             self._plotAlphasEffective()
         self.store_trajectory_at_episode_end(T, state_end, debug=self.debug)
         if update_counts:
-            self._update_state_counts(T, state_end)
+            self._update_visit_counts(T, state_end, 0)  # We pass '0' as action to update because this is the action used as "anchor" action when learning Q-values for terminal states. Recall that the action is associated to the CURRENT state, therefore, if we talk about "next_state" which should talk about "next_action", which is unknown at this point. Note however that we cannot pass np.nan because the _update_visit_counts() method updates the visit count of each visited state and action, and np.nan is NOT accepted by the arrays that store those counts for each state and action.
 
         # Update alpha for the next iteration for "by episode" updates
         if self.adjust_alpha_by_episode:
             for s in range(self.env.getNumStates()):
-                self._update_alphas(s)
+                self._update_alphas(s, 0)   # We pass '0' as action to update because this is the action used as "anchor" action when learning Q-values for terminal states
 
     def _compute_deltas(self, state, action, next_state, reward, info):
         """
@@ -296,10 +296,10 @@ class LeaTDLambda(Learner):
             if self.env.isStateContinuous():
                 self.V.update_weights(state, delta)
             else:
-                # IMPORTANT: (2020/11/11) if we use _alphas[state] as the learning rate alpha in the following update,
+                # IMPORTANT: (2020/11/11) if we use _alphas[state] as the learning rate alpha in the following update of V,
                 # we are using the SAME learning rate alpha for the update of ALL states, namely the
                 # learning rate value associated to the state that is being visited now.
-                # This is NOT how the alpha value should be updated for each state
+                # This is NOT how the alpha value should be used for each state
                 # (as we should apply the alpha associated to the state that decreases with the number of visits
                 # to EACH state --which happens differently). However, this seems to give slightly faster convergence
                 # than the theoretical alpha strategy just mentioned, at least in the gridworld environment!
@@ -313,12 +313,18 @@ class LeaTDLambda(Learner):
             if self.env.isStateContinuous():
                 self.Q.update_weights(state, action, delta)
             else:
+                # DM-2025/06/22: We now use the alpha by state-action instead of the alpha by state as alpha for the update of Q,
+                # which better takes into account the number of visits to each state AND action, not only to each state.
                 # Repeat the alpha for each state as many times as the number of possible actions in the environment
                 # Note that this repeat each value as we need it based on how state and actions are stored in the feature matrix used in self.Q,
                 # namely grouped by state (e.g. if alphas = [2.5, 4.1, 3.0], the repeat by 2 generates [2.5, 2.5, 4.1, 4.1, 3.0, 3.0]
                 # i.e. the same alpha for all actions associated to the same state (which is what we want, i.e. alphas on different actions grouped by state).
-                _alphas = np.repeat(self.getAlphasByState(), self.env.getNumActions())
-                self.Q.setWeights( self.Q.getWeights() + _alphas * delta * self._z_Q )
+                #_alphas = np.repeat(self.getAlphasByState(), self.env.getNumActions())
+
+                # Reorganize the SxA array into an S*A 1D array grouped by state, i.e. all actions for the first state, then all actions for the second state, etc.
+                # which is how the linearized Q values are organized.
+                _alphas2 = self.getAlphasByStateAction().reshape(-1)
+                self.Q.setWeights( self.Q.getWeights() + _alphas2 * delta * self._z_Q )
 
     def _expected_next_Q(self, next_state):
         """
@@ -352,6 +358,8 @@ class LeaTDLambda(Learner):
         ax.set_ylabel("z")
         start_state = self._states[0] if len(self._states) > 0 else None
         ax.set_title("Eligibility trace by time step (Episode {} - start state = {})".format(self.episode, start_state))
+        plt.pause(0.001)
+        plt.show()
 
     def _plotAlphasEffective(self):
         states2plot = self._choose_states2plot()
@@ -359,7 +367,7 @@ class LeaTDLambda(Learner):
         #for s in states2plot:
         #   plt.plot(self._times_nonzero_update[s], self._alphas_effective[s], '.-')
         #plt.plot(self._times_nonzero_update[self.env.getNumStates()-1], self._alphas_effective[self.env.getNumStates()-1], '.-')
-        plt.plot(self._alphas_effective[:,states2plot], '.-')
+        plt.plot(self._alphas_effective[:, states2plot], '.-')
         plt.legend(states2plot)
         ax = plt.gca()
         #ax.set_xlim([0,len(self._states)-1])
@@ -368,6 +376,8 @@ class LeaTDLambda(Learner):
         ax.set_ylabel("alpha*z")
         start_state = self._states[0] if len(self._states) > 0 else None
         ax.set_title("Effective learning rate (alpha*z) by time step (Episode {} - start state = {})".format(self.episode, start_state))
+        plt.pause(0.001)
+        plt.show()
 
     def _choose_states2plot(self):
         from Python.lib.environments.gridworlds import EnvGridworld1D
@@ -493,7 +503,7 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
             # See the comment in the learn() method of the super class (normally LeaTDLambda) for an use case.
             self._update_trajectory_and_average_reward(t, state, action, reward)  # This method belongs to the Learner super class defined in learners.episodic.discrete
         if info.get('update_counts', True):
-            self._update_state_counts(t, state)
+            self._update_visit_counts(t, state, action)
 
         # See comment in the constructor of the meaning of this attribute, which is exclusively used in the adaptive lambda learner
         self.state_counts_noreset[state] += 1
@@ -563,7 +573,7 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
 
         # Update alpha for the next iteration for "by state counts" update
         if not self.adjust_alpha_by_episode and info.get('update_alphas', True):
-            self._update_alphas(state)
+            self._update_alphas(state, action)
 
         if done and info.get('update_trajectory', True):
             # TEMPORARY-2025/01/14: The condition on 'update_trajectory' was added today and is linked to the current implementation of the CONTINUING average reward.
