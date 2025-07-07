@@ -51,6 +51,58 @@ def percentile(n):
     return percentile_
 
 
+def cdf(x: np.ndarray, min=-np.Inf, max=+np.Inf):
+    """
+    Computes the empirical Cumulative Distribution Function of a set of values
+
+    The empirical CDF is defined as cdf(x[j]) = #{i: 0 <= i < n such that x[i] <= x[j]} / n, for 0 <= j < n
+    where n is the length of array `x`.
+
+    Arguments:
+    x: numpy array
+        Array containing the values whose CDF is to be computed.
+
+    min: (opt) float
+        Theoretical minimum value of x.
+        This is used to define the value of x at which the CDF is 0, and it is added to the output vector of x values on which the CDF is computed.
+        This value is usually passed for plotting purposes, i.e. to have a CDF that goes from 0 to 1 in the range of x values where we know they can fall.
+        default: -np.Inf
+
+    max: (opt) float
+        Theoretical maximum value of x.
+        This is used to define the value of x at which the CDF is 1, and it is added to the output vector of x values on which the CDF is computed.
+        This value is usually passed for plotting purposes, i.e. to have a CDF that goes from 0 to 1 in the range of x values where we know they can fall.
+        default: +np.Inf
+
+    Return: pandas DataFrame
+    Pandas data frame containing the following three columns:
+    - 'x': sorted values of the analyzed variable.
+    - 'cdf': CDF(x)
+    - 'unif': The CDF of x if the values of x were distributed uniformly at random in the interval [min(x), max(x)].
+    (or [min, max(x)] or [min(x), max] or [min, max], depending on whether parameters `min` and/or `max` have a finite value.
+    """
+    # Get locations of not-NaN values
+    ind_valid = ~np.isnan(x)
+    # Sort the valid values
+    x_sorted = np.sort(x[ind_valid])
+    n_valid = len(x_sorted)
+    cdf = np.arange(1, n_valid + 1) / n_valid
+    if min is not None and not np.isnan(min) and min > -np.Inf:
+        # Add the minimum value at the beginning of the x values
+        if min > x_sorted[0]:
+            raise ValueError(f"The minimum value for x given in parameter `min` ({min}) is larger than the minimum value observed in `x` ({x_sorted[0]})")
+        x_sorted = np.r_[min, x_sorted]
+        cdf = np.r_[0.0, cdf]
+    if max is not None and not np.isnan(max) and max < +np.Inf:
+        # Add the maximum value at the end of the x values
+        if max < x_sorted[-1]:
+            raise ValueError(f"The maximum value for x given in parameter `max` ({max}) is smaller than the maximum value observed in `x` ({x_sorted[-1]})")
+        x_sorted = np.r_[x_sorted, max]
+        cdf = np.r_[cdf * n_valid / (n_valid + 1), 1.0]
+
+    return pd.DataFrame({'x': x_sorted, 'cdf': cdf, 'unif': x_sorted / x_sorted[-1]}, columns=['x', 'cdf', 'unif'])
+
+
 def rmse(Vtrue: np.ndarray, Vest: np.ndarray, weights: np.ndarray=None):
     """Root Mean Square Error (RMSE) between Vtrue and Vest, optionally weighted
 

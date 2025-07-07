@@ -50,6 +50,10 @@ class SimulatorDiffusionFV(Simulator):
         self.trajectory_mc = None
         self.trajectories_fv = None
 
+        self.jump_times = deque()
+        self.jump_numbers = deque()
+        self.jump_values = deque()
+
     def run(self, dict_params_simul: dict, sets_of_interest :list,
             start_state=0.0,
             store_trajectories=False,
@@ -109,7 +113,11 @@ class SimulatorDiffusionFV(Simulator):
         # - (opt, not prio) min number of cycles to compute expectation
         # - (opt, not prio) burn-in time
         start_state = start_state #float(absorption_set.inf)   # IMPORTANT: convert to float() o.w. the exit states in _run_simulation_mc() are stored as type `object` instead of `float`!!
-        print(f"\tRunning Monte-Carlo simulation to estimate the expected return time to absorption set A and the exit state distribution: start state = {start_state}, seed = {seed}...")
+        print(f"\nRunning Monte-Carlo simulation to estimate the expected return time to absorption set A and the exit state distribution: start state = {start_state}, seed = {seed}...")
+        print(f"Simulation parameters:\n{dict_params_simul}")
+        print(f"Start state: {start_state}")
+        print(f"Check for stationarity: {check_for_stationarity}")
+        print(f"Burn-in time for stationarity check: {burnin_for_stationarity_check}")
         expected_cycle_time, n_cycles, dist_exit_state, info_mc = self._run_simulation_mc(dict_params_simul, start_state=start_state, store_trajectory=store_trajectories,
                                                                                           check_for_stationarity=check_for_stationarity, burnin_for_stationarity_check=burnin_for_stationarity_check,
                                                                                           seed=seed, verbose=verbose, verbose_period=verbose_period, plot=plot.get('MC', False))
@@ -175,7 +183,10 @@ class SimulatorDiffusionFV(Simulator):
                 ax_dist.set_title(f"Distribution of exit states based on histogram (nsteps={T})")
 
             seed_fv = seed + 131713
-            print(f"\n\tRunning Fleming-Viot particle simulation to estimate the stationary probabilities of the sets of interest (seed={seed_fv})...")
+            print(f"\nRunning Fleming-Viot particle system simulation to estimate the stationary probabilities of the sets of interest (seed={seed_fv})...")
+            print(f"Simulation parameters:\n{dict_params_simul}")
+            print(f"Exit state distribution:\n{dist_exit_state[dist_exit_state['p'] > 0]}")
+            print(f"Sets of interest:\n{sets_of_interest}")
             df_proba_surv, dict_phi, info_fv = self._run_simulation_fv(dict_params_simul, dist_exit_state, sets_of_interest, store_trajectory=store_trajectories,
                                                                        seed=seed_fv, verbose=verbose, verbose_period=verbose_period, plot=plot.get('FV', False))
 
@@ -274,14 +285,14 @@ class SimulatorDiffusionFV(Simulator):
             """
             Estimates the exit state distribution as a histogram computed on the observed exit states on bins defined only OUTSIDE the absorption set A
 
-            The absorption set A is assumed to be a single interval.
+            IMPORTANT: The absorption set A is assumed to be a SINGLE interval (e.g. (a, b) or (-inf, b) or (a, +inf).
 
             Arguments:
-            exit_state: numpy array
+            exit_states: numpy array
                 Array containing the observed exit states from the absorption set A.
 
             bins: int
-                Number of bins to use for the histogram calculation of `exit_state` on EACH side of the region outside A.
+                Number of bins to use for the histogram calculation of `exit_states` on EACH side of the region outside A.
                 default: 30
 
             Return: pandas DataFrame
@@ -291,37 +302,49 @@ class SimulatorDiffusionFV(Simulator):
             The frequency value of the bin representing the absorption set interval is set to zero.
             """
 
-            # Option 1: Single histogram on all the observed exit states considered altogether
+            #-- Option 1: Single histogram on all the observed exit states considered altogether
             # It is NOT so useful because there is a large set of empty bins in the states belonging to the absorption set A that are not informative,
             # and we lose resolution in the region that we want to pay attention to (i.e. outside A). This problem is resolved in Option 2.
             #_freq, hist_exit_state_bins = np.histogram(exit_states, bins=30)
             #hist_exit_state_probs = _freq / np.sum(_freq)
 
-            # Option 2: Restrict the histogram computation on the region OUTSIDE the absorption set A in order to avoid the problem of option 1
-            # This option assumes that the absorption set is given as a single interval.
-            # separate the exit states that are negative from the exit states that are positive, o.w. there is a large number of empty bins that reduces
-            # resolution that we would like to have on the exit states distribution.
-            # IMPORTANT: This ASSUMES that the problem is 1D!
+            #-- Option 2: Restrict the histogram computation on the region OUTSIDE the absorption set A in order to avoid the problem of option 1
+            # ASSUMPTIONS:
+            # - The problem is 1D.
+            # - The absorption set is given as a SINGLE INTERVAL.
+
+            # Separate the exit states that are observed on the left side of the absorption set A from those observed on the right side,
+            # o.w. there is a large number of empty bins that reduces resolution that we would like to have on the exit states distribution.
             _ind_left = exit_states < float(absorption_set.inf)
-            _ind_right = ~_ind_left
+            _ind_right = exit_states > float(absorption_set.sup)
             _freq, _bins = np.array([]), np.array([])
             if sum(_ind_left) > 0:
-                _freq_left, _bins_left = np.histogram(exit_states[_ind_left], bins=bins)
+                _freq_left, _bins_left = np.histogram(exit_states[_ind_left], range=(np.min(exit_states), float(absorption_set.inf)), bins=bins)
                 _freq = np.r_[_freq, _freq_left]
                 _bins = np.r_[_bins, _bins_left]
             if sum(_ind_right) > 0:
-                _freq_right, _bins_right = np.histogram(exit_states[~_ind_left], bins=bins)
-                _bins = np.r_[_bins, _bins_right]
+                _freq_right, _bins_right = np.histogram(exit_states[_ind_right], range=(float(absorption_set.sup), np.max(exit_states)), bins=bins)
                 if len(_freq) > 0:
+                    # Fill in the region between the calculated freq. dist. so far (_freq) and the newly calculated freq. dist. (_freq_right) with a bin with zero count
+                    # Goal: show there is a gap in between these two distributions when plotting them.
                     _freq = np.r_[_freq, [0], _freq_right]
                 else:
                     _freq = np.r_[_freq_right]
+                _bins = np.r_[_bins, _bins_right]
             hist_exit_state_probs = _freq / np.sum(_freq)
             hist_exit_state_bins = _bins
 
-            _bin_intervals = [(hist_exit_state_bins[i], hist_exit_state_bins[i + 1]) for i, _ in enumerate(hist_exit_state_bins[:-1])]
-            _midpoints = [0.5 * (hist_exit_state_bins[i] + hist_exit_state_bins[i + 1]) for i, _ in enumerate(hist_exit_state_bins[:-1])]
+            _bin_intervals = [(hist_exit_state_bins[i], hist_exit_state_bins[i+1]) for i, _ in enumerate(hist_exit_state_bins[:-1])]
+            _midpoints = [0.5 * (hist_exit_state_bins[i] + hist_exit_state_bins[i+1]) for i, _ in enumerate(hist_exit_state_bins[:-1])]
             dist_exit_state = pd.DataFrame({'x': _midpoints, 'p': hist_exit_state_probs}, index=_bin_intervals, columns=['x', 'p'])
+
+            # Note that in the following assertion we check only exit states that have positive probability
+            # The reason is that the exit states are computed using a histogram and, more importantly, the fact that the value 0 is most likely part of
+            # dist_exit_state['x'] when e.g. the absorption set A is an interval that includes zero, since when exit states on both sides of zero are observed,
+            # a fictitious histogram bin connecting the two "side" histograms is added for plotting purposes.
+            assert sum([bool(absorption_set.contains(row['x'])) for ind, row in dist_exit_state.iterrows() if row['p'] > 0]) == 0,\
+                f"No exit state must be inside the absorption set A:\n{dist_exit_state}" \
+                f"\nOffending cases:\n{[x for x in dist_exit_state['x'] if bool(absorption_set.contains(x))]}"
 
             return dist_exit_state
         #--- Auxiliary functions
@@ -395,9 +418,13 @@ class SimulatorDiffusionFV(Simulator):
 
         for t in tqdm(range(1, dict_params_simul['T']+1)):    # We start the time step at 1 because t=0 corresponds to the initial state which is stored above
             state = self.env.getState()
-            next_state, _, _, _ = self.env.step(0)
+            next_state, _, _, info = self.env.step(0)
             if store_trajectory:
                 self.trajectory_mc[t] = next_state
+                if info.get('n_jumps', 0) > 0:
+                    self.jump_times.append(t)
+                    self.jump_numbers.append(info['n_jumps'])
+                    self.jump_values.append(info['jump_value'])
 
             # Compute rolling statistics in order to check for stationarity and thus start collecting exit states
             # (and exit times as well, although this is less important because the effect of non-stationarity washes out as more data is collected)
@@ -518,8 +545,8 @@ class SimulatorDiffusionFV(Simulator):
             Simulation parameters containing at least the following entries:
             - 'N': # particles used in the Fleming-Viot particle system. It must be an integer larger than 1.
             - 'absorption_set': sympy.Set defining the absorption set A, whose touching makes a particle be reactivated to another particle.
-            - 'max_nsteps': (opt) maximum number of (integer) steps to run the simulation for,
-            if the normal condition for stopping the FV simulation never happens. Default: 1E7
+            - 'max_nsteps': (opt) maximum number of (integer) steps to run the simulation for (over all particles),
+            if the normal condition for stopping the FV simulation never happens. Default: 1E5
 
         dist_exit_state: pandas data frame
             Estimate of the stationary exit state distribution from the absorption set A.
@@ -646,9 +673,9 @@ class SimulatorDiffusionFV(Simulator):
             state = pstates[idx_particle]
             self.env.setState(state)
             # Update the environment which now represents the particle to update
-            next_state, _, _, _ = self.env.step(0)
+            next_state, _, _, info = self.env.step(0)
             update_particle_info(idx_particle, time, next_state)
-            return state, next_state
+            return state, next_state, info
 
         def update_particle_info(idx_particle, time, state):
             ptimes[idx_particle] = time
@@ -701,7 +728,7 @@ class SimulatorDiffusionFV(Simulator):
             raise ValueError(f"Parameter `dict_params_simul['absorption_set']` must be of type sympy.Set (e.g. `sympy.Union(sympy.Interval(-np.Inf, -0.1), sympy.Interval(0.1, +np.Inf))`): {dict_params_simul['absorption_set']}")
         absorption_set = dict_params_simul['absorption_set']
 
-        max_nsteps = dict_params_simul.get('max_nsteps', 1E7)
+        max_nsteps = dict_params_simul.get('max_nsteps', 1E5)
 
         # Sets of interest on which the stationary probability is estimated
         if not isinstance(sets_of_interest, list):
@@ -744,7 +771,7 @@ class SimulatorDiffusionFV(Simulator):
         while not done:
             t += 1
             p = choose_particle(N)
-            state, next_state = update_particle(p, t)
+            state, next_state, info = update_particle(p, t)
             num_particles_absorbed_at_least_once = check_and_manage_absorption(p, t, state, next_state, num_particles_absorbed_at_least_once)
             update_phi(dict_phi, p, t, state)
 
@@ -756,7 +783,8 @@ class SimulatorDiffusionFV(Simulator):
             f"When the simulation did NOT stop by max. #steps = {max_nsteps}, {N} particles should have been absorbed at least once: {num_particles_absorbed_at_least_once} at t = {last_time_observed}"
 
         # Estimate the survival probability distribution
-        assert len(survival_times)-1 == N, f"There must be exactly N={N} survival times measured: {len(survival_times)}"
+        if t < max_nsteps:
+            assert len(survival_times)-1 == N, f"There must be exactly N={N} survival times measured: {len(survival_times)}"
         df_proba_surv = compute_survival_probability(survival_times)
 
         if store_trajectory:

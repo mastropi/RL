@@ -23,6 +23,7 @@ def timeit(func):
 
 
 def compute_K_integrals(x, r, sigma, beta=1):
+    "The beta parameter defines the translation coefficient from power (GW) to frequency (Hz), affecting the drift component. The value estimated by Zocca's paper is 0.863291580."
     def K1_integrand(y):
         return np.exp(-(y**2) * (beta * r + beta * x) / sigma**2)
 

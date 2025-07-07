@@ -374,7 +374,120 @@ def keep_dict_params_defined_in_function(dict_params, func):
 
     Note that both positional and keyword parameters in `func` are retained in `dict_params` if present.
     """
-    return dict([(k, dict_params[k]) for k in inspect.signature(func).parameters.keys() if k in dict_params])
+    try:
+        # Parameters extraction based on function's signature
+        # It only works if the inspect.signature() returns a non-empty result, which is NOT the case for Python's built-in functions.
+        params_func = inspect.signature(func).parameters.keys()
+    except:
+        # The function is expected to be a built-in function.
+        # NOTE however that this is expected NOT to work for *compiled* built-in functions.
+        # The call to describe_function(func) returns an object of type `inspect.ArgSpec'.
+        # Note that varargs may be 'args' and keywords may be 'kwargs' instead of None, apparently.
+        # Ex:
+        # describe_function(np.random.beta) --> ArgSpec(args=['a', 'b', 'size'], varargs=None, keywords=None, defaults=[None])
+        # describe_function(np.random.normal) --> ArgSpec(args=['loc', 'scale', 'size'], varargs=None, keywords=None, defaults=[0.0, 1.0, None])
+        signature_func = describe_function(func)
+        params_func = signature_func.args
+
+    dict_params_common = dict([(k, dict_params[k]) for k in params_func if k in dict_params])
+
+    return dict_params_common
+
+
+def describe_function(function):
+    """
+    Returns a function's argspec using its docstring
+
+    If usages discovered in the docstring conflict, or default
+    values could not be resolved, a generic argspec of *arg
+    and **kwargs is returned instead.
+
+    Ref: https://stackoverflow.com/questions/3276635/how-to-get-the-number-of-args-of-a-built-in-function-in-python
+    """
+    # taken from traitlet.utils.importstring
+    def import_item(name):
+        """Import and return ``bar`` given the string ``foo.bar``.
+
+        Calling ``bar = import_item("foo.bar")`` is the functional equivalent of
+        executing the code ``from foo import bar``.
+
+        Parameters
+        ----------
+        name : string
+          The fully qualified name of the module/package being imported.
+
+        Returns
+        -------
+        mod : module object
+           The module that was imported.
+        """
+        parts = name.rsplit('.', 1)
+        if len(parts) == 2:
+            # called with 'foo.bar....'
+            package, obj = parts
+            module = __import__(package, fromlist=[obj])
+            try:
+                pak = getattr(module, obj)
+            except AttributeError:
+                raise ImportError('No module named %s' % obj)
+            return pak
+        else:
+            # called with un-dotted string
+            return __import__(parts[0])
+
+    s = function.__doc__
+    if s is not None:
+        usages = []
+        p = r'([\w\d]*[^\(])\( ?([^\)]*)'
+        for func, usage in re.findall(p, s):
+            if func == function.__name__:
+                usages.append(usage)
+
+        longest = max(usages, key=lambda s: len(s))
+        usages.remove(longest)
+
+        #print(f"longest:\n{longest}")
+        #print(f"usages: {usages}")
+
+        # DM-2025/06/17: Commented the following `usages` analysis because it prevents from returning the appropriate arguments received by a function
+        # (e.g. np.random.normal, for which it returns args=[], instead of args=['loc', 'scale', 'size'].
+        # I don't know why the original writer of this function cares about having the arguments in usages appearing also in the function's signature
+        # described at the beginning of the __doc__ output.
+        #for u in usages:
+        #    if u not in longest:
+        #        # the given usages weren't subsets of a larger usage.
+        #        return inspect.ArgSpec([], 'args', 'kwargs', None)
+        if True: #else:
+            args = []
+            varargs = None
+            keywords = None
+            defaults = []
+
+            matchedargs = re.findall(r'( ?[^\[,\]]*) ?,? ?', longest)
+            for a in [a for a in matchedargs if len(a) != 0]:
+                if '=' in a:
+                    name, default = a.split('=')
+                    args.append(name)
+                    p = re.compile(r"<\w* '(.*)'>")
+                    m = p.match(default)
+
+                    try:
+                        if m:
+                            d = m.groups()[0]
+                            # if the default is a class
+                            default = import_item(d)
+                        else:
+                            defaults.append(eval(default))
+                    except:
+                        # couldn't resolve a default value
+                        return inspect.ArgSpec([], 'args', 'kwargs', None)
+                elif '**' in a:
+                    keywords = a.replace('**', '')
+                elif '*' in a:
+                    varargs = a.replace('*', '')
+                else:
+                    args.append(a)
+            return inspect.ArgSpec(args, varargs, keywords, defaults)
 
 
 def parse_dict_params(dict_params, dict_params_default):

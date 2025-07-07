@@ -6,7 +6,8 @@ Created on Sun May 29 19:46:31 2025
 @description: Functions related to diffusion processes, i.e. continuous-state continuous-time Markov processes with discretized time dimension
 (in order to do simulations of the process).
 Some functions are related to the 2024 paper by A. Zocca and Bert Zwart on frequency reserve calculation (FCR),
-"Dynamic dimensioning of frequency containment reserves", as they refer to the piecewise linear drift function alpha considered in the paper.
+"Dynamic dimensioning of frequency containment reserves", https://arxiv.org/abs/2411.11093,
+as they refer to the piecewise linear drift function alpha considered in the paper.
 """
 
 import numpy as np
