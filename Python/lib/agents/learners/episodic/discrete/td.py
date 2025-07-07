@@ -149,6 +149,11 @@ class LeaTDLambda(Learner):
         if info.get('update_counts', True):
             self._update_visit_counts(t, state, action)
 
+        # Add the state and next_state just visited to the known set of environment states which may be used when we need information about the size of the environment
+        # (without using knowledge about the environment that the agent is not expected to know).
+        # See the comment for the environment_set attribute in the GenericLearner class for a couple of use cases.
+        super().updateKnownEnvironmentSet({state, next_state})
+
         # Compute the delta values used for the update of each value function
         # NOTE: We compute the delta separately, and NOT inside the functions that update the value functions,
         # because the delta information is needed by the adaptive TD(lambda) learner and implementing a specific
@@ -506,6 +511,9 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
             self._update_average_reward()
         if info.get('update_counts', True):
             self._update_visit_counts(t, state, action)
+
+        # See comment about this step in LeaTDLambda.learn()
+        super().updateKnownEnvironmentSet({state, next_state})
 
         # See comment in the constructor of the meaning of this attribute, which is exclusively used in the adaptive lambda learner
         self.state_counts_noreset[state] += 1

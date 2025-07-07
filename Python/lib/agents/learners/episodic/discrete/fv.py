@@ -8,6 +8,7 @@ Created on Tue Sep 05 15:04:22 2023
 
 import numpy as np
 import pandas as pd
+from typing import Union
 
 from Python.lib.agents.learners import AlphaUpdateType, LearningCriterion, LearningTask, ResetMethod
 from Python.lib.agents.learners.episodic.discrete.td import LeaTDLambda, LeaTDLambdaAdaptive
@@ -1319,8 +1320,18 @@ class LeaFV(LeaTDLambda):
     def getAbsorptionSet(self):
         return self.absorption_set
 
-    def getActivationSet(self):
-        return self.activation_set
+    def getActivationSet(self, retrieve_probabilities=False):
+        "Retrieves the activation set, either as a set (when retrieve_probabilities=False) or as a dictionary (when retrieve_probabilities=True, even if it is None)"
+        if retrieve_probabilities:
+            assert self.activation_set is None or isinstance(self.activation_set, dict), f"The stored activation set must be a dictionary when retrieve_probabilities=True: {self.activation_set}"
+            if self.activation_set is None:
+                return dict()
+            else:
+                return self.activation_set
+        elif isinstance(self.activation_set, dict):
+            return set(self.activation_set.keys())
+        else:
+            return self.activation_set
 
     def getActiveSet(self):
         return self.active_set
@@ -1406,26 +1417,36 @@ class LeaFV(LeaTDLambda):
 
     def setAbsorptionSet(self, absorption_set):
         "Sets the absorption set and updates the activation and active sets so that they are consistent with the absorption set"
-        # TEMPORARY: This calculation of the activation set is ONLY valid for GRIDWORLD environments.
-        # In the general case, the activation set should be computed from the transition matrix P associated to the environment.
-        # [DONE-2025/06/13: Disregarded for what is written in the next "to-do"] to-do: (2024/05/12) Compute the activation set from the transition matrix of the environment
-        # [DONE-2025/06/13: The activation set is no longer computed to avoid CHEATING by the FV agent when learning value functions] to-do: (2025/01/08) DO NOT DO THE ABOVE TODO! In fact, the agent is NOT supposed to know the transition probabilities! (it's a model-free RL approach we are using!)
-        if False:
-            from Python.lib.environments.gridworlds import get_adjacent_states
-            activation_set = set()
-            for s in absorption_set:
-                for sadj, dir in get_adjacent_states(self.env.getShape(), s):
-                    if sadj is not None and sadj not in set.union(absorption_set, self.env.getObstacleStates()):
-                        activation_set.add(sadj)
-        else:
-            activation_set = None
-
         self.absorption_set = absorption_set
-        self.activation_set = activation_set
         self.active_set = self._compute_active_set()
         if not self.fixed_states_of_interest:
             # Update the set containing the states of interest based on the new active set
             self.states_of_interest = self.active_set
+
+    def setActivationSet(self, activation_set_or_dict: Union[set, dict, None], store_probabilities=False):
+        """
+        This method can be typically used to set OBSERVED EXIT states from the absorption set as activation set, to be used as backup states when no EXIT states are observed
+
+        Arguments:
+        activation_set: set or dict
+            Activation set to store which can include their probability of occurrence if they are obtained from e.g. the observation of EXIT states from
+            the absorption set.
+            This piece of information can be stored as a full dictionary or simply as a set depending on parameter store_probabilites.
+            This parameter can be None.
+
+        store_probabilities: (opt) bool
+            When the activation set is given as a dictionary containing states as keys and their probabilities as values,
+            whether it should be stored as a dictionary to preserve all the information or just as a set of the states used as keys.
+            This is useful when we would like to use the information stored as backup set of start states for the FV simulation
+            when no EXIT states are observed from the absorption set at a future policy learning step.
+            default: False
+        """
+        if activation_set_or_dict is not None and not isinstance(activation_set_or_dict, (set, dict)):
+            raise ValueError(f"The input parameter `activation_set_or_dict` must be a set or dict: {type(activation_set_or_dict)}")
+        if isinstance(activation_set_or_dict, dict):
+            self.activation_set = activation_set_or_dict if store_probabilities else set(activation_set_or_dict.keys())
+        else:
+            self.activation_set = activation_set_or_dict
 
     def setLessFrequentlyVisitedSet(self, less_frequently_visited_set):
         self.less_frequently_visited_set = less_frequently_visited_set

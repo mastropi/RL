@@ -177,7 +177,7 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
         states: list, tuple, set
             States to show given as their 1D index representation.
         """
-        n_string = f"(n={np.nan if states is None else str(len(states)) + ' out of ' + str(self.getNumStates()) + ', ' + str(np.round(len(states) / self.getNumStates() * 100, 1)) + '%'}):"
+        n_string = f"(n={np.nan if states is None else str(len(states)) + ' out of ' + str(len(self.getAllValidStates())) + ' valid states, ' + str(np.round(len(states) / len(self.getAllValidStates()) * 100, 1)) + '%'}):"
         if self.isStateContinuous():
             # This is the case for e.g. the MountainCar environment when the environment is defined on the continuous-valued states, but ONLY for the computation of the next state
             # based on Physics law (although the environment's state space is still discrete --which is why we call get_state_discrete_from_index() below).

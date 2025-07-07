@@ -132,6 +132,11 @@ class LeaMCLambda(Learner):
             self.learn_lambda_return(t, state, action, next_state, reward, done, info)
         else:
             self.learn_mc(t, state, action, next_state, reward, done, info)
+
+        # Add the state and next_state just visited to the known set of environment states which may be used when we need information about the size of the environment
+        # (without using knowledge about the environment that the agent is not expected to know).
+        # See the comment for the environment_set attribute in the GenericLearner class for a couple of use cases.
+        super().updateKnownEnvironmentSet({state, next_state})
     #------------- Method that is called by the outside world to learn V(s) ----------------------#
 
 
@@ -567,6 +572,11 @@ class LeaMCLambdaAdaptive(LeaMCLambda):
         if info.get('update_counts', True):
             self._update_visit_counts(t, state, action)
         self._updateG(t, state, next_state, reward, done)
+
+        # Add the state and next_state just visited to the known set of environment states which may be used when we need information about the size of the environment
+        # (without using knowledge about the environment that the agent is not expected to know).
+        # See the comment for the environment_set attribute in the GenericLearner class for a couple of use cases.
+        super().updateKnownEnvironmentSet({state, next_state})
 
         if done:
             # This means t+1 is the terminal time T

@@ -798,19 +798,20 @@ class Simulator:
         def update_absorption_set_if_not_too_large(absorption_set, max_prop_absorption_set=+np.Inf):
             """
             Updates the absorption set stored in the FV learner with the given `absorption_set` as long as it has not grown above
-            the `max_prop_absorption_set` threshold and returns whether it has been updated.
-            
+            the `max_prop_absorption_set` threshold computed out of the number of states known by the learner so far, and returns whether it has been updated.
+
             Note that the proportion of the absorption set is measured w.r.t. the number of VALID states in the environment,
             i.e. the states in the environment that CAN be visited (e.g. obstacles in labyrinths are not counted).
             This number of valid states is retrieved with the environment's method getValidStates().
             """
             _size_absorption_set = len(absorption_set)
             _n_valid_states = len(self.env.getAllValidStates())
-            _prop_absorption_set = _size_absorption_set / _n_valid_states
+            _n_known_states = len(self.agent.getLearner().getKnownEnvironmentSet())
+            _prop_absorption_set = _size_absorption_set / _n_known_states
             if _prop_absorption_set >= max_prop_absorption_set:
                 # The absorption set has become large enough, we won't update it
                 print(f"[CHECK #2] Absorption set NOT updated, as it has become large enough: "
-                      f"size = {_size_absorption_set} states ({_prop_absorption_set * 100}% of {_n_valid_states} valid states >= {max_prop_absorption_set*100}%)")
+                      f"size = {_size_absorption_set} states ({_prop_absorption_set * 100}% of {_n_known_states} KNOWN states >= {max_prop_absorption_set * 100}%) ({_size_absorption_set / _n_valid_states * 100:.1f}% of EXISTING valid states)")
                 absorption_set_has_been_updated = False
                 number_of_new_states_in_absorption_set = 0
             else:
@@ -818,9 +819,15 @@ class Simulator:
                 number_of_new_states_in_absorption_set = len(absorption_set) - len(self.agent.getLearner().getAbsorptionSet())
                 assert number_of_new_states_in_absorption_set >= 0, f"The size of the absorption set must NOT decrease: number of new states = {number_of_new_states_in_absorption_set}"
                 if absorption_set != self.agent.getLearner().getAbsorptionSet():
-                    print(f"[CHECK #2] Absorption set UPDATED! ({number_of_new_states_in_absorption_set} new states) --> "
-                          f"New size = {_size_absorption_set} states ({_prop_absorption_set * 100:.1f}% of {_n_valid_states} valid states)")
+                    print(f"[CHECK #2] Absorption set UPDATED! (most likely increased) ({number_of_new_states_in_absorption_set} new states) --> "
+                          f"New size = {_size_absorption_set} states ({_prop_absorption_set * 100:.1f}% of {_n_known_states} KNOWN states, {_size_absorption_set / _n_valid_states * 100:.1f}% of EXISTING valid states)")
                     self.agent.getLearner().setAbsorptionSet(absorption_set)
+                    # DM-2025/06/26: The reset of the backup EXIT state to None has been disabled because now we keep the backup exit states that are OUTSIDE A
+                    # when defining the start states for the FV simulation.
+                    # Note that, since the absorption set A CANNOT be reduced, any state in the backup exit set that is NOT in A, must be part of the external boundary of A.
+                    # The activation set should be reset (to None) because the activation set currently stored in the learner corresponds to a different absorption set
+                    #self.agent.getLearner().setActivationSet(None)
+                    #print(f"The activation set stored in the learner has been reset to None (because it may no longer be valid following the change in the absorption set).")
                     absorption_set_has_been_updated = True
                 else:
                     absorption_set_has_been_updated = False
@@ -932,7 +939,42 @@ class Simulator:
 
         print(f"Number of initial explorations run = {n_initial_explorations_run} for a total of {n_events_et} exploration steps. Last value of T = {dict_params_simul['T']}.")
         if len(learning_info['probas_stationary_exit_cycle_set']) > 0:
-            print("--> SUCCESS: EXIT states from absorption set A observed!")
+            print("--> SUCCESS: EXIT states from absorption set A observed! The EXIT states are stored as Activation Set in the learner for backup use in the future.")
+            # Store the observed EXIT states as activation set in the learner, to be used as backup start states for FV when no EXIT states are observed for the SAME absorption set A
+            self.agent.getLearner().setActivationSet(learning_info['probas_stationary_exit_cycle_set'], store_probabilities=True)
+        else:
+            # When NO EXIT states are observed, use the activation set stored in the learner as backup set of EXIT states keeping just the states that are OUTSIDE A (if any)
+            # Note that, since the absorption set A CANNOT be reduced, any state in the backup exit set that is NOT in A, must be part of the external boundary of A.
+            learning_info['probas_stationary_exit_cycle_set'] = self.agent.getLearner().getActivationSet(retrieve_probabilities=True)
+            if len(learning_info['probas_stationary_exit_cycle_set']) > 0:
+                print("--> NO EXIT states from absorption set A were observed, but the set of EXIT states was restored to the Activation Set stored in the learner as backup,"
+                      " using an uniform distribution (to achieve greater exploration):"
+                      f"\n{learning_info['probas_stationary_exit_cycle_set']}")
+                # Find the backup exit states that are outside the current absorption set A and thus that are eligible to be selected as start states for the FV simulation
+                _backup_exit_states_outside_A = set(learning_info['probas_stationary_exit_cycle_set'].keys()).difference(dict_params_simul['absorption_set'])
+                print(f"of which the following states are OUTSIDE A:\n{_backup_exit_states_outside_A}")
+
+                # Create the EXIT state distribution from the backup set of EXIT states as a uniform probability on the states that are OUTSIDE A
+                # This allows two things:
+                # - Avoid failure of the assertion that checks the set of start states for the FV simulation contains states in the absorption set (done in _run_simulation_fv())
+                # - Distributing the start states homogeneously among the backup EXIT states outside A which could help balance a very skewed distribution from a previous excursion
+                # that may bias the concentration of particles in regions where they could get stuck.
+                learning_info['probas_stationary_exit_cycle_set'] = dict()
+                _proba_uniform = 1 / max(1, len(_backup_exit_states_outside_A))  # max(1, ...) in case the set of backup exit states that are outside A is empty
+                for s in _backup_exit_states_outside_A:
+                    learning_info['probas_stationary_exit_cycle_set'][s] = _proba_uniform
+
+                # Store the backup set of EXIT states as activation set in the learner (so that it can be read at the next policy learning step)
+                self.agent.getLearner().setActivationSet(learning_info['probas_stationary_exit_cycle_set'], store_probabilities=True)
+
+                print(f"BACKUP set of EXIT states and their probability of selection as FV start states:"
+                      f"\n{learning_info['probas_stationary_exit_cycle_set']}")
+                assert len(set(learning_info['probas_stationary_exit_cycle_set'].keys()).intersection(dict_params_simul['absorption_set'])) == 0, \
+                    f"No states in the backup set of EXIT states must belong to the absorption set A, but the interesction of the backup set" \
+                    f"\n{learning_info['probas_stationary_exit_cycle_set']}" \
+                    f"\n and the absorption set" \
+                    f"\n{dict_params_simul['absorption_set']}" \
+                    f"\ngives {set(learning_info['probas_stationary_exit_cycle_set']).intersection(dict_params_simul['absorption_set'])}"
 
         # Store information about the estimated expected absorption time
         # One of the reasons for storing this information is to be able to use an estimated value for E(T_A) from a *previous* policy learning step,
@@ -1155,7 +1197,9 @@ class Simulator:
                     # Update also the set of less frequently visited states during the FV simulation in order to keep consistency of this piece of information
                     # with the information about the absorption set.
                     self.agent.getLearner().setLessFrequentlyVisitedSet(less_frequently_visited_set)
-
+            else:
+                print(f"Absorption set NOT updated because the number of steps T for the expected reabsorption time has reached its maximum of {MAX_NUMBER_OF_STEPS_FOR_EXPECTATION}.")
+                    
             #-- Process the estimated expected reward
             state_counts_all = state_counts_et + state_counts_fv
             #print(f"Shape of proba surv and phi: {df_proba_surv.shape}")
@@ -1919,6 +1963,25 @@ class Simulator:
             # via the call to the choose_state_from_set() function below, which precisely calls np.random.choice() passing a value for the `p=` parameter
             # when the `dist_proba_start_state` parameter is NOT None.
             dist_proba_for_start_state = None
+
+        # Choose the start state from the activation set or a subset of it, if not all those states are present in the dictionary of the start state distribution
+        # --because e.g. they were not observed during the E(T_A) excursion used for the stationary exit state distribution.
+        # First parse the start set parameter
+        _start_set_parsed = start_set.copy()
+        if dist_proba_for_start_state is not None:
+            if len(dist_proba_for_start_state) == 0:
+                warnings.warn(f"[_run_simulation_fv] The dictionary containing the start state distribution to use `dist_proba_for_start_state` is empty."
+                              f"\nThe start states will be selected UNIFORMLY AT RANDOM (but this may not be what is wished).")
+                dist_proba_for_start_state = None
+            elif not set(dist_proba_for_start_state.keys()).issubset(start_set):
+                # TODO: (2024/12/23) Update this logic (defining the distribution for the start state selection) so that when a start set is given and the distribution of start states is not None, the states in the given set are selected using the probability distribution stored in the start state distribution dictionary (dist_proba_start_state) READJUSTED to the intersecting states with `start_set`, instead of selecting them uniformly at random (which is the case now when setting dist_proba_for_start_state to None).
+                warnings.warn(f"[_run_simulation_fv] The set of start states given in `start_set` ({start_set}) "
+                              f"is NOT a subset of the keys present in the dictionary containing the start state distribution to use `dist_proba_for_start_state`:\n{dist_proba_for_start_state}"
+                              f"\nThe start states will be selected UNIFORMLY AT RANDOM (but this may not be what is wished).")
+                dist_proba_for_start_state = None
+            else:
+                # Define the set of start states as the keys of the given distribution, which define precisely which states the start state should be chosen from
+                _start_set_parsed = set(dist_proba_for_start_state.keys())
         for i, env in enumerate(envs):
             # Environment seed
             # IMPORTANT: (2024/05/07) Setting this seed is ONLY relevant when the environment has some stochastic component --e.g. wind in a gridworld.
@@ -1926,25 +1989,6 @@ class Simulator:
             # the random number generator of the environment stored in the `policy` object. This seed is set above.
             seed_i = seed + i if seed is not None else None
             env.setSeed(seed_i)
-
-            # TODO: (2024/12/23) Move this OUTSIDE this loop as the computation of _start_set_parsed is the same for all the particles!
-            # TODO: (2024/12/23) Update the logic below so that when a start set is given, the states in the set are honoured instead of being overridden by the states in the probability distribution dictionary, dist_proba_start_state. The idea is to select the state from the start_set with a probability given in dist_proba_start_state dictionary but READJUSTED to the intersecting states between the keys in dist_proba_start_state and `start_set`.
-            # Choose the start state from the activation set or a subset of it, if not all those states are present in the dictionary of the start state distribution
-            # --because e.g. they were not observed during the E(T_A) excursion used for the stationary exit state distribution.
-            _start_set_parsed = start_set.copy()
-            if dist_proba_for_start_state is not None:
-                if len(dist_proba_for_start_state) == 0:
-                    warnings.warn(f"[_run_simulation_fv] The dictionary containing the start state distribution to use `dist_proba_for_start_state` is empty."
-                                  f"\nThe start states will be selected UNIFORMLY AT RANDOM (but this may not be what is wished).")
-                    dist_proba_for_start_state = None
-                elif not set(dist_proba_for_start_state.keys()).issubset(start_set):
-                    warnings.warn(f"[_run_simulation_fv] The set of start states given in `start_set` ({start_set}) "
-                                  f"is NOT a subset of the keys present in the dictionary containing the start state distribution to use `dist_proba_for_start_state`:\n{dist_proba_for_start_state}"
-                                  f"\nThe start states will be selected UNIFORMLY AT RANDOM (but this may not be what is wished).")
-                    dist_proba_for_start_state = None
-                else:
-                    # Define the set of start states as the keys of the given distribution, which define precisely which states the start state should be chosen from
-                    _start_set_parsed = set(dist_proba_for_start_state.keys())
             start_state = choose_state_from_set(_start_set_parsed, dist_proba_for_start_state)
             env.setState(start_state)
 

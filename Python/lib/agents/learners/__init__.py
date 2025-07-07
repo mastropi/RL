@@ -207,6 +207,17 @@ class GenericLearner:
                                         # When a scalar is stored, the scalar value would normally correspond to the alpha value used when learning at the moment when
                                         # the store_learning_rate() method was called, REGARDLESS of the state and action the process just visited.
 
+        # Set of environment states that are known to the learner at the current learning time
+        # This piece of information is useful to avoid "cheating" derived from using information about the environment that an agent is not expected to know,
+        # e.g. the number of total states in the environment, prior to visiting all existing states. For instance when:
+        # - we need to compare the K-L distance between two consecutive policies in a policy learning process with a threshold that is independent of the size of the environment
+        #   (in this case we can use the number of elements in this `environment_set` attribute to dimension the environment and normalize the K-L distance;
+        #   we need normalization of the K-L distance because its value gets larger as the number of states increases, given comparable policy changes among environments).
+        # - we want to control the increase of the absorption set A in a Fleming-Viot learner (which inherits from this class, see the LeaFV class)
+        #   to avoid becoming too large and prevent EXIT states from being observed during the environment regular exploration (i.e. without using Fleming-Viot)
+        #   (see method update_absorption_set_if_not_too_large() in discrete.Simulator for an example of its actual use).
+        self.environment_set = set()
+
     def reset(self, reset_learning_epoch=True, reset_alphas=True, reset_value_functions=True, reset_average_reward=True, reset_trajectory=True, reset_counts=True):
         """
         Resets the variables that store information about the learning process
@@ -453,6 +464,11 @@ class GenericLearner:
         n_rewards_observed_so_far = len(self.rewards) - 1   # We subtract 1 to the length of self.rewards because the first element in self.rewards is a fictitious reward of 0 (see its initialization in the constructor)
         self.average_reward += (self.reward - self.average_reward) / max(1, n_rewards_observed_so_far)  # `max(1, ...)` to avoid division by 0 if we are storing the very first reward
 
+    def updateKnownEnvironmentSet(self, set_of_states_to_add):
+        "Updates the set of known environment states. Normally the input parameter represents newly visited states by the agent."
+        self.environment_set.update(set_of_states_to_add)
+
+    #-- Getters
     def getAverageLearningRates(self):
         return self.alpha_mean
 
@@ -532,6 +548,10 @@ class GenericLearner:
     def getSampleSizeForAverageReward(self):
         return self.sample_size_initial_reward_stored_in_learner
 
+    def getKnownEnvironmentSet(self):
+        return self.environment_set
+
+    #-- Setters
     def setInitialLearningRate(self, alpha):
         "Sets the initial learning rate"
         self.alpha = alpha
