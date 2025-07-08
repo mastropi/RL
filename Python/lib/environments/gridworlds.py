@@ -631,35 +631,43 @@ class EnvGridworld2D(EnvironmentDiscrete):
                     # There is WIND (for now only ONE wind direction is allowed)
                     # => The transition is no longer deterministic when the agent takes an action on a given state
 
-                    # Define the (objective) diagonal cells for the current state in 2D coordinates, regardless of whether those states are obstacles ore out of range
+                    # Define all the possible diagonal cells from the current state in 2D coordinates, regardless of whether those states are obstacles ore out of range
+                    # Note that some of these can be the next state, because of the wind.
+                    # ns = "next state", followed by the cardinal direction (e.g."north-east", etc.)
                     ns_ne_2d = (y - 1, x + 1)
                     ns_se_2d = (y + 1, x + 1)
                     ns_sw_2d = (y + 1, x - 1)
                     ns_nw_2d = (y - 1, x - 1)
 
-                    # Define the next state given the direction the agent decides to move and the direction of the wind
-                    # Note that each next state is given as a 1D-coordinate state and that they are VALID states
-                    # (because they are determined after analyzing whether each possible next state (based on movement direction and wind direction) is valid).
+                    # Define the next state given the direction the agent decides to move and the direction of the wind, and the location of the obstacles.
+                    # Note that each next state is given as a 1D-coordinate state and that they are VALID states,
+                    # because they are determined after analyzing whether each possible next state --based on movement direction-- is valid
+                    # and each possible next state --based on movement direction AND wind direction-- is valid.
+                    # NOTE that we must analyze BOTH conditions for a valid next state, either the regular next state without wind and the regular state with wind,
+                    # because if we don't check the first condition, we might end up with a tunnel effect when the regular next state is an obstacle, but the next state + WIND
+                    # is NOT an obstacle! (this already happened before I wrote this on 22-Jun-2025!!)
+                    # (the first condition, i.e. that the agent must go THROUGH the deterministic state before reaching the "windy" next state, is checked by the two conditions
+                    # on the first IF line in the definition of the dictionary below)
                     dict_next_state_dictated_by_wind_for_each_direction = dict({
                         # Directions (of movement)
                         Direction2D.UP: {
                                         # Possible wind directions
                                         Direction2D.UP: ns_up,
-                                        Direction2D.RIGHT: np.ravel_multi_index(ns_ne_2d, self.shape) if ns_ne_2d not in set_obstacle_states_2d
+                                        Direction2D.RIGHT: np.ravel_multi_index(ns_ne_2d, self.shape) if ns_ne_2d not in set_obstacle_states_2d and ns_up_2d not in set_obstacle_states_2d
                                                     else   np.ravel_multi_index(ns_up_2d, self.shape) if ns_up_2d not in set_obstacle_states_2d
                                                     else   s,
                                         Direction2D.DOWN: s,
-                                        Direction2D.LEFT: np.ravel_multi_index(ns_nw_2d, self.shape) if ns_nw_2d not in set_obstacle_states_2d
+                                        Direction2D.LEFT: np.ravel_multi_index(ns_nw_2d, self.shape) if ns_nw_2d not in set_obstacle_states_2d and ns_up_2d not in set_obstacle_states_2d
                                                     else  np.ravel_multi_index(ns_up_2d, self.shape) if ns_up_2d not in set_obstacle_states_2d
                                                     else  s
                                         },
                         Direction2D.RIGHT: {
                                         # Possible wind directions
-                                        Direction2D.UP: np.ravel_multi_index(ns_ne_2d, self.shape) if ns_ne_2d not in set_obstacle_states_2d
+                                        Direction2D.UP: np.ravel_multi_index(ns_ne_2d, self.shape) if ns_ne_2d not in set_obstacle_states_2d and ns_rt_2d not in set_obstacle_states_2d
                                                 else    np.ravel_multi_index(ns_rt_2d, self.shape) if ns_rt_2d not in set_obstacle_states_2d
                                                 else    s,
                                         Direction2D.RIGHT: ns_right,
-                                        Direction2D.DOWN: np.ravel_multi_index(ns_se_2d, self.shape) if ns_se_2d not in set_obstacle_states_2d
+                                        Direction2D.DOWN: np.ravel_multi_index(ns_se_2d, self.shape) if ns_se_2d not in set_obstacle_states_2d and ns_rt_2d not in set_obstacle_states_2d
                                                     else  np.ravel_multi_index(ns_rt_2d, self.shape) if ns_rt_2d not in set_obstacle_states_2d
                                                     else  s,
                                         Direction2D.LEFT: s
@@ -667,21 +675,21 @@ class EnvGridworld2D(EnvironmentDiscrete):
                         Direction2D.DOWN: {
                                         # Possible wind directions
                                         Direction2D.UP: s,
-                                        Direction2D.RIGHT: np.ravel_multi_index(ns_se_2d, self.shape) if ns_se_2d not in set_obstacle_states_2d
+                                        Direction2D.RIGHT: np.ravel_multi_index(ns_se_2d, self.shape) if ns_se_2d not in set_obstacle_states_2d and ns_dn_2d not in set_obstacle_states_2d
                                                     else   np.ravel_multi_index(ns_dn_2d, self.shape) if ns_dn_2d not in set_obstacle_states_2d
                                                     else   s,
                                         Direction2D.DOWN: ns_down,
-                                        Direction2D.LEFT: np.ravel_multi_index(ns_sw_2d, self.shape) if ns_sw_2d not in set_obstacle_states_2d
+                                        Direction2D.LEFT: np.ravel_multi_index(ns_sw_2d, self.shape) if ns_sw_2d not in set_obstacle_states_2d and ns_dn_2d not in set_obstacle_states_2d
                                                     else  np.ravel_multi_index(ns_dn_2d, self.shape) if ns_dn_2d not in set_obstacle_states_2d
                                                     else  s
                                         },
                         Direction2D.LEFT: {
                                         # Possible wind directions
-                                        Direction2D.UP: np.ravel_multi_index(ns_nw_2d, self.shape) if ns_nw_2d not in set_obstacle_states_2d
+                                        Direction2D.UP: np.ravel_multi_index(ns_nw_2d, self.shape) if ns_nw_2d not in set_obstacle_states_2d and ns_lt_2d not in set_obstacle_states_2d
                                                 else    np.ravel_multi_index(ns_lt_2d, self.shape) if ns_lt_2d not in set_obstacle_states_2d
                                                 else    s,
                                         Direction2D.RIGHT: s,
-                                        Direction2D.DOWN: np.ravel_multi_index(ns_sw_2d, self.shape) if ns_sw_2d not in set_obstacle_states_2d
+                                        Direction2D.DOWN: np.ravel_multi_index(ns_sw_2d, self.shape) if ns_sw_2d not in set_obstacle_states_2d and ns_lt_2d not in set_obstacle_states_2d
                                                     else  np.ravel_multi_index(ns_lt_2d, self.shape) if ns_lt_2d not in set_obstacle_states_2d
                                                     else  s,
                                         Direction2D.LEFT: ns_left
@@ -804,16 +812,18 @@ class EnvGridworld2D(EnvironmentDiscrete):
         return np.unravel_index(s, self.shape)
 
     def plot(self, figsize=(8, 8)):
-        "Plots the gridworld as an image showing the obstacles in black. The axis on which the plot is generated is returned."
+        "Plots the gridworld as an image showing the obstacles in gray. The axis on which the plot is generated is returned."
         nrows, ncols = self.shape
-        grid = np.zeros((nrows, ncols), dtype=int)
 
-        # Define an ad-hoc palette
+        # Define an ad-hoc palette defining the POSSIBLE colors in the image
         # Ref: https://stackoverflow.com/questions/37719304/python-imshow-set-certain-value-to-defined-color (accepted answer)
         palette = np.array([[255, 255, 255],    # white
                             [255, 255, 0],      # yellow
                             [0, 255, 0],        # green
-                            [0, 0, 0]])         # black
+                            [127, 127, 127]])   # gray (color used for the obstacles)
+
+        # Define the grid which will contain numbers that index the palette, so that we specify which color to show in each cell
+        grid = np.zeros((nrows, ncols), dtype=int)
 
         for obs in self.set_obstacle_states:
             raw, column = divmod(obs, ncols)
@@ -829,7 +839,7 @@ class EnvGridworld2D(EnvironmentDiscrete):
         grid[finish_row][finish_column] = 2     # green
 
         plt.figure(figsize=figsize)
-        plt.imshow(palette[grid])
+        plt.imshow(palette[grid])               #
         # Add labels with "Start" and "Finish"
         #plt.text(start_column, start_row, 'Start', ha='center', va='center', fontsize=15)
         #plt.text(finish_column, finish_row, 'Finish', ha='center', va='center', fontsize=15)

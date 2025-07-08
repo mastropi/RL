@@ -101,6 +101,90 @@ class Test_Support_EnvGridworld2D_WithObstacles(unittest.TestCase):
         assert observed_direction == expected_direction
 
 
+class Test_Support_EnvGridworld2D_WithObstaclesAndWind(unittest.TestCase):
+
+    gridworld = None
+
+    @classmethod
+    def setUpClass(cls):
+        cls.gridworld_up = EnvGridworld2D(shape=[3, 4], terminal_states=set({3, 7}), obstacle_states=set({5}), rewards_dict=dict({3: +1, 7: -1}),
+                                       # We use a wind intensity of 1.0 so that we would always move in the direction of the wind and it is easier to test
+                                       wind_dict=dict({'direction': Direction2D.UP, 'intensity': 1.0}))
+        cls.gridworld_left = EnvGridworld2D(shape=[3, 4], terminal_states=set({3, 7}), obstacle_states=set({5, 6}), rewards_dict=dict({3: +1, 7: -1}),
+                                       # We use a wind intensity of 1.0 so that we would always move in the direction of the wind and it is easier to test
+                                       wind_dict=dict({'direction': Direction2D.LEFT, 'intensity': 1.0}))
+
+    def test_move(self):
+        print("\nRunning test {}...".format(self.id()))
+
+        #--- WIND UP
+        env = self.gridworld_up
+        
+        # Moving left from the left border should stay in the same place (as opposed to moving up because of the wind)
+        env.setState(4)
+        next_state, reward, _, _ = env.step(Direction2D.LEFT.value)
+        assert next_state == 4
+        assert env.getState() == next_state
+        assert reward == 0
+
+        # Moving right should move up when no obstacles are present
+        env.setState(6)
+        next_state, reward, _, _ = env.step(Direction2D.RIGHT.value)
+        assert next_state == 3
+        assert env.getState() == next_state
+        assert reward == 1
+
+        # Moving right should NOT move up when there are obstacles in either the cell to the right or the cell where it would move due to the wind
+        env.setState(4)
+        next_state, reward, _, _ = env.step(Direction2D.DOWN.value)
+        assert next_state == 4  # There is an obstacle in state 5, and although the wind would tell the agent to end up in state 1, it can't because there is an obstacle just right from the current state at 4.
+        assert env.getState() == next_state
+        assert reward == 0
+
+        # Moving up should move just one cell up when the wind ALSO goes up, as opposed to moving *two* cells up
+        env.setState(11)
+        next_state, reward, _, _ = env.step(Direction2D.UP.value)
+        assert next_state == 7
+        assert env.getState() == next_state
+        assert reward == -1
+
+        env.setState(6)
+        next_state, reward, _, _ = env.step(Direction2D.UP.value)
+        assert next_state == 2
+        assert env.getState() == next_state
+        assert reward == 0
+
+        #--- WIND TO THE LEFT
+        env = self.gridworld_left
+
+        # Moving up from the top border should stay in the same place (as opposed to moving left because of the wind)
+        env.setState(2)
+        next_state, reward, _, _ = env.step(Direction2D.UP.value)
+        assert next_state == 2
+        assert env.getState() == next_state
+        assert reward == 0
+
+        # Moving down should NOT move left when there are obstacles in either the cell below or the cell where it would move due to the wind
+        env.setState(2)
+        next_state, reward, _, _ = env.step(Direction2D.DOWN.value)
+        assert next_state == 2  # There is an obstacle in states 5 and 6, and 6 is below 2
+        assert env.getState() == next_state
+        assert reward == 0
+
+        env.setState(1)
+        next_state, reward, _, _ = env.step(Direction2D.DOWN.value)
+        assert next_state == 1  # There is an obstacle in state 5, and although the wind would tell the agent to end up in state 4, it can't because there is an obstacle just below the current state at 1.
+        assert env.getState() == next_state
+        assert reward == 0
+
+        # Moving left should move just one cell to the left when the wind ALSO goes to the left, as opposed to moving *two* cells to the left
+        env.setState(2)
+        next_state, reward, _, _ = env.step(Direction2D.LEFT.value)
+        assert next_state == 1
+        assert env.getState() == next_state
+        assert reward == 0
+
+
 if __name__ == '__main__':
     # Reference for creating test suites:
     # https://stackoverflow.com/questions/15971735/running-single-test-from-unittest-testcase-via-command-line
@@ -116,6 +200,8 @@ if __name__ == '__main__':
     test_suite.addTest(Test_Support_EnvGridworld2D_WithObstacles("test_transition_probabilities"))
     test_suite.addTest(Test_Support_EnvGridworld2D_WithObstacles("test_method_get_adjacent_states"))
     test_suite.addTest(Test_Support_EnvGridworld2D_WithObstacles("test_method_get_opposite_direction"))
+
+    test_suite.addTest(Test_Support_EnvGridworld2D_WithObstaclesAndWind("test_move"))
 
     # Run the test suites
     runner.run(test_suite)
