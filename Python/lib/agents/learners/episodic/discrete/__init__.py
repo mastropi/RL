@@ -462,7 +462,7 @@ class Learner(GenericLearner):
 
         Note that for episodic learning tasks, in which case the average reward across episodes is normally not of interest, no track of the reward observed
         across episodes is maintained, i.e. the value of the super attribute GenericLearner.reward attribute is NOT updated at every new observed reward
-        during the episode. Hence, I call to the GenericLearner.update_average_reward() method will fail (this already happened today on 19-May-2025).
+        during the episode. Hence, a call to the GenericLearner.update_average_reward() method will fail (this already happened today on 19-May-2025).
 
         Arguments:
         T: int
