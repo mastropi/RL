@@ -372,6 +372,13 @@ class LeaFV(LeaTDLambda):
         if info.get('learn_from_superclass', True):
             # Learn the value function using the superclass learner
             super().learn(t, state, action, next_state, reward, done, info)
+        else:
+            # Just update the trajectory stored in the learner and the state counts information
+            # so that these pieces of information are used to e.g. increase the absorption set with states that are frequently visited during the FV simulation.
+            # This is actually ESSENTIAL when using TD(lambda) to learn (as opposed to TD(0)) where learning of value functions is carried out by each COPY of the base learner
+            # that is made for each particle, as opposed to by the base learner itself. However, the information about state visits and state counts is taken from the BASE learner.
+            super()._update_trajectory(t, state, action, reward)
+            super()._update_visit_counts(t, state, action)
 
         if envs is not None:
             assert envs[idx_particle].getStoreTrajectoryFlag(), "The environment associated to the FV particle on which the value functions learning is carried out must have stored the observed trajectory"
@@ -1450,3 +1457,67 @@ class LeaFV(LeaTDLambda):
 
     def setLessFrequentlyVisitedSet(self, less_frequently_visited_set):
         self.less_frequently_visited_set = less_frequently_visited_set
+
+
+class LeaFVAdaptive(LeaFV, LeaTDLambdaAdaptive):
+    def __init__(self, env, N: int, T: int, absorption_set: set,
+                 activation_set: set=None,
+                 states_of_interest: set=None,
+                 probas_stationary_start_state_et: dict=None,
+                 probas_stationary_start_state_fv: dict=None,
+                 dict_function_approximations: dict=None,
+                 criterion=LearningCriterion.AVERAGE,
+                 task=LearningTask.CONTINUING,
+                 alpha=0.1, gamma=1.0, lmbda=0.0,
+                 adjust_alpha=False, alpha_update_type=AlphaUpdateType.EVERY_STATE_VISIT,
+                 adjust_alpha_by_episode=False, alpha_min=0., func_adjust_alpha=None,
+                 reset_method=ResetMethod.ALLZEROS, reset_params=None, reset_seed=None,
+                 burnin_time=0, TIME_RESOLUTION=1,
+                 debug=False):
+        # NOTE: The order in which methods are resolved are defined by the Method Resolution Order which can be retrieved by calling:
+        #   type(self).mro()
+        # For more details and some examples see:
+        # https://stackoverflow.com/questions/2010692/what-does-mro-do
+        # The documentation: https://docs.python.org/3/howto/mro.html#python-2-3-mro
+        # For this class, the MRO (i.e. the output of LeaFVAdaptive.mro()) is:
+        #   [Python.lib.agents.learners.episodic.discrete.fv.LeaFVAdaptive,
+        #   Python.lib.agents.learners.episodic.discrete.fv.LeaFV,
+        #   Python.lib.agents.learners.episodic.discrete.td.LeaTDLambdaAdaptive,
+        #   Python.lib.agents.learners.episodic.discrete.td.LeaTDLambda,
+        #   Python.lib.agents.learners.episodic.discrete.Learner,
+        #   Python.lib.agents.learners.GenericLearner,
+        #   object]
+        # where we see that LeaTDLambdaAdaptive comes BEFORE LeaTDLambda, which is precisely what we want!! :)
+        # This means that when the process encounters the LeaFV.learn(), the super().learn() method called by LeaFV.learn() will be that of the LeaTDLambdaAdaptive class,
+        # and NOT of the LeaTDLambda class, which is what we want.
+        #
+        # Note also that, as a general information, the call to super() is of the form:
+        #   super(type, object_or_type=None)
+        # where object_or_type defines the method resolution order when calling a method of `self`.
+        # In particular `super().__init__()` is equivalent to `super(<current-class>, self).__init__()`
+        # Ref: https://docs.python.org/3/library/functions.html#super
+        #
+        # IMPORTANT to know as well, as a general information: one can also specify explicitly the name of the class to which the method we want to call belongs. Ex:
+        #   LeaTDLambdaAdaptive.learn()
+        # BUT, when doing so, we need to pass `self` as the first argument of the method because the method is called as a CLASS method, NOT as an OBJECT method, so the method
+        # does NOT have information about the calling object, as is the case in the normal calls.
+        # Therefore, the call should be as e.g.:
+        #   LeaTDLambdaAdaptive.learn(self, ...)
+        # Otherwise, the `self` parameter defined in the method called (e.g. learn()) will be assigned the value of the first parameter passed to the method,
+        # and that would mess up things.
+        # Ref: https://stackoverflow.com/questions/14206015/pythons-multiple-inheritance-picking-which-super-to-call
+        super().__init__(env, N, T, absorption_set,
+                         activation_set,
+                         states_of_interest,
+                         probas_stationary_start_state_et,
+                         probas_stationary_start_state_fv,
+                         dict_function_approximations,
+                         criterion=criterion,
+                         task=task,
+                         alpha=alpha, gamma=gamma, lmbda=lmbda,
+                         adjust_alpha=adjust_alpha, alpha_update_type=alpha_update_type,
+                         adjust_alpha_by_episode=adjust_alpha_by_episode, alpha_min=alpha_min, func_adjust_alpha=func_adjust_alpha,
+                         reset_method=reset_method, reset_params=reset_params, reset_seed=reset_seed,
+                         burnin_time=burnin_time, TIME_RESOLUTION=TIME_RESOLUTION,
+                         debug=debug)
+

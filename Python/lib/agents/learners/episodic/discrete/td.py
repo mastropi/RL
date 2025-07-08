@@ -173,7 +173,8 @@ class LeaTDLambda(Learner):
         # - https://stackoverflow.com/questions/57631705/runtimeerror-one-of-the-variables-needed-for-gradient-computation-has-been-modi
         self._updateQ(delta_Q, state=state, action=action)
         self._updateV(delta_V, state=state)
-        self._updateA(state, action, delta_V)
+        #self._deprecated_updateA(state, action, delta_V)
+        self._updateA(delta_V, state=state, action=action)
 
         # We store the effective learning rates alpha
         # (effective in terms of  the eligibility trace that affects the delta values used when updating V above)
@@ -342,10 +343,30 @@ class LeaTDLambda(Learner):
         """
         return self.V.getValue(next_state)
 
-    def _updateA(self, state, action, advantage):
+    def _updateA(self, delta, state=None, action=None):
+        if delta != 0.0:
+            if self.env.isStateContinuous():
+                self.A.update_weights(state, action, delta)
+            else:
+                # DM-2025/06/22: We now use the alpha by state-action instead of the alpha by state as alpha for the update of Q,
+                # which better takes into account the number of visits to each state AND action, not only to each state.
+                # Repeat the alpha for each state as many times as the number of possible actions in the environment
+                # Note that this repeat each value as we need it based on how state and actions are stored in the feature matrix used in self.Q,
+                # namely grouped by state (e.g. if alphas = [2.5, 4.1, 3.0], the repeat by 2 generates [2.5, 2.5, 4.1, 4.1, 3.0, 3.0]
+                # i.e. the same alpha for all actions associated to the same state (which is what we want, i.e. alphas on different actions grouped by state).
+                #_alphas = np.repeat(self.getAlphasByState(), self.env.getNumActions())
+
+                # Reorganize the SxA array into an S*A 1D array grouped by state, i.e. all actions for the first state, then all actions for the second state, etc.
+                # which is how the linearized Q values are organized.
+                _alphas2 = self.getAlphasByStateAction().reshape(-1)
+                self.A.setWeights( self.A.getWeights() + _alphas2 * delta * self._z_Q )
+
+    # DM-2025/06/20: Deprecated this method because it is only valid for TD(0)
+    # as it only updates the advantage of the current state and action and not of the past states and actions visited during the trajectory --which are also affected by TD(lambda)!
+    def _deprecated_updateA(self, state, action, advantage):
         """
         Sets the value of the Advantage function to the given value for the given state and action.
-        An unbiased estimation of the advantage is the delta(V) observed when taking the given action at the given state.
+        An unbiased estimation of the advantage is the delta(V) observed when taking the given action at the given state, i.e. the TD error.
         """
         if self.env.isStateContinuous():
             # IMPORTANT: The advantage function is assumed to be TABULAR
@@ -563,7 +584,8 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
         # Update the value functions
         self._updateV(delta_V, state=state)
         self._updateQ(delta_Q, state=state, action=action)
-        self._updateA(state, action, delta_V)
+        #self._deprecated_updateA(state, action, delta_V)
+        self._updateA(delta_V, state=state, action=action)
 
         # The effective alphas are only computed for the learning of V, not of Q
         # (as this is only stored for information purposes --e.g. plots of the eligibility traces to check if things are working properly)
