@@ -996,7 +996,10 @@ class LeaActorCriticNN(GenericLearner):
         Ex: LeaTDLambda
 
     optimizer_learning_rate: (opt) float
-        Learning rate for the policy parameter learner which is automatically adapted by the optimizer used.
+        Learning rate for the policy parameter learner.
+        If this is the Adam optimizer, this parameter is automatically adapted by the optimizer.
+        If this is used for the Natural Policy Gradient learning, it is NOT adapted automatically, but it can be updated by the user via the
+        setOptimizerLearningRate() method.
         default: 0.1
 
     reset_value_functions: (opt) bool
@@ -1556,6 +1559,13 @@ class LeaActorCriticNN(GenericLearner):
 
     def getPolicy(self):
         return self.policy
+
+    def getOptimizerLearningRate(self):
+        return self.optimizer_learning_rate
+
+    #-- Setters
+    def setOptimizerLearningRate(self, optimizer_learning_rate):
+        self.optimizer_learning_rate = optimizer_learning_rate
 
 
 if __name__ == "__main__":

@@ -214,7 +214,10 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
                     plt.text(cell[1], cell[0], "{:.1f}%".format(visit_relative_frequency[s]*100), horizontalalignment="center", verticalalignment="center", fontsize=15)
                 plt.suptitle(f"Labyrinth with obstacles in black (seed={seed_obstacles})", fontsize=20)
                 plt.title("Identified absorption set A in blue\n(intensity proportional to relative visit frequency)")
-                plt.show()
+                plt.pause(0.01)
+                plt.draw()
+                fig_mgr = plt.get_current_fig_manager()
+                fig_mgr.window.showMinimized()
         elif absorption_set is None:
             # We choose the first column, i.e. the column above the labyrinth's start state, of the 2D-grid as the set A of uninteresting states
             absorption_set = set()
@@ -287,7 +290,8 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
         #-- Plotting parameters
         cls.colormap = cm.get_cmap("jet")
 
-        #-- Possible value function learners to consider
+        #------ Possible value function learners to consider
+        #--- TD learners
         # TD(0) learner
         learner_td0 = td.LeaTDLambda( cls.env2d,
                                       criterion=learning_criterion,
@@ -332,7 +336,8 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
         cls.agent_nn_tda = agents.GenericAgent(cls.policy_nn.copy(), learner_tdlambda_adap)
         cls.sim_tda = DiscreteSimulator(cls.env2d, cls.agent_nn_tda, debug=cls.debug)
 
-        # Fleming-Viot learner
+        #--- Fleming-Viot learners
+        # FV(0) learners
         absorption_set = cls.A
         activation_set = cls.B
         learner_fv = fv.LeaFV(  cls.env2d,
@@ -354,6 +359,44 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
         #cls.agent_nn_fv = agents.GenericAgent(cls.policy_nn, dict({'value': learner_fv, 'policy': actor_critic}))
         cls.agent_nn_fv = agents.GenericAgent(cls.policy_nn.copy(), learner_fv)
         cls.sim_fv = DiscreteSimulator(cls.env2d, cls.agent_nn_fv, debug=cls.debug)
+
+        # FV(Lambda) learner
+        learner_fvlambda = fv.LeaFV(cls.env2d,
+                                    N, T, absorption_set, activation_set,
+                                    states_of_interest=states_of_interest_fv,
+                                    probas_stationary_start_state_et=None,
+                                    probas_stationary_start_state_fv=None,
+                                    criterion=learning_criterion,
+                                    task=learning_task,
+                                    gamma=cls.gamma,
+                                    lmbda=lmbda,
+                                    alpha=cls.alpha,
+                                    adjust_alpha=True,
+                                    adjust_alpha_by_episode=False,
+                                    alpha_min=cls.alpha_min,
+                                    reset_method=cls.reset_method, reset_params=cls.reset_params, reset_seed=cls.seed,
+                                    debug=cls.debug)
+        cls.agent_nn_fvl = agents.GenericAgent(cls.policy_nn.copy(), learner_fvlambda)
+        cls.sim_fvl = DiscreteSimulator(cls.env2d, cls.agent_nn_fvl, debug=cls.debug)
+
+        # Adaptive FV(Lambda) learner
+        learner_fvlambda_adap = fv.LeaFVAdaptive(cls.env2d,
+                                                N, T, absorption_set, activation_set,
+                                                states_of_interest=states_of_interest_fv,
+                                                probas_stationary_start_state_et=None,
+                                                probas_stationary_start_state_fv=None,
+                                                criterion=learning_criterion,
+                                                task=learning_task,
+                                                gamma=cls.gamma,
+                                                lmbda=lmbda,    # This is a dummy lambda, as it is actually not used because the learner is a adaptive TD(Lambda) defined in LeaTDLambdaAdaptive
+                                                alpha=cls.alpha,
+                                                adjust_alpha=True,
+                                                adjust_alpha_by_episode=False,
+                                                alpha_min=cls.alpha_min,
+                                                reset_method=cls.reset_method, reset_params=cls.reset_params, reset_seed=cls.seed,
+                                                debug=cls.debug)
+        cls.agent_nn_fva = agents.GenericAgent(cls.policy_nn.copy(), learner_fvlambda_adap)
+        cls.sim_fva = DiscreteSimulator(cls.env2d, cls.agent_nn_fva, debug=cls.debug)
 
     def getEnv(self):
         return self.env2d
@@ -660,6 +703,8 @@ class Test_EstPolicy_EnvMountainCar(unittest.TestCase):
                          "\nDistribution of state counts and trajectory (blue)\nAbsorption set indicated with red crosses\n(dx={:.3g}, dv={:.3g})".format(cls.env_mc.dx, cls.env_mc.dv))
             plt.pause(0.1)
             plt.draw()
+            fig_mgr = plt.get_current_fig_manager()
+            fig_mgr.window.showMinimized()
 
         # Check if absorption set is valid
         for state in absorption_set:
