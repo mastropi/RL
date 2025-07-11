@@ -710,8 +710,10 @@ class Simulator:
                         _size_absorption_set_before_update = len(self.agent.getLearner().getAbsorptionSet())
                         absorption_set_has_been_updated, _number_of_new_states_in_absorption_set = update_absorption_set_if_not_too_large(estimated_absorption_set)
 
-                        if _number_of_new_states_in_absorption_set > 0:
-                            # Increase the simulation time for the initial exploration by the increase in the absorption set
+                        if not dict_params_simul['soft_killing'] and _number_of_new_states_in_absorption_set > 0:
+                            # For the HARD killing case, increase the simulation time for the initial exploration by the increase in the absorption set
+                            # Note that we do NOT increase T for the SOFT killing case because under SOFT killing we do NOT need to observe EXIT states
+                            # in order to run the FV simulation.
                             _prop_increase_absorption_set = _number_of_new_states_in_absorption_set / _size_absorption_set_before_update
                             dict_params_simul = update_number_of_steps_for_expectation(dict_params_simul, increase_rate=_prop_increase_absorption_set,
                                                                                        reason=f"(due to increase of absorption set by {_prop_increase_absorption_set*100:.1f}%)")
@@ -721,12 +723,11 @@ class Simulator:
                 dict_params_simul['absorption_set'] = self.agent.getLearner().getAbsorptionSet()
                 dict_params_simul['activation_set'] = self.agent.getLearner().getActivationSet()
 
-                # When SOFT killing is used, update the killing probability of the states that are present in the absorption set, which is a function of the state visit frequency
-                # Note that all other states (not in the absorption set), which have already been assigned a killing probability, are NOT updated as they should still keep
-                # a non-zero killing probability.
+                # When SOFT killing is used, update the killing probability of the states based on the new state visit frequency, of which the probability is a function.
                 # This is done to mimic the logic used in the HARD killing context where NO state is REMOVED from the absorption set --see justification above.
                 if dict_params_simul['soft_killing']:
                     assert isinstance(dict_params_simul['proba_killing'], dict), "dict_params_simul['proba_killing'] must be defined and must be a dictionary"
+                    assert dict_params_simul['absorption_set'].issubset(dist_state_counts.keys()), "The absorption set must be a subset of the states with positive killing probability"
                     for s in dist_state_counts.keys():
                         # Use this to define the killing probability as a linear function, i.e. equal to the visit frequency of the state
                         dict_params_simul['proba_killing'][s] = dist_state_counts[s]
@@ -821,7 +822,7 @@ class Simulator:
             """
             _size_absorption_set = len(absorption_set)
             _n_valid_states = len(self.env.getAllValidStates())
-            _n_known_states = len(self.agent.getLearner().getKnownEnvironmentSet())
+            _n_known_states = max(_size_absorption_set, len(self.agent.getLearner().getKnownEnvironmentSet()))    # At least the agent knows the states in the absorption set just identified
             _prop_absorption_set = _size_absorption_set / _n_known_states
             if _prop_absorption_set >= max_prop_absorption_set:
                 # The absorption set has become large enough, we won't update it
@@ -961,43 +962,46 @@ class Simulator:
         time_last_absorption = learning_info['last_cycle_entrance_time']
 
         print(f"Number of initial explorations run = {n_initial_explorations_run} for a total of {n_events_et} exploration steps. Last value of T = {dict_params_simul['T']}.")
-        if len(learning_info['probas_stationary_exit_cycle_set']) > 0:
-            print("--> SUCCESS: EXIT states from absorption set A observed! The EXIT states are stored as Activation Set in the learner for backup use in the future.")
-            # Store the observed EXIT states as activation set in the learner, to be used as backup start states for FV when no EXIT states are observed for the SAME absorption set A
-            self.agent.getLearner().setActivationSet(learning_info['probas_stationary_exit_cycle_set'], store_probabilities=True)
-        else:
-            # When NO EXIT states are observed, use the activation set stored in the learner as backup set of EXIT states keeping just the states that are OUTSIDE A (if any)
-            # Note that, since the absorption set A CANNOT be reduced, any state in the backup exit set that is NOT in A, must be part of the external boundary of A.
-            learning_info['probas_stationary_exit_cycle_set'] = self.agent.getLearner().getActivationSet(retrieve_probabilities=True)
+        if not dict_params_simul['soft_killing']:
+            # Manage the set of EXIT states from A, which define the selection of start states for the FV particles
+            # The problem is that no EXIT states may have been observed in the above simulation, hence we need to recurse to a backup strategy.
             if len(learning_info['probas_stationary_exit_cycle_set']) > 0:
-                print("--> NO EXIT states from absorption set A were observed, but the set of EXIT states was restored to the Activation Set stored in the learner as backup,"
-                      " using an uniform distribution (to achieve greater exploration):"
-                      f"\n{learning_info['probas_stationary_exit_cycle_set']}")
-                # Find the backup exit states that are outside the current absorption set A and thus that are eligible to be selected as start states for the FV simulation
-                _backup_exit_states_outside_A = set(learning_info['probas_stationary_exit_cycle_set'].keys()).difference(dict_params_simul['absorption_set'])
-                print(f"of which the following states are OUTSIDE A:\n{_backup_exit_states_outside_A}")
-
-                # Create the EXIT state distribution from the backup set of EXIT states as a uniform probability on the states that are OUTSIDE A
-                # This allows two things:
-                # - Avoid failure of the assertion that checks the set of start states for the FV simulation contains states in the absorption set (done in _run_simulation_fv())
-                # - Distributing the start states homogeneously among the backup EXIT states outside A which could help balance a very skewed distribution from a previous excursion
-                # that may bias the concentration of particles in regions where they could get stuck.
-                learning_info['probas_stationary_exit_cycle_set'] = dict()
-                _proba_uniform = 1 / max(1, len(_backup_exit_states_outside_A))  # max(1, ...) in case the set of backup exit states that are outside A is empty
-                for s in _backup_exit_states_outside_A:
-                    learning_info['probas_stationary_exit_cycle_set'][s] = _proba_uniform
-
-                # Store the backup set of EXIT states as activation set in the learner (so that it can be read at the next policy learning step)
+                print("--> SUCCESS: EXIT states from absorption set A observed! The EXIT states are stored as Activation Set in the learner for backup use in the future.")
+                # Store the observed EXIT states as activation set in the learner, to be used as backup start states for FV when no EXIT states are observed for the SAME absorption set A
                 self.agent.getLearner().setActivationSet(learning_info['probas_stationary_exit_cycle_set'], store_probabilities=True)
+            else:
+                # When NO EXIT states are observed, use the activation set stored in the learner as backup set of EXIT states keeping just the states that are OUTSIDE A (if any)
+                # Note that, since the absorption set A CANNOT be reduced, any state in the backup exit set that is NOT in A, must be part of the external boundary of A.
+                learning_info['probas_stationary_exit_cycle_set'] = self.agent.getLearner().getActivationSet(retrieve_probabilities=True)
+                if len(learning_info['probas_stationary_exit_cycle_set']) > 0:
+                    print("--> NO EXIT states from absorption set A were observed, but the set of EXIT states was restored to the Activation Set stored in the learner as backup,"
+                          " using an uniform distribution (to achieve greater exploration):"
+                          f"\n{learning_info['probas_stationary_exit_cycle_set']}")
+                    # Find the backup exit states that are outside the current absorption set A and thus that are eligible to be selected as start states for the FV simulation
+                    _backup_exit_states_outside_A = set(learning_info['probas_stationary_exit_cycle_set'].keys()).difference(dict_params_simul['absorption_set'])
+                    print(f"of which the following states are OUTSIDE A:\n{_backup_exit_states_outside_A}")
 
-                print(f"BACKUP set of EXIT states and their probability of selection as FV start states:"
-                      f"\n{learning_info['probas_stationary_exit_cycle_set']}")
-                assert len(set(learning_info['probas_stationary_exit_cycle_set'].keys()).intersection(dict_params_simul['absorption_set'])) == 0, \
-                    f"No states in the backup set of EXIT states must belong to the absorption set A, but the interesction of the backup set" \
-                    f"\n{learning_info['probas_stationary_exit_cycle_set']}" \
-                    f"\n and the absorption set" \
-                    f"\n{dict_params_simul['absorption_set']}" \
-                    f"\ngives {set(learning_info['probas_stationary_exit_cycle_set']).intersection(dict_params_simul['absorption_set'])}"
+                    # Create the EXIT state distribution from the backup set of EXIT states as a uniform probability on the states that are OUTSIDE A
+                    # This allows two things:
+                    # - Avoid failure of the assertion that checks the set of start states for the FV simulation contains states in the absorption set (done in _run_simulation_fv())
+                    # - Distributing the start states homogeneously among the backup EXIT states outside A which could help balance a very skewed distribution from a previous excursion
+                    # that may bias the concentration of particles in regions where they could get stuck.
+                    learning_info['probas_stationary_exit_cycle_set'] = dict()
+                    _proba_uniform = 1 / max(1, len(_backup_exit_states_outside_A))  # max(1, ...) in case the set of backup exit states that are outside A is empty
+                    for s in _backup_exit_states_outside_A:
+                        learning_info['probas_stationary_exit_cycle_set'][s] = _proba_uniform
+
+                    # Store the backup set of EXIT states as activation set in the learner (so that it can be read at the next policy learning step)
+                    self.agent.getLearner().setActivationSet(learning_info['probas_stationary_exit_cycle_set'], store_probabilities=True)
+
+                    print(f"BACKUP set of EXIT states and their probability of selection as FV start states:"
+                          f"\n{learning_info['probas_stationary_exit_cycle_set']}")
+                    assert len(set(learning_info['probas_stationary_exit_cycle_set'].keys()).intersection(dict_params_simul['absorption_set'])) == 0, \
+                        f"No states in the backup set of EXIT states must belong to the absorption set A, but the interesction of the backup set" \
+                        f"\n{learning_info['probas_stationary_exit_cycle_set']}" \
+                        f"\n and the absorption set" \
+                        f"\n{dict_params_simul['absorption_set']}" \
+                        f"\ngives {set(learning_info['probas_stationary_exit_cycle_set']).intersection(dict_params_simul['absorption_set'])}"
 
         # Store information about the estimated expected absorption time
         # One of the reasons for storing this information is to be able to use an estimated value for E(T_A) from a *previous* policy learning step,
@@ -4087,7 +4091,10 @@ class Simulator:
             episode += 1
 
             # Reset variables at the start of a new episode
-            done_episode = self.env.getState() in self.env.getTerminalStates()
+            done_episode = False    # (2025/07/10) Note that here we set this variable to False and NOT to the result of checking whether the current state of the environment is a terminal state
+                                    # (with `self.env.getState() in self.env.getTerminalStates()`) as done in other places, such as _run_single_continuing_task(),
+                                    # because the environment is reset AFTER this (when episode > 0). And we cannot move this assignment of done_episode AFTER the reset of env
+                                    # in the following `if episode > 0` block because the value of done_episode is passed to the self.learn_terminal_state_values() method.
             t_episode = -1          # Time step within the current episode
                                     # Note that we initialize it at -1 because the time within an episode indexes the time at which the ACTION is taken,
                                     # (and this will happen AFTER increasing t_episode by 1, so that the first time an action is taken will be indexed by t_episode = 0)

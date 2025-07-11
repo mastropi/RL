@@ -314,14 +314,24 @@ class LeaMCLambda(Learner):
                     G /= discount
             # First-visit MC: We only update the value function estimation at the first visit of the state
             if self._states_first_visit_time[state] == tt:
-                delta = G - self.V.getValue(state)
+                # TODO: (2025/07/10) We should check SEPARATELY whether this is the first time the STATE is visited (in order to update V) and whether it is the frist time the STATE-ACTION is visited (to update Q(s,a) and A(s,a))
+                # Notes about the above to-do:
+                # - A(s,a) is updated using delta(V) and NOT delta(Q), therefore we should keep track of the delta(V) value observed for every FIRST-TIME visited state `s`
+                #   so that we can update A(s,a) using THAT delta(V) the first time (s,a) is visited! (Hence, the adaptation to this better way of updating the value functions (which takes into account the first time the STATE-ACTION is visited) is not so easy...)
+                # - In order to check whether the current `tt` time is the first visit to the current state-action, we should use the following IF condition:
+                #   `if self._actions_first_visit_time[state, action] == tt`
+                # - We should also split the self._update_alphas() method so that there is an update for each time a STATE is used for learning V(s) and
+                #   another method for each time a STATE-ACTION is used for learning Q(s,a) and A(s,a).
+                delta_V = G - self.V.getValue(state)
+                delta_Q = G - self.Q.getValue(state, action)
                 if self.criterion == LearningCriterion.AVERAGE and self.task == LearningTask.CONTINUING:
                     # Compute the differential delta which should be used to update the differential value function
                     # Ref: Sutton (2018), pag. 250
-                    delta -= self.getAverageReward()
-                self._updateV(state, delta)
-                self._updateQ(state, action, delta)
-                self._updateA(state, action, delta)
+                    delta_V -= self.getAverageReward()
+                    delta_Q -= self.getAverageReward()
+                self._updateV(state, delta_V)
+                self._updateQ(state, action, delta_Q)
+                self._updateA(state, action, delta_V)   # Note that we use delta_V here, NOT delta_Q because an unbiased estimator of the advantage function is delta(n+1) := R(n+1) + gamma*V(S(n+1)) - V(S(n+1)), or equivalent definition for the average reward case
                 # Update the learning rate alpha for the next iteration
                 self._update_alphas(state, action)
                 n_updates[state] += 1
@@ -493,14 +503,15 @@ class LeaMCLambda(Learner):
                 # Value of the error (delta) where the lambda-return is used as the current value function estimate,
                 # i.e. as the TARGET value --to which we want to take V(S(t))-- 
                 # which we consider estimated by G(t,lambda)
-                delta = Glambda[tt] - self.V.getValue(state)
+                delta_V = Glambda[tt] - self.V.getValue(state)
+                delta_Q = Glambda[tt] - self.Q.getValue(state, action)
                 if self.debug:
                     print("t: {} \tG(t,lambda): {} \tV({}): {} \tdelta: {}" \
-                          .format(tt, Glambda[tt], state, self.V.getValue(state), delta))
+                          .format(tt, Glambda[tt], state, self.V.getValue(state), delta_V))
 
-                self._updateV(state, delta)
-                self._updateQ(state, action, delta)
-                self._updateA(state, action, delta)
+                self._updateV(state, delta_V)
+                self._updateQ(state, action, delta_Q)
+                self._updateA(state, action, delta_V)   # Note that we use delta_V here, NOT delta_Q because an unbiased estimator of the advantage function is delta(n+1) := R(n+1) + gamma*V(S(n+1)) - V(S(n+1)), or equivalent definition for the average reward case
 
                 # Update the learning rate alpha for the next iteration
                 # Note that the update is based ONLY on the state visit frequency, NOT on the state-action visit frequency...

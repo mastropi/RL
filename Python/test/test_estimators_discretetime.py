@@ -770,7 +770,7 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
         # Plotting parameters
         cls.colormap = cm.get_cmap("jet")
 
-    def test_EnvGridworld1DOneTerminal_PolOptimal_MetTDLambdaGt0(self):
+    def test_EnvGridworld1DOneTerminal_PolOptimal_MetTDLambda(self):
         print("\n*** Running test " + self.id() + " ***")
 
         # Simulation setup
@@ -830,7 +830,7 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
         assert all(state_counts == expected_state_counts)
         assert np.allclose(state_values, expected_V, atol=1E-6)
 
-    def test_EnvGridworld1DOneTerminal_PolRandomWalk_MetTDLambdaGt0(self):
+    def test_EnvGridworld1DOneTerminal_PolRandomWalk_MetTDLambda(self):
         print("\n*** Running test " + self.id() + " ***")
 
         # Simulation setup
@@ -891,7 +891,7 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
         assert all(state_counts == expected_state_counts)
         assert np.allclose(state_values, expected_V, atol=1E-6)
 
-    def test_EnvGridworld1DOneTerminal_PolOptimal_MetTDLambda0(self):
+    def test_EnvGridworld1DOneTerminal_PolOptimal_MetTD0(self):
         print("\n*** Running test " + self.id() + " ***")
 
         # Simulation setup
@@ -928,7 +928,7 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
                     plot=False, pause=0.1)
 
         # The expected state values oscillate around self.V_true_optimal, and this is due to the fact that lambda = 0, as opposed to some positive value
-        # The true state value function is learned very well with e.g. lambda = 0.7, as used in test test_EnvGridworld1DOneTerminal_PolOptimal_MetTDLambdaGt0.
+        # The true state value function is learned very well with e.g. lambda = 0.7, as used in test test_EnvGridworld1DOneTerminal_PolOptimal_MetTDLambda.
         expected_V = [-0.395943, -0.395002, -0.392603, -0.386966, -0.374817,
                       -0.350897, -0.308078, -0.238799, -0.138176, -0.008029,
                        0.140430,  0.288038,  0.414136,  0.505060,  0.559203,
@@ -952,7 +952,7 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
         assert all(state_counts == expected_state_counts)
         assert np.allclose(state_values, expected_V, atol=1E-6)
 
-    def test_EnvGridworld1DOneTerminal_PolRandomWalk_MetTDLambda0(self):
+    def test_EnvGridworld1DOneTerminal_PolRandomWalk_MetTD0(self):
         print("\n*** Running test " + self.id() + " ***")
 
         # Simulation setup
@@ -990,7 +990,7 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
                     plot=False, pause=0.1)
 
         # The expected state values oscillate around self.V_true_optimal, and this is due to the fact that lambda = 0, as opposed to some positive value
-        # The true state value function is learned very well with e.g. lambda = 0.7, as used in test test_EnvGridworld1DOneTerminal_PolOptimal_MetTDLambdaGt0.
+        # The true state value function is learned very well with e.g. lambda = 0.7, as used in test test_EnvGridworld1DOneTerminal_PolOptimal_MetTDLambda.
         expected_V = [-0.022670, -0.021785, -0.024228, -0.025241, -0.024209,
                       -0.021873, -0.019348, -0.017756, -0.017073, -0.015500,
                       -0.013044, -0.011186, -0.009617, -0.010542, -0.005119,
@@ -1280,17 +1280,17 @@ class Test_EstValueFunctions_EnvGridworld2DWithObstacles(unittest.TestCase, test
         # NOTE: If adjusting alpha at the same 1/n rate as in the MC learner, TD(0) learns more slowly...
         # We can reach the same speed of learning as MC if we decrease alpha as 1/sqrt(n) OR if we use e.g. lambda = 0.7.
         # INTERESTING!
-        learner_tdlambda = td.LeaTDLambda(cls.env2d,
-                                          criterion=cls.learning_criterion,
-                                          task=cls.learning_task,
-                                          alpha=1.0,
-                                          gamma=cls.gamma, lmbda=0.0,
-                                          adjust_alpha=True,
-                                          adjust_alpha_by_episode=False,
-                                          alpha_min=0.0,
-                                          func_adjust_alpha=np.sqrt,    # Use a slower decrease rate of alpha so that TD(0) learns faster than with 1/n decrease --i.e. at a similar rate as 1/n decrease in Monte-Carlo above
-                                          debug=False)
-        cls.agent_rw_td = agents.GenericAgent(cls.policy_rw, learner_tdlambda)
+        learner_td0 = td.LeaTDLambda( cls.env2d,
+                                      criterion=cls.learning_criterion,
+                                      task=cls.learning_task,
+                                      alpha=1.0,
+                                      gamma=cls.gamma, lmbda=0.0,
+                                      adjust_alpha=True,
+                                      adjust_alpha_by_episode=False,
+                                      alpha_min=0.0,
+                                      func_adjust_alpha=np.sqrt,    # Use a slower decrease rate of alpha so that TD(0) learns faster than with 1/n decrease --i.e. at a similar rate as 1/n decrease in Monte-Carlo above
+                                      debug=False)
+        cls.agent_rw_td = agents.GenericAgent(cls.policy_rw, learner_td0)
         cls.sim_td = DiscreteSimulator(cls.env2d, cls.agent_rw_td, debug=False)
 
         # Fleming-Viot learner using groups of FV particles starting at different states outside A
@@ -1323,34 +1323,33 @@ class Test_EstValueFunctions_EnvGridworld2DWithObstacles(unittest.TestCase, test
         cls.expected_mc_V = [0.18794174, 0.29649877, 0.46634851, 0.,
                              0.10790858, 0.,         0.31369084, 0.46864529,
                              0.08636770, 0.09085891, 0.18653647, 0.312581]
-        # TODO: (2023/12/18) These expected Q values (which were actually obtained from an execution of the estimation process) look wrong... (based on what action (moving direction) is more valuable to achieve the terminal state; in addition, their values are VERY different from the expected Q values for TD(0), even some values here being negative... where did those negative values come from??)
-        cls.expected_mc_Q = [[ 0.03023433,  0.22566717, -0.02257150,  -0.04538826],
-                             [ 0.05145023,  0.15508904,  0.17511970,  -0.08516019],
-                             [-0.01269403,  0.65605520, -0.00413949, -0.17287316],
-                             [ 0.,          0.,          0.,          0.        ],
-                             [ 0.03521687,  0.03290669, -0.00655919,  0.04634422],
-                             [ 0.,          0.,          0.,          0.        ],
-                             [ 0.24175533,  0.02429782, -0.04142258,  0.08906026],
-                             [ 0.16092266,  0.40257731, -0.04839183, -0.04646285],
-                             [ 0.01860712,  0.00192583,  0.08381913, -0.01798438],
-                             [-0.00332623,  0.05722877,  0.04953676, -0.01258039],
-                             [ 0.04930168,  0.05101225,  0.10644929, -0.02022676],
-                             [ 0.18143995,  0.17092198,  0.01145685, -0.05123778]]
+        cls.expected_mc_Q = [[0.08489577, 0.50597695, 0.14277313, 0.08175354],
+                             [0.47772159, 0.29545309, 0.29855976, 0.11440401],
+                             [0.37563411, 1., 0.33230685, 0.19401699],
+                             [0., 0., 0., 0.],
+                             [0.10781088, 0.08651851, 0.20257748, 0.09290654],
+                             [0., 0., 0., 0.],
+                             [0.33391635, 0.29687345, 0.16721613, 0.25435584],
+                             [1., 0.42477374, 0.23334913, 0.3342631],
+                             [0.08144947, 0.05777766, 0.08746733, 0.06375138],
+                             [0.04359702, 0.14773668, 0.07043466, 0.04152835],
+                             [0.14962808, 0.14590172, 0.165144, 0.09567613],
+                             [0.36182088, 0.2304213, 0.23127573, 0.10008104]]
         cls.expected_td_V = [0.17765623, 0.28574322, 0.47875633, 0.,
                              0.11770661, 0.,         0.38475264, 0.62173917,
                              0.09284106, 0.12050374, 0.22991270, 0.35113428]
-        cls.expected_td_Q = [[0.16072246, 0.25062980, 0.10445315, 0.1596362 ],
-                             [0.25833001, 0.44407377, 0.25839356, 0.16133587],
-                             [0.45276433, 0.99968037, 0.33858707, 0.26228900],
-                             [0.,         0.,         0.,         0.        ],
-                             [0.15874380, 0.10327937, 0.08113218, 0.10224487],
-                             [0.,         0.,         0.,         0.        ],
-                             [0.44888002, 0.48944168, 0.18373345, 0.33437982],
-                             [0.99443671, 0.46526329, 0.25611076, 0.32729442],
-                             [0.10315783, 0.10242074, 0.08225361, 0.08128193],
-                             [0.10232160, 0.18439734, 0.09976743, 0.08166934],
-                             [0.32572204, 0.26179925, 0.19081792, 0.10207814],
-                             [0.47968696, 0.25279819, 0.25260026, 0.1854122 ]]
+        cls.expected_td_Q = [[0.16079618, 0.24871398, 0.10628935, 0.15863595],
+                            [0.25512266, 0.42570385, 0.25347304, 0.16170057],
+                            [0.43532815, 1.        , 0.34310401, 0.25930433],
+                            [0.        , 0.        , 0.        , 0.        ],
+                            [0.15825903, 0.10490817, 0.08263879, 0.10359332],
+                            [0.        , 0.        , 0.        , 0.        ],
+                            [0.43488431, 0.51920436, 0.19189932, 0.3412364 ],
+                            [1.        , 0.49316743, 0.26919549, 0.3377604 ],
+                            [0.10401549, 0.10639017, 0.08312845, 0.08257391],
+                            [0.10634505, 0.18845203, 0.10339682, 0.08263671],
+                            [0.33259533, 0.26924471, 0.19524533, 0.10487024],
+                            [0.51311301, 0.26312517, 0.25689216, 0.18832239]]
 
         # TODO: (2024/02/19) Update the expected results once we have correctly implemented the value functions learning under the EPISODIC DISCOUNTED reward setting and generated the results
         # For now, these values are the expected results of the not so correct implementation, where the time clock used to estimate P(T>t; s) is the same as the time used to estimate Phi(t,x; s), but these two time clocks are actually different
@@ -1393,7 +1392,7 @@ class Test_EstValueFunctions_EnvGridworld2DWithObstacles(unittest.TestCase, test
         assert np.allclose(observed_V, self.expected_mc_V, atol=1E-6)
         assert np.allclose(observed_Q, self.expected_mc_Q, atol=1E-6)
 
-    def test_Env_PolRandomWalk_MetTDLambda(self):
+    def test_Env_PolRandomWalk_MetTD0(self):
         print("\n*** Running test " + self.id() + " ***")
 
         state_values, action_values, advantage_values, state_counts, _, _, learning_info = \
@@ -1532,17 +1531,17 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
         cls.sim_mc = DiscreteSimulator(cls.env2d, cls.agent_rw_mc, debug=False)
 
         # TD(lambda) learner
-        learner_tdlambda = td.LeaTDLambda(cls.env2d,
-                                          criterion=cls.learning_criterion,
-                                          task=cls.learning_task,
-                                          alpha=1.0,
-                                          gamma=1.0, lmbda=0.0,
-                                          adjust_alpha=True,
-                                          func_adjust_alpha=np.sqrt,
-                                          adjust_alpha_by_episode=False,
-                                          alpha_min=0.0,
-                                          debug=False)
-        cls.agent_rw_td = agents.GenericAgent(cls.policy_rw, learner_tdlambda)
+        learner_td0 = td.LeaTDLambda( cls.env2d,
+                                      criterion=cls.learning_criterion,
+                                      task=cls.learning_task,
+                                      alpha=1.0,
+                                      gamma=1.0, lmbda=0.0,
+                                      adjust_alpha=True,
+                                      func_adjust_alpha=np.sqrt,
+                                      adjust_alpha_by_episode=False,
+                                      alpha_min=0.0,
+                                      debug=False)
+        cls.agent_rw_td = agents.GenericAgent(cls.policy_rw, learner_td0)
         cls.sim_td = DiscreteSimulator(cls.env2d, cls.agent_rw_td, debug=False)
 
         # Fleming-Viot learner
@@ -1568,41 +1567,46 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
 
         #-- Expected state values for all tests
         # MC learner
-        # TODO: (2023/12/18) These Monte-Carlo expected V values (which were actually obtained from an execution of the estimation process) are WRONG because the terminal state should NOT have value 0 under the average reward criterion learning --i.e. when estimating the *differential* value functions.
-        # The reason for this issue is that the estimation of terminal state values has not yet been fully implemented for MC and TD(lambda) learners with lambda > 0. See more details in the entry from 17-Dec-2023 in Tasks-Projects.xlsx Excel file.
+        # TODO: (2023/12/18) These Monte-Carlo expected V and Q values (which were actually obtained from an execution of the estimation process) are WRONG because the terminal state should NOT have value 0 under the average reward criterion learning --i.e. when estimating the *differential* value functions.
+        # The reason for this issue is that the estimation of terminal state values has not yet been fully implemented in MC and in TD(lambda) for lambda > 0.
+        # See more details in the entry from 17-Dec-2023 in Tasks-Projects.xlsx Excel file.
+        # UPDATE: (2025/07/10)
+        # - The MC implementation is pending because learning happens ONLY at episode END and currently this learning does NOT includes learning of the terminal state itself which is relevant for the CONTINUING learning task case.
+        # - The TD(lambda) for lambda > 0 implementation is pending because the eligibility traces are reset at the end of an episode (i.e. when the agent reaches a terminal state)
+        # - BUT NOW the TD(lambda) implementation is READY because I've just prevented the eligibility traces to be reset when reaching a terminal state under the CONTINUING learning task!
+        # - See also the to-do tasks I've written today in mc.py regarding how to deal with the correct MC learning for the CONTINUING learning task.
         cls.expected_mc_V = [0.30846098, 0.44259874, 0.63029386, 0.,
                              0.20527094, 0.,         0.50675541, 0.65228425,
                              0.13764317, 0.15088129, 0.32957630, 0.4950138]
-        # TODO: (2023/12/18) These Monte-Carlo expected Q values (which were actually obtained from an execution of the estimation process) look wrong... (based on what action (moving direction) is more valuable to achieve the terminal state; in addition, their values are VERY different from the expected Q values for TD(0))
-        cls.expected_mc_Q = [[-0.10497926,  0.19869401,  0.17612975, 0.038616470],
-                             [ 0.07399127,  0.17327522,  0.31313544, -0.11780319],
-                             [ 0.00487184,  0.27108070,  0.00280095,  0.35154037],
-                             [ 0.,          0.,          0.,          0.        ],
-                             [ 0.30322845,  0.11356473, -0.10983344, -0.1016888 ],
-                             [ 0.,          0.,          0.,          0.        ],
-                             [ 0.45877299,  0.02778924, -0.12370426,  0.14389743],
-                             [ 0.08703213,  0.56738527, -0.06992857,  0.06779541],
-                             [-0.04939215, -0.10683988,  0.24918431,  0.04469088],
-                             [-0.12835815,  0.06668889,  0.12368679,  0.08886378],
-                             [-0.02297774, -0.08885636,  0.48472477, -0.04331436],
-                             [ 0.14209802,  0.51843737,  0.17254239, -0.33806398]]
+        cls.expected_mc_Q = [[0.16073036, 0.66257218, 0.4448743 , 0.28930824],
+                             [0.70146694, 0.65097627, 0.44996013, 0.32424882],
+                             [0.63365135, 0.96708823, 0.5942919 , 0.44602911],
+                             [0.        , 0.        , 0.        , 0.        ],
+                             [0.45890828, 0.28342008, 0.31787272, 0.14223001],
+                             [0.        , 0.        , 0.        , 0.        ],
+                             [0.58623123, 0.64473911, 0.38205867, 0.52088631],
+                             [0.9624762 , 0.57840021, 0.46134768, 0.66429015],
+                             [0.30235755, 0.12915826, 0.20559211, 0.24645244],
+                             [0.17261556, 0.49031713, 0.17073172, 0.26401492],
+                             [0.28627364, 0.34347815, 0.44766234, 0.30629746],
+                             [0.54620631, 0.41109596, 0.59248867, 0.15246975]]
 
         # TD learner
         cls.expected_td_V = [  0.11512802,  0.26457653,  0.45853404, -0.07204246,
                                0.00811229,  0.,          0.38054146,  0.58872488,
                               -0.04774093,  0.00567791,  0.19265345,  0.33741384]
-        cls.expected_td_Q = [[ 0.09715254,  0.23310079, -0.01600686,  0.09617661],
-                             [ 0.24471781,  0.44654475,  0.24577001,  0.0983613 ],
-                             [ 0.45764161,  0.89897935,  0.35067266,  0.25019221],
-                             [-0.07204246, -0.07204246, -0.07204246, -0.07204246],
-                             [ 0.09298804, -0.01930358, -0.07420419, -0.02130343],
-                             [ 0.,          0.,          0.,          0.        ],
-                             [ 0.45329009,  0.49396376,  0.13453719,  0.34560123],
-                             [ 0.89494849,  0.47016001,  0.24945365,  0.33657962],
-                             [-0.01997194, -0.02932902, -0.07233910, -0.07454767],
-                             [-0.02875755,  0.13274115, -0.03439765, -0.07370337],
-                             [ 0.33522403,  0.25378455,  0.14492441, -0.0279854 ],
-                             [ 0.48441351,  0.24541169,  0.24528768,  0.13707096]]
+        cls.expected_td_Q =   [[ 0.09616464,  0.22947858, -0.01262361,  0.09321627],
+                               [ 0.23871267,  0.42687138,  0.23661131,  0.09769038],
+                               [ 0.4384099 ,  0.90190456,  0.35624414,  0.24426534],
+                               [-0.07204246, -0.07204246, -0.07204246, -0.07204246],
+                               [ 0.09146744, -0.01586872, -0.07145619, -0.01892577],
+                               [ 0.        ,  0.        ,  0.        ,  0.        ],
+                               [ 0.43923731,  0.52440816,  0.14472367,  0.3535408 ],
+                               [ 0.90298515,  0.49868802,  0.26493845,  0.3493667 ],
+                               [-0.01791483, -0.02087226, -0.07031127, -0.07167509],
+                               [-0.02092036,  0.1389521 , -0.02769491, -0.07170493],
+                               [ 0.34357302,  0.26094573,  0.15072278, -0.02412405],
+                               [ 0.51830314,  0.2576281 ,  0.24936403,  0.13991605]]
 
         # DM-2023/09/20: The expected value function (expected_fv_V) is similar to the expected value function under TD
         # because the problem is small... However, in problems where FV really observes more often the rare states with
@@ -1628,19 +1632,18 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
                              -0.039710,  0.000000, 0.298950, 0.447024,
                              -0.020319, -0.039758, 0.095426, 0.181439])
         # (2023/12/18) The expected action value function seems reasonable in terms of what action is better at each state to reach the terminal state at the upper-right cell of the labyrinth
-        cls.expected_fv_Q = np.array(
-                            [[-0.01367791,  0.11848694, -0.05318403, -0.01168208],
-                             [ 0.17164916,  0.45940778,  0.15864210, -0.00842918],
-                             [ 0.52806234,  0.95464411,  0.24212508,  0.16495517],
-                             [-0.03751482, -0.03751482, -0.03751482, -0.03751482],
-                             [-0.01941363, -0.04611871, -0.02248051, -0.05298840],
-                             [0.,           0.,          0.,          0.        ],
-                             [ 0.50213080,  0.27621888,  0.00773258,  0.12787165],
-                             [ 0.84994117,  0.34307159,  0.06641850,  0.23193807],
-                             [-0.00798979, -0.00769294, -0.00754817, -0.00751653],
-                             [-0.05953017, -0.02484684, -0.04193591, -0.02717974],
-                             [ 0.14703614,  0.02765407, -0.01561109, -0.06454853],
-                             [ 0.28667113,  0.04775472,  0.04977956, -0.0088709]])
+        cls.expected_fv_Q = np.array([ [ 0.00337005,  0.21551403, -0.05941219,  0.00407243],
+                                       [ 0.22365966,  0.50927352,  0.22532209,  0.00773141],
+                                       [ 0.50624329,  0.94810916,  0.28149558,  0.22551227],
+                                       [-0.03751482, -0.03751482, -0.03751482, -0.03751482],
+                                       [-0.00388831, -0.05936186, -0.03624876, -0.05908516],
+                                       [ 0.        ,  0.        ,  0.        ,  0.        ],
+                                       [ 0.50668984,  0.43373759,  0.04968287,  0.27088565],
+                                       [ 0.94809517,  0.43034983,  0.13371681,  0.28071775],
+                                       [-0.02087186, -0.02099537, -0.01911291, -0.0203816 ],
+                                       [-0.06333507,  0.01069771, -0.06379519, -0.03582095],
+                                       [ 0.26713995,  0.11440054,  0.03129102, -0.06331995],
+                                       [ 0.43064039,  0.12029626,  0.12699954,  0.04465804]])
         cls.expected_fv_average_reward = 0.023652
         cls.expected_fv_cycle_time = 10.9121
         cls.expected_fv_n_cycles = 91
@@ -1756,7 +1759,7 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
         assert np.isclose(learning_info['expected_cycle_time'], self.expected_cycle_time, atol=1E-1)
         assert learning_info['num_cycles'] == self.expected_n_cycles
 
-    def test_Env_PolRandomWalk_MetTDLambda(self):
+    def test_Env_PolRandomWalk_MetTD0(self):
         print("\n*** Running test " + self.id() + " ***")
 
         state_values, action_values, advantage_values, state_counts, _, _, learning_info = \
@@ -1796,7 +1799,7 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
         assert sum(state_counts) == learning_info['nsteps'] + 1
         assert np.allclose(observed_p, self.expected_p, atol=1E-6)
 
-    def test_Env_PolRandomWalk_MetTDLambda_FromCycles(self):
+    def test_Env_PolRandomWalk_MetTD0_FromCycles(self):
         """
         The results of this test should change (w.r.t. to the previous test that is NOT based on cycles) ONLY in terms of the estimated average reward,
         but NOT in terms of the estimated value functions, because the differential value functions are computed using the average reward that is estimated
@@ -1992,18 +1995,18 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
         assert np.allclose(observed_values_V, [-0.048985,    0.062923,    0.341079,   -0.103347,
                                                -0.086998,    0.0,         0.304401,    0.542247,
                                                -0.089413,   -0.028424,    0.159238,    0.307917], atol=1E-6)
-        assert np.allclose(observed_values_Q, [ [-0.04830524,  0.01685302, -0.05130689, -0.04937437],
-                                                [ 0.03156942,  0.18919254,  0.01623364, -0.04363127],
-                                                [ 0.19273859,  0.80517147,  0.17743615,  0.02350946],
-                                                [-0.10334710,  -0.1033471, -0.1033471,  -0.1033471 ],
-                                                [-0.04346483, -0.07934325, -0.05816373, -0.06285601],
-                                                [ 0.,          0.,          0.,          0.        ],
-                                                [ 0.16465952,  0.44706463,  0.05878794,  0.15979296],
-                                                [ 0.82775883,  0.47547588,  0.13853342,  0.19526448],
-                                                [-0.08049551, -0.04504468, -0.06910456, -0.08128324],
-                                                [-0.05094879,  0.04632566, -0.04481171, -0.08047806],
-                                                [ 0.17427736,  0.18568194,  0.06002421, -0.04526816],
-                                                [ 0.46890963,  0.18421572,  0.18865816,  0.06611749]], atol=1E-6)
+        assert np.allclose(observed_values_Q, [[-0.05873732,  0.02722446, -0.09710915, -0.05801876],
+                                               [ 0.03069453,  0.27684977,  0.02558971, -0.05753793],
+                                               [ 0.3078517 ,  0.88668882,  0.25860268,  0.03257763],
+                                               [-0.1033471 , -0.1033471 , -0.1033471 , -0.1033471 ],
+                                               [-0.05922436, -0.09392056, -0.1015787 , -0.09612063],
+                                               [ 0.        ,  0.        ,  0.        ,  0.        ],
+                                               [ 0.29918608,  0.55392647,  0.11646784,  0.28035406],
+                                               [ 0.88794859,  0.57599526,  0.31634638,  0.27883378],
+                                               [-0.09734465, -0.0524537 , -0.10234974, -0.10209823],
+                                               [-0.05193447,  0.11156354, -0.05182949, -0.10353123],
+                                               [ 0.26850003,  0.29431717,  0.1271709 , -0.0500451 ],
+                                               [ 0.55739791,  0.3035721 ,  0.31107617,  0.12689527]], atol=1E-6)
 
 
 class Test_EstValueFunctionV_MetMCLambda_EnvMountainCar(unittest.TestCase, test_utils.EpisodeSimulation):
@@ -2278,22 +2281,22 @@ if __name__ == '__main__':
 
         # Gridworld with one terminal state (on the right) having +1 reward
         test_suite_gw1d1t = unittest.TestSuite()
-        test_suite_gw1d1t.addTest(Test_EstDifferentialStateValueV_EnvGridworld1D("test_EnvGridworld1DOneTerminal_PolOptimal_MetTDLambdaGt0"))
-        test_suite_gw1d1t.addTest(Test_EstDifferentialStateValueV_EnvGridworld1D("test_EnvGridworld1DOneTerminal_PolOptimal_MetTDLambda0"))
+        test_suite_gw1d1t.addTest(Test_EstDifferentialStateValueV_EnvGridworld1D("test_EnvGridworld1DOneTerminal_PolOptimal_MetTDLambda"))
+        test_suite_gw1d1t.addTest(Test_EstDifferentialStateValueV_EnvGridworld1D("test_EnvGridworld1DOneTerminal_PolOptimal_MetTD0"))
         test_suite_gw1d1t.addTest(Test_EstDifferentialStateValueV_EnvGridworld1D("test_EnvGridworld1DOneTerminal_PolOptimal_MetFV"))
-        test_suite_gw1d1t.addTest(Test_EstDifferentialStateValueV_EnvGridworld1D("test_EnvGridworld1DOneTerminal_PolRandomWalk_MetTDLambdaGt0"))
-        test_suite_gw1d1t.addTest(Test_EstDifferentialStateValueV_EnvGridworld1D("test_EnvGridworld1DOneTerminal_PolRandomWalk_MetTDLambda0"))
+        test_suite_gw1d1t.addTest(Test_EstDifferentialStateValueV_EnvGridworld1D("test_EnvGridworld1DOneTerminal_PolRandomWalk_MetTDLambda"))
+        test_suite_gw1d1t.addTest(Test_EstDifferentialStateValueV_EnvGridworld1D("test_EnvGridworld1DOneTerminal_PolRandomWalk_MetTD0"))
         test_suite_gw1d1t.addTest(Test_EstDifferentialStateValueV_EnvGridworld1D("test_EnvGridworld1DOneTerminal_PolRandomWalk_MetFV"))
 
         test_suite_gw2dobstacles = unittest.TestSuite()
         test_suite_gw2dobstacles.addTest(Test_EstValueFunctions_EnvGridworld2DWithObstacles("test_Env_PolRandomWalk_MetMC"))
-        test_suite_gw2dobstacles.addTest(Test_EstValueFunctions_EnvGridworld2DWithObstacles("test_Env_PolRandomWalk_MetTDLambda"))
+        test_suite_gw2dobstacles.addTest(Test_EstValueFunctions_EnvGridworld2DWithObstacles("test_Env_PolRandomWalk_MetTD0"))
         # DM-2024/08/23: Test removed because the current implementation of FV learning under the discounted criterion has been deprecated (see discrete.py)
         #test_suite_gw2dobstacles.addTest(Test_EstValueFunctions_EnvGridworld2DWithObstacles("test_Env_PolRandomWalk_MetFV"))
         test_suite_gw2dobstacles.addTest(Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles("test_Env_PolRandomWalk_MetMC"))
         test_suite_gw2dobstacles.addTest(Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles("test_Env_PolRandomWalk_MetMC_FromCycles"))
-        test_suite_gw2dobstacles.addTest(Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles("test_Env_PolRandomWalk_MetTDLambda"))
-        test_suite_gw2dobstacles.addTest(Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles("test_Env_PolRandomWalk_MetTDLambda_FromCycles"))
+        test_suite_gw2dobstacles.addTest(Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles("test_Env_PolRandomWalk_MetTD0"))
+        test_suite_gw2dobstacles.addTest(Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles("test_Env_PolRandomWalk_MetTD0_FromCycles"))
         test_suite_gw2dobstacles.addTest(Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles("test_Env_PolRandomWalk_MetFV"))
         test_suite_gw2dobstacles.addTest(Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles("test_Env_PolRandomWalk_MetFV_SoftKilling"))
 
