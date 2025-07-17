@@ -118,15 +118,30 @@ class LeaTDLambda(Learner):
         self._times_nonzero_update = [[] for _ in self.env.getAllStates()]
         self._alphas_effective = np.zeros((0, self.env.getNumStates()))
 
-    def _reset_at_start_of_episode(self):
-        super()._reset_at_start_of_episode()
+    def _reset_at_start_of_episode(self, reset_episode=True):
+        """
+        16-Jul-2025: Parameter reset_episode controls whether the eligibility traces are also reset under CONTINUING learning tasks.
+        This reset should NOT happen under CONTINUING learning tasks so that states visited BEFORE
+        the episode ended are also impacted by the rewards observed in the new episode.
+
+        Note that we use a parameter name that is not so directly related to eligibility traces because
+        information that affects the weight applied to each state and state-action in the eligibility traces,
+        namely the learning rate alpha which is affected by the state and state-action counts,
+        is controlled by the superclass learner which doesn't know about eligibility traces.
+        """
+        super()._reset_at_start_of_episode(reset_episode=reset_episode)
+        if reset_episode or self.task == LearningTask.EPISODIC:
+            self.reset_traces()
+
+    def reset_traces(self):
         self._z_V[:] = 0.
         self._z_V_all = np.zeros((0, self.env.getNumStates()))
         self._z_Q[:] = 0.
         self._z_Q_all = np.zeros((0, self.env.getNumStates() * self.env.getNumActions()))
 
-        # The effective alphas are only computed for the learning of V, not of Q
-        # (as this is only stored for information purposes --e.g. plots of the eligibility traces to check if things are working properly)
+        # The effective alphas correspond to the alpha learning rates multiplied by the eligibility traces, as that gives the actual update strength of the value functions
+        # They are only computed for the learning of V, not of Q
+        # (because this is stored for information purposes --e.g. plots of the eligibility traces to check if things are working properly)
         self._alphas_effective = np.zeros((0, self.env.getNumStates()))
 
     def setParams(self, alpha=None, gamma=None, lmbda=None, adjust_alpha=None, alpha_update_type=None,
@@ -507,8 +522,25 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
             self._all_lambdas_sum = np.zeros(self.env.getNumStates(), dtype=float)
             self._all_lambdas_sum2 = np.zeros(self.env.getNumStates(), dtype=float)
 
-    def _reset_at_start_of_episode(self):
-        super()._reset_at_start_of_episode()
+    def _reset_at_start_of_episode(self, reset_episode=True):
+        """
+        16-Jul-2025: Parameter reset_episode controls whether the eligibility traces are also reset under CONTINUING learning tasks.
+        This reset should NOT happen under CONTINUING learning tasks so that states visited BEFORE
+        the episode ended are also impacted by the rewards observed in the new episode.
+
+        Note that we use a parameter name that is not so directly related to eligibility traces because
+        information that affects the weight applied to each state and state-action in the eligibility traces,
+        namely the learning rate alpha which is affected by the state and state-action counts,
+        is controlled by the superclass learner which doesn't know about eligibility traces.
+        """
+        super()._reset_at_start_of_episode(reset_episode=reset_episode)
+        if reset_episode or self.task == LearningTask.EPISODIC:
+            self.reset_traces()
+
+    def reset_traces(self):
+        super().reset_traces()  # This is NEW as of 14-Jul-2025... I don't understand why the eligibility traces were not reset before... (i.e. _z_V, _z_V_all, _z_Q, _z_Q_all)
+                                # Well, at least we should reset _z_V_all and _z_Q_all because it is true that _z_V and _z_Q are computed from _gradient_V_all and _gradient_Q_all
+                                # (see the _updateZ() method below).
         self._gradient_V_all = np.zeros((0, self.env.getNumStates()))
         self._gradient_Q_all = np.zeros((0, self.env.getNumStates() * self.env.getNumActions()))
         self._lambdas = []

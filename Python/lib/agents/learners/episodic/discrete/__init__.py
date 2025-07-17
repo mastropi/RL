@@ -228,7 +228,7 @@ class Learner(GenericLearner):
         self.episode += 1
 
         # Reset the attributes that keep track of states and rewards received during learning at the new episode that will start
-        self._reset_at_start_of_episode()
+        self._reset_at_start_of_episode(reset_episode=reset_episode)
 
         # Only reset the initial estimates of the value functions at the very first episode (the episode counter starts at 1)
         # (since each episode should leverage what the agent learned so far!)
@@ -266,22 +266,43 @@ class Learner(GenericLearner):
         self._alphas2 = self.alpha * np.ones((self.env.getNumStates(), self.env.getNumActions()))
         self._alphas_at_max_episode = None
 
-    def _reset_at_start_of_episode(self):
+    def _reset_at_start_of_episode(self, reset_episode=True):
         """
-        Resets internal structures that store information about EACH episode
-        (all attributes referring to the current episode should start with an underscore)
-        """
+        Resets internal structures that store information about EACH episode (all attributes referring to the current episode should start with an underscore)
 
+        16-Jul-2025: Parameter reset_episode controls whether information defining learning rates alpha (typically state and state-action visit counts)
+        are also reset under CONTINUING learning tasks.
+        This reset should NOT happen under CONTINUING learning tasks so that the visit counts keep increasing as states visited in
+        previous episodes are visited again, since in CONTINUING learning tasks there is no concept of episode.
+        This is relevant when the learner uses eligibility traces to impact the value of state and actions at previously visited states and actions.
+        """
+        self._reset_trajectory()
+
+        if reset_episode or self.task == LearningTask.EPISODIC:
+            # Visit counts
+            self._state_counts = np.zeros(self.env.getNumStates(), dtype=int)
+            self._states_first_visit_time = np.nan * np.ones(self.env.getNumStates())
+            self._action_counts = np.zeros((self.env.getNumStates(), self.env.getNumActions()), dtype=int)
+            self._actions_first_visit_time = np.nan * np.ones((self.env.getNumStates(), self.env.getNumActions()))
+
+        # List of alphas used during the episode (which may vary from state to state and from the time visited)
+        self._alphas_used_in_episode = deque([])
+
+        # Average reward observed at each episode
+        self._average_reward_in_episode = 0.0
+
+        # Store the values of the next states at each time iteration
+        # This is used for instance to check in mc.py the recursive calculation of G(t,lambda), i.e.:
+        #     G(t,lambda) = R(t+1) + gamma * ( (1 - lambda) * V(S(t+1)) + lambda * G(t,lambda) )
+        # stated in the paper "META-Learning state-based eligibility traces..." by Zhao et al. (2020)
+        self._values_next_state = [np.nan]
+
+    def _reset_trajectory(self):
+        "Resets the trajectory information: times, states, actions, and rewards"
         # States and actions visited in the current episode
         self._times = deque([])
         self._states = deque([])
         self._actions = deque([])
-
-        # Visit counts
-        self._state_counts = np.zeros(self.env.getNumStates(), dtype=int)
-        self._states_first_visit_time = np.nan * np.ones(self.env.getNumStates())
-        self._action_counts = np.zeros((self.env.getNumStates(), self.env.getNumActions()), dtype=int)
-        self._actions_first_visit_time = np.nan * np.ones((self.env.getNumStates(), self.env.getNumActions()))
 
         # Store the _rewards obtained after each action
         # We initialize the _rewards with one element so that there is an INDEX match between the
@@ -312,18 +333,6 @@ class Learner(GenericLearner):
         # same number of elements as the list of rewards ONCE THE EPISODE HAS ENDED, by calling e.g. the
         # store_trajectory_at_episode_end() method defined in this class.
         self._rewards = deque([self.env.getReward(self.env.getState())])
-
-        # List of alphas used during the episode (which may vary from state to state and from the time visited)
-        self._alphas_used_in_episode = deque([])
-
-        # Average reward observed at each episode
-        self._average_reward_in_episode = 0.0
-
-        # Store the values of the next states at each time iteration
-        # This is used for instance to check in mc.py the recursive calculation of G(t,lambda), i.e.:
-        #     G(t,lambda) = R(t+1) + gamma * ( (1 - lambda) * V(S(t+1)) + lambda * G(t,lambda) )
-        # stated in the paper "META-Learning state-based eligibility traces..." by Zhao et al. (2020)
-        self._values_next_state = [np.nan]
 
     def reset_value_functions(self):
         """
@@ -560,7 +569,7 @@ class Learner(GenericLearner):
         time index (i.e. self.states[t], self.rewards[t] correspond respectively to S(t) and R(t), meaning
         that R(t) is the reward received AFTER the system visits state S(t) --recall that R(0) has been
         set to 0 at the beginning of the episode (see definition of self._rewards() in the
-        _reset_at_start_of_episode() method of this class).
+        _reset_trajectory() method of this class).
 
         3) In addition, action self.actions[t] contains action A(t), i.e. the action taken AFTER visiting state S(t).
         The last action of the episode, i.e. A(T), is set to np.nan when this method is called,
@@ -623,6 +632,7 @@ class Learner(GenericLearner):
         ax.set_xlabel("state")
         ax.set_ylabel("alpha")
         ax.set_title("Learning rate (alpha) for each state (episode {}, t={})".format(self.episode, t))
+        ax.set_ylim((0, None))
         ax2 = ax.twinx()  # Create a secondary axis sharing the same x axis
         ax2.bar(self.env.all_states, self._state_counts_over_all_episodes, color="blue", alpha=0.3)
         plt.sca(ax)  # Go back to the primary axis

@@ -94,28 +94,41 @@ class LeaMCLambda(Learner):
         else:
             self.lmbda = None
 
-    def _reset_at_start_of_episode(self):
+    def _reset_at_start_of_episode(self, reset_episode=True):
         """
         Resets internal structures used during learning specific to this learning algorithm
         (all attributes reset here should start with an underscore, i.e. they should be private)
-        """
-        super()._reset_at_start_of_episode()
 
-        ### All the attributes that follow are used to store information about the
-        ### n-step returns and the lambda returns (i.e. the lambda-weighted average
-        ### n-step returns for ALL time steps in the episode, from t=0, ..., T-1,
-        ### where T is the time at which the episode terminates).
-        ### Note that this information is stored in lists as opposed to numpy arrays
-        ### because we don't know their size in advance (as we don't know when the episode
-        ### will terminate) and increasing the size of numpy arrays is apparently less efficient
-        ### than increasing the size of lists
-        ### (Ref: https://stackoverflow.com/questions/568962/how-do-i-create-an-empty-array-matrix-in-numpy)
-        # n-step return (G(t:t+n) 0 <= t <= T-1, 1 <= n <= T-t-1)
-        # The array is a 1d array indexed by t only because the n's are accumulated in the sum
-        # that then is used to compute G(t,lambda))
-        self._G_list = []
-        # lambda-return (G(t,lambda))
-        self._Glambda_list = []
+        16-Jul-2025: Parameter reset_episode controls whether information related to the eligibility traces is also reset under CONTINUING learning tasks.
+        This reset should NOT happen under CONTINUING learning tasks so that states visited BEFORE
+        the episode ended are also impacted by the rewards observed in the new episode.
+
+        Note that we use a parameter name that is not so directly related to eligibility traces because
+        information that affects the weight applied to each state and state-action in the eligibility traces,
+        namely the learning rate alpha which is affected by the state and state-action counts,
+        is controlled by the superclass learner which doesn't know about eligibility traces.
+        """
+        # DM-2025/07/16: I am not sure about passing reset_episode to super()._reset_start_of_episode() and of using the below condition for resetting the return values history, G,
+        # because the test results in test_estimators_discretetime.py look worse (more different to the true value function, based on plots)
+        # than when always resetting them
+        # (to see this, run Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles.test_Env_PolRandomWalk_MetMC() with plot=True in sim_mc.run()).
+        super()._reset_at_start_of_episode() #reset_episode=reset_episode)
+        if True: #(reset_episode or self.task == LearningTask.EPISODIC):
+            ### All the attributes that follow are used to store information about the
+            ### n-step returns and the lambda returns (i.e. the lambda-weighted average
+            ### n-step returns for ALL time steps in the episode, from t=0, ..., T-1,
+            ### where T is the time at which the episode terminates).
+            ### Note that this information is stored in lists as opposed to numpy arrays
+            ### because we don't know their size in advance (as we don't know when the episode
+            ### will terminate) and increasing the size of numpy arrays is apparently less efficient
+            ### than increasing the size of lists
+            ### (Ref: https://stackoverflow.com/questions/568962/how-do-i-create-an-empty-array-matrix-in-numpy)
+            # n-step return (G(t:t+n) 0 <= t <= T-1, 1 <= n <= T-t-1)
+            # The array is a 1d array indexed by t only because the n's are accumulated in the sum
+            # that then is used to compute G(t,lambda))
+            self._G_list = []
+            # lambda-return (G(t,lambda))
+            self._Glambda_list = []
 
     def setParams(self, alpha=None, gamma=None, lmbda=None, adjust_alpha=None, alpha_update_type=None,
                   adjust_alpha_by_episode=None, alpha_min=None):
@@ -234,6 +247,21 @@ class LeaMCLambda(Learner):
             # Learn the value functions!
             # First store the alphas to be used in the value functions update
             self.store_learning_rate(self.getAlphasByState())
+            # TODO: (2025/07/10) In order to properly learn at episode END in the CONTINUING learning task, we should first store the next_state in the learner's trajectory and also its visit count so that the alpha used to learn the value of a terminal state is properly adjusted
+            # Notes on the above to-do task:
+            # - This trajectory and visit count information is used by the self.learn_mc_at_episode_end() method in order to learn the value functions,
+            #   and therefore it's important to store those pieces of information on the next_state (possibly terminal) state if we want the state and action value functions
+            #   for that state to also be updated in the CONTINUING learning task case (whose value is NOT zero as in the EPISODIC learning task).
+            # - The following piece of code my help to implement the above:
+            #   if self.task == LearningTask.CONTINUING:
+            #       if info.get('update_trajectory', True):
+            #           self._update_trajectory(T, next_state, 0, 0.0)
+            #       if info.get('update_counts', True):
+            #           self._update_visit_counts(T, next_state, 0)
+            # - When storing the trajectory, we should also take care of the comment written below about the need of calling self.store_trajectory_at_episode_end() AFTER calling
+            #   self.learn_mc_at_episode_end(). In order to satisfy that condition, we might need to split the storage of information in self.store_trajectory_at_episode_end()
+            #   between the information related to the alpha values and the information related to the trajectory, so that the comment below is still satisfied
+            #   when adding the next_state to the trajectory here.
             self.learn_mc_at_episode_end(T, next_state)
 
             # Store the trajectory and update the state count of the end state
