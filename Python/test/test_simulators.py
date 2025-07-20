@@ -277,7 +277,7 @@ class Test_Class_Simulator(unittest.TestCase):
             print(f"State counts: {state_counts_td_1}")
             print(f"Average reward (as stored in learner): {avg_reward_td_1}")
             print(f"Average reward (raw, i.e. plain average of observed rewards): {avg_reward_raw_td_1}")
-            print("_run_single() took {:.4f} seconds".format(time_td_1))
+            print("_run_single() took {:.4f} seconds on {} steps".format(time_td_1, learning_info_1['nsteps']))
             assert np.sum(state_counts_td_1) == len(learner_td.getStates()), f"The sum of the state counts ({np.sum(state_counts_td_1)}) must coincide with the trajectory length ({len(learner_td.getStates())})"
             assert np.isclose(avg_reward_td_1, avg_reward_raw_td_1), "[TD1] The average reward stored in the learner must be the same as the raw average reward computed as plain average of the observed rewards"
 
@@ -295,30 +295,53 @@ class Test_Class_Simulator(unittest.TestCase):
             print(f"State counts: {state_counts_td_2}")
             print(f"Average reward (as stored in learner): {avg_reward_td_2}")
             print(f"Average reward (raw, i.e. plain average of observed rewards): {avg_reward_raw_td_2}")
-            print("_run_single_continuing_task() took {:.4f} seconds".format(time_td_2))
+            print("_run_single_continuing_task() took {:.4f} seconds on {} steps".format(time_td_2, learning_info_2['nsteps']))
             assert np.sum(state_counts_td_2) == len(learner_td.getStates()), f"The sum of the state counts ({np.sum(state_counts_td_2)}) must coincide with the trajectory length ({len(learner_td.getStates())})"
             assert np.isclose(avg_reward_td_2, avg_reward_raw_td_2), "[TD2] The average reward stored in the learner must be the same as the raw average reward computed as plain average of the observed rewards"
 
             # Simulation using run_exploration_and_learn_value_functions()
             print(f"\nRunning simulation with run_exploration_and_learn_value_functions()...")
             time_start = timer()
-            learner_exploration, nsteps = sim.run_exploration_and_learn_value_functions(max_time_steps=max_time_steps, seed=seed, verbose=True, verbose_period=10)
+            learner_exploration_and_learn, nsteps = sim.run_exploration_and_learn_value_functions(max_time_steps=max_time_steps, seed=seed, verbose=True, verbose_period=10)
             time_td_3 = timer() - time_start
-            state_counts_td_3 = learner_exploration.getStateCounts()
+            state_counts_td_3 = learner_exploration_and_learn.getStateCounts()
             learning_info_3 = {'nsteps': nsteps}
-            state_values_td_3 = learner_exploration.getV().getValues()
-            action_values_td_3 = learner_exploration.getQ().getValues()
-            avg_reward_td_3 = learner_exploration.getAverageReward()
-            visited_states_3 = learner_exploration.getStates()
-            recorded_rewards_3 = learner_exploration.getRewards()
-            avg_reward_raw_td_3 = np.mean(learner_exploration.getRewards())
+            state_values_td_3 = learner_exploration_and_learn.getV().getValues()
+            action_values_td_3 = learner_exploration_and_learn.getQ().getValues()
+            avg_reward_td_3 = learner_exploration_and_learn.getAverageReward()
+            visited_states_3 = learner_exploration_and_learn.getStates()
+            recorded_rewards_3 = learner_exploration_and_learn.getRewards()
+            avg_reward_raw_td_3 = np.mean(learner_exploration_and_learn.getRewards())
             print(f"State counts: {state_counts_td_3}")
             print(f"Average reward (as stored in learner): {avg_reward_td_3}")
             print(f"Average reward (raw, i.e. plain average of observed rewards): {avg_reward_raw_td_3}")
-            print("run_exploration_and_learn_value_functions() took {:.4f} seconds".format(time_td_3))
-            assert np.sum(state_counts_td_3) == len(learner_exploration.getStates()), f"The sum of the state counts ({np.sum(state_counts_td_3)}) must coincide with the trajectory length ({len(learner_exploration.getStates())})"
+            print("run_exploration_and_learn_value_functions() took {:.4f} seconds on {} steps".format(time_td_3, learning_info_3['nsteps']))
+            assert np.sum(state_counts_td_3) == len(learner_exploration_and_learn.getStates()), f"The sum of the state counts ({np.sum(state_counts_td_3)}) must coincide with the trajectory length ({len(learner_exploration_and_learn.getStates())})"
             assert np.isclose(avg_reward_td_3, avg_reward_raw_td_3), "[TD3] The average reward stored in the learner must be the same as the raw average reward computed as plain average of the observed rewards"
 
+            # Simulation using run_exploration() --> To check whether the average reward is the same as the methods that learn the value functions as well
+            print(f"\nRunning simulation with run_exploration() to check consistency of the average reward...")
+            # Reset the learner of the agent stored in the simulator
+            sim.getAgent().getLearner().reset(reset_episode=True, reset_value_functions=True, reset_average_reward=True)
+            time_start = timer()
+            learner_exploration, nsteps, average_reward = sim.run_exploration(max_time_steps=max_time_steps, seed=seed, verbose=True, verbose_period=10)
+            time_td_4 = timer() - time_start
+            state_counts_td_4 = learner_exploration.getStateCounts()
+            learning_info_4 = {'nsteps': nsteps}
+            state_values_td_4 = learner_exploration.getV().getValues()
+            action_values_td_4 = learner_exploration.getQ().getValues()
+            avg_reward_td_4 = average_reward
+            visited_states_4 = learner_exploration.getStates()
+            recorded_rewards_4 = learner_exploration.getRewards()
+            avg_reward_raw_td_4 = np.mean(learner_exploration.getRewards())
+            print(f"State counts: {state_counts_td_4}")
+            print(f"Average reward (as stored in learner): {avg_reward_td_4}")
+            print(f"Average reward (raw, i.e. plain average of observed rewards): {avg_reward_raw_td_4}")
+            print("run_exploration() took {:.4f} seconds on {} steps".format(time_td_4, learning_info_4['nsteps']))
+            assert np.sum(state_counts_td_4) == 0, f"State counts are NOT tracked by run_exploration()"
+            assert np.isclose(avg_reward_td_4, avg_reward_raw_td_4), "[TD3] The average reward stored in the learner must be the same as the raw average reward computed as plain average of the observed rewards"
+
+            # Comparing _run_single vs. _run_single_continuing_task
             assert nepisodes == 10 and seed == 1713
             assert learning_info_1['nsteps'] == learning_info_2['nsteps']
             assert all(state_counts_td_1 == state_counts_td_2)
@@ -328,6 +351,7 @@ class Test_Class_Simulator(unittest.TestCase):
             assert visited_states_1 == visited_states_2
             assert recorded_rewards_1 == recorded_rewards_2
 
+            # Comparing _run_single vs. run_exploration_and_learn_value_functions
             assert learning_info_1['nsteps'] == learning_info_3['nsteps']
             assert all(state_counts_td_1 == state_counts_td_3)
             assert np.allclose(state_values_td_1, state_values_td_3)
@@ -335,6 +359,23 @@ class Test_Class_Simulator(unittest.TestCase):
             assert np.isclose(avg_reward_td_1, avg_reward_td_3)
             assert visited_states_1 == visited_states_3
             assert recorded_rewards_1 == recorded_rewards_3
+
+            # Comparing _run_single vs. run_exploration
+            assert learning_info_1['nsteps'] == learning_info_4['nsteps']
+            assert all(state_counts_td_4 == 0), "State counts are NOT tracked by run_exploration()"
+            assert all(state_values_td_4 == 0.0), "Value functions are NOT learned by run_exploration()"
+            assert all(action_values_td_4 == 0.0), "Value functions are NOT learned by run_exploration()"
+            # Now comes a distinction between different simulation cases that differ in the end state: if the end state is the environment's start state just after the agent
+            # reached a terminal state, then the trajectory stored by run_exploration() has one more state than the trajectory stored by the other simulation methods,
+            # just because run_exploration() happens to store that state, whereas the other methods don't.
+            if len(visited_states_1) == len(visited_states_4):
+                assert np.isclose(avg_reward_td_1, avg_reward_td_4)
+                assert visited_states_1 == visited_states_4
+                assert recorded_rewards_1 == recorded_rewards_4
+            else:
+                assert np.isclose(avg_reward_td_1, avg_reward_td_4 * len(visited_states_4) / len(visited_states_1))
+                assert visited_states_1 == visited_states_4[:-1]
+                assert recorded_rewards_1 == recorded_rewards_4[:-1]
 
             # Check whether the estimated values are the expected ones (in order to find out whether something equally affected the outcome of both tested methods above) or,
             # if there is a difference between the two outcomes above, which outcome is correct.

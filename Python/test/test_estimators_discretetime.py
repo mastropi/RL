@@ -1116,7 +1116,7 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
         self.env1d.setV(self.V_true_optimal)
 
         sim = DiscreteSimulator(self.env1d, agent_fv_optimal, debug=False)
-        state_values, action_values, advantage_values, state_counts, state_counts_et, probas_stationary, average_reward, average_absorption_time, n_cycles_absorption_used, n_events_et, n_events_fv  = \
+        state_values, action_values, advantage_values, state_counts, state_counts_et, probas_stationary, average_reward, average_absorption_time, n_cycles_absorption_used, n_events_a, n_events_et, n_events_fv  = \
             sim.run(max_time_steps=max_time_steps_fv,
                     max_time_steps_for_absorbed_particles_check=max_time_steps_fv,
                     min_prop_absorbed_particles=min_prop_absorbed_particles,
@@ -1219,7 +1219,7 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
         self.env1d.setV(self.V_true_random)
 
         sim = DiscreteSimulator(self.env1d, agent_fv_random, debug=False)
-        state_values, action_values, advantage_values, state_counts, state_counts_et, probas_stationary, average_reward, average_absorption_time, n_cycles_absorption_used, n_events_et, n_events_fv  = \
+        state_values, action_values, advantage_values, state_counts, state_counts_et, probas_stationary, average_reward, average_absorption_time, n_cycles_absorption_used, n_events_a, n_events_et, n_events_fv  = \
             sim.run(max_time_steps=max_time_steps_fv,
                     max_time_steps_for_absorbed_particles_check=max_time_steps_fv,
                     min_prop_absorbed_particles=min_prop_absorbed_particles,
@@ -1325,7 +1325,7 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
         self.env1d.setV(self.V_true_optimal)
 
         sim = DiscreteSimulator(self.env1d, agent_fv_optimal, debug=False)
-        state_values, action_values, advantage_values, state_counts, state_counts_et, probas_stationary, average_reward, average_absorption_time, n_cycles_absorption_used, n_events_et, n_events_fv  = \
+        state_values, action_values, advantage_values, state_counts, state_counts_et, probas_stationary, average_reward, average_absorption_time, n_cycles_absorption_used, n_events_a, n_events_et, n_events_fv  = \
             sim.run(max_time_steps=max_time_steps_fv,
                     max_time_steps_for_absorbed_particles_check=max_time_steps_fv,
                     min_prop_absorbed_particles=min_prop_absorbed_particles,
@@ -1428,7 +1428,7 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
         self.env1d.setV(self.V_true_random)
 
         sim = DiscreteSimulator(self.env1d, agent_fv_random, debug=False)
-        state_values, action_values, advantage_values, state_counts, state_counts_et, probas_stationary, average_reward, average_absorption_time, n_cycles_absorption_used, n_events_et, n_events_fv  = \
+        state_values, action_values, advantage_values, state_counts, state_counts_et, probas_stationary, average_reward, average_absorption_time, n_cycles_absorption_used, n_events_a, n_events_et, n_events_fv  = \
             sim.run(max_time_steps=max_time_steps_fv,
                     max_time_steps_for_absorbed_particles_check=max_time_steps_fv,
                     min_prop_absorbed_particles=min_prop_absorbed_particles,
@@ -1534,7 +1534,7 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
         self.env1d.setV(self.V_true_random)
 
         sim = DiscreteSimulator(self.env1d, agent_fv_random, debug=False)
-        state_values, action_values, advantage_values, state_counts, state_counts_et, probas_stationary, average_reward, average_absorption_time, n_cycles_absorption_used, n_events_et, n_events_fv  = \
+        state_values, action_values, advantage_values, state_counts, state_counts_et, probas_stationary, average_reward, average_absorption_time, n_cycles_absorption_used, n_events_a, n_events_et, n_events_fv  = \
             sim.run(max_time_steps=max_time_steps_fv,
                     max_time_steps_for_absorbed_particles_check=max_time_steps_fv,
                     min_prop_absorbed_particles=min_prop_absorbed_particles,
@@ -1803,7 +1803,7 @@ class Test_EstValueFunctions_EnvGridworld2DWithObstacles(unittest.TestCase, test
         # (2024/02/19) Note that parameter max_time_steps_fv is by default set to None,
         # which means that it is automatically computed by the _run_simulation_fv() method called by run()
         # and as of the writing of this, it is set to N*100, where N is the number of particles in the FV system.
-        state_values, action_values, advantage_values, state_counts, state_counts_et, probas_stationary, average_reward, average_cycle_time, n_cycles, n_events_et, n_events_fv = \
+        state_values, action_values, advantage_values, state_counts, state_counts_et, probas_stationary, average_reward, average_cycle_time, n_cycles, n_events_a, n_events_et, n_events_fv = \
            self.sim_fv.run(max_time_steps=500,
                            max_time_steps_for_absorbed_particles_check=500,
                            stopping_criterion_fv=StoppingCriterion.MAX_TIME_STEPS_OR_MIN_PROP_ABSORBED_PARTICLES_AS_LONG_AS_ENOUGH_TIME_STEPS_HAVE_BEEN_TAKEN,
@@ -2261,7 +2261,7 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
         # which means that it is automatically computed by the _run_simulation_fv() method called by run()
         # and as of the writing of this, it is set to N*100, where N is the number of particles in the FV system.
         min_prop_absorbed_particles = 1.0
-        state_values, action_values, advantage_values, state_counts, state_counts_et, probas_stationary, average_reward, average_cycle_time, n_cycles, n_events_et, n_events_fv = \
+        state_values, action_values, advantage_values, state_counts, state_counts_et, probas_stationary, average_reward, average_cycle_time, n_cycles, n_events_a, n_events_et, n_events_fv = \
            self.sim_fv.run(min_prop_absorbed_particles=min_prop_absorbed_particles, stopping_criterion_fv=StoppingCriterion.MAX_TIME_STEPS_OR_MIN_PROP_ABSORBED_PARTICLES, seed=self.seed, verbose=True, verbose_period=100)
 
         # The following are the state values (value function) calculated using the average reward observed during the single Markov chain excursion used to estimate E(T_A)
@@ -2332,7 +2332,7 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
         print("\n*** Running test " + self.id() + " ***")
 
         min_prop_absorbed_particles = 1.0
-        state_values, action_values, advantage_values, state_counts, state_counts_et, probas_stationary, average_reward, average_cycle_time, n_cycles, n_events_et, n_events_fv = \
+        state_values, action_values, advantage_values, state_counts, state_counts_et, probas_stationary, average_reward, average_cycle_time, n_cycles, n_events_a, n_events_et, n_events_fv = \
            self.sim_fv.run(soft_killing=True, max_time_steps=self.N*30, min_prop_absorbed_particles=min_prop_absorbed_particles, stopping_criterion_fv=StoppingCriterion.MAX_TIME_STEPS_OR_MIN_PROP_ABSORBED_PARTICLES, seed=self.seed, verbose=True, verbose_period=100)
 
         observed_values_V = state_values

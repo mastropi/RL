@@ -314,12 +314,12 @@ def plot_state_counts(dict_simulator, learning_method, params_exec, trajectory=N
     if trajectory is None:
         # Generate a trajectory under the policy stored in the learner of the simulator
         _simulator = copy.deepcopy(dict_simulator[learning_method])
-        learner_under_policy = _simulator.run_exploration(max_time_steps=trajectory_length, epsilon_random_action=epsilon_random_action, seed=seed, verbose=verbose, verbose_period=verbose_period)
-        trajectory = np.array(learner_under_policy.getStates())
+        _learner_under_policy, _nsteps, _average_reward = _simulator.run_exploration(max_time_steps=trajectory_length, epsilon_random_action=epsilon_random_action, seed=seed, verbose=verbose, verbose_period=verbose_period)
+        trajectory = np.array(_learner_under_policy.getStates())
         # Generate the 1D array containing the state counts for each state index
         # (as the above run_exploration() method does NOT update the state counts of the learner because this is done by the learn() method of the learner and the run_exploration()
         # method does NOT learn, it only collects a trajectory)
-        state_counts = learner_under_policy.getStateCountsFromTrajectory()
+        state_counts = _learner_under_policy.getStateCountsFromTrajectory()
     else:
         # Distribution of state counts in the given trajectory
         state_counts = np.zeros(dict_simulator[learning_method].getEnv().getNumStates(), dtype=int)
@@ -1186,10 +1186,12 @@ for rep in range(nrep):
             seed_learn = seed_rep + t_learn
             if env_type == Environment.Gridworld:
                 print(f"\n\n*** Running learning step {t_learn+1} of {n_learning_steps} (True average reward under current policy = {avg_reward_true}) "
-                      f"(AVERAGE REWARD at previous step (not reward-shaped) = {R_all[rep, max(0, t_learn-1)]} of MAX={max_avg_reward_episodic}, {1/R_all[rep, max(0, t_learn-1)]:.0f} average steps)... (seed={seed_learn}) @{get_current_datetime_as_string()}")
+                      f"(AVERAGE REWARD at previous step (not reward-shaped) = {R_all[rep, max(0, t_learn-1)]} of MAX={max_avg_reward_episodic}, {1/R_all[rep, max(0, t_learn-1)]:.0f} average steps) "
+                      f"(AVERAGE REWARD STORED In learner = {simulator_value_functions.getAgent().getLearner().getAverageReward()})... (seed={seed_learn}) @{get_current_datetime_as_string()}")
             else:
                 print(f"\n\n*** Running learning step {t_learn+1} of {n_learning_steps} "
-                      f"(AVERAGE REWARD at previous step (not reward-shaped) = {R_all[rep, max(0, t_learn-1)]} of MAX={max_avg_reward_episodic}, {1/R_all[rep, max(0, t_learn-1)]:.0f} average steps)... (seed={seed_learn}) @{get_current_datetime_as_string()}")
+                      f"(AVERAGE REWARD at previous step (not reward-shaped) = {R_all[rep, max(0, t_learn-1)]} of MAX={max_avg_reward_episodic}, {1/R_all[rep, max(0, t_learn-1)]:.0f} average steps) "
+                      f"(AVERAGE REWARD STORED In learner = {simulator_value_functions.getAgent().getLearner().getAverageReward()})... (seed={seed_learn}) @{get_current_datetime_as_string()}")
             time.sleep(1)   # Wait for a second so that I can easily read the learning step number
 
             # ALWAYS RESET THE VALUE FUNCTIONS WHEN IT'S THE VERY FIRST LEARNING STEP (because we don't want to keep history from a earlier learning process on the same learner!)
@@ -1282,7 +1284,7 @@ for rep in range(nrep):
                         estimate_absorption_set_at_this_step = True
                     else:
                         estimate_absorption_set_at_this_step = estimate_absorption_set_at_every_step
-                V, Q, A, state_counts, state_counts_et, probas_stationary, expected_reward, expected_absorption_time, n_cycles_absorption_used, n_events_et, n_events_fv = \
+                V, Q, A, state_counts, state_counts_et, probas_stationary, expected_reward, expected_absorption_time, n_cycles_absorption_used, n_events_a, n_events_et, n_events_fv = \
                     simulator_value_functions.run(t_learn=t_learn,
                                                   max_time_steps=max_time_steps_fv_overall,
                                                   max_time_steps_for_absorbed_particles_check=max_time_steps_fv_for_all_particles,
@@ -1338,7 +1340,7 @@ for rep in range(nrep):
                     V, Q, A, state_counts, _, _, learning_info = \
                         simulator_value_functions.run(t_learn=t_learn,
                                                       max_time_steps=_max_time_steps,
-                                                      estimated_average_reward=simulator_value_functions.getAgent().getLearner().getAverageReward() if use_average_reward_from_previous_step else None,
+                                                      estimated_average_reward=simulator_value_functions.getAgent().getLearner().getAverageReward() if use_average_reward_from_previous_step else 0.0,
                                                       use_fixed_average_reward=use_fixed_average_reward,
                                                       reset_value_functions=reset_value_functions_at_this_step,
                                                       seed=seed_learn,
@@ -1473,11 +1475,11 @@ for rep in range(nrep):
             # or whether we learn the policy via regular policy gradient (in which case a trajectory is generated when updating the policy by the learner_ac.learn() call above).
             # Note that we use 1000 time steps, regardless of the value of T above (used for the estimation of E(T_A) in the FVAC learning case). We do so in order to get
             # a reasonable estimation of the average reward, because the value of parameter T may be too small (e.g. T = 100).
-            learner_current_policy = _simulator.run_exploration(t_learn=t_learn, max_time_steps=1000, epsilon_random_action=epsilon_random_action, seed=seed_learn, verbose=False, verbose_period=verbose_period)
-            trajectory_under_policy = np.array(learner_current_policy.getStates())
+            _learner_current_policy, _nsteps, _average_reward = _simulator.run_exploration(t_learn=t_learn, max_time_steps=1000, epsilon_random_action=0.0, seed=seed_learn + 171317, verbose=False, verbose_period=verbose_period)
+            trajectory_under_policy = np.array(_learner_current_policy.getStates())
             if is_NPG or policy_learning_mode != "online":
                 # Note that the average reward is NOT estimated by the run_exploration() method called above, therefore we compute it here from the observed rewards
-                R_all[rep, t_learn] = np.mean(learner_current_policy.getRewards())
+                R_all[rep, t_learn] = np.mean(_average_reward)
 
             # Store the long-run average reward estimated by the value functions learner used above
             R_long_all[rep, t_learn] = average_reward_from_critic_estimation
@@ -1491,7 +1493,7 @@ for rep in range(nrep):
             # Check if we need to stop learning because the average reward didn't change a bit
             if  break_when_no_change and t_learn > 0 and R_all[rep, t_learn] - R_all[rep, t_learn-1] == 0.0 or \
                 break_when_goal_reached and np.isclose(R_all[rep, t_learn], max_avg_reward_episodic, rtol=0.001):
-                print(f"*** Policy learning process stops at learning step t_learn+1={t_learn+1} because the average reward didn't change a bit from previous learning step! ***")
+                print(f"*** Policy learning process stops at learning step t_learn+1={t_learn+1} because the average reward didn't change a bit from the previous learning step! ***")
                 break
 
             if plot_policy_update:
@@ -1573,12 +1575,12 @@ if policy_learning_mode == "online":
     # We learn the policy by doing a final excursion using the current policy and computing the loss
     # => Plot the episodic average reward observed during the ONLINE Actor-Critic excursion
     ax_R.plot(np.arange(1, n_learning_steps+1), dict_R[learning_method][rep, :n_learning_steps], marker='.', color="green")
-    legend_R += ["Average reward (episodic)"]
+    legend_R += ["Average reward (episodic) (AFTER updating policy)"]
     if not np.isnan(max_avg_reward_episodic):
         ax_R.axhline(max_avg_reward_episodic, color="green", linewidth=1)
         legend_R += ["Max. average reward (episodic)"]
 ax_R.plot(np.arange(1, n_learning_steps+1), dict_R_long[learning_method][rep, :n_learning_steps], marker='.', color="greenyellow")
-legend_R += ["Long-run average reward estimated by value functions learner"]
+legend_R += ["Long-run average reward estimated by value functions learner (BEFORE updating policy)"]
 if not np.isnan(max_avg_reward_continuing):
     ax_R.axhline(max_avg_reward_continuing, color="greenyellow", linewidth=1)
     legend_R += ["Max. average reward (continuing)"]
@@ -1653,7 +1655,7 @@ if env_type == Environment.MountainCar:
     # For instance, with 100 steps, the GIF takes ~2 minutes to generate and is 1 MB in size already!
     _npoints2plot = min(T, 100)
     _simulator = copy.deepcopy(dict_simulator[learning_method])
-    _learner_latest_policy = _simulator.run_exploration(t_learn=t_learn, max_time_steps=T, epsilon_random_action=epsilon_random_action, seed=seed_learn, verbose=False, verbose_period=1)
+    _learner_latest_policy, _nsteps, _average_reward = _simulator.run_exploration(t_learn=t_learn, max_time_steps=T, epsilon_random_action=epsilon_random_action, seed=seed_learn, verbose=False, verbose_period=1)
     _trajectory_under_policy = np.array(_learner_latest_policy.getStates())
     assert _npoints2plot < len(_trajectory_under_policy)
 

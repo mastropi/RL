@@ -295,7 +295,7 @@ class Test_Class_LeaFV_discretetime(unittest.TestCase):
 
         # Non-parametric (historical) estimation of P(T>t)
         seed = 1317
-        _, _, _, state_counts_nonparametric, _, probas_stationary_nonparametric, average_reward_nonparametric, _, _, _, _  = \
+        _, _, _, state_counts_nonparametric, _, probas_stationary_nonparametric, average_reward_nonparametric, _, _, _, _, _  = \
             sim.run(max_time_steps=max_time_steps_fv,
                     stopping_criterion_fv=StoppingCriterion.MAX_TIME_STEPS_OR_MIN_PROP_ABSORBED_PARTICLES,
                     seed=seed,
@@ -303,7 +303,7 @@ class Test_Class_LeaFV_discretetime(unittest.TestCase):
                     plot=True)
 
         # Parametric estimation of P(T>t)
-        _, _, _, state_counts_parametric, _, probas_stationary_parametric, average_reward_parametric, _, _, _, _  = \
+        _, _, _, state_counts_parametric, _, probas_stationary_parametric, average_reward_parametric, _, _, _, _, _  = \
             sim.run(max_time_steps=max_time_steps_fv,
                     stopping_criterion_fv=StoppingCriterion.MAX_TIME_STEPS,
                     seed=seed,

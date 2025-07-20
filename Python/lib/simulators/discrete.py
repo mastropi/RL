@@ -333,10 +333,16 @@ class Simulator:
             default: 0.90
 
         use_average_reward_stored_in_learner: (opt) bool
-            In the AVERAGE reward criterion case, this indicates whether the average reward already stored in the FV learner should be used as correction
-            for the differential value functions estimated by TD at every visit to each state and action.
-            When True, the average reward stored in the learner is used by both the single Markov chain excursion used to estimate E(T_A) and
-            the FV excursion, AS LONG AS IT IS NOT ZERO. In both excursions, the average reward is iteratively updated based on newly observed rewards.
+            In the AVERAGE reward criterion case, this indicates whether the average reward stored in the FV learner should be used as correction
+            for the differential value functions estimation.
+            When True, the average reward stored in the learner is used in all value function estimation instances,
+            be it the single Markov chain excursion used to estimate E(T_A) or the FV simulation.
+            When parameter `use_fixed_average_reward=True`, that average reward is iteratively updated by newly observed reward information,
+            o.w. it is kept fixed throughout each simulation.
+            Note that the average reward stored in the learner is updated after every simulation step, which includes:
+            - the simulation run for the estimation of A (if requested by the user).
+            - the initial simulation run to estimate E(T_A).
+            - the FV simulation.
 
             Note that, for the iterative update of the average reward, we need to know the sample size behind the initial average reward stored in the learner,
             which weights the contribution of such initial average reward in the update formula used to compute the new average reward.
@@ -344,15 +350,10 @@ class Simulator:
             - In the single Markov chain excursion, the GenericLearner class (from which the FV learner inherits) has an attribute
             (normally sample_size_initial_reward_stored_in_learner) that stores the sample size on which the average reward already stored
             in the learner is based upon (typically this sample size is updated at the end of the single Markov chain excursion with the newly observed sample size,
-            which is exclusively based on the current learning process that just finished, i.e. the sample size does NOT increase from the sample size
+            which is exclusively based on the current learning process that just finished, meaning that the sample size does NOT increase w.r.t. the sample size
             behind the initial average reward passed when the current learning process started).
-            - In the FV excursion, the initial average reward estimate receives a weight of N, the number of particles, at is assumed to have come from
+            - In the FV excursion, the initial average reward estimate receives a weight of N, the number of particles, as it is assumed to have come from
             a previous simulation carried out also on N particles, i.e. the same number of particles used in the current FV simulation and learning process.
-
-            If the average reward stored in the learner is zero (which we consider an indication of no reward being observed during e.g. a previous excursion,
-            and thus no information is available about it), the average reward is learned during the single Markov chain excursion
-            (i.e. learned by the TD learner) and the average reward estimated at the end of such excursion is used as initial correction value when learning
-            the value functions (by TD) during the FV simulation that comes thereafter.
             default: False
 
         use_fixed_average_reward: (opt) bool
@@ -400,8 +401,9 @@ class Simulator:
         - state_counts_et: visit frequency of states under the single Markov chain simulation that estimates E(T_A).
         - probas_stationary: dictionary with the estimated stationary probability for each state of interest.
         - expected_reward: the estimated expected reward.
-        - n_events_et: number of events observed during the simulation of the single Markov chain used to estimate E(T_A) and P(T>t).
-        - n_events_fv: number of events observed during the FV simulation that estimates Phi(t).
+        - n_events_a: number of steps during the estimation of the absorption set A (zero, if A is not estimated).
+        - n_events_et: number of steps during the simulation of the single Markov chain used to estimate E(T_A) and P(T>t).
+        - n_events_fv: number of steps during the FV simulation that estimates Phi(t).
         """
         if t_learn <= 0:
             # Reset the learner completely if this is the first step of a policy learning process (this is the default case, even if we are NOT in a policy learning process
@@ -458,7 +460,7 @@ class Simulator:
         envs = [self.env if i == 0 else copy.deepcopy(self.env) for i in range(dict_params_simul['N'])]
 
         state_values, action_values, advantage_values, state_counts, state_counts_from_single_markov_chain, probas_stationary, expected_reward, expected_absorption_time, n_absorption_cycles_used, \
-            time_last_absorption, max_survival_time, n_events_et, n_events_fv = \
+            time_last_absorption, max_survival_time, n_events_a, n_events_et, n_events_fv = \
                 self._estimate_value_functions_and_expected_reward_fv(  envs, dict_params_simul, dict_params_info,
                                                                         probas_stationary_start_state_et=self.agent.getLearner().getProbasStationaryStartStateET(),
                                                                         probas_stationary_start_state_fv=self.agent.getLearner().getProbasStationaryStartStateFV(),
@@ -467,7 +469,7 @@ class Simulator:
                                                                         keep_fv_estimation_of_average_reward_and_stationary_probability_consistent=keep_fv_estimation_of_average_reward_and_stationary_probability_consistent,
                                                                         reset_value_functions=reset_value_functions)
 
-        return state_values, action_values, advantage_values, state_counts, state_counts_from_single_markov_chain, probas_stationary, expected_reward, expected_absorption_time, n_absorption_cycles_used, n_events_et, n_events_fv
+        return state_values, action_values, advantage_values, state_counts, state_counts_from_single_markov_chain, probas_stationary, expected_reward, expected_absorption_time, n_absorption_cycles_used, n_events_a, n_events_et, n_events_fv
 
     def _estimate_value_functions_and_expected_reward_fv( self, envs, dict_params_simul, dict_params_info,
                                                           probas_stationary_start_state_et: dict=None,
@@ -543,8 +545,9 @@ class Simulator:
         - n_cycles: number of cycles observed to estimate E(T_A).
         - time_last_absorption: discrete time of the last absorption observed, used in the estimation of E(T_A).
         - max_survival_time: maximum survival time observed when estimating P(T>t).
-        - n_events_et: number of events observed during the simulation of the single Markov chain used to estimate E(T_A) and P(T>t).
-        - n_events_fv: number of events observed during the FV simulation that estimates Phi(t).
+        - n_events_a: number of steps during the estimation of the absorption set A (zero if A is not estimated).
+        - n_events_et: number of steps during the simulation of the single Markov chain used to estimate E(T_A) and P(T>t).
+        - n_events_fv: number of steps during the FV simulation that estimates Phi(t).
         """
 
         # -- Auxiliary functions
@@ -563,9 +566,9 @@ class Simulator:
             dict_params_info['pause'] = dict_params_info.get('pause', 0.1)
 
             # Parse FV-specific simulation parameters
-            dict_params_simul, less_frequently_visited_states_case, absorption_set_has_been_updated = parse_absorption_parameters(dict_params_simul, dict_params_info)
+            dict_params_simul, less_frequently_visited_states_case, absorption_set_has_been_updated, n_events_a, average_reward_a = parse_absorption_parameters(dict_params_simul, dict_params_info)
 
-            return dict_params_simul, dict_params_info, less_frequently_visited_states_case, absorption_set_has_been_updated
+            return dict_params_simul, dict_params_info, less_frequently_visited_states_case, absorption_set_has_been_updated, n_events_a, average_reward_a
 
         def parse_absorption_parameters(dict_params_simul, dict_params_info):
             """
@@ -593,6 +596,8 @@ class Simulator:
             - absorption_set_has_been_updated: whether the absorption set has been updated w.r.t. to the set previously stored in the learner.
             Even if the process is responsible for updating the absorption set, this may not be updated if it has become "sufficiently" large
             (based on dict_params_simul['max_prop_absorption_set'] which defaults to 0.80).
+            - n_events_a: number of steps used during the estimation of the absorption set A (zero, if not estimated).
+            - average_reward_a: the average reward observed during the estimation of the absorption set A (np.nan, if not estimated).
             """
             #----- Auxiliary functions -----
             def assertions_on_absorption_set(absorption_set):
@@ -617,6 +622,8 @@ class Simulator:
 
             dict_params_simul['soft_killing'] = dict_params_simul.get('soft_killing', False)
 
+            n_events_a = 0          # Number of steps during the estimation of the absorption set A (initialized to zero in case the absorption set is NOT estimated by this process)
+            average_reward_a = 0.0  # Average reward during the estimation of the absorption set A (initialized to zero in case the absorption set is NOT estimated by this process, in order to avoid problems with missing average reward values)
             less_frequently_visited_states_case = "N/A"
             absorption_set_has_been_updated = False
                 ## NOTE: The above information stored in `absorption_set_has_been_udpated` is used to confirm that reward shaping is in fact done when it is requested by the user,
@@ -647,19 +654,29 @@ class Simulator:
                 print(f"\n**** ABSORPTION SET SELECTION ****")
                 print(f"Estimating the absorption set based on cumulative relative visit frequency (<= {dict_params_simul['threshold_absorption_set']}) of states with NO reward from an initial exploration of the environment...")
                 _average_reward_stored_in_learner_prev = self.agent.getLearner().getAverageReward()
-                _learner = self.run_exploration(t_learn=dict_params_info['t_learn'], max_time_steps=dict_params_simul['T'],
+                _learner, n_events_a, average_reward_a = self.run_exploration(t_learn=dict_params_info['t_learn'], max_time_steps=dict_params_simul['T'],
                                                                               epsilon_random_action=dict_params_simul['epsilon_random_action'],
                                                                               seed=dict_params_simul['seed'],
                                                                               verbose=dict_params_info['verbose'], verbose_period=dict_params_info['verbose_period'])
 
                 # IMPORTANT STEP: The average reward observed during the exploration that estimates A is stored in the learner,
                 # so that it can be used as initial (or definite, if `use_fixed_average_reward=True`) average reward for the initial exploration that estimates E(T_A).
-                # This is quite IMPORTANT because, if the average reward stored in the learner is the one computed by the FV simulation and estimator,
+                # This MAY be IMPORTANT because, if the average reward stored in the learner is the one computed by the FV simulation and estimator,
                 # and this overestimates the average reward too much (because of the variability associated to the three different elements of the FV estimator),
                 # then the learning of value functions by the Monte-Carlo simulation using a TD learner would probably be very UNSTABLE and make the policy learning process break
                 # i.e. an UNLEARNING of the policy (of course, this was already observed in ~Jun-2025, o.w. I would not be writing this here).
-                self.agent.getLearner().setAverageReward(_learner.getAverageReward())
-                print(f"[ESTIMATION OF A using {dict_params_simul['T']} steps] average reward stored in learner = {self.agent.getLearner().getAverageReward()} "
+                _average_reward_to_store =  (self.agent.getLearner().getSampleSizeForAverageReward() * _average_reward_stored_in_learner_prev + n_events_a * average_reward_a) / \
+                                            (self.agent.getLearner().getSampleSizeForAverageReward() + n_events_a)  if use_average_reward_stored_in_learner \
+                                                                                                                    else average_reward_a
+                self.agent.getLearner().setAverageReward(_average_reward_to_store)
+                # The sample size behind the average reward we store in the learner is ALWAYS JUST the sample size of the CURRENT exploration
+                # despite the fact that we may have used the average reward stored in the learner when use_average_reward_stored_in_learner=True,
+                # whose sample size should in principle contribute to the sample size of the average reward we are storing now...
+                # However, the average reward stored in the learner is usually the average reward observed at a previous policy learning step,
+                # which therefore could correspond to a DIFFERENT policy than the one we are using at the current policy learning step. Hence, we should "forget" about its value
+                # after using it here, hence we also forget about the sample size behind its calculation.
+                self.agent.getLearner().setSampleSizeForAverageReward(n_events_a)
+                print(f"[ESTIMATION OF A using {dict_params_simul['T']} steps] average reward stored in learner = {self.agent.getLearner().getAverageReward()} (seed={dict_params_simul['seed']}, based on n={n_events_a} exploration steps + {use_average_reward_stored_in_learner and self.agent.getLearner().getSampleSizeForAverageReward() or 0} from average reward stored in learner)"
                       f"(compared to previous value of {_average_reward_stored_in_learner_prev} that could be OVERESTIMATED by FV)")
                 print()
 
@@ -810,7 +827,7 @@ class Simulator:
                 self.env.show_states(dict_params_simul['activation_set'])
                 print("**** ABSORPTION SET SELECTION ****\n")
 
-            return dict_params_simul, less_frequently_visited_states_case, absorption_set_has_been_updated
+            return dict_params_simul, less_frequently_visited_states_case, absorption_set_has_been_updated, n_events_a, average_reward_a
 
         def update_number_of_steps_for_expectation(dict_params_simul, increase_rate=0.10, reason=""):
             """
@@ -873,19 +890,11 @@ class Simulator:
         np.random.seed(dict_params_simul['seed'])
 
         # Parse specific parameters, related to the simulation in general, and related to the absorption dynamics characteristics
-        dict_params_simul, dict_params_info, less_frequently_visited_states_case, absorption_set_has_been_updated = parse_simulation_parameters_fv(dict_params_simul, dict_params_info, envs[0])
+        dict_params_simul, dict_params_info, less_frequently_visited_states_case, absorption_set_has_been_updated, n_events_a, average_reward_a = \
+            parse_simulation_parameters_fv(dict_params_simul, dict_params_info, envs[0])
 
-        estimated_average_reward_before_initial_exploration = None
-        if use_average_reward_stored_in_learner:
-            #and self.agent.getLearner().getAverageReward() != 0.0:
-            # DM-2025/06/25: Commented out the above second condition (on checking whether the average reward stored in the learner is not zero) for two reasons:
-            # a) The execution parameter use_fixed_average_reward (defined in tests.py) seems to be crucially be set to use_fixed_average_reward=True
-            # (so that we use Keith Ross's approach when learning the value functions at each step (namely that a fixed average reward value is used,
-            # as opposed to being updated on the fly, i.e. online). This change (among other fixes related to the average reward value that is used at each stage
-            # --Monte-Carlo exploration vs. Fleming-Viot exploration) prevented the policy from being UNLEARNED.
-            #
-            # b) It simplifies the process and reduces decisions that may look artificial.
-            estimated_average_reward_before_initial_exploration = self.agent.getLearner().getAverageReward()
+        estimated_average_reward_before_initial_exploration = self.agent.getLearner().getAverageReward() if use_average_reward_stored_in_learner \
+                                                                                                         else average_reward_a
         print(f"[IN _estimate_value_functions_and_expected_reward_fv()] The average reward before initial exploration is: {estimated_average_reward_before_initial_exploration}")
         # -- Parse input parameters
 
@@ -947,6 +956,23 @@ class Simulator:
                                 max_time_steps=dict_params_simul['T'],      # Max simulation time over ALL episodes
                                 start_state_first_episode=start_state,
                                 #estimated_average_reward=0.0,  # (2025/05/18) Use this (TOGETHER WITH use_fixed_average_reward=True) for the ABLATION study of estimating the average reward at a wrong value (e.g. always 0)
+                                # NOTES: (2025/07/14)
+                                # 1) The value of parameter estimated_average_reward is kept always fixed at estimated_average_reward_before_initial_exploration,
+                                #   as opposed to being updated using the average reward observed at every simulation run in this loop as contribution,
+                                #   because, if no EXIT states from A are observed, then NO reward is observed during that simulation
+                                #   (as A only contains states with no reward, by definition) and we don't want to diminish the value of the average reward used as initial average.
+                                #   Nevertheless, if no EXIT states are observed and the absorption set A was estimated at this policy learning step then, most likely,
+                                #   the value of estimated_average_reward_before_initial_exploration is ALSO zero, because its value would be equal to the average reward observed
+                                #   during the A-estimation process.
+                                # 2) There is a conceptual difference between the average reward estimated by this INI exploration and the average reward estimated by the
+                                #   A-estimation exploration run above: the start state.
+                                #   - The start state in the A-estimation exploration is an environment's start state (e.g. the START cell in a labyrinth).
+                                #   - The start state in this INI exploration is a state in the boundary of A (or close enough, based on the caveat mentioned in the comment above
+                                #   about the states in the start state distribution stored in probas_stationary_start_state_et.
+                                #   HENCE, the average reward of this INI exploration may be slightly biased upward because it is likely that a reward is observed at the beginning
+                                #   of the exploration, if the policy at the INI start state is close to optimal, whereas the policy at the S state is far from optimal.
+                                #   (this was observed already in a 6x8 random labyrinth (seed=4217) with WIND=0.6 , that's why I am writing this!)
+                                #   In any case, I don't think this small bias would have a large impact in a bad learning of the value functions...but haven't really checked that.
                                 estimated_average_reward=estimated_average_reward_before_initial_exploration,
                                 use_fixed_average_reward=use_fixed_average_reward,
                                 reset_value_functions=reset_value_functions,
@@ -962,6 +988,20 @@ class Simulator:
             n_initial_explorations_run += 1
             # Increase the number of steps taken during the initial exploration
             n_events_et += learning_info['nsteps']
+
+            # Update the sample size behind the calculation of the average reward
+            # Note that we distinguish between the VERY FIRST iteration of this INI exploration (n_initial_exploration_run = 1)
+            # and further iterations (which are run under the HARD killing case only when NO EXIT states from A are observed during the first INI exploration)
+            # so that we do NOT use the currently stored sample size behind the average reward as a contribution to the new sample size when no estimation of the absorption set A
+            # has been performed because, in that case, that sample size is associated to an average reward that corresponds to the average reward estimated
+            # at the PREVIOUS policy learning step, which might correspond to a very different policy than the current one...
+            # and we don't want to keep accumulating that sample size to the current policy learning step, also because this would give us an ALWAYS INCREASING sample size,
+            # as the policy learning step increases, which does not make sense because that would imply that we are putting together on the same bag reward observations that
+            # may come from totally different policies... from the very initial policy to the policy learned after many policy learning steps!
+            if n_initial_explorations_run == 1:
+                self.agent.getLearner().setSampleSizeForAverageReward( n_events_a + learning_info['nsteps'] )
+            else:
+                self.agent.getLearner().setSampleSizeForAverageReward( self.agent.getLearner().getSampleSizeForAverageReward() + learning_info['nsteps'] )
 
             # Check if EXIT states from A have been observed
             if len(learning_info['probas_stationary_exit_cycle_set']) == 0 and dict_params_simul['T'] < MAX_NUMBER_OF_STEPS_FOR_EXPECTATION:
@@ -1088,6 +1128,7 @@ class Simulator:
             probas_stationary = dict()
             expected_absorption_time = np.nan
             max_survival_time = np.nan
+            n_events_a = n_events_a
             n_events_et = n_events_et
             n_events_fv = 0
 
@@ -1185,9 +1226,15 @@ class Simulator:
                 # See meeting minutes in entry dated 17-Jan-2024 for more details.
                 method_fv = self._deprecated_run_simulation_fv_discounted; uniform_jump_rate = 1
                 start_set = self.agent.getLearner().active_set.difference(self.env.getTerminalStates())
-            estimated_average_reward_before_fv = estimated_average_reward_before_initial_exploration  if use_average_reward_stored_in_learner and dict_params_info['t_learn'] > 0 and estimated_average_reward_before_initial_exploration is not None and not np.isnan(estimated_average_reward_before_initial_exploration) \
-                                                                                                      else average_reward_from_initial_exploration if dict_params_simul['reward_for_exit_states'] is None \
-                                                                                                      else None
+            # DM-2025/07/13: When use_average_reward_stored_in_learner=True we should do precisely that, use the average reward stored in the learner
+            # and this is what is retrieved by self.agent.getLearner().getAverageReward(), NOT by estimated_average_reward_before_initial_exploration, as was the case before.
+            # This is why this line was replaced with the one that follows.
+            #estimated_average_reward_before_fv = estimated_average_reward_before_initial_exploration  if use_average_reward_stored_in_learner and dict_params_info['t_learn'] > 0 and estimated_average_reward_before_initial_exploration is not None and not np.isnan(estimated_average_reward_before_initial_exploration) \
+            #                                                                                          else average_reward_from_initial_exploration if dict_params_simul['reward_for_exit_states'] is None \
+            #                                                                                          else None
+            estimated_average_reward_before_fv = self.agent.getLearner().getAverageReward() if use_average_reward_stored_in_learner and dict_params_simul['reward_for_exit_states'] is None \
+                                                                                            else average_reward_from_initial_exploration if dict_params_simul['reward_for_exit_states'] is None \
+                                                                                            else None
             n_events_fv, state_values, action_values, advantage_values, state_counts_fv, phi, df_proba_surv, expected_absorption_time, max_survival_time, absorption_set, less_frequently_visited_set = \
                 method_fv(  dict_params_info['t_learn'], envs,
                             dict_params_simul['absorption_set'],
@@ -1354,18 +1401,18 @@ class Simulator:
                 ##### TEMPORARY PATCH (comment assertion when applying patch) #####
 
         return state_values, action_values, advantage_values, state_counts_all, state_counts_et, probas_stationary, expected_reward, expected_absorption_time, n_absorption_cycles_used, \
-               time_last_absorption, max_survival_time, n_events_et, n_events_fv
+               time_last_absorption, max_survival_time, n_events_a, n_events_et, n_events_fv
 
     def run_exploration(self, t_learn=-1, max_time_steps=1000, epsilon_random_action=0.0, seed=None, verbose=False, verbose_period=1):
         """
         Performs an exploration of the environment without value functions learning, just with the purpose of collecting state visit frequencies and
-        recording the observed average reward.
+        returning the observed average reward. The value of the average reward is NOT updated in the agent's learner.
 
         This is typically used to estimate the absorption set A to use in FV learning or the killing probability in the case of soft killing,
         and to estimate the expected reward to be used as correction value for a future exploration that is used for value functions learning
         under the average reward criterion.
 
-        The learner stored in self.agent is used to learn and store the trajectory, which is assumed to have the following methods defined:
+        The learner stored in self.agent is used to store the trajectory (but NOT the average reward), which is assumed to have the following methods defined:
         - reset()
         - update_trajectory()
         This is the case if the learner is an instance of the GenericLearner class.
@@ -1396,8 +1443,11 @@ class Simulator:
             The time step period to be verbose.
             default: 1 => be verbose at every simulation step.
 
-        Return: learner object inheriting from class GenericLearner
-        The learner object stored in self.agent where the observed trajectory is stored.
+        Return: tuple
+        Tuple with the following three elements:
+        - learner object inheriting from class GenericLearner: the learner object stored in self.agent where the observed trajectory is stored.
+        - the number of steps used by the simulation.
+        - the average reward observed during the simulation
         """
         if max_time_steps is None or max_time_steps < 0 or max_time_steps == +np.Inf:
             raise ValueError(f"Parameter `max_time_steps` must be a positive finite number: {max_time_steps}")
@@ -1422,11 +1472,12 @@ class Simulator:
         # Reset the environment to a state according to its initial state distribution
         self.env.reset()
 
-        # Reset the learner to reset any trajectory potentially stored in the learner
+        # Reset the learner in order to reset any trajectory potentially stored in the learner
         # Note that we reset the learner and NOT simply the trajectory stored in it because the reset() method defines a few attributes
         # that are not defined by the `learner` constructor which should also be set before starting a simulation.
         # (THIS SHOULD BE CHANGED PERHAPS --by defining all the attributes that are necessary during a simulation in the CONSTRUCTOR of the learner NOT only by its reset() method
         # --but I am not really sure about this need, because a learner should be anyway RESET before starting a simulation... right?)
+        # Note that we do NOT reset the value functions nor the average reward because these are not learned nor updated in the learner object
         learner.reset(reset_episode=True)
 
         # Initialize the rewards list with a dummy first element as if the environment came from an action taken by the agent and a reward of LANDING at the reset state is observed
@@ -1486,12 +1537,13 @@ class Simulator:
         learner.times += [t+1]
         learner.states += [next_state]
         learner.actions += [np.nan]
-        learner.setAverageReward(total_reward / (t+1))    # We need to divide by the length of learner.times because if at the start state there is a reward it is counted (see Learner._reset_at_start_of_episode() method)
+        assert len(learner.rewards) == t + 1     # This assertion is to corroborate that we need to divide total_reward by t+1, as that is tantamount to doing np.mean(learner.rewards)
+        average_reward = total_reward / (t+1)    # We need to divide by the length of learner.times because if at the start state there is a reward it is counted (see Learner._reset_trajectory() method)
         assert len(learner.states) == len(learner.actions) and len(learner.actions) == len(learner.rewards)
         if len(learner.times) > 1:
             assert learner.times[-1] == learner.times[-2] + 1
 
-        return learner
+        return learner, t, average_reward
 
     def run_exploration_and_learn_value_functions(self, t_learn=-1, max_time_steps=1000, epsilon_random_action=0.0, seed=None, verbose=False, verbose_period=1):
         """
@@ -1503,7 +1555,7 @@ class Simulator:
         - learn()
 
         EXAMPLE OF CALLING THIS METHOD:
-        learner, n_events_absorption_set_estimation = self.run_exploration(t_learn=0, max_time_steps=dict_params_simul['T'], seed=1313)
+        learner, n_events_absorption_set_estimation = self.run_exploration_and_learn_value_functions(t_learn=0, max_time_steps=dict_params_simul['T'], seed=1313)
 
         t_learn: (opt) int
             The learning step number (starting at 0) for which the simulation is run when learning is used in the context of policy learning.
@@ -1965,7 +2017,7 @@ class Simulator:
         if not soft_killing and len(start_set.intersection(absorption_set)) > 0:
             raise ValueError(f"The start set must NOT contain any state in the absorption set. States present in the absorption set:\n{start_set.intersection(absorption_set)}")
 
-        if  stopping_criterion_fv not in [StoppingCriterion.MAX_TIME_STEPS, StoppingCriterion.MAX_TIME_STEPS_AND_MIN_PROP_ABSORBED_PARTICLES] \
+        if  stopping_criterion_fv in [StoppingCriterion.MAX_TIME_STEPS, StoppingCriterion.MAX_TIME_STEPS_AND_MIN_PROP_ABSORBED_PARTICLES] \
             and estimated_average_reward is None:
             # Set the estimated average reward to 0.0 when the stopping criterion requires to always reach MAX_TIME_STEPS but the given estimated average reward is missing
             # This is necessary because in those cases the average reward is NOT estimated iteratively as the FV simulation progresses, but a pre-calculated fixed value is used.
@@ -5053,10 +5105,6 @@ class Simulator:
             if max_time_steps_reached or episode == nepisodes - 1:
                 # The maximum number of steps over ALL episodes has been reached, so we need to stop the simulation
                 done = True
-
-        # Store the sample size behind the calculation of the average reward, in case we use this calculated average reward as initial value for future learning processes
-        # (e.g. on future policy learning steps)
-        learner.setSampleSizeForAverageReward()
 
         if plot and reward_shaping and not np.isnan(reward_for_exit_states):
             # Plot the distribution of the shaped rewards

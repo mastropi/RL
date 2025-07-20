@@ -194,7 +194,7 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
             agent_for_initial_exploration = agents.GenericAgent(cls.policy_nn.copy(), cls.learner_for_initial_exploration)
             sim_for_initial_exploration = DiscreteSimulator(cls.env2d, agent_for_initial_exploration, debug=cls.debug)
 
-            learner = sim_for_initial_exploration.run_exploration(t_learn=0, max_time_steps=T, seed=cls.seed, verbose=cls.debug, verbose_period=1)
+            learner, nsteps, average_reward = sim_for_initial_exploration.run_exploration(t_learn=0, max_time_steps=T, seed=cls.seed, verbose=cls.debug, verbose_period=1)
             absorption_set = compute_set_of_frequent_states_with_zero_reward(learner.getStates(), learner.getRewards(), threshold=threshold_absorption_set)
             # 2024/10/23: Use this for EWRL-2024 POSTER where we used NON-CUMULATIVE visit frequency to define the absorption set
             #absorption_set = compute_set_of_frequent_states_with_zero_reward(learner.getStates(), learner.getRewards(), threshold=threshold_absorption_set, cumulative=False)
@@ -656,7 +656,7 @@ class Test_EstPolicy_EnvMountainCar(unittest.TestCase):
         agent_for_initial_exploration = agents.GenericAgent(cls.policy_nn.copy(), cls.learner_for_initial_exploration)
         sim_for_initial_exploration = DiscreteSimulator(cls.env_mc, agent_for_initial_exploration, debug=cls.debug)
 
-        learner = sim_for_initial_exploration.run_exploration(t_learn=0, max_time_steps=T, seed=cls.seed, verbose=cls.debug, verbose_period=1)
+        learner, nsteps, average_reward = sim_for_initial_exploration.run_exploration(t_learn=0, max_time_steps=T, seed=cls.seed, verbose=cls.debug, verbose_period=1)
 
         # Compute the absorption set
         if cls.env_mc.isStateContinuous():

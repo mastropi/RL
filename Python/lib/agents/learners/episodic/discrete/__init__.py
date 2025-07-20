@@ -545,7 +545,7 @@ class Learner(GenericLearner):
             # TODO: (2023/12/18) Fix the adjustment performed of the episodic average reward to a continuing average reward to the cases where a non-zero reward is perceived when transitioning to *a* start state (see "IMPORTANT 2" note written above)
             # NOTE that this may NOT be needed if we generalize the learning of value functions to the MC and TD(lambda) learners using the proposed method described in today's entry at Tasks-Projects.xlsx, where we would have only ONE episode on which the episodic average reward is computed.
             sample_size_for_current_estimated_average = self.sample_size_initial_reward_stored_in_learner + np.sum(self.times_at_episode_end) + len(self.times_at_episode_end)
-                ## NOTE: (2024/04/17) Explanation of the use of `len(self.times_at_episode_end)` which I haven't explained so far, but needs an explanation:
+                ## NOTE: (2024/04/17) Explanation of the use of `+ len(self.times_at_episode_end)` which I haven't explained so far, but needs an explanation:
                 ## it is due to what is explained above about the sample size behind the EPISODIC average reward (which is T)
                 ## and the sample size behind the CONTINUING average reward (T+1), i.e. each episode length stored in self.times_at_episode_end contains the EPISODIC sample size
                 ## (as opposed to the CONTINUING sample size).
@@ -556,6 +556,8 @@ class Learner(GenericLearner):
             # (Note: at some point, the print() below gives an error that something is an int and not a list, but I haven't figured out what the problem is, so I commented out, because this step is not crucial for the functioning of the process)
             #all_rewards_so_far = self.rewards + self._rewards
             #print(f"\nT={T}, state={state_end}\nEpisode average = {self._average_reward_in_episode}\nPrevious average = {self.getAverageReward()}\nEpisode length + 1 = {T+1}\nUpdated average = {updated_average} vs.\nComputed average = {np.mean(all_rewards_so_far)}")
+            # (2025/07/20) Use the following if computing the average reward from scratch, i.e. without using an ITERATIVE update. This approach gives for sure the currently observed average reward.
+            #updated_average = np.mean(np.r_[self.rewards, self._rewards])
             self.setAverageReward(updated_average)
 
             # Check that the updated average reward is correctly calculated (by comparing to the regular average over all the rewards observed over ALL episodes)
@@ -708,11 +710,14 @@ class Learner(GenericLearner):
         # Also, this method is required because it is called by the reset_value_functions() method defined in this class.
         raise NotImplementedError
 
-    def setSampleSizeForAverageReward(self):
+    def setSampleSizeForAverageReward(self, sample_size=None):
         """
         Sets the sample size behind the calculation of the average reward based on the information stored in the self.times_at_episode_end
-        which stores the length of each episode (at the end of which the average reward is updated).
+        when no sample_size value is given.
+
+        This attribute stores the length of each episode (at the end of which the average reward is updated).
         This information can be used to update the average reward from a previous estimate in subsequent learning moments carried out with the same learner.
         """
-        sample_size = np.sum(self.times_at_episode_end)
+        if sample_size is None:
+            sample_size = np.sum(self.times_at_episode_end)
         super().setSampleSizeForAverageReward(sample_size)
