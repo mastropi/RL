@@ -49,7 +49,7 @@ def plot_estimated_state_value_function(env, state_values, learning_criterion):
     ax_V.xaxis.set_major_locator(MaxNLocator(integer=True))
     ax_V.set_xlabel("State")
     ax_V.set_ylabel(learning_criterion == LearningCriterion.AVERAGE and "V(s) - V(0)" or "V(s)")
-    ax_V.set_title(f"State value function under the {learning_criterion.name.upper()} reward criterion" + (learning_criterion == LearningCriterion.AVERAGE and ", referenced to V(s)" or ""))
+    ax_V.set_title(f"State value function under the {learning_criterion.name.upper()} reward criterion: RMSE = {computing.rmse(env.getV() - env.getV()[0], state_values - state_values[0]):.3f}")
     plt.pause(0.1)
     plt.draw()
 
@@ -770,139 +770,19 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
         # Plotting parameters
         cls.colormap = cm.get_cmap("jet")
 
-    def test_EnvGridworld1DOneTerminal_PolOptimal_MetTDLambda(self):
-        print("\n*** Running test " + self.id() + " ***")
-
-        # Simulation setup
-        seed = 1717
-        max_time_steps = 1397   # If possible, use the same number of events as those observed in the FV test below (n_events_et + n_events_fv), but this may not be the case...
-
-        # Learner
-        params = dict({'alpha': 1.0,
-                       'gamma': self.gamma,
-                       'lambda': 0.7,
-                       'alpha_min': 0.1,        # We use alpha_min > 0 because o.w. V(s) is not fully learned, due to the CONTINUING task context, where we receive reards from "infinite" time
-                       })
-        learner_td = td.LeaTDLambda(self.env1d,
-                                    criterion=self.learning_criterion,
-                                    task=self.learning_task,
-                                    alpha=params['alpha'], gamma=params['gamma'], lmbda=params['lambda'],
-                                    alpha_update_type=AlphaUpdateType.EVERY_STATE_VISIT,
-                                    adjust_alpha=True, adjust_alpha_by_episode=False,
-                                    alpha_min=params['alpha_min'],
-                                    debug=False)
-
-        # Define the agents for the policies that are used in the tests
-        agent_td_optimal = agents.GenericAgent(self.policy_optimal, learner_td)
-
-        # Store the true state value function in the environment so that we can compare our estimates with those values when running the simulation in the test
-        self.env1d.setV(self.V_true_optimal)
-
-        sim = DiscreteSimulator(self.env1d, agent_td_optimal, debug=False)
-        state_values, action_values, advantage_values, state_counts, _, _, learning_info = \
-            sim.run(max_time_steps=max_time_steps,
-                    seed=seed,
-                    compute_rmse=False, state_observe=self.nS-1,   # This is the state just before the terminal state
-                    verbose=True, verbose_period=max_time_steps // 20,
-                    plot=False, pause=0.1)
-
-        # The expected state values are EXTREMELY close to self.V_true_optimal, so great!
-        expected_V = [ -0.34288381, -0.29135953, -0.23972250, -0.18814899, -0.13679102,
-                       -0.0857702 , -0.03517258,  0.01495512,  0.06460743,  0.11381979,
-                        0.16266567,  0.21125104,  0.25970609,  0.30817452,  0.35680085,
-                        0.40571654,  0.45502593,  0.50479233,  0.55506471, -0.39413951]
-        expected_state_counts = [70, 70, 70, 70, 70, 70, 70, 70, 70, 70, 70, 70, 70, 70, 70, 70, 70, 70, 69, 69]
-        expected_time_steps = 1397
-        print("\nObserved V(s): " + test_utils.array2str(state_values))
-        print("State count: " + test_utils.array2str(state_counts))
-        print(f"Number of time steps in simulation: {learning_info['nsteps']}")
-
-        plot_estimated_state_value_function(self.env1d, state_values, self.learning_criterion)
-
-        assert self.nS == 20 and \
-               seed == 1717 and \
-               self.start_state == 0 and \
-               params['alpha'] == 1.0 and \
-               params['gamma'] == 1.0 and \
-               params['lambda'] == 0.7 and \
-               params['alpha_min'] == 0.1
-        assert learning_info['nsteps'] == expected_time_steps
-        assert all(state_counts == expected_state_counts)
-        assert np.allclose(state_values, expected_V, atol=1E-6)
-
-    def test_EnvGridworld1DOneTerminal_PolRandomWalk_MetTDLambda(self):
-        print("\n*** Running test " + self.id() + " ***")
-
-        # Simulation setup
-        seed = 1717
-        max_time_steps = 1397  # If possible, use the same number of events as those observed in the FV test below (n_events_et + n_events_fv), but this may not be the case...
-
-        # Learner
-        params = dict({'alpha': 1.0,
-                       'gamma': self.gamma,
-                       'lambda': 0.7,
-                       'alpha_min': 0.1,
-                       # We use alpha_min > 0 because o.w. V(s) is not fully learned, due to the CONTINUING task context, where we receive reards from "infinite" time
-                       })
-        learner_td = td.LeaTDLambda(self.env1d,
-                                    criterion=self.learning_criterion,
-                                    task=self.learning_task,
-                                    alpha=params['alpha'], gamma=params['gamma'], lmbda=params['lambda'],
-                                    alpha_update_type=AlphaUpdateType.EVERY_STATE_VISIT,
-                                    adjust_alpha=True, adjust_alpha_by_episode=False,
-                                    alpha_min=params['alpha_min'],
-                                    debug=False)
-
-        # Define the agents for the policies that are used in the tests
-        agent_td_random = agents.GenericAgent(self.policy_random, learner_td)
-
-        # Store the true state value function in the environment so that we can compare our estimates with those values when running the simulation in the test
-        self.env1d.setV(self.V_true_random)
-
-        sim = DiscreteSimulator(self.env1d, agent_td_random, debug=False)
-        state_values, action_values, advantage_values, state_counts, _, _, learning_info = \
-            sim.run(max_time_steps=max_time_steps,
-                    seed=seed,
-                    compute_rmse=False, state_observe=self.nS-1,   # This is the state just before the terminal state
-                    verbose=True, verbose_period=max_time_steps // 20,
-                    plot=False, pause=0.1)
-
-        # The expected state values are EXTREMELY close to self.V_true_optimal, so great!
-        expected_V = [ -0.06542071, -0.06415109, -0.06721427, -0.06603852, -0.05873144,
-                       -0.05419946, -0.03993487, -0.01633867, -0.00199921,  0.01469925,
-                        0.04491748,  0.08471120,  0.14604221,  0.23703669,  0.26748067,
-                        0.32316794,  0.48722293,  0.70349616,  0.89664059, -0.03621932]
-        expected_state_counts = [177, 141, 136, 152, 137, 117, 96, 74, 66, 64, 50, 29, 20, 29, 37, 32, 21, 10, 6, 4]
-        expected_time_steps = 1397
-        print("\nObserved V(s): " + test_utils.array2str(state_values))
-        print("State count: " + test_utils.array2str(state_counts))
-        print(f"Number of time steps in simulation: {learning_info['nsteps']}")
-
-        plot_estimated_state_value_function(self.env1d, state_values, self.learning_criterion)
-
-        assert self.nS == 20 and \
-               seed == 1717 and \
-               self.start_state == 0 and \
-               params['alpha'] == 1.0 and \
-               params['gamma'] == 1.0 and \
-               params['lambda'] == 0.7 and \
-               params['alpha_min'] == 0.1
-        assert learning_info['nsteps'] == expected_time_steps
-        assert all(state_counts == expected_state_counts)
-        assert np.allclose(state_values, expected_V, atol=1E-6)
-
     def test_EnvGridworld1DOneTerminal_PolOptimal_MetTD0(self):
         print("\n*** Running test " + self.id() + " ***")
 
         # Simulation setup
         seed = 1717
-        max_time_steps = 1397   # If possible, use the same number of events as those observed in the FV test below (n_events_et + n_events_fv), but this may not be the case...
+        max_time_steps = 2609 #1397   # If possible, use the same budget (number of events) used in the FV test below (n_events_a + n_events_et + n_events_fv)
 
         # Learner and agent definition
         params = dict({'alpha': 1.0,
                        'gamma': self.gamma,
                        'lambda': 0.0,
-                       'alpha_min': 0.1,        # We use alpha_min > 0 because o.w. V(s) is even LESS learned than it is with lambda=0 (as opposed to using e.g. lambda=0.7), due to the CONTINUING task context, where we receive reards from "infinite" time
+                       'alpha_min': 0.1,
+                       # We use alpha_min > 0 because o.w. V(s) is even LESS learned than it is with lambda=0 (as opposed to using e.g. lambda=0.7), due to the CONTINUING task context, where we receive rewards from "infinite" time
                        })
         learner_td = td.LeaTDLambda(self.env1d,
                                     criterion=self.learning_criterion,
@@ -929,12 +809,12 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
 
         # The expected state values oscillate around self.V_true_optimal, and this is due to the fact that lambda = 0, as opposed to some positive value
         # The true state value function is learned very well with e.g. lambda = 0.7, as used in test test_EnvGridworld1DOneTerminal_PolOptimal_MetTDLambda.
-        expected_V = [-0.395943, -0.395002, -0.392603, -0.386966, -0.374817,
-                      -0.350897, -0.308078, -0.238799, -0.138176, -0.008029,
-                       0.140430,  0.288038,  0.414136,  0.505060,  0.559203,
-                       0.585151,  0.594903,  0.602679,  0.603437, -0.396303]
-        expected_state_counts = [70, 70, 70, 70, 70, 70, 70, 70, 70, 70, 70, 70, 70, 70, 70, 70, 70, 70, 69, 69]
-        expected_time_steps = 1397
+        expected_V = [-0.544077, -0.471049, -0.380620, -0.276250, -0.164391,
+                      -0.053533,  0.047583,  0.132015,  0.196170,  0.242398, 
+                       0.270883,  0.286800,  0.295046,  0.299683,  0.303730, 
+                       0.309529,  0.319318,  0.335681,  0.361708, -0.599226]
+        expected_state_counts = [131, 131, 131, 131, 131, 131, 131, 131, 131, 131, 130, 130, 130, 130, 130, 130, 130, 130, 130, 130]
+        expected_time_steps = 2609
         print("\nObserved V(s): " + test_utils.array2str(state_values))
         print("State count: " + test_utils.array2str(state_counts))
         print(f"Number of time steps in simulation: {learning_info['nsteps']}")
@@ -957,14 +837,14 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
 
         # Simulation setup
         seed = 1717
-        max_time_steps = 1397  # If possible, use the same number of events as those observed in the FV test below (n_events_et + n_events_fv), but this may not be the case...
+        max_time_steps = 6000 #1397   # If possible, use the same budget (number of events) used in the FV test below (n_events_a + n_events_et + n_events_fv)
 
         # Learner and agent definition
         params = dict({'alpha': 1.0,
                        'gamma': self.gamma,
                        'lambda': 0.0,
                        'alpha_min': 0.1,
-                       # We use alpha_min > 0 because o.w. V(s) is even LESS learned than it is with lambda=0 (as opposed to using e.g. lambda=0.7), due to the CONTINUING task context, where we receive reards from "infinite" time
+                       # We use alpha_min > 0 because o.w. V(s) is even LESS learned than it is with lambda=0 (as opposed to using e.g. lambda=0.7), due to the CONTINUING task context, where we receive rewards from "infinite" time
                        })
         learner_td = td.LeaTDLambda(self.env1d,
                                     criterion=self.learning_criterion,
@@ -991,12 +871,12 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
 
         # The expected state values oscillate around self.V_true_optimal, and this is due to the fact that lambda = 0, as opposed to some positive value
         # The true state value function is learned very well with e.g. lambda = 0.7, as used in test test_EnvGridworld1DOneTerminal_PolOptimal_MetTDLambda.
-        expected_V = [-0.022670, -0.021785, -0.024228, -0.025241, -0.024209,
-                      -0.021873, -0.019348, -0.017756, -0.017073, -0.015500,
-                      -0.013044, -0.011186, -0.009617, -0.010542, -0.005119,
-                       0.030250,  0.186153,  0.467958,  0.851619, -0.012612]
-        expected_state_counts = [177, 141, 136, 152, 137, 117, 96, 74, 66, 64, 50, 29, 20, 29, 37, 32, 21, 10, 6, 4]
-        expected_time_steps = 1397
+        expected_V = [-0.136551, -0.133886, -0.130763, -0.125924, -0.118312,
+                      -0.111044, -0.103541, -0.094047, -0.080239, -0.070409,
+                      -0.058702, -0.023361, -0.003274,  0.041439,  0.130459,
+                       0.216678,  0.356023,  0.568982,  0.781315, -0.059804]
+        expected_state_counts = [672, 593, 559, 568, 527, 480, 416, 361, 335, 299, 252, 208, 172, 146, 139, 121, 75, 41, 24, 13]
+        expected_time_steps = 6000
         print("\nObserved V(s): " + test_utils.array2str(state_values))
         print("State count: " + test_utils.array2str(state_counts))
         print(f"Number of time steps in simulation: {learning_info['nsteps']}")
@@ -1009,6 +889,189 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
                params['alpha'] == 1.0 and \
                params['gamma'] == 1.0 and \
                params['lambda'] == 0.0 and \
+               params['alpha_min'] == 0.1
+        assert learning_info['nsteps'] == expected_time_steps
+        assert all(state_counts == expected_state_counts)
+        assert np.allclose(state_values, expected_V, atol=1E-6)
+
+    def test_EnvGridworld1DOneTerminal_PolOptimal_MetTDLambda(self):
+        print("\n*** Running test " + self.id() + " ***")
+
+        # Simulation setup
+        seed = 1717
+        max_time_steps = 2609 #1397   # If possible, use the same budget (number of events) used in the FV test below (n_events_a + n_events_et + n_events_fv)
+
+        # Learner
+        params = dict({'alpha': 1.0,
+                       'gamma': self.gamma,
+                       'lambda': 0.7,
+                       'alpha_min': 0.1,
+                       # We use alpha_min > 0 because o.w. V(s) is not fully learned, due to the CONTINUING task context, where we receive rewards from "infinite" time
+                       })
+        learner_td = td.LeaTDLambda(self.env1d,
+                                    criterion=self.learning_criterion,
+                                    task=self.learning_task,
+                                    alpha=params['alpha'], gamma=params['gamma'], lmbda=params['lambda'],
+                                    alpha_update_type=AlphaUpdateType.EVERY_STATE_VISIT,
+                                    adjust_alpha=True, adjust_alpha_by_episode=False,
+                                    alpha_min=params['alpha_min'],
+                                    debug=False)
+
+        # Define the agents for the policies that are used in the tests
+        agent_td_optimal = agents.GenericAgent(self.policy_optimal, learner_td)
+
+        # Store the true state value function in the environment so that we can compare our estimates with those values when running the simulation in the test
+        self.env1d.setV(self.V_true_optimal)
+
+        sim = DiscreteSimulator(self.env1d, agent_td_optimal, debug=False)
+        state_values, action_values, advantage_values, state_counts, _, _, learning_info = \
+            sim.run(max_time_steps=max_time_steps,
+                    seed=seed,
+                    compute_rmse=False, state_observe=self.nS-1,   # This is the state just before the terminal state
+                    verbose=True, verbose_period=max_time_steps // 20,
+                    plot=False, pause=0.1)
+
+        # The expected state values are EXTREMELY close to self.V_true_optimal, so great!
+        expected_V = [-0.339983, -0.290047, -0.240105, -0.190151, -0.140180,
+                      -0.090190, -0.040180,  0.009848,  0.059891,  0.109943,
+                       0.160009,  0.210075,  0.260135,  0.310182,  0.360213,
+                       0.410225,  0.460215,  0.510186,  0.560140, -0.389918]
+        expected_state_counts = [131, 131, 131, 131, 131, 131, 131, 131, 131, 131, 130, 130, 130, 130, 130, 130, 130, 130, 130, 130]
+        expected_time_steps = 2609
+        print("\nObserved V(s): " + test_utils.array2str(state_values))
+        print("State count: " + test_utils.array2str(state_counts))
+        print(f"Number of time steps in simulation: {learning_info['nsteps']}")
+
+        plot_estimated_state_value_function(self.env1d, state_values, self.learning_criterion)
+
+        assert self.nS == 20 and \
+               seed == 1717 and \
+               self.start_state == 0 and \
+               params['alpha'] == 1.0 and \
+               params['gamma'] == 1.0 and \
+               params['lambda'] == 0.7 and \
+               params['alpha_min'] == 0.1
+        assert learning_info['nsteps'] == expected_time_steps
+        assert all(state_counts == expected_state_counts)
+        assert np.allclose(state_values, expected_V, atol=1E-6)
+
+    def test_EnvGridworld1DOneTerminal_PolRandomWalk_MetTDLambda(self):
+        print("\n*** Running test " + self.id() + " ***")
+
+        # Simulation setup
+        seed = 1717
+        max_time_steps = 6000 #1397   # If possible, use the same budget (number of events) used in the FVLambda test below (n_events_a + n_events_et + n_events_fv)
+
+        # Learner
+        params = dict({'alpha': 1.0,
+                       'gamma': self.gamma,
+                       'lambda': 0.7,
+                       'alpha_min': 0.1,
+                       # We use alpha_min > 0 because o.w. V(s) is not fully learned, due to the CONTINUING task context, where we receive rewards from "infinite" time
+                       })
+        learner_td = td.LeaTDLambda(self.env1d,
+                                    criterion=self.learning_criterion,
+                                    task=self.learning_task,
+                                    alpha=params['alpha'], gamma=params['gamma'], lmbda=params['lambda'],
+                                    alpha_update_type=AlphaUpdateType.EVERY_STATE_VISIT,
+                                    adjust_alpha=True, adjust_alpha_by_episode=False,
+                                    alpha_min=params['alpha_min'],
+                                    debug=False)
+
+        # Define the agents for the policies that are used in the tests
+        agent_td_random = agents.GenericAgent(self.policy_random, learner_td)
+
+        # Store the true state value function in the environment so that we can compare our estimates with those values when running the simulation in the test
+        self.env1d.setV(self.V_true_random)
+
+        sim = DiscreteSimulator(self.env1d, agent_td_random, debug=False)
+        state_values, action_values, advantage_values, state_counts, _, _, learning_info = \
+            sim.run(max_time_steps=max_time_steps,
+                    seed=seed,
+                    compute_rmse=False, state_observe=self.nS-1,   # This is the state just before the terminal state
+                    verbose=True, verbose_period=max_time_steps // 20,
+                    plot=False, pause=0.1)
+
+        # The expected state values are EXTREMELY close to self.V_true_optimal, so great!
+        expected_V = [-0.199185, -0.194841, -0.190414, -0.177342, -0.159378,
+                      -0.131277, -0.112982, -0.090894, -0.056950, -0.034998,
+                       0.019430,  0.125726,  0.154529,  0.265563,  0.411115,
+                       0.460125,  0.515025,  0.623460,  0.750548, -0.118817]            
+        expected_state_counts = [672, 593, 559, 568, 527, 480, 416, 361, 335, 299, 252, 208, 172, 146, 139, 121, 75, 41, 24, 13]
+        expected_time_steps = 6000
+        print("\nObserved V(s): " + test_utils.array2str(state_values))
+        print("State count: " + test_utils.array2str(state_counts))
+        print(f"Number of time steps in simulation: {learning_info['nsteps']}")
+
+        plot_estimated_state_value_function(self.env1d, state_values, self.learning_criterion)
+
+        assert self.nS == 20 and \
+               seed == 1717 and \
+               self.start_state == 0 and \
+               params['alpha'] == 1.0 and \
+               params['gamma'] == 1.0 and \
+               params['lambda'] == 0.7 and \
+               params['alpha_min'] == 0.1
+        assert learning_info['nsteps'] == expected_time_steps
+        assert all(state_counts == expected_state_counts)
+        assert np.allclose(state_values, expected_V, atol=1E-6)
+
+    def test_EnvGridworld1DOneTerminal_PolRandomWalk_MetTDLambdaAdaptive(self):
+        print("\n*** Running test " + self.id() + " ***")
+
+        # Simulation setup
+        seed = 1717
+        max_time_steps = 6000 #1397   # If possible, use the same budget (number of events) used in the FVLambda test below (n_events_a + n_events_et + n_events_fv)
+
+        # Learner
+        params = dict({'alpha': 1.0,
+                       'gamma': self.gamma,
+                       'lambda': 0.7,           # This lambda value is used only if burnin=True in the constructor of the ADAPTIVE TD(Lambda) learner
+                       'alpha_min': 0.1,
+                       # We use alpha_min > 0 because o.w. V(s) is not fully learned, due to the CONTINUING task context, where we receive rewards from "infinite" time
+                       })
+        learner_td = td.LeaTDLambdaAdaptive(self.env1d,
+                                    criterion=self.learning_criterion,
+                                    task=self.learning_task,
+                                    alpha=params['alpha'], gamma=params['gamma'], lmbda=params['lambda'],
+                                    alpha_update_type=AlphaUpdateType.EVERY_STATE_VISIT,
+                                    adjust_alpha=True, adjust_alpha_by_episode=False,
+                                    alpha_min=params['alpha_min'],
+                                    debug=False)
+
+        # Define the agents for the policies that are used in the tests
+        agent_td_random = agents.GenericAgent(self.policy_random, learner_td)
+
+        # Store the true state value function in the environment so that we can compare our estimates with those values when running the simulation in the test
+        self.env1d.setV(self.V_true_random)
+
+        sim = DiscreteSimulator(self.env1d, agent_td_random, debug=False)
+        state_values, action_values, advantage_values, state_counts, _, _, learning_info = \
+            sim.run(max_time_steps=max_time_steps,
+                    seed=seed,
+                    compute_rmse=False, state_observe=self.nS-1,   # This is the state just before the terminal state
+                    verbose=True, verbose_period=max_time_steps // 20,
+                    plot=False, pause=0.1)
+
+        # The expected state values are EXTREMELY close to self.V_true_optimal, so great!
+        expected_V = [-0.134100, -0.130502, -0.125922, -0.118442, -0.105498,
+                      -0.090978, -0.076702, -0.056693, -0.026127, -0.005600,
+                       0.020860,  0.098041,  0.134575,  0.218302,  0.363901,
+                       0.446349,  0.523574,  0.667548,  0.808879, -0.060597]
+        expected_state_counts = [672, 593, 559, 568, 527, 480, 416, 361, 335, 299, 252, 208, 172, 146, 139, 121, 75, 41, 24, 13]
+        expected_time_steps = 6000
+        print("\nObserved V(s): " + test_utils.array2str(state_values))
+        print("State count: " + test_utils.array2str(state_counts))
+        print(f"Number of time steps in simulation: {learning_info['nsteps']}")
+
+        plot_estimated_state_value_function(self.env1d, state_values, self.learning_criterion)
+
+        assert self.nS == 20 and \
+               seed == 1717 and \
+               self.start_state == 0 and \
+               params['alpha'] == 1.0 and \
+               params['gamma'] == 1.0 and \
+               params['lambda'] == 0.7 and \
                params['alpha_min'] == 0.1
         assert learning_info['nsteps'] == expected_time_steps
         assert all(state_counts == expected_state_counts)
@@ -1032,7 +1095,8 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
                        'alpha': 1.0,
                        'gamma': self.gamma,
                        'lambda': 0.0,
-                       'alpha_min': 0.1,        # We use alpha_min > 0 because o.w. V(s) is not fully learned (due to the CONTINUING task context, where we receive reards from "infinite" time
+                       'alpha_min': 0.1,
+                       # We use alpha_min > 0 because o.w. V(s) is not fully learned (due to the CONTINUING task context, where we receive rewards from "infinite" time
                        })
         learner_fv = fv.LeaFV(  self.env1d, params['N'], params['T'], params['absorption_set'], params['activation_set'],
                                 probas_stationary_start_state_et=None,
@@ -1135,7 +1199,7 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
                        'gamma': self.gamma,
                        'lambda': 0.0,
                        'alpha_min': 0.1,
-                       # We use alpha_min > 0 because o.w. V(s) is not fully learned (due to the CONTINUING task context, where we receive reards from "infinite" time
+                       # We use alpha_min > 0 because o.w. V(s) is not fully learned (due to the CONTINUING task context, where we receive rewards from "infinite" time
                        })
         learner_fv = fv.LeaFV(self.env1d, params['N'], params['T'], params['absorption_set'], params['activation_set'],
                               probas_stationary_start_state_et=None,
@@ -1208,6 +1272,321 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
                 params['alpha'] == 1.0 and \
                 params['gamma'] == 1.0 and \
                 params['lambda'] == 0.0 and \
+                params['alpha_min'] == 0.1
+        assert all(state_counts == expected_state_counts)
+        assert sum(state_counts) == n_events_et + n_events_fv + 1
+        assert n_events_et == expected_n_events_et
+        assert n_events_fv == expected_n_events_fv
+        assert n_cycles_absorption_used == expected_n_cycles_absorption
+        assert np.isclose(average_absorption_time, expected_absorption_time)
+        assert np.isclose(average_reward, expected_average_reward, atol=1E-6)
+        for key, value in probas_stationary.items():
+            assert np.isclose(probas_stationary[key], expected_probas_stationary[key])
+        assert np.isclose(average_reward, expected_reward_under_stationarity), f"The estimated average reward must satisfy the expected reward formula under stationarity: average reward = {average_reward}, expected reward = {expected_reward_under_stationarity}"
+        assert np.allclose(state_values, expected_V, atol=1E-6)
+        assert np.allclose(state_values, agent_fv_random.getLearner().getV().getValues(), atol=1E-6), "The observed V(s) must coincide with the V(s) stored in the learner"
+
+    def test_EnvGridworld1DOneTerminal_PolOptimal_MetFVLambda(self):
+        print("\n*** Running test " + self.id() + " ***")
+
+        # Simulation setup
+        seed = 1717
+
+        # Learner and agent definition
+        N = 50
+        T = 1000
+        max_time_steps_fv = 100*N
+        min_prop_absorbed_particles = 0.90  # Minimum proportion of particles that should be absorbed after overcoming the maximum number of time steps defined in max_time_steps_fv
+        params = dict({'N': N,
+                       'T': T,
+                       'absorption_set': set(np.arange(5)),
+                       'activation_set': set({5}),
+                       'alpha': 1.0,
+                       'gamma': self.gamma,
+                       'lambda': 0.7,           # NON-ZERO LAMBDA!
+                       'alpha_min': 0.1,
+                       # We use alpha_min > 0 because o.w. V(s) is not fully learned (due to the CONTINUING task context, where we receive rewards from "infinite" time
+                       })
+        learner_fv = fv.LeaFV(  self.env1d, params['N'], params['T'], params['absorption_set'], params['activation_set'],
+                                probas_stationary_start_state_et=None,
+                                probas_stationary_start_state_fv=None,
+                                criterion=self.learning_criterion,
+                                states_of_interest=self.env1d.getTerminalStates(),
+                                alpha=params['alpha'], gamma=params['gamma'], lmbda=params['lambda'],
+                                alpha_update_type=AlphaUpdateType.EVERY_STATE_VISIT,
+                                adjust_alpha=True, adjust_alpha_by_episode=False,
+                                alpha_min=params['alpha_min'],
+                                debug=False)
+
+        # Define the agents for the policies that are used in the tests
+        agent_fv_optimal = agents.GenericAgent(self.policy_optimal, learner_fv)
+
+        # Store the true state value function in the environment so that we can compare our estimates with those values when running the simulation in the test
+        self.env1d.setV(self.V_true_optimal)
+
+        sim = DiscreteSimulator(self.env1d, agent_fv_optimal, debug=False)
+        state_values, action_values, advantage_values, state_counts, state_counts_et, probas_stationary, average_reward, average_absorption_time, n_cycles_absorption_used, n_events_et, n_events_fv  = \
+            sim.run(max_time_steps=max_time_steps_fv,
+                    max_time_steps_for_absorbed_particles_check=max_time_steps_fv,
+                    min_prop_absorbed_particles=min_prop_absorbed_particles,
+                    stopping_criterion_fv=StoppingCriterion.MAX_TIME_STEPS_OR_MIN_PROP_ABSORBED_PARTICLES_AS_LONG_AS_ENOUGH_TIME_STEPS_HAVE_BEEN_TAKEN,
+                    use_average_reward_stored_in_learner=False,
+                    ## Set the above parameter to True in case we want to test what happens when we start with an initially estimated average reward,
+                    ## e.g. to check if that changes the value function estimation results considerably. To this end, we could call learner_fv.setAverageReward(<value>)
+                    ## when instantiating the FV learner above.
+                    seed=seed,
+                    verbose=True, verbose_period=max_time_steps_fv // 20,
+                    plot=False)
+
+        # The expected state values are close to self.V_true_optimal but not quite there
+        expected_V = [ -0.35477391, -0.30489473, -0.25344517, -0.20073751, -0.14711610,
+                       -0.08025389, -0.03044760,  0.01888331,  0.0684977 ,  0.12148603,
+                        0.17294591,  0.23487263,  0.28481861,  0.32388805,  0.36710499,
+                        0.41190764,  0.45792358,  0.50468974,  0.55153374, -0.40162009]
+        expected_state_counts = [50, 50, 50, 50, 50, 100, 100, 100, 100, 101, 101, 109, 117, 141, 150, 161, 189, 239, 300, 351]
+        expected_n_events_et = params['T']
+        expected_n_events_fv = 1609
+        expected_n_cycles_absorption = 49
+        expected_absorption_time = 20.0
+        expected_average_reward = 0.0467760
+        expected_probas_stationary = dict({19: expected_average_reward})
+        # The following is NOT an expected value for the unit test, but just the expected reward under stationarity computed using its definition,
+        # i.e. E(R) = sum{x} p(x)*r(x), where p(x) is the stationary probability
+        expected_reward_under_stationarity = computing.compute_expected_reward(self.env1d, probas_stationary)
+        print("\nObserved V(s): " + test_utils.array2str(state_values))
+        print("State count: " + test_utils.array2str(state_counts))
+        print(f"Number of cycles observed in E(T) estimation: {n_cycles_absorption_used}")
+        print(f"Estimated expected reabsorption time E(T): {average_absorption_time}")
+        print(f"Estimated expected reward: {average_reward}")
+        print(f"Number of time steps in E(T) estimation: {n_events_et}")
+        print(f"Number of time steps in FV simulation: {n_events_fv}")
+        print(f"Total number of time steps in E(T) + FV simulation: {n_events_et + n_events_fv}")
+
+        plot_estimated_state_value_function(self.env1d, state_values, self.learning_criterion)
+
+        assert  self.nS == 20 and \
+                seed == 1717 and \
+                max_time_steps_fv == 100*params['N'] and \
+                min_prop_absorbed_particles == 0.90 and \
+                params['N'] == 50 and \
+                params['T'] == 1000 and \
+                params['absorption_set'] == set(np.arange(5)) and \
+                params['activation_set'] == set({5}) and \
+                params['alpha'] == 1.0 and \
+                params['gamma'] == 1.0 and \
+                params['lambda'] == 0.7 and \
+                params['alpha_min'] == 0.1
+        assert all(state_counts == expected_state_counts)
+        assert sum(state_counts) == n_events_et + n_events_fv
+        assert n_events_et == expected_n_events_et
+        assert n_events_fv == expected_n_events_fv
+        assert n_cycles_absorption_used == expected_n_cycles_absorption
+        assert np.isclose(average_absorption_time, expected_absorption_time)
+        assert np.isclose(average_reward, expected_average_reward)
+        for key, value in probas_stationary.items():
+            assert np.isclose(probas_stationary[key], expected_probas_stationary[key])
+        assert np.isclose(average_reward, expected_reward_under_stationarity), f"The estimated average reward must satisfy the expected reward formula under stationarity: average reward = {average_reward}, expected reward = {expected_reward_under_stationarity}"
+        assert np.allclose(state_values, expected_V, atol=1E-6)
+        assert np.allclose(state_values, agent_fv_optimal.getLearner().getV().getValues(), atol=1E-6), "The observed V(s) must coincide with the V(s) stored in the learner"
+
+    def test_EnvGridworld1DOneTerminal_PolRandomWalk_MetFVLambda(self):
+        print("\n*** Running test " + self.id() + " ***")
+
+        # Simulation setup
+        seed = 1717
+
+        # Learner and agent definition
+        N = 50
+        T = 1000
+        max_time_steps_fv = 100*N
+        min_prop_absorbed_particles = 0.90  # Minimum proportion of particles that should be absorbed after overcoming the maximum number of time steps defined in max_time_steps_fv
+        params = dict({'N': N,
+                       'T': T,
+                       'absorption_set': set(np.arange(5)),
+                       'activation_set': set({5}),
+                       'alpha': 1.0,
+                       'gamma': self.gamma,
+                       'lambda': 0.7,           # NON-ZERO LAMBDA!
+                       'alpha_min': 0.1,
+                       # We use alpha_min > 0 because o.w. V(s) is not fully learned (due to the CONTINUING task context, where we receive rewards from "infinite" time
+                       })
+        learner_fv = fv.LeaFV(self.env1d, params['N'], params['T'], params['absorption_set'], params['activation_set'],
+                              probas_stationary_start_state_et=None,
+                              probas_stationary_start_state_fv=None,
+                              criterion=self.learning_criterion,
+                              states_of_interest=self.env1d.getTerminalStates(),
+                              alpha=params['alpha'], gamma=params['gamma'], lmbda=params['lambda'],
+                              alpha_update_type=AlphaUpdateType.EVERY_STATE_VISIT,
+                              adjust_alpha=True, adjust_alpha_by_episode=False,
+                              alpha_min=params['alpha_min'],
+                              debug=False)
+
+        # Define the agents for the policies that are used in the tests
+        agent_fv_random = agents.GenericAgent(self.policy_random, learner_fv)
+
+        # Store the true state value function in the environment so that we can compare our estimates with those values when running the simulation in the test
+        self.env1d.setV(self.V_true_random)
+
+        sim = DiscreteSimulator(self.env1d, agent_fv_random, debug=False)
+        state_values, action_values, advantage_values, state_counts, state_counts_et, probas_stationary, average_reward, average_absorption_time, n_cycles_absorption_used, n_events_et, n_events_fv  = \
+            sim.run(max_time_steps=max_time_steps_fv,
+                    max_time_steps_for_absorbed_particles_check=max_time_steps_fv,
+                    min_prop_absorbed_particles=min_prop_absorbed_particles,
+                    stopping_criterion_fv=StoppingCriterion.MAX_TIME_STEPS_OR_MIN_PROP_ABSORBED_PARTICLES_AS_LONG_AS_ENOUGH_TIME_STEPS_HAVE_BEEN_TAKEN,
+                    use_average_reward_stored_in_learner=False,
+                    ## Set the above parameter to True in case we want to test what happens when we start with an initially estimated average reward,
+                    ## e.g. to check if that changes the value function estimation results considerably. To this end, we could call learner_fv.setAverageReward(<value>)
+                    ## when instantiating the FV learner above.
+                    ## Note that, if we set it to True and set the initial average reward value in the learner to be a too large value,
+                    ## we might end up with a very bad V(s) estimate because a too large average reward is subtracted at every
+                    ## TD learning step carried out by the FV simulation, and this brings the V(s) estimate very negative for states far away from the positive reward on the right.
+                    seed=seed,
+                    verbose=True, verbose_period=max_time_steps_fv // 20,
+                    plot=False)
+
+        # The expected state values are close to self.V_true_optimal but not quite there
+        expected_V = [ -0.04539979, -0.04250076, -0.04049402, -0.03939358, -0.03698311,
+                        0.00813395,  0.06361135,  0.09466145,  0.12106896,  0.16731018,
+                        0.19904312,  0.22348239,  0.26050741,  0.41166498,  0.50509432,
+                        0.65310685,  0.69017098,  0.75085757,  0.8416227 , -0.04733032]
+        expected_state_counts = [156, 118, 109, 112, 103, 387, 480, 523, 517, 503, 529, 522, 443, 412, 354, 272, 207, 139, 76, 39]
+        expected_n_events_et = params['T']
+        expected_n_events_fv = 5000
+        expected_n_cycles_absorption = 47
+        expected_absorption_time = 19.468
+        expected_average_reward = 0.00235216
+        expected_probas_stationary = dict({19: expected_average_reward})
+        # The following is NOT an expected value for the unit test, but just the expected reward under stationarity computed using its definition,
+        # i.e. E(R) = sum{x} p(x)*r(x), where p(x) is the stationary probability
+        expected_reward_under_stationarity = computing.compute_expected_reward(self.env1d, probas_stationary)
+        print("\nObserved V(s): " + test_utils.array2str(state_values))
+        print("State count: " + test_utils.array2str(state_counts))
+        print(f"Number of cycles observed in E(T) estimation: {n_cycles_absorption_used}")
+        print(f"Estimated expected reabsorption time E(T): {average_absorption_time}")
+        print(f"Estimated expected reward: {average_reward}")
+        print(f"Number of time steps in E(T) estimation: {n_events_et}")
+        print(f"Number of time steps in FV simulation: {n_events_fv}")
+        print(f"Total number of time steps in E(T) + FV simulation: {n_events_et + n_events_fv}")
+
+        plot_estimated_state_value_function(self.env1d, state_values, self.learning_criterion)
+
+        assert  self.nS == 20 and \
+                seed == 1717 and \
+                max_time_steps_fv == 100*params['N'] and \
+                min_prop_absorbed_particles == 0.90 and \
+                params['N'] == 50 and \
+                params['T'] == 1000 and \
+                params['absorption_set'] == set(np.arange(5)) and \
+                params['activation_set'] == set({5}) and \
+                params['alpha'] == 1.0 and \
+                params['gamma'] == 1.0 and \
+                params['lambda'] == 0.7 and \
+                params['alpha_min'] == 0.1
+        assert all(state_counts == expected_state_counts)
+        assert sum(state_counts) == n_events_et + n_events_fv + 1
+        assert n_events_et == expected_n_events_et
+        assert n_events_fv == expected_n_events_fv
+        assert n_cycles_absorption_used == expected_n_cycles_absorption
+        assert np.isclose(average_absorption_time, expected_absorption_time)
+        assert np.isclose(average_reward, expected_average_reward, atol=1E-6)
+        for key, value in probas_stationary.items():
+            assert np.isclose(probas_stationary[key], expected_probas_stationary[key])
+        assert np.isclose(average_reward, expected_reward_under_stationarity), f"The estimated average reward must satisfy the expected reward formula under stationarity: average reward = {average_reward}, expected reward = {expected_reward_under_stationarity}"
+        assert np.allclose(state_values, expected_V, atol=1E-6)
+        assert np.allclose(state_values, agent_fv_random.getLearner().getV().getValues(), atol=1E-6), "The observed V(s) must coincide with the V(s) stored in the learner"
+
+    def test_EnvGridworld1DOneTerminal_PolRandomWalk_MetFVLambdaAdaptive(self):
+        print("\n*** Running test " + self.id() + " ***")
+
+        # Simulation setup
+        seed = 1717
+
+        # Learner and agent definition
+        N = 50
+        T = 1000
+        max_time_steps_fv = 100*N
+        min_prop_absorbed_particles = 0.90  # Minimum proportion of particles that should be absorbed after overcoming the maximum number of time steps defined in max_time_steps_fv
+        params = dict({'N': N,
+                       'T': T,
+                       'absorption_set': set(np.arange(5)),
+                       'activation_set': set({5}),
+                       'alpha': 1.0,
+                       'gamma': self.gamma,
+                       'lambda': 0.7,           # This lambda value is used only if burnin=True in the constructor of the ADAPTIVE TD(Lambda) learner used by FV
+                       'alpha_min': 0.1,
+                       # We use alpha_min > 0 because o.w. V(s) is not fully learned (due to the CONTINUING task context, where we receive rewards from "infinite" time
+                       })
+        learner_fv = fv.LeaFVAdaptive(self.env1d, params['N'], params['T'], params['absorption_set'], params['activation_set'],
+                              probas_stationary_start_state_et=None,
+                              probas_stationary_start_state_fv=None,
+                              criterion=self.learning_criterion,
+                              states_of_interest=self.env1d.getTerminalStates(),
+                              alpha=params['alpha'], gamma=params['gamma'], lmbda=params['lambda'],
+                              alpha_update_type=AlphaUpdateType.EVERY_STATE_VISIT,
+                              adjust_alpha=True, adjust_alpha_by_episode=False,
+                              alpha_min=params['alpha_min'],
+                              debug=False)
+
+        # Define the agents for the policies that are used in the tests
+        agent_fv_random = agents.GenericAgent(self.policy_random, learner_fv)
+
+        # Store the true state value function in the environment so that we can compare our estimates with those values when running the simulation in the test
+        self.env1d.setV(self.V_true_random)
+
+        sim = DiscreteSimulator(self.env1d, agent_fv_random, debug=False)
+        state_values, action_values, advantage_values, state_counts, state_counts_et, probas_stationary, average_reward, average_absorption_time, n_cycles_absorption_used, n_events_et, n_events_fv  = \
+            sim.run(max_time_steps=max_time_steps_fv,
+                    max_time_steps_for_absorbed_particles_check=max_time_steps_fv,
+                    min_prop_absorbed_particles=min_prop_absorbed_particles,
+                    stopping_criterion_fv=StoppingCriterion.MAX_TIME_STEPS_OR_MIN_PROP_ABSORBED_PARTICLES_AS_LONG_AS_ENOUGH_TIME_STEPS_HAVE_BEEN_TAKEN,
+                    use_average_reward_stored_in_learner=False,
+                    ## Set the above parameter to True in case we want to test what happens when we start with an initially estimated average reward,
+                    ## e.g. to check if that changes the value function estimation results considerably. To this end, we could call learner_fv.setAverageReward(<value>)
+                    ## when instantiating the FV learner above.
+                    ## Note that, if we set it to True and set the initial average reward value in the learner to be a too large value,
+                    ## we might end up with a very bad V(s) estimate because a too large average reward is subtracted at every
+                    ## TD learning step carried out by the FV simulation, and this brings the V(s) estimate very negative for states far away from the positive reward on the right.
+                    seed=seed,
+                    verbose=True, verbose_period=max_time_steps_fv // 20,
+                    plot=False)
+
+        # The expected state values are close to self.V_true_optimal but not quite there
+        expected_V = [-0.015824, -0.015002, -0.014612, -0.014598, -0.014898,
+                      -0.002645,  0.027479,  0.059156,  0.092394,  0.143794,
+                       0.185527,  0.220248,  0.281726,  0.437627,  0.504653,
+                       0.658824,  0.706403,  0.793662,  0.880850, -0.017755]
+        expected_state_counts = [156, 118, 109, 112, 103, 387, 480, 523, 517, 503, 529, 522, 443, 412, 354, 272, 207, 139, 76, 39]
+        expected_n_events_et = params['T']
+        expected_n_events_fv = 5000
+        expected_n_cycles_absorption = 47
+        expected_absorption_time = 19.468
+        expected_average_reward = 0.00235216
+        expected_probas_stationary = dict({19: expected_average_reward})
+        # The following is NOT an expected value for the unit test, but just the expected reward under stationarity computed using its definition,
+        # i.e. E(R) = sum{x} p(x)*r(x), where p(x) is the stationary probability
+        expected_reward_under_stationarity = computing.compute_expected_reward(self.env1d, probas_stationary)
+        print("\nObserved V(s): " + test_utils.array2str(state_values))
+        print("State count: " + test_utils.array2str(state_counts))
+        print(f"Number of cycles observed in E(T) estimation: {n_cycles_absorption_used}")
+        print(f"Estimated expected reabsorption time E(T): {average_absorption_time}")
+        print(f"Estimated expected reward: {average_reward}")
+        print(f"Number of time steps in E(T) estimation: {n_events_et}")
+        print(f"Number of time steps in FV simulation: {n_events_fv}")
+        print(f"Total number of time steps in E(T) + FV simulation: {n_events_et + n_events_fv}")
+
+        plot_estimated_state_value_function(self.env1d, state_values, self.learning_criterion)
+
+        assert  self.nS == 20 and \
+                seed == 1717 and \
+                max_time_steps_fv == 100*params['N'] and \
+                min_prop_absorbed_particles == 0.90 and \
+                params['N'] == 50 and \
+                params['T'] == 1000 and \
+                params['absorption_set'] == set(np.arange(5)) and \
+                params['activation_set'] == set({5}) and \
+                params['alpha'] == 1.0 and \
+                params['gamma'] == 1.0 and \
+                params['lambda'] == 0.7 and \
                 params['alpha_min'] == 0.1
         assert all(state_counts == expected_state_counts)
         assert sum(state_counts) == n_events_et + n_events_fv + 1

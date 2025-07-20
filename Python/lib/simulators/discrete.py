@@ -2064,10 +2064,16 @@ class Simulator:
             env.setState(start_state)
 
             if is_learner_td_lambda:
-                # Make all learners share the same V and Q because the environment has only one V and only one Q that should be updated by ALL learners
-                learners[i].V = learner.getV()
-                learners[i].Q = learner.getQ()
-                learners[i].A = learner.getA()
+                # Share information about the learning process that should be common among particles, namely:
+                # - value functions: all particles are exploring the environment in parallel to learn the same value functions!
+                # - visit counts: since all particles are learning the same value functions, their strength (learning rate) when updating the value functions should be adapted
+                #   based on what the other particles learn, otherwise the learning rate would NOT be adjusted by the visit counts observed by the system, and could be too large,
+                #   possibly generating too much oscillation in the value function estimates.
+                # - learning rates: learning rates may not need to be shared across particles because they are adjusted using visit counts at each learning rate update step
+                #   from the original learning rate value. However, sharing them helps monitor their values more easily, e.g. when constructing plots.
+                learner.share_value_functions(learners[i])
+                learner.share_visit_counts(learners[i])
+                learner.share_learning_rates(learners[i])
 
         # Event times: the first event time is 0
         # This implies t=0 is considered the time at which each particle is positioned to their start state.
@@ -2203,7 +2209,8 @@ class Simulator:
                         # Update the trajectory and state counts stored in the base learner so that we can use them when analyzing whether the absorption set A should be increased
                         # based on the FV visits. Note that the third argument 0 is the default (anchor) action that is considered to be taken to transition from a terminal state
                         # (see the learn_terminal_state_values() method for more details).
-                        learner.learn(t, state, 0, next_state, reward, False, {'learn_from_superclass': False})
+                        learner._states += [state]
+                        assert sum(learners[idx_particle]._state_counts_over_all_episodes) == len(learner._states)
                     else:
                         if use_fixed_average_reward:
                             info['average_reward'] = estimated_average_reward
@@ -2248,7 +2255,8 @@ class Simulator:
                     # so that we can use them to analyze whether the absorption set A should be increased, based on the FV visits
                     # We pass `'learn_from_super_class': False` because we do NOT want to learn again, as learning just happened above
                     # with the call to learners[idx_particle].learn (notice that here we are calling the `learner` object, NOT the `learners[idx_particle]` object).
-                    learner.learn(t, state, action, next_state, reward, done, {'learn_from_superclass': False})
+                    learner._states += [state]
+                    assert sum(learners[idx_particle]._state_counts_over_all_episodes) == len(learner._states)
                 else:
                     learner.learn(t, state, action, next_state, reward, done, info)
             if reward != 0.0:
@@ -2265,9 +2273,14 @@ class Simulator:
                 t_abs = t
 
                 if is_learner_td_lambda:
-                    # Reset the information that we reset at the start of an episode because particle absorption is like the end of an episode
-                    # This resets: trajectory, eligibility traces, learning steps alpha (which can be different for each state)
-                    learners[idx_particle]._reset_at_start_of_episode()
+                    # 14-Jul-2025: Reset the trajectory information and the eligibility traces information
+                    # because these should NOT contain information from the particle BEFORE the latest absorption,
+                    # as they do NOT correspond to transitions of the original Markov process whose value functions are of interest.
+                    # HOWEVER, we should NOT reset the pieces of information that are normally reset at the end of an episode, that in the FV(Lambda) learning process
+                    # are common to ALL particles, namely the state and action visit counts and the alpha learning rates, because these have to be determined by the OVERALL visits,
+                    # o.w. we risk to have a too strong update of the value functions, making their estimates unstable.
+                    learners[idx_particle]._reset_trajectory()
+                    learners[idx_particle].reset_traces()
 
                 # Contribution to the survival probability
                 if not has_particle_been_absorbed_once[idx_particle]:
@@ -2745,7 +2758,6 @@ class Simulator:
                     # we want a stable estimate of the average reward over all episodes.
                     # 3) We pass update_phi=False because we only update the occupation probability Phi AFTER all particles have been reactivated, o.w. we would be reactivating
                     # different absorbed particles using *different* estimates of the conditional occupation probability, whereas they must be reactivated using the SAME estimate.
-                    # TODO: (2024/01/29) Revise the correct use of the `done` variable here, instead of `done_episode`, because actually when we are done by `done`, this line will NEVER be executed because we will NOT enter again the `while done` loop...
                     learner.learn(t, state, action, next_state, reward, done, info, update_phi=False)
 
                 if next_state in absorption_set:
@@ -3082,7 +3094,6 @@ class Simulator:
                     # we want a stable estimate of the average reward over all episodes.
                     # 3) We pass update_phi=False because we only update the occupation probability Phi AFTER all particles have been reactivated, o.w. we would be reactivating
                     # different absorbed particles using *different* estimates of the conditional occupation probability, whereas they must be reactivated using the SAME estimate.
-                    # TODO: (2024/01/29) Revise the correct use of the `done` variable here, instead of `done_episode`, because actually when we are done by `done`, this line will NEVER be executed because we will NOT enter again the `while done` loop...
                     learner.learn(t, state, action, next_state, reward, done, info, update_phi=False)
 
                 if next_state in absorption_set:

@@ -245,6 +245,31 @@ class Learner(GenericLearner):
         self.adjust_alpha_by_episode = adjust_alpha_by_episode if adjust_alpha_by_episode is not None else self.adjust_alpha_by_episode
         self.alpha_min = alpha_min if alpha_min is not None else self.alpha_min
 
+    def share_value_functions(self, target_learner):
+        "Make the target learner share the same value functions learned by this learner. Application: learning value functions with parallel learners, such as Fleming-Viot particle systems."
+        target_learner.V = self.getV()
+        target_learner.Q = self.getQ()
+        target_learner.A = self.getA()
+
+    def share_visit_counts(self, target_learner):
+        "Make the target learner share the same state and state-action visit counts as this learner. Application: learning value functions with parallel learners, such as Fleming-Viot particle systems."
+        target_learner._state_counts = self._state_counts
+        target_learner._states_first_visit_time = self._states_first_visit_time
+        target_learner._action_counts = self._action_counts
+        target_learner._actions_first_visit_time = self._actions_first_visit_time
+
+        target_learner._state_counts_over_all_episodes = self._state_counts_over_all_episodes
+        target_learner._state_counts_first_visit_over_all_episodes = self._state_counts_first_visit_over_all_episodes
+        target_learner._action_counts_over_all_episodes = self._action_counts_over_all_episodes
+        target_learner._action_counts_first_visit_over_all_episodes = self._action_counts_first_visit_over_all_episodes
+
+    def share_learning_rates(self, target_learner):
+        "Make the target learner share the same state and state-action visit counts as this learner. Application: learning value functions with parallel learners, such as Fleming-Viot particle systems."
+        target_learner._alphas_used_in_episode = self._alphas_used_in_episode
+        target_learner._alphas_at_max_episode = self._alphas_at_max_episode
+        target_learner._alphas = self._alphas
+        target_learner._alphas2 = self._alphas2
+
     def _reset_at_start_of_first_episode(self):
         "Resets the attributes that should be reset when the very first episode is run"
         # Episode number (this number will be incremented soon after the call to this method so that the first episode has number 1)

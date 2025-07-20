@@ -413,7 +413,7 @@ class LeaTDLambda(Learner):
         plt.legend(states2plot)
         ax = plt.gca()
         #ax.set_xlim([0,len(self._states)-1])
-        ax.set_ylim([0,1])
+        ax.set_ylim((0, 1))
         ax.set_xlabel("time step")
         ax.set_ylabel("alpha*z")
         start_state = self._states[0] if len(self._states) > 0 else None
@@ -463,7 +463,7 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
                          reset_method=reset_method, reset_params=reset_params, reset_seed=reset_seed,
                          store_history_over_all_episodes=True if task == LearningTask.CONTINUING else store_history_over_all_episodes,
                          debug=debug)
-        
+
         # List that keeps the history of ALL lambdas used at EVERY TIME STEP
         # (i.e. all states are mixed up here and if we want to identify which state the lambda corresponds to
         # we need to look at the history of states provided by the learner)
@@ -487,7 +487,7 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
         # Counter of state visits WITHOUT resetting the count after each episode
         # (This MIGHT be used to decide whether we should use the adaptive or non-adaptive lambda
         # based on whether the delta information from which the agent learns already contains
-        # bootstrapping information about the value function at the next state)  
+        # bootstrapping information about the value function at the next state)
         self.state_counts_noreset = np.zeros(self.env.getNumStates())
 
         #-- Variables used in the HOMOGENEOUS adaptive type case
@@ -584,6 +584,7 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
             # => Do NOT do an adaptive lambda yet... so that some learning still happens.
             # In fact, the adaptive lambda may suggest NO learning due to the absence of innovation
             # in case the reward of the current step is 0 (e.g. in gridworlds receiving reward only at terminal states)
+            #print(f"*** ENTERED BURNIN (reward={reward})")
             lambda_adaptive = self.lmbda
             #print("episode: {}, t: {}, lambda (fixed) = {}".format(self.episode, t, lambda_adaptive))
             #print("episode: {}, t: {}, next_state: {}, state_counts[{}] = {} \n\tstate counts: {}\n\tlambda(adap)={}" \
@@ -592,8 +593,13 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
             #-- Adaptive lambda
             # Define the relative target error delta by dividing the bootstrap delta (for now only for V, not for Q) to a reference value defined below
             #ref_value = self.V.getValue(state)                                         # reference value is the value of the current state
-            #ref_value = np.mean( np.abs(self.V.getValues()) )                          # reference value is the average value over all states
-            ref_value = np.mean( np.abs(self.V.getValues()[self.env.getNonTerminalStates()]) )     # reference value is the average value over NON-TERMINAL states (whose value is always 0, so they should no te included in the average)
+            if self.task == LearningTask.EPISODIC:
+                # Reference value is the average value over NON-TERMINAL states (whose value is always 0, so they should no te included in the average)
+                ref_value = np.mean( np.abs(self.V.getValues()[self.env.getNonTerminalStates()]) )
+            else:
+                # Reference value is the average value over all states
+                ref_value = np.mean(np.abs(self.V.getValues()))
+
             delta_relative = delta / ref_value if ref_value != 0 \
                                                else 0. if delta == 0. \
                                                else np.Inf

@@ -352,6 +352,14 @@ class LeaFV(LeaTDLambda):
         Learns the value functions using TD learning and updates the particle's trajectory in the environment representing the particle
 
         Arguments:
+        info: dict
+            Dictionary containing instructions about the learning step.
+            The following entries are retrieved, if present, by this method:
+            - 'learn_from_superclass': whether to call the super class learn() method to learn value functions.
+                (default: True)
+            - 'update_trajectory_and_visit_counts': whether to update the trajectory and state and state-action visit counts when learn_from_superclass=False.
+                (default: False)
+
         envs: (opt) list of Environment
             All the environments associated to the FV particles.
 
@@ -372,11 +380,8 @@ class LeaFV(LeaTDLambda):
         if info.get('learn_from_superclass', True):
             # Learn the value function using the superclass learner
             super().learn(t, state, action, next_state, reward, done, info)
-        else:
+        elif info.get('update_trajectory_and_visit_counts', False):
             # Just update the trajectory stored in the learner and the state counts information
-            # so that these pieces of information are used to e.g. increase the absorption set with states that are frequently visited during the FV simulation.
-            # This is actually ESSENTIAL when using TD(lambda) to learn (as opposed to TD(0)) where learning of value functions is carried out by each COPY of the base learner
-            # that is made for each particle, as opposed to by the base learner itself. However, the information about state visits and state counts is taken from the BASE learner.
             super()._update_trajectory(t, state, action, reward)
             super()._update_visit_counts(t, state, action)
 
