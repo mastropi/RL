@@ -67,7 +67,7 @@ def compute_normalized_KL_distance(KL_distance, learner):
     return KL_distance / max(1, num_states_known_by_learner), num_states_known_by_learner
 
 def show_elapsed_time(learning_method, time_elapsed, time_cpu):
-    print("{} learning process took {:.1f} minutes, ({:.1f} hours (CPU: {:.1f} minutes, {:.1f} hours)".format(learning_method.upper(), time_elapsed / 60, time_elapsed / 3600, time_cpu / 60, time_cpu / 3600))
+    print("{} learning process took {:.1f} minutes, {:.1f} hours (CPU: {:.1f} minutes, {:.1f} hours)".format(learning_method.upper(), time_elapsed / 60, time_elapsed / 3600, time_cpu / 60, time_cpu / 3600))
 
 def define_plotting_parameters():
     dict_colors = dict(); dict_linestyles = dict(); dict_legends = dict()
@@ -571,7 +571,7 @@ learning_task = LearningTask.CONTINUING
 learning_criterion = LearningCriterion.AVERAGE; gamma = 1.0    # gamma could be < 1 in the average reward criterion in order to take the limit as gamma -> 1 as presented in Sutton, pag. 251/252.
 #learning_criterion = LearningCriterion.DISCOUNTED; gamma = 0.9
 
-seed = 1317
+seed = 1317  # Seed used when creating the test object in test_optimizers_discretetime.py, which in turn is used for: (i) the policy seed at creation (torch.manual_seed(seed)), (ii) the eventual reset seed for value functions in learners (reset_seed=seed) at their creation
 env_type = Environment.Gridworld
 #env_type = Environment.MountainCar
 env_type_name = env_type.name   # The environment NAME is retrieved to avoid an error that happened at least once (Jun-2025) when saving results to a pickle file: "Can't pickle <enum 'Environment'>: attribute lookup Environment on __main__ failed"
@@ -1143,6 +1143,7 @@ for rep in range(nrep):
     cpu_start_rep = process_time()
     if learning_method == "all_online":
         for t_learn in range(n_learning_steps):
+            seed_learn = seed_rep + t_learn
             print(f"\n\n*** Running learning step {t_learn+1} of {n_learning_steps} (AVERAGE REWARD at previous step (not reward-shaped) = {R_all[rep, max(0, t_learn-1)]}, {1/R_all[rep, max(0, t_learn-1)]:.0f} average steps) of "
                   f"MAX={max_avg_reward_episodic if policy_learning_mode == 'online' else max_avg_reward_continuing} using {nsteps_all[rep, max(0, t_learn-1)]} time steps for Critic estimation)... (seed={seed_learn}) @{get_current_datetime_as_string()}")
             print("Learning the VALUE FUNCTIONS and POLICY simultaneously...")
@@ -1163,8 +1164,10 @@ for rep in range(nrep):
         # Keep track of the number of learning steps in which we observe a significant change in the policy so that we can reduce the optimizer learning rate
         # when NPG is used and thus avoid very large policy updates when some learning has already happened.
         n_learning_steps_with_large_enough_KL = 0
-        if plot_policy_update:
+        if True: #plot_policy_update:
             # Initialize the plot of the policy at each policy learning step
+            # NOTE: The plot of the absorption set only makes sense for the FIRST REPLICATION because at this point the absorption set has not been re-estimated
+            # (the estimation is done at the beginning of the FV process).
             axes_policy = plot_policy(test_ac.getEnv(), learner_ac.getPolicy(), np.nan, state_counts_all[rep, :, :], params_exec, is_problem_2d=problem_2d,
                                       absorption_set=simulator_value_functions.getAgent().getLearner().getAbsorptionSet() if learning_method_type == "values_fv" else None,
                                       t_learn=1, verbose=False)
@@ -1307,8 +1310,8 @@ for rep in range(nrep):
                 average_reward_initial_exploration = simulator_value_functions.getAgent().getLearner().getAverageRewardInitialExploration()
                 average_reward_fv_inflated = simulator_value_functions.getAgent().getLearner().getAverageRewardRaw()
                 average_reward_from_critic_estimation = expected_reward    # Note: this is the same information stored in the FV learner, i.e. it would also be returned by calling simulator_value_functions.getAgent().getLearner().getAverageReward()
-                nsteps_all[rep, t_learn] = n_events_et + n_events_fv
-                max_time_steps_benchmark_all[rep, t_learn] = n_events_et + n_events_fv  # Number of steps to use when running TDAC at the respective learning step
+                nsteps_all[rep, t_learn] = n_events_a + n_events_et + n_events_fv
+                max_time_steps_benchmark_all[rep, t_learn] = n_events_a + n_events_et + n_events_fv  # Number of steps to use when running TDAC at the respective learning step
             else:
                 # TD learners
                 if 'max_time_steps_benchmark_all' in locals() and rep < len(max_time_steps_benchmark_all) and t_learn < len(max_time_steps_benchmark_all[rep, :]) and max_time_steps_benchmark_all[rep, t_learn] != np.nan:
@@ -2046,7 +2049,7 @@ dict_colors, dict_linestyles, dict_legends, figsize = define_plotting_parameters
 
 # Show the execution times by method
 for meth in dict_time_elapsed.keys():
-    print(f"Execution times for meth={meth}: total = {np.sum(dict_time_elapsed[meth])/60:.1f} min (CPU: {np.sum(dict_time_cpu[meth])/60:.1f} min),"
+    print(f"Execution times for meth={meth}: total = {np.sum(dict_time_elapsed[meth])/60:.1f} min (CPU: {np.sum(dict_time_cpu[meth])/60:.1f} min), "
           f"average = {np.mean(dict_time_elapsed[meth])/60:.1f} min (CPU: {np.mean(dict_time_cpu[meth])/60:.1f} min)")
 
 # Show the number of steps by method
