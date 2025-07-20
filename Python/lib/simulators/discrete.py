@@ -842,7 +842,7 @@ class Simulator:
 
             return dict_params_simul
 
-        def update_absorption_set_if_not_too_large(absorption_set, max_prop_absorption_set=+np.Inf):
+        def update_absorption_set_if_not_too_large(absorption_set, max_prop_absorption_set=0.90): #+np.Inf):
             """
             Updates the absorption set stored in the FV learner with the given `absorption_set` as long as it has not grown above
             the `max_prop_absorption_set` threshold computed out of the number of states known by the learner so far, and returns whether it has been updated.
