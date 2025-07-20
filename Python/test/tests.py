@@ -1287,9 +1287,7 @@ for rep in range(nrep):
                                                   max_time_steps=max_time_steps_fv_overall,
                                                   max_time_steps_for_absorbed_particles_check=max_time_steps_fv_for_all_particles,
                                                   min_prop_absorbed_particles=min_prop_absorbed_particles, stopping_criterion_fv=stopping_criterion_fv,
-                                                  min_num_cycles_for_expectations=0,
-                                                      ## Note: We set the minimum number of cycles for the estimation of E(T_A) to 0 because we do NOT need
-                                                      ## the estimation of the average reward to learn the optimal policy, as it cancels out in the advantage function Q(s,a) - V(s)!!
+                                                  min_num_cycles_for_expectations=None,  # When None, the minimum number of cycles for the estimation of E(T_A) is set by the global variable MIN_NUM_CYCLES_FOR_EXPECTATIONS
                                                   estimate_absorption_set=estimate_absorption_set_at_every_step, update_absorption_set_with_fv_visits=update_absorption_set_with_fv_visits, threshold_absorption_set=threshold_absorption_set,
                                                   soft_killing=soft_killing,
                                                   use_average_reward_stored_in_learner=use_average_reward_from_previous_step,

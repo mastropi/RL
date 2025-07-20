@@ -538,7 +538,7 @@ class Simulator:
         """
 
         # -- Auxiliary functions
-        is_estimation_of_denominator_unreliable = lambda: n_absorption_cycles_used < dict_params_simul['min_num_cycles_for_expectations']
+        is_estimation_of_denominator_unreliable = lambda: n_absorption_cycles_used == 0 or n_absorption_cycles_used < dict_params_simul['min_num_cycles_for_expectations']
 
         def parse_simulation_parameters_fv(dict_params_simul, dict_params_info, env):
             "Parses the simulation (and information) parameters for the FV simulation (including parameters for generic (non-FV) simulations)"
@@ -1010,14 +1010,21 @@ class Simulator:
         # So, the value we store here could be used in that case for the estimation of the long-run expected reward by FV.
         # Note that, if not enough cycles are observed during this initial exploration, we set the expected absorption time to the one measured in the previous policy learning step
         # whenever there is a previous step; if not, we set it to the number of steps taken during the initial exploration, which is our best estimate.
-        _case_expected_absorption_time = "estimated at this learning step on observed cycles"
-        if n_absorption_cycles_used == 0:
-            warning_msg = "WARNING: The estimation of the expected absorption time E(T_A) cannot be reliably performed" \
-                        f" because no cycles were observed after the burn-in period of {dict_params_simul['burnin_time_steps']} time steps: {n_absorption_cycles_used} < {dict_params_simul['min_num_cycles_for_expectations']}"
-            if dict_params_info['t_learn'] == 0:
-                expected_absorption_time = learning_info['nsteps']
-                warning_msg += f"\nThe value of E(T_A) will be set to the number of steps run: {expected_absorption_time}"
-                _case_expected_absorption_time = "estimated as the number of total steps run"
+        if is_estimation_of_denominator_unreliable(): #n_absorption_cycles_used == 0:
+            warning_msg = f"WARNING: The estimation of the expected absorption time E(T_A) cannot be reliably performed " \
+                          f"because the number of cycles observed is zero or smaller than the minimum allowed: " \
+                          f"{n_absorption_cycles_used} < {dict_params_simul['min_num_cycles_for_expectations']}"
+            if True: #dict_params_info['t_learn'] == 0:
+                # DM-2025/07/14: We now ALWAYS set E(T_A) to the number of simulation steps when no cycles are observed because the previous strategy of setting it to the
+                # value estimated at the previous policy learning step could have been BADLY UNDERESTIMATED (because based on very different settings, different A and policy)
+                # giving a very large estimated expected reward (because denominator of FV ratio too small), and this was responsible for making the policy go SNAFU under
+                # the execution parameters of STORED=True, FIXED=True.
+                expected_absorption_time = float(np.nan_to_num(learning_info['expected_cycle_time']))
+                _censored_time = learning_info['nsteps'] - time_last_absorption
+                assert _censored_time >= 0
+                expected_absorption_time += (_censored_time - expected_absorption_time) / (n_absorption_cycles_used + 1)
+                warning_msg += f"\nThe estimation of E(T_A) will INCLUDE the number of steps taken between the last entry time to A and the number of simulation steps run: {expected_absorption_time}"
+                _case_expected_absorption_time = "estimated using the last censored observation"
             else:
                 expected_absorption_time = self.agent.getLearner().getExpectedAbsorptionTime()
                 warning_msg += f"\nThe value of E(T_A) will be set to the value of the previous policy learning step: {expected_absorption_time}"
@@ -1025,9 +1032,10 @@ class Simulator:
             print(warning_msg)
             warnings.warn(warning_msg)
         else:
-            assert not np.isnan(learning_info['expected_cycle_time']) and learning_info['expected_cycle_time'] is not None, \
-                f"The expected cycle time estimated by the initial exploration must not be NaN nor None: {learning_info['expected_cycle_time']}"
             expected_absorption_time = learning_info['expected_cycle_time']
+            _case_expected_absorption_time = "estimated at this learning step on fully observed cycles"
+        assert not np.isnan(expected_absorption_time) and expected_absorption_time is not None, \
+            f"The expected cycle time estimated by the initial exploration must not be NaN nor None: {expected_absorption_time}"
         self.agent.getLearner().setExpectedAbsorptionTimeAndNumCycles(expected_absorption_time, n_absorption_cycles_used)
         print(f"--> Estimated absorption time E(T_A) on {n_absorption_cycles_used} cycles: {expected_absorption_time} ({_case_expected_absorption_time})")
 
@@ -1049,18 +1057,19 @@ class Simulator:
             dict_params_simul['learner_policy'].learn_natural(self.agent.getLearner().getA().getValues())
 
         #-- Step 2: Simulate N particles with Fleming-Viot to compute the empirical distribution and estimate the stationary probabilities, and from them the expected reward
-        # BUT do this ONLY when the estimation of E(T_A) is reliable... otherwise, set the stationary probabilities and expected reward to NaN.
         print("\n*** FLEMING-VIOT SIMULATION ***")
-        if dict_params_info['t_learn'] == 0 and is_estimation_of_denominator_unreliable():
-            warning_msg = f"WARNING: [t_learn=0] The Fleming-Viot estimate of the long-run expected reward may be unreliable because the estimation of the expected absorption time E(T_A) " \
-                          f"is based on too few reabsorption cycles after the burn-in period of {dict_params_simul['burnin_time_steps']} time steps: " \
-                          f"{n_absorption_cycles_used} < {dict_params_simul['min_num_cycles_for_expectations']}"
+        if is_estimation_of_denominator_unreliable():
+            warning_msg = f"WARNING: [t_learn={dict_params_info['t_learn']}] The Fleming-Viot estimate of the long-run expected reward may be unreliable because the estimation of the expected absorption time E(T_A) " \
+                          f"is based on too few reabsorption cycles: {n_absorption_cycles_used} < {dict_params_simul['min_num_cycles_for_expectations']}"
             print(warning_msg)
             warnings.warn(warning_msg)
+        # Do not run the FV simulation when NO exit states from A have been observed and no backup set of exit states is available
+        # Reason: FV needs to know where to distribute the FV particles and this location should be in the outside boundary of A,
+        # which is estimated by the EXIT states from A observed during the E(T_A) simulation.
         if not dict_params_simul['soft_killing'] and len(learning_info['probas_stationary_exit_cycle_set']) == 0:
             # This is the case when the start states of the FV particles cannot be chosen because:
             # - we are NOT using the soft killing strategy
-            # - no EXIT states from A were observed during the initial exploration of the environment
+            # - no EXIT states from A were observed during the initial exploration of the environment and no backup set is available
             state_counts_all = state_counts_et
             expected_reward = self.agent.getLearner().getAverageReward()
             probas_stationary = dict()
