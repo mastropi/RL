@@ -30,6 +30,7 @@ from datetime import datetime
 from collections import deque   # Used for fast update of lists at the borders (which is a very common operation done on lists by the methods implemented here)
 import numpy as np
 import pandas as pd
+import torch
 from matplotlib import pyplot as plt, cm
 from matplotlib.ticker import MaxNLocator
 import gym
@@ -1383,10 +1384,17 @@ class Simulator:
         learner = self.getAgent().getLearner()
 
         # Set seeds of:
-        # - the policy's environment --> responsible for selecting the action.
-        # - the object's environment --> responsible of deciding on the next step given the action.
+        # - torch --> responsible for selecting the action when the policy is modeled via a neural network.
+        # - the policy's environment --> just in case this environment does NOT have the same memory address as self.env
+        #   (e.g. when policies are deepcopied from the original policy in order to compare different learning methods)
+        # - numpy --> responsible for deciding whether a (completely) random action is chosen (when epsilon_random_action > 0).
+        #   numpy is used to both draw a random number to decide whether to choose a random action (without following the policy)
+        #   and then to actually choose that random action, if this ends up being the case.
+        # - the object's environment --> responsible of deciding on the next state given the action.
         if seed is not None:
+            torch.manual_seed(seed)
             policy.env.seed(seed)
+            np.random.seed(seed)
             self.env.seed(seed)
 
         # Reset the environment to a state according to its initial state distribution
@@ -1509,10 +1517,17 @@ class Simulator:
         learner = self.getAgent().getLearner()
 
         # Set seeds of:
-        # - the policy's environment --> responsible for selecting the action.
-        # - the object's environment --> responsible of deciding on the next step given the action.
+        # - torch --> responsible for selecting the action when the policy is modeled via a neural network.
+        # - the policy's environment --> just in case this environment does NOT have the same memory address as self.env
+        #   (e.g. when policies are deepcopied from the original policy in order to compare different learning methods)
+        # - numpy --> responsible for deciding whether a (completely) random action is chosen (when epsilon_random_action > 0).
+        #   numpy is used to both draw a random number to decide whether to choose a random action (without following the policy)
+        #   and then to actually choose that random action, if this ends up being the case.
+        # - the object's environment --> responsible of deciding on the next state given the action.
         if seed is not None:
+            torch.manual_seed(seed)
             policy.env.seed(seed)
+            np.random.seed(seed)
             self.env.seed(seed)
 
         # Reset the environment to a state according to its initial state distribution
@@ -1954,11 +1969,21 @@ class Simulator:
         policy = self.agent.getPolicy()     # Used to define the next action and next state
         learner = self.agent.getLearner()  # Used to learn (or keep learning) the value functions
 
-        # Set the seed of the environment stored in the policy which is the one responsible for defining the next action of the agent
-        # Note that this environment normally coincides with the environment stored in this Simulator object, but it may not always be the case
-        # (this already happened when I was using different COPIES of a policy to compare different value function learners! May-2024)
+        # Set seeds of:
+        # - torch --> responsible for selecting the action when the policy is modeled via a neural network.
+        # - the policy's environment --> just in case this environment does NOT have the same memory address as self.env
+        #   (e.g. when policies are deepcopied from the original policy in order to compare different learning methods)
+        # - numpy [NOT SET, see below] --> responsible for deciding whether a (completely) random action is chosen (when epsilon_random_action > 0).
+        #   numpy is used to both draw a random number to decide whether to choose a random action (without following the policy)
+        #   and then to actually choose that random action, if this ends up being the case.
+        #   NOTE HOWEVER: We do NOT set the numpy random seed because for FV this has already been set at the very beginning of the process,
+        #   by method _estimate_value_functions_and_expected_reward_fv(). Since this is not the case in the single Markov explorations
+        #   run by the run_exploration*() methods, the numpy random seed is set in those methods.
+        #   Another reason for not setting the numpy random seed here is that the expected results of FV unit tests would change and I don't want to update them now.
         if seed is not None:
+            torch.manual_seed(seed)
             policy.env.seed(seed)
+            #np.random.seed(seed)   # Not set because of the reasons indicated in the above comments
 
         # Reset the learner, but WITHOUT resetting the value functions as they were possibly learned a bit during an initial exploration of the environment
         # (UNLESS reward shaping was performed during the initial exploration of the environment to promote a policy that takes the agent towards the boundary of A,
@@ -4008,21 +4033,17 @@ class Simulator:
         policy = self.agent.getPolicy()
         learner = self.agent.getLearner()
 
-        # Set the seed of the environment stored in the policy which is the one responsible for defining the next action of the agent
-        # Note that this environment normally coincides with the environment stored in this Simulator object, but it may not always be the case
-        # (this already happened when I was using different COPIES of a policy to compare different value function learners! May-2024)
+        # Set seeds of:
+        # - torch --> responsible for selecting the action when the policy is modeled via a neural network.
+        # - the policy's environment --> just in case this environment does NOT have the same memory address as self.env
+        #   (e.g. when policies are deepcopied from the original policy in order to compare different learning methods)
+        # - numpy --> responsible for deciding whether a (completely) random action is chosen (when epsilon_random_action > 0).
+        #   numpy is used to both draw a random number to decide whether to choose a random action (without following the policy)
+        #   and then to actually choose that random action, if this ends up being the case.
+        # - the object's environment --> responsible of deciding on the next state given the action.
         if seed is not None:
+            torch.manual_seed(seed)
             policy.env.seed(seed)
-
-        # Numpy seed and Environment seed
-        # (the numpy seed is needed when epsilon_random_action > 0 because in that case a random number is drawn to decide whether to choose a random action
-        # --without following the policy-- and subsequently to choose a random action, if that ends up being the case)
-        # We only set the seed when it is not None because when this method is called by the simulate() method,
-        # seed is set to None in order to avoid having each experiment (i.e. each replication) produce the same results
-        # (which would certainly invalidate the replications!). In that case, the environment's seed is set *before*
-        # calling this method run() and we don't want to revert that seed setting, o.w. the experiments repeatability
-        # would be broken.
-        if seed is not None:
             np.random.seed(seed)
             self.env.setSeed(seed)
 
@@ -4582,21 +4603,17 @@ class Simulator:
         policy = self.agent.getPolicy()
         learner = self.agent.getLearner()
 
-        # Set the seed of the environment stored in the policy which is the one responsible for defining the next action of the agent
-        # Note that this environment normally coincides with the environment stored in this Simulator object, but it may not always be the case
-        # (this already happened when I was using different COPIES of a policy to compare different value function learners! May-2024)
+        # Set seeds of:
+        # - torch --> responsible for selecting the action when the policy is modeled via a neural network.
+        # - the policy's environment --> just in case this environment does NOT have the same memory address as self.env
+        #   (e.g. when policies are deepcopied from the original policy in order to compare different learning methods)
+        # - numpy --> responsible for deciding whether a (completely) random action is chosen (when epsilon_random_action > 0).
+        #   numpy is used to both draw a random number to decide whether to choose a random action (without following the policy)
+        #   and then to actually choose that random action, if this ends up being the case.
+        # - the object's environment --> responsible of deciding on the next state given the action.
         if seed is not None:
+            torch.manual_seed(seed)
             policy.env.seed(seed)
-
-        # Numpy seed and Environment seed
-        # (the numpy seed is needed when epsilon_random_action > 0 because in that case a random number is drawn to decide whether to choose a random action
-        # --without following the policy-- and subsequently to choose a random action, if that ends up being the case)
-        # We only set the seed when it is not None because when this method is called by the simulate() method,
-        # seed is set to None in order to avoid having each experiment (i.e. each replication) produce the same results
-        # (which would certainly invalidate the replications!). In that case, the environment's seed is set *before*
-        # calling this method run() and we don't want to revert that seed setting, o.w. the experiments repeatability
-        # would be broken.
-        if seed is not None:
             np.random.seed(seed)
             self.env.setSeed(seed)
 
