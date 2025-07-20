@@ -240,16 +240,20 @@ class Simulator:
         Runs all the simulations that are needed to learn differential value functions using the Fleming-Viot approach.
 
         These simulations include:
-        - A simulation on a single Markov chain which is used to estimate E(T_A), the expected reabsorption to the set
-        of uninteresting states, A.
+        - A simulation to estimate the absorption set A, if requested by parameter estimate_absorption_set.
+        - A simulation on a single Markov chain used to estimate E(T_A), the expected reabsorption time to the set
+        of uninteresting states, A, which is used as denominator of the Fleming-Viot estimator of stationary state probabilities.
         - A Fleming-Viot simulation on N particles which is used to estimate Phi(t, x) and P(T > t), which contribute
         to the numerator of the Fleming-Viot estimator of stationary state probabilities.
 
         Arguments:
         t_learn: (opt) int
-            The learning step number (starting at 0) for which the FV simulation is run when FV is used in the context of FVRL,
-            i.e. to learn an optimal policy.
-            This is ONLY used for informational purposes, i.e. to show which stage of the policy learning we are at.
+            The learning step number (starting at 0) for which the FV simulation is run when FV is used in the context of FVAC,
+            i.e. to learn an optimal policy using Fleming-Viot Actor-Critic.
+            Negative values are accepted.
+            This used for informational purposes, and to decide whether some learner resetting should be done, namely when t_learn <= 0,
+            which indicates that a whole new simulation process (e.g. a new replication) is run,
+            possibly using the same learner stored in the simulator object used for running the simulations.
 
         max_time_steps: (opt) int
             Maximum number of steps to run the simulation for, computed as the comprehensive number of transitions observed over ALL particles.
@@ -407,7 +411,13 @@ class Simulator:
             # Note that in an FV learner, this may imply resetting collateral information to the information specific to the FV simulation, such as:
             # the absorption set, the activation set, the average reward observed during the initial exploration, the estimated expected reabsorption time, etc.
             self.agent.getLearner().reset(reset_episode=True, reset_value_functions=True, reset_average_reward=True, reset_auxiliary_info=True)
-            print(f"[IN _run_fv() t_learn=0] The average reward stored in learner after RESET is: {self.agent.getLearner().average_reward}, {self.agent.getLearner()._average_reward_in_episode} (EPISODE)")
+            print(f"[IN _run_fv() t_learn={t_learn}] The average reward stored in learner after RESET is: {self.agent.getLearner().average_reward}, {self.agent.getLearner()._average_reward_in_episode} (EPISODE)")
+        # ALWAYS reset the number of steps run for the estimation of A and the initial exploration
+        # Goals:
+        # - Avoid having too many simulation steps run when no EXIT states are observed from A, thus giving a lot of budget to competing methods such as TDAC.
+        # - Avoid having A grow too fast, perhaps...?
+        #   (if a larger sample size is used to estimate A we might end up with more states in A which would complicate observing EXIT states...? not fully sure about this though)
+        self.agent.getLearner().resetNumTimeStepsForExpectation()
 
         #--- Parse input parameters ---
         if min_num_cycles_for_expectations is None:
@@ -494,7 +504,7 @@ class Simulator:
         probas_stationary_start_state_et: (opt) dict
             Stationary distribution to use for the selection of the start state of the single Markov chain
             simulation used to estimate the expected reabsorption cycle time, E(T_A).
-            States are the dictionary keys and their probability of selection are the values.
+            Dictionary keys are the states and dictionary values are their probability of selection.
             Normally this is a uniform distribution on the states at the boundary of A.
             default: None, in which case the initial state distribution stored in the environment is used
 
@@ -637,8 +647,10 @@ class Simulator:
                 print(f"\n**** ABSORPTION SET SELECTION ****")
                 print(f"Estimating the absorption set based on cumulative relative visit frequency (<= {dict_params_simul['threshold_absorption_set']}) of states with NO reward from an initial exploration of the environment...")
                 _average_reward_stored_in_learner_prev = self.agent.getLearner().getAverageReward()
-                _learner = self.run_exploration(t_learn=dict_params_info['t_learn'], max_time_steps=dict_params_simul['T'], seed=dict_params_simul['seed'],
-                                                verbose=dict_params_info['verbose'], verbose_period=dict_params_info['verbose_period'])
+                _learner = self.run_exploration(t_learn=dict_params_info['t_learn'], max_time_steps=dict_params_simul['T'],
+                                                                              epsilon_random_action=dict_params_simul['epsilon_random_action'],
+                                                                              seed=dict_params_simul['seed'],
+                                                                              verbose=dict_params_info['verbose'], verbose_period=dict_params_info['verbose_period'])
 
                 # IMPORTANT STEP: The average reward observed during the exploration that estimates A is stored in the learner,
                 # so that it can be used as initial (or definite, if `use_fixed_average_reward=True`) average reward for the initial exploration that estimates E(T_A).
@@ -738,6 +750,7 @@ class Simulator:
                         # (continuing with the to-do task: this is the idea proposed by Matt which makes absolute sense and should solve the problems encountered with the other two strategies above --although I don't recall what they are.)
 
                 # Store the state with smallest visit frequency during the initial exploration to use as start state for the E(T_A) simulation
+                # whenever the probability distribution for the start state for the E(T_A) simulation has not yet been set (typically this is the case at the first learning step)
                 # Goal: Start at a state that is most likely close to the boundary of A
                 #dict_params_simul['start_states_for_et'] = set({dist_state_counts.index[-1]})  # THIS DOES NOT SEEM LIKE A GOOD IDEA... POLICY LEARNING FAILS!! (perhaps because it is only one point...?
                 dict_params_simul['start_states_for_et'] = set(dist_state_counts.index).difference(dict_params_simul['absorption_set'])
@@ -877,57 +890,57 @@ class Simulator:
         # -- Parse input parameters
 
         # -- Step 1: Simulate a single Markov chain to estimate the EXIT state distribution from A and the expected cycle time of return to A, E(T_A)
-        # We now define the start state for the VERY FIRST episode.
-        # (At subsequent episodes, the start state is defined by the initial state distribution (isd) of the environment,
-        # because that is the distribution that allows converting the originally EPISODIC task into a CONTINUING task.)
-        # For the start state at the very first episode, since the estimation of E(T_A) requires full entrance cycles to A,
-        # it is better to start the simulation OUTSIDE A (so that an entrance event to A will be observed with high probability),
-        # and in particular following the stationary EXIT distribution, as required by the theory.
-        # An estimate of this stationary EXIT distribution is normally stored in input parameter probas_stationary_start_state_et,
-        # following its definition during the PREVIOUS policy learning step (where it was set equal to probas_stationary_start_state_fv).
-        # Note that such probas_stationary_start_state_et distribution may actually NOT give a distribution of the EXIT states from A
-        # because the set A may well have been updated just above! (when estimate_absorption_set = True)
-        # Nevertheless, this is NOT a functional problem; the only problem is that the agent may take more time to observe the entrance event to A
-        # for the first time, because the start state is part of a set of frequently observed states, which is how A is defined, thus delaying
-        # the time when samples used to estimate E(T_A) can be taken.
-        # When probas_stationary_start_state_et is None (which is the case at the very first step of a policy learning process),
-        # the start state is chosen uniformly as the set of states defined after the initial exploration of the environment in entry dict_params_simul['start_states_for_et']
-        # as long as it is not empty (it should never be empty though, because of the way it is defined above).
-        # Otherwise, if for some reason it happens to be empty, we set the start state to None so that the state is chosen
-        # following the initial state distribution of the environment (isd) (done by the env.reset() when called in the _run_single_continuing_task() method).
-        if probas_stationary_start_state_et is None or len(probas_stationary_start_state_et) == 0:
-            # DM-2025/06/14: We should NOT use information about the activation set because that would be cheating,
-            # as the agent is assumed not to know anything about the environment, except for what it discovers while exploring.
-            #if self.agent.getLearner().getActivationSet() is not None and len(self.agent.getLearner().getActivationSet()) > 0:
-            #    start_state = choose_state_from_set(self.agent.getLearner().getActivationSet(), None)
-            #else:
-
-            # Note: setting the start_state value to `None` (when the 'start_states_for_et' entry in dict_params_simul is empty)
-            # means that the start state will be chosen from the environment's initial state distribution
-            # (done by _run_single_continuing_task() when choosing the start state of the simulation)
-            start_state = choose_state_from_set(dict_params_simul['start_states_for_et']) if len(dict_params_simul.get('start_states_for_et', {})) > 0 else None
-            print(f"The start state for the E(T_A) simulation has been chosen UNIFORMLY at random from the following set:")
-            self.env.show_states(dict_params_simul.get('start_states_for_et'))
-        else:
-            start_state = choose_state_from_set(set(probas_stationary_start_state_et.keys()), probas_stationary_start_state_et)
-            print(f"The start state for the E(T_A) simulation has been chosen as a random sample from the following distribution:"
-                  f"\n{probas_stationary_start_state_et}"
-                  f"\ntaking values on the following set,", end=" ")
-            self.env.show_states(set(probas_stationary_start_state_et.keys()))
-        print(f"SINGLE simulation on T={dict_params_simul['T']} steps for the estimation of the expected reabsorption time E(T_A) starts at state s={start_state}")
-        if start_state is None:
-            warning_msg = "WARNING: No information is available for choosing the start state of the E(T_A) simulation (=> start_state = None). " \
-                          f"The start state will be chosen using the initial state distribution of the environment:" \
-                          f"\n{self.env.getInitialStateDistribution() if len(self.env.getInitialStateDistribution()) <= 20 else 'Not printed because too large (' + str(len(self.env.getInitialStateDistribution())) + ' elements)'}"
-            print(warning_msg)
-            warnings.warn(warning_msg)
-        time.sleep(1)
-
         # Simulate the single Markov chain until EXIT states are observed from A or, if soft killing is used, only simulate it ONCE (as EXIT states are NOT used in soft killing)
         n_events_et = 0
         n_initial_explorations_run = 0
         flag_soft_killing_or_exit_states_observed_or_maximum_t_reached = False
         while not flag_soft_killing_or_exit_states_observed_or_maximum_t_reached:
+            # We now define the start state for the VERY FIRST episode.
+            # (At subsequent episodes, the start state is defined by the initial state distribution (isd) of the environment,
+            # because that is the distribution that allows converting the originally EPISODIC task into a CONTINUING task.)
+            # For the start state at the very first episode, since the estimation of E(T_A) requires full entrance cycles to A,
+            # it is better to start the simulation OUTSIDE A (so that an entrance event to A will be observed with high probability),
+            # and in particular following the stationary EXIT distribution, as required by the theory.
+            # An estimate of this stationary EXIT distribution is normally stored in input parameter probas_stationary_start_state_et,
+            # following its definition during the PREVIOUS policy learning step (where it was set equal to probas_stationary_start_state_fv).
+            # Note that such probas_stationary_start_state_et distribution may actually NOT give a distribution of the EXIT states from A
+            # because the set A may well have been updated just above! (when estimate_absorption_set = True)
+            # Nevertheless, this is NOT a functional problem; the only problem is that the agent may take more time to observe the entrance event to A
+            # for the first time, because the start state is part of a set of frequently observed states, which is how A is defined, thus delaying
+            # the time when samples used to estimate E(T_A) can be taken.
+            # When probas_stationary_start_state_et is None (which is the case at the very first step of a policy learning process),
+            # the start state is chosen uniformly as the set of states defined after the initial exploration of the environment in entry dict_params_simul['start_states_for_et']
+            # as long as it is not empty (it should never be empty though, because of the way it is defined above).
+            # Otherwise, if for some reason it happens to be empty, we set the start state to None so that the state is chosen
+            # following the initial state distribution of the environment (isd) (done by the env.reset() when called in the _run_single_continuing_task() method).
+            if probas_stationary_start_state_et is None or len(probas_stationary_start_state_et) == 0:
+                # DM-2025/06/14: We should NOT use information about the activation set because that would be cheating,
+                # as the agent is assumed not to know anything about the environment, except for what it discovers while exploring.
+                # if self.agent.getLearner().getActivationSet() is not None and len(self.agent.getLearner().getActivationSet()) > 0:
+                #    start_state = choose_state_from_set(self.agent.getLearner().getActivationSet(), None)
+                # else:
+
+                # Note: setting the start_state value to `None` (when the 'start_states_for_et' entry in dict_params_simul is empty)
+                # means that the start state will be chosen from the environment's initial state distribution
+                # (done by _run_single_continuing_task() when choosing the start state of the simulation)
+                start_state = choose_state_from_set(dict_params_simul['start_states_for_et']) if len(dict_params_simul.get('start_states_for_et', {})) > 0 else None
+                print(f"The start state for the E(T_A) simulation has been chosen UNIFORMLY at random from the following set:")
+                self.env.show_states(dict_params_simul.get('start_states_for_et'))
+            else:
+                start_state = choose_state_from_set(set(probas_stationary_start_state_et.keys()), probas_stationary_start_state_et)
+                print(f"The start state for the E(T_A) simulation has been chosen as a random sample from the following distribution:"
+                      f"\n{probas_stationary_start_state_et}"
+                      f"\ntaking values on the following set,", end=" ")
+                self.env.show_states(set(probas_stationary_start_state_et.keys()))
+            print(f"SINGLE simulation on T={dict_params_simul['T']} steps for the estimation of the expected reabsorption time E(T_A) starts at state s={start_state}")
+            if start_state is None:
+                warning_msg = "WARNING: No information is available for choosing the start state of the E(T_A) simulation (=> start_state = None). " \
+                              f"The start state will be chosen using the initial state distribution of the environment:" \
+                              f"\n{self.env.getInitialStateDistribution() if len(self.env.getInitialStateDistribution()) <= 20 else 'Not printed because too large (' + str(len(self.env.getInitialStateDistribution())) + ' elements)'}"
+                print(warning_msg)
+                warnings.warn(warning_msg)
+            time.sleep(0.5)
+
             state_values, action_values, advantage_values, state_counts_et, _, _, learning_info = \
                 self._run_single_continuing_task(
                                 t_learn=dict_params_info['t_learn'],
