@@ -104,9 +104,12 @@ def cdf(x: np.ndarray, min=-np.Inf, max=+np.Inf):
 
 
 def rmse(Vtrue: np.ndarray, Vest: np.ndarray, weights: np.ndarray=None):
-    """Root Mean Square Error (RMSE) between Vtrue and Vest, optionally weighted
+    """
+    Root Mean Square Error (RMSE) between Vtrue and Vest, optionally weighted
 
     All weights are assumed to be non-negative.
+
+    Missing values are allowed in both values and weights and they are ignored.
 
     Arguments:
     Vtrue: np.ndarray of any shape (the same shape as Vest and weights)
@@ -121,9 +124,9 @@ def rmse(Vtrue: np.ndarray, Vest: np.ndarray, weights: np.ndarray=None):
 
     Return: float
     For the weighted version:
-        sqrt( sum( weight * (Vest - Vtrue)**2 ) / sum(weight) )
+        sqrt( nansum( weight * (Vest - Vtrue)**2 ) / nansum(weight) )
     For the unweighted version:
-        sqrt( mean( (Vest - Vtrue)**2 ) )
+        sqrt( nanmean( (Vest - Vtrue)**2 ) )
     """
     if type(Vtrue) != np.ndarray or type(Vest) != np.ndarray or (weights is not None and type(weights) != np.ndarray):
         raise ValueError("The first three input parameters must be numpy arrays (`weights` can be None)")
@@ -131,14 +134,14 @@ def rmse(Vtrue: np.ndarray, Vest: np.ndarray, weights: np.ndarray=None):
         raise ValueError("The first three input parameters have the same shape({}, {}, {})" \
                          .format(Vtrue.shape, Vest.shape, weights and weights.shape or ""))
 
-    if np.sum(weights) == 0:
+    if np.nansum(weights) == 0:
         raise Warning("The weights sum up to zero. They will not be used to compute the RMSE.")
         weights = None
 
     if weights is not None:
-        mse = np.sum( weights * (Vest - Vtrue)**2 ) / np.sum(weights)
+        mse = np.nansum( weights * (Vest - Vtrue)**2 ) / np.nansum(weights)
     else:
-        mse = np.mean( (Vest - Vtrue)**2 )
+        mse = np.nanmean( (Vest - Vtrue)**2 )
 
     return np.sqrt(mse)
 

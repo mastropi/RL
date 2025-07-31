@@ -9,12 +9,71 @@ Created on Thu Apr 30 13:16:50 2020
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
+from matplotlib.ticker import MaxNLocator
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+
+from Python.lib.agents.learners import LearningCriterion
+from Python.lib.utils import computing
 
 
 def array2str(x, sep=", ", fmt=":.6f"):
     "Converts an array (possibly numeric) to string separated by `sep` using the given string format"
     return "[" + sep.join( map(lambda s: ("{" + fmt + "}").format(s), x) ) + "]"
+
+
+def plot_estimated_state_value_function(env, state_values, learning_criterion, state_counts=None, alphas=None, fontsize_state_counts=7):
+    """
+    Plots the estimated state value function for the given environment as V(s), where s is the 1D index of the environment states.
+    If `env` has the true state value function stored in the object, it is also plotted (this is checked by calling `env.getV()` and checking it is not None).
+    When the `learning_criterion` is the average reward, each state value function is plotted as V(s) - avg(V), since in that case the state value function is not unique.
+
+    Optionally the state counts are also plotted as percentage and/or the alpha learning rates at the latest learning step, on the secondary axis.
+    The absolute state counts are shown as labels with a fontsize specified by parameter `fontsize_state_counts`.
+    """
+    # Reference value for the plots, needed for the AVERAGE reward learning criterion because there is no unique solution for V(s) in that case
+    ref_V_true = ref_V = 0.0
+    if learning_criterion == LearningCriterion.AVERAGE:
+        if env.getV() is not None:
+            ref_V_true = np.nanmean(env.getV()) #env.getV()[0]
+        ref_V = np.nanmean(state_values) #state_values[0]
+    ax_V = plt.figure().subplots(1, 1)
+    if env.getV() is not None:
+        ax_V.plot(env.getAllStates(), env.getV() - ref_V_true, 'b.-')
+    ax_V.plot(env.getAllStates(), state_values - ref_V, 'r.-')
+    ax_V.xaxis.set_major_locator(MaxNLocator(integer=True))
+    ax_V.set_xlabel("State")
+    ax_V.set_ylabel(learning_criterion == LearningCriterion.AVERAGE and "V(s) - avg(V)" or "V(s)")
+    ax_V.set_title(f"State value function under the {learning_criterion.name.upper()} reward criterion" + (env.getV() is not None and f": RMSE = {computing.rmse(env.getV() - ref_V_true, state_values - ref_V):.3f}" or ""))
+
+    if state_counts is not None or alphas is not None:
+        ax2 = ax_V.twinx()
+
+    ylabel = ""
+    sep = ""
+    if state_counts is not None:
+        # Plot the state counts on a secondary axis,
+        # as a percentage so that they most likely have a very similar scale as the learning rate alphas which might also have been requested
+        state_counts_rel = state_counts / np.sum(state_counts)
+        ax2.bar(np.arange(env.getNumStates()), state_counts_rel, color="blue", alpha=0.3)
+        for s in range(env.getNumStates()):
+            ax2.text(s, state_counts_rel[s], state_counts[s], fontsize=fontsize_state_counts, horizontalalignment="center", verticalalignment="bottom")
+        ylabel += "State counts"
+        sep = " - "
+    if alphas is not None:
+        # Plot the final learning rates on a secondary axis
+        ax2.plot(alphas, color="blue", linestyle="dotted")
+        ax2.set_ylim((0, None))
+        ylabel += sep + "Alphas at last simulation step"
+    ax2.set_ylabel(ylabel)
+
+    plt.pause(0.1)
+    plt.draw()
+
+    if "ax2" in locals():
+        return ax_V, ax2
+    else:
+        return ax_V
+
 
 def plot_rmse_by_episode(rmse_mean_values, rmse_se_values=None, min_rmse=None, max_rmse=None, kpi_name="RMSE",
                          color="black", linestyle='solid',
@@ -241,6 +300,7 @@ def plot_results_2D(ax, V, params, colormap, vmin=None, vmax=None, format_labels
     ax.set_title(title)
 
     return ax
+
 
 class EpisodeSimulation:
 

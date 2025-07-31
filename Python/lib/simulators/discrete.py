@@ -1102,8 +1102,9 @@ class Simulator:
         self.agent.getLearner().setAverageRewardInitialExploration(average_reward_from_initial_exploration)
         print(f"--> [t_learn={dict_params_info['t_learn']}] Average reward estimated from the initial exploration: {average_reward_from_initial_exploration} (it will be used to correct the value functions estimated by the FV simulation)")
 
-        # When reward shaping is used to promote the exploration of the states at the boundary of A, we should update the policy AFTER the initial exploration,
-        # because the value functions are reset at the beginning of the FV simulation (so that the FV simulation reflects the original environment, WITHOUT reward shaping)
+        # When reward shaping is used (i.e. the entry 'reward_for_exit_states' is not None) to promote the exploration of the states at the boundary of A,
+        # we should update the policy AFTER the initial exploration, because the value functions are reset at the beginning of the FV simulation
+        # (they are reset so that the FV simulation reflects the original environment, WITHOUT reward shaping).
         # This is important, because o.w. the policy for all the states in A will never change, even if we do reward shaping.
         if dict_params_simul['reward_for_exit_states'] is not None:
             print(f"[AFTER INITIAL EXPLORATION] Updating the policy based on the value functions learned with reward shaping on EXIT states from A (r={dict_params_simul['reward_for_exit_states']})")
@@ -1405,8 +1406,9 @@ class Simulator:
 
     def run_exploration(self, t_learn=-1, max_time_steps=1000, epsilon_random_action=0.0, seed=None, verbose=False, verbose_period=1):
         """
-        Performs an exploration of the environment without value functions learning, just with the purpose of collecting state visit frequencies and
-        returning the observed average reward. The value of the average reward is NOT updated in the agent's learner.
+        Performs an exploration of the environment under a CONTINUING learning task, without value functions learning,
+        just with the purpose of collecting state visit frequencies and returning the observed average reward.
+        The value of the average reward is NOT updated in the agent's learner.
 
         This is typically used to estimate the absorption set A to use in FV learning or the killing probability in the case of soft killing,
         and to estimate the expected reward to be used as correction value for a future exploration that is used for value functions learning
@@ -1547,8 +1549,8 @@ class Simulator:
 
     def run_exploration_and_learn_value_functions(self, t_learn=-1, max_time_steps=1000, epsilon_random_action=0.0, seed=None, verbose=False, verbose_period=1):
         """
-        Perform an exploration of the environment with the main objective of collecting state visit frequencies.
-        However, the exploration is also used to learn value functions.
+        Performs an exploration of the environment under a CONTINUING learning task, with the main objective of collecting state visit frequencies.
+        However, the exploration is also used to learn the differential value functions.
 
         The learner stored in self.agent is used to learn and store the trajectory, which is assumed to have the following methods defined:
         - reset()
@@ -4388,11 +4390,7 @@ class Simulator:
                     if self.env.getV() is not None:
                         if weights_rmse is not None:
                             weights = learner.getStateCounts()
-                        # For the AVERAGE reward criterion, plot the state value function referenced to V(s=0) as in this case V(s) is NOT unique
-                        ref_V_true = ref_V = 0.0
-                        if self.agent.getLearner().getLearningCriterion() == LearningCriterion.AVERAGE:
-                            ref_V_true = self.env.getV()[0]
-                            ref_V = self._get_state_value(learner, 0)
+                        ref_V_true, ref_V = self._compute_function_reference_values()
                         RMSE[min(episode+1, nepisodes)] = rmse(self.env.getV() - ref_V_true, learner.getV().getValues() - ref_V, weights=weights)
                         MAPE[min(episode+1, nepisodes)] = mape(self.env.getV() - ref_V_true, learner.getV().getValues() - ref_V, weights=weights)
 
@@ -5089,11 +5087,7 @@ class Simulator:
 
                 if compute_rmse:
                     if self.env.getV() is not None:
-                        # For the AVERAGE reward criterion, plot the state value function referenced to V(s=0) as in this case V(s) is NOT unique
-                        ref_V_true = ref_V = 0.0
-                        if self.agent.getLearner().getLearningCriterion() == LearningCriterion.AVERAGE:
-                            ref_V_true = self.env.getV()[0]
-                            ref_V = self._get_state_value(learner, 0)
+                        ref_V_true, ref_V = self._compute_function_reference_values()
                         if weights_rmse is not None:
                             weights = learner.getStateCounts()
                         RMSE[min(episode+1, nepisodes)] = rmse(self.env.getV() - ref_V_true, learner.getV().getValues() - ref_V, weights=weights)
@@ -5421,11 +5415,7 @@ class Simulator:
             RMSE = np.nan*np.zeros(nepisodes+1)
             MAPE = np.nan*np.zeros(nepisodes+1)
             # RMSE (True vs. Estimated values)
-            # For the AVERAGE reward criterion, plot the state value function referenced to V(s=0) as in this case V(s) is NOT unique
-            ref_V_true = ref_V = 0.0
-            if self.agent.getLearner().getLearningCriterion() == LearningCriterion.AVERAGE:
-                ref_V_true = self.env.getV()[0]
-                ref_V = self._get_state_value(learner, 0)
+            ref_V_true, ref_V = self._compute_function_reference_values()
             print(f"True value function:\n{self.env.getV() - ref_V_true}")
             RMSE[0] = rmse(self.env.getV() - ref_V_true, learner.getV().getValues() - ref_V, weights=weights)
             MAPE[0] = mape(self.env.getV() - ref_V_true, learner.getV().getValues() - ref_V, weights=weights)
@@ -5442,6 +5432,29 @@ class Simulator:
         ntimes_rmse_inside_ci95 = 0
 
         return V, RMSE, MAPE, ntimes_rmse_inside_ci95
+
+    def _compute_function_reference_values(self):
+        """
+        Computes reference values for the state value functions (true and estimated) to use in plots
+
+        This is relevant for the AVERAGE learning criterion (typically used in CONTINUING learning tasks),
+        as in that case the state value function is NOT unique (by linear algebra considerations).
+
+        For the DISCOUNTED learning criterion, the reference values are set to 0.
+
+        All the information is taken from the attributes of this object. If the environment does NOT have any true state value function stored in it,
+        the reference value is set to 0.
+
+        Return: Tuple
+        Tuple with the following two elements:
+        - Reference value for the true V(s), computed as the average of "true V(s)".
+        - Reference value for the estimated V(s), computed as the average of "estimated V(s)".
+        """
+        ref_V_true = ref_V = 0.0
+        if self.agent.getLearner().getLearningCriterion() == LearningCriterion.AVERAGE:
+            ref_V_true = np.nanmean(self.env.getV()) if self.env.getV() is not None else 0.0
+            ref_V = np.nanmean(self.agent.getLearner().getV().getValues())
+        return ref_V_true, ref_V
 
     def _setup_plots(self, t_learn=0, colormap="seismic", lut=None, state_observe=None, setup_policy_plot=True):
         """
@@ -5485,15 +5498,13 @@ class Simulator:
         fig_V = plt.figure()
         ax = plt.gca()
         # Plot the true state value function (to have it as a reference already) and set integer values on the horizontal axis as states are integer-valued
+        _ref_V_true, _ = self._compute_function_reference_values()
         if self.env.getV() is not None:
-            # For the AVERAGE reward criterion, plot the state value function referenced to V(s=0) as in this case V(s) is NOT unique
-            _ref_V = self.env.getV()[0] if self.agent.getLearner().getLearningCriterion() == LearningCriterion.AVERAGE else 0.0
-            ax.plot(self.env.getAllStates(), self.env.getV() - _ref_V, '.-', color="blue")
+            ax.plot(self.env.getAllStates(), self.env.getV() - _ref_V_true, '.-', color="blue")
             ax.xaxis.set_major_locator(MaxNLocator(integer=True))
         # Plot the initial estimate of the state value function stored in the learner
         _learner_state_values = self.agent.getLearner().getV().getValues()
-        _ref_V = _learner_state_values[0] if self.agent.getLearner().getLearningCriterion() == LearningCriterion.AVERAGE else 0.0
-        ax.plot(self.env.getAllStates(), _learner_state_values - _ref_V, '-', color=colors_V(0))
+        ax.plot(self.env.getAllStates(), _learner_state_values - _ref_V_true, '-', color=colors_V(0))
 
         # Create other figures, depending on the environment's dimension
         if self.env.getDimension() == 2:
@@ -5577,8 +5588,8 @@ class Simulator:
         # Update the state value function plot
         plt.figure(fig_V.number)
         ax = plt.gca()
-        # For the AVERAGE reward criterion, plot the state value function referenced to V(s=0) as in this case V(s) is NOT unique
-        ref_V = self._get_state_value(learner, 0) if self.agent.getLearner().getLearningCriterion() == LearningCriterion.AVERAGE else 0.0
+
+        _, ref_V = self._compute_function_reference_values()
         ax.plot(self.env.getAllStates(), learner.getV().getValues() - ref_V, linewidth=0.5, color=colors_V(t / colors_V_length))
         ax.set_xlabel(f"1D state index (0 - {self.env.getNumStates()-1})")
         ax.set_ylabel(f"V(s) - {ref_V}")
@@ -5633,8 +5644,7 @@ class Simulator:
         # Plot the estimated state value function at the end of the episode, in both 1D layout and 2D layout, if the environment is 2D.
         #print("episode: {} (T={}), color: {}".format(episode, t_episode+1, colors_V(episode/nepisodes)))
         plt.figure(fig_V.number)
-        # For the AVERAGE reward criterion, plot the state value function referenced to V(s=0) as in this case V(s) is NOT unique
-        ref_V = self._get_state_value(learner, 0) if self.agent.getLearner().getLearningCriterion() == LearningCriterion.AVERAGE else 0.0
+        _, ref_V = self._compute_function_reference_values()
         plt.plot(self.env.getAllStates(), learner.getV().getValues() - ref_V, linewidth=0.5, color=colors_V(min(episode, nepisodes-1) / nepisodes))
         plt.gca().set_xlabel(f"1D state index (0 - {self.env.getNumStates()-1})")
         plt.gca().set_ylabel(f"V(s) - {ref_V}")
@@ -5668,11 +5678,7 @@ class Simulator:
             ax = plt.gca()
 
             # Compute quantities to plot
-            # For the AVERAGE reward criterion, plot the state value function referenced to V(s=0) as in this case V(s) is NOT unique
-            ref_V_true = ref_V = 0.0
-            if self.agent.getLearner().getLearningCriterion() == LearningCriterion.AVERAGE:
-                ref_V_true = self.env.getV()[0]
-                ref_V = self._get_state_value(learner, 0)
+            ref_V_true, ref_V = self._compute_function_reference_values()
             RMSE_state_observe = rmse(np.array(self.env.getV()[state_observe] - ref_V_true), np.array(self._get_state_value(learner, state_observe) - ref_V), weights=weights)
             se95 = 2 * np.sqrt(0.5 * (1 - 0.5) / (episode + 1))
             # Only count falling inside the CI starting at episode 100 so that

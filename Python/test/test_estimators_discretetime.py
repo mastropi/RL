@@ -16,7 +16,6 @@ from unittest_data_provider import data_provider
 from timeit import default_timer as timer
 import numpy as np
 from matplotlib import pyplot as plt, cm
-from matplotlib.ticker import MaxNLocator
 
 from Python.lib.estimators import miscellanea as estimators_miscellanea
 
@@ -33,25 +32,6 @@ from Python.lib.simulators.fv import StoppingCriterion
 from Python.lib.utils import computing
 
 import test_utils
-
-
-def plot_estimated_state_value_function(env, state_values, learning_criterion):
-    # Reference value for the plots, needed for the AVERAGE reward learning criterion because there is no unique solution for V(s) in that case
-    ref_V_true = ref_V = 0.0
-    if learning_criterion == LearningCriterion.AVERAGE:
-        if env.getV() is not None:
-            ref_V_true = env.getV()[0]
-        ref_V = state_values[0]
-    ax_V = plt.figure().subplots(1, 1)
-    if env.getV() is not None:
-        ax_V.plot(env.getAllStates(), env.getV() - ref_V_true, 'b.-')
-    ax_V.plot(env.getAllStates(), state_values - ref_V, 'r.-')
-    ax_V.xaxis.set_major_locator(MaxNLocator(integer=True))
-    ax_V.set_xlabel("State")
-    ax_V.set_ylabel(learning_criterion == LearningCriterion.AVERAGE and "V(s) - V(0)" or "V(s)")
-    ax_V.set_title(f"State value function under the {learning_criterion.name.upper()} reward criterion: RMSE = {computing.rmse(env.getV() - env.getV()[0], state_values - state_values[0]):.3f}")
-    plt.pause(0.1)
-    plt.draw()
 
 
 class Test_EstStateValueV_MetOffline_EnvDeterministicNextState(unittest.TestCase):
@@ -819,7 +799,7 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
         print("State count: " + test_utils.array2str(state_counts))
         print(f"Number of time steps in simulation: {learning_info['nsteps']}")
 
-        plot_estimated_state_value_function(self.env1d, state_values, self.learning_criterion)
+        test_utils.plot_estimated_state_value_function(self.env1d, state_values, self.learning_criterion, state_counts=state_counts, alphas=sim.getAgent().getLearner().getAlphasByState())
 
         assert self.nS == 20 and \
                seed == 1717 and \
@@ -881,7 +861,7 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
         print("State count: " + test_utils.array2str(state_counts))
         print(f"Number of time steps in simulation: {learning_info['nsteps']}")
 
-        plot_estimated_state_value_function(self.env1d, state_values, self.learning_criterion)
+        test_utils.plot_estimated_state_value_function(self.env1d, state_values, self.learning_criterion, state_counts=state_counts, alphas=sim.getAgent().getLearner().getAlphasByState())
 
         assert self.nS == 20 and \
                seed == 1717 and \
@@ -942,7 +922,7 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
         print("State count: " + test_utils.array2str(state_counts))
         print(f"Number of time steps in simulation: {learning_info['nsteps']}")
 
-        plot_estimated_state_value_function(self.env1d, state_values, self.learning_criterion)
+        test_utils.plot_estimated_state_value_function(self.env1d, state_values, self.learning_criterion, state_counts=state_counts, alphas=sim.getAgent().getLearner().getAlphasByState())
 
         assert self.nS == 20 and \
                seed == 1717 and \
@@ -1003,7 +983,7 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
         print("State count: " + test_utils.array2str(state_counts))
         print(f"Number of time steps in simulation: {learning_info['nsteps']}")
 
-        plot_estimated_state_value_function(self.env1d, state_values, self.learning_criterion)
+        test_utils.plot_estimated_state_value_function(self.env1d, state_values, self.learning_criterion, state_counts=state_counts, alphas=sim.getAgent().getLearner().getAlphasByState())
 
         assert self.nS == 20 and \
                seed == 1717 and \
@@ -1064,7 +1044,7 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
         print("State count: " + test_utils.array2str(state_counts))
         print(f"Number of time steps in simulation: {learning_info['nsteps']}")
 
-        plot_estimated_state_value_function(self.env1d, state_values, self.learning_criterion)
+        test_utils.plot_estimated_state_value_function(self.env1d, state_values, self.learning_criterion, state_counts=state_counts, alphas=sim.getAgent().getLearner().getAlphasByState())
 
         assert self.nS == 20 and \
                seed == 1717 and \
@@ -1153,7 +1133,7 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
         print(f"Number of time steps in FV simulation: {n_events_fv}")
         print(f"Total number of time steps in E(T) + FV simulation: {n_events_et + n_events_fv}")
 
-        plot_estimated_state_value_function(self.env1d, state_values, self.learning_criterion)
+        test_utils.plot_estimated_state_value_function(self.env1d, state_values, self.learning_criterion, state_counts=state_counts, alphas=sim.getAgent().getLearner().getAlphasByState())
 
         assert  self.nS == 20 and \
                 seed == 1717 and \
@@ -1259,7 +1239,7 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
         print(f"Number of time steps in FV simulation: {n_events_fv}")
         print(f"Total number of time steps in E(T) + FV simulation: {n_events_et + n_events_fv}")
 
-        plot_estimated_state_value_function(self.env1d, state_values, self.learning_criterion)
+        test_utils.plot_estimated_state_value_function(self.env1d, state_values, self.learning_criterion, state_counts=state_counts, alphas=sim.getAgent().getLearner().getAlphasByState())
 
         assert  self.nS == 20 and \
                 seed == 1717 and \
@@ -1362,7 +1342,7 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
         print(f"Number of time steps in FV simulation: {n_events_fv}")
         print(f"Total number of time steps in E(T) + FV simulation: {n_events_et + n_events_fv}")
 
-        plot_estimated_state_value_function(self.env1d, state_values, self.learning_criterion)
+        test_utils.plot_estimated_state_value_function(self.env1d, state_values, self.learning_criterion, state_counts=state_counts, alphas=sim.getAgent().getLearner().getAlphasByState())
 
         assert  self.nS == 20 and \
                 seed == 1717 and \
@@ -1468,7 +1448,7 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
         print(f"Number of time steps in FV simulation: {n_events_fv}")
         print(f"Total number of time steps in E(T) + FV simulation: {n_events_et + n_events_fv}")
 
-        plot_estimated_state_value_function(self.env1d, state_values, self.learning_criterion)
+        test_utils.plot_estimated_state_value_function(self.env1d, state_values, self.learning_criterion, state_counts=state_counts, alphas=sim.getAgent().getLearner().getAlphasByState())
 
         assert  self.nS == 20 and \
                 seed == 1717 and \
@@ -1574,7 +1554,7 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
         print(f"Number of time steps in FV simulation: {n_events_fv}")
         print(f"Total number of time steps in E(T) + FV simulation: {n_events_et + n_events_fv}")
 
-        plot_estimated_state_value_function(self.env1d, state_values, self.learning_criterion)
+        test_utils.plot_estimated_state_value_function(self.env1d, state_values, self.learning_criterion, state_counts=state_counts, alphas=sim.getAgent().getLearner().getAlphasByState())
 
         assert  self.nS == 20 and \
                 seed == 1717 and \
@@ -1784,7 +1764,7 @@ class Test_EstValueFunctions_EnvGridworld2DWithObstacles(unittest.TestCase, test
         print("\nObserved state value function: " + test_utils.array2str(observed_V))
         print("Expected state value function: " + test_utils.array2str(self.expected_td_V))
 
-        plot_estimated_state_value_function(self.env2d, state_values, LearningCriterion.DISCOUNTED)
+        test_utils.plot_estimated_state_value_function(self.env2d, state_values, LearningCriterion.DISCOUNTED, state_counts=state_counts, alphas=self.sim_td.getAgent().getLearner().getAlphasByState())
 
         assert self.nS == 3*4 and \
                self.seed == 1717 and \
@@ -1828,7 +1808,7 @@ class Test_EstValueFunctions_EnvGridworld2DWithObstacles(unittest.TestCase, test
         print(f"Expected state counts: " + test_utils.array2str(self.expected_fv_state_counts))
         print("State frequency distribution (observed during FV simulation): " + test_utils.array2str(observed_p))
 
-        plot_estimated_state_value_function(self.env2d, state_values, LearningCriterion.DISCOUNTED)
+        test_utils.plot_estimated_state_value_function(self.env2d, state_values, LearningCriterion.DISCOUNTED, state_counts=state_counts, alphas=self.sim_fv.getAgent().getLearner().getAlphasByState())
 
         assert self.nS == 3*4 and \
                self.seed == 1717 and \
@@ -2179,7 +2159,7 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
 
         print(f"learning steps: {learning_info['nsteps']}")
 
-        plot_estimated_state_value_function(self.env2d, state_values, LearningCriterion.AVERAGE)
+        test_utils.plot_estimated_state_value_function(self.env2d, state_values, LearningCriterion.AVERAGE, state_counts=state_counts, alphas=self.sim_td.getAgent().getLearner().getAlphasByState())
 
         assert self.nS == 3*4 and \
                self.seed == 1717 and \
@@ -2233,7 +2213,7 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
         print(f"Average reward (using renewal theory): {observed_average_reward_from_cycles}")
         print(f"Expected average reward: {self.expected_average_reward_from_cycles}")
 
-        plot_estimated_state_value_function(self.env2d, state_values, LearningCriterion.AVERAGE)
+        test_utils.plot_estimated_state_value_function(self.env2d, state_values, LearningCriterion.AVERAGE, state_counts=state_counts, alphas=self.sim_td.getAgent().getLearner().getAlphasByState())
 
         assert self.nS == 3*4 and \
                self.seed == 1717 and \
@@ -2295,7 +2275,7 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
         print(f"Expected estimated average reward (using FV estimator): {self.expected_fv_average_reward}")
         print(f"Expected estimated average reward (using TD estimator): {self.expected_average_reward}")
 
-        plot_estimated_state_value_function(self.env2d, state_values, LearningCriterion.AVERAGE)
+        test_utils.plot_estimated_state_value_function(self.env2d, state_values, LearningCriterion.AVERAGE, state_counts=state_counts, alphas=self.sim_fv.getAgent().getLearner().getAlphasByState())
 
         assert self.nS == 3*4 and \
                min_prop_absorbed_particles == 1.0 and \
@@ -2355,7 +2335,7 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
         print(f"(observed average cycle time on {n_cycles} cycles: {average_cycle_time}")
         print(f"\nEstimated average reward (using FV estimator): {observed_average_reward}")
 
-        plot_estimated_state_value_function(self.env2d, state_values, LearningCriterion.AVERAGE)
+        test_utils.plot_estimated_state_value_function(self.env2d, state_values, LearningCriterion.AVERAGE, state_counts=state_counts, alphas=self.sim_fv.getAgent().getLearner().getAlphasByState())
 
         assert self.nS == 3*4 and \
                min_prop_absorbed_particles == 1.0 and \
