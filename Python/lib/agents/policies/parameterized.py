@@ -465,7 +465,6 @@ class PolNN:
     def __init__(self, env: EnvironmentDiscrete, nn_model: nn.Module, seed=None):
         self.env = env
         self.nn_model = nn_model
-        self.seed = seed
 
         if self.nn_model.getNumOutputs() != self.env.getNumActions():
             raise ValueError("The environment where the model is to be applied and the model itself are incompatible in the number of actions they deal with."
@@ -481,16 +480,15 @@ class PolNN:
             self.nn_model.getOutputLayer().bias.requires_grad = False
             self.nn_model.getOutputLayer().weight.requires_grad = False
 
-        # Set seeds in every object concerned by this class
+        self.seed = seed    # The seed is stored for informational purposes, just to know the seed with which we initialized the object, if needed
         self.env.seed(self.seed)
-        if seed is not None:
-            nn.init.torch.manual_seed(self.seed)
+        self.reset(seed=self.seed)
 
-    def reset(self, initial_values=None):
-        "Resets the policy to the random walk or to the given initial values"
-        self.init_policy(values=initial_values)
+    def reset(self, initial_values=None, seed=None):
+        "Resets the policy to the random walk or to the given initial values, using the given seed for the generation of random weights"
+        self.init_policy(values=initial_values, seed=seed)
 
-    def init_policy(self, values=None, eps=1E-2):
+    def init_policy(self, values=None, eps=1E-2, seed=None):
         """
         Initializes the parameters of the neural network so that the output policy is either almost constant over all actions for all input states
         or is almost equal to the `values` given (which are indexed by all possible actions), also for all input states.
@@ -535,13 +533,17 @@ class PolNN:
             Small value defining the standard deviation of the normal distribution used to define the weights and biases of all layers except for
             the biases of the neurons in the output layer.
             default: 1E-2
+
+        seed: (opt) int
+            Seed to use for the generation of the random weights.
+            default: None
         """
         # Inspired by the weights_init() function in this code:
         # https://github.com/pytorch/examples/blob/main/dcgan/main.py
         # Note also the use of Module.apply() method which calls a function on each submodule of a module (e.g. of a neural network).
 
-        if self.seed is not None:
-            nn.init.torch.manual_seed(self.seed)  # manual_seed() does not accept `None`
+        if seed is not None:
+            nn.init.torch.manual_seed(seed)  # manual_seed() does not accept `None`
 
         if self.nn_model.getNumHiddenLayers() == 0:
             # The neural network is assumed to be used simply as an implementation of action preferences
@@ -662,7 +664,7 @@ class PolNN:
 
     def get_policy_values(self):
         """
-        Returns the policy values in a 2D array indexed by each state and each action of the environment
+        Returns the policy values in a 2D array indexed by each state (1D index) and each action of the environment
 
         It is ASSUMED that the state space is finite! (as the states on which the policy is evaluated
         is given by all the states of the environment --i.e. they are a finite number).
@@ -680,7 +682,7 @@ class PolNN:
         return policy
 
     def getPolicyForState(self, state_simulation) -> tensor:
-        "Returns a tensor containing the probability of choosing each possible action for the given simulation state"
+        "Returns a tensor containing the probability of choosing each possible action for the given simulation state, i.e. the state representation that is used during the simulation process"
         # Compute the action preferences output by the neural network (each output node represents a possible action)
         if self.nn_model.getNumInputs() == self.env.getNumStates():
             # Get the 1D index associated to the simulation state, which is needed to define which input neuron is activated
@@ -689,6 +691,9 @@ class PolNN:
             input[idx_state] = 1
             proba_actions = F.softmax(self.nn_model(input), dim=0)
         elif self.nn_model.getNumInputs() == 1:
+            # The simulation state is assumed to be a scalar,
+            # typically a 1D representation of the environment state in discrete-state environments or the state of a 1D continuous-state environment
+            assert is_scalar(state_simulation)
             proba_actions = F.softmax(self.nn_model([state_simulation]), dim=0)
         else:
             # The simulation state can be ANYTHING, so we need to distinguish between the case in which the state is the physical state
