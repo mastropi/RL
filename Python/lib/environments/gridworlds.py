@@ -807,6 +807,17 @@ class EnvGridworld2D(EnvironmentDiscrete):
         "Returns the list of obstacle states"
         return list(self.set_obstacle_states)
 
+    def getStateFromIndex(self, s, simulation=True):
+        """
+        Returns the environment state from the given 1D state index. See more details in documentation for EnvironmentDiscrete.getIndexFromState()
+
+        When simulation=True, the same 1D index is returned; when simulation=False, the actual 2D environment state is returned.
+        """
+        if simulation:
+            return s
+        else:
+            return np.unravel_index(s, self.shape)
+
     def getStateIndicesFromIndex(self, s: int):
         "Returns the 2D state indices associated to the 1D state index"
         return np.unravel_index(s, self.shape)
@@ -963,9 +974,12 @@ class EnvGridworld2D(EnvironmentDiscrete):
 
 class EnvGridworld2D_Random(EnvGridworld2D):
     """
-    Gridworld with randomly generated obstacles that guarantees a path between the start state and the terminal state. Author: Alphonse Lafon
+    Gridworld with randomly generated obstacles that guarantees a path between the start state and the terminal state.
 
-    Author: Alphonse Lafon
+    IMPORTANT: If parameter n_obstacles > 0, an obstacle is forced one cell LEFT to the finish line in order to reduce the number of possible paths to reach
+    the finish. This assumes that the finish is NOT at the leftmost column of the grid.
+
+    Author: Alphonse Lafon and Daniel Mastropietro
 
     Arguments:
     seed: (opt) int
@@ -1016,9 +1030,10 @@ class EnvGridworld2D_Random(EnvGridworld2D):
             queue = [start]
             visited = set()
             obstacle_set = set(random.sample(list_of_possible_obstacles, self.n_obstacles))
-            # Place an obstacle exactly in one of the cells before reaching the finish cell, so that there are less possible paths to reach the finish
-            # This assumes that the Finish is NOT at one of the leftmost column cells
-            obstacle_set.add(finish - 1)
+            if n_obstacles > 0:
+                # Place an obstacle exactly in one of the cells before reaching the finish cell, so that there are less possible paths to reach the finish
+                # This assumes that the Finish is NOT at one of the leftmost column cells
+                obstacle_set.add(finish - 1)
             while queue:
                 # Analyze the last state in the queue
                 state = queue.pop()

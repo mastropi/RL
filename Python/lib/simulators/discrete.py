@@ -4998,7 +4998,7 @@ class Simulator:
                     # in which case parameter use_fixed_average_reward is set to False.
                     info['average_reward'] = estimated_average_reward
                 learner.learn(t_episode, state, action, next_state, reward, done_episode, info)
-                if state in self.env.getTerminalStates():
+                if state in self.env.getTerminalStates() and learner.getQ().isTabular():
                     # We need to copy the Q-values of the terminal state to the other actions because the action chosen to go to the start state is always the same (action 0)
                     action_anchor = 0
                     for _action in range(self.env.getNumActions()):
@@ -5937,12 +5937,13 @@ class Simulator:
         action: int
             Index of the action whose value is copied to all other possible actions of the environment.
         """
-        for _action in range(self.env.getNumActions()):
-            # TODO: (2023/11/23) Generalize this update of the Q-value to ANY function approximation as the following call to _setWeight() assumes that we are in the tabular case!!
-            QA._setWeight(state, _action, QA.getValue(state, action))
-        # Check that all Q values are the same for the given state
-        for _action in range(self.env.getNumActions()):
-            assert np.isclose(QA.getValue(state, _action), QA.getValue(state, action)), f"All Q-values are the same for the terminal state {state}:\n{QA.getValues()}"
+        if QA.isTabular():
+            for _action in range(self.env.getNumActions()):
+                # TODO: (2023/11/23) Generalize this update of the Q-value to ANY function approximation as the following call to _setWeight() assumes that we are in the tabular case!!
+                QA._setWeight(state, _action, QA.getValue(state, action))
+            # Check that all Q values are the same for the given state
+            for _action in range(self.env.getNumActions()):
+                assert np.isclose(QA.getValue(state, _action), QA.getValue(state, action)), f"All Q-values are the same for the terminal state {state}:\n{QA.getValues()}"
 
     def simulate(self, nexperiments, nepisodes, max_time_steps_per_episode=None, compute_rmse=True, weights_rmse=None,
                  verbose=False, verbose_period=1, verbose_convergence=False, plot=False):

@@ -24,6 +24,7 @@ import Python.lib.agents as agents
 
 from Python.lib.agents.learners import LearningCriterion, LearningTask, ResetMethod
 from Python.lib.agents.learners.episodic.discrete import fv, td
+from Python.lib.agents.learners.value_functions import StateValueFunctionApproxNN, ActionValueFunctionApproxNN
 
 from Python.lib.agents.policies.parameterized import PolNN
 
@@ -47,8 +48,15 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
     @classmethod
     def setUpClass(cls, shape=(3, 4), obstacles_set: Union[list, set]=None, n_obstacles: int=None, wind_dict: dict=None, exit_state=None, start_states_set: set=None,
                         define_start_state_from_absorption_set=False,   # This parameter has priority over the value of `start_states_set` when it is True
-                        # Characteristics of the neural network for the Actor Critic policy learner
-                        nn_input: InputLayer=InputLayer.ONEHOT, nn_hidden_layer_sizes: list=[8], initial_policy=None, dropout_policy=0.0,
+                        # Value functions model
+                        use_function_approximation=False,
+                        nn_input_value_functions: InputLayer=InputLayer.STATE,
+                        nn_hidden_layer_sizes_value_functions: list=[12],
+                        # Policy model
+                        nn_input_policy: InputLayer=InputLayer.ONEHOT,
+                        nn_hidden_layer_sizes_policy: list=[12],
+                        dropout_policy=0.0,
+                        initial_policy=None,
                         # Characteristics of all learners
                         learning_task=LearningTask.CONTINUING,
                         learning_criterion=LearningCriterion.AVERAGE,
@@ -64,6 +72,23 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
         Prepares the necessary objects to perform Actor-Critic policy learning
 
         Arguments:
+        nn_input_value_functions: InputLayer
+            Type of input layer as defined by the InputLayer enum in the neural network used for value functions.
+            default: InputLayer.STATE
+
+        nn_hidden_layer_sizes_value_functions: list
+            List with the sizes of each hidden layer in the neural network used for value functions.
+            Default: [12]
+
+        nn_input_policy: InputLayer
+            Type of input layer as defined by the InputLayer enum.
+            default: InputLayer.ONEHOT, i.e. as many neurons as number of states in the environment
+
+        nn_hidden_layer_sizes_policy: list
+            List with the sizes of each hidden layer in the neural network used for the policy.
+            When empty, the policy will be learned by Natural Policy Gradient.
+            Default: [12]
+
         obstacles_set: (opt) set
             Set containing the cells to define as obstacles of the labyrinth.
             When None, the obstacles are selected randomly with as many as `n_obstacles`.
@@ -145,12 +170,41 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
             ax_labyrinth = cls.env2d.plot()
         #-- Environment characteristics
 
+        #-- Value functions modeling
+        dict_function_approximations = None     # This means TABULAR value functions
+        if use_function_approximation:
+            dropout_value_functions = 0.0  # 0.5           # Set it to 0.0 if we do not want any dropout layer in the network
+            learning_rate_value_functions = 0.001 if dropout_value_functions == 0.0 else 0.01  # We increase the learning rate when there is dropout. Ref: https://machinelearningmastery.com/using-dropout-regularization-in-pytorch-models/ (conclusions)
+            # Inputs for SINGLE input layer:
+            # - V-NN: 1D-cell position (total = 1)
+            # - Q-NN: 1D-cell position, action (total = 2)
+            # Inputs for ONEHOT input layer:
+            # - V-NN: one-hot 1D-cell position (total = # states)
+            # - Q-NN: one-hot 1D-cell position + one-hot action (total = # states + # actions)
+            # Inputs for STATE input layer:
+            # - V-NN: 2D state
+            # - Q-NN: 2D state + action value (0, 1, 2, 3)
+            nn_input_V = np.prod(env_shape) if nn_input_value_functions == InputLayer.ONEHOT else 2 if nn_input_value_functions == InputLayer.STATE else 1
+            nn_input_Q = np.prod(env_shape) + 4 if nn_input_value_functions == InputLayer.ONEHOT else 2 + 1 if nn_input_value_functions == InputLayer.STATE else 1 + 1
+            dict_function_approximations = dict(
+                {'V': StateValueFunctionApproxNN(cls.env2d, nn_input=nn_input_V, nn_hidden_layer_sizes=nn_hidden_layer_sizes_value_functions, dropout=dropout_value_functions, lr=learning_rate_value_functions),
+                 'Q': ActionValueFunctionApproxNN(cls.env2d, nn_input=nn_input_Q, nn_hidden_layer_sizes=nn_hidden_layer_sizes_value_functions, dropout=dropout_value_functions, lr=learning_rate_value_functions),
+                 'A': ActionValueFunctionApproxNN(cls.env2d, nn_input=nn_input_Q, nn_hidden_layer_sizes=nn_hidden_layer_sizes_value_functions, dropout=dropout_value_functions, lr=learning_rate_value_functions)
+                 })
+        #-- Value functions modeling
+
         #-- Policy characteristics
         # Policy model
-        if nn_input == InputLayer.SINGLE:
-            cls.nn_model = NNBackprop(1, nn_hidden_layer_sizes, cls.env2d.getNumActions(), dict_activation_functions=dict({'hidden': [nn.ReLU]*len(nn_hidden_layer_sizes)}), dropout=dropout_policy)
+        if nn_input_policy == InputLayer.SINGLE:
+            cls.nn_model = NNBackprop(1, nn_hidden_layer_sizes_policy, cls.env2d.getNumActions(), dict_activation_functions=dict({'hidden': [nn.ReLU]*len(nn_hidden_layer_sizes_policy)}), dropout=dropout_policy)
+        elif nn_input_policy == InputLayer.STATE:
+            # The actual environment state is used as input of the neural network (the state in the 2D gridworld has dimension 2)
+            cls.nn_model = NNBackprop(2, nn_hidden_layer_sizes_policy, 3, dict_activation_functions=dict({'hidden': [nn.ReLU] * len(nn_hidden_layer_sizes_policy)}), dropout=dropout_policy)
         else:
-            cls.nn_model = NNBackprop(cls.env2d.getNumStates(), nn_hidden_layer_sizes, cls.env2d.getNumActions(), dict_activation_functions=dict({'hidden': [nn.ReLU] * len(nn_hidden_layer_sizes)}), dropout=dropout_policy)
+            # One-hot encoding or Natural Policy Gradient learning (NPG)
+            # Note that NPG requires one input neuron per state because of the way it is currently implemented, namely using a neural network
+            # although a neural network is not really necessary, it's just a way to simplify the implementation and avoid writing a different policy class.
+            cls.nn_model = NNBackprop(cls.env2d.getNumStates(), nn_hidden_layer_sizes_policy, cls.env2d.getNumActions(), dict_activation_functions=dict({'hidden': [nn.ReLU] * len(nn_hidden_layer_sizes_policy)}), dropout=dropout_policy)
         cls.policy_nn = PolNN(cls.env2d, cls.nn_model, seed=cls.seed)
         print(f"Neural network to model the policy:\n{cls.nn_model}")
 
@@ -294,12 +348,13 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
         #--- TD learners
         # TD(0) learner
         learner_td0 = td.LeaTDLambda( cls.env2d,
+                                      dict_function_approximations=dict_function_approximations,
                                       criterion=learning_criterion,
                                       task=learning_task,
                                       gamma=cls.gamma,
                                       lmbda=0.0,
                                       alpha=cls.alpha,
-                                      adjust_alpha=True,
+                                      adjust_alpha=dict_function_approximations is None, # We do NOT adjust the learning rate alpha when value functions are learned by function approximation (NN) because the adjustment is done by the optimizer
                                       adjust_alpha_by_episode=False,
                                       alpha_min=cls.alpha_min,
                                       reset_method=cls.reset_method, reset_params=cls.reset_params, reset_seed=cls.seed,
@@ -309,12 +364,13 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
 
         # TD(lambda) learner
         learner_tdlambda = td.LeaTDLambda(cls.env2d,
+                                          dict_function_approximations=dict_function_approximations,
                                           criterion=learning_criterion,
                                           task=learning_task,
                                           gamma=cls.gamma,
                                           lmbda=lmbda,
                                           alpha=cls.alpha,
-                                          adjust_alpha=True,
+                                          adjust_alpha=dict_function_approximations is None, # We do NOT adjust the learning rate alpha when value functions are learned by function approximation (NN) because the adjustment is done by the optimizer
                                           adjust_alpha_by_episode=False,
                                           alpha_min=cls.alpha_min,
                                           reset_method=cls.reset_method, reset_params=cls.reset_params, reset_seed=cls.seed,
@@ -324,11 +380,12 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
 
         # Adaptive TD(lambda) learner
         learner_tdlambda_adap = td.LeaTDLambdaAdaptive( cls.env2d,
+                                                        dict_function_approximations=dict_function_approximations,
                                                         criterion=learning_criterion,
                                                         task=learning_task,
                                                         gamma=cls.gamma,
                                                         alpha=cls.alpha,
-                                                        adjust_alpha=True,
+                                                        adjust_alpha=dict_function_approximations is None, # We do NOT adjust the learning rate alpha when value functions are learned by function approximation (NN) because the adjustment is done by the optimizer
                                                         adjust_alpha_by_episode=False,
                                                         alpha_min=cls.alpha_min,
                                                         reset_method=cls.reset_method, reset_params=cls.reset_params, reset_seed=cls.seed,
@@ -345,12 +402,13 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
                                 states_of_interest=states_of_interest_fv,
                                 probas_stationary_start_state_et=None,
                                 probas_stationary_start_state_fv=None,
+                                dict_function_approximations=dict_function_approximations,
                                 criterion=learning_criterion,
                                 task=learning_task,
                                 gamma=cls.gamma,
                                 lmbda=0.0,
                                 alpha=cls.alpha,
-                                adjust_alpha=True,
+                                adjust_alpha=dict_function_approximations is None, # We do NOT adjust the learning rate alpha when value functions are learned by function approximation (NN) because the adjustment is done by the optimizer
                                 adjust_alpha_by_episode=False,
                                 alpha_min=cls.alpha_min,
                                 reset_method=cls.reset_method, reset_params=cls.reset_params, reset_seed=cls.seed,
@@ -366,12 +424,13 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
                                     states_of_interest=states_of_interest_fv,
                                     probas_stationary_start_state_et=None,
                                     probas_stationary_start_state_fv=None,
+                                    dict_function_approximations=dict_function_approximations,
                                     criterion=learning_criterion,
                                     task=learning_task,
                                     gamma=cls.gamma,
                                     lmbda=lmbda,
                                     alpha=cls.alpha,
-                                    adjust_alpha=True,
+                                    adjust_alpha=dict_function_approximations is None, # We do NOT adjust the learning rate alpha when value functions are learned by function approximation (NN) because the adjustment is done by the optimizer
                                     adjust_alpha_by_episode=False,
                                     alpha_min=cls.alpha_min,
                                     reset_method=cls.reset_method, reset_params=cls.reset_params, reset_seed=cls.seed,
@@ -385,12 +444,13 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
                                                 states_of_interest=states_of_interest_fv,
                                                 probas_stationary_start_state_et=None,
                                                 probas_stationary_start_state_fv=None,
+                                                dict_function_approximations=dict_function_approximations,
                                                 criterion=learning_criterion,
                                                 task=learning_task,
                                                 gamma=cls.gamma,
                                                 lmbda=lmbda,    # This is a dummy lambda, as it is actually not used because the learner is a adaptive TD(Lambda) defined in LeaTDLambdaAdaptive
                                                 alpha=cls.alpha,
-                                                adjust_alpha=True,
+                                                adjust_alpha=dict_function_approximations is None, # We do NOT adjust the learning rate alpha when value functions are learned by function approximation (NN) because the adjustment is done by the optimizer
                                                 adjust_alpha_by_episode=False,
                                                 alpha_min=cls.alpha_min,
                                                 reset_method=cls.reset_method, reset_params=cls.reset_params, reset_seed=cls.seed,
@@ -568,11 +628,16 @@ class Test_EstPolicy_EnvMountainCar(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls, env_discrete=True, nx=20, nv=21, factor_for_force_and_gravity=20, factor_force=1.0, factor_max_speed=1.0,
-                   dict_function_approximations=None,
-                   nn_input: Union[InputLayer, int]=2,
-                   nn_hidden_layer_sizes: list=[8],
+                   # Value functions model
+                   use_function_approximation=False,
+                   nn_input_value_functions: InputLayer=InputLayer.STATE,
+                   nn_hidden_layer_sizes_value_functions: list=[12],
+                   # Policy model
+                   nn_input_policy: Union[InputLayer, int]=2,
+                   nn_hidden_layer_sizes_policy: list=[12],
                    dropout_policy: float=0.0,
                    initial_policy=[1/3, 1/3, 1/3],
+                   # Characteristics of all learners
                    learning_task=LearningTask.CONTINUING,
                    learning_criterion=LearningCriterion.AVERAGE,
                    alpha=1.0, gamma=1.0, lmbda=0.0,  # Lambda parameter in non-adaptive TD(lambda) learners
@@ -585,9 +650,22 @@ class Test_EstPolicy_EnvMountainCar(unittest.TestCase):
         Prepares the necessary objects to perform Actor-Critic policy learning on the discrete Mountain Car environment
 
         Arguments:
-        nn_input: InputLayer or int
-            Type of input layer as defined by the InputLayer enum or the number of input neurons.
+        nn_input_value_functions: InputLayer
+            Type of input layer as defined by the InputLayer enum in the neural network used for value functions.
+            default: InputLayer.STATE
+
+        nn_hidden_layer_sizes_value_functions: list
+            List with the sizes of each hidden layer in the neural network used for value functions.
+            Default: [12]
+
+        nn_input_policy: InputLayer or int
+            Type of input layer as defined by the InputLayer enum or the number of input neurons in the policy network
             default: 2 (one for the position x and one for the velocity v of the car)
+
+        nn_hidden_layer_sizes_policy: list
+            List with the sizes of each hidden layer in the neural network used for the policy.
+            When empty, the policy will be learned by Natural Policy Gradient.
+            Default: [12]
 
         seed: (opt) int
             Seed to be used for:
@@ -610,14 +688,37 @@ class Test_EstPolicy_EnvMountainCar(unittest.TestCase):
                                          discrete_state=env_discrete, seed_reset=cls.seed)
         cls.nS = cls.env_mc.getNumStates()
 
+        #-- Value functions modeling
+        dict_function_approximations = None     # This means TABULAR value functions
+        if use_function_approximation:
+            dropout_value_functions = 0.0  # 0.5           # Set it to 0.0 if we do not want any dropout layer in the network
+            learning_rate_value_functions = 0.001 if dropout_value_functions == 0.0 else 0.01  # We increase the learning rate when there is dropout. Ref: https://machinelearningmastery.com/using-dropout-regularization-in-pytorch-models/ (conclusions)
+            # Inputs of the V-NN: position x, velocity v (total = 2); Inputs of the Q-NN: position, velocity, action (total = 3)
+            nn_input_V = 2
+            nn_input_Q = 3
+            dict_function_approximations = dict(
+                {'V': StateValueFunctionApproxNN(cls.env2d, nn_input=nn_input_V, nn_hidden_layer_sizes=nn_hidden_layer_sizes_value_functions, dropout=dropout_value_functions, lr=learning_rate_value_functions),
+                 'Q': ActionValueFunctionApproxNN(cls.env2d, nn_input=nn_input_Q, nn_hidden_layer_sizes=nn_hidden_layer_sizes_value_functions, dropout=dropout_value_functions, lr=learning_rate_value_functions),
+                 'A': ActionValueFunctionApproxNN(cls.env2d, nn_input=nn_input_Q, nn_hidden_layer_sizes=nn_hidden_layer_sizes_value_functions, dropout=dropout_value_functions, lr=learning_rate_value_functions)
+                 })
+
         #-- Policy characteristics
         # Policy model
-        if nn_input == InputLayer.SINGLE:
-            cls.nn_model = NNBackprop(1, nn_hidden_layer_sizes, 3, dict_activation_functions=dict({'hidden': [nn.ReLU]*len(nn_hidden_layer_sizes)}), dropout=dropout_policy)
-        elif nn_input == InputLayer.ONEHOT or len(nn_hidden_layer_sizes) == 0:  # The case with no hidden layers corresponds to the NPG case (Natural Policy Gradient) and this requires that there is one neuron per state
-            cls.nn_model = NNBackprop(cls.nS, nn_hidden_layer_sizes, 3, dict_activation_functions=dict({'hidden': [nn.ReLU] * len(nn_hidden_layer_sizes)}), dropout=dropout_policy)
+        # NOTE: The "no hidden layers" condition should be checked UPFRONT to avoid the policy being set to the NN structure defined by nn_input_policy
+        if len(nn_hidden_layer_sizes_policy) == 0 or nn_input_policy == InputLayer.ONEHOT:
+            # One-hot encoding or Natural Policy Gradient learning (NPG)
+            # Note that NPG requires one input neuron per state because of the way it is currently implemented, namely using a neural network
+            # although a neural network is not really necessary, it's just a way to simplify the implementation and avoid writing a different policy class.
+            cls.nn_model = NNBackprop(cls.nS, nn_hidden_layer_sizes_policy, 3, dict_activation_functions=dict({'hidden': [nn.ReLU] * len(nn_hidden_layer_sizes_policy)}), dropout=dropout_policy)
+        elif nn_input_policy == InputLayer.SINGLE:
+            cls.nn_model = NNBackprop(1, nn_hidden_layer_sizes_policy, 3, dict_activation_functions=dict({'hidden': [nn.ReLU] * len(nn_hidden_layer_sizes_policy)}), dropout=dropout_policy)
+        elif nn_input_policy == InputLayer.STATE:
+            # The actual environment state is used as input of the neural network (the state in the Mountain Car has dimension 2)
+            cls.nn_model = NNBackprop(2, nn_hidden_layer_sizes_policy, 3, dict_activation_functions=dict({'hidden': [nn.ReLU]*len(nn_hidden_layer_sizes_policy)}), dropout=dropout_policy)
         else:
-            cls.nn_model = NNBackprop(nn_input, nn_hidden_layer_sizes, 3, dict_activation_functions=dict({'hidden': [nn.ReLU] * len(nn_hidden_layer_sizes)}), dropout=dropout_policy)
+            # Parameter nn_input_policy gives directly the number of input neurons
+            _n_input_neurons = nn_input_policy
+            cls.nn_model = NNBackprop(_n_input_neurons, nn_hidden_layer_sizes_policy, 3, dict_activation_functions=dict({'hidden': [nn.ReLU] * len(nn_hidden_layer_sizes_policy)}), dropout=dropout_policy)
 
         cls.policy_nn = PolNN(cls.env_mc, cls.nn_model, seed=cls.seed)
         print(f"Neural network to model the policy:\n{cls.nn_model}")
@@ -634,7 +735,6 @@ class Test_EstPolicy_EnvMountainCar(unittest.TestCase):
             policy_probabilities = cls.policy_nn.get_policy_values()
             print(policy_probabilities)
 
-
         #-- FV learning characteristics
         # Absorption set
         cls.learner_for_initial_exploration = None
@@ -648,7 +748,7 @@ class Test_EstPolicy_EnvMountainCar(unittest.TestCase):
                                                              gamma=cls.gamma,
                                                              lmbda=0.0,
                                                              alpha=cls.alpha,
-                                                             adjust_alpha=True,
+                                                             adjust_alpha=dict_function_approximations is None, # We do NOT adjust the learning rate alpha when value functions are learned by function approximation (NN) because the adjustment is done by the optimizer
                                                              adjust_alpha_by_episode=False,
                                                              alpha_min=cls.alpha_min,
                                                              reset_method=cls.reset_method, reset_params=cls.reset_params, reset_seed=cls.seed,
@@ -733,7 +833,7 @@ class Test_EstPolicy_EnvMountainCar(unittest.TestCase):
                                       gamma=cls.gamma,
                                       lmbda=0.0,
                                       alpha=cls.alpha,
-                                      adjust_alpha=True,
+                                      adjust_alpha=dict_function_approximations is None, # We do NOT adjust the learning rate alpha when value functions are learned by function approximation (NN) because the adjustment is done by the optimizer
                                       adjust_alpha_by_episode=False,
                                       alpha_min=cls.alpha_min,
                                       reset_method=cls.reset_method, reset_params=cls.reset_params, reset_seed=cls.seed,
@@ -749,7 +849,7 @@ class Test_EstPolicy_EnvMountainCar(unittest.TestCase):
                                           gamma=cls.gamma,
                                           lmbda=lmbda,
                                           alpha=cls.alpha,
-                                          adjust_alpha=True,
+                                          adjust_alpha=dict_function_approximations is None, # We do NOT adjust the learning rate alpha when value functions are learned by function approximation (NN) because the adjustment is done by the optimizer
                                           adjust_alpha_by_episode=False,
                                           alpha_min=cls.alpha_min,
                                           reset_method=cls.reset_method, reset_params=cls.reset_params, reset_seed=cls.seed,
@@ -764,7 +864,7 @@ class Test_EstPolicy_EnvMountainCar(unittest.TestCase):
                                                         task=learning_task,
                                                         gamma=cls.gamma,
                                                         alpha=cls.alpha,
-                                                        adjust_alpha=True,
+                                                        adjust_alpha=dict_function_approximations is None, # We do NOT adjust the learning rate alpha when value functions are learned by function approximation (NN) because the adjustment is done by the optimizer
                                                         adjust_alpha_by_episode=False,
                                                         alpha_min=cls.alpha_min,
                                                         reset_method=cls.reset_method, reset_params=cls.reset_params, reset_seed=cls.seed,
@@ -785,7 +885,7 @@ class Test_EstPolicy_EnvMountainCar(unittest.TestCase):
                                 gamma=cls.gamma,
                                 lmbda=0.0,
                                 alpha=cls.alpha,
-                                adjust_alpha=True,
+                                adjust_alpha=dict_function_approximations is None, # We do NOT adjust the learning rate alpha when value functions are learned by function approximation (NN) because the adjustment is done by the optimizer
                                 adjust_alpha_by_episode=False,
                                 alpha_min=cls.alpha_min,
                                 reset_method=cls.reset_method, reset_params=cls.reset_params, reset_seed=cls.seed,

@@ -85,7 +85,8 @@ class LeaTDLambda(Learner):
             # AVERAGE reward criterion => CONTINUING learning task
             raise ValueError("The EPISODIC learning task in TD learning requires the DISCOUNTED reward criterion, however the AVERAGE reward criterion was specified)")
 
-        # Attributes that MUST be present for all TD methods
+        #-- Attributes that MUST be present for all TD methods
+        # Value functions
         dict_function_approximations = dict() if dict_function_approximations is None else dict_function_approximations
         if task == LearningTask.CONTINUING:
             # For continuing learning tasks, there are NO terminal states, i.e. their value should NOT be set to 0 by the learner,
@@ -99,16 +100,17 @@ class LeaTDLambda(Learner):
             self.V = dict_function_approximations['V'] if 'V' in dict_function_approximations.keys() else StateValueFunctionApprox(self.env.getNumStates(), self.env.getTerminalStates())
             self.Q = dict_function_approximations['Q'] if 'Q' in dict_function_approximations.keys() else ActionValueFunctionApprox(self.env.getNumStates(), self.env.getNumActions(), self.env.getTerminalStates())
             self.A = dict_function_approximations['A'] if 'A' in dict_function_approximations.keys() else ActionValueFunctionApprox(self.env.getNumStates(), self.env.getNumActions(), self.env.getTerminalStates())
+        # Discount factor
         self.gamma = gamma
         
-        # Attributes specific to the current TD method
+        #-- Attributes specific to the current TD method
         self.lmbda = lmbda
         # Eligibility traces for learning V
-        self._z_V = np.zeros(self.env.getNumStates())
-        self._z_V_all = np.zeros((0, self.env.getNumStates()))                            # Historic information
+        self._z_V = np.zeros(self.V.getDimension())
+        self._z_V_all = np.zeros((0, self.V.getDimension()))  # Historic information
         # Eligibility traces for learning Q
-        self._z_Q = np.zeros(self.env.getNumStates() * self.env.getNumActions())
-        self._z_Q_all = np.zeros((0, self.env.getNumStates() * self.env.getNumActions())) # Historic information
+        self._z_Q = np.zeros(self.Q.getDimension())
+        self._z_Q_all = np.zeros((0, self.Q.getDimension()))  # Historic information
 
         # (Nov-2020) Product of alpha and z (the eligibility trace)
         # which gives the EFFECTIVE alpha value of the Stochastic Approximation algorithm
@@ -116,7 +118,7 @@ class LeaTDLambda(Learner):
         # by keeping track of the effective alpha as a FUNCTION of the episode number for EACH STATE
         # Each episode is a different row of the _alphas_effective array and the states are across the columns.
         self._times_nonzero_update = [[] for _ in self.env.getAllStates()]
-        self._alphas_effective = np.zeros((0, self.env.getNumStates()))
+        self._alphas_effective = np.zeros((0, self.V.getDimension()))
 
     def _reset_at_start_of_episode(self, reset_episode=True):
         """
@@ -135,14 +137,14 @@ class LeaTDLambda(Learner):
 
     def reset_traces(self):
         self._z_V[:] = 0.
-        self._z_V_all = np.zeros((0, self.env.getNumStates()))
+        self._z_V_all = np.zeros((0, self.V.getDimension()))
         self._z_Q[:] = 0.
-        self._z_Q_all = np.zeros((0, self.env.getNumStates() * self.env.getNumActions()))
+        self._z_Q_all = np.zeros((0, self.Q.getDimension()))
 
         # The effective alphas correspond to the alpha learning rates multiplied by the eligibility traces, as that gives the actual update strength of the value functions
         # They are only computed for the learning of V, not of Q
         # (because this is stored for information purposes --e.g. plots of the eligibility traces to check if things are working properly)
-        self._alphas_effective = np.zeros((0, self.env.getNumStates()))
+        self._alphas_effective = np.zeros((0, self.V.getDimension()))
 
     def setParams(self, alpha=None, gamma=None, lmbda=None, adjust_alpha=None, alpha_update_type=None,
                   adjust_alpha_by_episode=None, alpha_min=None):
@@ -193,7 +195,15 @@ class LeaTDLambda(Learner):
 
         # We store the effective learning rates alpha
         # (effective in terms of  the eligibility trace that affects the delta values used when updating V above)
-        self._alphas_effective = np.r_[self._alphas_effective, (self._alphas * self._z_V).reshape(1, len(self._z_V))]
+        if self.V.isTabular():
+            # As many learning rates alpha as number of state-actions: each state-action affected by the eligibility trace will have their own alpha
+            _alphas = self.getAlphasByState()
+        else:
+            # Use the alpha associated to the currently visited state as learning rate for ALL states visited in the past,
+            # (i.e. `_alphas` is a scalar value) as the learning rate needs to multiply the eligibility trace vector _z_V
+            # whose dimension is NOT the number of states in the environment, but the dimension of the theta vector parameterizing the value function.
+            _alphas = self.getAlphaForState(state)
+        self._alphas_effective = np.r_[self._alphas_effective, (_alphas * self._z_V).reshape(1, len(self._z_V))]
             ## NOTE: We need to reshape the product alpha*z because _alphas_effective is a 2D array with as many rows as
             ## the number of episodes run so far and as many columns as the number of states. The length of alpha*z
             ## is the number of states which should be laid out across the columns when appending a new row to
@@ -285,6 +295,7 @@ class LeaTDLambda(Learner):
                 # This is why here we call the GenericLearner.getAverageReward() method which retrieves the average reward observed over the whole simulation,
                 # regardless of any implementation-related episodes.
                 average_reward_correction = self.getAverageReward()
+            #print(f"[_compute_deltas()] Value functions corrected by average reward = {average_reward_correction:.4g}")
             delta_V -= average_reward_correction
             delta_Q -= average_reward_correction
 
@@ -292,61 +303,77 @@ class LeaTDLambda(Learner):
 
     def _updateZ(self, state, action, lmbda, delta_V=None, delta_Q=None):
         "Updates the eligibility traces used for learning V and those used for learning Q"
-        if self.env.isStateContinuous():
-            # TODO: (2024/08/12) We still need to implement the gradient computation and adapt the definition of _z_V at the constructor to have the same dimension as the parameter of the neural network that models each value function
-            #gradient_V = self.V.getGradient(state, delta_V)
-            #gradient_Q = self.Q.getGradient(state, action, delta_Q)
-            pass
-        else:
-            # The gradients of V and Q are computed assuming the function approximation is linear, where
-            # the gradient is equal to the feature associated to state s or state-action (s,a),
-            # stored at the corresponding column of the feature matrix X.
-            gradient_V = self.V.X[:, state]
-            gradient_Q = self.Q.X[:, self.Q.getLinearIndex(state, action)]
+        gradient_V = self.V.getGradient(state, delta_V)
+        gradient_Q = self.Q.getGradient(state, action, delta_Q)
 
+        if gradient_V is not None:
             self._z_V = self.gamma * lmbda * self._z_V + \
                         gradient_V                                    # For every-visit TD(lambda)
                         #gradient_V * (self._state_counts[state] == 1)  # For first-visit TD(lambda)
             self._z_V_all = np.r_[self._z_V_all, self._z_V.reshape(1, len(self._z_V))]
 
+        if gradient_Q is not None:
             self._z_Q = self.gamma * lmbda * self._z_Q + \
                         gradient_Q
             self._z_Q_all = np.r_[self._z_Q_all, self._z_Q.reshape(1, len(self._z_Q))]
 
     def _updateV(self, delta, state=None):
         if delta != 0.0:
-            if self.env.isStateContinuous():
-                self.V.update_weights(state, delta)
+            if self.V.isTabular():
+                # As many learning rates alpha as number of states: each state affected by the eligibility trace will have their own alpha
+
+                # IMPORTANT: (2020/11/11) Note that we use self.getAlphasByState() and NOT self.getAlphaForState(state) as alpha values for each state affected by the eligibility trace
+                # as the former method gives the alpha value for EACH eligible state, which may be different from the alpha for the CURRENTLY visited `state`, retrieved by the latter
+                # method. In the latter case, we would be using the SAME learning rate alpha for the update of ALL states, and this is NOT how the alpha value should be applied.
+                # (as we should apply the alpha associated to the state that decreases with the number of visits to EACH state --which happens differently).
+                # However, using the same alpha seems to give slightly faster convergence than the state-based alpha strategy, at least in the gridworld environment.
+                _alphas = self.getAlphasByState()
             else:
-                # IMPORTANT: (2020/11/11) if we use _alphas[state] as the learning rate alpha in the following update of V,
-                # we are using the SAME learning rate alpha for the update of ALL states, namely the
-                # learning rate value associated to the state that is being visited now.
-                # This is NOT how the alpha value should be used for each state
-                # (as we should apply the alpha associated to the state that decreases with the number of visits
-                # to EACH state --which happens differently). However, this seems to give slightly faster convergence
-                # than the theoretical alpha strategy just mentioned, at least in the gridworld environment!
-                # If we wanted to use the strategy that should be applied in theory, we should simply
-                # replace `self.getAlphaForState(state)` with `self.getAlphasByState()` in the below expression.
-                #self.V.setWeights( self.V.getWeights() + self.getAlphaForState(state) * delta * self._z_V )
-                self.V.setWeights( self.V.getWeights() + self.getAlphasByState() * delta * self._z_V )
+                # Use the alpha associated to the currently visited state as learning rate for ALL states visited in the past,
+                # (i.e. `_alphas` is a scalar value) as the learning rate needs to multiply the eligibility trace vector _z_V
+                # whose dimension is NOT the number of states in the environment, but the dimension of the theta vector parameterizing V(s).
+                _alphas = self.getAlphaForState(state)
+
+            #-- TESTING THE LEARNING PROCESS BY A NEURAL NETWORK BY PROVIDING THE TRUE FUNCTION VALUE
+            # CONCLUSION: Option 2 works as long as we convert the sum we do in my V._compute_loss() function to a tensor!!!! (o.w. the gradient is zero! ARRRGHRHHRHHH!!!)
+            #import torch
+            #
+            # 1) Computing the loss directly, giving the target and predicted values, which are the arguments of the loss
+            #loss = self.V.loss(torch.tensor(self.env.getV()[state]), self.V._getValue(state))
+
+            # 2) Computing the loss indirectly, by giving the state and the delta value observed (using my V._compute_loss() function to this end)
+            #delta = self.env.getV()[state] - self.V.getValue(state)
+            #loss = self.V._compute_loss(state, delta)
+
+            #self.V.optimizer.zero_grad()
+            #loss.backward()
+            #self.V.optimizer.step()
+            #-- TESTING THE LEARNING PROCESS BY A NEURAL NETWORK BY PROVIDING THE TRUE FUNCTION VALUE
+
+            self.V.updateWeights(state, delta, multiplier_delta=_alphas * self._z_V)
 
     def _updateQ(self, delta, state=None, action=None):
         if delta != 0.0:
-            if self.env.isStateContinuous():
-                self.Q.update_weights(state, action, delta)
-            else:
-                # DM-2025/06/22: We now use the alpha by state-action instead of the alpha by state as alpha for the update of Q,
-                # which better takes into account the number of visits to each state AND action, not only to each state.
-                # Repeat the alpha for each state as many times as the number of possible actions in the environment
-                # Note that this repeat each value as we need it based on how state and actions are stored in the feature matrix used in self.Q,
-                # namely grouped by state (e.g. if alphas = [2.5, 4.1, 3.0], the repeat by 2 generates [2.5, 2.5, 4.1, 4.1, 3.0, 3.0]
-                # i.e. the same alpha for all actions associated to the same state (which is what we want, i.e. alphas on different actions grouped by state).
-                #_alphas = np.repeat(self.getAlphasByState(), self.env.getNumActions())
+            # DM-2025/06/22: We now use the alpha by state-action instead of the alpha by state as alpha for the update of Q,
+            # which better takes into account the number of visits to each state AND action, not only to each state.
+
+            if self.Q.isTabular():
+                # As many learning rates alpha as number of state-actions: each state-action affected by the eligibility trace will have their own alpha
 
                 # Reorganize the SxA array into an S*A 1D array grouped by state, i.e. all actions for the first state, then all actions for the second state, etc.
                 # which is how the linearized Q values are organized.
+                # Note that, if we just wanted to use the same alpha for all actions, we could use a np.repeat() call as follows:
+                #   _alphas = np.repeat(self.getAlphasByState(), self.env.getNumActions())
+                # Note that the above repeats each value making a layout of the alpha values as we need them, namely respecting the state-action layout in the feature matrix for Q,
+                # grouped by state. Ex: if alphas = [2.5, 4.1, 3.0] for three different states, the repeat by 2 actions generates [2.5, 2.5, 4.1, 4.1, 3.0, 3.0]
+                # i.e. the same alpha for all actions associated to the same state (which is what is needed, i.e. alphas on different actions grouped by state).
                 _alphas2 = self.getAlphasByStateAction().reshape(-1)
-                self.Q.setWeights( self.Q.getWeights() + _alphas2 * delta * self._z_Q )
+            else:
+                # Use the alpha associated to the currently visited state and action as learning rate for ALL state-actions visited in the past,
+                # (i.e. `_alphas2` is a scalar value) as the learning rate needs to multiply the eligibility trace vector _z_Q
+                # whose dimension is NOT the number of states in the environment, but the dimension of the theta vector parameterizing the value function.
+                _alphas2 = self.getAlphaForStateAction(state, action)
+            self.Q.updateWeights(state, action, delta, multiplier_delta=_alphas2 * self._z_Q )
 
     def _expected_next_Q(self, next_state):
         """
@@ -360,21 +387,16 @@ class LeaTDLambda(Learner):
 
     def _updateA(self, delta, state=None, action=None):
         if delta != 0.0:
-            if self.env.isStateContinuous():
-                self.A.update_weights(state, action, delta)
-            else:
-                # DM-2025/06/22: We now use the alpha by state-action instead of the alpha by state as alpha for the update of Q,
-                # which better takes into account the number of visits to each state AND action, not only to each state.
-                # Repeat the alpha for each state as many times as the number of possible actions in the environment
-                # Note that this repeat each value as we need it based on how state and actions are stored in the feature matrix used in self.Q,
-                # namely grouped by state (e.g. if alphas = [2.5, 4.1, 3.0], the repeat by 2 generates [2.5, 2.5, 4.1, 4.1, 3.0, 3.0]
-                # i.e. the same alpha for all actions associated to the same state (which is what we want, i.e. alphas on different actions grouped by state).
-                #_alphas = np.repeat(self.getAlphasByState(), self.env.getNumActions())
-
-                # Reorganize the SxA array into an S*A 1D array grouped by state, i.e. all actions for the first state, then all actions for the second state, etc.
-                # which is how the linearized Q values are organized.
+            # For details about the computation of _alphas2, see comments in the _updateQ() method
+            if self.A.isTabular():
+                # As many learning rates alpha as number of state-actions: each state-action affected by the eligibility trace will have their own alpha
                 _alphas2 = self.getAlphasByStateAction().reshape(-1)
-                self.A.setWeights( self.A.getWeights() + _alphas2 * delta * self._z_Q )
+            else:
+                # Use the alpha associated to the currently visited state and action as learning rate for ALL state-actions visited in the past,
+                # (i.e. `_alphas2` is a scalar value) as the learning rate needs to multiply the eligibility trace vector _z_Q
+                # whose dimension is NOT the number of states in the environment, but the dimension of the theta vector parameterizing the value function.
+                _alphas2 = self.getAlphaForStateAction(state, action)
+            self.A.updateWeights(state, action, delta, multiplier_delta=_alphas2 * self._z_Q)
 
     # DM-2025/06/20: Deprecated this method because it is only valid for TD(0)
     # as it only updates the advantage of the current state and action and not of the past states and actions visited during the trajectory --which are also affected by TD(lambda)!
@@ -627,7 +649,15 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
 
         # The effective alphas are only computed for the learning of V, not of Q
         # (as this is only stored for information purposes --e.g. plots of the eligibility traces to check if things are working properly)
-        self._alphas_effective = np.r_[self._alphas_effective, (self.getAlphasByState() * self._z_V).reshape(1, len(self._z_V))]
+        if self.V.isTabular():
+            # As many learning rates alpha as number of state-actions: each state-action affected by the eligibility trace will have their own alpha
+            _alphas = self.getAlphasByState()
+        else:
+            # Use the alpha associated to the currently visited state as learning rate for ALL states visited in the past,
+            # (i.e. `_alphas` is a scalar value) as the learning rate needs to multiply the eligibility trace vector _z_V
+            # whose dimension is NOT the number of states in the environment, but the dimension of the theta vector parameterizing V(s).
+            _alphas = self.getAlphaForState(state)
+        self._alphas_effective = np.r_[self._alphas_effective, (_alphas * self._z_V).reshape(1, len(self._z_V))]
             ## NOTE: We need to reshape the product alpha*z because _alphas_effective is a 2D array with as many rows as
             ## the number of episodes run so far and as many columns as the number of states. The length of alpha*z
             ## is the number of states which should be laid out across the columns when appending a new row to

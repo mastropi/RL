@@ -29,7 +29,6 @@ from scipy.special import rel_entr
 from Python.lib.agents.learners import ResetMethod
 from Python.lib.agents.learners import LearningCriterion, LearningTask
 from Python.lib.agents.learners.policies import LeaActorCriticNN
-from Python.lib.agents.learners.value_functions import ActionValueFunctionApproxNN, StateValueFunctionApproxNN
 from Python.lib.agents.policies import probabilistic
 
 from Python.lib.environments.gridworlds import Direction2D
@@ -37,7 +36,7 @@ from Python.lib.estimators.nn_models import InputLayer
 from Python.lib.simulators.fv import StoppingCriterion
 
 from Python.lib.utils.basic import get_current_datetime_as_string, load_objects_from_pickle, log_file_open, log_file_close, save_objects_to_pickle, set_numpy_options, reset_numpy_options
-from Python.lib.utils.computing import compute_expected_reward, compute_transition_matrices, compute_state_value_function_from_transition_matrix
+from Python.lib.utils.computing import compute_expected_reward, compute_state_value_function_from_environment_and_policy
 
 from Python.test.test_optimizers_discretetime import Test_EstPolicy_EnvGridworldsWithObstacles, Test_EstPolicy_EnvMountainCar
 
@@ -125,11 +124,10 @@ def compute_true_state_value_function(env, policy, learning_task, learning_crite
     - expected_reward: the expected reward for the CONTINUING learning task.
     - mu: the stationary probability for the CONTINUING learning task.
     """
-    P_epi, P_con, b_epi, b_con, g, mu = compute_transition_matrices(env, policy, atol=atol)
-    P = P_con if learning_task == LearningTask.CONTINUING else P_epi
-    b = b_con if learning_task == LearningTask.CONTINUING else b_epi
-    bias = g if learning_criterion == LearningCriterion.AVERAGE else 0.0
-    V_true = compute_state_value_function_from_transition_matrix(P, b, bias=bias, gamma=gamma)
+    V_true, mu = compute_state_value_function_from_environment_and_policy(env, policy, gamma=gamma,
+                                                                          continuing_task=learning_task==LearningTask.CONTINUING,
+                                                                          average_reward_criterion=learning_criterion==LearningCriterion.AVERAGE,
+                                                                          atol=atol)
     env.setV(V_true)
     dict_proba_stationary = dict(zip(np.arange(len(mu)), mu))
     avg_reward_true = compute_expected_reward(env, dict_proba_stationary)
@@ -591,10 +589,10 @@ if env_type == Environment.Gridworld:
         size_vertical = 3; size_horizontal = 4
         size_vertical = 4; size_horizontal = 5
         size_vertical = 6; size_horizontal = 8
-        size_vertical = 8; size_horizontal = 12
+        #size_vertical = 8; size_horizontal = 12
         #size_vertical = 9; size_horizontal = 13
         #size_vertical = 10; size_horizontal = 14
-        size_vertical = 10; size_horizontal = 30
+        #size_vertical = 10; size_horizontal = 30
 
         # Square labyrinths
         #size_vertical = 15
@@ -668,7 +666,7 @@ if env_type == Environment.Gridworld and size_vertical == 4 and size_horizontal 
 
 #----------------------------- MODEL FOR POLICY -----------------------#
 # Number of input neurons (just one with the state value or one-per-state)
-nn_input = InputLayer.ONEHOT
+nn_input_policy = InputLayer.ONEHOT
 # Number of hidden layers in the neural network model
 # Using multiple layers whose size is proportional to the gridworld size... however this tends to be counterproductive...
 # i.e. learning is slower and may fail (e.g. it usually converges to a non-optimal policy where the advantage function is 0), presumably because of the larger number of parameters.
@@ -680,9 +678,28 @@ nn_input = InputLayer.ONEHOT
 # with adaptive TD(lambda), where the hidden layer sizes were set to [38, 19].
 #nn_hidden_layer_sizes = [int( 0.8*np.prod(env_shape) ), int( 0.4*np.prod(env_shape) )]
 # Keep the neural network rather small or do NOT use any hidden layer for Natural Policy Gradient (NPG)
-nn_hidden_layer_sizes = [] #[12]
-print(f"Neural Network architecture:\n{len(nn_hidden_layer_sizes)} hidden layers of sizes {nn_hidden_layer_sizes}")
+# To learn more about NN architecture, see the following references, but essentially:
+# - adding more hidden layers doesn't improve performance much, so we can just use ONE layer.
+# - the number of neurons in the hidden layer is suggested to be the average between input and output neurons,
+# but I tried this for our small number of neurons but the network didn't learn at all! (here I am talking about an NN to approximate value functions)
+# (2010) https://stats.stackexchange.com/questions/181/how-to-choose-the-number-of-hidden-layers-and-nodes-in-a-feedforward-neural-netw
+# (2021) https://www.reddit.com/r/MachineLearning/comments/mualkr/d_effective_ways_of_choosing_the_number_of
+# (2021) https://medium.com/geekculture/introduction-to-neural-network-2f8b8221fbd3
+# (2016) by Srikant: https://arxiv.org/abs/1610.04161 "Why Deep Neural Networks for Function Approximation?" where they show that the number of neurons needed in a shallow network
+# (i.e. networks whose depth does NOT depend on the allowed maximum uniform error epsilon) to approximate a function increases exponentially with the inverse of epsilon,
+# whereas deep networks (i.e. networks whose depth increases as 1/epsilon) require polylog(1/epsilon) neurons to achieve the epsilon uniform error.
+# (2014) https://web.archive.org/web/20140721050413/http://www.heatonresearch.com/node/707, Jeff Heaton, "An introduction to neural networks for Java".
+# He indicates what is possible (via a theorem I believe?) with NN with one and with two hidden layers.
+nn_hidden_layer_sizes = nn_hidden_layer_sizes_policy = [12]
+print(f"Neural Network architecture:\n{len(nn_hidden_layer_sizes_policy)} hidden layers of sizes {nn_hidden_layer_sizes_policy}")
 #----------------------------- MODEL FOR POLICY -----------------------#
+
+
+#----------------------------- MODEL FOR CRITIC -----------------------#
+use_function_approximation = True
+nn_input_value_functions = InputLayer.STATE
+nn_hidden_layer_sizes_value_functions = [48] #[12]
+#----------------------------- MODEL FOR CRITIC -----------------------#
 
 
 #----------------------------- FV ABSORPTION SET ----------------------#
@@ -722,8 +739,15 @@ if env_type == Environment.Gridworld:
     test_ac.setUpClass(shape=env_shape, obstacles_set=obstacles_set, n_obstacles=n_obstacles, wind_dict=wind_dict,
                        define_start_state_from_absorption_set=False, start_states_set={entry_state},  #{nS-1}, #None,
                        exit_state=exit_state,
+                       # Value functions model
+                       use_function_approximation=use_function_approximation,
+                       nn_input_value_functions=nn_input_value_functions,
+                       nn_hidden_layer_sizes_value_functions=nn_hidden_layer_sizes_value_functions,
                        # Policy model
-                       nn_input=nn_input, nn_hidden_layer_sizes=nn_hidden_layer_sizes, initial_policy=initial_policy, dropout_policy=dropout_policy,
+                       nn_input_policy=nn_input_policy,
+                       nn_hidden_layer_sizes_policy=nn_hidden_layer_sizes_policy,
+                       dropout_policy=dropout_policy,
+                       initial_policy=initial_policy,
                        # General learning parameters
                        learning_task=learning_task,
                        learning_criterion=learning_criterion,
@@ -744,15 +768,6 @@ elif env_type == Environment.MountainCar:
     N = 30  #50
     T = 300 #100 #300 #500
     env_discrete = True #False
-    if env_discrete:
-        dict_function_approximations = None
-    else:
-        dropout_value_functions = 0.0  #0.5           # Set it to 0.0 if we do not want any dropout layer in the network
-        learning_rate_value_functions = 0.001 if dropout_value_functions == 0.0 else 0.01  # We increase the learning rate when there is dropout. Ref: https://machinelearningmastery.com/using-dropout-regularization-in-pytorch-models/ (conclusions)
-        nn_hidden_layer_sizes_value_functions = nn_hidden_layer_sizes if len(nn_hidden_layer_sizes) > 0 else [12]
-        dict_function_approximations = dict({'V': StateValueFunctionApproxNN(nn_input=2, nn_hidden_layer_sizes=nn_hidden_layer_sizes_value_functions, dropout=dropout_value_functions, lr=learning_rate_value_functions),
-                                             'Q': ActionValueFunctionApproxNN(nn_input=2 + 1, nn_hidden_layer_sizes=nn_hidden_layer_sizes_value_functions, dropout=dropout_value_functions, lr=learning_rate_value_functions)})
-                                                ## Number of inputs for Q: (x, v, a)
     dropout_policy = 0.0  #0.5
     initial_policy = [1/3, 1/3, 1/3]
     test_ac = Test_EstPolicy_EnvMountainCar()
@@ -763,10 +778,14 @@ elif env_type == Environment.MountainCar:
                        factor_for_force_and_gravity=10 if not env_discrete else 90, #100, #90, #20, #15,   # Factor controlling the number of discrete positions in the discretized problem --> NOTE: Using `1` is TOO SMALL! (as there are too many points in the grid)
                        factor_force=1.0,
                        factor_max_speed=3.0,    # Only used in MountainCarDiscrete (with continuous states)
-                       # Value function approximations model
-                       dict_function_approximations=dict_function_approximations,
+                       # Value functions model
+                       use_function_approximation=use_function_approximation,
+                       nn_input_value_functions=nn_input_value_functions,
+                       nn_hidden_layer_sizes_value_functions=nn_hidden_layer_sizes_value_functions,
                        # Policy model
-                       nn_input=2, nn_hidden_layer_sizes=nn_hidden_layer_sizes, dropout_policy=dropout_policy,
+                       nn_input_policy=2,
+                       nn_hidden_layer_sizes_policy=nn_hidden_layer_sizes_policy,
+                       dropout_policy=dropout_policy,
                        initial_policy=initial_policy,
                        # General learning parameters
                        learning_task=learning_task,
@@ -963,7 +982,8 @@ is_NPG = len(nn_hidden_layer_sizes) == 0
 #*********************
 n_learning_steps = 150 #50 #100 #30 #200 #50 #100
 #*********************
-n_episodes_per_learning_step = 50 #100 #30  # Number of episodes for the policy update step when learning the policy online and in NON-NPG mode
+prob_include_in_train = 1.0            # Probability of including a step of the exploration, used for the ONLINE policy learning update, in the sample that computes the loss. Goal: reduce the correlation among samples included in the training process.
+n_episodes_per_learning_step = int(50 / prob_include_in_train) #100 #30  # Number of episodes for the policy update step when learning the policy online and in NON-NPG mode
 # Max time steps per episode during exploration for the online policy learning
 # In the Mountain Car problem we limit the number of steps per episode in the continuous-dynamics case because I've seen out-of-memory problems otherwise.
 if env_type == Environment.Gridworld:
@@ -977,11 +997,17 @@ allow_deterministic_policy = True #False
 # The instability in principle can be reduced by reducing the learning rate for the actor (optimizer_learning_rate) from e.g. 10.0 to 1.0, but not really sure about its effect.
 use_advantage = not (learning_method == "values_fvos") # Set this to True if we want to use the advantage function learned as the TD error, instead of using the advantage function as the difference between the estimated Q(s,a) and the estimated V(s) (where the average reward cancels out)
 optimizer_learning_rate = 1.0 if is_NPG and use_advantage else 10.0 if is_NPG and not use_advantage else 0.05 #if policy_learning_mode == "online" else 0.05 #0.01 #0.1
-adjust_optimizer_learning_rate = True; t_learn_min_to_adjust_optimizer_learning_rate = 1
+if use_function_approximation:
+    # When using function approximations for V(s) and Q(s,a), we should use a not too large policy learning rate in order to avoid too large changes in the policy
+    # that tend to generate the same policy for all states at once... without nuance as of different actions to take at each state.
+    # Take the example of a gridworld, if the policy learning rate is small enough, after initial policy learning steps where action probabilities tend to be very similar across cells,
+    # the policy then starts drifting to a nuance policy that is different for different cells (e.g. from t_learn > 6 when optimizer_learning_rate = 0.1 in 6x8 labyrinth without wind).
+    optimizer_learning_rate /= 10
+adjust_optimizer_learning_rate = False; t_learn_min_to_adjust_optimizer_learning_rate = 1
 reset_value_functions_at_every_learning_step = False #(learning_method == "values_fv")     # Reset the value functions when learning with FV, o.w. the learning can become too unstable due to the oversampling of the states with high value... (or something like that)
 
 # 2) Parameters about VALUE FUNCTION learning (Critic)
-alpha_initial = simulator_value_functions.getAgent().getLearner().getInitialLearningRate()      # NOTE: alpha_initial is NOT used when learning the value functions by function approximation, as this is set by the default learning rate of the Adam optimizer
+alpha_initial = 1.0 #simulator_value_functions.getAgent().getLearner().getInitialLearningRate()      # NOTE: alpha_initial is NOT used when learning the value functions by function approximation, as this is set by the default learning rate of the Adam optimizer
 adjust_alpha_initial_by_learning_step = False; t_learn_min_to_adjust_alpha = 30 # based at 1 (regardless of the base value used for t_learn)
 #max_time_steps_per_episode = test_ac.getEnv().getNumStates()*10  # (2024/05/02) NO LONGER USED!  # This parameter is just set as a SAFEGUARD against being blocked in an episode at some state of which the agent could be liberated by restarting to a new episode (when this max number of steps is reached)
 epsilon_random_action = 0.1 #if policy_learning_mode == "online" else 0.0 #0.1 #0.05 #0.0 #0.01
@@ -1044,8 +1070,11 @@ params_exec = dict([(k, eval(k)) for k in [ # --- Environment
                                             'adjust_optimizer_learning_rate',
                                             'reset_value_functions_at_every_learning_step',
                                             # --- Critic
+                                            'use_function_approximation',
                                             'N',
                                             'T',
+                                            'M1',
+                                            'M2',
                                             'max_time_steps_benchmark',
                                             'alpha_initial',
                                             'adjust_alpha_initial_by_learning_step',
@@ -1358,12 +1387,9 @@ for rep in range(nrep):
             print(f"Learning step #{t_learn+1}: Learning of value functions COMPLETED using {learning_method} method on {nsteps_all[rep, t_learn]} time steps")
             print(f"Estimated average reward by Critic learning process: {average_reward_from_critic_estimation}")
             state_counts_all[rep, t_learn, :] = state_counts
-            if simulator_value_functions.getAgent().getLearner().getV().isTabular():
-                V_all[rep, t_learn, :] = V
-            if simulator_value_functions.getAgent().getLearner().getV().isTabular():
-                Q_all[rep, t_learn, :, :] = Q.reshape(test_ac.getEnv().getNumStates(), test_ac.getEnv().getNumActions())
-            if simulator_value_functions.getAgent().getLearner().getA().isTabular():
-                A_all[rep, t_learn, :, :] = A.reshape(test_ac.getEnv().getNumStates(), test_ac.getEnv().getNumActions())
+            V_all[rep, t_learn, :] = V
+            Q_all[rep, t_learn, :, :] = Q.reshape(test_ac.getEnv().getNumStates(), test_ac.getEnv().getNumActions())
+            A_all[rep, t_learn, :, :] = A.reshape(test_ac.getEnv().getNumStates(), test_ac.getEnv().getNumActions())
 
             #--- 2) ACTOR
             print(f"\nLearning the POLICY {policy_learning_mode.upper()} using estimated {use_advantage and 'ADVANTAGE A(s,a) values' or 'ACTION Q(s,a) values'} ", end=" ")

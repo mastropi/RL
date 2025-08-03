@@ -20,21 +20,25 @@ from torch import nn
 
 @unique
 class InputLayer(Enum):
-    "Input layer size for neural networks: either SINGLE for a single neuron representing e.g. the state, or ONEHOT for a one-hot encoding of the state"
+    """Input layer size for neural networks, either:
+    - SINGLE for a single neuron containing the 1D representation of the state
+    - ONEHOT for a one-hot encoding of the state
+    - STATE for as many neurons as the dimension of the actual environment state (e.g. (x, y) for 2D gridworld, (x, v) for mountain car)
+    """
     SINGLE = 1
     ONEHOT = 2
+    STATE  = 3
 
 
 class NNBackprop(nn.Module):
     """
-    Neural network with on input layer, any number of hidden layers and one output layer
+    Neural network with one input layer, any number of hidden layers and one output layer
     with possibly different activation functions at each layer and output layer.
 
     Before applying the activation function, the output of each node in the hidden and output layers
     is computed as a linear combination of its inputs.
 
     Arguments:
-
     dict_activation_functions: (opt) dict
         Dictionary containing the activation functions for each hidden layer and for the output layer.
         The following entries are parsed:

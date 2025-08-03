@@ -1182,7 +1182,12 @@ class LeaActorCriticNN(GenericLearner):
         self.reset(reset_value_functions=self.reset_value_functions_at_every_learning_step, reset_policy=False)
 
         # Loss function to minimize when learning the optimum policy parameter
-        loss = 0.0
+        # NOTE the use of the trick to call next() on the policy parameters, so that the gradient can be computed via a call to loss.backward()
+        # even if the loss is NOT updated during the loop, because e.g. no entry to the line `loss += -advantage * logprob` that updates the loss occurs
+        # (possible when prob_include_in_train is close to zero), which has the "nice" property of appending to the `loss` variable a (gradient) computational graph.
+        # Note that, when the loss is not updated, the gradient is still 0, because the gradient of `0 * f(params)` is equal to zero.
+        # This is NOT documented at all and I arrived to the solution using ChatGPT on 29-Jul-2025 (too bad).
+        loss = 0.0 * next(self.policy.getModel().parameters()).sum()
         # Length over all episodes which is needed to compute (normalize) the final loss function, which is equal to MINUS the average reward observed over all episodes,
         # as the goal of the problem is to maximize the average reward, and episodes most likely have different lengths... so we cannot simply SUM the terms making up
         # the loss function, we need to normalize that sum.
@@ -1192,7 +1197,7 @@ class LeaActorCriticNN(GenericLearner):
         for episode in range(1, nepisodes+1):
             if batch_learning:
                 # Use the following when updating the policy parameters after EACH episode (batch update)
-                loss = 0.0
+                loss = 0.0 * next(self.policy.getModel().parameters()).sum()
 
             if start_state is None:
                 self.env.reset()
@@ -1361,8 +1366,10 @@ class LeaActorCriticNN(GenericLearner):
         "On the theory of policy gradient methods: optimality, approximation, and distribution shift", Agarwal et al. 2021
 
         Arguments:
-        advantage_values: array-like
-            Advantage function values previously estimated for all states and actions in the environment.
+        advantage_values: 1D array-like
+            Advantage function values previously estimated for all states and actions in the environment as a 1D array of size #states * #actions,
+            distributed in groups by state, e.g. in an environment with 2 states and 4 actions the layout would be:
+            [A(0, 0), A(0, 1), A(0, 2), A(0, 3), A(1, 0), A(1, 1), A(1, 2), A(1, 3)]
         """
         nS = np.prod(self.env.getShape())
         nA = self.env.getNumActions()

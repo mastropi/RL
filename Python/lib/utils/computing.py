@@ -375,6 +375,26 @@ def compute_set_of_frequent_states_with_zero_reward(states, rewards, threshold=0
         return set(dist_state_counts.index[dist_state_counts > threshold])
 
 
+def compute_state_value_function_from_environment_and_policy(env, policy, gamma=1.0, continuing_task=False, average_reward_criterion=False, atol=1E-6):
+    """
+    Computes the true state value function V(s) for the given environment under the given policy
+
+    It performs the steps of calling compute_transition_matrices() + compute_state_value_function_from_transition_matrix().
+
+    Return: Tuple
+    Tuple with the following two elements:
+    - V_true: the true state value function as a 1D array indexed by the 1D state index of the environment states.
+    - mu: the stationary probability distribution also as a 1D array.
+    """
+    P_epi, P_con, b_epi, b_con, g, mu = compute_transition_matrices(env, policy, atol=atol)
+    P = P_con if continuing_task else P_epi
+    b = b_con if continuing_task else b_epi
+    bias = g if average_reward_criterion else 0.0
+    V_true = compute_state_value_function_from_transition_matrix(P, b, bias=bias, gamma=gamma)
+
+    return V_true, mu
+
+
 def compute_transition_matrices(env, policy, atol=1E-6):
     """
     Computes the transition probability matrices for the EPISODIC and CONTINUING learning tasks on a given discrete-state / discrete-action environment

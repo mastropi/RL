@@ -552,19 +552,68 @@ class LeaMCLambda(Learner):
     #------------------- Auxiliary function: value function udpate -------------------------------#
     def _updateV(self, state, delta):
         "Updates the state value function V(s) for the given state using the given delta on the gradient computed assuming a linear approximation function"
-        gradient_V = self.V.X[:, state] # row vector
-        self.V.setWeights( self.V.getWeights() + self.getAlphasByState() * delta * gradient_V )    # The alpha value used in learning each state (given in self.getAlphasByState()) depends on the state being learned
+        gradient_V = self.V.getGradient(state, delta) # row vector
+        assert gradient_V is not None
+
+        if self.V.isTabular():
+            # As many learning rates alpha as number of states: each state affected by the eligibility trace will have their own alpha
+
+            # IMPORTANT: (2020/11/11) Note that we use self.getAlphasByState() and NOT self.getAlphaForState(state) as alpha values for each state affected by the eligibility trace
+            # as the former method gives the alpha value for EACH eligible state, which may be different from the alpha for the CURRENTLY visited `state`, retrieved by the latter
+            # method. In the latter case, we would be using the SAME learning rate alpha for the update of ALL states, and this is NOT how the alpha value should be applied.
+            # (as we should apply the alpha associated to the state that decreases with the number of visits to EACH state --which happens differently).
+            # However, using the same alpha seems to give slightly faster convergence than the state-based alpha strategy, at least in the gridworld environment.
+            _alphas = self.getAlphasByState()
+        else:
+            # Use the alpha associated to the currently visited state as learning rate for ALL states visited in the past,
+            # (i.e. `_alphas` is a scalar value) as the learning rate needs to multiply the eligibility trace vector _z_V
+            # whose dimension is NOT the number of states in the environment, but the dimension of the theta vector parameterizing V(s).
+            _alphas = self.getAlphaForState(state)
+        self.V.updateWeights(state, delta, multiplier_delta=_alphas * gradient_V)
 
     def _updateQ(self, state, action, delta):
         "Updates the action value function Q(s,a) for the given state and action using the given delta on the gradient computed assuming a linear approximation function"
-        gradient_Q = self.Q.X[:, self.Q.getLinearIndex(state, action)]  # row vector
+        gradient_Q = self.Q.getGradient(state, action, delta)  # row vector
+        assert gradient_Q is not None
+
         # DM-2025/06/22: We now use the alpha by state-action instead of the alpha by state as alpha for the update of Q,
         # which better takes into account the number of visits to each state AND action, not only to each state.
-        #_alphas = np.repeat(self.getAlphasByState(), self.env.getNumActions()) # We use the same alpha on all the actions associated to each state, but the alpha depends on the state
-        _alphas2 = self.getAlphasByStateAction().reshape(-1)
-        self.Q.setWeights( self.Q.getWeights() + _alphas2 * delta * gradient_Q )
 
-    def _updateA(self, state, action, advantage):
+        if self.Q.isTabular():
+            # As many learning rates alpha as number of state-actions: each state-action affected by the eligibility trace will have their own alpha
+
+            # Reorganize the SxA array into an S*A 1D array grouped by state, i.e. all actions for the first state, then all actions for the second state, etc.
+            # which is how the linearized Q values are organized.
+            # Note that, if we just wanted to use the same alpha for all actions, we could use a np.repeat() call as follows:
+            #   _alphas = np.repeat(self.getAlphasByState(), self.env.getNumActions())
+            # Note that the above repeats each value making a layout of the alpha values as we need them, namely respecting the state-action layout in the feature matrix for Q,
+            # grouped by state. Ex: if alphas = [2.5, 4.1, 3.0] for three different states, the repeat by 2 actions generates [2.5, 2.5, 4.1, 4.1, 3.0, 3.0]
+            # i.e. the same alpha for all actions associated to the same state (which is what is needed, i.e. alphas on different actions grouped by state).
+            _alphas2 = self.getAlphasByStateAction().reshape(-1)
+        else:
+            # Use the alpha associated to the currently visited state and action as learning rate for ALL state-actions visited in the past,
+            # (i.e. `_alphas2` is a scalar value) as the learning rate needs to multiply the eligibility trace vector _z_Q
+            # whose dimension is NOT the number of states in the environment, but the dimension of the theta vector parameterizing the value function.
+            _alphas2 = self.getAlphaForStateAction(state, action)
+        self.Q.updateWeights(state, action, delta, multiplier_delta=_alphas2 * gradient_Q)
+
+    def _updateA(self, state, action, delta):
+        "Updates the advantage function A(s,a) for the given state and action using the given delta (which should be a delta(V), NOT delta(Q)) on the gradient computed assuming a linear approximation function"
+        gradient_A = self.A.getGradient(state, action, delta)  # row vector
+        assert gradient_A is not None
+
+        # For details about the computation of _alphas2, see comments in the _updateQ() method
+        if self.A.isTabular():
+            # As many learning rates alpha as number of state-actions: each state-action affected by the eligibility trace will have their own alpha
+            _alphas2 = self.getAlphasByStateAction().reshape(-1)
+        else:
+            # Use the alpha associated to the currently visited state and action as learning rate for ALL state-actions visited in the past,
+            # (i.e. `_alphas2` is a scalar value) as the learning rate needs to multiply the eligibility trace vector _z_Q
+            # whose dimension is NOT the number of states in the environment, but the dimension of the theta vector parameterizing the value function.
+            _alphas2 = self.getAlphaForStateAction(state, action)
+        self.A.updateWeights(state, action, delta, multiplier_delta=_alphas2 * gradient_A)
+
+    def _deprecated_updateA(self, state, action, advantage):
         """
         Sets the value of the Advantage function to the given value for the given state and action.
         An unbiased estimation of the advantage is the delta(V) observed when taking the given action at the given state.

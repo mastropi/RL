@@ -209,7 +209,12 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
         return self.s
 
     def getStateFromIndex(self, s, simulation=True):
-        "Returns the environment state from the given 1D state index. See more details in documentation for getIndexFromState()"
+        """
+        Returns the environment state from the given 1D state index. See more details in documentation for getIndexFromState()
+
+        It is assumed that the environment state is 1D. If this is not the case, the method should be implemented in the environment class itself
+        (e.g. EnvGridworld2D)
+        """
         return s
 
     def getStateIndicesFromIndex(self, s):
