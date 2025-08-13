@@ -111,6 +111,11 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
         #-- Value function learning parameters
         cls.gamma = gamma
         cls.alpha = alpha
+        # We ALWAYS adjust the learning rates alpha, even in the case of function approximation for value functions,
+        # because these rates are used for learning the advantage function, which is ALWAYS TABULAR, as it is based on the delta(V) error.
+        # Note, on the other hand, that this adjusting of the alpha learning rates does NOT affect the learning of the state and action value functions
+        # because they are learned by the NN optimizer itself, e.g. Adam, which is completely independent of the alpha learning rates.
+        adjust_alpha = True
         cls.alpha_min = alpha_min
         cls.reset_method = reset_method_value_functions
         cls.reset_params = dict({'min': -1, 'max': +1})
@@ -189,7 +194,7 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
             dict_function_approximations = dict(
                 {'V': StateValueFunctionApproxNN(cls.env2d, nn_input=nn_input_V, nn_hidden_layer_sizes=nn_hidden_layer_sizes_value_functions, dropout=dropout_value_functions, lr=learning_rate_value_functions),
                  'Q': ActionValueFunctionApproxNN(cls.env2d, nn_input=nn_input_Q, nn_hidden_layer_sizes=nn_hidden_layer_sizes_value_functions, dropout=dropout_value_functions, lr=learning_rate_value_functions),
-                 'A': ActionValueFunctionApproxNN(cls.env2d, nn_input=nn_input_Q, nn_hidden_layer_sizes=nn_hidden_layer_sizes_value_functions, dropout=dropout_value_functions, lr=learning_rate_value_functions)
+                 #'A': ActionValueFunctionApproxNN(cls.env2d, nn_input=nn_input_Q, nn_hidden_layer_sizes=nn_hidden_layer_sizes_value_functions, dropout=dropout_value_functions, lr=learning_rate_value_functions)
                  })
         #-- Value functions modeling
 
@@ -354,7 +359,7 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
                                       gamma=cls.gamma,
                                       lmbda=0.0,
                                       alpha=cls.alpha,
-                                      adjust_alpha=dict_function_approximations is None, # We do NOT adjust the learning rate alpha when value functions are learned by function approximation (NN) because the adjustment is done by the optimizer
+                                      adjust_alpha=adjust_alpha,
                                       adjust_alpha_by_episode=False,
                                       alpha_min=cls.alpha_min,
                                       reset_method=cls.reset_method, reset_params=cls.reset_params, reset_seed=cls.seed,
@@ -370,7 +375,7 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
                                           gamma=cls.gamma,
                                           lmbda=lmbda,
                                           alpha=cls.alpha,
-                                          adjust_alpha=dict_function_approximations is None, # We do NOT adjust the learning rate alpha when value functions are learned by function approximation (NN) because the adjustment is done by the optimizer
+                                          adjust_alpha=adjust_alpha,
                                           adjust_alpha_by_episode=False,
                                           alpha_min=cls.alpha_min,
                                           reset_method=cls.reset_method, reset_params=cls.reset_params, reset_seed=cls.seed,
@@ -385,7 +390,7 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
                                                         task=learning_task,
                                                         gamma=cls.gamma,
                                                         alpha=cls.alpha,
-                                                        adjust_alpha=dict_function_approximations is None, # We do NOT adjust the learning rate alpha when value functions are learned by function approximation (NN) because the adjustment is done by the optimizer
+                                                        adjust_alpha=adjust_alpha,
                                                         adjust_alpha_by_episode=False,
                                                         alpha_min=cls.alpha_min,
                                                         reset_method=cls.reset_method, reset_params=cls.reset_params, reset_seed=cls.seed,
@@ -408,7 +413,7 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
                                 gamma=cls.gamma,
                                 lmbda=0.0,
                                 alpha=cls.alpha,
-                                adjust_alpha=dict_function_approximations is None, # We do NOT adjust the learning rate alpha when value functions are learned by function approximation (NN) because the adjustment is done by the optimizer
+                                adjust_alpha=adjust_alpha,
                                 adjust_alpha_by_episode=False,
                                 alpha_min=cls.alpha_min,
                                 reset_method=cls.reset_method, reset_params=cls.reset_params, reset_seed=cls.seed,
@@ -430,7 +435,7 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
                                     gamma=cls.gamma,
                                     lmbda=lmbda,
                                     alpha=cls.alpha,
-                                    adjust_alpha=dict_function_approximations is None, # We do NOT adjust the learning rate alpha when value functions are learned by function approximation (NN) because the adjustment is done by the optimizer
+                                    adjust_alpha=adjust_alpha,
                                     adjust_alpha_by_episode=False,
                                     alpha_min=cls.alpha_min,
                                     reset_method=cls.reset_method, reset_params=cls.reset_params, reset_seed=cls.seed,
@@ -450,7 +455,7 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
                                                 gamma=cls.gamma,
                                                 lmbda=lmbda,    # This is a dummy lambda, as it is actually not used because the learner is a adaptive TD(Lambda) defined in LeaTDLambdaAdaptive
                                                 alpha=cls.alpha,
-                                                adjust_alpha=dict_function_approximations is None, # We do NOT adjust the learning rate alpha when value functions are learned by function approximation (NN) because the adjustment is done by the optimizer
+                                                adjust_alpha=adjust_alpha,
                                                 adjust_alpha_by_episode=False,
                                                 alpha_min=cls.alpha_min,
                                                 reset_method=cls.reset_method, reset_params=cls.reset_params, reset_seed=cls.seed,
@@ -679,6 +684,11 @@ class Test_EstPolicy_EnvMountainCar(unittest.TestCase):
         #-- Value function learning parameters
         cls.gamma = gamma
         cls.alpha = alpha
+        # We ALWAYS adjust the learning rates alpha, even in the case of function approximation for value functions,
+        # because these rates are used for learning the advantage function, which is ALWAYS TABULAR, as it is based on the delta(V) error.
+        # Note, on the other hand, that this adjusting of the alpha learning rates does NOT affect the learning of the state and action value functions
+        # because they are learned by the NN optimizer itself, e.g. Adam, which is completely independent of the alpha learning rates.
+        adjust_alpha = True
         cls.alpha_min = alpha_min
         cls.reset_method = reset_method_value_functions
         cls.reset_params = reset_value    # This is the value to assign at the start of the value function
@@ -699,7 +709,7 @@ class Test_EstPolicy_EnvMountainCar(unittest.TestCase):
             dict_function_approximations = dict(
                 {'V': StateValueFunctionApproxNN(cls.env2d, nn_input=nn_input_V, nn_hidden_layer_sizes=nn_hidden_layer_sizes_value_functions, dropout=dropout_value_functions, lr=learning_rate_value_functions),
                  'Q': ActionValueFunctionApproxNN(cls.env2d, nn_input=nn_input_Q, nn_hidden_layer_sizes=nn_hidden_layer_sizes_value_functions, dropout=dropout_value_functions, lr=learning_rate_value_functions),
-                 'A': ActionValueFunctionApproxNN(cls.env2d, nn_input=nn_input_Q, nn_hidden_layer_sizes=nn_hidden_layer_sizes_value_functions, dropout=dropout_value_functions, lr=learning_rate_value_functions)
+                 #'A': ActionValueFunctionApproxNN(cls.env2d, nn_input=nn_input_Q, nn_hidden_layer_sizes=nn_hidden_layer_sizes_value_functions, dropout=dropout_value_functions, lr=learning_rate_value_functions)
                  })
 
         #-- Policy characteristics
@@ -748,7 +758,7 @@ class Test_EstPolicy_EnvMountainCar(unittest.TestCase):
                                                              gamma=cls.gamma,
                                                              lmbda=0.0,
                                                              alpha=cls.alpha,
-                                                             adjust_alpha=dict_function_approximations is None, # We do NOT adjust the learning rate alpha when value functions are learned by function approximation (NN) because the adjustment is done by the optimizer
+                                                             adjust_alpha=True,
                                                              adjust_alpha_by_episode=False,
                                                              alpha_min=cls.alpha_min,
                                                              reset_method=cls.reset_method, reset_params=cls.reset_params, reset_seed=cls.seed,
@@ -833,7 +843,7 @@ class Test_EstPolicy_EnvMountainCar(unittest.TestCase):
                                       gamma=cls.gamma,
                                       lmbda=0.0,
                                       alpha=cls.alpha,
-                                      adjust_alpha=dict_function_approximations is None, # We do NOT adjust the learning rate alpha when value functions are learned by function approximation (NN) because the adjustment is done by the optimizer
+                                      adjust_alpha=adjust_alpha,
                                       adjust_alpha_by_episode=False,
                                       alpha_min=cls.alpha_min,
                                       reset_method=cls.reset_method, reset_params=cls.reset_params, reset_seed=cls.seed,
@@ -849,7 +859,7 @@ class Test_EstPolicy_EnvMountainCar(unittest.TestCase):
                                           gamma=cls.gamma,
                                           lmbda=lmbda,
                                           alpha=cls.alpha,
-                                          adjust_alpha=dict_function_approximations is None, # We do NOT adjust the learning rate alpha when value functions are learned by function approximation (NN) because the adjustment is done by the optimizer
+                                          adjust_alpha=adjust_alpha,
                                           adjust_alpha_by_episode=False,
                                           alpha_min=cls.alpha_min,
                                           reset_method=cls.reset_method, reset_params=cls.reset_params, reset_seed=cls.seed,
@@ -864,7 +874,7 @@ class Test_EstPolicy_EnvMountainCar(unittest.TestCase):
                                                         task=learning_task,
                                                         gamma=cls.gamma,
                                                         alpha=cls.alpha,
-                                                        adjust_alpha=dict_function_approximations is None, # We do NOT adjust the learning rate alpha when value functions are learned by function approximation (NN) because the adjustment is done by the optimizer
+                                                        adjust_alpha=adjust_alpha,
                                                         adjust_alpha_by_episode=False,
                                                         alpha_min=cls.alpha_min,
                                                         reset_method=cls.reset_method, reset_params=cls.reset_params, reset_seed=cls.seed,
@@ -885,7 +895,7 @@ class Test_EstPolicy_EnvMountainCar(unittest.TestCase):
                                 gamma=cls.gamma,
                                 lmbda=0.0,
                                 alpha=cls.alpha,
-                                adjust_alpha=dict_function_approximations is None, # We do NOT adjust the learning rate alpha when value functions are learned by function approximation (NN) because the adjustment is done by the optimizer
+                                adjust_alpha=adjust_alpha,
                                 adjust_alpha_by_episode=False,
                                 alpha_min=cls.alpha_min,
                                 reset_method=cls.reset_method, reset_params=cls.reset_params, reset_seed=cls.seed,

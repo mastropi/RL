@@ -111,6 +111,9 @@ class LeaTDLambda(Learner):
         # Eligibility traces for learning Q
         self._z_Q = np.zeros(self.Q.getDimension())
         self._z_Q_all = np.zeros((0, self.Q.getDimension()))  # Historic information
+        # Eligibility traces for learning A, which are ALWAYS TABULAR (for the Generalized Advantage Estimation (GAE) --Ref: https://arxiv.org/abs/1707.06347, Schulman et al. (2017))
+        self._z_A = np.zeros(self.env.getNumStates() * self.env.getNumActions())
+        self._z_A_all = np.zeros((0, self.env.getNumStates() * self.env.getNumActions()))  # Historic information
 
         # (Nov-2020) Product of alpha and z (the eligibility trace)
         # which gives the EFFECTIVE alpha value of the Stochastic Approximation algorithm
@@ -140,6 +143,8 @@ class LeaTDLambda(Learner):
         self._z_V_all = np.zeros((0, self.V.getDimension()))
         self._z_Q[:] = 0.
         self._z_Q_all = np.zeros((0, self.Q.getDimension()))
+        self._z_A[:] = 0.
+        self._z_A_all = np.zeros((0, self.env.getNumStates() * self.env.getNumActions()))
 
         # The effective alphas correspond to the alpha learning rates multiplied by the eligibility traces, as that gives the actual update strength of the value functions
         # They are only computed for the learning of V, not of Q
@@ -182,16 +187,30 @@ class LeaTDLambda(Learner):
         self.store_learning_rate(self.getAlphasByState())
         # Update the eligibility trace
         self._updateZ(state, action, self.lmbda, delta_V=delta_V, delta_Q=delta_Q)
-        # Update the value functions
-        # IMPORTANT: (2024/08/12) For the continuous state case, we need to update Q first and then V o.w. we get the error that I do NOT understand:
+        # Update the action value functions
+        # IMPORTANT: (2024/08/12) For the continuous state case that uses neural networks to approximate value functions,
+        # we need to update Q first and then V o.w. we get the error that I do NOT understand:
         # "RuntimeError: one of the variables needed for gradient computation has been modified by an inplace operation?"
         # More info:
         # - https://github.com/pytorch/pytorch/issues/39141
         # - https://stackoverflow.com/questions/57631705/runtimeerror-one-of-the-variables-needed-for-gradient-computation-has-been-modi
         self._updateQ(delta_Q, state=state, action=action)
+
+        # Update the state value function
+        # Retrieve the V(s) value BEFORE its update, in order to use it for the TRUE online TD(lambda) used by self._updateA_GAE()
+        # to compute the Generalized Advantage Estimation (GAE)
+        V_old = self.V.getValue(state)
         self._updateV(delta_V, state=state)
+        # From Sutton, page 300, where they talk about TRUE online TD(lambda)
+        # This is an approximation of the actual difference in V(S(t)) before and after the update,
+        # because rigorously we should use V_new_minus_old = V_t(S(t)) - V_{t-1}(S(t)) and here we are using V_new_minus_old = V_{t+1}(S(t)) - V_t(S(t)),
+        # but it should be perfectly fine.
+        V_new_minus_old = self.V.getValue(state) - V_old
+
+        # Update the advantage function
+        self._updateA_GAE(delta_V, state=state, action=action, V_new_minus_old=V_new_minus_old)
+        #self._updateA(delta_V, state=state, action=action)
         #self._deprecated_updateA(state, action, delta_V)
-        self._updateA(delta_V, state=state, action=action)
 
         # We store the effective learning rates alpha
         # (effective in terms of  the eligibility trace that affects the delta values used when updating V above)
@@ -317,6 +336,19 @@ class LeaTDLambda(Learner):
                         gradient_Q
             self._z_Q_all = np.r_[self._z_Q_all, self._z_Q.reshape(1, len(self._z_Q))]
 
+        # Eligibility traces for GAE, the update of the advantage function using the Generalized Advantage Estimation which allows implementing TD(lambda)
+        A_vector = np.zeros(self.env.getNumStates() * self.env.getNumActions(), dtype=float)
+        A_vector[self.A.getLinearIndex(state, action)] = 1.0  # This is the component that will be affected (in _updateA()) by delta_V, to update the advantage of the currently visited state-action
+        # Based on Sutton, page 300, on TRUE online TD(lambda),
+        # with the goal of better reproducing GAE (the Generalized Advantage Estimate) compared to plain TD(lambda).
+        # What we do here is called TRUE online TD(lambda), which is based on defining the TD error as R(t+1) + V_t(S(t+1)) - V_{t-1}(S(t)),
+        # i.e. by using the PREVIOUS estimate of v(S(t)) as predicted value, instead of the current estimate V_t(S(t)).
+        # Ref: http://incompleteideas.net/book/first/ebook/node76.html
+        _alpha2 = self.getAlphaForStateAction(state, action)
+        self._z_A = self.gamma * lmbda * self._z_A + \
+                    (1 - _alpha2 * self.gamma * lmbda * self._z_A[self.A.getLinearIndex(state, action)]) * A_vector
+        self._z_A_all = np.r_[self._z_A_all, self._z_A.reshape(1, len(self._z_A))]
+
     def _updateV(self, delta, state=None):
         if delta != 0.0:
             if self.V.isTabular():
@@ -396,7 +428,29 @@ class LeaTDLambda(Learner):
                 # (i.e. `_alphas2` is a scalar value) as the learning rate needs to multiply the eligibility trace vector _z_Q
                 # whose dimension is NOT the number of states in the environment, but the dimension of the theta vector parameterizing the value function.
                 _alphas2 = self.getAlphaForStateAction(state, action)
-            self.A.updateWeights(state, action, delta, multiplier_delta=_alphas2 * self._z_Q)
+            self.A.updateWeights(state, action, delta, multiplier_delta=_alphas2 * self._z_A)
+
+    def _updateA_GAE(self, delta, state, action, V_new_minus_old=0.0):
+        """
+        Updates the advantage function (when `delta` is not zero) following the Generalized Advantage Estimation (GAE),
+        using TRUE online TD(lambda) for TABULAR advantage function
+
+        Ref:
+        Schulman et al. (2017), https://arxiv.org/abs/1707.06347 --> for GAE
+        Sutton (2018), Chapter 12.5, "True online TD(lambda)", pag. 300 --> for the TRUE online TD(lambda)
+        """
+        if delta != 0.0:
+            assert self.A.isTabular(), "The advantage function MUST be tabular, because it is estimated as the delta(V) error, " \
+                                       "and THIS delta(V) value is the one that could be computed using a function approximation for V(s)"
+            # Retrieve the learning rate alpha for each state-action, i.e. each state affected by the eligibility trace will have their own alpha
+            _alphas2 = self.getAlphasByStateAction().reshape(-1)
+
+            # Dummy vector signalling the currently visited state-action which defines the additional term being subtracted below when V_new_minus_old != 0.0
+            _alpha2 = self.getAlphaForStateAction(state, action)
+            A_vector = np.zeros(self.env.getNumStates() * self.env.getNumActions(), dtype=float)
+            A_vector[self.A.getLinearIndex(state, action)] = 1.0
+            self.A.setWeights(self.A.getWeights() + _alphas2 * (delta + V_new_minus_old) * self._z_A - \
+                                                    _alpha2  * V_new_minus_old * A_vector)
 
     # DM-2025/06/20: Deprecated this method because it is only valid for TD(0)
     # as it only updates the advantage of the current state and action and not of the past states and actions visited during the trajectory --which are also affected by TD(lambda)!
@@ -641,11 +695,30 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
         self.store_learning_rate(self.getAlphasByState())
         # Update the eligibility trace
         self._updateZ(state, action, lambda_adaptive)
-        # Update the value functions
-        self._updateV(delta_V, state=state)
+        # Update the action value functions
+        # IMPORTANT: (2024/08/12) For the continuous state case that uses neural networks to approximate value functions,
+        # we need to update Q first and then V o.w. we get the error that I do NOT understand:
+        # "RuntimeError: one of the variables needed for gradient computation has been modified by an inplace operation?"
+        # More info:
+        # - https://github.com/pytorch/pytorch/issues/39141
+        # - https://stackoverflow.com/questions/57631705/runtimeerror-one-of-the-variables-needed-for-gradient-computation-has-been-modi
         self._updateQ(delta_Q, state=state, action=action)
+
+        # Update the state value function
+        # Retrieve the V(s) value BEFORE its update, in order to use it for the TRUE online TD(lambda) used by self._updateA_GAE()
+        # to compute the Generalized Advantage Estimation (GAE)
+        V_old = self.V.getValue(state)
+        self._updateV(delta_V, state=state)
+        # From Sutton, page 300, where they talk about TRUE online TD(lambda)
+        # This is an approximation of the actual difference in V(S(t)) before and after the update,
+        # because rigorously we should use V_new_minus_old = V_t(S(t)) - V_{t-1}(S(t)) and here we are using V_new_minus_old = V_{t+1}(S(t)) - V_t(S(t)),
+        # but it should be perfectly fine.
+        V_new_minus_old = self.V.getValue(state) - V_old
+
+        # Update the advantage function
+        self._updateA_GAE(delta_V, state=state, action=action, V_new_minus_old=V_new_minus_old)
         #self._deprecated_updateA(state, action, delta_V)
-        self._updateA(delta_V, state=state, action=action)
+        #self._updateA(delta_V, state=state, action=action)
 
         # The effective alphas are only computed for the learning of V, not of Q
         # (as this is only stored for information purposes --e.g. plots of the eligibility traces to check if things are working properly)
