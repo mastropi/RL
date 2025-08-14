@@ -190,6 +190,7 @@ class StateValueFunctionApprox(LinearValueFunctionApprox):
         super().reset(method=method, params_random=params_random, seed=seed)
 
         # Set the value of terminal states to 0 (this is the definition of the value of terminal states)
+        # Note that terminal states are empty for CONTINUING learning tasks, so that their value is NOT forced to zero here.
         for s in self.terminal_states:
             self.setValue(s, 0.0)
 
@@ -313,6 +314,7 @@ class ActionValueFunctionApprox(LinearValueFunctionApprox):
         super().reset(method=method, params_random=params_random, seed=seed)
 
         # Set the value of terminal states to 0 (for all actions), as this is the definition of the value of terminal states
+        # Note that terminal states are empty for CONTINUING learning tasks, so that their value is NOT forced to zero here.
         for s in self.terminal_states:
             for a in range(self.nA):
                 self.setValue(s, a, 0.0)
@@ -446,14 +448,18 @@ class ValueFunctionApproxNN:
         # Neural network model
         self.nn_model = NNBackprop(nn_input, nn_hidden_layer_sizes, 1, dict_activation_functions=dict({'hidden': [torch.nn.ReLU] * len(nn_hidden_layer_sizes)}), dropout=dropout)
         self.loss = torch.nn.MSELoss()
+        self.optimizer_algorithm = optimizer
+        self.lr = lr
         self.optimizer = optimizer(self.nn_model.parameters(), lr=lr)
 
         self.seed = seed    # The seed is stored for informational purposes, just to know the seed with which we initialized the object, if needed
         self.reset(seed=self.seed)
 
     def reset(self, method=ResetMethod.ALLZEROS, params_random=None, seed=None):
-        "Resets the value function to random values for every state or to the given initial values, optionally using a seed for the random initialization of the neural network weights"
-        self.init_value(value=params_random, seed=seed)
+        "Resets the value function to random values for every state around the value zero, optionally using a seed for the random initialization of the neural network weights"
+        self.init_value(value=0.0, seed=seed)
+        # Reset the Adam optimizer (to avoid leakage from one replication to the next!)
+        self.optimizer = self.optimizer_algorithm(self.nn_model.parameters(), lr=self.lr)
 
     def init_value(self, value=None, eps=1E-1, seed=None):
         """
@@ -497,11 +503,9 @@ class ValueFunctionApproxNN:
         bias_output_layer = p
 
         # If a specific output value is requested, it is set via the bias of the output neuron (which is the last parameter in nn_model.parameters() retrieved above)
-        if value is not None:
+        if value is not None and is_scalar(value):
             # Initialize the bias of the output neuron to `value`
-            if not (is_scalar(value) or len(value) != 1):
-                raise ValueError(f"Parameter `value` must be a scalar or have length 1: {value}")
-            torch.nn.init.constant_(bias_output_layer, 0.1)
+            torch.nn.init.constant_(bias_output_layer, value)
 
     #-- GETTERS
     def getEnvironmentStateFromSimulationState(self, state_simulation):
