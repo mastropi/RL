@@ -79,6 +79,8 @@ class NNBackprop(nn.Module):
             # Add a drop out layer if requested
             if self.dropout > 0.0:
                 self.dropout_layers.append( nn.Dropout(self.dropout) )
+            # NOTE: This nn.Linear() call is telling how the INPUT to each hidden neuron should be computed, but NOT the output.
+            # The output calculation is defined in the forward() method.
             self.hidden_layers.append( nn.Linear(hidden_sizes_extended[h-1], hidden_sizes_extended[h]) ) #, dtype=torch.float) ) # DM-2024/06/11: Commented out `dtype` because it fails in IRIT cluster with torch-1.8 installed
 
         # If we want to initialize weights and bias leading to a layer, use the nn.init functions

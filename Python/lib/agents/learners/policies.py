@@ -1071,7 +1071,7 @@ class LeaActorCriticNN(GenericLearner):
             # Policy learning step
             self.t_learn = 0
             # Reset the policy (to a random walk)
-            self.policy.reset(initial_values=initial_policy)
+            self.policy.reset(initial_values=initial_policy, seed=self.seed)
             # Neural network optimizer
             # NOTE: The default learning rate of the Adam optimizer is 0.03 (so, quite small!)
             self.optimizer = optim.Adam(self.policy.getThetaParameter(), lr=self.optimizer_learning_rate, betas=(0.9, 0.999))
