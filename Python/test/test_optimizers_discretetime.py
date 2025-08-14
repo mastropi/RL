@@ -187,10 +187,10 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
             # - V-NN: one-hot 1D-cell position (total = # states)
             # - Q-NN: one-hot 1D-cell position + one-hot action (total = # states + # actions)
             # Inputs for STATE input layer:
-            # - V-NN: 2D state
-            # - Q-NN: 2D state + action value (0, 1, 2, 3)
-            nn_input_V = np.prod(env_shape) if nn_input_value_functions == InputLayer.ONEHOT else 2 if nn_input_value_functions == InputLayer.STATE else 1
-            nn_input_Q = np.prod(env_shape) + 4 if nn_input_value_functions == InputLayer.ONEHOT else 2 + 1 if nn_input_value_functions == InputLayer.STATE else 1 + 1
+            # - V-NN: 2D state + one dummy neuron to mark terminal states (so that they are learned independently of the other states, crucial in CONTINUING learning tasks!)
+            # - Q-NN: 2D state + one dummy neuron (as per above) + action neurons
+            nn_input_V = np.prod(env_shape) if nn_input_value_functions == InputLayer.ONEHOT else 2 + 1 if nn_input_value_functions == InputLayer.STATE else 1
+            nn_input_Q = np.prod(env_shape) + cls.env2d.getNumActions() if nn_input_value_functions == InputLayer.ONEHOT else 2 + 1 + cls.env2d.getNumActions() if nn_input_value_functions == InputLayer.STATE else 1 + 1  # `2 + 1`: `+1` for a dummy neuron to signal terminal states
             dict_function_approximations = dict(
                 {'V': StateValueFunctionApproxNN(cls.env2d, nn_input=nn_input_V, nn_hidden_layer_sizes=nn_hidden_layer_sizes_value_functions, dropout=dropout_value_functions, lr=learning_rate_value_functions),
                  'Q': ActionValueFunctionApproxNN(cls.env2d, nn_input=nn_input_Q, nn_hidden_layer_sizes=nn_hidden_layer_sizes_value_functions, dropout=dropout_value_functions, lr=learning_rate_value_functions),
@@ -704,8 +704,8 @@ class Test_EstPolicy_EnvMountainCar(unittest.TestCase):
             dropout_value_functions = 0.0  # 0.5           # Set it to 0.0 if we do not want any dropout layer in the network
             learning_rate_value_functions = 0.001 if dropout_value_functions == 0.0 else 0.01  # We increase the learning rate when there is dropout. Ref: https://machinelearningmastery.com/using-dropout-regularization-in-pytorch-models/ (conclusions)
             # Inputs of the V-NN: position x, velocity v (total = 2); Inputs of the Q-NN: position, velocity, action (total = 3)
-            nn_input_V = 2
-            nn_input_Q = 3
+            nn_input_V = 2 + 1      # `+1` as a dummy neuron that signals terminal states (so that their value is estimated separately)
+            nn_input_Q = 2 + 1 + 1  # `+1` for the dummy neuron for terminal states and `+1` for the action which has an order meaning (i.e. -1: accelerate left, 0: acceleration=0, +1: accelerate right)
             dict_function_approximations = dict(
                 {'V': StateValueFunctionApproxNN(cls.env2d, nn_input=nn_input_V, nn_hidden_layer_sizes=nn_hidden_layer_sizes_value_functions, dropout=dropout_value_functions, lr=learning_rate_value_functions),
                  'Q': ActionValueFunctionApproxNN(cls.env2d, nn_input=nn_input_Q, nn_hidden_layer_sizes=nn_hidden_layer_sizes_value_functions, dropout=dropout_value_functions, lr=learning_rate_value_functions),

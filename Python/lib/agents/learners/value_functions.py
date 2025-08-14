@@ -661,21 +661,39 @@ class StateValueFunctionApproxNN(ValueFunctionApproxNN):
 
         This means that it can be either:
         - a 1D index representation of the environment state, for discrete-state environments (e.g. gridworld, discrete-state Mountain Car)
-        - the actual representation of the environment state, for continuous-state environments (e.g. continuous-state Mountain Car)
+        - the actual representation of the environment state (e.g. 2D gridworld state, continuous-state Mountain Car, etc.).
+        In this case, an dummy neuron is assumed present in the input layer to mark terminal states so that their values can be learned
+        independently of the other states, which is VERY IMPORTANT in CONTINUING learning tasks where terminal states are adjacent to a start state,
+        something that cannot usually be inferred from the environment structure.
          """
         if self.nn_model.getNumInputs() == self.nS:
             # InputLayer.ONEHOT: One-hot input, i.e. one per state
             input = np.zeros(self.nS, dtype=int)
             input[state_simulation] = 1
-            state_value = self.nn_model(torch.tensor(input.reshape(-1).astype(float)))
+            state_value = self.nn_model(input.reshape(-1).astype(float))
         elif self.nn_model.getNumInputs() == 1:
             # InputLayer.SINGLE: The state itself is the input on as many neurons as its dimension (e.g. (x, y) for 2D gridworld (x, v) for Mountain Car, etc.)
-            state_value = self.nn_model(torch.tensor(np.array(state_simulation).reshape(-1).astype(float)))
+            state_value = self.nn_model(np.array(state_simulation).reshape(-1).astype(float))
         else:
             # InputLayer.STATE: The state input to the neural network is the actual state (e.g. (x, y) for 2D gridworld (x, v) for Mountain Car)
             # => First we need to convert the simulation state into whatever is input to the neural network, and this is defined by the environment
-            state_multidim = self.getEnvironmentStateFromSimulationState(state_simulation)
-            state_value = self.nn_model(torch.tensor(np.array(state_multidim).reshape(-1).astype(float)))
+            #state_multidim = self.getEnvironmentStateFromSimulationState(state_simulation)
+            state_multidim = self.getEnvironmentStateFromSimulationState(state_simulation) / np.array(self.env.getShape())
+
+            dim_state = len(state_multidim)
+            if self.nn_model.getNumInputs() == dim_state:
+                # The state covers ALL input neurons
+                state_value = self.nn_model(np.array(state_multidim).reshape(-1).astype(float))
+            else:
+                # The state does NOT cover all the input neurons, we instead assume that there is a DUMMY neuron to mark terminal states
+                # (useful for CONTINUING learning tasks where all terminal states have a start state as adjacent because of the reset step)
+                assert self.nn_model.getNumInputs() == dim_state + 1, "There must be only ONE more neuron complementing the state, which is used to mark terminal states " \
+                                                                "(useful in CONTINUING learning tasks where a resetting to a start state is done, once a terminal state is reached)"
+                input = np.zeros(dim_state + 1, dtype=float)
+                input[:dim_state] = np.array(state_multidim)
+                input[dim_state] = int(state_simulation in self.env.getTerminalStates())
+
+                state_value = self.nn_model(input.astype(float))
 
         return state_value
 
@@ -784,24 +802,49 @@ class ActionValueFunctionApproxNN(ValueFunctionApproxNN):
 
         This means that it can be either:
         - a 1D index representation of the environment state, for discrete-state environments (e.g. gridworld, discrete-state Mountain Car)
-        - the actual representation of the environment state, for continuous-state environments (e.g. continuous-state Mountain Car)
+        - the actual representation of the environment state (e.g. 2D gridworld state, continuous-state Mountain Car, etc.).
+        In this case, an dummy neuron is assumed present in the input layer to mark terminal states so that their values can be learned
+        independently of the other states, which is VERY IMPORTANT in CONTINUING learning tasks where terminal states are adjacent to a start state,
+        something that cannot usually be inferred from the environment structure.
          """
         if self.nn_model.getNumInputs() == self.nS + self.nA:
             # InputLayer.ONEHOT: One-hot input, i.e. one per state on the first nS neurons and one per action on the next nA neurons
             input = np.zeros(self.nS + self.nA, dtype=int)
             input[state_simulation] = 1
             input[self.nS + action] = 1
-            action_value = self.nn_model(torch.tensor(input.reshape(-1).astype(float)))
+            action_value = self.nn_model(input.reshape(-1).astype(float))
         elif self.nn_model.getNumInputs() == 1 + 1:
             # InputLayer.SINGLE: The state is assumed to be a scalar (1),
             # typically a 1D representation of the environment state in discrete-state environments or the state of a 1D continuous-state environment
             # The action is also a scalar (+ 1), which is actually the way it is always represented (e.g. 0, 1, 2, 3)
-            action_value = self.nn_model(torch.tensor(np.concatenate([np.array(state_simulation).reshape(-1).astype(float), np.array([action]).astype(float)])))
+            action_value = self.nn_model(np.concatenate([np.array(state_simulation).reshape(-1).astype(float), np.array([action]).astype(float)]))
         else:
             # InputLayer.STATE: The state input to the neural network is the actual state (e.g. (x, y) for 2D gridworld (x, v) for Mountain Car), and the action is the usual scalar
             # => First we need to convert the simulation state into whatever is input to the neural network, and this is defined by the environment
-            state_multidim = self.getEnvironmentStateFromSimulationState(state_simulation)
-            action_value = self.nn_model(torch.tensor(np.concatenate([np.array(state_multidim).reshape(-1).astype(float), np.array([action]).astype(float)])))
+            #state_multidim = self.getEnvironmentStateFromSimulationState(state_simulation)
+            state_multidim = self.getEnvironmentStateFromSimulationState(state_simulation) / np.array(self.env.getShape())
+            #action_value = self.nn_model(torch.tensor(np.concatenate([np.array(state_multidim).reshape(-1).astype(float), np.array([action]).astype(float)])))
+
+            dim_state = len(state_multidim)
+            if self.nn_model.getNumInputs() == dim_state + self.env.getNumActions():
+                # The state + possible actions cover ALL input neurons
+                # The action uses ALWAYS a ONE-HOT encoding (because the values 0, 1, 2, ... are simply SYMBOLS, they do not have any meaning)
+                input = np.zeros(dim_state + self.nA, dtype=float)
+                input[dim_state + action] = 1
+            else:
+                # The state + possible actions do NOT cover all the input neurons, we instead assume that there is a DUMMY neuron to mark terminal states, right after the state neurons
+                # (useful for CONTINUING learning tasks where all terminal states have a start state as adjacent because of the reset step)
+                assert self.nn_model.getNumInputs() == dim_state + 1 + self.nA, "There must be only ONE more neuron complementing the state, which is used to mark terminal states " \
+                                                                "(useful in CONTINUING learning tasks where a resetting to a start state is done, once a terminal state is reached)"
+                input = np.zeros(dim_state + 1 + self.nA, dtype=float)
+                input[dim_state + 1] = int(state_simulation in self.env.getTerminalStates())
+                input[dim_state + 1 + action] = 1
+
+            # Assign the state to the first `dim_state` neurons
+            input[:dim_state] = np.array(state_multidim)
+
+            # Compute the action value
+            action_value = self.nn_model(input.astype(float))
 
         return action_value
 
@@ -911,9 +954,10 @@ if __name__ == "__main__":
 
         # Value function learner characteristics
         use_neural_network = True
+        lr = 1E-3
         nn_input = InputLayer.STATE  #InputLayer.ONEHOT  #InputLayer.SINGLE
-        nn_input_V = env2d.getNumStates() if nn_input == InputLayer.ONEHOT else 2 if nn_input == InputLayer.STATE else 1
-        nn_input_Q = env2d.getNumStates() + env2d.getNumActions() if nn_input == InputLayer.ONEHOT else 2 + 1 if nn_input == InputLayer.STATE else 1 + 1
+        nn_input_V = env2d.getNumStates() if nn_input == InputLayer.ONEHOT else 2 + 1 if nn_input == InputLayer.STATE else 1    # `2 + 1`: `+1` for a dummy neuron to signal terminal states
+        nn_input_Q = env2d.getNumStates() + env2d.getNumActions() if nn_input == InputLayer.ONEHOT else 2 + 1 + env2d.getNumActions() if nn_input == InputLayer.STATE else 1 + 1    # `2 + 1`: `+1` for a dummy neuron to signal terminal states
         # See https://stats.stackexchange.com/questions/181/how-to-choose-the-number-of-hidden-layers-and-nodes-in-a-feedforward-neural-netw
         # for recommendations written in 2010 about number of hidden layers and their sizes.
         # Summary:
@@ -924,8 +968,8 @@ if __name__ == "__main__":
         nn_hidden_layer_sizes_Q = [12]  #[48]  #[12, 24]  #[8, 12]  #[int(np.round(np.mean([nn_input_Q, 2])))]
         dict_function_approximations = None
         if use_neural_network:
-            dict_function_approximations = dict({'V': StateValueFunctionApproxNN(env2d, nn_input=nn_input_V, nn_hidden_layer_sizes=nn_hidden_layer_sizes_V),
-                                                 'Q': ActionValueFunctionApproxNN(env2d, nn_input=nn_input_Q, nn_hidden_layer_sizes=nn_hidden_layer_sizes_Q),
+            dict_function_approximations = dict({'V': StateValueFunctionApproxNN(env2d, nn_input=nn_input_V, nn_hidden_layer_sizes=nn_hidden_layer_sizes_V, lr=lr),
+                                                 'Q': ActionValueFunctionApproxNN(env2d, nn_input=nn_input_Q, nn_hidden_layer_sizes=nn_hidden_layer_sizes_Q, lr=lr),
                                                  #'A': ActionValueFunctionApproxNN(env2d, nn_input=nn_input_Q, nn_hidden_layer_sizes=nn_hidden_layer_sizes_Q)
                                                  })
 
@@ -974,7 +1018,7 @@ if __name__ == "__main__":
         # Monte-Carlo simulation
         T = 1000
         #sim_td.run_exploration_and_learn_value_functions(max_time_steps=T, seed=seed, verbose=debug, verbose_period=1)
-        sim_td._run_single_continuing_task(max_time_steps=T, seed=seed, verbose=debug, verbose_period=T // 20, plot=False)
+        sim_td._run_single_continuing_task(max_time_steps=T, seed=seed, verbose=debug, verbose_period=T // 20, plot=True)
 
         # Plot
         test_utils.plot_estimated_state_value_function(env2d, sim_td.getAgent().getLearner().getV().getValues(), learning_criterion, state_counts=sim_td.getAgent().getLearner().getStateCounts(), alphas=sim_td.getAgent().getLearner().getAlphasByState())
