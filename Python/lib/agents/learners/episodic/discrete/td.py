@@ -295,6 +295,7 @@ class LeaTDLambda(Learner):
         # such as the epsilon value of the epsilon-greedy next action strategy.
         delta_V = reward + self.gamma * self.V.getValue(next_state) - self.V.getValue(state)
         delta_Q = reward + self.gamma * self._expected_next_Q(next_state) - self.Q.getValue(state, action)
+        #delta_Q = reward + self.gamma * self._max_next_Q(next_state) - self.Q.getValue(state, action)
 
         # Check whether we are learning the differential value function
         # (average reward criterion for the continuing learning task context) and adjust delta accordingly
@@ -349,7 +350,7 @@ class LeaTDLambda(Learner):
                     (1 - _alpha2 * self.gamma * lmbda * self._z_A[self.A.getLinearIndex(state, action)]) * A_vector
         self._z_A_all = np.r_[self._z_A_all, self._z_A.reshape(1, len(self._z_A))]
 
-    def _updateV(self, delta, state=None):
+    def _updateV(self, delta, state):
         if delta != 0.0:
             if self.V.isTabular():
                 # As many learning rates alpha as number of states: each state affected by the eligibility trace will have their own alpha
@@ -384,7 +385,7 @@ class LeaTDLambda(Learner):
 
             self.V.updateWeights(state, delta, multiplier_delta=_alphas * self._z_V)
 
-    def _updateQ(self, delta, state=None, action=None):
+    def _updateQ(self, delta, state, action):
         if delta != 0.0:
             # DM-2025/06/22: We now use the alpha by state-action instead of the alpha by state as alpha for the update of Q,
             # which better takes into account the number of visits to each state AND action, not only to each state.
@@ -405,19 +406,41 @@ class LeaTDLambda(Learner):
                 # (i.e. `_alphas2` is a scalar value) as the learning rate needs to multiply the eligibility trace vector _z_Q
                 # whose dimension is NOT the number of states in the environment, but the dimension of the theta vector parameterizing the value function.
                 _alphas2 = self.getAlphaForStateAction(state, action)
-            self.Q.updateWeights(state, action, delta, multiplier_delta=_alphas2 * self._z_Q )
+            self.Q.updateWeights(state, action, delta, multiplier_delta=_alphas2 * self._z_Q)
 
     def _expected_next_Q(self, next_state):
         """
-        Computes the expected Q value for the next state and next action.
-        The estimated value V of the next state is used for this, which is similar to computing the expected Q value.
-        However, to compute the expected Q value of the next state and next action (which is what is done
-        by the Expected SARSA learner of the Q function) we need to have access to the policy...
-        but we don't have access to it here (because it is not passed to the constructor of the class).
-        """
-        return self.V.getValue(next_state)
+        Computes the expected Q value for the next state over all possible next actions (which is what is done by the Expected SARSA learner of the Q function)
 
-    def _updateA(self, delta, state=None, action=None):
+        In the tabular context, when both V and Q are tabular, we use V(s) as an estimate of the expected Q value.
+        Otherwise, we compute the PLAIN average of the Q values.
+        Note that we do NOT compute the policy-weighted average, because this learner object does NOT have access to the current policy.
+        If we want to compute the policy-weighted average, i.e. the ACTUAL expected Q value over all possible next actions,
+        we should pass the current policy to the constructor of this class.
+        """
+        if self.V.isTabular() and self.Q.isTabular():
+            # In the tabular context, we consider V(s) to be a fairly good estimate of the expectation of Q(s,A) over all actions A
+            return self.V.getValue(next_state)
+        else:
+            # This means that V and Q are estimated with two different models (e.g. tabular and NN or two NN models)
+            # => To avoid having a very large error when using V(s) as an estimate of Expected vale of Q(s,A) over all A, we compute the plain average of Q(s,A)
+            # (note that we do NOT compute policy-weighted average because this object does not know about the policy.
+            Q_mean = 0.0
+            for action in range(self.env.getNumActions()):
+                Q_mean += self.Q.getValue(next_state, action)
+            Q_mean /= self.env.getNumActions()
+            return Q_mean
+
+    def _max_next_Q(self, next_state):
+        """
+        Computes the maximum Q value for the next state over all possible next actions (which is what is done by the Q-learning algorithm)
+        """
+        Q_max = -np.Inf
+        for action in range(self.env.getNumActions()):
+            Q_max = max(Q_max, self.Q.getValue(next_state, action))
+        return Q_max
+
+    def _updateA(self, delta, state, action):
         if delta != 0.0:
             # For details about the computation of _alphas2, see comments in the _updateQ() method
             if self.A.isTabular():
@@ -774,7 +797,7 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
             # In the HOMOGENEOUS adaptive lambda we need to store the HISTORY of the gradient
             # (because we need to retroactively apply the newly computed lambda to previous eligibility traces)
             gradient_V = self.V.X[:, state]      # Note: this is returned as a ROW vector, even when we retrieve the `state` COLUMN of matrix X
-            gradient_Q = self.V.X[:, self.Q.getLinearIndex(state, action)]
+            gradient_Q = self.Q.X[:, self.Q.getLinearIndex(state, action)]
             # Use the following calculation of the gradient for FIRST-VISIT TD(lambda)
             # (i.e. the gradient is set to 0 if the current visit of `state` is not the first one)
             #gradient_V * (self._state_counts[state] == 1)  # For first-visit TD(lambda)
