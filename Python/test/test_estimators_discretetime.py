@@ -1678,6 +1678,9 @@ class Test_EstValueFunctions_EnvGridworld2DWithObstacles(unittest.TestCase, test
         cls.agent_rw_fv = agents.GenericAgent(cls.policy_rw, learner_fv)
         cls.sim_fv = DiscreteSimulator(cls.env2d, cls.agent_rw_fv, debug=False)
 
+        # Expected state visit counts
+        cls.expected_state_counts = [602, 482, 228, 100, 709, 0, 223, 182, 932, 602, 328, 261]
+
         # Expected state values for all tests
         cls.expected_mc_V = [0.18794174, 0.29649877, 0.46634851, 0.,
                              0.10790858, 0.,         0.31369084, 0.46864529,
@@ -1741,13 +1744,15 @@ class Test_EstValueFunctions_EnvGridworld2DWithObstacles(unittest.TestCase, test
                     plot=False, pause=0.1)
         observed_V = state_values
         observed_Q = action_values.reshape((self.env2d.getNumStates(), self.env2d.getNumActions()))
-        print("\nObserved state value function: " + test_utils.array2str(observed_V))
+        print("\nState visit counts: " + test_utils.array2str(state_counts))
+        print("Observed state value function: " + test_utils.array2str(observed_V))
         print("Expected state value function: " + test_utils.array2str(self.expected_mc_V))
 
         assert self.nS == 3*4 and \
                self.seed == 1717 and \
                self.nepisodes == 100 and \
                self.start_state == 8
+        assert all(state_counts == self.expected_state_counts)
         assert np.allclose(observed_V, self.expected_mc_V, atol=1E-6)
         assert np.allclose(observed_Q, self.expected_mc_Q, atol=1E-6)
 
@@ -1770,6 +1775,7 @@ class Test_EstValueFunctions_EnvGridworld2DWithObstacles(unittest.TestCase, test
                self.seed == 1717 and \
                self.nepisodes == 100 and \
                self.start_state == 8
+        assert all(state_counts == self.expected_state_counts)
         assert np.allclose(observed_V, self.expected_td_V, atol=1E-6)
         assert np.allclose(observed_Q, self.expected_td_Q, atol=1E-6)
 
@@ -2031,7 +2037,7 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
         cls.expected_average_reward_from_cycles = 0.021382
         cls.expected_cycle_time = 10.3812
         cls.expected_n_cycles = 446
-        cls.expected_state_counts_in_complete_cycles = [602, 482, 228, 99, 707, 0, 223, 182, 929, 602, 328, 261]
+        cls.expected_state_counts_in_complete_cycles = [602, 482, 228, 100, 707, 0, 223, 182, 929, 602, 328, 261]
             ## This is used in the estimation of the stationary probability from cycles
             ## Note that this counts do NOT count the states visited before the first cycle was completed (so that we use only COMPLETE cycles to estimate the stationary probabilities)
 
@@ -2346,7 +2352,7 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
                self.A == set({8}) and \
                self.B == set({4, 9})
         # Assertions about state counts
-        assert all(state_counts == [486., 354., 175.,  95., 576.,   0., 251., 193., 680., 513., 377., 301.])
+        assert all(state_counts == [486, 354, 175,  95, 576,   0, 251, 193, 680, 513, 377, 301])
         assert sum(state_counts) == n_events_et + n_events_fv + 1
 
         # Assertions about the estimated expected cycle time

@@ -201,44 +201,65 @@ class Test_Class_Simulator(unittest.TestCase):
         # Expected values for selected max_time_steps cases (because it is cumbersome to copy all expected values for all tested cases!)
         # 'C' stands for state counts.
         expected_values = dict({45: {'V': [-0.12097312,  0.10998136,  0.46934819,  0.67405153, -0.25618422],
-                                     'Q': [[0.        , -0.12097312, -0.12797619,  0.16286081, -0.19404762,
-                                            0.55227267,  0.        ,  0.67405153, -0.25618422, -0.25618422]],
+                                     'Q': [[ 0.        , -0.12097312,
+                                            -0.12797619,  0.16286081,
+                                            -0.19404762,  0.55227267,
+                                             0.        ,  0.67405153,
+                                            -0.25618422, -0.25618422]],
                                      'C': [10, 11, 9, 8, 8]
                                      },
-                                # DM-2025/01/14: This is one case where the simulation ends at a start state (i.e. just after transitioning from a terminal state to a start state)
-                                # So, it's a VERY special situation in terms of the learning process as currently implemented because it is made up of PATCHES,
-                                # until we more cleanly implement the computation of the average reward in the CONTINUING task
-                                # (which is now computed as an adjustment of the EPISODIC average reward --see Learner.update_average_reward() for more details
-                                # and the implementations of _run_single(), _run_single_continuing_task() and run_exploration_and_learn_value_functions() in discrete.Simulator
+                                # DM-2025/01/14: This is one case where the simulation ends at a start state (s=0) (i.e. just after transitioning from a terminal to a start state)
+                                # So, it's a VERY special situation in terms of the learning process as currently implemented that is made up of PATCHES,
+                                # using the EPISODIC learning task as a basis until we implement more cleanly the computation of the average reward in the CONTINUING learning task
+                                # (which is now computed as an adjustment of the EPISODIC average reward
+                                # --see Learner.update_average_reward() and Learner.store_trajectory_at_episode_end(), and the implementations of
+                                # _run_single(), _run_single_continuing_task() and run_exploration_and_learn_value_functions() in discrete.Simulator
                                 # for implementation details of the PATCHES --look for the string "TEMPORARY")
-                                # NOTE that the state counts list ('C') is the same as the above case `45`, even if there is "one more step" in this case.
-                                # The reason is that the last step of the current case is from a terminal to a start state and we don't count that step as a valid step
-                                # because o.w. the sum of the state counts would not coincide with the number of simulation steps, as it should (tested below).
+                                # Note that the count of the ending state s=0 is NOT incremented by +1 (from 10), precisely because of the above special situation regarding the average reward.
+                                # *** NOTE that this test confirms that the average reward computed iteratively by repeated calls to Learner.update_average_reward()
+                                # is CORRECT by comparing its value against the RAW average (computed on the list of observed rewards over all episode). ***
                                 46: {'V': [-0.12097312,  0.10998136,  0.46934819,  0.67405153, -0.26102196],
-                                     'Q': [[0.        , -0.12097312, -0.12797619,  0.16286081, -0.19404762,
-                                            0.55227267,  0.        ,  0.67405153, -0.26102196, -0.26102196]],
+                                     'Q': [[ 0.        , -0.12097312,
+                                            -0.12797619,  0.16286081,
+                                            -0.19404762,  0.55227267,
+                                             0.        ,  0.67405153,
+                                            -0.26102196, -0.26102196]],
                                      'C': [10, 11, 9, 8, 8]
                                      },
+                                # This case ends at state s = 3 (0-based index)
                                 49: {'V': [-0.11578753,  0.12543584,  0.47242722,  0.67405153, -0.26102196],
-                                     'Q': [[0.        , -0.11578753, -0.12797619,  0.17611824, -0.19404762,
-                                            0.54647998,  0.        ,  0.67405153, -0.26102196, -0.26102196]],
+                                     'Q': [[ 0.        , -0.11578753,
+                                            -0.12797619,  0.17611824,
+                                            -0.19404762,  0.54647998,
+                                             0.        ,  0.67405153,
+                                            -0.26102196, -0.26102196]],
                                      'C': [11, 12, 10, 9, 8]
                                      },
                                 50: {'V': [-0.11578753,  0.12543584,  0.47242722,  0.66194192, -0.26102196],
-                                     'Q': [[0.        , -0.11578753, -0.12797619,  0.17611824, -0.19404762,
-                                            0.54647998,  0.        ,  0.66194192, -0.26102196, -0.26102196]],
+                                     'Q': [[ 0.        , -0.11578753,
+                                            -0.12797619,  0.17611824,
+                                            -0.19404762,  0.54647998,
+                                             0.        ,  0.66194192,
+                                            -0.26102196, -0.26102196]],
                                      'C': [11, 12, 10, 9, 9]
                                      },
-                                # This is another case where the simulation ends at a start state (i.e. just after transitioning from a terminal state to a start state)
+                                # This is another case where the simulation ends at a start state (s=0) (i.e. just after transitioning from a terminal to a start state)
                                 # See more details about these cases in the comment above for entry `46`, where the same thing happens.
+                                # Essentially, the count of ending state s=0 is NOT incremented by +1 (from 11).
                                 51: {'V': [-0.11578753,  0.12543584,  0.47242722,  0.66194192, -0.26449264],
-                                     'Q': [[0.        , -0.11578753, -0.12797619,  0.17611824, -0.19404762,
-                                            0.54647998,  0.        ,  0.66194192, -0.26449264, -0.26449264]],
+                                     'Q': [[ 0.        , -0.11578753,
+                                            -0.12797619,  0.17611824,
+                                            -0.19404762,  0.54647998,
+                                             0.        ,  0.66194192,
+                                            -0.26449264, -0.26449264]],
                                      'C': [11, 12, 10, 9, 9]
                                      },
                                 52: {'V': [-0.11039147,  0.12543584,  0.47242722,  0.66194192, -0.26449264],
-                                     'Q': [[0.        , -0.11039147, -0.12797619,  0.17611824, -0.19404762,
-                                            0.54647998,  0.        ,  0.66194192, -0.26449264, -0.26449264]],
+                                     'Q': [[ 0.        , -0.11039147,
+                                            -0.12797619,  0.17611824,
+                                            -0.19404762,  0.54647998,
+                                             0.        ,  0.66194192,
+                                            -0.26449264, -0.26449264]],
                                      'C': [12, 13, 10, 9, 9]
                                      }
                                 })

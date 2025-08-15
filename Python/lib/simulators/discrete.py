@@ -1642,10 +1642,9 @@ class Simulator:
                 # Partially reset the learner (only trajectories are reset). See why we need to do this where we do the same thing in _run_single_continuing_task()
                 learner.reset(reset_episode=False, reset_value_functions=False, reset_average_reward=False)
 
-                # See the reasons why we set these parameters where we do the same thing in _run_single_continuing_task()
-                info = {'update_trajectory': False,
-                        'update_counts': False}
-                # TEMPORARY (2024/05/14): Needed only because of the EPISODIC view of the average reward
+                # See the reasons why we set this parameter where we do the same thing in _run_single_continuing_task()
+                info = {'update_trajectory_and_average_reward': False}
+                # TEMPORARY (2024/05/14): Needed only because of the EPISODIC view of the average reward to compute the CONTINUING average reward
             else:
                 action = self._choose_action(policy, state, epsilon_random_action=epsilon_random_action)
                 next_state, reward, done_episode, info = self.env.step(action)
@@ -1655,9 +1654,10 @@ class Simulator:
             # (e.g. learn the average reward and update trajectory information over all episodes)
             if t >= max_time_steps:
                 done_episode = True
+                info['max_time_steps_reached'] = True
                 if self.debug:
                     print("[run_exploration, DEBUG] (TOTAL MAX TIME STEPS = {} REACHED at episode {}!)".format(max_time_steps, learner.episode))
-            # TEMPORARY (2024/05/14): Needed only because of the EPISODIC view of the average reward
+            # TEMPORARY (2024/05/14): Needed only because of the EPISODIC view of the average reward to compute the CONTINUING average reward
 
             # Learn (and update the trajectory stored in the learner)
             learner.learn(t_episode, state, action, next_state, reward, done_episode, info)
@@ -2300,10 +2300,13 @@ class Simulator:
             # If the selected state is part of the absorption set, the time to absorption contributes to the estimation of the survival probability P(T>t)
             # --as long as the particle has never been absorbed before-- and the particle is reactivated right-away.
             if self.env.getIndexFromState(state) in self.env.getTerminalStates():
-                # Note: The following reset of the environment is typically carried out by the gym module,
+                # Notes:
+                # - The following reset of the environment is typically carried out by the gym module,
                 # e.g. by the toy_text.discrete.DiscreteEnv environment's reset() method where the initial state
                 # is chosen based on the isd attribute of the object, i.e. of the Initial State Distribution defining the initial state.
-                # Note also that the seed for the reset has been set separately for each particle before starting the FV simulation.
+                # - The seed for the reset has been set separately for each particle before starting the FV simulation.
+                # - As no action is conceptually associated to a terminal state (by definition), we need to choose one.
+                action = 0
                 next_state = envs[idx_particle].reset()
                 reward = envs[idx_particle].getReward(next_state)
                 if DEBUG_TRAJECTORIES:
@@ -2316,16 +2319,14 @@ class Simulator:
                     if is_learner_td_lambda:
                         # Use TD(lambda) on each particle separately, BUT using the COMMONLY estimated average reward (since we need all particles to do so)
                         info['average_reward'] = estimated_average_reward if use_fixed_average_reward else learner.getAverageReward()
-                        self.learn_terminal_state_values(learners[idx_particle], t, state, next_state, reward, info, done_episode=next_state in self.env.getTerminalStates())
-                        # Update the trajectory and state counts stored in the base learner so that we can use them when analyzing whether the absorption set A should be increased
-                        # based on the FV visits. Note that the third argument 0 is the default (anchor) action that is considered to be taken to transition from a terminal state
-                        # (see the learn_terminal_state_values() method for more details).
+                        self.learn_terminal_state_values(learners[idx_particle], t, state, action, next_state, reward, info, done_episode=next_state in self.env.getTerminalStates())
+                        # Update the trajectory stored in the base learner so that we can use it to analyze whether the absorption set A should be increased based on FV visits
                         learner._states += [state]
                         assert sum(learners[idx_particle]._state_counts_over_all_episodes) == len(learner._states)
                     else:
                         if use_fixed_average_reward:
                             info['average_reward'] = estimated_average_reward
-                        self.learn_terminal_state_values(learner, t, state, next_state, reward, info, done_episode=next_state in self.env.getTerminalStates())
+                        self.learn_terminal_state_values(learner, t, state, action, next_state, reward, info, done_episode=next_state in self.env.getTerminalStates())
             else:
                 # Step on the selected particle
                 action = self._choose_action(policy, state, epsilon_random_action=epsilon_random_action)
@@ -2833,6 +2834,7 @@ class Simulator:
                     # e.g. by the toy_text.discrete.DiscreteEnv environment's reset() method where the initial state
                     # is chosen based on the isd attribute of the object, i.e. of the Initial State Distribution defining the initial state.
                     # Note also that the seed for the reset has been set separately for each particle before starting the FV simulation.
+                    action = 0
                     next_state = envs[idx_particle].reset()
                     reward = envs[idx_particle].getReward(next_state)
                     if DEBUG_TRAJECTORIES:
@@ -2842,7 +2844,7 @@ class Simulator:
                     # Learn the value functions for the terminal state for the continuing learning task case,
                     # because in that case the value of terminal states is NOT defined as 0.
                     if learner.getLearningTask() == LearningTask.CONTINUING:
-                        self.learn_terminal_state_values(t, state, next_state, reward, info)
+                        self.learn_terminal_state_values(learner, t, state, action, next_state, reward, info)
                             ## Note: the `info` dictionary is guaranteed to be defined thanks to the assertion
                             ## at the initialization of the FV particles that asserts they cannot be at a terminal state.
                             ## Thanks to this condition, when a particle is at a terminal state, it means that it MUST have
@@ -3169,6 +3171,7 @@ class Simulator:
                     # e.g. by the toy_text.discrete.DiscreteEnv environment's reset() method where the initial state
                     # is chosen based on the isd attribute of the object, i.e. of the Initial State Distribution defining the initial state.
                     # Note also that the seed for the reset has been set separately for each particle before starting the FV simulation.
+                    action = 0
                     next_state = envs[idx_particle].reset()
                     reward = envs[idx_particle].getReward(next_state)
                     if DEBUG_TRAJECTORIES:
@@ -3178,7 +3181,7 @@ class Simulator:
                     # Learn the value functions for the terminal state for the continuing learning task case,
                     # because in that case the value of terminal states is NOT defined as 0.
                     if learner.getLearningTask() == LearningTask.CONTINUING:
-                        self.learn_terminal_state_values(t, state, next_state, reward, info)
+                        self.learn_terminal_state_values(learner, t, state, action, next_state, reward, info)
                             ## Note: the `info` dictionary is guaranteed to be defined thanks to the assertion
                             ## at the initialization of the FV particles that asserts they cannot be at a terminal state.
                             ## Thanks to this condition, when a particle is at a terminal state, it means that it MUST have
@@ -3670,6 +3673,7 @@ class Simulator:
                 # e.g. by the toy_text.discrete.DiscreteEnv environment's reset() method where the initial state
                 # is chosen based on the isd attribute of the object, i.e. of the Initial State Distribution defining the initial state.
                 # Note also that the seed for the reset has been set separately for each particle before starting the FV simulation.
+                action = 0
                 next_state = envs[idx_particle].reset()
                 reward = envs[idx_particle].getReward(next_state)
                 if DEBUG_TRAJECTORIES:
@@ -3681,7 +3685,7 @@ class Simulator:
                 # Note that the transition from the terminal state to the start state is stored as part of the particle's trajectory
                 # (because we are passing env=envs[idx_particle] as parameter to learn_terminal_state_values()).
                 if learner.getLearningTask() == LearningTask.CONTINUING:
-                    self.learn_terminal_state_values(t_clock, state, next_state, reward, info, envs=envs, idx_particle=idx_particle, update_phi=True)
+                    self.learn_terminal_state_values(learner, t_clock, state, action, next_state, reward, info, envs=envs, idx_particle=idx_particle, update_phi=True)
             else:
                 # Step on the selected particle
                 #print(f"\n[debug] Moving particle #{idx_particle}...")
@@ -3721,9 +3725,7 @@ class Simulator:
                 # TO-DO: (2024/01/29) Revise the correct use of the `done` variable here, instead of `done_episode`, because actually when we are done by `done`, this line will NEVER be executed because we will NOT enter again the `while done` loop...
                 assert state in learner.getActiveSet()
                 if True or df_particles_for_start_state is None or state not in df_particles_for_start_state.index:
-                    info['update_counts'] = True #True #False
                     learner.learn(t_clock, state, action, next_state, reward, done, info, envs=envs, idx_particle=idx_particle, update_phi=True)
-                    info.pop('update_counts')
 
             # Step on all the "normal" particles that have been created for the exploration of the system following the dynamics of the *underlying* Markov chain
             for idx_env, env in enumerate(envs_normal):
@@ -3738,13 +3740,12 @@ class Simulator:
                 # (see the learn_at_absorption() method), and we want to learn the value of the states outside A using the FV estimator,
                 # not from the exploration of the underlying Markov process carried out here by these "normal" particles.
                 # It is worth noting that state counts are stored in the learner NOT in the environment associated to the particle being updated here)
-                info_normal['update_counts'] = True #state_normal not in df_particles_for_start_state.index if df_particles_for_start_state is not None else state_normal in absorption_set #True
                 learner.learn(t, state_normal, action_normal, next_state_normal, reward_normal, done_normal, info_normal, envs=envs_normal, idx_particle=idx_env, update_phi=False)
                 if done_normal and learner.getLearningTask() == LearningTask.CONTINUING:
                     # Go to an environment's start state and learn the value of the terminal state
                     reset_state_normal = env.reset()
                     reward_normal = env.getReward(reset_state_normal)
-                    self.learn_terminal_state_values(t, next_state_normal, reset_state_normal, reward_normal, info_normal)
+                    self.learn_terminal_state_values(learner, t, next_state_normal, action_normal, reset_state_normal, reward_normal, info_normal)
 
             if next_state in absorption_set:
                 # The particle has been absorbed.
@@ -4254,8 +4255,9 @@ class Simulator:
                     # because its value is not necessarily 0! (as long as this is NOT the first episode, which is the case at this point)
                     # (the value of a terminal state is 0 only in EPISODIC learning tasks, in which case it is 0 by definition of terminal states).
                     # In fact, in the continuing learning task, the environment state goes to a start state when the episode "terminates" and the Markov process continues.
+                    action = 0
                     reward = self.env.getReward(self.env.getState())
-                    self.learn_terminal_state_values(learner, t_episode, terminal_state_previous_episode, self.env.getState(), reward, info, done_episode=done_episode)
+                    self.learn_terminal_state_values(learner, t_episode, terminal_state_previous_episode, action, self.env.getState(), reward, info, done_episode=done_episode)
                         ## Notes:
                         ## - it's important that t_episode = -1 here (as is the case because of the reset of t_episode to -1 above) so that there is NO update of the average reward
                         ##  by Learner.update_average_reward() when done_episode=True (i.e. a situation that happens ONLY at the very end of the simulation when the simulation
@@ -4302,6 +4304,7 @@ class Simulator:
                 if max_time_steps is not None and t >= max_time_steps:
                     max_time_steps_reached = True
                     done_episode = True
+                    info['max_time_steps_reached'] = True
                     if self.debug:
                         print("[run_single, DEBUG] (TOTAL MAX TIME STEPS = {} REACHED at episode {}!)".format(max_time_steps, episode+1))
 
@@ -4870,9 +4873,10 @@ class Simulator:
 
                 # ---- UPDATE FOR CONTINUING TASK
                 if done_episode:
-                    # The episode ended at the previous step
+                    # The episode ended at the previous step, which means that we are now at a TERMINAL state (i.e. `state` is terminal)
                     # => Reset the environment to a start state because the process honours a CONTINUING learning task (of the value functions)
                     # => Reset the episode-related information (needed most importantly for a correct calculation of the average reward)
+                    assert state in self.env.getTerminalStates(), f"When the episode ended at the previous episode, the current state is a terminal state (s={state})"
 
                     if plot:
                         # Update plots that are updated at the end of an episode
@@ -4921,9 +4925,10 @@ class Simulator:
                     # observed in the episode when updating the within-episode average reward is WAY larger than it really was.
                     learner.reset(reset_episode=False, reset_value_functions=False, reset_average_reward=False)
 
-                    # TEMPORARY: (2024/02/13) Two temporary settings are done here, until the proper implementation of a CONTINUING learning task (with NO episodes) is done, as follows:
-                    # 1) Non-update of trajectory: the trajectory should NOT be updated when learning from the transition "terminal state" -> "start state" because we do NOT want
-                    # to have this transition contribute to the estimation of the average reward (i.e. we do not want to have the reward observed when going from a terminal state
+                    # TEMPORARY: (2024/02/13) One temporary setting is done here, until proper implementation of a CONTINUING learning task (with NO episodes), namely:
+                    # Non-update of trajectory and average reward: neither the trajectory nor the average reward should be updated
+                    # when learning from the transition "terminal state" -> "start state" because we do NOT want to have this transition contribute
+                    # to the estimation of the average reward (i.e. we do not want to have the reward observed when going from a terminal state
                     # to a start state to be present in the list of episode rewards stored in self._rewards) because the Learner.update_average_reward() method that performs
                     # this calculation assumes right now that the average reward estimated by the learner is the EPISODIC average reward, and thus adjusts for this when estimating
                     # the CONTINUING average reward (by multiplying the average reward observed in the episode by T / (T+1), which assumes that the reward received when going
@@ -4934,14 +4939,11 @@ class Simulator:
                     # - estimate the CONTINUING average reward when the learning task is CONTINUING.
                     # This will also eliminate the assumption mentioned above that is currently done in Learner.update_average_reward() that the reward received when going from
                     # a terminal state to a start state is 0.
-                    # 2) Non-update of state counts: the count of the terminal state should not be increased by 1 now because it was ALREADY increased at the end of the "episode"
-                    # when learning at the previous iteration, because the count of the final episode state is increased when done_episode = True in the call to learner.learn().
                     #
                     # NOTE that the `info` dictionary will be updated to its regular value (normally empty) at the next call to self.env.step() which happens at the next "regular"
                     # step of the agent (where the agent goes from a state to a VALID next state under the original EPISODIC Markov process
                     # --as opposed to going from a terminal state to a start state, which is what just happened above.
-                    info = {'update_trajectory': False,
-                            'update_counts': False}
+                    info = {'update_trajectory_and_average_reward': False}
                 # ---- UPDATE FOR CONTINUING TASK
                 else:
                     action = self._choose_action(policy, state, epsilon_random_action=epsilon_random_action)
@@ -4967,6 +4969,7 @@ class Simulator:
                     max_time_steps_reached = True
                     done_episode = True
                     stop = True
+                    info['max_time_steps_reached'] = True
                     if self.debug:
                         print("[run_single_continuing_task, DEBUG] (TOTAL MAX TIME STEPS = {} REACHED at episode {}!)".format(max_time_steps, learner.episode))
 
@@ -5018,12 +5021,9 @@ class Simulator:
                     # in which case parameter use_fixed_average_reward is set to False.
                     info['average_reward'] = estimated_average_reward
                 learner.learn(t_episode, state, action, next_state, reward, done_episode, info)
-                if state in self.env.getTerminalStates() and learner.getQ().isTabular():
-                    # We need to copy the Q-values of the terminal state to the other actions because the action chosen to go to the start state is always the same (action 0)
-                    action_anchor = 0
-                    for _action in range(self.env.getNumActions()):
-                        learner.getQ()._setWeight(state, _action, learner.getQ().getValue(state, action_anchor))
-                        learner.getA()._setWeight(state, _action, learner.getA().getValue(state, action_anchor))
+                if not self.env.isStateContinuous() and state in self.env.getTerminalStates():
+                    self._copy_action_values_for_terminal_state(learner.getQ(), state, action)
+                    self._copy_action_values_for_terminal_state(learner.getA(), state, action)
 
                 #---- UPDATE FOR CONTINUING TASK
                 # Plotting step moved INSIDE the episode because there is only 1 episode!
@@ -5867,7 +5867,7 @@ class Simulator:
         factor_fs = factor_fontsize * np.min((5 / shape[0], 5 / shape[1]))
         self.env.add_labels(ax, state_counts, fontsize=fontsize*factor_fs, color=color)
 
-    def learn_terminal_state_values(self, learner, t, terminal_state, next_state, reward, info, done_episode=False, envs=None, idx_particle=None, update_phi=False):
+    def learn_terminal_state_values(self, learner, t, terminal_state, action, next_state, reward, info, done_episode=False, envs=None, idx_particle=None, update_phi=False):
         """
         Learns the state and action values for the terminal state in the continuing learning task context
 
@@ -5877,7 +5877,17 @@ class Simulator:
         Arguments:
         learner: Learner
             Learner object responsible for learning the value functions stored in it.
-            
+
+        t: int
+            Current simulation time.
+
+        terminal_state: int
+            Terminal state on which learning takes place.
+
+        action: int
+            Action taken to go from the terminal state to the next state. Normally this is a "fictitious" action as, by definition, terminal states do not
+            have an action associated with it.
+
         next_state: int
             Index of the state visited AFTER visiting the terminal_state. This is normally a start state, as this method is usually called
             when the environment transitioned from a terminal state to an environment's start state.
@@ -5910,36 +5920,30 @@ class Simulator:
             See description of this parameter in the learner's learn() method (typically LeaFV.learn()).
             default: False
         """
-        # We update just one action for Q and then copy its value to the other Q values
-        # In fact, all Q-values for the terminal state are the same because all the actions lead to a start state --defined by env.reset())
-        action_anchor = 0
-
         # Learn
         if t <= 0:
             # We are learning the values of the terminal state at the start of an episode
-            # => Do not update the trajectory nor the state count because they were updated at the end of the previous episode.
-            # Note that, even if the simulation ends at the given `next_state` we set these flags to False because they concern the update of the trajectory and the counts
-            # of the TERMINAL state visited at the previous step, NOT of the `next_state` to which the system transitions (which may happen to be the end state when the simulation
-            # ends there).
-            info['update_trajectory'] = False
-            info['update_counts'] = False
+            # => Do not update the trajectory nor the average reward because they were updated at the end of the previous episode.
+            # Note that, even if the simulation ends at the given `next_state` we set this flag to False
+            # because it concerns the update of the trajectory of the TERMINAL state visited at the previous step,
+            # NOT of the `next_state` to which the system transitions (which may happen to be the end state if the simulation ends here).
+            info['update_trajectory_and_average_reward'] = False
         if envs is None:
             # We distinguish the call because only LeaFV.learn() method accepts more parameters than the other learners
-            learner.learn(t, terminal_state, action_anchor, next_state, reward, done_episode, info)
+            learner.learn(t, terminal_state, action, next_state, reward, done_episode, info)
         else:
             assert isinstance(learner, LeaFV)
-            learner.learn(t, terminal_state, action_anchor, next_state, reward, done_episode, info, envs=envs, idx_particle=idx_particle, update_phi=update_phi)
+            learner.learn(t, terminal_state, action, next_state, reward, done_episode, info, envs=envs, idx_particle=idx_particle, update_phi=update_phi)
         if t <= 0:
-            info.pop('update_trajectory')
-            info.pop('update_counts')
+            info.pop('update_trajectory_and_average_reward')
 
-        # Copy the Q-value just learned for the anchor action to the Q-value of the other possible actions
+        # Copy the action and advantage value just learned to the value associated to the other possible actions that could have been taken at this terminal state
         # TODO: (2024/08/23) If it becomes necessary, we could implement the copy of Q(s,a) for the case of continuous-state environments by performing all possible actions on the same continuous-valued state visited when `done` and learning from those actions (i.e. calling learner.learn())
         # Note that in principle, this copy operation IS necessary because, when learning the action value of the state just BEFORE visiting a terminal state,
-        # the average of Q(s,a) over all actions is used in the computation of the TD error (see LeaTD._compute_deltas()).
+        # the average of Q(s,a) over all actions at the next state (i.e. the terminal state in this case) is used in the computation of the TD error (see LeaTD._compute_deltas()).
         if not self.env.isStateContinuous():
-            self._copy_action_values_for_terminal_state(learner.getQ(), terminal_state, action_anchor)
-            self._copy_action_values_for_terminal_state(learner.getA(), terminal_state, action_anchor)
+            self._copy_action_values_for_terminal_state(learner.getQ(), terminal_state, action)
+            self._copy_action_values_for_terminal_state(learner.getA(), terminal_state, action)
 
     def _copy_action_values_for_terminal_state(self, QA, state, action):
         """
@@ -5961,9 +5965,6 @@ class Simulator:
             for _action in range(self.env.getNumActions()):
                 # TODO: (2023/11/23) Generalize this update of the Q-value to ANY function approximation as the following call to _setWeight() assumes that we are in the tabular case!!
                 QA._setWeight(state, _action, QA.getValue(state, action))
-            # Check that all Q values are the same for the given state
-            for _action in range(self.env.getNumActions()):
-                assert np.isclose(QA.getValue(state, _action), QA.getValue(state, action)), f"All Q-values are the same for the terminal state {state}:\n{QA.getValues()}"
 
     def simulate(self, nexperiments, nepisodes, max_time_steps_per_episode=None, compute_rmse=True, weights_rmse=None,
                  verbose=False, verbose_period=1, verbose_convergence=False, plot=False):

@@ -413,32 +413,41 @@ class Learner(GenericLearner):
             # Discretize the state so that we can update the count of a visited state
             state = self.env.getIndexFromState(state)
 
+        #-- State visit counts
+        # First-visit counts and times
         #print("t: {}, visit to state: {}".format(t, state))
         if np.isnan(self._states_first_visit_time[state]):
             self._state_counts_first_visit_over_all_episodes[state] += 1
             #print("\tFIRST STATE VISIT!")
             #print("\tcounts first visit after: {}".format(self._state_counts_first_visit_over_all_episodes[state]))
             #print("\tall counts fv: {}".format(self._state_counts_first_visit_over_all_episodes))
-        if np.isnan(self._actions_first_visit_time[state, action]):
-            self._action_counts_first_visit_over_all_episodes[state, action] += 1
-
-        # Update first-visit times
         self._states_first_visit_time[state] = np.nanmin([t, self._states_first_visit_time[state]])
-        self._actions_first_visit_time[state, action] = np.nanmin([t, self._actions_first_visit_time[state, action]])
 
-        # Keep track of every-visit counts
+        # Every-visit counts
         self._state_counts[state] += 1                              # Counts per-episode
         self._state_counts_over_all_episodes[state] += 1            # Counts over all episodes
-        self._action_counts[state, action] += 1                     # Counts per-episode
-        self._action_counts_over_all_episodes[state, action] += 1   # Counts over all episodes
+
+        #-- State-action visit counts
+        # Check if the action is missing (it  can be missing in terminal states where no action is defined)
+        is_action_missing = action is None or np.isnan(action)
+        if not is_action_missing:
+            if np.isnan(self._actions_first_visit_time[state, action]):
+                self._action_counts_first_visit_over_all_episodes[state, action] += 1
+            self._actions_first_visit_time[state, action] = np.nanmin([t, self._actions_first_visit_time[state, action]])
+            self._action_counts[state, action] += 1                     # Counts per-episode
+            self._action_counts_over_all_episodes[state, action] += 1   # Counts over all episodes
 
     def _update_alphas(self, state, action):
         # with np.printoptions(precision=4):
         #    print("Before updating alpha: episode {}, state {}: state_count={:.0f}, alpha>={}: alpha={}\n{}" \
         #          .format(self.episode, state, self._state_counts_over_all_episodes[state], self.alpha_min, self.getAlphaForState(state), np.array(self._alphas)))
+
+        # Parse state and action
         if self.env.isStateContinuous():
             # Discretize the state so that we can update the count of a visited state
             state = self.env.getIndexFromState(state)
+        # Check if the action is missing (it  can be missing in terminal states where no action is defined)
+        is_action_missing = action is None or np.isnan(action)
 
         # NOTE that we store the alpha value BEFORE its update, as this is the value that was used to learn prior to updating alpha!
         self._alphas_used_in_episode += [self._alphas[state]]
@@ -449,16 +458,20 @@ class Learner(GenericLearner):
                 # Update using the episode number (equal for all states)
                 _time_divisor = self.func_adjust_alpha(max(1, self.episode - MIN_EPISODE + 2)) # +2 => see the note below on the ELSE block for why we use +2 and not +1.
                 self._alphas[state] = max(self.alpha_min, self.alpha / _time_divisor)
-                self._alphas2[state, action] = max(self.alpha_min, self.alpha / _time_divisor)
+                if not is_action_missing:
+                    self._alphas2[state, action] = max(self.alpha_min, self.alpha / _time_divisor)
             else:
                 if self.alpha_update_type == AlphaUpdateType.FIRST_STATE_VISIT:
                     state_count = self._state_counts_first_visit_over_all_episodes[state]
-                    state_action_count = self._action_counts_first_visit_over_all_episodes[state, action]
+                    if not is_action_missing:
+                        state_action_count = self._action_counts_first_visit_over_all_episodes[state, action]
                 else:
                     state_count = self._state_counts_over_all_episodes[state]
-                    state_action_count = self._action_counts_over_all_episodes[state, action]
+                    if not is_action_missing:
+                        state_action_count = self._action_counts_over_all_episodes[state, action]
                 _time_divisor_alpha = self.func_adjust_alpha(max(1, state_count - self.min_count_to_update_alpha + 2))
-                _time_divisor_alpha2 = self.func_adjust_alpha(max(1, state_action_count - self.min_count_to_update_alpha + 2))
+                if not is_action_missing:
+                    _time_divisor_alpha2 = self.func_adjust_alpha(max(1, state_action_count - self.min_count_to_update_alpha + 2))
                     ## +2 => when state_count = min_count_to_update_alpha, the time divisor is > 1; if we used +1, the time divisor would be equal to 1
                     ## and this would imply that alpha would NOT be reduced, even if the state count had reached
                     ## the specified min count to adjust (reduce) alpha.
@@ -472,7 +485,8 @@ class Learner(GenericLearner):
                     # alpha value observed (for each state) at the MAX_EPISODE_FOR_ALPHA_MIN episode
                     # (which can be either alpha_min or larger than alpha_min).
                     self._alphas[state] = max(self.alpha_min, self.alpha / _time_divisor_alpha)
-                    self._alphas2[state, action] = max(self.alpha_min, self.alpha / _time_divisor_alpha2)
+                    if not is_action_missing:
+                        self._alphas2[state, action] = max(self.alpha_min, self.alpha / _time_divisor_alpha2)
                     if MAX_EPISODE_FOR_ALPHA_MIN is not None and self.episode == MAX_EPISODE_FOR_ALPHA_MIN:
                         # Store the last alpha value observed for each state
                         # so that we can use it as starting point from now on when decreasing alpha further.
@@ -484,7 +498,8 @@ class Learner(GenericLearner):
                     # Start decreasing from the alpha value left at episode = MAX_EPISODE_FOR_ALPHA_MIN
                     # without any lower bound for alpha
                     self._alphas[state] = self._alphas_at_max_episode[state] / _time_divisor_alpha
-                    self._alphas2[state, action] = self._alphas2_at_max_episode[state, action] / _time_divisor_alpha2
+                    if not is_action_missing:
+                        self._alphas2[state, action] = self._alphas2_at_max_episode[state, action] / _time_divisor_alpha2
                     #print("episode {}, state {}: alphas: {}".format(self.episode, state, self._alphas))
                     #print("episode {}, state {}, action {}: alphas: {}".format(self.episode, state, action, self._alphas2))
 
@@ -630,9 +645,10 @@ class Learner(GenericLearner):
         # DM-2025/01/14: The following IF block was uncommented today when fixing the learning process for continuing tasks.
         # It takes into account the situation where the simulation ends just AFTER the reset of the environment from a terminal state to a start state
         # (this is what the condition `T == 0` means, which clearly says that the end state is observed at episode time T = 0, which precisely represents the START of an episode).
-        # For now the last observed `reward` is added to the list of observed rewards in the episode ONLY in the continuing task case because in the episodic task case
-        # the reward observed at the very start of the episode will be in principle stored by another mechanism (e.g. when calling LeaTD.learn() with done_episode=True),
-        # but still to fully verify.
+        # For now the last observed `reward` is added to the list of observed episodic rewards (self._rewards) ONLY for CONTINUING learning tasks,
+        # because for EPISODIC learning tasks the reward observed at the very start of the episode will be in principle stored by another mechanism
+        # (e.g. when calling LeaTDLambda.learn() with done_episode=True), but still to fully verify (as such case of having a reward at restart of the episode
+        # has not yet been encountered --we had only dealt with environments where rewards are at terminal state, such as gridworlds).
         if self.task == LearningTask.CONTINUING and T == 0:
             assert reward == 0.0, "At this point (14-Jan-2025) of the implementation of the continuing average reward calculation as an adjustment of the episodic average reward," \
                                   " it is assumed that the reward observed when transitioning from a terminal to a start state is 0.0"

@@ -158,7 +158,7 @@ class LeaTDLambda(Learner):
         self.lmbda = lmbda if lmbda is not None else self.lmbda
 
     def learn(self, t, state, action, next_state, reward, done, info):
-        if info.get('update_trajectory', True):
+        if info.get('update_trajectory_and_average_reward', True):
             # We may not want to update the trajectory when using this call just to learn the value functions.
             # This is the case when using episodes under a continuing learning task context: in that case, the value functions
             # of the terminal state are normally learned at the start of the next episode (before updating the environment's state, which is a START state at that point,
@@ -168,8 +168,7 @@ class LeaTDLambda(Learner):
             # --see also discrete.Simulator._run_single() and search for 'LearningTask.CONTINUING'
             self._update_trajectory(t, state, action, reward)  # This method belongs to the Learner super class defined in learners.episodic.discrete
             self._update_average_reward()
-        if info.get('update_counts', True):
-            self._update_visit_counts(t, state, action)
+        self._update_visit_counts(t, state, action)
 
         # Add the state and next_state just visited to the known set of environment states which may be used when we need information about the size of the environment
         # (without using knowledge about the environment that the agent is not expected to know).
@@ -233,14 +232,34 @@ class LeaTDLambda(Learner):
         if not self.adjust_alpha_by_episode and info.get('update_alphas', True):
             self._update_alphas(state, action)
 
-        if done and info.get('update_trajectory', True):
-            # TEMPORARY-2025/01/14: The condition on 'update_trajectory' was added today and is linked to the current implementation of the CONTINUING average reward
+        if done and info.get('update_trajectory_and_average_reward', True):
+            # TEMPORARY-2025/01/14: The condition on 'update_trajectory_and_average_reward' was added today and is linked to the current implementation of the CONTINUING average reward
             # as an adjustment of the EPISODIC average reward, as explained in Learner.update_average_reward(). This new condition is only False when updating the value functions
             # at the end of a fictitious episode in CONTINUING tasks or when learning at the end of the simulation happening just after a reset of the environment due to reaching
             # a terminal state. In any of those two situations, we should NOT call the self.learn_at_episode_end() method here because the method updates the trajectory
             # that has already been updated by the methods calling this LeaTDLambda.learn() method: _run_single(), _run_single_continuing_task() and
             # run_exploration_and_learn_value_functions() in discrete.Simulator. See more details in those methods.
-            self.learn_at_episode_end(t+1, next_state)
+            # 2025/08/15: The condition defining parameter `update_counts` in self.learn_at_episode_end() is based on defining the conditions under which
+            # this is the only opportunity to update the state and state-action visit counts at the end of an episode (i.e. when `done`, as is the case here,
+            # which does NOT necessarily imply that a TERMINAL state has been reached --it can imply that the simulation ended), namely when EITHER:
+            # - the learning task is EPISODIC.
+            # - the learning task is CONTINUING and the maximum simulation time has been reached, i.e. this is the very last step of the simulation!
+            # In either case, there will be NO next step of the simulation that will allow us to update the state and state-action visit counts,
+            # in the first case, because by definition of EPISODIC learning task, when `done` there is NEVER a next step, either because the simulation ended
+            # or because a terminal state has been reached; in the second case, because there will be no opportunity to update the state and state-action
+            # visit counts when the process transitions away from this end state because the simulation ENDS here.
+            # (We note that in the CONTINUING learning case, the visit counts of terminal states will be updated when the process transitions from the terminal
+            # state to a start state (which may NOT be at the very next iteration step, for instance when the learner is a Fleming-Viot learner!),
+            # at which moment LEARNING of the terminal state takes place and thus the alpha learning rates for the terminal state will be adjusted
+            # by the UPDATED state and state-action visit counts. So we are in business by not updating the visit counts when the simulation does NOT end now.)
+            # Recall again, that the end state can be either a terminal state (a TRUE "done episode" situation) or any other state (a TRUNCATED "done episode").
+            # It's important to recall also that the visit counts have a direct impact on the state- and state-action-specific learning rates alpha,
+            # which have a very important influence on the learning process!
+            # Out of the above two situations, the only important context in which the update of the visit counts has a really impact on learning
+            # is the CONTINUING learning task case, where terminal states do not necessarily value zero. For the EPISODIC learning task, updating
+            # the end state visit counts has an impact on learning if the end state is NOT a terminal state, but such end state will normally have
+            # large volatility (i.e. it will not always be the same), thus diluting the potential effect of not updating its visit counts at this time.
+            self.learn_at_episode_end(t+1, next_state, update_counts=self.getLearningTask() == LearningTask.EPISODIC or info.get('max_time_steps_reached', False))
 
     def learn_at_episode_end(self, T, state_end, update_counts=True):
         """
@@ -258,7 +277,11 @@ class LeaTDLambda(Learner):
 
         update_counts: (opt) bool
             Whether the state visit count for the end state should be updated as well.
-            We might want to set this to False to avoid a too aggressive decrease of the learning rate alpha that in the end prevents learning,
+            We should set this to False for CONTINUING learning task when this is NOT the last step of the simulation
+            (i.e. when the maximum number of simulation steps has NOT been reached), because if this is NOT the last step of the simulation,
+            the visit count for the current end state (which must be a terminal state, by definition of episode when the maximum number of steps
+            has not been reached) will be updated when learning the terminal state, i.e. when transitioning from the terminal state to a start state.
+            We also might want to set this to False to avoid a too aggressive decrease of the learning rate alpha that in the end prevents learning,
             especially when a state is visited but no reward innovation is observed, meaning that the learning step is sort of "useless" because
             the delta(V) value to apply to the new V(s) is 0.
         """
@@ -268,14 +291,15 @@ class LeaTDLambda(Learner):
         if self.debug: #and self.episode > 45: # Use the condition on `episode` in order to plot just the last episodes
             self._plotZ()
             self._plotAlphasEffective()
+
         self.store_trajectory_at_episode_end(T, state_end, debug=self.debug)
         if update_counts:
-            self._update_visit_counts(T, state_end, 0)  # We pass '0' as action to update because this is the action used as "anchor" action when learning Q-values for terminal states. Recall that the action is associated to the CURRENT state, therefore, if we talk about "next_state" which should talk about "next_action", which is unknown at this point. Note however that we cannot pass np.nan because the _update_visit_counts() method updates the visit count of each visited state and action, and np.nan is NOT accepted by the arrays that store those counts for each state and action.
+            self._update_visit_counts(T, state_end, np.nan)
 
         # Update alpha for the next iteration for "by episode" updates
         if self.adjust_alpha_by_episode:
             for s in range(self.env.getNumStates()):
-                self._update_alphas(s, 0)   # We pass '0' as action to update because this is the action used as "anchor" action when learning Q-values for terminal states
+                self._update_alphas(s, np.nan)
 
     def _compute_deltas(self, state, action, next_state, reward, info):
         """
@@ -656,13 +680,12 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
         self.burnin = burnin if burnin is not None else self.burnin
 
     def learn(self, t, state, action, next_state, reward, done, info):
-        if info.get('update_trajectory', True):
+        if info.get('update_trajectory_and_average_reward', True):
             # We may not want to update the trajectory when using this call just to learn the value functions.
             # See the comment in the learn() method of the super class (normally LeaTDLambda) for an use case.
             self._update_trajectory(t, state, action, reward)  # This method belongs to the Learner super class defined in learners.episodic.discrete
             self._update_average_reward()
-        if info.get('update_counts', True):
-            self._update_visit_counts(t, state, action)
+        self._update_visit_counts(t, state, action)
 
         # See comment about this step in LeaTDLambda.learn()
         super().updateKnownEnvironmentSet({state, next_state})
@@ -771,10 +794,10 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
         if not self.adjust_alpha_by_episode and info.get('update_alphas', True):
             self._update_alphas(state, action)
 
-        if done and info.get('update_trajectory', True):
-            # TEMPORARY-2025/01/14: The condition on 'update_trajectory' was added today and is linked to the current implementation of the CONTINUING average reward.
-            # For more details, see the comment I wrote in LeaTDLambda.learn() of the super class.
-            self.learn_at_episode_end(t+1, next_state)
+        if done and info.get('update_trajectory_and_average_reward', True):
+            # TEMPORARY-2025/01/14: The condition on 'update_trajectory_and_average_reward' was added today and is linked to the current implementation of the CONTINUING average reward.
+            # For more details about this and about the definition of parameter `update_counts=` below, see the comment I wrote in LeaTDLambda.learn() of the super class.
+            self.learn_at_episode_end(t+1, next_state, update_counts=self.getLearningTask() == LearningTask.EPISODIC or self.getLearningTask() == LearningTask.CONTINUING and info.get('max_time_steps_reached', False))
             self._store_lambdas_in_episode()
 
         if self.debug:
